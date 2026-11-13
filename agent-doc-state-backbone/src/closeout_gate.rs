@@ -253,6 +253,7 @@ mod tests {
         CloseoutOwnerProjection {
             cycle_id: cycle_id.to_string(),
             owner_id: "owner-old".to_string(),
+            owner_token: "token-old".to_string(),
             owner_pid: 4242,
             role: CLOSEOUT_ROLE_SESSION_CHECK_RECOVERY.to_string(),
             claimed_secs: claimed,

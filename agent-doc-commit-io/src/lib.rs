@@ -20,7 +20,9 @@ use agent_doc_git::{
 use agent_doc_git_io::{
     dirs::{narrow_to_submodule, resolve_to_git_root},
     transaction::{
-        CommitTransactionError, stage_and_commit_exact_paths_once, update_parent_submodule_pointer,
+        CommitFencePhase, CommitTransactionError, CommitTransactionFence,
+        stage_and_commit_exact_paths_once, stage_and_commit_exact_paths_once_with_fence,
+        update_parent_submodule_pointer, update_parent_submodule_pointer_with_fence,
     },
 };
 use anyhow::{Context, Result};
@@ -843,6 +845,8 @@ pub struct CommitCoordinatorPorts<
     pub post_commit_cleanup: &'a PostCommitCleanup,
     pub queue_consume_write: &'a QueueConsumeWrite,
     pub write_convergence: &'a WriteConvergence,
+    pub closeout_owner_fence:
+        Option<&'a agent_doc_controller_io::project_controller::CloseoutOwnerCapability>,
 }
 
 struct RuntimeCommitPreStageRepairEffects;
@@ -886,15 +890,86 @@ struct RuntimeTransientCleanupEffects;
 static TRANSIENT_CLEANUP_EFFECTS: RuntimeTransientCleanupEffects = RuntimeTransientCleanupEffects;
 
 #[doc(hidden)]
-pub struct RuntimePostCommitCleanupEffects;
+pub struct RuntimePostCommitCleanupEffects<'a> {
+    closeout_owner_fence:
+        Option<&'a agent_doc_controller_io::project_controller::CloseoutOwnerCapability>,
+}
 pub struct RuntimeForceDiskPipelineFrontmatterEffects;
 
 pub static FORCE_DISK_PIPELINE_FRONTMATTER_EFFECTS: RuntimeForceDiskPipelineFrontmatterEffects =
     RuntimeForceDiskPipelineFrontmatterEffects;
 
+fn maybe_pause_ref_landed_before_terminal_promotion(file: &Path) -> Result<()> {
+    if !std::env::var("AGENT_DOC_TEST_CLOSEOUT_REF_LANDED_BARRIER_FILE")
+        .ok()
+        .is_some_and(|target| Path::new(&target) == file)
+    {
+        return Ok(());
+    }
+    if let Ok(ready) = std::env::var("AGENT_DOC_TEST_CLOSEOUT_REF_LANDED_BARRIER_READY") {
+        std::fs::write(ready, b"ready")?;
+    }
+    if let Ok(release) = std::env::var("AGENT_DOC_TEST_CLOSEOUT_REF_LANDED_BARRIER_RELEASE") {
+        let started = std::time::Instant::now();
+        while !Path::new(&release).exists() {
+            anyhow::ensure!(
+                started.elapsed() < std::time::Duration::from_secs(30),
+                "timed out waiting for ref-landed closeout promotion barrier release",
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+    Ok(())
+}
+
+fn maybe_pause_ignored_path_before_terminal_promotion(file: &Path) -> Result<()> {
+    if !std::env::var("AGENT_DOC_TEST_CLOSEOUT_IGNORED_PATH_BARRIER_FILE")
+        .ok()
+        .is_some_and(|target| Path::new(&target) == file)
+    {
+        return Ok(());
+    }
+    if let Ok(ready) = std::env::var("AGENT_DOC_TEST_CLOSEOUT_IGNORED_PATH_BARRIER_READY") {
+        std::fs::write(ready, b"ready")?;
+    }
+    if let Ok(release) = std::env::var("AGENT_DOC_TEST_CLOSEOUT_IGNORED_PATH_BARRIER_RELEASE") {
+        let started = std::time::Instant::now();
+        while !Path::new(&release).exists() {
+            anyhow::ensure!(
+                started.elapsed() < std::time::Duration::from_secs(30),
+                "timed out waiting for ignored-path closeout barrier release",
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+    Ok(())
+}
+
 #[doc(hidden)]
-pub static POST_COMMIT_CLEANUP_EFFECTS: RuntimePostCommitCleanupEffects =
-    RuntimePostCommitCleanupEffects;
+pub static POST_COMMIT_CLEANUP_EFFECTS: RuntimePostCommitCleanupEffects<'static> =
+    RuntimePostCommitCleanupEffects {
+        closeout_owner_fence: None,
+    };
+
+struct RuntimeCommitTransactionFence<'a> {
+    capability: &'a agent_doc_controller_io::project_controller::CloseoutOwnerCapability,
+}
+
+impl CommitTransactionFence for RuntimeCommitTransactionFence<'_> {
+    fn ensure(&self, target: &Path, phase: CommitFencePhase) -> Result<()> {
+        if phase == CommitFencePhase::BeforeParentRefUpdate {
+            return self
+                .capability
+                .ensure_parent_submodule_transaction_boundary(target);
+        }
+        self.capability
+            .ensure_git_transaction_boundary(target, phase == CommitFencePhase::BeforeRefUpdate)
+    }
+
+    fn ref_updated(&self, target: &Path) {
+        self.capability.record_commit_ref_updated(target);
+    }
+}
 
 impl agent_doc_git_io::pre_stage_repair::CommitPreStageRepairEffects
     for RuntimeCommitPreStageRepairEffects
@@ -1303,7 +1378,7 @@ impl agent_doc_git_io::transient_cleanup::TransientCleanupEffects
 }
 
 impl agent_doc_git_io::post_commit_cleanup::PostCommitCleanupEffects
-    for RuntimePostCommitCleanupEffects
+    for RuntimePostCommitCleanupEffects<'_>
 {
     fn read_to_string(&self, file: &Path) -> Result<String> {
         commit_current_document_content(file, "post_commit_cleanup")
@@ -1363,14 +1438,19 @@ impl agent_doc_git_io::post_commit_cleanup::PostCommitCleanupEffects
         snapshot_content: Option<&str>,
         file_content: Option<&str>,
     ) -> Result<()> {
-        if force_disk_commit_resolution_enabled() {
+        if let Some(fence) = self.closeout_owner_fence {
+            maybe_pause_ref_landed_before_terminal_promotion(file)?;
+            fence.ensure_protects(file)?;
+            fence.ensure_still_held()?;
+        }
+        let result = if force_disk_commit_resolution_enabled() {
             agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
                 &FORCE_DISK_PIPELINE_FRONTMATTER_EFFECTS,
                 file,
                 event,
                 snapshot_content,
                 file_content,
-            )?;
+            )
         } else {
             agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
                 &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -1378,13 +1458,34 @@ impl agent_doc_git_io::post_commit_cleanup::PostCommitCleanupEffects
                 event,
                 snapshot_content,
                 file_content,
-            )?;
+            )
+        };
+        if let Err(error) = result {
+            if self.closeout_owner_fence.is_some() {
+                return Err(error);
+            }
+            eprintln!("[commit] cycle-state update failed: {error} (non-fatal)");
+        }
+        if let Some(fence) = self.closeout_owner_fence {
+            fence.record_terminal_promotion_landed(file)?;
         }
         Ok(())
     }
 
     fn mark_capture_committed(&self, file: &Path, current_content: &str) -> Result<()> {
-        agent_doc_capture_io::mark_committed_with_current_content(file, current_content)
+        if let Some(fence) = self.closeout_owner_fence {
+            fence.ensure_protects(file)?;
+            fence.ensure_still_held()?;
+        }
+        let result =
+            agent_doc_capture_io::mark_committed_with_current_content(file, current_content);
+        if let Err(error) = result {
+            if self.closeout_owner_fence.is_some() {
+                return Err(error);
+            }
+            eprintln!("[commit] capture-state update failed: {error} (non-fatal)");
+        }
+        Ok(())
     }
 
     fn reconcile_queue_continuation(
@@ -1698,6 +1799,26 @@ pub fn commit_for_authority(file: &Path, force_disk: bool) -> Result<bool> {
     Ok(commit_with_outcome_for_authority(file, force_disk)?.did_commit)
 }
 
+pub fn commit_under_closeout_owner(
+    file: &Path,
+    fence: &agent_doc_controller_io::project_controller::CloseoutOwnerCapability,
+) -> Result<bool> {
+    fence.ensure_protects(file)?;
+    Ok(commit_with_outcome_under_closeout_owner(file, fence)?.did_commit)
+}
+
+pub fn commit_for_authority_under_closeout_owner(
+    file: &Path,
+    force_disk: bool,
+    fence: &agent_doc_controller_io::project_controller::CloseoutOwnerCapability,
+) -> Result<bool> {
+    fence.ensure_protects(file)?;
+    Ok(with_force_disk_commit_resolution(force_disk, || {
+        commit_with_outcome_under_closeout_owner(file, fence)
+    })?
+    .did_commit)
+}
+
 /// Close the git boundary for a response-replay canonicalization that
 /// `session-check` already proved and projected through document authority.
 ///
@@ -1888,19 +2009,28 @@ fn commit_proven_response_replay_canonicalization_scoped(file: &Path) -> Result<
 /// response index/archive, and bounded Git history; writes nothing.
 pub fn pending_committed_response_evidence_repair(file: &Path) -> Result<Option<String>> {
     agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
-        if let Some(ids) = duplicate_queue_response_projection_plan(file)? {
+        if let Some(ids) = duplicate_queue_response_projection_plan(
+            file,
+            ResponseEvidencePlanObservation::ReadOnly,
+        )? {
             return Ok(Some(format!(
                 "duplicate queue response projections in HEAD would be canonicalized and committed (ids={})",
                 ids.into_iter().collect::<Vec<_>>().join(",")
             )));
         }
-        if let Some(ids) = historical_response_evidence_restore_plan(file)? {
+        if let Some(ids) = historical_response_evidence_restore_plan(
+            file,
+            ResponseEvidencePlanObservation::ReadOnly,
+        )? {
             return Ok(Some(format!(
                 "committed response evidence would be restored into the tracked response archive/index and committed (ids={})",
                 ids.into_iter().collect::<Vec<_>>().join(",")
             )));
         }
-        if let Some(ids) = orphaned_queue_response_projection_plan(file)? {
+        if let Some(ids) = orphaned_queue_response_projection_plan(
+            file,
+            ResponseEvidencePlanObservation::ReadOnly,
+        )? {
             return Ok(Some(format!(
                 "orphaned queue response projections would be detached and committed (ids={})",
                 ids.into_iter().collect::<Vec<_>>().join(",")
@@ -1910,11 +2040,41 @@ pub fn pending_committed_response_evidence_repair(file: &Path) -> Result<Option<
     })
 }
 
+#[derive(Clone, Copy)]
+enum ResponseEvidencePlanObservation {
+    Applying,
+    ReadOnly,
+}
+
+impl ResponseEvidencePlanObservation {
+    fn authority(self, file: &Path, source: &str) -> Result<String> {
+        match self {
+            Self::Applying => commit_current_document_content(file, source),
+            Self::ReadOnly => {
+                agent_doc_document_realtime_io::peek_current_document_content(file, source)
+            }
+        }
+    }
+
+    fn disk(self, file: &Path, source: &str) -> Result<String> {
+        match self {
+            Self::Applying => {
+                agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)
+            }
+            Self::ReadOnly => {
+                agent_doc_document_realtime_io::peek_disk_document_content(file, source)
+            }
+        }
+    }
+}
+
 /// Read-only plan for [`restore_and_commit_historical_response_evidence`]: the
 /// response ids it would restore/index, or `None` when it would do nothing.
-fn historical_response_evidence_restore_plan(file: &Path) -> Result<Option<BTreeSet<String>>> {
-    let authority =
-        commit_current_document_content(file, "plan_historical_response_evidence_authority")?;
+fn historical_response_evidence_restore_plan(
+    file: &Path,
+    observation: ResponseEvidencePlanObservation,
+) -> Result<Option<BTreeSet<String>>> {
+    let authority = observation.authority(file, "plan_historical_response_evidence_authority")?;
     let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
         return Ok(None);
     };
@@ -1941,15 +2101,13 @@ fn historical_response_evidence_restore_plan(file: &Path) -> Result<Option<BTree
 
 /// Read-only plan for
 /// [`canonicalize_and_commit_duplicate_queue_response_projections`].
-fn duplicate_queue_response_projection_plan(file: &Path) -> Result<Option<BTreeSet<String>>> {
-    let authority = commit_current_document_content(
-        file,
-        "plan_duplicate_queue_response_projection_authority",
-    )?;
-    let disk = agent_doc_document_realtime_io::resolve_disk_current_document_content(
-        file,
-        "plan_duplicate_queue_response_projection_disk",
-    )?;
+fn duplicate_queue_response_projection_plan(
+    file: &Path,
+    observation: ResponseEvidencePlanObservation,
+) -> Result<Option<BTreeSet<String>>> {
+    let authority =
+        observation.authority(file, "plan_duplicate_queue_response_projection_authority")?;
+    let disk = observation.disk(file, "plan_duplicate_queue_response_projection_disk")?;
     if authority != disk {
         return Ok(None);
     }
@@ -1963,13 +2121,13 @@ fn duplicate_queue_response_projection_plan(file: &Path) -> Result<Option<BTreeS
 
 /// Read-only plan for [`detach_and_commit_orphaned_queue_response_projections`]:
 /// the response ids whose struck queue projection it would detach.
-fn orphaned_queue_response_projection_plan(file: &Path) -> Result<Option<BTreeSet<String>>> {
+fn orphaned_queue_response_projection_plan(
+    file: &Path,
+    observation: ResponseEvidencePlanObservation,
+) -> Result<Option<BTreeSet<String>>> {
     let authority =
-        commit_current_document_content(file, "plan_orphaned_queue_response_projection_authority")?;
-    let disk = agent_doc_document_realtime_io::resolve_disk_current_document_content(
-        file,
-        "plan_orphaned_queue_response_projection_disk",
-    )?;
+        observation.authority(file, "plan_orphaned_queue_response_projection_authority")?;
+    let disk = observation.disk(file, "plan_orphaned_queue_response_projection_disk")?;
     if authority != disk {
         return Ok(None);
     }
@@ -2021,7 +2179,12 @@ pub fn restore_and_commit_historical_response_evidence(file: &Path) -> Result<bo
         // `#sessioncheckread`: the read-only plan is the gate, so the status
         // check's report and this repair can never disagree about whether a
         // restoration is pending.
-        if historical_response_evidence_restore_plan(file)?.is_none() {
+        if historical_response_evidence_restore_plan(
+            file,
+            ResponseEvidencePlanObservation::Applying,
+        )?
+        .is_none()
+        {
             return Ok(false);
         }
         let authority =
@@ -2176,7 +2339,11 @@ pub fn canonicalize_and_commit_duplicate_queue_response_projections(file: &Path)
         if authority != disk {
             return Ok(false);
         }
-        let Some(response_ids) = duplicate_queue_response_projection_plan(file)? else {
+        let Some(response_ids) = duplicate_queue_response_projection_plan(
+            file,
+            ResponseEvidencePlanObservation::Applying,
+        )?
+        else {
             return Ok(false);
         };
         let target =
@@ -2320,7 +2487,11 @@ pub fn detach_and_commit_orphaned_queue_response_projections(file: &Path) -> Res
         if authority != disk {
             return Ok(false);
         }
-        let Some(detached) = orphaned_queue_response_projection_plan(file)? else {
+        let Some(detached) = orphaned_queue_response_projection_plan(
+            file,
+            ResponseEvidencePlanObservation::Applying,
+        )?
+        else {
             return Ok(false);
         };
         let mut target = authority.clone();
@@ -2729,6 +2900,24 @@ fn report_unlanded_tracked_work_half(file: &Path, half: Option<UnlandedTrackedWo
 }
 
 fn commit_with_outcome_scoped(file: &Path) -> Result<CommitOutcome> {
+    commit_with_outcome_scoped_with_fence(file, None)
+}
+
+fn commit_with_outcome_under_closeout_owner(
+    file: &Path,
+    fence: &agent_doc_controller_io::project_controller::CloseoutOwnerCapability,
+) -> Result<CommitOutcome> {
+    agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
+        commit_with_outcome_scoped_with_fence(file, Some(fence))
+    })
+}
+
+fn commit_with_outcome_scoped_with_fence(
+    file: &Path,
+    closeout_owner_fence: Option<
+        &agent_doc_controller_io::project_controller::CloseoutOwnerCapability,
+    >,
+) -> Result<CommitOutcome> {
     // `#trackedworkdropped`: a recovery `commit` after a rejected tracked-work
     // half used to land the response silently while every `--backlog-add` /
     // `--todo-add` in the closeout was lost. Observe the half BEFORE the commit
@@ -2738,14 +2927,19 @@ fn commit_with_outcome_scoped(file: &Path) -> Result<CommitOutcome> {
     } else {
         observe_unlanded_tracked_work_half(file)
     };
-    let outcome = commit_with_outcome_scoped_inner(file)?;
+    let outcome = commit_with_outcome_scoped_inner(file, closeout_owner_fence)?;
     if outcome.did_commit {
         report_unlanded_tracked_work_half(file, unlanded_half);
     }
     Ok(outcome)
 }
 
-fn commit_with_outcome_scoped_inner(file: &Path) -> Result<CommitOutcome> {
+fn commit_with_outcome_scoped_inner(
+    file: &Path,
+    closeout_owner_fence: Option<
+        &agent_doc_controller_io::project_controller::CloseoutOwnerCapability,
+    >,
+) -> Result<CommitOutcome> {
     if !controller_commit_in_progress() {
         let _ =
             agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_turn_stage(
@@ -2763,7 +2957,10 @@ fn commit_with_outcome_scoped_inner(file: &Path) -> Result<CommitOutcome> {
     // returns `Ok(None)` for a headless document (no editor authority to defer to),
     // and any delegation error falls through to the local path, which keeps the
     // existing fail-closed safety.
-    if !controller_commit_in_progress() && !force_disk_commit_resolution_enabled() {
+    if closeout_owner_fence.is_none()
+        && !controller_commit_in_progress()
+        && !force_disk_commit_resolution_enabled()
+    {
         match commit_via_controller_awaiting_live_projection(file) {
             ControllerCommitAttempt::Committed(outcome) => {
                 return Ok(CommitOutcome {
@@ -2784,6 +2981,9 @@ fn commit_with_outcome_scoped_inner(file: &Path) -> Result<CommitOutcome> {
             }
         }
     }
+    let post_commit_cleanup = RuntimePostCommitCleanupEffects {
+        closeout_owner_fence,
+    };
     commit_with_ports_outcome(
         CommitCoordinatorPorts {
             pre_stage_repair: &COMMIT_PRE_STAGE_REPAIR_EFFECTS,
@@ -2794,10 +2994,11 @@ fn commit_with_outcome_scoped_inner(file: &Path) -> Result<CommitOutcome> {
             boundary_reposition: &BOUNDARY_REPOSITION_EFFECTS,
             boundary_invariant: &BOUNDARY_INVARIANT_EFFECTS,
             transient_cleanup: &TRANSIENT_CLEANUP_EFFECTS,
-            post_commit_cleanup: &POST_COMMIT_CLEANUP_EFFECTS,
+            post_commit_cleanup: &post_commit_cleanup,
             queue_consume_write:
                 &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
             write_convergence: &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
+            closeout_owner_fence,
         },
         file,
     )
@@ -4042,11 +4243,22 @@ where
             snapshot_after_noop.as_deref(),
             Some(&file_after_noop),
             post_commit_local_drift,
-        );
+        )?;
 
         if in_submodule && agent_doc_git_io::submodule::is_submodule_pointer_stale(file) {
             eprintln!("[commit] submodule pointer stale in parent after no-op commit - updating");
-            update_parent_submodule_pointer(&super_root, &git_root, &msg)?;
+            if let Some(fence) = ports.closeout_owner_fence {
+                let transaction_fence = RuntimeCommitTransactionFence { capability: fence };
+                update_parent_submodule_pointer_with_fence(
+                    &super_root,
+                    &git_root,
+                    &msg,
+                    file,
+                    &transaction_fence,
+                )?;
+            } else {
+                update_parent_submodule_pointer(&super_root, &git_root, &msg)?;
+            }
         }
 
         let elapsed_total = t_total.elapsed().as_millis();
@@ -4204,18 +4416,24 @@ where
 
     let t_commit = std::time::Instant::now();
     let mut commit_attempts = 0u32;
+    let transaction_fence = ports
+        .closeout_owner_fence
+        .map(|capability| RuntimeCommitTransactionFence { capability });
     // `#splicectlcommit`: set when the refused ignored path is a declared
     // scratch document, so the refusal is reported as a clean skip.
     let mut ignored_scratch_skip: Option<String> = None;
     let commit_output = {
         loop {
             let t_staging = std::time::Instant::now();
-            match stage_and_commit_exact_paths_once(
+            match stage_and_commit_exact_paths_once_with_fence(
                 &git_root,
                 &resolved,
                 snapshot_content.as_deref(),
                 &binary_owned_side_effects,
                 &msg,
+                transaction_fence
+                    .as_ref()
+                    .map(|fence| fence as &dyn CommitTransactionFence),
             ) {
                 Ok(out) => {
                     let elapsed_staging = t_staging.elapsed().as_millis();
@@ -4288,12 +4506,22 @@ where
                     // commit is unreachable, not because it succeeded. The refusal
                     // itself is unchanged — same message, same error, still never
                     // committed.
+                    if let Some(fence) = ports.closeout_owner_fence {
+                        maybe_pause_ignored_path_before_terminal_promotion(file)?;
+                        fence.ensure_protects(file)?;
+                        fence.ensure_still_held()?;
+                    }
                     if let Err(abandon_error) = agent_doc_cycle_state_io::mark_abandoned(
                         file,
                         agent_doc_cycle_state_io::COMMIT_REFUSED_IGNORED_PATH_EVENT,
                         None,
                         None,
                     ) {
+                        if ports.closeout_owner_fence.is_some() {
+                            return Err(abandon_error).with_context(|| {
+                                format!("could not close fenced cycle for ignored path {path}")
+                            });
+                        }
                         eprintln!(
                             "[commit] WARNING: could not close the cycle for ignored path {path}: {abandon_error:#}"
                         );
@@ -4358,6 +4586,10 @@ where
             if snapshot_active_projection_reconciled
                 && let Some(committed) = agent_doc_git_io::revision::show_head(file)?
             {
+                if let Some(fence) = ports.closeout_owner_fence {
+                    fence.ensure_protects(file)?;
+                    fence.ensure_still_held()?;
+                }
                 // The active projection was staged from a derived snapshot.
                 // Advance its durable baseline only after the commit succeeds;
                 // a pre-stage checkpoint would strand the baseline ahead of
@@ -4372,7 +4604,7 @@ where
                 ports.post_commit_cleanup,
                 file,
                 head_doc.as_deref(),
-            );
+            )?;
         }
         agent_doc_git_io::commit_result_reporting::CommitCommandOutcome::Failed
         | agent_doc_git_io::commit_result_reporting::CommitCommandOutcome::Error
@@ -4432,7 +4664,18 @@ where
         elapsed_postcommit_check = postcommit_check_started.elapsed().as_millis();
 
         if in_submodule {
-            update_parent_submodule_pointer(&super_root, &git_root, &msg)?;
+            if let Some(fence) = ports.closeout_owner_fence {
+                let transaction_fence = RuntimeCommitTransactionFence { capability: fence };
+                update_parent_submodule_pointer_with_fence(
+                    &super_root,
+                    &git_root,
+                    &msg,
+                    file,
+                    &transaction_fence,
+                )?;
+            } else {
+                update_parent_submodule_pointer(&super_root, &git_root, &msg)?;
+            }
         }
 
         if did_commit {

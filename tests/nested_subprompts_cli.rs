@@ -6,6 +6,7 @@
 
 use std::fs;
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 /// `#integrationtesttargets`: these commands reach the project controller,
 /// which they launch as production does.
@@ -50,13 +51,14 @@ fn assert_ok(output: &std::process::Output, what: &str) {
 }
 
 fn assert_transient_closeout(output: &std::process::Output, what: &str) {
+    assert!(
+        !output.status.success(),
+        "{what} must reject the intentionally live sibling rows"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        !output.status.success()
-            && (stderr.contains("#transientcloseout")
-                || stderr.contains("refusal=captured_response_not_materialized")),
-        "{what} should retain the response before reporting incomplete closeout: stdout={} stderr={stderr}",
-        String::from_utf8_lossy(&output.stdout)
+        stderr.contains("#transientcloseout"),
+        "{what} must identify its strict closeout refusal:\n{stderr}"
     );
 }
 
@@ -66,9 +68,14 @@ fn assert_transient_closeout(output: &std::process::Output, what: &str) {
 fn committed_session(dir: &std::path::Path, kind: &str, run_rows: &str) -> std::path::PathBuf {
     fs::create_dir_all(dir.join(".agent-doc/locks")).unwrap();
     let doc = dir.join("session.md");
+    let fixture = dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("fixture")
+        .trim_start_matches('.');
     let content = format!(
         concat!(
-            "---\nagent_doc_session: nested-subprompts\nagent_doc_format: template\n",
+            "---\nagent_doc_session: nested-subprompts-{kind}-{fixture}\nagent_doc_format: template\n",
             "prompt_presets:\n  \"#auth\": \"I authorize you to do this.\"\n---\n\n",
             "## Exchange\n\n",
             "<!-- agent:exchange patch=append subagents -->\n",
@@ -97,6 +104,7 @@ fn committed_session(dir: &std::path::Path, kind: &str, run_rows: &str) -> std::
             "<!-- /agent:icebox -->\n",
         ),
         kind = kind,
+        fixture = fixture,
         rows = run_rows,
     );
     fs::write(&doc, &content).unwrap();
@@ -115,14 +123,66 @@ fn committed_session(dir: &std::path::Path, kind: &str, run_rows: &str) -> std::
 }
 
 fn preflight_json(dir: &std::path::Path, doc: &std::path::Path) -> serde_json::Value {
+    let ops = dir.join(".agent-doc/logs/ops.log");
+    let previous_ops_len = fs::metadata(&ops).map(|meta| meta.len()).unwrap_or(0);
     let output = run_agent_doc(dir, &["preflight", doc.to_str().unwrap()]);
     assert_ok(&output, "preflight");
-    serde_json::from_slice(&output.stdout).unwrap_or_else(|err| {
+    let state = serde_json::from_slice(&output.stdout).unwrap_or_else(|err| {
         panic!(
             "preflight stdout is not JSON ({err}): {}",
             String::from_utf8_lossy(&output.stdout)
         )
-    })
+    });
+    // Admission intentionally returns before comprehensive queue projection.
+    // Tests below that inspect the persisted tree wait for the detached effect,
+    // while the admission contract itself remains the captured `state` above.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        let current = fs::read_to_string(&ops).unwrap_or_default();
+        let appended = current.get(previous_ops_len as usize..).unwrap_or(&current);
+        if appended.contains("queue_maintenance_background_completed") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "detached queue maintenance did not complete: {appended}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+    state
+}
+
+/// `agent:loop` is a scheduled runnable list. This tree-shape test is about an
+/// open pass, so admit the fixture through the production scheduler and wait on
+/// the public read-only schedule contract before asserting its queue plan. An
+/// unopened or not-yet-admitted window correctly holds every loop head.
+fn wait_for_loop_window(dir: &std::path::Path, doc: &std::path::Path) {
+    agent_doc_controller_io::queue_scheduler::start_queue_scheduler(dir).unwrap();
+    let _ = agent_doc_controller_io::queue_scheduler::note_document_changed(doc).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let output = run_agent_doc(dir, &["queue", "schedule", doc.to_str().unwrap(), "--json"]);
+        if output.status.success()
+            && serde_json::from_slice::<serde_json::Value>(&output.stdout)
+                .ok()
+                .and_then(|report| {
+                    report
+                        .get("window_open")
+                        .and_then(serde_json::Value::as_bool)
+                })
+                == Some(true)
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "loop schedule did not open its first pass: status={} stdout={} stderr={}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 fn string_list(state: &serde_json::Value, key: &str) -> Vec<String> {
@@ -165,6 +225,17 @@ fn without_admitted_queue_ids(text: &str) -> String {
     normalized
 }
 
+fn admitted_queue_id_annotation(line: &str) -> &str {
+    let id_start = line
+        .rfind("[#q-")
+        .unwrap_or_else(|| panic!("missing stable queue id: {line}"));
+    let id_end = id_start
+        + line[id_start..]
+            .find(']')
+            .unwrap_or_else(|| panic!("unterminated stable queue id: {line}"));
+    &line[id_start..=id_end]
+}
+
 fn work_texts(items: &[String]) -> Vec<String> {
     items
         .iter()
@@ -203,6 +274,9 @@ fn only_nested_leaves_run_in_every_runnable_list_spelling() {
     for kind in ["run", "queue", "loop"] {
         let dir = tempfile::tempdir().unwrap();
         let doc = committed_session(dir.path(), kind, &live_rows());
+        if kind == "loop" {
+            wait_for_loop_window(dir.path(), &doc);
+        }
         let state = preflight_json(dir.path(), &doc);
 
         let prompts = string_list(&state, "queue_prompts");
@@ -228,25 +302,17 @@ fn only_nested_leaves_run_in_every_runnable_list_spelling() {
             dispatch_work.iter().all(|item| item != PARENT),
             "{kind}: the parent is never dispatched: {dispatch:#?}"
         );
-        if kind == "loop" {
+        for child in CHILDREN {
             assert!(
-                dispatch_work.is_empty(),
-                "{kind}: loop rows stay out of one-shot subagent dispatch: {dispatch:#?}"
+                dispatch_work.iter().any(|item| item == child),
+                "{kind}: every leaf is independently dispatchable: {dispatch:#?}"
             );
-        } else {
-            for child in CHILDREN {
-                assert!(
-                    dispatch_work.iter().any(|item| item == child),
-                    "{kind}: every leaf is independently dispatchable: {dispatch:#?}"
-                );
-            }
         }
-        assert_eq!(
+        assert!(
             dispatch_work
                 .iter()
                 .any(|item| item == "separate flat head"),
-            kind != "loop",
-            "{kind}: the flat sibling follows the component policy: {dispatch:#?}"
+            "{kind}: the flat sibling is independently dispatchable: {dispatch:#?}"
         );
 
         // Tracked checklist rows keep their children in the item, never in the
@@ -314,7 +380,7 @@ fn a_leaf_is_claimable_and_its_brief_carries_parent_context() {
             "- ### {PARENT}\n  - 🟡 [#subagent:pmsync#1] {}\n",
             CHILDREN[0]
         )),
-        "the context parent stays navigable while only the claimed leaf carries lifecycle projection:\n{body}"
+        "only the claimed leaf carries lifecycle projection:\n{body}"
     );
 
     let state = preflight_json(dir.path(), &doc);
@@ -580,7 +646,7 @@ fn run_agent_doc_stdin(dir: &std::path::Path, args: &[&str], stdin: &str) -> std
 }
 
 /// Claim, start and report one item the way a coordinator dispatches it.
-fn dispatch_and_report(dir: &std::path::Path, path: &str, item: &str, owner: &str) {
+fn dispatch_and_report(dir: &std::path::Path, path: &str, item: &str, owner: &str) -> String {
     assert_ok(
         &run_agent_doc(
             dir,
@@ -588,6 +654,20 @@ fn dispatch_and_report(dir: &std::path::Path, path: &str, item: &str, owner: &st
         ),
         "queue claim",
     );
+    let claims = run_agent_doc(dir, &["queue", "claims", path]);
+    assert_ok(&claims, "queue claims after claim");
+    let claims: serde_json::Value = serde_json::from_slice(&claims.stdout).unwrap();
+    let claimed_item = claims
+        .as_array()
+        .and_then(|claims| {
+            claims.iter().find_map(|claim| {
+                (claim["owner"].as_str() == Some(owner))
+                    .then(|| claim["item_text"].as_str())
+                    .flatten()
+            })
+        })
+        .unwrap_or_else(|| panic!("missing claimed item for {owner}: {claims}"))
+        .to_string();
     assert_ok(
         &run_agent_doc(
             dir,
@@ -596,7 +676,7 @@ fn dispatch_and_report(dir: &std::path::Path, path: &str, item: &str, owner: &st
                 "start",
                 path,
                 "--item",
-                item,
+                &claimed_item,
                 "--owner",
                 owner,
                 "--generation",
@@ -607,24 +687,28 @@ fn dispatch_and_report(dir: &std::path::Path, path: &str, item: &str, owner: &st
         ),
         "queue start",
     );
-    assert_ok(
-        &run_agent_doc(
-            dir,
-            &[
-                "queue",
-                "report-complete",
-                "--prose-only",
-                path,
-                "--item",
-                item,
-                "--generation",
-                "1",
-                "--response",
-                "Part 1 shipped; Part 2 is a design doc.",
-            ],
-        ),
-        "queue report-complete",
+    let response = if item.contains("#adversarial-pr") {
+        "REVIEW-CLEAN https://github.com/haiven-dev/haiven-api/pull/823#pullrequestreview-1 base=aaaa111 head=bbbb222 cycles=1\nINLINE-THREADS-LOADED 0 head=bbbb222\nQueried pulls/823/comments."
+    } else {
+        "Part 1 shipped; Part 2 is a design doc."
+    };
+    let report = run_agent_doc(
+        dir,
+        &[
+            "queue",
+            "report-complete",
+            "--prose-only",
+            path,
+            "--item",
+            &claimed_item,
+            "--generation",
+            "1",
+            "--response",
+            response,
+        ],
     );
+    assert_ok(&report, "queue report-complete");
+    claimed_item
 }
 
 fn claim_owners(dir: &std::path::Path, path: &str) -> Vec<String> {
@@ -666,14 +750,7 @@ fn a_verbatim_nested_echo_closes_the_reported_leaf_not_the_parent() {
                 .lines()
                 .find(|line| line.contains(child))
                 .unwrap_or_else(|| panic!("missing admitted child {child}:\n{admitted}"));
-            let id_start = line
-                .rfind("[#q-")
-                .unwrap_or_else(|| panic!("missing stable id for {child}: {line}"));
-            let id_end = id_start
-                + line[id_start..]
-                    .find(']')
-                    .unwrap_or_else(|| panic!("unterminated stable id for {child}: {line}"));
-            format!(">   - {child} {}\n", &line[id_start..=id_end])
+            format!(">   - {child} {}\n", admitted_queue_id_annotation(line))
         })
         .collect();
     let response = format!(
@@ -698,8 +775,8 @@ fn a_verbatim_nested_echo_closes_the_reported_leaf_not_the_parent() {
     assert!(claim_owners(dir.path(), path).is_empty());
 }
 
-/// Equal child text under separate parents is separate queue work. A targeted
-/// acknowledgement for one nest vector must not strike the sibling occurrence.
+/// Equal child text under separate parents is separate queue work. A closeout
+/// for one nest vector must not remove or strike the sibling occurrence.
 #[test]
 fn equal_nested_children_close_by_parent_vector() {
     let dir = tempfile::tempdir().unwrap();
@@ -707,26 +784,59 @@ fn equal_nested_children_close_by_parent_vector() {
     let second_parent = "https://github.com/haiven-dev/haiven-api/pull/823";
     let child = "#adversarial-pr";
     let second_vector = format!("{second_parent}: {child}");
-    let rows = format!("- {second_parent}\n  - {child}\n- {first_parent}\n  - {child}\n");
+    let rows = format!("- {first_parent}\n  - {child}\n- {second_parent}\n  - {child}\n");
     let doc = closeout_session(dir.path(), &rows, "");
     let path = doc.to_str().unwrap();
 
-    let closed = run_agent_doc(
-        dir.path(),
-        &["queue", "consume", path, "--ack-text", &second_vector],
+    preflight_json(dir.path(), &doc);
+    let admitted = run_body(&doc, "run");
+    let second_section = admitted
+        .split_once(second_parent)
+        .map(|(_, section)| section)
+        .unwrap_or_else(|| panic!("missing second parent:\n{admitted}"));
+    let second_child = second_section
+        .lines()
+        .find(|line| line.contains(child))
+        .unwrap_or_else(|| panic!("missing second child:\n{admitted}"));
+    let second_annotation = admitted_queue_id_annotation(second_child);
+    let second_id = second_annotation
+        .trim_start_matches("[#")
+        .trim_end_matches(']');
+    let second_leaf_echo = format!("{child} {second_annotation}");
+    assert_ok(
+        &run_agent_doc(dir.path(), &["commit", path]),
+        "close the coordinator cycle",
     );
-    assert_ok(&closed, "queue consume --ack-text on one parent vector");
+    let second_reported_vector = format!("{second_vector} {second_annotation}");
+    dispatch_and_report(
+        dir.path(),
+        path,
+        &second_reported_vector,
+        "subagent:adversarial-pr-823",
+    );
+    let ack = run_agent_doc(
+        dir.path(),
+        &["queue", "consume", path, "--ack-id", second_id],
+    );
+    assert_ok(&ack, "queue consume --ack-id on the reported nested leaf");
+    let response = format!(
+        "<!-- patch:exchange -->\n### Re: adversarial review — gpt-5\n\n> **Queue prompt:** {first_parent}\n\n**Deferred:** Its child remains queued.\n\n> **Queue prompt:** {second_parent}\n>   - {second_leaf_echo}\n\nReviewed pull request 823.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nDone.\n<!-- /patch:recap -->\n"
+    );
+    let output = run_agent_doc_stdin(dir.path(), &["respond", path, "--force-disk"], &response);
+    assert_transient_closeout(&output, "respond");
 
     let body = without_admitted_queue_ids(&run_body(&doc, "run"));
-    let (second_section, first_section) = body
-        .split_once(first_parent)
-        .unwrap_or_else(|| panic!("missing first parent:\n{body}"));
+    let (first_section, second_section) = body
+        .split_once(second_parent)
+        .unwrap_or_else(|| panic!("missing second parent:\n{body}"));
     assert!(
-        first_section.contains(child) && !first_section.contains(&format!("~~{child}~~")),
+        first_section.contains(first_parent)
+            && first_section.contains(child)
+            && !first_section.contains(&format!("~~{child}~~")),
         "the equal-text child under the other parent stays live:\n{body}"
     );
     assert!(
-        second_section.contains(second_parent) && second_section.contains(&format!("~~{child}")),
+        second_section.contains(&format!("~~{child}")),
         "only the addressed parent vector closes:\n{body}"
     );
     assert_eq!(body.matches(&format!("~~{child}")).count(), 1, "{body}");

@@ -2408,6 +2408,112 @@ Duplicate replay should stay live.
     }
 
     #[test]
+    fn fenced_ignored_path_refusal_cannot_promote_after_owner_loss() {
+        let _env = agent_doc_test_support::env_lock();
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        let (doc, _) = ignored_session_doc_with_open_cycle(root, "agent_doc_scratch: true\n");
+        let cycle = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+            .unwrap()
+            .expect("open ignored-path cycle");
+        let claim = agent_doc_controller_io::project_controller::claim_closeout_owner_guard_for_file(
+            &doc,
+            agent_doc_controller_io::project_controller::CloseoutOwnerClaimRequest {
+                expected_cycle_id: Some(cycle.cycle_id.clone()),
+                owner_id: agent_doc_controller_io::project_controller::new_closeout_owner_id(
+                    "ignored-path-test",
+                ),
+                owner_pid: std::process::id(),
+                role: agent_doc_controller_io::project_controller::CLOSEOUT_OWNER_ROLE_CAPTURED_FINALIZE_RESUME.into(),
+                now_secs: 1,
+                lease_secs: agent_doc_controller_io::project_controller::CLOSEOUT_OWNER_LEASE_SECS,
+                allow_dead_owner_takeover: true,
+            },
+        )
+        .unwrap();
+        let agent_doc_controller_io::project_controller::CloseoutOwnerGuardClaimOutcome::Acquired(
+            guard,
+        ) = claim
+        else {
+            panic!("ignored-path test must acquire the closeout owner");
+        };
+        let marker = root.join("ignored-path-fence.marker");
+        let release = root.join("ignored-path-fence.release");
+        unsafe {
+            std::env::set_var("AGENT_DOC_TEST_CLOSEOUT_IGNORED_PATH_BARRIER_FILE", &doc);
+            std::env::set_var(
+                "AGENT_DOC_TEST_CLOSEOUT_IGNORED_PATH_BARRIER_READY",
+                &marker,
+            );
+            std::env::set_var(
+                "AGENT_DOC_TEST_CLOSEOUT_IGNORED_PATH_BARRIER_RELEASE",
+                &release,
+            );
+        }
+        let commit_doc = doc.clone();
+        let attempt = std::thread::spawn(move || {
+            agent_doc_commit_io::commit_under_closeout_owner(&commit_doc, guard.capability())
+        });
+        let started = std::time::Instant::now();
+        while !marker.exists() {
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(10),
+                "ignored-path fence barrier was not reached"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        unsafe {
+            std::env::set_var("AGENT_DOC_TEST_CAPTURED_RESUME_FORCE_LEASE_LOST_FILE", &doc);
+        }
+        fs::write(&release, b"release").unwrap();
+        assert!(
+            attempt.join().unwrap().is_err(),
+            "lost owner must fail before ignored-path abandonment"
+        );
+        assert!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+                .unwrap()
+                .expect("retained ignored-path cycle")
+                .is_open(),
+            "stale ignored-path transaction must perform zero terminal promotion"
+        );
+        unsafe {
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_IGNORED_PATH_BARRIER_FILE");
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_IGNORED_PATH_BARRIER_READY");
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_IGNORED_PATH_BARRIER_RELEASE");
+            std::env::remove_var("AGENT_DOC_TEST_CAPTURED_RESUME_FORCE_LEASE_LOST_FILE");
+        }
+        let successor = agent_doc_controller_io::project_controller::claim_closeout_owner_guard_for_file(
+            &doc,
+            agent_doc_controller_io::project_controller::CloseoutOwnerClaimRequest {
+                expected_cycle_id: Some(cycle.cycle_id),
+                owner_id: agent_doc_controller_io::project_controller::new_closeout_owner_id(
+                    "ignored-path-successor",
+                ),
+                owner_pid: std::process::id(),
+                role: agent_doc_controller_io::project_controller::CLOSEOUT_OWNER_ROLE_CAPTURED_FINALIZE_RESUME.into(),
+                now_secs: 2,
+                lease_secs: agent_doc_controller_io::project_controller::CLOSEOUT_OWNER_LEASE_SECS,
+                allow_dead_owner_takeover: true,
+            },
+        )
+        .unwrap();
+        let agent_doc_controller_io::project_controller::CloseoutOwnerGuardClaimOutcome::Acquired(
+            successor,
+        ) = successor
+        else {
+            panic!("successor must acquire ignored-path closeout");
+        };
+        let _ = agent_doc_commit_io::commit_under_closeout_owner(&doc, successor.capability());
+        assert!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+                .unwrap()
+                .expect("successor terminal cycle")
+                .closed_by_ignored_path_refusal()
+        );
+    }
+
+    #[test]
     fn declared_scratch_doc_that_is_not_ignored_commits_normally() {
         // The declaration never skips a commit by itself: only an untracked
         // path `.gitignore` matches is skipped.

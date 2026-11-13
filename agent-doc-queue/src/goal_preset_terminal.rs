@@ -270,8 +270,25 @@ pub fn blocked_hand_back_asks_to_decide_human_review(response: &str) -> bool {
     if lower.contains("changes_requested") || lower.contains("changes requested") {
         return true;
     }
-    lower.contains("review")
-        && (lower.contains("clear") || lower.contains("replace") || lower.contains("approv"))
+    if !lower.contains("review")
+        || !(lower.contains("clear") || lower.contains("replace") || lower.contains("approv"))
+    {
+        return false;
+    }
+    // A named external owner can be a real, unresolved operator dependency
+    // (`BLOCKED tmstorm clears ...`). The preset's no-approve/no-dismiss rule
+    // answers only a decision handed back generically to this coordinator.
+    // Keep direct imperatives as generic too even when they omit an actor.
+    ["reviewer", "operator", "human", "you"]
+        .iter()
+        .any(|actor| {
+            lower.contains(&format!("{actor} clear"))
+                || lower.contains(&format!("{actor} replac"))
+                || lower.contains(&format!("{actor} approv"))
+        })
+        || lower.contains("clear the review")
+        || lower.contains("replace the review")
+        || lower.contains("approve the review")
 }
 
 fn preset_already_answers_human_review(bodies: &[String]) -> bool {
@@ -351,12 +368,8 @@ pub fn hand_back_completes_goal_loop(response: &str, states: &[String], bodies: 
         return false;
     }
     let blocked = ["BLOCKED".to_string()];
-    if hand_back_begins_with_final_state(response, &blocked)
-        && blocked_review_order_already_answered(response, bodies)
-    {
-        return false;
-    }
-    true
+    !(hand_back_begins_with_final_state(response, &blocked)
+        && blocked_review_order_already_answered(response, bodies))
 }
 
 /// True when `line` begins with one of `states`, after blockquote, list, and
@@ -587,11 +600,21 @@ fn prompt_pressure_brief_section(handoff: &GoalLoopHandoff, kind: &PromptPressur
         quoted.push('\n');
     }
     let instruction = match kind {
-        PromptPressureKind::Prose => format!(
-            "The previous worker `{owner}` (generation {generation}) handed this same queue row back without completing the prompt. A prose blocker in agent:exchange does not complete the prompt. Finish the prompt, or return only the review structure (`<!-- agent-doc:prompt-blocker -->` with the incomplete work, **Complete by:**, and **Prompt:**). Its hand-back, verbatim:\n{quoted}",
-            owner = handoff.owner,
-            generation = handoff.generation,
-        ),
+        PromptPressureKind::Prose => {
+            let pull_request = if crate::prompt_pressure::head_requires_created_pull_request(
+                &handoff.item_text,
+            ) {
+                " This row requires a pull request created this turn (#closepressure). Citing a pull request that already existed does not complete it. Open the pull request and include its URL as the effect this turn opened."
+            } else {
+                ""
+            };
+            format!(
+                "The previous worker `{owner}` (generation {generation}) handed this same queue row back without completing the prompt. A prose blocker in agent:exchange does not complete the prompt. Finish the prompt, or return only the review structure (`<!-- agent-doc:prompt-blocker -->` with the incomplete work, **Complete by:**, and **Prompt:**).{pull_request} Its hand-back, verbatim:\n{quoted}",
+                owner = handoff.owner,
+                generation = handoff.generation,
+                pull_request = pull_request,
+            )
+        }
         PromptPressureKind::Review => format!(
             "The previous worker `{owner}` (generation {generation}) returned a review structure instead of completing the prompt. That review item is the operator-facing blocker. If it is still open, stop and do not redispatch this row. If the operator has resolved it, finish the prompt now. The recorded blocker:\n{quoted}",
             owner = handoff.owner,
@@ -708,6 +731,17 @@ mod tests {
         assert!(!hand_back_completes_goal_loop(quiet, &declared, &bodies));
         assert!(!response_published_pull_request_explanation(quiet));
         assert!(preset_requires_operator_order_rule(&bodies[0]));
+
+        let named_external = "BLOCKED tmstorm clears or replaces review 100 against the current head base=aaa head=bbb cycles=4";
+        assert!(!blocked_review_order_already_answered(
+            named_external,
+            &bodies
+        ));
+        assert!(hand_back_completes_goal_loop(
+            named_external,
+            &declared,
+            &bodies
+        ));
 
         let explained = "BLOCKED reviewer clears or replaces review 100 base=aaa head=bbb cycles=4\n\n\
              Posted the pull-request comment https://github.com/sample-org/sample-repo/pull/12#issuecomment-100 \

@@ -2780,6 +2780,120 @@ pub(crate) fn paint_attempt_projection(text: &str, projection: &str) -> String {
     }
 }
 
+/// Repair one binary-owned attempt projection that a concurrent operator
+/// insertion displaced into the middle of its queue row.
+///
+/// A controller write and an editor edit can both insert at the first work-text
+/// character of the same CRDT row. The character union is lossless, but its
+/// deterministic peer ordering may materialize `- When 📥 work` instead of
+/// `- 📥 When work`. This repair is deliberately evidence-bound: the
+/// controller's pre-union row must carry the projection, the editor's observed
+/// before row must be that exact row without it, the editor must have changed
+/// that row, and removing the displaced token from the union must reproduce the
+/// editor's exact after row. Otherwise no repair is authorized.
+pub fn repair_displaced_attempt_projection(
+    canonical_before: &str,
+    union_after: &str,
+    editor_before: &str,
+    editor_after: &str,
+) -> Option<String> {
+    let canonical_lines = canonical_before.split('\n').collect::<Vec<_>>();
+    let editor_before_lines = editor_before.split('\n').collect::<Vec<_>>();
+    let editor_after_lines = editor_after.split('\n').collect::<Vec<_>>();
+    if editor_before_lines.len() != editor_after_lines.len() {
+        return None;
+    }
+
+    let mut repaired = union_after
+        .split('\n')
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let mut changed = false;
+    for canonical_line in canonical_lines {
+        if !canonical_line.trim_start().starts_with("- ") {
+            continue;
+        }
+        let Some(projection) = attempt_projection_tokens(canonical_line) else {
+            continue;
+        };
+        let Some(unprojected) = remove_leading_attempt_projection(canonical_line) else {
+            continue;
+        };
+        let editor_matches = editor_before_lines
+            .iter()
+            .enumerate()
+            .filter(|(_, line)| **line == unprojected)
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        let [editor_index] = editor_matches.as_slice() else {
+            continue;
+        };
+        let editor_target = editor_after_lines[*editor_index];
+        if editor_target == editor_before_lines[*editor_index]
+            || line_carries_attempt_projection(editor_target)
+        {
+            continue;
+        }
+
+        let union_matches = repaired
+            .iter()
+            .enumerate()
+            .filter_map(|(index, line)| {
+                (!line_carries_attempt_projection(line)
+                    && remove_displaced_projection(line, &projection)
+                        .is_some_and(|without| without == editor_target))
+                .then_some(index)
+            })
+            .collect::<Vec<_>>();
+        let [union_index] = union_matches.as_slice() else {
+            continue;
+        };
+        repaired[*union_index] = paint_attempt_projection(editor_target, &projection);
+        changed = true;
+    }
+    changed.then(|| repaired.join("\n"))
+}
+
+fn remove_leading_attempt_projection(line: &str) -> Option<String> {
+    let indent_len = line.len() - line.trim_start().len();
+    let (indent, content) = line.split_at(indent_len);
+    let (list, mut body) = content
+        .strip_prefix("- ")
+        .map_or(("", content), |rest| ("- ", rest));
+    let (heading, work) = if let Some(rest) = body.strip_prefix("###")
+        && rest.chars().next().is_some_and(char::is_whitespace)
+    {
+        ("### ", rest.trim_start())
+    } else {
+        ("", body)
+    };
+    body = agent_doc_element_queue::strip_attempt_projection_prefix(work);
+    (body != work).then(|| format!("{indent}{list}{heading}{body}"))
+}
+
+fn remove_displaced_projection(line: &str, projection: &str) -> Option<String> {
+    if projection.is_empty() {
+        return None;
+    }
+    for (start, _) in line.match_indices(projection) {
+        let end = start + projection.len();
+        let before_is_space = line[..start]
+            .chars()
+            .next_back()
+            .is_some_and(char::is_whitespace);
+        let after_is_space = line[end..].chars().next().is_some_and(char::is_whitespace);
+        if !before_is_space || !after_is_space {
+            continue;
+        }
+        let after_space = line[end..].chars().next().map(char::len_utf8).unwrap_or(0);
+        let mut candidate = String::with_capacity(line.len() - projection.len() - after_space);
+        candidate.push_str(&line[..start]);
+        candidate.push_str(&line[end + after_space..]);
+        return Some(candidate);
+    }
+    None
+}
+
 /// Projection to copy onto `survivor_work`. The dropped marked row must be the
 /// only marked source, and exactly one longer continuation may survive.
 pub(crate) fn continuation_attempt_projection(
@@ -7750,6 +7864,37 @@ Second answer line three.
         assert!(
             merged_raced.contains("an unrelated prompt that must survive"),
             "{merged_raced}"
+        );
+    }
+
+    #[test]
+    fn displaced_pending_projection_is_repaired_from_exact_editor_intent() {
+        let wrap =
+            |row: &str| format!("<!-- agent:run id=\"main\" -->\n{row}\n<!-- /agent:run -->\n");
+        let work = "agent-doc uses subagents for blocked harness actions.";
+        let canonical_before = wrap(&format!("- 📥 {work}"));
+        let editor_before = wrap(&format!("- {work}"));
+        let editor_after = wrap(&format!("- When {work}"));
+        let union_after = wrap(&format!("- When 📥 {work}"));
+
+        assert_eq!(
+            repair_displaced_attempt_projection(
+                &canonical_before,
+                &union_after,
+                &editor_before,
+                &editor_after,
+            ),
+            Some(wrap(&format!("- 📥 When {work}"))),
+        );
+        assert_eq!(
+            repair_displaced_attempt_projection(
+                &editor_before,
+                &union_after,
+                &editor_before,
+                &editor_after,
+            ),
+            None,
+            "an operator-authored glyph without a binary-owned prefix witness is untouched",
         );
     }
 

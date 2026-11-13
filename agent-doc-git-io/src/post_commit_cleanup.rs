@@ -113,7 +113,7 @@ pub fn finalize_successful_commit(
     effects: &impl PostCommitCleanupEffects,
     file: &Path,
     prior_head_doc: Option<&str>,
-) {
+) -> Result<()> {
     let started = std::time::Instant::now();
     effects.log_cycle(file, "commit", None, None);
     effects.log_op(
@@ -130,14 +130,12 @@ pub fn finalize_successful_commit(
     let file_content = effects.read_to_string(file).ok();
     let current_read_ms = current_read_started.elapsed().as_millis();
     let pipeline_started = std::time::Instant::now();
-    if let Err(e) = effects.mark_pipeline_committed(
+    effects.mark_pipeline_committed(
         file,
         OpsLogEvent::CommitSuccess.as_str(),
         snap.as_deref(),
         file_content.as_deref(),
-    ) {
-        eprintln!("[commit] cycle-state update failed: {} (non-fatal)", e);
-    }
+    )?;
     let pipeline_ms = pipeline_started.elapsed().as_millis();
     let capture_started = std::time::Instant::now();
     // Capture state is projected from the cycle phase. The primary pipeline
@@ -154,9 +152,7 @@ pub fn finalize_successful_commit(
             ),
         );
     } else if let Some(file_content) = file_content.as_deref() {
-        if let Err(e) = effects.mark_capture_committed(file, file_content) {
-            eprintln!("[commit] capture-state update failed: {} (non-fatal)", e);
-        }
+        effects.mark_capture_committed(file, file_content)?;
     } else {
         eprintln!(
             "[commit] capture-state update skipped: current document content unavailable (non-fatal)"
@@ -213,6 +209,7 @@ pub fn finalize_successful_commit(
             capture_ms,
         ),
     );
+    Ok(())
 }
 
 pub fn log_already_current_local_drift_handoff(
@@ -274,7 +271,7 @@ pub fn finalize_already_committed_noop(
     snapshot_content: Option<&str>,
     file_content: Option<&str>,
     drift_kind: Option<PostCommitLocalDriftKind>,
-) {
+) -> Result<()> {
     // `#chatprompt` (GH #125): a cycle that carried chat prompts answered an
     // operator turn even when the document did not change; logging it as
     // `commit_noop` made `session_accretion` report idleness during real work.
@@ -302,19 +299,16 @@ pub fn finalize_already_committed_noop(
         file,
         &format!("commit_already_current file={} basis=head", file.display()),
     );
-    if let Err(e) = effects.mark_pipeline_committed(file, event, snapshot_content, file_content) {
-        eprintln!("[commit] cycle-state update failed: {} (non-fatal)", e);
-    }
+    effects.mark_pipeline_committed(file, event, snapshot_content, file_content)?;
     if let Some(file_content) = file_content {
-        if let Err(e) = effects.mark_capture_committed(file, file_content) {
-            eprintln!("[commit] capture-state update failed: {} (non-fatal)", e);
-        }
+        effects.mark_capture_committed(file, file_content)?;
     } else {
         eprintln!(
             "[commit] capture-state update skipped: current document content unavailable (non-fatal)"
         );
     }
     let _ = effects.reconcile_queue_continuation(file, "commit_already_current");
+    Ok(())
 }
 
 #[cfg(test)]
@@ -402,14 +396,16 @@ mod tests {
     fn a_noop_commit_of_a_chat_prompt_cycle_is_logged_as_a_chat_turn() {
         let file = Path::new("/tmp/agent-doc-chat-turn-noop.md");
         let idle = TerminalEffects::default();
-        finalize_already_committed_noop(&idle, file, "commit_already_current", None, None, None);
+        finalize_already_committed_noop(&idle, file, "commit_already_current", None, None, None)
+            .unwrap();
         assert_eq!(*idle.cycle_events.lock().unwrap(), vec!["commit_noop"]);
 
         let chat = TerminalEffects {
             chat_prompts: true,
             ..TerminalEffects::default()
         };
-        finalize_already_committed_noop(&chat, file, "commit_already_current", None, None, None);
+        finalize_already_committed_noop(&chat, file, "commit_already_current", None, None, None)
+            .unwrap();
         assert_eq!(*chat.cycle_events.lock().unwrap(), vec!["commit_chat_turn"]);
     }
 
@@ -420,7 +416,8 @@ mod tests {
             &effects,
             Path::new("/tmp/agent-doc-terminal-capture-fold.md"),
             None,
-        );
+        )
+        .unwrap();
 
         assert_eq!(effects.capture_calls.load(Ordering::SeqCst), 0);
         assert!(

@@ -1205,6 +1205,7 @@ mod tests {
             true,
             agent_doc_route_io::queue_dispatch::RouteQueueEffects {
                 write_document: retry_once_crdt_merge_route_write_document,
+                refresh_explicit_send_after_enqueue: false,
             },
         )
         .expect("route enqueue should retry a stale relay baseline");

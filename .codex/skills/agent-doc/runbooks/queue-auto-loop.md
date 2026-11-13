@@ -34,6 +34,9 @@ Read `ui_outcome` before describing a stop:
 `queue_auto_clear_yield: true` is an intentional supervisor handoff only after
 the just-completed item's authorized current-item and returned-subagent outward
 effects have executed and their results are verified (`#effectbeforecloseout`).
+A required pull request is one of those effects (`#closepressure`): citing a
+pull request that already existed does not complete a setup or
+open-a-pull-request head.
 `END THIS TURN` and `next_queue_prompt` govern later queue work; they never
 preempt, defer, or cancel a required post/publish/push/message/API effect from
 the item being closed. End after that proven closeout; the ready supervisor
@@ -126,14 +129,13 @@ pool's running, dispatching, frozen, and free counts.
   new generation for a worker whose continue succeeded.
 - A harness freeze means the harness reported the worker ended without a
   result (`agent-doc queue freeze <FILE> --item <item> --generation <N>
-  --reason '<what was reported>'`). It frees the slot but keeps the claim; a
-  later report from that worker is still accepted. `queue claim --refresh`
-  with that attempt's owner and generation clears the freeze, including after
-  the claim TTL. A resumed transcript may use a new wrapper id; run `queue
-  start` with that returned id to atomically rebind the same generation and
-  clear the freeze. Reusing the old wrapper id is an idempotent resume. Expiry
-  does not turn a harness freeze into lost and does not make its head eligible
-  for dispatch. Only `queue release --requeue` abandons it.
+  --reason '<what was reported>'`). The command immediately runs failed-
+  continue recovery and prints the authoritative refill. When that refill
+  offers the stopped item again, run its exact `queue claim`, `queue brief`,
+  and `queue start` commands as a fresh attempt with the newly returned
+  generation and wrapper id. Never run `queue start` against the frozen owner
+  and generation or reuse an old start command: the emitted refill has already
+  authorized retry and the replacement claim retires that stopped attempt.
 - No heartbeat for `AGENT_DOC_SUBAGENT_FROZEN_SECS` (default 1.5 times the
   claim TTL, so expiry alone is never this case) fails continue. The same task
   is retried into the freed slot. Do not leave that row for a later prompt.
@@ -184,15 +186,16 @@ its coordinator still passes the text.
 
 Never infer running from a label, intended spawn, process poll, or heartbeat.
 `queue claim --refresh --generation <N>` extends an already-started attempt and
-revives one that expired with its worker still bound. A continuation wrapper
-for a frozen attempt runs `queue start` and atomically replaces the stopped
-wrapper binding without changing generation. Neither operation revives an
-explicit requeue. A live generation binds to at most one wrapper and a wrapper
-to at most one live claim. Use generation-matched `queue release` only for that attempt; add
-`--requeue` to abandon it for a new worker. Expired attempts become visible `⚠️`
-lost state, except a harness freeze, which stays the same attempt until that
-refresh or an explicit requeue. Orphaned completion evidence is `🔄` and must be
-reconciled, not redispatched.
+revives one that expired with its worker still bound only when no worker stop
+was recorded. It does not revive an explicit requeue or a harness stop handled
+by `queue freeze`: that command's emitted refill owns failed-continue recovery
+and offers the stopped row through a fresh claim/generation. Never reuse the
+old generation's `queue start` command for a continuation wrapper. A live
+generation binds to at most one wrapper and a wrapper to at most one live
+claim. Use generation-matched `queue release` only for that attempt; add
+`--requeue` to abandon it for a new worker. Expired attempts become visible
+`⚠️` lost state. Orphaned completion evidence is `🔄` and must be reconciled,
+not redispatched.
 
 Claimed heads do not count toward continuation and must not be redispatched. If
 all remaining heads are claimed or operator-gated, end quietly and wait for the

@@ -2071,10 +2071,23 @@ impl LiveClearScenario {
             String::from_utf8_lossy(&preflight.stdout),
             stderr(&preflight)
         );
+        self.wait_until(
+            "detached queue maintenance admitted the active head",
+            || {
+                std::fs::read_to_string(&self.doc)
+                    .ok()
+                    .and_then(|content| {
+                        agent_doc_queue::queue_heads::active_queue_head_text(&content)
+                            .ok()
+                            .flatten()
+                    })
+                    .is_some()
+            },
+        );
         let admitted = std::fs::read_to_string(&self.doc).unwrap();
         let queue_head = agent_doc_queue::queue_heads::active_queue_head_text(&admitted)
             .unwrap()
-            .expect("preflight leaves the admitted queue head active");
+            .expect("detached queue maintenance leaves the admitted queue head active");
         let response = format!(
             "<!-- patch:exchange -->\n### Re: {head} — test-model\n\n> **Queue prompt:** {queue_head}\n\nDone: {head}.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nDone: {head}.\n<!-- /patch:recap -->\n"
         );

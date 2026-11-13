@@ -1185,15 +1185,11 @@ fn queue_prompt_content_line(line: &str) -> bool {
         }
     }
     let lower = trimmed.to_ascii_lowercase();
-    if lower.starts_with("do [#")
+    !(lower.starts_with("do [#")
         || lower.starts_with("do #")
         || lower.starts_with("re [#")
         || lower.starts_with("re #")
-        || trimmed.starts_with("[#")
-    {
-        return false;
-    }
-    true
+        || trimmed.starts_with("[#"))
 }
 
 /// True when a queue list item whose content (after the bullet) is

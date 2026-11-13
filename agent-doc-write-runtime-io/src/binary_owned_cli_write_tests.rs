@@ -47,6 +47,7 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for TestQueueCommandEffe
         &self,
         _file: &Path,
         _count: usize,
+        _apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
         unreachable!("not exercised")
     }
@@ -55,15 +56,22 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for TestQueueCommandEffe
         &self,
         _file: &Path,
         _count: usize,
+        _apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
         unreachable!("not exercised")
     }
 
-    fn strike_orphan_id_backed_queue_head(&self, file: &Path, id: &str) -> anyhow::Result<bool> {
-        agent_doc_queue_io::queue_consume::strike_orphan_id_backed_queue_head(
+    fn strike_orphan_id_backed_queue_head(
+        &self,
+        file: &Path,
+        id: &str,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> anyhow::Result<bool> {
+        agent_doc_queue_io::queue_consume::strike_orphan_id_backed_queue_head_under_apply_guard(
             file,
             id,
             &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
+            apply_guard,
         )
     }
 
@@ -71,6 +79,7 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for TestQueueCommandEffe
         &self,
         _file: &Path,
         _id: &str,
+        _apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> anyhow::Result<bool> {
         unreachable!("not exercised")
     }
@@ -79,11 +88,16 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for TestQueueCommandEffe
         &self,
         _file: &Path,
         _expected_head: &str,
+        _apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
         unreachable!("not exercised")
     }
 
-    fn prune_noise_queue_heads(&self, _file: &Path) -> anyhow::Result<usize> {
+    fn prune_noise_queue_heads(
+        &self,
+        _file: &Path,
+        _apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> anyhow::Result<usize> {
         unreachable!("not exercised")
     }
 }

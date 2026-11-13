@@ -1181,6 +1181,12 @@ internal data class CapturedSurface(
             }
             return
         }
+        if (surfaceObservationQueuesStructuralSync(receipt.output)) {
+            // The observation receipt means the desired generation is durable, not that its
+            // asynchronous tmux effect already ran. Surface that short pending interval so a
+            // healthy 1-2 second reconcile does not look like a dropped auto-sync.
+            TerminalUtil.showHint(observation.project, SyncLayoutAction.LAYOUT_SYNC_PENDING_MESSAGE)
+        }
         surfaceDeliveryRetryAttempt.set(0)
         val publishedEndpoint = SurfaceEndpoint(pending.projectRoot, pending.surfaceId)
         // Decide under the lock that retireControllerProjection drains under: either this endpoint is

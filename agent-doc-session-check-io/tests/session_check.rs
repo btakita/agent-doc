@@ -56,6 +56,15 @@ mod tests {
             &agent_doc_closeout_runtime_io::session_check_effects(),
         )
     }
+    fn inspect_applying(file: &std::path::Path) -> Result<SessionCheckStatus> {
+        let _process_global_lock = agent_doc_test_support::env_lock();
+        let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+        let effects = agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(
+            file,
+            &apply_guard,
+        )?;
+        agent_doc_session_check_io::inspect_under_apply_guard(file, &effects, &apply_guard)
+    }
     fn inspect_with_warnings(file: &std::path::Path) -> Result<SessionCheckReport> {
         let _process_global_lock = agent_doc_test_support::env_lock();
         agent_doc_session_check_io::inspect_with_warnings(
@@ -683,9 +692,8 @@ mod tests {
         }
         let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("session_check_committed_response_visible_in_current_document")
-                && ops_log.contains("authority=lazily_crdt"),
-            "expected Lazily/CRDT proof marker in ops log:\n{ops_log}"
+            !ops_log.contains("session_check_committed_response_visible_in_current_document"),
+            "read-only inspection must not persist its Lazily/CRDT proof:\n{ops_log}"
         );
     }
 
@@ -3007,9 +3015,8 @@ Body\n\
         let log =
             fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
-            log.contains("session_check_active_session_drift_provenance")
-                && log.contains("operator_proven=true"),
-            "the provenance decision is recorded: {log}"
+            !log.contains("session_check_active_session_drift_provenance"),
+            "read-only inspection must not persist its provenance decision: {log}"
         );
     }
 
@@ -3091,8 +3098,8 @@ Body\n\
         let log =
             fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
-            log.contains("promptless=true") && log.contains("operator_proven=true"),
-            "the promptless provenance decision is recorded: {log}"
+            !log.contains("session_check_active_session_drift_provenance"),
+            "read-only inspection must not persist its promptless provenance decision: {log}"
         );
     }
 
@@ -3639,7 +3646,7 @@ Body\n\
         )
         .unwrap();
 
-        match inspect(&doc).unwrap() {
+        match inspect_applying(&doc).unwrap() {
             SessionCheckStatus::Ok(message) => {
                 assert!(
                     message.contains("recovered the missing commit boundary from committed historical exchange snapshot drift"),
@@ -3827,7 +3834,7 @@ Body\n\
         )
         .unwrap();
 
-        match inspect(&doc).unwrap() {
+        match inspect_applying(&doc).unwrap() {
             SessionCheckStatus::Ok(message) => {
                 assert!(
                     message.contains("recovered the missing commit boundary from committed historical exchange snapshot drift"),
@@ -4007,7 +4014,7 @@ Body\n\
         )
         .unwrap();
 
-        let status = inspect(&doc).unwrap();
+        let status = inspect_applying(&doc).unwrap();
         match status {
             SessionCheckStatus::Ok(message) => {
                 assert!(message.contains("repaired committed historical exchange snapshot drift"));
@@ -4276,7 +4283,7 @@ Body\n\
         .unwrap();
         fs::write(&doc, committed).unwrap();
 
-        match inspect(&doc).unwrap() {
+        match inspect_applying(&doc).unwrap() {
             SessionCheckStatus::Ok(message) => {
                 assert!(message.contains("repaired committed historical exchange snapshot drift"));
             }
@@ -4476,9 +4483,10 @@ Body\n\
         )
         .unwrap();
 
-        let report = inspect_with_warnings(&doc).unwrap();
-        assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
-        assert!(report.warnings.is_empty());
+        assert!(matches!(
+            inspect_applying(&doc).unwrap(),
+            SessionCheckStatus::Ok(_)
+        ));
         assert!(
             agent_doc_supervisor_io::startup_miss::load_startup_miss(&doc)
                 .unwrap()
@@ -6457,7 +6465,7 @@ Body\n\
             .unwrap();
 
         assert!(
-            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            matches!(inspect_applying(&doc).unwrap(), SessionCheckStatus::Ok(_)),
             "guard should clear when the dropped prompt is present in HEAD"
         );
         assert!(
@@ -6518,7 +6526,7 @@ Body\n\
         .unwrap();
 
         assert!(
-            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            matches!(inspect_applying(&doc).unwrap(), SessionCheckStatus::Ok(_)),
             "guard should clear when the dropped queue edit is preserved in HEAD"
         );
         assert!(
@@ -6552,7 +6560,7 @@ Body\n\
             .unwrap();
 
         assert!(
-            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            matches!(inspect_applying(&doc).unwrap(), SessionCheckStatus::Ok(_)),
             "guard should self-clear when the dropped [#id] is preserved as a struck do [#id] head"
         );
         assert!(
@@ -6585,7 +6593,7 @@ Body\n\
             .unwrap();
 
         assert!(
-            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            matches!(inspect_applying(&doc).unwrap(), SessionCheckStatus::Ok(_)),
             "guard should clear when the dropped queue head was consumed this cycle"
         );
     }
@@ -6610,7 +6618,7 @@ Body\n\
         .unwrap();
 
         assert!(
-            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            matches!(inspect_applying(&doc).unwrap(), SessionCheckStatus::Ok(_)),
             "guard should clear when the dropped queue head is struck in place"
         );
         assert!(
@@ -9050,9 +9058,18 @@ The exchange is 590+ lines; I'm continuing the queue.\n<!-- /agent:exchange -->"
             "precondition: late-IPC over-application present"
         );
 
-        agent_doc_session_check_io::enforce_clean_closeout(
+        let apply_guard =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        let effects = agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(
             &doc,
-            &agent_doc_closeout_runtime_io::session_check_effects(),
+            &apply_guard,
+        )
+        .unwrap();
+        agent_doc_session_check_io::enforce_clean_closeout_with_force_disk_under_apply_guard(
+            &doc,
+            false,
+            &effects,
+            &apply_guard,
         )
         .expect("enforce_clean_closeout should self-heal, not bail");
         assert_eq!(fs::read_to_string(&doc).unwrap(), committed);

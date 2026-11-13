@@ -165,9 +165,10 @@ fn subagent_dispatch_candidates_for_content(file: &Path, content: &str) -> Resul
         .collect::<Vec<_>>();
     // `#subagentworkpool`: an attempt that expired with its worker still bound
     // and was not abandoned may still be working, so its row is never offered.
-    // A stopped harness freeze stays `Running`. Once continue fails, the same
-    // retry offer claims a new generation (`#transientcloseout`). This filter
-    // is only the unconfirmed slot, which a freeze does not hold.
+    // A stopped harness freeze is transiently `Running` in the ledger. The
+    // synchronous recovery pass fails continue and offers a new generation
+    // (`#transientcloseout`). This filter is only the unconfirmed slot, which
+    // that transient frozen entry does not hold.
     let retrying = |claim: &agent_doc_queue::queue_claim::QueueClaim| {
         agent_doc_queue::lost_running_recovery::retry_authorized(claim)
     };
@@ -420,12 +421,17 @@ fn queue_attr_subagent_plan_with_pools(
     prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
     mut pools: Option<&mut Vec<agent_doc_queue::subagent_pool::PoolStatus>>,
 ) -> Result<Option<agent_doc_queue::subagent_intent::QueueSubagentPlan>> {
+    // Keep nested-claim steering installed for every claim/pool read below.
+    // `ledger_claimed_items_for_content` installs the same view internally,
+    // but its guard ends when that call returns; a following state read would
+    // otherwise parse a nested leaf as its parent row.
+    let _claim_view = crate::queue_claim::steer_guard_for(file, content);
     let components = agent_doc_element::element::parse(content)?;
     let graph = agent_doc_queue::queue_set::QueueSet::parse(content, &components)?;
     // `#queueschedule`: a closed schedule window dispatches nothing.
     // Do not call `claimed_items_for_content` here: it folds this plan's held
     // heads back in and would recurse.
-    let schedule_held = crate::queue_schedule::schedule_held_heads(file, content);
+    let schedule_held = crate::queue_schedule::schedule_held_heads_for_dispatch(file, content);
     let mut excluded = crate::queue_claim::ledger_claimed_items_for_content(file, content)
         .with_heads(&schedule_held)
         .with_heads(&crate::queue_claim::completion_evidence_hold_texts(content))
@@ -434,8 +440,8 @@ fn queue_attr_subagent_plan_with_pools(
         ));
     let claim_states = crate::queue_claim::claim_states_for_content(file, content)?;
     // `#subagentworkpool`: a dispatching claim and a live running worker hold
-    // a pool slot; a frozen worker frees its slot but keeps its claim (it
-    // stays in `excluded` through the ledger claims).
+    // a pool slot; a frozen ledger entry frees its slot and remains excluded
+    // only until failed-continue recovery offers its fresh replacement.
     let now = crate::queue_claim::claim_clock_now_secs();
     let frozen_secs = crate::subagent_pool::frozen_secs();
     let default_pool = crate::subagent_pool::default_pool_size();
@@ -447,10 +453,24 @@ fn queue_attr_subagent_plan_with_pools(
             })
             .map(|claim| claim.identity.clone()),
     );
-    let lost = claim_states
-        .iter()
-        .filter(|claim| claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost)
-        .cloned()
+    // Lost attempts deliberately do not install the nested steering guard:
+    // they are non-blocking for ordinary queue reconciliation. Dispatch has a
+    // stricter contract, however: a started Lost attempt is unknown-effect
+    // work and must remain excluded unless retry is explicitly authorized.
+    // Judge those durable attempts against every executable lineage directly
+    // instead of relying on `claim_states_for_content`, whose live-head view
+    // intentionally omits a non-blocking nested Lost claim.
+    let live_dispatch_identities = executable_row_keys(content)
+        .into_iter()
+        .map(|(_, lineage)| agent_doc_queue::queue_claim::claim_identity(&lineage))
+        .collect::<std::collections::HashSet<_>>();
+    let lost = crate::queue_claim::load_ledger_following(file, content)?
+        .claims
+        .into_iter()
+        .filter(|claim| {
+            claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost
+                && live_dispatch_identities.contains(&claim.identity)
+        })
         .collect::<Vec<_>>();
     let lineage = (!lost.is_empty())
         .then(|| crate::queue_lineage::load(file))
@@ -458,7 +478,16 @@ fn queue_attr_subagent_plan_with_pools(
     let unsafe_lost = lost
         .into_iter()
         .filter(|claim| {
-            !agent_doc_queue::lost_running_recovery::retry_authorized(claim)
+            let explicit_started_requeue = claim
+                .frozen
+                .as_ref()
+                .is_some_and(agent_doc_queue::queue_claim::QueueWorkerFreeze::is_abandon);
+            // A failed continue can authorize retry after an involuntary
+            // worker loss. An explicit requeue of an attempt that did start
+            // is different: the release proves ownership ended, not that the
+            // worker produced no external effects. Keep it fail-closed.
+            (!agent_doc_queue::lost_running_recovery::retry_authorized(claim)
+                || explicit_started_requeue)
                 && !lineage.as_ref().is_some_and(|lineage| {
                     crate::queue_lineage::attempt_never_started(lineage, claim)
                 })

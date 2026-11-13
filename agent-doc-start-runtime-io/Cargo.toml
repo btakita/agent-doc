@@ -75,5 +75,6 @@ tmux-router = { path = "../../tmux-router", version = "0.3.14" }
 [dev-dependencies]
 agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.573", features = ["test-support"] }
 agent-doc-element = { path = "../agent-doc-element", version = "0.35.573" }
+agent-doc-route-io = { path = "../agent-doc-route-io", version = "0.35.573" }
 agent-doc-test-support = { path = "../agent-doc-test-support", version = "0.35.573" }
 tempfile = "3"

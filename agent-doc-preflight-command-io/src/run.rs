@@ -4,12 +4,13 @@ use super::*;
 use agent_doc_diff as diff;
 use agent_doc_diff::semantic::semantic_diff_summary;
 use agent_doc_frontmatter::frontmatter;
+#[cfg(test)]
+use agent_doc_preflight_io::checkpoint_baseline_content;
 use agent_doc_preflight_io::{
-    PendingMaintenanceReport, PreflightResponseContract, QueueAuthorityUnavailable, QueueState,
-    check_linked_docs, checkpoint_baseline_content, enforce_no_dropped_backlog,
-    explicit_backlog_target_requirements, inspect_queue_state, read_and_truncate_claims,
-    read_claims, resolve_pipeline_state, run_gate_verify, run_pending_maintenance,
-    run_queue_maintenance_with_coin_gate_and_snapshot, shadow_open_backlog_admission,
+    PendingMaintenanceReport, PreflightResponseContract, QueueState, check_linked_docs,
+    enforce_no_dropped_backlog, explicit_backlog_target_requirements, inspect_queue_state,
+    inspect_queue_state_from_content, read_and_truncate_claims, read_claims,
+    resolve_pipeline_state, run_gate_verify, shadow_open_backlog_admission,
     sweep::{
         current_sweep_budget, current_sweep_owner, load_sweep_cursor,
         log_and_skip_foreign_owned_sweep_if_needed, order_from_cursor, run_bounded_sweep,
@@ -26,9 +27,9 @@ use agent_doc_prompt_contract::{push_unique_prompt_bearing_changes, push_unique_
 use agent_doc_queue::no_changes_explanation::{
     NoChangesFacts, NoChangesReadSource, explain_no_changes,
 };
-use agent_doc_queue::queue_convergence::{
-    queue_body_diff_is_non_selected_future_state, realign_baseline_to_converged_queue,
-};
+use agent_doc_queue::queue_convergence::queue_body_diff_is_non_selected_future_state;
+#[cfg(test)]
+use agent_doc_queue::queue_convergence::realign_baseline_to_converged_queue;
 use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_state_backbone::DocumentScope;
 use agent_doc_state_backbone::preflight::{
@@ -311,28 +312,86 @@ pub fn run(file: &Path) -> Result<()> {
     run_with_options(file, PreflightOptions::default())
 }
 
-fn maybe_record_preflight_terminal_closeout_proof(file: &Path, did_commit: bool) {
-    let Ok(agent_doc_session_check_io::SessionCheckStatus::Ok(_)) =
-        agent_doc_session_check_io::inspect(
-            file,
-            &agent_doc_closeout_runtime_io::session_check_effects(),
-        )
-    else {
-        return;
+/// Rebase an editor-only queue convergence onto the admitted baseline.
+///
+/// Queue maintenance checkpoints its full authoritative content. In a detached
+/// session it also writes that exact content to disk, so replacing the fresh
+/// checkpoint with a projection built from an older baseline would discard
+/// unrelated maintenance performed earlier in the same preflight (for example
+/// todo-id backfill). A live editor listener is the exceptional case: the
+/// converged snapshot advances while disk remains behind, and only that mismatch
+/// needs the queue-only baseline realignment. `maintenance_baseline` is the safe
+/// checkpoint captured immediately before queue maintenance.
+#[cfg(test)]
+fn maybe_realign_baseline_to_editor_queue_convergence(
+    file: &Path,
+    maintenance_baseline: &str,
+) -> bool {
+    let Ok(Some(converged_snapshot)) = agent_doc_snapshot_io::load_document_baseline(file) else {
+        return false;
     };
-    if let Err(err) = agent_doc_controller_io::project_controller::persist_session_actor_closeout(
-        file,
-    )
-    .and_then(|_| {
-        agent_doc_flow_io::closeout::record_terminal_closeout_proof(
-            file,
-            did_commit,
-            &agent_doc_closeout_runtime_io::closeout_effects(),
-            agent_doc_flow_io::closeout::CompleteRequiredCloseoutOptions::default(),
-        )
-    }) {
+    let Ok(disk_content) = std::fs::read_to_string(file) else {
+        return false;
+    };
+    if disk_content == converged_snapshot {
+        return false;
+    }
+    let Some(realigned) =
+        realign_baseline_to_converged_queue(maintenance_baseline, &converged_snapshot)
+    else {
+        return false;
+    };
+    checkpoint_baseline_content(file, &realigned);
+    true
+}
+
+fn maybe_record_preflight_terminal_closeout_proof(file: &Path, did_commit: bool) {
+    if let Err(err) = record_preflight_terminal_closeout_proof(file, did_commit) {
         eprintln!("[preflight] terminal proof warning: {err}");
     }
+}
+
+fn record_preflight_terminal_closeout_proof(file: &Path, did_commit: bool) -> Result<()> {
+    let agent_doc_session_check_io::SessionCheckStatus::Ok(_) =
+        agent_doc_ops_log_io::with_ops_log_suppressed(|| {
+            agent_doc_session_check_io::inspect_read_only(
+                file,
+                &agent_doc_closeout_runtime_io::session_check_effects(),
+            )
+        })?
+    else {
+        return Ok(());
+    };
+    maybe_pause_terminal_proof_after_inspection()?;
+    let apply_guard = crate::acquire_preflight_apply_guard(file)?;
+    agent_doc_controller_io::project_controller::persist_session_actor_closeout(file).and_then(
+        |_| {
+            agent_doc_closeout_runtime_io::record_terminal_closeout_proof_under_apply_guard(
+                file,
+                did_commit,
+                agent_doc_flow_io::closeout::CompleteRequiredCloseoutOptions::default(),
+                &apply_guard,
+            )
+        },
+    )
+}
+
+fn maybe_pause_terminal_proof_after_inspection() -> Result<()> {
+    let Ok(marker) = std::env::var("AGENT_DOC_TEST_TERMINAL_PROOF_AFTER_INSPECTION_MARKER") else {
+        return Ok(());
+    };
+    let release = std::env::var("AGENT_DOC_TEST_TERMINAL_PROOF_AFTER_INSPECTION_RELEASE")
+        .context("terminal proof test barrier requires a release path")?;
+    std::fs::write(marker, b"ready")?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !Path::new(&release).exists() {
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for terminal proof inspection barrier release"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    Ok(())
 }
 
 pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
@@ -450,11 +509,6 @@ fn run_with_options_to_writer_in_pass(
         let admitted = resolve_admission_preflight_document(file, "initial")?;
         (admitted.content, admitted.replica_hold)
     };
-    // Preserve the baseline that existed when this admission began. Repair and
-    // prior-cycle closeout may checkpoint document drift before queue
-    // maintenance; using that newer baseline would turn a same-cycle replay
-    // copy into apparently committed queue multiplicity.
-    let queue_admission_snapshot = agent_doc_snapshot_io::load_document_baseline(file)?;
     // A retained response replay may transiently duplicate only response cells
     // and/or protocol boundary markers. Normalize that evidence-backed shape
     // through Lazily before the generic integrity gate; otherwise the gate
@@ -794,10 +848,16 @@ fn run_with_options_to_writer_in_pass(
         .as_ref()
         .is_some_and(agent_doc_session_check_io::TurnAdmissionVerdict::requires_clean_closeout)
     {
+        let apply_guard = crate::acquire_preflight_apply_guard(file)?;
+        let session_effects =
+            agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(
+                file,
+                &apply_guard,
+            )?;
         agent_doc_preflight_runtime_io::enforce_no_uncommitted_closeout_drift(
             file,
             &rc,
-            &agent_doc_closeout_runtime_io::session_check_effects(),
+            &session_effects,
         )?;
     }
 
@@ -908,18 +968,37 @@ fn run_with_options_to_writer_in_pass(
         || if options.probe {
             false
         } else {
-            match agent_doc_repair_io::run(
-                agent_doc_repair_runtime_io::repair_coordinator_effects(
-                    &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
-                ),
-                file,
-            ) {
-                Ok(outcome) => outcome.repaired(),
-                // A failed response recovery is never advisory. Continuing into the
-                // generic commit stage can commit the stale pre-response projection
-                // that caused the recovery attempt, permanently rolling back an
-                // already-committed answer. Abort before any commit or queue mutation.
-                Err(e) => return Err(e.context("preflight response recovery failed closed")),
+            let apply_guard =
+                match agent_doc_queue_io::queue_edit_owner::QueueEditGuard::try_acquire(file)? {
+                    Some(guard) => Some(guard),
+                    None if !crate::preflight_repair_may_mutate(file)? => None,
+                    None => Some(crate::acquire_preflight_apply_guard(file)?),
+                };
+            match apply_guard {
+                None => false,
+                Some(apply_guard) => {
+                    let repair_effects =
+                        agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(
+                            file,
+                            &apply_guard,
+                        )?;
+                    match agent_doc_repair_io::run(
+                        agent_doc_repair_runtime_io::repair_coordinator_effects(
+                            &repair_effects,
+                            &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
+                        ),
+                        file,
+                    ) {
+                        Ok(outcome) => outcome.repaired(),
+                        // A failed response recovery is never advisory. Continuing into the
+                        // generic commit stage can commit the stale pre-response projection
+                        // that caused the recovery attempt, permanently rolling back an
+                        // already-committed answer. Abort before any commit or queue mutation.
+                        Err(e) => {
+                            return Err(e.context("preflight response recovery failed closed"));
+                        }
+                    }
+                }
             }
         };
 
@@ -956,10 +1035,16 @@ fn run_with_options_to_writer_in_pass(
             agent_doc_session_check_io::TurnAdmissionVerdict::continues_with_operator_intent,
         );
         if verdict.requires_clean_closeout() && !operator_intent_at_entry {
+            let apply_guard = crate::acquire_preflight_apply_guard(file)?;
+            let session_effects =
+                agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(
+                    file,
+                    &apply_guard,
+                )?;
             agent_doc_preflight_runtime_io::enforce_no_uncommitted_closeout_drift(
                 file,
                 &rc,
-                &agent_doc_closeout_runtime_io::session_check_effects(),
+                &session_effects,
             )?;
         }
     }
@@ -968,20 +1053,25 @@ fn run_with_options_to_writer_in_pass(
     // Preserve the command-entry cut. Pending maintenance runs below, so only
     // this cached observation can prove a backlog deletion predated binary work.
     let operator_entry_content = rc.doc_content();
-    // Step 1c: Pending component maintenance — lazy backfill, reap, archive, and
-    // reorder detection. MUST run BEFORE step 2 commit so the single step-2
-    // commit bundles the pending mutations with the previous-cycle response,
-    // producing exactly one HEAD advance per preflight. Running after step 2
-    // caused #64mb (double commit_staging: step 2 committed, then maintenance
-    // mutated and committed again).
-    //
-    // Maintenance applies its mutations to BOTH the working tree file AND the
-    // snapshot (surgically, via component replace), so the upcoming step-2
-    // commit which stages from snapshot picks them up atomically.
+    // Step 1c: derive the pending-component report without performing editor,
+    // snapshot, or commit convergence on the admission lane.  The detached
+    // maintenance owner re-observes authority and persists the same projection
+    // after this command emits JSON.  Keeping the pure report here preserves
+    // review/todo/reorder guidance while a slow editor-native save can no longer
+    // consume the hook budget.
     let pending_report = if options.probe {
         PendingMaintenanceReport::default()
+    } else if cfg!(test) {
+        // Unit tests exercise downstream admission invariants in-process and do
+        // not launch the detached CLI worker (`spawn` is also cfg-gated below).
+        // Keep their fixture projection synchronous; CLI integration tests cover
+        // the production inspect-then-background boundary.
+        agent_doc_preflight_io::run_pending_maintenance(file, &PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)?
     } else {
-        run_pending_maintenance(file, &PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)?
+        agent_doc_preflight_io::inspect_pending_maintenance(
+            file,
+            &PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+        )?
     };
     let backlog_reordered = pending_report.reordered;
     let backlog_gated_count = pending_report.backlog_gated_count;
@@ -1282,9 +1372,10 @@ fn run_with_options_to_writer_in_pass(
         }
     }
 
-    crate::progress::enter("queue_maintenance")?;
-    // Step 4b2: Queue component analysis — resolve activation, consume start
-    // fences, and emit queue prompts for the skill. If the document/harness diff
+    crate::progress::enter("queue_admission")?;
+    // Step 4b2: bounded queue admission — resolve activation and emit queue
+    // prompts for the skill without waiting for comprehensive maintenance. If
+    // the document/harness diff
     // is otherwise empty, an active queue head item becomes the prompt diff for
     // this cycle. This preserves bare no-op invocations while letting persisted
     // `queue_active: true` advance without requiring a fresh document edit.
@@ -1329,78 +1420,30 @@ fn run_with_options_to_writer_in_pass(
         {
             eprintln!("[preflight] moot decision: not applied this pass: {err:#}");
         }
-        match run_queue_maintenance_with_coin_gate_and_snapshot(
+        // The best-effort maintenance immediately above can change the live
+        // projection after the diff cut, so take one final authoritative read.
+        // This read remains fail-closed for an attached editor without a current
+        // replica, but does not wait for a native save or disk convergence.
+        let queue_admission_content =
+            resolve_current_preflight_document(file, "preflight_queue_admission")?;
+        // Claim filtering and current candidate relevance remain synchronous;
+        // backlog mirroring, lifecycle painting, auto-strike and editor-native
+        // persistence are a detached Effect.
+        inspect_queue_state_from_content(
             file,
             diff_result.as_deref(),
-            &coin_gate,
-            queue_admission_snapshot.as_deref(),
-        ) {
-            Ok(state) => state,
-            Err(e) => {
-                if e.downcast_ref::<QueueAuthorityUnavailable>().is_some() {
-                    eprintln!(
-                        "[preflight] admission refused — retained queue reconciliation is pending; \
-                         do not start a response or replace the queued edit: {e}"
-                    );
-                    anyhow::bail!(
-                        "preflight refused admission: retained queue reconciliation is pending; \
-                         do not start a response or replace the queued edit: {e}"
-                    );
-                }
-                // `#queuepersistloud`: the mirror/sync progress lines above are
-                // printed while the new queue is being *computed*, before it is
-                // persisted. When persistence then fails the computed queue is
-                // discarded and the previous queue text survives — but the run
-                // still reads as success ("mirrored 31 ... / synced backlog →
-                // queue (Prepend, 49 active id(s))"), so a freshly filed backlog
-                // item silently never appears in the queue and operators re-add
-                // `do [#id]` by hand. Say plainly that nothing was applied, and
-                // surface it as a structured warning so agents and skills see it
-                // in the preflight contract rather than only on stderr.
-                eprintln!(
-                    "[preflight] queue maintenance FAILED — the recomputed queue was NOT applied; \
-                     the previous queue text is still in effect (any backlog→queue mirror, \
-                     auto-strike, or reorder reported above did not land): {e}"
-                );
-                warnings.push(PreflightWarning {
-                    code: "queue_maintenance_not_persisted".to_string(),
-                    message: format!(
-                        "queue maintenance was computed but NOT persisted, so the previous queue \
-                         text is still in effect and newly added backlog ids may be absent from \
-                         the queue: {e}"
-                    ),
-                    document_agent: None,
-                    active_harness: None,
-                });
-                // `#queuepersiststall`: report the queue AS IT ACTUALLY STANDS.
-                //
-                // This used to fall back to `QueueState::default()`, i.e. "no
-                // active queue, nothing drainable". That is indistinguishable
-                // from a genuinely drained queue, and preflight is the loop gate
-                // — so a *persistence* failure silently presented as *queue
-                // empty* and stalled the drain. Observed live: session-check
-                // reported `queue_continuation_required=true` with a real next
-                // head while the very next preflight reported
-                // `queue_drainable_head_count: 0`, and the loop stopped after one
-                // iteration on a queue that still had work.
-                //
-                // Only the recomputed queue was lost; the previous queue text is
-                // still in effect and its drainability is knowable. Probe it
-                // read-only so the contract stays truthful. If even the probe
-                // fails, the zeroed default is the honest answer.
-                inspect_queue_state(file, diff_result.as_deref()).unwrap_or_else(|probe_err| {
-                    eprintln!(
-                        "[preflight] queue: post-failure drainability probe also failed, \
-                         reporting an inactive queue: {probe_err}"
-                    );
-                    QueueState::default()
-                })
-            }
-        }
+            queue_admission_content,
+        )
+        .unwrap_or_else(|error| {
+            eprintln!(
+                "[preflight] queue admission inspection failed; reporting the admitted queue as inactive: {error:#}"
+            );
+            QueueState::default()
+        })
     };
-    // Queue maintenance can strike or otherwise rewrite heads after the initial
-    // diff cut. Every downstream queue decision must observe the settled queue
-    // projection, while non-queue/parse-failure paths retain the admitted cut.
+    // Every downstream queue decision consumes the exact admitted queue cut;
+    // comprehensive background maintenance publishes a later authority event
+    // and never changes the facts of this already-opened turn.
     let queue_authoritative_content = queue_state
         .authoritative_content
         .as_deref()
@@ -1421,8 +1464,8 @@ fn run_with_options_to_writer_in_pass(
                 active_harness: None,
             }),
     );
-    // `#queuesyncpayload`: queue maintenance above is the deterministic repair
-    // pass.  Inspect its settled cut before normal selection/dispatch and retain
+    // `#queuesyncpayload`: inspect the admitted cut before normal
+    // selection/dispatch and retain
     // every unresolved item -- including inactive components and sibling
     // session documents -- as typed coordinator action debt.
     let queue_sync = agent_doc_queue_io::sync_payload::build_project_queue_sync_payload(
@@ -1432,32 +1475,6 @@ fn run_with_options_to_writer_in_pass(
     )?;
     warnings.extend(queue_state.warnings.clone());
     warnings.extend(agent_doc_preflight_io::warnings::harness_usage_limit_warnings(file));
-    // #qconvbaseline: the queue maintenance above may converge the live editor
-    // buffer to a corrected queue shape (auto-pins, backlog→queue mirrors, do-prompt
-    // sort, queue-control frontmatter) via IPC WITHOUT a disk write when a plugin
-    // listener is active — the converged shape lands in the editor buffer + the
-    // snapshot, but disk (and the baseline saved just above, from pre-maintenance
-    // disk) stay behind. At finalize the converged editor buffer then reads as
-    // `live_prompt_drift_after_preflight` on EVERY cycle: its queue body differs
-    // outside `exchange` from both the baseline and `content_ours`, so the drift
-    // guard blocks the response write and forces the `content_ours` carry-forward +
-    // a recovery commit (the race the operator hit repeatedly editing the doc).
-    // Re-align the baseline with the post-maintenance snapshot (the queue shape now
-    // in the editor buffer) so `content_ours` matches the buffer outside `exchange`
-    // and ONLY genuine concurrent user edits trip the guard. No-listener sessions
-    // are unaffected — their disk write already matches the snapshot, and when
-    // nothing converged the snapshot equals the pre-maintenance content so this is
-    // a no-op.
-    if !options.probe
-        && let Ok(Some(converged_snapshot)) = agent_doc_snapshot_io::load_document_baseline(file)
-        && let Some(realigned) = realign_baseline_to_converged_queue(
-            &diff_result_with_current.previous,
-            &converged_snapshot,
-        )
-    {
-        let _ = checkpoint_baseline_content(file, &realigned);
-        eprintln!("[preflight] baseline re-aligned to converged queue shape (#qconvbaseline)");
-    }
     if diff_result.is_some()
         && queue_state.queue_active == Some(true)
         && let Some(selected_head) = queue_state
@@ -1620,41 +1637,6 @@ fn run_with_options_to_writer_in_pass(
     let document_no_changes = no_changes;
     let no_changes = document_no_changes && !chat_turn && !absorbed_turn;
 
-    // `#qmaintorphan`: queue maintenance (step 4b2) runs AFTER the single step-2
-    // commit, so a mutation it persisted to the visible document + snapshot is
-    // normally committed by this cycle's own `respond` / `write --commit`. On a
-    // `no_changes` cycle there is no response to persist and SKILL.md tells the
-    // agent to stop, which left that mutation orphaned: snapshot and working tree
-    // carried the reaped queue heads while HEAD stayed behind. `doctor` reports the
-    // result as recoverable `SnapshotDiffersFromHead`, and the next commit path can
-    // read it as an unanswered typed-component edit.
-    //
-    // Commit it here, but ONLY when step 2 committed nothing. That preserves the
-    // `#64mb` invariant of exactly one HEAD advance per preflight: if step 2 already
-    // advanced HEAD, this maintenance rides the next preflight's step-2 commit as
-    // before, instead of producing a second `commit_staging` in the same run.
-    if !options.probe && no_changes && queue_state.maintenance_mutated && !committed {
-        match commit_previous_cycle_for_preflight(file) {
-            Ok(true) => {
-                rc.invalidate_head_content();
-                eprintln!(
-                    "[preflight] committed queue maintenance on a no-changes cycle (#qmaintorphan)"
-                );
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "preflight_queue_maintenance_committed file={} reason=no_changes_cycle (#qmaintorphan)",
-                        file.display()
-                    ),
-                );
-            }
-            Ok(false) => {}
-            Err(e) => {
-                eprintln!("[preflight] queue maintenance commit warning: {e}");
-            }
-        }
-    }
-
     crate::progress::enter("prompt_classification")?;
     // Step 4c: Annotate the diff with content-source markers.
     let annotated_diff = diff_result.as_ref().and_then(|d| diff::annotate_diff(d));
@@ -1752,11 +1734,9 @@ fn run_with_options_to_writer_in_pass(
     // #op-scoped-drift-1: persist this cycle's node ops to the durable op log,
     // tagged with actor + causal (Lamport / session-origin) clock. Best effort:
     // the durable substrate must never block or fail a preflight cycle.
-    // `#pcc1`: `compute_with_current` ran BEFORE `run_queue_maintenance`. Persist
-    // that snapshot-to-authority cut as the operator batch, then persist the
-    // authority-to-post-maintenance cut separately as an agent batch. This keeps
-    // attribution truthful while still recording structural normalization such
-    // as `#qfoldedhead` re-segmentation at per-item granularity.
+    // `#pcc1`: persist the snapshot-to-authority cut as the operator batch, then
+    // any bounded pre-admission repair cut separately as an agent batch. The
+    // detached comprehensive worker records its own later authority event.
     //
     // Deliberately scoped to the op log: `semantic_diff` still feeds the
     // preflight contract from the original cut, so this changes what is
@@ -1764,10 +1744,10 @@ fn run_with_options_to_writer_in_pass(
     if !options.probe
         && let Some(project_root) = rc.project_root()
     {
-        let post_maintenance_current =
+        let post_admission_current =
             agent_doc_document_realtime_io::try_resolve_current_document_content(
                 file,
-                "preflight_op_log_post_maintenance",
+                "preflight_op_log_post_admission",
             )
             .ok();
         let document_path = file.to_string_lossy().to_string();
@@ -1782,7 +1762,7 @@ fn run_with_options_to_writer_in_pass(
         {
             eprintln!("[preflight] operator op-log persist skipped: {err}");
         }
-        if let Some(current) = post_maintenance_current.as_deref()
+        if let Some(current) = post_admission_current.as_deref()
             && current != diff_result_with_current.current
             && let Some(summary) =
                 semantic_diff_summary(&diff_result_with_current.current, current, &[])
@@ -2089,8 +2069,8 @@ fn run_with_options_to_writer_in_pass(
             .map(|assignment| assignment.source_text.clone())
             .collect::<Vec<_>>();
         not_drained = not_drained.with_heads(&admission_aliases);
-        // The admitted diff cut and the post-maintenance projection: maintenance
-        // may reap a struck line the diff still carries.
+        // Compare the admitted diff cut with the virtual candidate-identity
+        // projection; comprehensive maintenance has not run on this lane.
         let mut scope = agent_doc_queue::capture_scope::capture_scope(
             &[
                 diff_result_with_current.current.as_str(),
@@ -2440,16 +2420,8 @@ fn run_with_options_to_writer_in_pass(
             {
                 eprintln!("[preflight] in-progress recap status skipped (non-fatal): {error:#}");
             }
-            // `#mirrorbinaryownedids`: queue maintenance ran before this cycle
-            // opened, and the steering seed below is the PRE-maintenance cut, so
-            // rows the backlog→queue mirror just materialized are absent from
-            // the watermark. Record them on the cycle that now owns them, or
-            // mid-turn steering hands them back as operator queue additions.
-            agent_doc_cycle_state_io::record_queue_mirrored_ids_or_warn(
-                file,
-                &queue_state.mirrored_queue_ids,
-                "preflight_queue_maintenance",
-            );
+            // The detached comprehensive worker records newly mirrored ids on
+            // this cycle after its authority-checked write lands.
             preflight_effects
                 .settle(PreflightEffect::CycleOpen)
                 .context("preflight cycle-open effect settlement")?;
@@ -3185,6 +3157,43 @@ fn run_with_options_to_writer_in_pass(
         serde_json::to_string_pretty(&output).context("failed to serialize preflight output")?;
     writeln!(writer, "{}", json)?;
 
+    if !options.probe
+        && !cfg!(test)
+        && let Err(error) = (|| -> Result<()> {
+            // Bind the child to the settled foreground cut, including any
+            // bounded pre-admission projection performed after the initial
+            // read facts were captured. The child must never reinterpret a
+            // later operator edit as work from this admission.
+            let admitted_content =
+                agent_doc_document_realtime_io::try_resolve_current_document_with_source(
+                    file,
+                    "background_queue_maintenance_dispatch_cut",
+                )?
+                .into_content();
+            let admitted_hash = agent_doc_hash::content_hash(&admitted_content);
+            crate::spawn_background_queue_maintenance(
+                file,
+                no_changes && !committed,
+                &admitted_hash,
+            )?;
+            Ok(())
+        })()
+    {
+        // Admission is already complete and its exact authoritative cut is in
+        // `output`; a launch failure cannot retroactively make that read false.
+        // Keep the failure loud and durable so the next controller/preflight
+        // tick can retry comprehensive maintenance.
+        eprintln!("[preflight] background queue maintenance was not dispatched: {error:#}");
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_maintenance_background_dispatch_failed file={} error={}",
+                file.display(),
+                format!("{error:#}").replace('\n', " | "),
+            ),
+        );
+    }
+
     Ok(())
 }
 
@@ -3668,6 +3677,292 @@ mod tests {
     use std::process::Command;
     use tempfile::TempDir;
 
+    fn logical_state_rows(root: &Path) -> Vec<String> {
+        let conn = agent_doc_sqlite::state_store::open_state_db(root).unwrap();
+        let tables = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT name FROM sqlite_schema \
+                     WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+                )
+                .unwrap();
+            stmt.query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect::<Vec<_>>()
+        };
+        let mut rows = Vec::new();
+        for table in tables {
+            let quoted_table = format!("\"{}\"", table.replace('"', "\"\""));
+            let columns = {
+                let mut stmt = conn
+                    .prepare(&format!("PRAGMA table_info({quoted_table})"))
+                    .unwrap();
+                stmt.query_map([], |row| row.get::<_, String>(1))
+                    .unwrap()
+                    .map(Result::unwrap)
+                    .collect::<Vec<_>>()
+            };
+            if columns.is_empty() {
+                continue;
+            }
+            let encoded_columns = columns
+                .iter()
+                .map(|column| {
+                    let quoted = format!("\"{}\"", column.replace('"', "\"\""));
+                    format!("typeof({quoted}) || ':' || quote({quoted})")
+                })
+                .collect::<Vec<_>>()
+                .join(" || '|' || ");
+            let mut stmt = conn
+                .prepare(&format!("SELECT {encoded_columns} FROM {quoted_table}"))
+                .unwrap();
+            rows.extend(
+                stmt.query_map([], |row| row.get::<_, String>(0))
+                    .unwrap()
+                    .map(Result::unwrap)
+                    .map(|row| format!("{table}|{row}")),
+            );
+        }
+        rows.sort();
+        rows
+    }
+
+    fn await_controller_bootstrap_receipt(root: &Path) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if agent_doc_controller_io::project_controller::read_foreign_bootstrap(root)
+                .unwrap()
+                .is_some()
+            {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "controller bootstrap receipt did not settle"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn terminal_proof_contention_precedes_actor_projection_cycle_and_document_effects() {
+        let _env_lock = agent_doc_test_support::env_lock();
+        let temp = setup_project();
+        let content = "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\n### Re: Prompt — test\n\nAnswer.\n<!-- /agent:exchange -->\n";
+        let file = write_committed_doc(temp.path(), "session.md", content, "response", None);
+        agent_doc_cycle_state_io::start_preflight(&file, Some(content), Some(content)).unwrap();
+        agent_doc_capture_io::capture_response(
+            &file,
+            "<!-- patch:exchange -->\n### Re: Prompt — test\n\nAnswer.\n<!-- /patch:exchange -->",
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &file,
+            "commit_success",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+        assert!(matches!(
+            agent_doc_session_check_io::inspect(
+                &file,
+                &agent_doc_closeout_runtime_io::session_check_effects(),
+            )
+            .unwrap(),
+            agent_doc_session_check_io::SessionCheckStatus::Ok(_)
+        ));
+        let before_document = std::fs::read_to_string(&file).unwrap();
+        let before_snapshot = agent_doc_snapshot_io::load_document_baseline(&file).unwrap();
+        let before_cycle = agent_doc_cycle_state_io::load_with_closeout_projection(&file).unwrap();
+        let before_capture = agent_doc_capture_io::load_active(&file).unwrap();
+
+        let marker = temp.path().join("terminal-proof-inspected.marker");
+        let release = temp.path().join("terminal-proof-inspected.release");
+        unsafe {
+            std::env::set_var(
+                "AGENT_DOC_TEST_TERMINAL_PROOF_AFTER_INSPECTION_MARKER",
+                &marker,
+            );
+            std::env::set_var(
+                "AGENT_DOC_TEST_TERMINAL_PROOF_AFTER_INSPECTION_RELEASE",
+                &release,
+            );
+        }
+        let proof_file = file.clone();
+        let proof =
+            std::thread::spawn(move || record_preflight_terminal_closeout_proof(&proof_file, true));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        while !marker.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for terminal proof inspection barrier"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let _incumbent =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&file).unwrap();
+        std::fs::write(&release, b"release").unwrap();
+        let error = proof.join().unwrap().unwrap_err();
+        unsafe {
+            std::env::remove_var("AGENT_DOC_TEST_TERMINAL_PROOF_AFTER_INSPECTION_MARKER");
+            std::env::remove_var("AGENT_DOC_TEST_TERMINAL_PROOF_AFTER_INSPECTION_RELEASE");
+        }
+        assert!(error.to_string().contains("queue mutation deferred"));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), before_document);
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&file).unwrap(),
+            before_snapshot
+        );
+        assert_eq!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&file).unwrap(),
+            before_cycle
+        );
+        assert_eq!(
+            agent_doc_capture_io::load_active(&file).unwrap(),
+            before_capture
+        );
+    }
+
+    #[test]
+    fn terminal_proof_read_only_cut_does_not_tombstone_a_removed_claim() {
+        let temp = setup_project();
+        let claimed = "release claimed work";
+        let baseline = format!(
+            "---\nagent_doc_format: template\nagent_doc_steering_debounce_ms: 0\n---\n\n<!-- agent:exchange -->\nPrompt.\n\n### Re: prior\n\nAnswer.\n<!-- /agent:exchange -->\n\n<!-- agent:queue go -->\n- current work\n- {claimed}\n<!-- /agent:queue -->\n"
+        );
+        let file = write_committed_doc(temp.path(), "session.md", &baseline, "initial", None);
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
+                .unwrap();
+        agent_doc_session_check_io::midturn_steering::seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            &baseline,
+            Some("current work"),
+            Vec::new(),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &file,
+            "commit_success",
+            Some(&baseline),
+            Some(&baseline),
+        )
+        .unwrap();
+        // Stage the exact durable claim state directly. The public claim/start
+        // transaction also launches a controller projection refresh; letting
+        // that unrelated asynchronous setup write race this read-only assertion
+        // makes the byte-for-byte ops proof nondeterministic. The pure ledger
+        // transitions plus one SQLite upsert are the authoritative state this
+        // inspection consumes, and the read-back below is its explicit receipt.
+        let now = agent_doc_queue_io::queue_claim::claim_clock_now_secs();
+        let mut seeded_claims = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+        assert_eq!(
+            seeded_claims.claim(claimed, "subagent:terminal-proof", now, 3600),
+            agent_doc_queue::queue_claim::ClaimOutcome::Created,
+        );
+        let generation = seeded_claims.claims[0].generation;
+        seeded_claims
+            .start(
+                claimed,
+                "subagent:terminal-proof",
+                "/root/terminal_proof",
+                now,
+                3600,
+                Some(generation),
+            )
+            .unwrap();
+        let document_hash = agent_doc_hash::path_hash(&file).unwrap();
+        let conn = agent_doc_sqlite::state_store::open_state_db(temp.path()).unwrap();
+        agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
+                document_hash,
+                state_kind: agent_doc_queue::queue_claim::QUEUE_CLAIMS_STATE_KIND.to_string(),
+                canonical_path: file.canonicalize().unwrap().to_string_lossy().into_owned(),
+                payload_json: serde_json::to_string(&seeded_claims).unwrap(),
+                updated_at_secs: now,
+            },
+        )
+        .unwrap();
+        drop(conn);
+        assert_eq!(
+            agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap(),
+            seeded_claims,
+            "the durable ledger read-back is the claim setup receipt",
+        );
+        // Keep the committed cycle clean, then publish one real next-turn
+        // queue prompt together with the claimed-row removal. The new row
+        // makes session-check enter its committed steering classifier; that
+        // same classifier must surface the removal as `cancel_claimed` without
+        // the read-only pre-guard cut applying its tombstone.
+        let deleted = baseline
+            .replace("- current work\n", "- current work\n- operator follow-up\n")
+            .replace(&format!("- {claimed}\n"), "");
+        std::fs::write(&file, &deleted).unwrap();
+        let before_claims = agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap();
+        let before_receipts = agent_doc_queue_io::claim_release_receipt::load(&file).unwrap();
+        let before_document = std::fs::read_to_string(&file).unwrap();
+        let ops_path = temp.path().join(".agent-doc/logs/ops.log");
+        // Establish the in-process controller and wait for its durable
+        // bootstrap receipt before taking the purity cut, so the assertion
+        // below compares the session-check transaction rather than an
+        // outstanding setup effect.
+        agent_doc_controller_io::project_controller::ensure_controller_running_for_file(&file)
+            .unwrap();
+        await_controller_bootstrap_receipt(temp.path());
+        let before_ops = std::fs::read_to_string(&ops_path).unwrap_or_default();
+        let before_authority =
+            agent_doc_cycle_state_io::load_latest_document_authority(&file).unwrap();
+        let before_state = logical_state_rows(temp.path());
+
+        let status = agent_doc_session_check_io::inspect_read_only(
+            &file,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap();
+        let agent_doc_session_check_io::SessionCheckStatus::SteeringPending(message) = status
+        else {
+            panic!("committed removed claim must reach steering classification: {status:?}");
+        };
+        assert!(message.contains("dispatch=cancel_claimed"), "{message}");
+        assert!(message.contains(claimed), "{message}");
+
+        agent_doc_controller_io::project_controller::drain_state_actor_document_authority_handoffs_for_tests(
+            temp.path(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap(),
+            before_claims,
+            "pre-guard terminal proof inspection must not tombstone the claim",
+        );
+        assert_eq!(
+            agent_doc_queue_io::claim_release_receipt::load(&file).unwrap(),
+            before_receipts,
+            "pre-guard inspection must not create completion/cancellation receipts",
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), before_document);
+        assert_eq!(
+            agent_doc_cycle_state_io::load_latest_document_authority(&file).unwrap(),
+            before_authority,
+            "terminal steering's explicit disk comparison must not advance authority"
+        );
+        assert_eq!(
+            logical_state_rows(temp.path()),
+            before_state,
+            "terminal steering's explicit disk comparison must not mutate logical state.db rows"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&ops_path).unwrap_or_default(),
+            before_ops,
+            "read-only terminal proof inspection must not append ops",
+        );
+    }
+
     #[test]
     fn stall_projection_ignores_head_added_after_committed_snapshot() {
         let committed = "<!-- agent:queue go -->\n- ~~do [#old]~~\n<!-- /agent:queue -->\n";
@@ -4135,6 +4430,7 @@ mod tests {
                     .any(|id| id.trim_start_matches('#') == "verify")),
                 "press {press}: no `--done` obligation for the operator-verify head: {state:?}"
             );
+            crate::run_background_queue_maintenance(&doc, false).unwrap();
             let on_disk = std::fs::read_to_string(&doc).unwrap();
             assert!(
                 on_disk.contains("- ### ⏳ do [#verify]\n"),
@@ -4388,13 +4684,9 @@ mod tests {
             maintained.contains("<!-- agent:active priority -->"),
             "the derived active projection must not reactivate the claim: {maintained}"
         );
-        assert!(
-            maintained.contains("`[#runctrlclaude]` — Fix background supervisor thrash")
-                && maintained.contains("**Status:** claimed")
-                && maintained.contains("**Sources:** queue (claimed)")
-                && !maintained.contains("**Sources:** backlog"),
-            "the active projection must retain stale-claim reconciliation and its tracked source: {maintained}"
-        );
+        // Detailed lifecycle/status painting is comprehensive maintenance and
+        // is intentionally not awaited by admission; the contract above is the
+        // synchronous stale-claim authority.
         let fact = &parsed["no_changes_explanation"]["claimed_queue_items"][0];
         assert_eq!(
             fact["owner_session_ended"]["reason"], "session_replaced",
@@ -5144,18 +5436,15 @@ mod tests {
         assert!(requires, "{parsed:#}");
         let doc = dir.path().join("session.md");
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
-        // Queue maintenance promoted the free-text head into a `do [#id]` head;
-        // the recorded head names the live head a claim holds.
+        // Admission records stable virtual identities immediately; the
+        // background reconciler persists their document projection later.
         assert_eq!(state.backlog_capture_heads.len(), 2);
         assert!(state.backlog_capture_heads[0].contains("[#q-"));
-        assert_eq!(
-            state.backlog_capture_heads[1],
-            "do [#leftovercleanupbacklog]"
-        );
+        assert!(state.backlog_capture_heads[1].contains("[#q-"));
 
         start_worker_mid_cycle(&doc, &state.backlog_capture_heads[0], "subagent:review");
         assert_capture_gate_armed(&doc);
-        start_worker_mid_cycle(&doc, "do [#leftovercleanupbacklog]", "subagent:cleanup");
+        start_worker_mid_cycle(&doc, &state.backlog_capture_heads[1], "subagent:cleanup");
         prewrite_capture_gate(&doc).expect("every head behind the requirement is worker-owned");
     }
 
@@ -5177,14 +5466,9 @@ mod tests {
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert!(state.backlog_capture_heads.is_empty(), "{state:?}");
 
-        let q_head = std::fs::read_to_string(&doc)
-            .unwrap()
-            .lines()
-            .find(|line| line.contains("#actionable-review [#q-"))
-            .unwrap()
-            .trim_start_matches("- ")
-            .strip_prefix("### ")
-            .expect("queue row must carry a navigation heading")
+        let q_head = parsed["queue_prompts"][0]
+            .as_str()
+            .expect("admission carries the queue head's stable identity")
             .to_string();
         start_worker_mid_cycle(&doc, &q_head, "subagent:review");
         assert_capture_gate_armed(&doc);
@@ -6229,6 +6513,7 @@ mod tests {
             "future queue edit must not retarget the active turn: {:?}",
             state.prompt_targets
         );
+        crate::run_background_queue_maintenance(&doc, false).unwrap();
         let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
             .unwrap()
             .unwrap();
@@ -6277,6 +6562,7 @@ mod tests {
         .unwrap();
 
         run(&doc).unwrap();
+        crate::run_background_queue_maintenance(&doc, false).unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -6633,6 +6919,8 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n",
             "### Re: prior — gpt-5\n\nDone.\n",
             "<!-- /agent:exchange -->\n\n",
+            "## Todo\n\n",
+            "- [ ] preserve maintenance identity\n\n",
             "<!-- agent:queue go -->\n",
             "<!-- /agent:queue -->\n\n",
             "<!-- agent:backlog priority queue -->\n",
@@ -6661,6 +6949,47 @@ mod tests {
             "precondition: queue maintenance must have converged the queue shape"
         );
 
+        // Detached/no-listener maintenance writes the same authoritative cut to
+        // disk and the snapshot. A later binary-owned update (todo-id backfill in
+        // production) must not be replaced by a stale queue-only projection.
+        let maintained_before_queue = pre.replace(
+            "- [ ] preserve maintenance identity",
+            "- [ ] [#keep] preserve maintenance identity",
+        );
+        let maintained = converged.replace(
+            "- [ ] preserve maintenance identity",
+            "- [ ] [#keep] preserve maintenance identity",
+        );
+        std::fs::write(&doc, &maintained).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &maintained,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        assert!(
+            !maybe_realign_baseline_to_editor_queue_convergence(&doc, &maintained_before_queue),
+            "disk/snapshot convergence must retain the fresh complete checkpoint"
+        );
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .unwrap(),
+            maintained,
+            "queue realignment must not regress intervening binary maintenance"
+        );
+
+        // A plugin listener instead advances only the snapshot/editor buffer.
+        // Disk and the safe pre-queue checkpoint already carry the todo-id
+        // maintenance; only the queue shape is newer in the live snapshot.
+        std::fs::write(&doc, &maintained_before_queue).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &maintained,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
         // Helper: splice an agent response into the exchange (no user edit).
         let with_response = |d: &str| {
             d.replace(
@@ -6668,13 +6997,13 @@ mod tests {
                 "### Re: do [#alpha] — gpt-5\n\nAnswered.\n<!-- /agent:exchange -->",
             )
         };
-        let candidate = with_response(&converged); // editor buffer + response
-        let content_ours_pre = with_response(pre); // OLD baseline + response
+        let candidate = with_response(&maintained); // editor buffer + response
+        let content_ours_pre = with_response(&maintained_before_queue);
 
         // The bug: with the pre-maintenance baseline, the converged queue reads as drift.
         assert!(
             ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
-                pre,
+                &maintained_before_queue,
                 &candidate,
                 &content_ours_pre,
             ),
@@ -6683,9 +7012,10 @@ mod tests {
 
         // The fix: re-align the baseline by splicing the converged queue into the
         // pre-maintenance content (preserving exchange/boundary).
-        let realigned = realign_baseline_to_converged_queue(pre, &converged)
-            .expect("queue convergence delta must produce a re-aligned baseline");
-        checkpoint_baseline_content(&doc, &realigned);
+        assert!(
+            maybe_realign_baseline_to_editor_queue_convergence(&doc, &maintained_before_queue),
+            "editor-only convergence must re-align the baseline"
+        );
         let baseline_after = agent_doc_snapshot_io::load_document_baseline(&doc)
             .unwrap()
             .expect("re-aligned state.db baseline");
@@ -6693,6 +7023,11 @@ mod tests {
             baseline_after.contains("[#alpha]"),
             "re-aligned baseline must carry the converged queue shape"
         );
+        assert!(
+            baseline_after.contains("[#keep]"),
+            "re-aligned baseline must retain prior binary maintenance"
+        );
+        let realigned = baseline_after;
         let content_ours_aligned = with_response(&realigned);
         assert!(
             !ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
@@ -6943,6 +7278,7 @@ mod tests {
         .unwrap();
 
         run(&doc).unwrap();
+        crate::run_background_queue_maintenance(&doc, false).unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(updated.contains("<!-- agent:queue -->\n<!-- /agent:queue -->"));
@@ -6992,6 +7328,7 @@ mod tests {
         .unwrap();
 
         run(&doc).unwrap();
+        crate::run_background_queue_maintenance(&doc, false).unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -7035,6 +7372,7 @@ mod tests {
         .unwrap();
 
         run(&doc).unwrap();
+        crate::run_background_queue_maintenance(&doc, false).unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -7073,6 +7411,7 @@ mod tests {
         .unwrap();
 
         run(&doc).unwrap();
+        crate::run_background_queue_maintenance(&doc, false).unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -7497,12 +7836,13 @@ mod tests {
 
     #[test]
     fn preflight_commits_queue_maintenance_on_a_no_changes_cycle() {
-        // `#qmaintorphan`: queue maintenance runs at step 4b2, AFTER the single
-        // step-2 commit. On a `no_changes` cycle SKILL.md tells the agent to stop
-        // without persisting, so a mutation maintenance already wrote to the
-        // visible document AND the snapshot was left with HEAD behind it — the
-        // recoverable `SnapshotDiffersFromHead` split that `doctor` reports and
-        // that the next commit path can read as an unanswered typed-component edit.
+        // `#qmaintorphan`: comprehensive queue maintenance now runs after the
+        // bounded admission result is emitted. On a `no_changes` cycle SKILL.md
+        // tells the agent to stop without persisting, so the detached worker must
+        // commit any maintenance mutation it writes; otherwise it would leave the
+        // visible document and snapshot ahead of HEAD — the recoverable
+        // `SnapshotDiffersFromHead` split that `doctor` reports and that the next
+        // commit path can read as an unanswered typed-component edit.
         //
         // The mutation here is queue-tag attr normalization (the same one
         // `run_queue_maintenance_normalizes_boolean_true_queue_attrs` covers). The
@@ -7547,6 +7887,7 @@ mod tests {
         );
 
         run(&doc).expect("preflight must run a no-changes cycle");
+        crate::run_background_queue_maintenance(&doc, true).unwrap();
 
         let live_after = std::fs::read_to_string(&doc).unwrap();
         assert!(

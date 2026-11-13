@@ -2819,6 +2819,19 @@ fn request_existing_controller_with_timeout<T: DeserializeOwned>(
     })
 }
 
+/// One-shot transport for observationally pure fence probes. Handoff refusal
+/// is returned directly: the generic retry policy publishes diagnostics for
+/// first refusal, settlement, and exhaustion, which would make a rejected
+/// read-only transaction mutate ops state.
+fn request_existing_controller_effect_free_with_timeout<T: DeserializeOwned>(
+    project_root: &Path,
+    request: ControllerRequest,
+    timeout: Duration,
+) -> Result<T> {
+    let stream = connect(project_root)?;
+    request_controller_on_stream_with_timeout(project_root, request, timeout, stream)
+}
+
 /// (`#handoffrefusalretry`) Run one client RPC under the handoff settle policy.
 ///
 /// Each attempt reconnects from scratch, so a retry lands on whichever
@@ -7813,6 +7826,480 @@ pub const CLOSEOUT_RECOVERY_LEASE_SECS: u64 =
 pub const CLOSEOUT_ROLE_SESSION_CHECK_RECOVERY: &str =
     agent_doc_state_backbone::CLOSEOUT_ROLE_SESSION_CHECK_RECOVERY;
 
+/// Opaque proof that this process acquired one exact closeout owner identity.
+///
+/// No scalar constructor is exposed. Callers obtain this only from
+/// [`claim_closeout_owner_guard_for_file`], retain it in their owner guard,
+/// and borrow it through nested closeout effects. The shared loss flag is
+/// minted here with the claim and cannot be replaced by a downstream caller.
+pub struct CloseoutOwnerCapability {
+    file: PathBuf,
+    cycle_id: String,
+    owner_id: String,
+    owner_token: String,
+    owner_pid: u32,
+    role: String,
+    lease_secs: u64,
+    actorless: bool,
+    lease_lost: Arc<AtomicBool>,
+    terminal_effect_in_progress: Arc<AtomicBool>,
+    terminal_effect_landed: Arc<AtomicBool>,
+    git_ref_landed: Arc<AtomicBool>,
+    terminal_promotion_landed: Arc<AtomicBool>,
+}
+
+impl std::fmt::Debug for CloseoutOwnerCapability {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("CloseoutOwnerCapability")
+            .field("file", &self.file)
+            .field("cycle_id", &self.cycle_id)
+            .field("owner_id", &self.owner_id)
+            .field("owner_token", &"<opaque>")
+            .field("owner_pid", &self.owner_pid)
+            .field("role", &self.role)
+            .field("lease_secs", &self.lease_secs)
+            .field("actorless", &self.actorless)
+            .field("lease_lost", &self.lease_lost.load(Ordering::SeqCst))
+            .field(
+                "terminal_effect_in_progress",
+                &self.terminal_effect_in_progress.load(Ordering::SeqCst),
+            )
+            .field(
+                "terminal_effect_landed",
+                &self.terminal_effect_landed.load(Ordering::SeqCst),
+            )
+            .finish()
+    }
+}
+
+impl CloseoutOwnerCapability {
+    fn heartbeat_clone(&self) -> Self {
+        Self {
+            file: self.file.clone(),
+            cycle_id: self.cycle_id.clone(),
+            owner_id: self.owner_id.clone(),
+            owner_token: self.owner_token.clone(),
+            owner_pid: self.owner_pid,
+            role: self.role.clone(),
+            lease_secs: self.lease_secs,
+            actorless: self.actorless,
+            lease_lost: self.lease_lost.clone(),
+            terminal_effect_in_progress: self.terminal_effect_in_progress.clone(),
+            terminal_effect_landed: self.terminal_effect_landed.clone(),
+            git_ref_landed: self.git_ref_landed.clone(),
+            terminal_promotion_landed: self.terminal_promotion_landed.clone(),
+        }
+    }
+
+    pub fn file(&self) -> &Path {
+        &self.file
+    }
+
+    pub fn cycle_id(&self) -> &str {
+        &self.cycle_id
+    }
+
+    pub fn owner_id(&self) -> &str {
+        &self.owner_id
+    }
+
+    pub fn ensure_protects(&self, file: &Path) -> Result<()> {
+        let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+        anyhow::ensure!(
+            canonical == self.file,
+            "closeout owner capability for {} cannot protect effects on {}",
+            self.file.display(),
+            canonical.display(),
+        );
+        Ok(())
+    }
+
+    /// Revalidate the opaque owner at one exact Git transaction boundary.
+    /// The test barrier deliberately lives here so loss is injected after the
+    /// commit object exists but before the ref CAS, not at an outer wrapper.
+    pub fn ensure_git_transaction_boundary(
+        &self,
+        file: &Path,
+        before_ref_update: bool,
+    ) -> Result<()> {
+        self.ensure_protects(file)?;
+        if before_ref_update
+            && std::env::var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_FILE")
+                .ok()
+                .is_some_and(|target| Path::new(&target) == self.file)
+        {
+            if let Ok(ready) = std::env::var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_READY") {
+                std::fs::write(ready, b"ready")?;
+            }
+            if let Ok(release) =
+                std::env::var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_RELEASE")
+            {
+                let started = std::time::Instant::now();
+                while !Path::new(&release).exists() {
+                    anyhow::ensure!(
+                        started.elapsed() < Duration::from_secs(30),
+                        "timed out waiting for inner closeout commit barrier release",
+                    );
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+            if std::env::var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_HELD_BY_OTHER_FILE")
+                .ok()
+                .is_some_and(|target| Path::new(&target) == self.file)
+            {
+                self.mark_lease_lost();
+            }
+        }
+        self.ensure_still_held()
+    }
+
+    /// Revalidate at the exact sibling-repository ref CAS. This barrier is
+    /// distinct from the primary document commit so deterministic races can
+    /// pause after sibling commit-tree work without intercepting the earlier
+    /// session-document ref update.
+    pub fn ensure_sibling_git_transaction_boundary(&self, file: &Path) -> Result<()> {
+        self.ensure_protects(file)?;
+        if std::env::var("AGENT_DOC_TEST_CLOSEOUT_INNER_SIBLING_BARRIER_FILE")
+            .ok()
+            .is_some_and(|target| Path::new(&target) == self.file)
+        {
+            if let Ok(ready) = std::env::var("AGENT_DOC_TEST_CLOSEOUT_INNER_SIBLING_BARRIER_READY")
+            {
+                std::fs::write(ready, b"ready")?;
+            }
+            if let Ok(release) =
+                std::env::var("AGENT_DOC_TEST_CLOSEOUT_INNER_SIBLING_BARRIER_RELEASE")
+            {
+                let started = std::time::Instant::now();
+                while !Path::new(&release).exists() {
+                    anyhow::ensure!(
+                        started.elapsed() < Duration::from_secs(30),
+                        "timed out waiting for inner sibling closeout barrier release",
+                    );
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+            if std::env::var("AGENT_DOC_TEST_CLOSEOUT_INNER_SIBLING_HELD_BY_OTHER_FILE")
+                .ok()
+                .is_some_and(|target| Path::new(&target) == self.file)
+            {
+                self.mark_lease_lost();
+            }
+        }
+        self.ensure_still_held()
+    }
+
+    /// Revalidate after the parent gitlink commit object is prepared and
+    /// immediately before the superproject ref CAS.
+    pub fn ensure_parent_submodule_transaction_boundary(&self, file: &Path) -> Result<()> {
+        self.ensure_protects(file)?;
+        if std::env::var("AGENT_DOC_TEST_CLOSEOUT_INNER_PARENT_BARRIER_FILE")
+            .ok()
+            .is_some_and(|target| Path::new(&target) == self.file)
+        {
+            if let Ok(ready) = std::env::var("AGENT_DOC_TEST_CLOSEOUT_INNER_PARENT_BARRIER_READY") {
+                std::fs::write(ready, b"ready")?;
+            }
+            if let Ok(release) =
+                std::env::var("AGENT_DOC_TEST_CLOSEOUT_INNER_PARENT_BARRIER_RELEASE")
+            {
+                let started = std::time::Instant::now();
+                while !Path::new(&release).exists() {
+                    anyhow::ensure!(
+                        started.elapsed() < Duration::from_secs(30),
+                        "timed out waiting for inner parent-submodule closeout barrier release",
+                    );
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+            if std::env::var("AGENT_DOC_TEST_CLOSEOUT_INNER_PARENT_HELD_BY_OTHER_FILE")
+                .ok()
+                .is_some_and(|target| Path::new(&target) == self.file)
+            {
+                self.mark_lease_lost();
+            }
+        }
+        self.ensure_still_held()
+    }
+
+    /// Causal receipt set only after the exact Git ref CAS succeeds.
+    pub fn record_commit_ref_updated(&self, file: &Path) {
+        if self.ensure_protects(file).is_ok() {
+            self.git_ref_landed.store(true, Ordering::SeqCst);
+        }
+    }
+
+    pub fn record_terminal_promotion_landed(&self, file: &Path) -> Result<()> {
+        self.ensure_protects(file)?;
+        let state =
+            agent_doc_cycle_state_io::load_with_closeout_projection(file)?.with_context(|| {
+                format!(
+                    "terminal promotion for {} did not persist cycle state",
+                    file.display()
+                )
+            })?;
+        anyhow::ensure!(
+            state.cycle_id == self.cycle_id && !state.is_open(),
+            "terminal promotion receipt does not cover owned cycle {} for {} (observed cycle={} phase={})",
+            self.cycle_id,
+            file.display(),
+            state.cycle_id,
+            state.phase.as_str(),
+        );
+        self.terminal_promotion_landed.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+
+    pub fn owner_pid(&self) -> u32 {
+        self.owner_pid
+    }
+
+    pub fn role(&self) -> &str {
+        &self.role
+    }
+
+    pub fn is_actorless(&self) -> bool {
+        self.actorless
+    }
+
+    pub fn lease_lost(&self) -> bool {
+        self.lease_lost.load(Ordering::SeqCst)
+    }
+
+    /// Mark an answered refresh loss on every borrow of this capability.
+    pub fn mark_lease_lost(&self) {
+        self.lease_lost.store(true, Ordering::SeqCst);
+    }
+
+    pub fn refresh(&self) -> Result<CloseoutOwnerClaimOutcome> {
+        if std::env::var("AGENT_DOC_TEST_CLOSEOUT_FORCE_CYCLE_SUPERSEDED_FILE")
+            .ok()
+            .is_some_and(|target| Path::new(&target) == self.file)
+        {
+            return Ok(CloseoutOwnerClaimOutcome::CycleSuperseded);
+        }
+        if self.actorless {
+            return Ok(CloseoutOwnerClaimOutcome::Acquired(
+                CloseoutOwnerProjection {
+                    cycle_id: self.cycle_id.clone(),
+                    owner_id: self.owner_id.clone(),
+                    owner_token: self.owner_token.clone(),
+                    owner_pid: self.owner_pid,
+                    role: self.role.clone(),
+                    claimed_secs: timestamp_secs(),
+                    expires_secs: u64::MAX,
+                },
+            ));
+        }
+        claim_closeout_owner_for_file(
+            &self.file,
+            CloseoutOwnerClaimRequest {
+                expected_cycle_id: Some(self.cycle_id.clone()),
+                owner_id: self.owner_id.clone(),
+                owner_pid: self.owner_pid,
+                role: self.role.clone(),
+                now_secs: timestamp_secs(),
+                lease_secs: self.lease_secs,
+                allow_dead_owner_takeover: false,
+            },
+        )
+    }
+
+    pub fn ensure_still_held(&self) -> Result<()> {
+        if std::env::var("AGENT_DOC_TEST_CAPTURED_RESUME_FORCE_LEASE_LOST_FILE")
+            .ok()
+            .is_some_and(|target| Path::new(&target) == self.file)
+        {
+            self.mark_lease_lost();
+        }
+        anyhow::ensure!(
+            !self.lease_lost(),
+            "closeout owner lease for cycle {} owner {} was lost before the next durable effect",
+            self.cycle_id,
+            self.owner_id,
+        );
+        // The successful fenced commit itself closes the cycle and therefore
+        // can make a subsequent owner refresh answer `CycleSuperseded`. The
+        // causal receipt permits only that outcome: we must still perform the
+        // refresh so a concurrent `HeldByOther` (or mismatched acquisition) is
+        // observed synchronously at every post-commit promotion boundary.
+        let causal_terminal_promotion = self.terminal_effect_landed.load(Ordering::SeqCst)
+            || self.terminal_promotion_landed.load(Ordering::SeqCst);
+        let outcome = self.refresh()?;
+        anyhow::ensure!(
+            match &outcome {
+                CloseoutOwnerClaimOutcome::Acquired(owner)
+                    if owner.cycle_id == self.cycle_id
+                        && owner.owner_id == self.owner_id
+                        && owner.owner_token == self.owner_token
+                        && owner.owner_pid == self.owner_pid
+                        && owner.role == self.role =>
+                    true,
+                CloseoutOwnerClaimOutcome::CycleSuperseded if causal_terminal_promotion => true,
+                _ => false,
+            },
+            "closeout owner lease for cycle {} owner {} pid={} role={} was lost before the next durable effect: {outcome:?}",
+            self.cycle_id,
+            self.owner_id,
+            self.owner_pid,
+            self.role,
+        );
+        Ok(())
+    }
+
+    /// Execute the terminal commit under this exact capability and retain a
+    /// receipt only when that effect closed this capability's cycle.
+    pub fn run_terminal_effect<T>(&self, effect: impl FnOnce() -> Result<T>) -> Result<T> {
+        anyhow::ensure!(
+            self.terminal_effect_in_progress
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok(),
+            "terminal closeout effect is already in progress for cycle {} owner {}",
+            self.cycle_id,
+            self.owner_id,
+        );
+        self.git_ref_landed.store(false, Ordering::SeqCst);
+        self.terminal_promotion_landed
+            .store(false, Ordering::SeqCst);
+        let outcome = (|| {
+            self.ensure_still_held()?;
+            let result = effect()?;
+            let state = agent_doc_cycle_state_io::load_with_closeout_projection(&self.file)?
+                .with_context(|| {
+                    format!(
+                        "terminal closeout effect for {} did not persist cycle state",
+                        self.file.display()
+                    )
+                })?;
+            anyhow::ensure!(
+                state.cycle_id == self.cycle_id && !state.is_open(),
+                "terminal closeout effect did not close the owned cycle {} for {} (observed cycle={} phase={})",
+                self.cycle_id,
+                self.file.display(),
+                state.cycle_id,
+                state.phase.as_str(),
+            );
+            self.terminal_effect_landed.store(true, Ordering::SeqCst);
+            Ok(result)
+        })();
+        self.terminal_effect_in_progress
+            .store(false, Ordering::SeqCst);
+        outcome
+    }
+}
+
+#[derive(Debug)]
+pub enum CloseoutOwnerGuardClaimOutcome {
+    Acquired(ClaimedCloseoutOwnerGuard),
+    HeldByOther(CloseoutOwnerProjection),
+    CycleSuperseded,
+}
+
+pub struct ClaimedCloseoutOwnerGuard {
+    capability: CloseoutOwnerCapability,
+    stop: Option<std::sync::mpsc::Sender<()>>,
+    heartbeat: Option<std::thread::JoinHandle<()>>,
+}
+
+impl std::fmt::Debug for ClaimedCloseoutOwnerGuard {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ClaimedCloseoutOwnerGuard")
+            .field("capability", &self.capability)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ClaimedCloseoutOwnerGuard {
+    fn new(capability: CloseoutOwnerCapability) -> Self {
+        if capability.is_actorless() {
+            return Self {
+                capability,
+                stop: None,
+                heartbeat: None,
+            };
+        }
+        let heartbeat_capability = capability.heartbeat_clone();
+        let (stop, stopped) = std::sync::mpsc::channel();
+        let heartbeat = std::thread::spawn(move || {
+            let interval = Duration::from_secs((heartbeat_capability.lease_secs / 3).max(1));
+            let mut wait = interval;
+            let mut lost_refreshes: u32 = 0;
+            loop {
+                match stopped.recv_timeout(wait) {
+                    Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                }
+                if heartbeat_capability
+                    .terminal_effect_landed
+                    .load(Ordering::SeqCst)
+                {
+                    break;
+                }
+                match heartbeat_capability.refresh() {
+                    Ok(CloseoutOwnerClaimOutcome::Acquired(ref owner))
+                        if owner.cycle_id == heartbeat_capability.cycle_id
+                            && owner.owner_id == heartbeat_capability.owner_id
+                            && owner.owner_token == heartbeat_capability.owner_token
+                            && owner.owner_pid == heartbeat_capability.owner_pid
+                            && owner.role == heartbeat_capability.role =>
+                    {
+                        lost_refreshes = 0;
+                        wait = interval;
+                    }
+                    Ok(CloseoutOwnerClaimOutcome::CycleSuperseded)
+                        if heartbeat_capability
+                            .terminal_promotion_landed
+                            .load(Ordering::SeqCst)
+                            || heartbeat_capability
+                                .terminal_effect_landed
+                                .load(Ordering::SeqCst) =>
+                    {
+                        break;
+                    }
+                    Ok(CloseoutOwnerClaimOutcome::HeldByOther(_))
+                    | Ok(CloseoutOwnerClaimOutcome::CycleSuperseded)
+                    | Ok(CloseoutOwnerClaimOutcome::Acquired(_)) => {
+                        heartbeat_capability.mark_lease_lost();
+                        break;
+                    }
+                    Err(_) => {
+                        lost_refreshes = lost_refreshes.saturating_add(1);
+                        wait = Duration::from_secs(1u64 << lost_refreshes.min(5)).min(interval);
+                    }
+                }
+            }
+        });
+        Self {
+            capability,
+            stop: Some(stop),
+            heartbeat: Some(heartbeat),
+        }
+    }
+
+    pub fn capability(&self) -> &CloseoutOwnerCapability {
+        &self.capability
+    }
+}
+
+impl Drop for ClaimedCloseoutOwnerGuard {
+    fn drop(&mut self) {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(heartbeat) = self.heartbeat.take() {
+            let _ = heartbeat.join();
+        }
+        if !self.capability.is_actorless() {
+            let _ = release_closeout_owner_for_capability(
+                &self.capability,
+                "foreground_closeout_finished",
+            );
+        }
+    }
+}
+
 /// Lease duration for a closeout-owner `role` (`#closeoutwaitchurn`).
 pub fn closeout_owner_lease_secs(role: &str) -> u64 {
     agent_doc_state_backbone::closeout_owner_lease_secs(role)
@@ -7831,6 +8318,9 @@ pub enum CloseoutCycleWaitOutcome {
 struct CloseoutOwnerReleaseRequest {
     cycle_id: String,
     owner_id: String,
+    owner_token: String,
+    owner_pid: u32,
+    role: String,
     reason: String,
     released_secs: u64,
 }
@@ -7874,7 +8364,7 @@ fn ensure_closeout_test_controller(project_root: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn claim_closeout_owner_for_file(
+fn claim_closeout_owner_for_file(
     file: &Path,
     request: CloseoutOwnerClaimRequest,
 ) -> Result<CloseoutOwnerClaimOutcome> {
@@ -7920,13 +8410,96 @@ pub fn claim_closeout_owner_for_file(
     )
 }
 
-pub fn release_closeout_owner_for_file(
+/// Claim one closeout owner and mint its non-reconstructible nested-effect
+/// capability. Actorless documents use the same minting boundary: they receive
+/// an opaque local capability instead of a caller-supplied boolean or loss
+/// flag.
+pub fn claim_closeout_owner_guard_for_file(
     file: &Path,
-    cycle_id: &str,
-    owner_id: &str,
+    request: CloseoutOwnerClaimRequest,
+) -> Result<CloseoutOwnerGuardClaimOutcome> {
+    let canonical_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let expected_cycle_id = request.expected_cycle_id.clone();
+    let owner_id = request.owner_id.clone();
+    let owner_pid = request.owner_pid;
+    let role = request.role.clone();
+    let lease_secs = request.lease_secs;
+    let lease_lost = Arc::new(AtomicBool::new(false));
+    let terminal_effect_in_progress = Arc::new(AtomicBool::new(false));
+    let terminal_effect_landed = Arc::new(AtomicBool::new(false));
+    let git_ref_landed = Arc::new(AtomicBool::new(false));
+    let terminal_promotion_landed = Arc::new(AtomicBool::new(false));
+
+    if agent_doc_project_root_io::project_root_containing(file).is_none() {
+        return Ok(CloseoutOwnerGuardClaimOutcome::Acquired(
+            ClaimedCloseoutOwnerGuard::new(CloseoutOwnerCapability {
+                file: canonical_file,
+                cycle_id: expected_cycle_id.unwrap_or_else(|| "actorless".to_string()),
+                owner_id,
+                owner_token: new_closeout_owner_id("actorless-closeout-token"),
+                owner_pid,
+                role,
+                lease_secs,
+                actorless: true,
+                lease_lost,
+                terminal_effect_in_progress,
+                terminal_effect_landed,
+                git_ref_landed,
+                terminal_promotion_landed,
+            }),
+        ));
+    }
+
+    match claim_closeout_owner_for_file(file, request)? {
+        CloseoutOwnerClaimOutcome::Acquired(owner) => {
+            anyhow::ensure!(
+                owner.owner_id == owner_id
+                    && !owner.owner_token.is_empty()
+                    && owner.owner_pid == owner_pid
+                    && owner.role == role
+                    && expected_cycle_id
+                        .as_deref()
+                        .is_none_or(|expected| owner.cycle_id == expected),
+                "controller returned a closeout owner identity different from the requested capability: requested owner={} pid={} role={} cycle={:?}; returned={owner:?}",
+                owner_id,
+                owner_pid,
+                role,
+                expected_cycle_id,
+            );
+            Ok(CloseoutOwnerGuardClaimOutcome::Acquired(
+                ClaimedCloseoutOwnerGuard::new(CloseoutOwnerCapability {
+                    file: canonical_file,
+                    cycle_id: owner.cycle_id,
+                    owner_id,
+                    owner_token: owner.owner_token,
+                    owner_pid,
+                    role,
+                    lease_secs,
+                    actorless: false,
+                    lease_lost,
+                    terminal_effect_in_progress,
+                    terminal_effect_landed,
+                    git_ref_landed,
+                    terminal_promotion_landed,
+                }),
+            ))
+        }
+        CloseoutOwnerClaimOutcome::HeldByOther(owner) => {
+            Ok(CloseoutOwnerGuardClaimOutcome::HeldByOther(owner))
+        }
+        CloseoutOwnerClaimOutcome::CycleSuperseded => {
+            Ok(CloseoutOwnerGuardClaimOutcome::CycleSuperseded)
+        }
+    }
+}
+
+fn release_closeout_owner_for_capability(
+    capability: &CloseoutOwnerCapability,
     reason: &str,
 ) -> Result<bool> {
     use super::command_plane::{CloseoutOwnerReleasePayload, build_closeout_owner_release_submit};
+    let file = capability.file();
+    capability.ensure_protects(file)?;
     let project_root = agent_doc_project_root_io::project_root_containing(file)
         .with_context(|| format!("no project root found for {}", file.display()))?;
     // `#netadv5` RTT budget: `request_controller_with_timeout` already
@@ -7938,15 +8511,22 @@ pub fn release_closeout_owner_for_file(
         .to_string_lossy()
         .to_string();
     let released_secs = timestamp_secs();
-    let command_id = format!("closeout-owner-release:{cycle_id}:{owner_id}:{released_secs}");
+    let command_id = format!(
+        "closeout-owner-release:{}:{}:{released_secs}",
+        capability.cycle_id(),
+        capability.owner_id(),
+    );
     let submit = build_closeout_owner_release_submit(
         &command_id,
         &command_id,
         0,
         CloseoutOwnerReleasePayload {
             document_path,
-            cycle_id: cycle_id.to_string(),
-            owner_id: owner_id.to_string(),
+            cycle_id: capability.cycle_id().to_string(),
+            owner_id: capability.owner_id().to_string(),
+            owner_token: capability.owner_token.clone(),
+            owner_pid: capability.owner_pid(),
+            role: capability.role().to_string(),
             reason: reason.to_string(),
             released_secs,
         },
@@ -9733,6 +10313,92 @@ pub fn current_text_via_controller_model_read_for_doc(
     }
 }
 
+/// Read the controller-owned current text without publishing diagnostics or
+/// performing pressure/lease cleanup. This is the authority probe for fences
+/// that must be observationally pure when they reject a stale transaction.
+pub fn peek_current_text_via_controller_model_read_for_doc(
+    doc: &Path,
+    source: &str,
+) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let file_arg = canonical.to_string_lossy().to_string();
+    let authority = crdt_authority_for_file(&file_arg);
+    if !authority.editor_attached() {
+        return Ok(Some(agent_doc_crdt_relay_io::CurrentText::Detached));
+    }
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
+        return Ok(None);
+    };
+    request_existing_controller_crdt_current_text_read_quiet(&project_root, &canonical, source)
+        .map(Some)
+}
+
+/// Publish the diagnostic/pressure side of a controller-model observation
+/// after its caller has independently revalidated mutation authority.
+///
+/// Queue-maintenance effect owners first use
+/// [`peek_current_text_via_controller_model_read_for_doc`], recheck their
+/// admitted-cut fence, and only then call this function. Keeping the read and
+/// publication separate prevents a stale RPC from appending ops or changing
+/// pressure state before the caller can reject its observation.
+pub fn publish_controller_model_read_diagnostic_for_doc(
+    doc: &Path,
+    source: &str,
+    observed: Result<&Option<agent_doc_crdt_relay_io::CurrentText>, &anyhow::Error>,
+) {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let file_arg = canonical.to_string_lossy().to_string();
+    let authority = crdt_authority_for_file(&file_arg);
+    if !authority.editor_attached() {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "controller_crdt_current_text_skipped file={} source={} authority=git reason=detached_authority",
+                canonical.display(),
+                source,
+            ),
+        );
+        return;
+    }
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
+        agent_doc_ops_log_io::log_op(
+            doc,
+            &format!(
+                "controller_crdt_current_text_skipped file={} source={} reason=no_project_root",
+                doc.display(),
+                source,
+            ),
+        );
+        return;
+    };
+    match observed {
+        Ok(Some(current)) => {
+            clear_expired_controller_model_pressure(&project_root);
+            log_controller_current_text_result(&canonical, source, current);
+        }
+        Ok(None) => {}
+        Err(err) => {
+            record_controller_model_pressure(
+                &project_root,
+                &canonical,
+                source,
+                &format!("{err:#}"),
+            );
+            agent_doc_ops_log_io::log_op(
+                &canonical,
+                &format!(
+                    "controller_crdt_current_text_read_unavailable file={} source={} socket={} timeout_ms={} error={} recovery=idle_disk_fallback",
+                    canonical.display(),
+                    source,
+                    socket_path(&project_root).display(),
+                    CONTROLLER_CRDT_CURRENT_TEXT_READ_TIMEOUT.as_millis(),
+                    format!("{err:#}").replace('\n', "\\n"),
+                ),
+            );
+        }
+    }
+}
+
 /// Read the compact CRDT revision from an already-running controller.
 ///
 /// This intentionally does not materialize canonical markdown or emit the
@@ -9929,35 +10595,74 @@ fn request_existing_controller_crdt_current_text_read(
     canonical: &Path,
     source: &str,
 ) -> Result<agent_doc_crdt_relay_io::CurrentText> {
-    let data: serde_json::Value = request_existing_controller_with_timeout(
+    request_existing_controller_crdt_current_text_read_with_diagnostics(
         project_root,
-        ControllerRequest {
-            command: "crdt_current_text".to_string(),
-            file: Some(canonical.to_path_buf()),
-            session_id: None,
-            pane_id: None,
-            window_id: None,
-            generation: None,
-            state: None,
-            caller: None,
-            reason: None,
-            supervisor_pid: None,
-            supervisor_socket: None,
-            command_kind: None,
-            diagnostic_payload: Some(
-                serde_json::json!({
-                    "source": source,
-                    "recover_projection": false,
-                    "flush_barrier": false,
-                })
-                .to_string(),
-            ),
-            sequence: None,
-        },
-        CONTROLLER_CRDT_CURRENT_TEXT_READ_TIMEOUT,
-    )?;
+        canonical,
+        source,
+        true,
+    )
+}
+
+fn request_existing_controller_crdt_current_text_read_quiet(
+    project_root: &Path,
+    canonical: &Path,
+    source: &str,
+) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    request_existing_controller_crdt_current_text_read_with_diagnostics(
+        project_root,
+        canonical,
+        source,
+        false,
+    )
+}
+
+fn request_existing_controller_crdt_current_text_read_with_diagnostics(
+    project_root: &Path,
+    canonical: &Path,
+    source: &str,
+    publish_diagnostic: bool,
+) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    let request = ControllerRequest {
+        command: "crdt_current_text".to_string(),
+        file: Some(canonical.to_path_buf()),
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: None,
+        state: None,
+        caller: None,
+        reason: None,
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: Some(
+            serde_json::json!({
+                "source": source,
+                "recover_projection": false,
+                "flush_barrier": false,
+                "effect_free": !publish_diagnostic,
+            })
+            .to_string(),
+        ),
+        sequence: None,
+    };
+    let data: serde_json::Value = if publish_diagnostic {
+        request_existing_controller_with_timeout(
+            project_root,
+            request,
+            CONTROLLER_CRDT_CURRENT_TEXT_READ_TIMEOUT,
+        )?
+    } else {
+        request_existing_controller_effect_free_with_timeout(
+            project_root,
+            request,
+            CONTROLLER_CRDT_CURRENT_TEXT_READ_TIMEOUT,
+        )?
+    };
     let current = controller_current_text_from_data(&data)?;
-    log_controller_current_text_result(canonical, source, &current);
+    if publish_diagnostic {
+        log_controller_current_text_result(canonical, source, &current);
+    }
     Ok(current)
 }
 
@@ -11638,6 +12343,10 @@ struct ControllerCrdtCurrentTextPayload {
     recover_projection: bool,
     #[serde(default = "default_crdt_current_text_flush_barrier")]
     flush_barrier: bool,
+    /// A fence probe must be a true observation: no projection recovery,
+    /// controller cleanup, or diagnostics may be published by either endpoint.
+    #[serde(default)]
+    effect_free: bool,
 }
 
 fn default_crdt_current_text_flush_barrier() -> bool {
@@ -11784,13 +12493,29 @@ fn handle_crdt_current_text_rpc(
     let file_arg = canonical.to_string_lossy().to_string();
     let payload = crdt_current_text_payload(&request)?;
     let source = crdt_current_text_source(&payload);
+    if payload.effect_free {
+        anyhow::ensure!(
+            !payload.recover_projection && !payload.flush_barrier,
+            "effect-free current-text reads cannot recover or flush projection"
+        );
+    }
     let authority = crdt_authority_for_file(&file_arg);
     if !authority.editor_attached() {
         let current = agent_doc_crdt_relay_io::CurrentText::Detached;
-        log_controller_current_text_result(&canonical, &source, &current);
+        if !payload.effect_free {
+            log_controller_current_text_result(&canonical, &source, &current);
+        }
         return Ok(controller_current_text_response(current));
     }
-    let current = if payload.recover_projection {
+    #[cfg(any(test, feature = "test-support"))]
+    if payload.effect_free {
+        pause_effect_free_current_text_after_authority_for_test()?;
+    }
+    let current = if payload.effect_free {
+        agent_doc_crdt_relay_io::peek_current_text_for_file_with_authority_nonblocking(
+            &canonical, authority,
+        )?
+    } else if payload.recover_projection {
         agent_doc_crdt_relay_io::current_text_for_file_with_authority_recovering_projection(
             &canonical, authority,
         )?
@@ -11801,8 +12526,35 @@ fn handle_crdt_current_text_rpc(
     } else {
         agent_doc_crdt_relay_io::current_text_for_file_with_authority(&canonical, authority)?
     };
-    log_controller_current_text_result(&canonical, &source, &current);
+    if !payload.effect_free {
+        log_controller_current_text_result(&canonical, &source, &current);
+    }
     Ok(controller_current_text_response(current))
+}
+
+#[cfg(any(test, feature = "test-support"))]
+fn pause_effect_free_current_text_after_authority_for_test() -> Result<()> {
+    let Some(marker) = std::env::var_os("AGENT_DOC_TEST_EFFECT_FREE_CURRENT_TEXT_AUTHORITY_MARKER")
+        .map(PathBuf::from)
+    else {
+        return Ok(());
+    };
+    let Some(release) =
+        std::env::var_os("AGENT_DOC_TEST_EFFECT_FREE_CURRENT_TEXT_AUTHORITY_RELEASE")
+            .map(PathBuf::from)
+    else {
+        return Ok(());
+    };
+    std::fs::write(&marker, b"authority-observed")?;
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !release.exists() {
+        anyhow::ensure!(
+            Instant::now() < deadline,
+            "timed out waiting to release effect-free current-text authority barrier"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    Ok(())
 }
 
 /// Candidate documents to test for a resume-id claim (`#resumeownerfmread`).
@@ -11939,6 +12691,7 @@ fn crdt_current_text_payload(
             source: None,
             recover_projection: false,
             flush_barrier: default_crdt_current_text_flush_barrier(),
+            effect_free: false,
         });
     };
     if payload_json.trim().is_empty() {
@@ -11946,6 +12699,7 @@ fn crdt_current_text_payload(
             source: None,
             recover_projection: false,
             flush_barrier: default_crdt_current_text_flush_barrier(),
+            effect_free: false,
         });
     }
     serde_json::from_str(payload_json).context("failed to parse CRDT current-text payload")
@@ -19478,6 +20232,7 @@ pub(crate) mod background_maintenance_test_gate {
 pub struct StateActorTestHandle {
     should_stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
+    runtime: Arc<ControllerRuntime>,
     /// Registered in `warm_test_actor_sockets` while the actor serves it.
     warm_socket: PathBuf,
 }
@@ -19511,6 +20266,32 @@ pub fn ensure_state_actor_for_tests(project_root: &Path) -> Result<()> {
     shutdown_stale_controller(&canonical);
     let actor = start_state_actor_for_tests(&canonical)?;
     actors.insert(canonical, actor);
+    Ok(())
+}
+
+/// Drain the in-process actor's document-authority handoff lane to an exact
+/// empty receipt. Purity regressions call this after the operation under test
+/// so an asynchronously folded authority observation cannot escape the state
+/// comparison merely because its worker had not run yet.
+#[cfg(feature = "test-support")]
+pub fn drain_state_actor_document_authority_handoffs_for_tests(project_root: &Path) -> Result<()> {
+    let canonical = project_root
+        .canonicalize()
+        .unwrap_or_else(|_| project_root.to_path_buf());
+    ensure_state_actor_for_tests(&canonical)?;
+    let runtime = state_actors_for_tests()
+        .lock()
+        .get(&canonical)
+        .map(|actor| Arc::clone(&actor.runtime))
+        .context("test state actor disappeared before authority drain")?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while runtime.drain_document_authority_handoffs(&canonical)? {
+        anyhow::ensure!(
+            Instant::now() < deadline,
+            "timed out draining test state actor document-authority handoffs"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
     Ok(())
 }
 
@@ -19632,8 +20413,9 @@ pub fn start_state_actor_for_tests(project_root: &Path) -> Result<StateActorTest
     // The listener is bound, so the socket path canonicalizes to the key the
     // clients' lookups will compute.
     let warm_socket = warm_test_actor_sockets::register(&sock);
+    let thread_runtime = Arc::clone(&runtime);
     let thread = std::thread::spawn(move || {
-        install_controller_request_thread_context(&runtime);
+        install_controller_request_thread_context(&thread_runtime);
         // `#visiblewriteloadflake`: serve each client on its own thread, as
         // `serve_with_options` does. Serving inline let one long-poll (a
         // `visible_write_commit_candidate_patch_await` chunk) hold the only
@@ -19644,7 +20426,7 @@ pub fn start_state_actor_for_tests(project_root: &Path) -> Result<StateActorTest
         while !thread_stop.load(Ordering::SeqCst) && actor_root.is_dir() {
             match listener.accept() {
                 Ok(stream) => {
-                    let runtime = Arc::clone(&runtime);
+                    let runtime = Arc::clone(&thread_runtime);
                     let client_stop = Arc::clone(&thread_stop);
                     let sock = sock.clone();
                     clients.retain(|client: &std::thread::JoinHandle<()>| !client.is_finished());
@@ -19677,6 +20459,7 @@ pub fn start_state_actor_for_tests(project_root: &Path) -> Result<StateActorTest
     Ok(StateActorTestHandle {
         should_stop,
         thread: Some(thread),
+        runtime,
         warm_socket,
     })
 }
@@ -26450,8 +27233,18 @@ fn run_closeout_owner_claim(
         );
     }
     let ordinary_outcome = current.decide_owner_claim(&claim, current_owner_alive);
-    let outcome =
+    let mut outcome =
         current.decide_owner_claim_with_authorization(&claim, current_owner_alive, &authorization);
+    if let CloseoutOwnerClaimOutcome::Acquired(owner) = &mut outcome
+        && owner.owner_token.is_empty()
+    {
+        owner.owner_token = format!(
+            "closeout-owner-token:{}:{}:{}",
+            owner.cycle_id,
+            owner.owner_id,
+            closeout_owner_event_nonce(),
+        );
+    }
     let retained_handoff = matches!(ordinary_outcome, CloseoutOwnerClaimOutcome::HeldByOther(_))
         && matches!(&outcome, CloseoutOwnerClaimOutcome::Acquired(_));
     if let CloseoutOwnerClaimOutcome::Acquired(owner) = &outcome {
@@ -26466,6 +27259,7 @@ fn run_closeout_owner_claim(
                 document_hash: document_hash.clone(),
                 cycle_id: owner.cycle_id.clone(),
                 owner_id: owner.owner_id.clone(),
+                owner_token: owner.owner_token.clone(),
                 owner_pid: owner.owner_pid,
                 role: owner.role.clone(),
                 claimed_secs: owner.claimed_secs,
@@ -26525,9 +27319,13 @@ fn run_closeout_owner_release(
             .state_projection
             .document(&document_hash)
             .filter(|document| {
-                document
-                    .closeout
-                    .owner_release_matches(&release.cycle_id, &release.owner_id)
+                document.closeout.owner_release_matches(
+                    &release.cycle_id,
+                    &release.owner_id,
+                    &release.owner_token,
+                    release.owner_pid,
+                    &release.role,
+                )
             })
             .map_or((false, None), |document| {
                 (
@@ -26790,6 +27588,9 @@ fn service_closeout_owner_release(
         CloseoutOwnerReleaseRequest {
             cycle_id: payload.cycle_id,
             owner_id: payload.owner_id,
+            owner_token: payload.owner_token,
+            owner_pid: payload.owner_pid,
+            role: payload.role,
             reason: payload.reason,
             released_secs: payload.released_secs,
         },
@@ -45811,6 +46612,35 @@ mod tests {
 
     /// `#netadv5` RTT budget for the closeout ACK lease: one claim and one
     /// release each cost exactly their budgeted serial controller round trips.
+    #[test]
+    fn closeout_owner_capability_is_bound_to_its_canonical_document() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let first = dir.path().join("first.md");
+        let second = dir.path().join("second.md");
+        std::fs::write(&first, "first\n").unwrap();
+        std::fs::write(&second, "second\n").unwrap();
+        let outcome = claim_closeout_owner_guard_for_file(
+            &first,
+            CloseoutOwnerClaimRequest {
+                expected_cycle_id: Some("actorless-cycle".into()),
+                owner_id: "actorless-owner".into(),
+                owner_pid: std::process::id(),
+                role: CLOSEOUT_OWNER_ROLE_FOREGROUND_FINALIZE.into(),
+                now_secs: timestamp_secs(),
+                lease_secs: CLOSEOUT_OWNER_LEASE_SECS,
+                allow_dead_owner_takeover: true,
+            },
+        )
+        .unwrap();
+        let CloseoutOwnerGuardClaimOutcome::Acquired(guard) = outcome else {
+            panic!("actorless closeout guard must be acquired");
+        };
+        assert!(guard.capability().ensure_protects(&first).is_ok());
+        assert!(guard.capability().ensure_protects(&second).is_err());
+    }
+
+    /// `#netadv5` RTT budget for the closeout ACK lease: one claim and one
+    /// release each cost exactly their budgeted serial controller round trips.
     #[cfg(feature = "test-support")]
     #[test]
     fn closeout_owner_claim_and_release_stay_within_round_trip_budget() {
@@ -45819,15 +46649,18 @@ mod tests {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         let doc = root.join("tasks/rtt.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
-        std::fs::write(&doc, "---\nagent_doc_session: session-rtt\n---\nBody\n").unwrap();
+        let content = "---\nagent_doc_session: session-rtt\n---\nBody\n";
+        std::fs::write(&doc, content).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         // Warm the in-process controller so the measured calls see a serving one.
         ensure_state_actor_for_tests(root).unwrap();
 
         let before = controller_round_trips_on_this_thread();
-        let outcome = claim_closeout_owner_for_file(
+        let outcome = claim_closeout_owner_guard_for_file(
             &doc,
             CloseoutOwnerClaimRequest {
-                expected_cycle_id: None,
+                expected_cycle_id: Some(cycle.cycle_id),
                 owner_id: "rtt-owner".to_string(),
                 owner_pid: std::process::id(),
                 role: CLOSEOUT_OWNER_ROLE_FOREGROUND_FINALIZE.to_string(),
@@ -45843,7 +46676,13 @@ mod tests {
         );
 
         let before = controller_round_trips_on_this_thread();
-        let released = release_closeout_owner_for_file(&doc, "cycle", "rtt-owner", "netadv5");
+        let released: Result<bool> = match outcome {
+            Ok(CloseoutOwnerGuardClaimOutcome::Acquired(guard)) => {
+                drop(guard);
+                Ok(true)
+            }
+            other => Err(anyhow::anyhow!("claim was not acquired: {other:?}")),
+        };
         let release_rtt = controller_round_trips_on_this_thread() - before;
         assert_eq!(
             release_rtt, CLOSEOUT_OWNER_RELEASE_SERIAL_ROUND_TRIPS,
@@ -65545,6 +66384,253 @@ mod tests {
     }
 
     #[test]
+    fn effect_free_current_text_rpc_is_pure_for_attached_editor_fences() {
+        let _env = reliable_sync_env_lock();
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/effect-free-current-text.md");
+        std::fs::write(&doc, "Body\n").unwrap();
+        let canonical = doc.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        controller_liveness_plane().lock().restore_liveness(&[
+            agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash,
+                pid: std::process::id().into(),
+                tag: "test-editor-effect-free-current-text".into(),
+            },
+        ]);
+        let bootstrap = test_bootstrap(&dir);
+        let ops_path = dir.path().join(".agent-doc/logs/ops.log");
+        let state_path = dir.path().join(".agent-doc/state.db");
+        drop(agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap());
+        let before_ops = std::fs::read(&ops_path).ok();
+        let before_state = std::fs::read(&state_path).ok();
+        let mut should_stop = false;
+
+        let response = handle_request(
+            &(serde_json::json!({
+                "command": "crdt_current_text",
+                "file": canonical,
+                "diagnostic_payload": serde_json::json!({
+                    "source": "test_effect_free_controller_current_text",
+                    "recover_projection": false,
+                    "flush_barrier": false,
+                    "effect_free": true
+                }).to_string()
+            })
+            .to_string()
+                + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: serde_json::Value = serde_json::from_str(&response).unwrap();
+
+        assert_eq!(envelope.get("ok").and_then(|ok| ok.as_bool()), Some(true));
+        assert_eq!(
+            envelope
+                .get("data")
+                .and_then(|data| data.get("status"))
+                .and_then(|status| status.as_str()),
+            Some("editor_attached_model_missing")
+        );
+        assert!(!should_stop);
+        assert_eq!(
+            std::fs::read(&ops_path).ok(),
+            before_ops,
+            "effect-free attached-editor authority probes must not append ops"
+        );
+        assert_eq!(
+            std::fs::read(&state_path).ok(),
+            before_state,
+            "effect-free attached-editor authority probes must not mutate state.db"
+        );
+    }
+
+    #[test]
+    fn effect_free_current_text_client_refusal_is_one_shot_and_pure() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/effect-free-client-refusal.md");
+        std::fs::write(&doc, "Body\n").unwrap();
+        let canonical = doc.canonicalize().unwrap();
+        let state_path = dir.path().join(".agent-doc/state.db");
+        let ops_path = dir.path().join(".agent-doc/logs/ops.log");
+        drop(agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap());
+        let before_state = std::fs::read(&state_path).ok();
+        let before_ops = std::fs::read(&ops_path).ok();
+
+        let sock = socket_path(dir.path());
+        std::fs::create_dir_all(sock.parent().unwrap()).unwrap();
+        let name = sock.to_fs_name::<GenericFilePath>().unwrap();
+        let listener = ListenerOptions::new().name(name).create_sync().unwrap();
+        let server = std::thread::spawn(move || {
+            let stream = listener.accept().unwrap();
+            let (reader_half, mut writer_half) = stream.split();
+            let mut line = String::new();
+            BufReader::new(reader_half).read_line(&mut line).unwrap();
+            let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(request["command"], "crdt_current_text");
+            let diagnostic: serde_json::Value =
+                serde_json::from_str(request["diagnostic_payload"].as_str().unwrap()).unwrap();
+            assert_eq!(diagnostic["effect_free"], true);
+            writeln!(
+                writer_half,
+                "{}",
+                serde_json::json!({
+                    "ok": false,
+                    "error": "controller not authoritative (handoff_state=Preparing)"
+                })
+            )
+            .unwrap();
+            writer_half.flush().unwrap();
+        });
+
+        let err = request_existing_controller_crdt_current_text_read_quiet(
+            dir.path(),
+            &canonical,
+            "test_effect_free_client_refusal",
+        )
+        .unwrap_err();
+        server.join().unwrap();
+
+        assert!(
+            format!("{err:#}").contains("controller not authoritative"),
+            "the one-shot read must surface the authentic refusal: {err:#}"
+        );
+        assert_eq!(
+            std::fs::read(&ops_path).ok(),
+            before_ops,
+            "the effect-free client transport must not publish handoff retry diagnostics"
+        );
+        assert_eq!(
+            std::fs::read(&state_path).ok(),
+            before_state,
+            "the effect-free client transport must not mutate controller state"
+        );
+    }
+
+    #[test]
+    fn effect_free_model_ensure_observation_stays_pure_when_authority_drifts_mid_rpc() {
+        let _env = reliable_sync_env_lock();
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/effect-free-mid-rpc-drift.md");
+        std::fs::write(&doc, "admitted authority\n").unwrap();
+        let canonical = doc.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        controller_liveness_plane().lock().restore_liveness(&[
+            agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash,
+                pid: std::process::id().into(),
+                tag: "test-editor-effect-free-mid-rpc-drift".into(),
+            },
+        ]);
+        let state_path = dir.path().join(".agent-doc/state.db");
+        let ops_path = dir.path().join(".agent-doc/logs/ops.log");
+        drop(agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap());
+        let before_state = std::fs::read(&state_path).ok();
+        let before_ops = std::fs::read(&ops_path).ok();
+        let marker = dir.path().join("effect-free-authority.marker");
+        let release = dir.path().join("effect-free-authority.release");
+        unsafe {
+            std::env::set_var(
+                "AGENT_DOC_TEST_EFFECT_FREE_CURRENT_TEXT_AUTHORITY_MARKER",
+                &marker,
+            );
+            std::env::set_var(
+                "AGENT_DOC_TEST_EFFECT_FREE_CURRENT_TEXT_AUTHORITY_RELEASE",
+                &release,
+            );
+        }
+
+        let sock = socket_path(dir.path());
+        std::fs::create_dir_all(sock.parent().unwrap()).unwrap();
+        let name = sock.to_fs_name::<GenericFilePath>().unwrap();
+        let listener = ListenerOptions::new().name(name).create_sync().unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let server = std::thread::spawn(move || {
+            let stream = listener.accept().unwrap();
+            let (reader_half, mut writer_half) = stream.split();
+            let mut line = String::new();
+            BufReader::new(reader_half).read_line(&mut line).unwrap();
+            let mut should_stop = false;
+            let response = handle_request(&line, &bootstrap, &mut should_stop).unwrap();
+            writeln!(writer_half, "{response}").unwrap();
+            writer_half.flush().unwrap();
+            assert!(!should_stop);
+        });
+        let root = dir.path().to_path_buf();
+        let request_file = canonical.clone();
+        let client = std::thread::spawn(move || {
+            let data: serde_json::Value = request_existing_controller_effect_free_with_timeout(
+                &root,
+                ControllerRequest {
+                    command: "crdt_current_text".to_string(),
+                    file: Some(request_file),
+                    session_id: None,
+                    pane_id: None,
+                    window_id: None,
+                    generation: None,
+                    state: None,
+                    caller: None,
+                    reason: None,
+                    supervisor_pid: None,
+                    supervisor_socket: None,
+                    command_kind: None,
+                    diagnostic_payload: Some(
+                        serde_json::json!({
+                            "source": "test_model_ensure_mid_rpc_drift",
+                            "recover_projection": false,
+                            "flush_barrier": false,
+                            "effect_free": true,
+                        })
+                        .to_string(),
+                    ),
+                    sequence: None,
+                },
+                Duration::from_secs(30),
+            )?;
+            controller_current_text_from_data(&data)
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while !marker.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "effect-free RPC did not reach its post-authority barrier"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        std::fs::write(&doc, "operator authority\n").unwrap();
+        std::fs::write(&release, b"release").unwrap();
+        let observed = client.join().unwrap().unwrap();
+        server.join().unwrap();
+        unsafe {
+            std::env::remove_var("AGENT_DOC_TEST_EFFECT_FREE_CURRENT_TEXT_AUTHORITY_MARKER");
+            std::env::remove_var("AGENT_DOC_TEST_EFFECT_FREE_CURRENT_TEXT_AUTHORITY_RELEASE");
+        }
+
+        assert!(matches!(
+            observed,
+            agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+        ));
+        assert_eq!(
+            std::fs::read(&ops_path).ok(),
+            before_ops,
+            "a stale effect-free RPC must not append controller/relay diagnostics"
+        );
+        assert_eq!(
+            std::fs::read(&state_path).ok(),
+            before_state,
+            "a stale effect-free RPC must not mutate pressure/controller state"
+        );
+    }
+
+    #[test]
     fn crdt_current_text_rpc_does_not_promote_projection_when_editor_is_attached() {
         let _env = reliable_sync_env_lock();
         let dir = tempfile::TempDir::new().unwrap();
@@ -65682,12 +66768,16 @@ mod tests {
             "the controller must stamp a fresh lease instead of trusting the client's stale now_secs"
         );
         assert!(matches!(
-            first,
+            &first,
             CloseoutOwnerClaimOutcome::Acquired(CloseoutOwnerProjection {
-                ref owner_id,
+                owner_id,
                 ..
             }) if owner_id == "owner-1"
         ));
+        let first_owner = match &first {
+            CloseoutOwnerClaimOutcome::Acquired(owner) => owner.clone(),
+            _ => unreachable!(),
+        };
         let second =
             handle_closeout_owner_claim(&bootstrap, &runtime, claim_request("owner-2")).unwrap();
         assert!(matches!(
@@ -65718,6 +66808,9 @@ mod tests {
                     serde_json::to_string(&CloseoutOwnerReleaseRequest {
                         cycle_id: cycle.cycle_id.clone(),
                         owner_id: "owner-1".to_string(),
+                        owner_token: first_owner.owner_token.clone(),
+                        owner_pid: first_owner.owner_pid,
+                        role: first_owner.role.clone(),
                         reason: "finished".to_string(),
                         released_secs: 11,
                     })
@@ -65915,24 +67008,25 @@ mod tests {
         let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
 
         let claim_and_release = |owner_id: &str, role: &str| {
-            assert!(matches!(
-                run_closeout_owner_claim(
-                    &bootstrap,
-                    &runtime,
-                    &doc,
-                    CloseoutOwnerClaimRequest {
-                        expected_cycle_id: Some(cycle.cycle_id.clone()),
-                        owner_id: owner_id.into(),
-                        owner_pid: std::process::id(),
-                        role: role.into(),
-                        now_secs: timestamp_secs(),
-                        lease_secs: CLOSEOUT_OWNER_LEASE_SECS,
-                        allow_dead_owner_takeover: false,
-                    },
-                )
-                .unwrap(),
-                CloseoutOwnerClaimOutcome::Acquired(_)
-            ));
+            let owner = match run_closeout_owner_claim(
+                &bootstrap,
+                &runtime,
+                &doc,
+                CloseoutOwnerClaimRequest {
+                    expected_cycle_id: Some(cycle.cycle_id.clone()),
+                    owner_id: owner_id.into(),
+                    owner_pid: std::process::id(),
+                    role: role.into(),
+                    now_secs: timestamp_secs(),
+                    lease_secs: CLOSEOUT_OWNER_LEASE_SECS,
+                    allow_dead_owner_takeover: false,
+                },
+            )
+            .unwrap()
+            {
+                CloseoutOwnerClaimOutcome::Acquired(owner) => owner,
+                other => panic!("owner claim failed: {other:?}"),
+            };
             clear_captured_finalize_wake(&runtime, &document_hash);
             assert!(
                 run_closeout_owner_release(
@@ -65942,6 +67036,9 @@ mod tests {
                     CloseoutOwnerReleaseRequest {
                         cycle_id: cycle.cycle_id.clone(),
                         owner_id: owner_id.into(),
+                        owner_token: owner.owner_token.clone(),
+                        owner_pid: owner.owner_pid,
+                        role: owner.role.clone(),
                         reason: "finished".into(),
                         released_secs: timestamp_secs(),
                     },
@@ -66008,12 +67105,16 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(matches!(claim, CloseoutOwnerClaimOutcome::Acquired(_)));
+        let claimed_owner = match claim {
+            CloseoutOwnerClaimOutcome::Acquired(owner) => owner,
+            other => panic!("owner claim failed: {other:?}"),
+        };
 
         let releaser = Arc::clone(&runtime);
         let release_bootstrap = bootstrap.clone();
         let release_doc = doc.clone();
         let release_cycle = cycle.cycle_id.clone();
+        let release_owner = claimed_owner.clone();
         let releaser = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(150));
             run_closeout_owner_release(
@@ -66023,6 +67124,9 @@ mod tests {
                 CloseoutOwnerReleaseRequest {
                     cycle_id: release_cycle,
                     owner_id: owner_id.to_string(),
+                    owner_token: release_owner.owner_token,
+                    owner_pid: release_owner.owner_pid,
+                    role: release_owner.role,
                     reason: "request_guard_dropped".to_string(),
                     released_secs: timestamp_secs(),
                 },
@@ -66973,9 +68077,13 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            first,
-            CloseoutOwnerClaimOutcome::Acquired(ref p) if p.owner_id == "owner-1"
+            &first,
+            CloseoutOwnerClaimOutcome::Acquired(p) if p.owner_id == "owner-1"
         ));
+        let first_owner = match &first {
+            CloseoutOwnerClaimOutcome::Acquired(owner) => owner.clone(),
+            _ => unreachable!(),
+        };
         let second = serde_json::from_value::<CloseoutOwnerClaimOutcome>(
             dispatch_command_plane_submit(&bootstrap, runtime.as_ref(), &claim_submit("owner-2"))
                 .unwrap(),
@@ -66986,6 +68094,31 @@ mod tests {
             CloseoutOwnerClaimOutcome::HeldByOther(ref p) if p.owner_id == "owner-1"
         ));
 
+        let forged_release = build_closeout_owner_release_submit(
+            "closeout-owner-release-forged",
+            "closeout-owner-release-forged",
+            0,
+            CloseoutOwnerReleasePayload {
+                document_path: doc.to_string_lossy().to_string(),
+                cycle_id: cycle.cycle_id.clone(),
+                owner_id: "owner-1".to_string(),
+                owner_token: "forged-token".to_string(),
+                owner_pid: first_owner.owner_pid,
+                role: first_owner.role.clone(),
+                reason: "forged".to_string(),
+                released_secs: 10,
+            },
+        )
+        .unwrap();
+        let forged_released = serde_json::from_value::<bool>(
+            dispatch_command_plane_submit(&bootstrap, runtime.as_ref(), &forged_release).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            !forged_released,
+            "a reconstructed scalar release must not clear the owner"
+        );
+
         // Release owner-1 over the command plane, then owner-2 can claim.
         let release = build_closeout_owner_release_submit(
             "closeout-owner-release",
@@ -66995,6 +68128,9 @@ mod tests {
                 document_path: doc.to_string_lossy().to_string(),
                 cycle_id: cycle.cycle_id.clone(),
                 owner_id: "owner-1".to_string(),
+                owner_token: first_owner.owner_token,
+                owner_pid: first_owner.owner_pid,
+                role: first_owner.role,
                 reason: "finished".to_string(),
                 released_secs: 11,
             },

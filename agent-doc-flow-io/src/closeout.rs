@@ -17,6 +17,10 @@ use anyhow::{Context, Result};
 use std::path::Path;
 
 pub trait CloseoutEffects {
+    /// Prove that this adapter owns the per-document apply transaction before
+    /// any flow-level mutation that bypasses an individual effect method.
+    fn require_mutation_capability(&self, file: &Path) -> Result<()>;
+
     fn commit(&self, file: &Path) -> Result<bool>;
 
     /// Reconcile a committed cycle's durable merge baseline to HEAD before
@@ -167,6 +171,7 @@ pub fn complete_required_closeout_with_options(
     effects: &dyn CloseoutEffects,
     options: CompleteRequiredCloseoutOptions,
 ) -> Result<bool> {
+    effects.require_mutation_capability(file)?;
     let mut timer = CloseoutTimer::start(file);
     let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
 
@@ -703,6 +708,7 @@ pub fn record_terminal_closeout_proof(
     effects: &dyn CloseoutEffects,
     options: CompleteRequiredCloseoutOptions,
 ) -> Result<()> {
+    effects.require_mutation_capability(file)?;
     let canonical = file
         .canonicalize()
         .with_context(|| format!("terminal proof: failed to canonicalize {}", file.display()))?;
@@ -1742,6 +1748,7 @@ pub fn apply_closeout_recovery(
     file: &Path,
     effects: &dyn CloseoutEffects,
 ) -> Result<RecoveryApplication> {
+    effects.require_mutation_capability(file)?;
     // Rejected finalize attempts historically stacked captured-only orphans
     // behind the same already-answered heading. One `repair --apply` pass
     // retired only the newest projection, forcing the caller to classify and
@@ -2072,6 +2079,7 @@ pub fn apply_closeout_recovery_mutation(
     mutation: CloseoutRecoveryMutation<'_>,
     effects: &dyn CloseoutEffects,
 ) -> Result<()> {
+    effects.require_mutation_capability(file)?;
     match mutation {
         CloseoutRecoveryMutation::RefreshReplayBaseline {
             capture,

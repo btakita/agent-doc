@@ -43,6 +43,7 @@ serde_json = "1"
 agent-doc-closeout-runtime-io = { path = "../agent-doc-closeout-runtime-io", version = "0.35.573", features = ["test-support"] }
 agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.573" }
 agent-doc-document = { path = "../agent-doc-document", version = "0.35.573" }
+agent-doc-queue-io = { path = "../agent-doc-queue-io", version = "0.35.573" }
 agent-doc-reliable-sync-io = { path = "../agent-doc-reliable-sync-io", version = "0.35.573" }
 agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version = "0.35.573" }
 agent-doc-work-graph = { path = "../agent-doc-work-graph", version = "0.35.573" }

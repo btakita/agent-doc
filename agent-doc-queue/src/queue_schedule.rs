@@ -436,6 +436,29 @@ pub fn live_heads_for_queue(content: &str, queue_id: &str) -> anyhow::Result<Vec
         .collect())
 }
 
+/// Live nested leaves of one queue, rendered exactly as [`live_heads_for_queue`].
+///
+/// Their lineage claim key differs from the visible row text. This lets pure
+/// admission distinguish a newly executable descendant from an already-known
+/// top-level loop row without mutating the document first.
+pub fn nested_live_heads_for_queue(content: &str, queue_id: &str) -> anyhow::Result<Vec<String>> {
+    let components = element::parse(content)?;
+    let graph = QueueGraph::parse(content, &components).map_err(anyhow::Error::new)?;
+    let block = graph
+        .block(queue_id)
+        .ok_or_else(|| anyhow::anyhow!("agent:queue id `{queue_id}` not found"))?;
+    Ok(document_queue::executable_prompt_indexes(&block.entries)
+        .into_iter()
+        .filter_map(|index| {
+            let QueueEntry::Prompt(prompt) = block.entries.get(index)? else {
+                return None;
+            };
+            let lineage = document_queue::lineage_claim_text(&block.entries, index)?;
+            (lineage != prompt.text.trim()).then(|| prompt.text.clone())
+        })
+        .collect())
+}
+
 /// Completed head texts retained in one queue body. The scheduler uses this
 /// proof to distinguish a head that ran from a transient editor draft that was
 /// replaced before dispatch.

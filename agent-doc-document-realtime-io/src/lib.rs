@@ -7319,6 +7319,17 @@ fn query_embedded_relay(
     Ok(Some(current))
 }
 
+fn peek_embedded_relay(
+    file: &std::path::Path,
+) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
+    if !agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file) {
+        return Ok(None);
+    }
+    let authority = agent_doc_crdt_relay_io::crdt_authority_for_file(file);
+    agent_doc_crdt_relay_io::peek_current_text_for_file_with_authority_nonblocking(file, authority)
+        .map(Some)
+}
+
 fn current_text_status(current: &agent_doc_crdt_relay_io::CurrentText) -> &'static str {
     match current {
         agent_doc_crdt_relay_io::CurrentText::Detached => "detached",
@@ -9111,17 +9122,72 @@ pub fn resolve_disk_current_document_content(
 /// `disk_hash` and never converged, while the guidance said to wait for a
 /// settlement that observation itself kept resetting. A read that claims
 /// authority is not a read (`#retainedsettlereactive`).
-pub fn peek_disk_document_content(file: &std::path::Path, source: &str) -> Result<String> {
+pub fn peek_disk_document(file: &std::path::Path, source: &str) -> Result<CurrentDocument> {
     let content = std::fs::read_to_string(file).with_context(|| {
         format!(
             "{source}: failed to read disk-authoritative document {}",
             file.display()
         )
     })?;
-    Ok(
-        CurrentDocument::new(file.to_path_buf(), reconcile_current_doc(&content, None))
-            .into_content(),
-    )
+    Ok(CurrentDocument::new(
+        file.to_path_buf(),
+        reconcile_current_doc(&content, None),
+    ))
+}
+
+pub fn peek_disk_document_content(file: &std::path::Path, source: &str) -> Result<String> {
+    Ok(peek_disk_document(file, source)?.into_content())
+}
+
+/// Resolve the current editor-or-disk authority without recording an authority
+/// observation, emitting an ops diagnostic, or running controller cleanup.
+/// Stale-effect fences use this so rejecting a transaction is itself a pure
+/// read of durable state.
+pub fn peek_current_document(file: &std::path::Path, source: &str) -> Result<CurrentDocument> {
+    let embedded = peek_embedded_relay(file)?;
+    let current = if embedded
+        .as_ref()
+        .is_some_and(embedded_relay_observation_is_current)
+    {
+        embedded
+    } else {
+        match agent_doc_controller_io::project_controller::peek_current_text_via_controller_model_read_for_doc(
+            file, source,
+        ) {
+            Ok(current) => current.or(embedded),
+            Err(_) if embedded.is_some() => embedded,
+            Err(error) => return Err(error),
+        }
+    };
+    match current {
+        Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. }) => {
+            let disk = peek_disk_document_content(file, source)?;
+            let buffer = BufferState::new(text, true, 0);
+            Ok(CurrentDocument::new(
+                file.to_path_buf(),
+                reconcile_current_doc(&disk, Some(&buffer)),
+            ))
+        }
+        Some(agent_doc_crdt_relay_io::CurrentText::Detached) | None => {
+            peek_disk_document(file, source)
+        }
+        Some(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica) => {
+            anyhow::bail!(
+                "{source}: editor authority is attached but its current replica is missing for {}",
+                file.display()
+            )
+        }
+        Some(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => {
+            anyhow::bail!(
+                "{source}: editor authority is attached but synchronization is pending for {}",
+                file.display()
+            )
+        }
+    }
+}
+
+pub fn peek_current_document_content(file: &std::path::Path, source: &str) -> Result<String> {
+    Ok(peek_current_document(file, source)?.into_content())
 }
 
 pub fn try_resolve_current_document_content(
@@ -10829,6 +10895,57 @@ fn observe_retained_write_settlement(file: &Path, source: &str) -> RetainedWrite
     settlement
 }
 
+/// Build the retained-write verdict without publishing observations, refreshing
+/// controller storage, or applying a settlement receipt. Status-only callers
+/// need the same classification while preserving a byte-for-byte state cut.
+fn observe_retained_write_settlement_read_only(
+    file: &Path,
+    source: &str,
+) -> RetainedWriteSettlement {
+    let scope = agent_doc_state_backbone::DocumentScope::new();
+    let settlement = RetainedWriteSettlement::new_in(&scope);
+
+    let Some(pending) = pending_document_write(file) else {
+        return settlement;
+    };
+    let captured_response = projected_captured_response(file);
+    let payload = captured_response.as_deref().filter(|payload| {
+        agent_doc_turn::response_replay::response_materialized_in_content(
+            payload,
+            &pending.target_content,
+        )
+    });
+    let added_lines = agent_doc_state_backbone::retained_write::intent_added_lines(
+        pending.expected_content.as_deref(),
+        &pending.target_content,
+    );
+    settlement.observe_pending(Some(RetainedIntentFacts {
+        intent_id: pending.intent_id.clone(),
+        target_hash: pending.target_hash.clone(),
+        reason: pending.reason.clone(),
+        source: pending.source.clone(),
+        superseding_stage: superseding_closeout_stage(file, &pending),
+        operator_superseding_hash: None,
+        carries_response_payload: payload.is_some(),
+        carries_content_delta: !added_lines.is_empty(),
+        closeout_committed: agent_doc_cycle_state_io::load_with_closeout_projection(file)
+            .ok()
+            .flatten()
+            .is_some_and(|state| state.phase == agent_doc_turn::CyclePhase::Committed),
+    }));
+    settlement.observe_authority(observe_plane(
+        peek_current_document_content(file, source),
+        payload,
+        &added_lines,
+    ));
+    settlement.observe_disk(observe_plane(
+        peek_disk_document_content(file, source),
+        payload,
+        &added_lines,
+    ));
+    settlement
+}
+
 /// Is the retained intent stranded rather than merely slow?
 ///
 /// True when authority and disk have already converged and the intent still
@@ -11309,6 +11426,20 @@ pub fn retained_write_blocks_session_closeout(file: &Path, source: &str) -> bool
     retained_session_closeout_holder(file, source).is_some()
 }
 
+/// Pure status-only form of [`retained_write_blocks_session_closeout`].
+///
+/// In particular, this does not call the controller's reactive settlement RPC:
+/// that endpoint refreshes the durable projection and may migrate/prune the
+/// state store before returning its verdict.
+pub fn retained_write_blocks_session_closeout_read_only(file: &Path, source: &str) -> bool {
+    let verdict = observe_retained_write_settlement_read_only(file, source).verdict();
+    if select_session_closeout_holder(&verdict, None).is_some() {
+        return true;
+    }
+    let compact = pending_compact_projection_read_only(file);
+    select_session_closeout_holder(&verdict, compact.as_ref()).is_some()
+}
+
 /// The concrete durable holder that keeps a session closeout (and the Codex
 /// auto-queue continuation) from completing, named by the same single read
 /// that decides it blocks (`#sdkretained`).
@@ -11429,6 +11560,19 @@ pub fn pending_compact_projection(
     }
 }
 
+fn pending_compact_projection_read_only(
+    file: &Path,
+) -> Option<agent_doc_state_backbone::DocumentCompactProjectionContinuation> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)?;
+    agent_doc_controller_io::project_controller::document_state_projection_existing(
+        &project_root,
+        file,
+    )
+    .ok()
+    .flatten()
+    .and_then(|projection| projection.document.pending_compact_projection)
+}
+
 fn retained_compact_projection_blocks(
     file: &Path,
     source: &str,
@@ -11464,6 +11608,57 @@ fn retained_compact_projection_blocks(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn logical_state_rows(root: &std::path::Path) -> Vec<String> {
+        let conn = agent_doc_sqlite::state_store::open_state_db(root).unwrap();
+        let tables = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT name FROM sqlite_schema \
+                     WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+                )
+                .unwrap();
+            stmt.query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect::<Vec<_>>()
+        };
+        let mut rows = Vec::new();
+        for table in tables {
+            let quoted_table = format!("\"{}\"", table.replace('"', "\"\""));
+            let columns = {
+                let mut stmt = conn
+                    .prepare(&format!("PRAGMA table_info({quoted_table})"))
+                    .unwrap();
+                stmt.query_map([], |row| row.get::<_, String>(1))
+                    .unwrap()
+                    .map(Result::unwrap)
+                    .collect::<Vec<_>>()
+            };
+            if columns.is_empty() {
+                continue;
+            }
+            let encoded_columns = columns
+                .iter()
+                .map(|column| {
+                    let quoted = format!("\"{}\"", column.replace('"', "\"\""));
+                    format!("typeof({quoted}) || ':' || quote({quoted})")
+                })
+                .collect::<Vec<_>>()
+                .join(" || '|' || ");
+            let mut stmt = conn
+                .prepare(&format!("SELECT {encoded_columns} FROM {quoted_table}"))
+                .unwrap();
+            rows.extend(
+                stmt.query_map([], |row| row.get::<_, String>(0))
+                    .unwrap()
+                    .map(Result::unwrap)
+                    .map(|row| format!("{table}|{row}")),
+            );
+        }
+        rows.sort();
+        rows
+    }
 
     /// `#sdkretained` (haiven-dev `tasks/sdk.md`, 2026-10-12): the durable
     /// write verdict was `Satisfied` while the post-commit compact projection
@@ -14243,6 +14438,50 @@ mod tests {
                 std::thread::sleep(std::time::Duration::from_millis(5));
             }
         })
+    }
+
+    #[test]
+    fn status_only_peek_of_allocated_current_hub_is_logically_pure() {
+        let content = "# Session\n\noperator text\n";
+        let (dir, file, _) = temp_doc(content);
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let identity = "test-status-only-peek";
+        seed_reliable_sync_open(&file, identity);
+        agent_doc_crdt_relay_io::seed_embedded_relay_for_file(&file).unwrap();
+        let document_hash = agent_doc_fs::document_state_hash(&file).unwrap();
+        assert!(agent_doc_crdt_relay_io::hub_is_allocated_for_test(
+            &document_hash
+        ));
+        assert!(agent_doc_crdt_relay_io::crdt_authority_for_file(&file).editor_attached());
+
+        let ops_path = dir.path().join(".agent-doc/logs/ops.log");
+        let before_authority =
+            agent_doc_cycle_state_io::load_latest_document_authority(&file).unwrap();
+        let before_state = logical_state_rows(dir.path());
+        let before_ops = std::fs::read(&ops_path).unwrap_or_default();
+
+        assert_eq!(
+            peek_current_document_content(&file, "test_status_only_embedded_peek").unwrap(),
+            content
+        );
+
+        assert_eq!(
+            agent_doc_cycle_state_io::load_latest_document_authority(&file).unwrap(),
+            before_authority,
+            "status-only embedded peek must not publish an authority observation"
+        );
+        assert_eq!(
+            logical_state_rows(dir.path()),
+            before_state,
+            "status-only embedded peek must not mutate logical state.db rows"
+        );
+        assert_eq!(
+            std::fs::read(&ops_path).unwrap_or_default(),
+            before_ops,
+            "status-only embedded peek must not append diagnostics"
+        );
+
+        seed_reliable_sync_close(&file, identity);
     }
 
     #[test]

@@ -87,6 +87,30 @@ fn run_body(doc: &std::path::Path) -> String {
     content[body_start..end].to_string()
 }
 
+fn ops_log_len(doc: &std::path::Path) -> usize {
+    let ops = doc.parent().unwrap().join(".agent-doc/logs/ops.log");
+    fs::read_to_string(ops).unwrap_or_default().len()
+}
+
+fn wait_for_queue_maintenance(doc: &std::path::Path, previous_ops_len: usize) {
+    let ops = doc.parent().unwrap().join(".agent-doc/logs/ops.log");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        let current = fs::read_to_string(&ops).unwrap_or_default();
+        if current
+            .get(previous_ops_len..)
+            .is_some_and(|appended| appended.contains("queue_maintenance_background_completed"))
+        {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "detached queue maintenance did not complete: {current}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+}
+
 fn assert_ok(output: &std::process::Output, what: &str) {
     assert!(
         output.status.success(),
@@ -159,10 +183,12 @@ fn an_operator_checked_todo_closes_its_queue_row() {
         &todo,
     );
     let path = doc.to_str().unwrap();
+    let previous_ops_len = ops_log_len(&doc);
     assert_ok(
         &run_agent_doc(dir.path(), &["preflight", path]),
         "preflight",
     );
+    wait_for_queue_maintenance(&doc, previous_ops_len);
     assert!(
         run_body(&doc).contains("- ### 📥 do [#pmq]\n"),
         "an open Todo's row is live:\n{}",
@@ -175,13 +201,10 @@ fn an_operator_checked_todo_closes_its_queue_row() {
         .replace("- [ ] [#pmq]", "- [x] [#pmq]")
         .replace("- [ ] [#bk1]", "- [x] [#bk1]");
     fs::write(&doc, &checked).unwrap();
+    let previous_ops_len = ops_log_len(&doc);
     let output = run_agent_doc(dir.path(), &["preflight", path]);
     assert_ok(&output, "preflight after the operator checks");
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("\"do [#pmq]\" source=todo_checked"),
-        "{stderr}"
-    );
+    wait_for_queue_maintenance(&doc, previous_ops_len);
 
     let body = run_body(&doc);
     assert!(
@@ -218,8 +241,10 @@ fn a_checked_todo_sharing_an_open_backlog_id_keeps_the_backlog_row() {
         "- [x] [#bk1] approve the backlog work\n",
     );
     let path = doc.to_str().unwrap();
+    let previous_ops_len = ops_log_len(&doc);
     let output = run_agent_doc(dir.path(), &["preflight", path]);
     assert_ok(&output, "preflight");
+    wait_for_queue_maintenance(&doc, previous_ops_len);
     let body = run_body(&doc);
     assert!(body.contains("- ### 📥 do [#bk1]\n"), "{body}");
     assert!(!body.contains("~~"), "{body}");

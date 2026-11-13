@@ -139,43 +139,66 @@ pub trait QueueCommandEffects {
         &self,
         file: &Path,
         count: usize,
+        apply_guard: &crate::queue_edit_owner::QueueEditGuard,
     ) -> Result<Option<QueueCommandConsumeOutcome>>;
     fn consume_free_text_queue_prompts_with_outcome(
         &self,
         file: &Path,
         count: usize,
+        apply_guard: &crate::queue_edit_owner::QueueEditGuard,
     ) -> Result<Option<QueueCommandConsumeOutcome>>;
-    fn strike_orphan_id_backed_queue_head(&self, file: &Path, id: &str) -> Result<bool>;
-    fn acknowledge_open_id_backed_queue_head(&self, file: &Path, id: &str) -> Result<bool>;
+    fn strike_orphan_id_backed_queue_head(
+        &self,
+        file: &Path,
+        id: &str,
+        apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+    ) -> Result<bool>;
+    fn acknowledge_open_id_backed_queue_head(
+        &self,
+        file: &Path,
+        id: &str,
+        apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+    ) -> Result<bool>;
     fn acknowledge_open_id_backed_queue_head_for_attempt(
         &self,
         file: &Path,
         id: &str,
         attempt: Option<&agent_doc_document::queue_projection::QueueOwnerProjection>,
+        apply_guard: &crate::queue_edit_owner::QueueEditGuard,
     ) -> Result<bool> {
         if attempt.is_some() {
             anyhow::bail!("this queue command effect does not support --ack-id --ack-owner");
         }
-        self.acknowledge_open_id_backed_queue_head(file, id)
+        self.acknowledge_open_id_backed_queue_head(file, id, apply_guard)
     }
     fn acknowledge_paused_free_text_queue_head(
         &self,
         file: &Path,
         expected_head: &str,
+        apply_guard: &crate::queue_edit_owner::QueueEditGuard,
     ) -> Result<Option<QueueCommandConsumeOutcome>>;
     fn acknowledge_paused_free_text_queue_head_with_selector(
         &self,
         file: &Path,
         expected_head: &str,
         selector: Option<&crate::queue_consume::AckTextSelector>,
+        apply_guard: &crate::queue_edit_owner::QueueEditGuard,
     ) -> Result<Option<QueueCommandConsumeOutcome>> {
         if selector.is_some() {
             anyhow::bail!("this queue command effect does not support --ack-text selectors");
         }
-        self.acknowledge_paused_free_text_queue_head(file, expected_head)
+        self.acknowledge_paused_free_text_queue_head(file, expected_head, apply_guard)
     }
-    fn prune_noise_queue_heads(&self, file: &Path) -> Result<usize>;
-    fn converge_captured_answered_free_text_projection(&self, _file: &Path) -> Result<usize> {
+    fn prune_noise_queue_heads(
+        &self,
+        file: &Path,
+        apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+    ) -> Result<usize>;
+    fn converge_captured_answered_free_text_projection(
+        &self,
+        _file: &Path,
+        _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+    ) -> Result<usize> {
         Ok(0)
     }
 
@@ -794,7 +817,18 @@ pub fn record_claim_runtime_projection(
     projection: &ClaimRuntimeProjection,
     cleared_item: Option<&str>,
 ) -> Result<()> {
-    record_claim_runtime_projection_scoped(file, projection, cleared_item, None)
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    record_claim_runtime_projection_under_apply_guard(file, projection, cleared_item, &apply_guard)
+}
+
+#[doc(hidden)]
+pub fn record_claim_runtime_projection_under_apply_guard(
+    file: &Path,
+    projection: &ClaimRuntimeProjection,
+    cleared_item: Option<&str>,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<()> {
+    record_claim_runtime_projection_scoped(file, projection, cleared_item, None, apply_guard)
 }
 
 fn record_claim_runtime_projection_scoped(
@@ -802,7 +836,9 @@ fn record_claim_runtime_projection_scoped(
     projection: &ClaimRuntimeProjection,
     cleared_item: Option<&str>,
     only_identity: Option<&agent_doc_element_queue::QueueItemIdentity>,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
 ) -> Result<()> {
+    apply_guard.ensure_protects(file)?;
     if projection.changed {
         // Keep the recovery baseline aligned with this binary-owned cosmetic
         // mutation. Otherwise a later exchange update can make the unrelated
@@ -871,6 +907,16 @@ pub fn project_claim_runtime_state_with_effects(
     file: &Path,
     cleared_item: Option<&str>,
 ) -> Result<bool> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    project_claim_runtime_state_under_apply_guard(effects, file, cleared_item, &apply_guard)
+}
+
+fn project_claim_runtime_state_under_apply_guard(
+    effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
+    file: &Path,
+    cleared_item: Option<&str>,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<bool> {
     let repair_generation = queue_repair_generation(file)?;
     project_runtime_state_with_effects(
         effects,
@@ -880,6 +926,7 @@ pub fn project_claim_runtime_state_with_effects(
         None,
         CLAIM_RUNTIME_PROJECTION_MAX_ATTEMPTS,
         repair_generation,
+        apply_guard,
     )
 }
 
@@ -894,6 +941,17 @@ pub fn project_claim_item_runtime_state_with_effects(
     item: &str,
     cleared: bool,
 ) -> Result<bool> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    project_claim_item_runtime_state_under_apply_guard(effects, file, item, cleared, &apply_guard)
+}
+
+fn project_claim_item_runtime_state_under_apply_guard(
+    effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
+    file: &Path,
+    item: &str,
+    cleared: bool,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<bool> {
     let identity = agent_doc_queue::queue_claim::claim_identity(item);
     let repair_generation = queue_repair_generation(file)?;
     project_runtime_state_with_effects(
@@ -904,6 +962,7 @@ pub fn project_claim_item_runtime_state_with_effects(
         Some(&identity),
         CLAIM_RUNTIME_PROJECTION_MAX_ATTEMPTS,
         repair_generation,
+        apply_guard,
     )
 }
 
@@ -989,7 +1048,16 @@ pub fn claim_with_runtime_projection(
     agent_doc_queue::queue_claim::ClaimOutcome,
     agent_doc_queue::queue_claim::QueueClaim,
 )> {
-    claim_with_runtime_projection_for_harness(effects, file, item, owner, ttl_secs, None)
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    claim_with_runtime_projection_under_apply_guard(
+        effects,
+        file,
+        item,
+        owner,
+        ttl_secs,
+        None,
+        &apply_guard,
+    )
 }
 
 /// [`claim_with_runtime_projection`] for a worker on `worker_harness`
@@ -1005,6 +1073,31 @@ pub fn claim_with_runtime_projection_for_harness(
     agent_doc_queue::queue_claim::ClaimOutcome,
     agent_doc_queue::queue_claim::QueueClaim,
 )> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    claim_with_runtime_projection_under_apply_guard(
+        effects,
+        file,
+        item,
+        owner,
+        ttl_secs,
+        worker_harness,
+        &apply_guard,
+    )
+}
+
+fn claim_with_runtime_projection_under_apply_guard(
+    effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
+    file: &Path,
+    item: &str,
+    owner: &str,
+    ttl_secs: u64,
+    worker_harness: Option<&str>,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<(
+    agent_doc_queue::queue_claim::ClaimOutcome,
+    agent_doc_queue::queue_claim::QueueClaim,
+)> {
+    apply_guard.ensure_protects(file)?;
     let before = crate::queue_claim::load_ledger(file)?;
     let (outcome, claim) =
         crate::queue_claim::claim_for_worker_harness(file, item, owner, ttl_secs, worker_harness)?;
@@ -1012,9 +1105,14 @@ pub fn claim_with_runtime_projection_for_harness(
         .claims
         .iter()
         .find(|previous| previous.identity == claim.identity);
-    let projection =
-        project_claim_item_runtime_state_with_effects(effects, file, &claim.item_text, false)
-            .and_then(|_| verify_claim_admission_visible(effects, file, &claim));
+    let projection = project_claim_item_runtime_state_under_apply_guard(
+        effects,
+        file,
+        &claim.item_text,
+        false,
+        apply_guard,
+    )
+    .and_then(|_| verify_claim_admission_visible(effects, file, &claim));
     if let Err(projection_error) = projection {
         let rollback = crate::queue_claim::rollback_unstarted_admission(file, &claim, previous);
         // `#waitingitemclaimmarker`: a deterministic blocker terminalizes this
@@ -1029,8 +1127,14 @@ pub fn claim_with_runtime_projection_for_harness(
                 .context("record the refused claim admission in queue lineage")
         });
         let repair = rollback.as_ref().ok().and_then(|_| {
-            project_claim_item_runtime_state_with_effects(effects, file, &claim.item_text, true)
-                .err()
+            project_claim_item_runtime_state_under_apply_guard(
+                effects,
+                file,
+                &claim.item_text,
+                true,
+                apply_guard,
+            )
+            .err()
         });
         return match (rollback, repair) {
             (Ok(()), None) => Err(projection_error).context(
@@ -1058,6 +1162,15 @@ pub fn project_all_queue_runtime_state_with_effects(
     effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
     file: &Path,
 ) -> Result<bool> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    project_all_queue_runtime_state_under_apply_guard(effects, file, &apply_guard)
+}
+
+fn project_all_queue_runtime_state_under_apply_guard(
+    effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
+    file: &Path,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<bool> {
     let repair_generation = queue_repair_generation(file)?;
     project_runtime_state_with_effects(
         effects,
@@ -1067,6 +1180,7 @@ pub fn project_all_queue_runtime_state_with_effects(
         None,
         CLAIM_RUNTIME_PROJECTION_MAX_ATTEMPTS,
         repair_generation,
+        apply_guard,
     )
 }
 
@@ -1084,7 +1198,11 @@ pub fn project_all_queue_runtime_state_once_with_effects(
     effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
     file: &Path,
 ) -> Result<QueueRuntimeProjectionOnceOutcome> {
-    Ok(project_all_queue_runtime_state_once_run_with_effects(effects, file)?.outcome)
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    Ok(
+        project_all_queue_runtime_state_once_run_under_apply_guard(effects, file, &apply_guard)?
+            .outcome,
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1097,9 +1215,21 @@ pub fn project_all_queue_runtime_state_once_run_with_effects(
     effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
     file: &Path,
 ) -> Result<QueueRuntimeProjectionRun> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    project_all_queue_runtime_state_once_run_under_apply_guard(effects, file, &apply_guard)
+}
+
+fn project_all_queue_runtime_state_once_run_under_apply_guard(
+    effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
+    file: &Path,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<QueueRuntimeProjectionRun> {
     let generation = queue_repair_generation(file)?;
-    let outcome = project_all_queue_runtime_state_once_for_generation_with_effects(
-        effects, file, generation,
+    let outcome = project_all_queue_runtime_state_once_for_generation_under_apply_guard(
+        effects,
+        file,
+        generation,
+        apply_guard,
     )?;
     Ok(QueueRuntimeProjectionRun {
         outcome,
@@ -1112,11 +1242,27 @@ pub fn project_all_queue_runtime_state_once_for_generation_with_effects(
     file: &Path,
     generation: u64,
 ) -> Result<QueueRuntimeProjectionOnceOutcome> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    project_all_queue_runtime_state_once_for_generation_under_apply_guard(
+        effects,
+        file,
+        generation,
+        &apply_guard,
+    )
+}
+
+fn project_all_queue_runtime_state_once_for_generation_under_apply_guard(
+    effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
+    file: &Path,
+    generation: u64,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<QueueRuntimeProjectionOnceOutcome> {
     project_queue_runtime_state_once_for_generation_with_effects(
         effects,
         file,
         generation,
         RuntimeProjectionRows::All,
+        apply_guard,
     )
 }
 
@@ -1130,11 +1276,13 @@ pub fn project_background_self_heal_runtime_state_once_for_generation_with_effec
     file: &Path,
     generation: u64,
 ) -> Result<QueueRuntimeProjectionOnceOutcome> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     project_queue_runtime_state_once_for_generation_with_effects(
         effects,
         file,
         generation,
         RuntimeProjectionRows::BackgroundComplete,
+        &apply_guard,
     )
 }
 
@@ -1143,8 +1291,18 @@ fn project_queue_runtime_state_once_for_generation_with_effects(
     file: &Path,
     generation: u64,
     rows: RuntimeProjectionRows,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
 ) -> Result<QueueRuntimeProjectionOnceOutcome> {
-    match project_runtime_state_with_effects(effects, file, None, rows, None, 1, generation) {
+    match project_runtime_state_with_effects(
+        effects,
+        file,
+        None,
+        rows,
+        None,
+        1,
+        generation,
+        apply_guard,
+    ) {
         Ok(changed) => Ok(QueueRuntimeProjectionOnceOutcome::Settled { changed }),
         Err(error)
             if error
@@ -1460,12 +1618,14 @@ pub fn clean_slate_with_effects(
     effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
     file: &Path,
 ) -> Result<QueueCleanSlateOutcome> {
+    let queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let reset =
         agent_doc_controller_io::project_controller::queue_clean_slate_reset_for_file(file)?;
-    let projection = match project_all_queue_runtime_state_once_for_generation_with_effects(
+    let projection = match project_all_queue_runtime_state_once_for_generation_under_apply_guard(
         effects,
         file,
         reset.generation,
+        &queue_edit_guard,
     ) {
         Ok(outcome @ QueueRuntimeProjectionOnceOutcome::Settled { .. }) => {
             if let Some(request) = load_queue_projection_repair_request(file)?
@@ -1527,6 +1687,16 @@ pub fn project_blocker_runtime_state_with_effects(
     effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
     file: &Path,
 ) -> Result<bool> {
+    let apply_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    project_blocker_runtime_state_under_apply_guard(effects, file, &apply_guard)
+}
+
+#[doc(hidden)]
+pub fn project_blocker_runtime_state_under_apply_guard(
+    effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
+    file: &Path,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<bool> {
     let repair_generation = queue_repair_generation(file)?;
     project_runtime_state_with_effects(
         effects,
@@ -1536,9 +1706,11 @@ pub fn project_blocker_runtime_state_with_effects(
         None,
         CLAIM_RUNTIME_PROJECTION_MAX_ATTEMPTS,
         repair_generation,
+        apply_guard,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn project_runtime_state_with_effects(
     effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
     file: &Path,
@@ -1547,7 +1719,9 @@ fn project_runtime_state_with_effects(
     only_identity: Option<&agent_doc_element_queue::QueueItemIdentity>,
     max_attempts: usize,
     repair_generation: u64,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
 ) -> Result<bool> {
+    apply_guard.ensure_protects(file)?;
     let mut wrote_successor = false;
     for attempt in 1..=max_attempts {
         if queue_repair_generation(file)? != repair_generation {
@@ -1686,7 +1860,13 @@ fn project_runtime_state_with_effects(
                 persisted_heads: settled.persisted_heads,
                 changed: wrote_successor,
             };
-            record_claim_runtime_projection_scoped(file, &accepted, cleared_item, only_identity)?;
+            record_claim_runtime_projection_scoped(
+                file,
+                &accepted,
+                cleared_item,
+                only_identity,
+                apply_guard,
+            )?;
             return Ok(wrote_successor);
         }
         let authority_superseded = authoritative != current;
@@ -1747,13 +1927,14 @@ pub fn consume_with_options(
     // preflight queue maintenance and the supervisor idle-watch defer instead of
     // round-tripping a torn intermediate queue. Released on drop (incl. early
     // return / `bail!`).
-    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
+    let queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let target = count.max(1);
     let content = effects.current_document_content(file, "queue_consume_classify")?;
     match classify_active_queue_head(&content)? {
         ActiveQueueHeadKind::None => {}
         ActiveQueueHeadKind::Inactive => {
-            let struck = effects.converge_captured_answered_free_text_projection(file)?;
+            let struck =
+                effects.converge_captured_answered_free_text_projection(file, &queue_edit_guard)?;
             if struck > 0 {
                 println!(
                     "{}: recovered torn inactive queue projection and consumed {} captured-response-proven head(s)",
@@ -1792,9 +1973,9 @@ pub fn consume_with_options(
         ActiveQueueHeadKind::FreeText
     ) {
         if options.force_disk {
-            effects.consume_free_text_queue_prompts_force_disk(file, target)?
+            effects.consume_free_text_queue_prompts_force_disk(file, target, &queue_edit_guard)?
         } else {
-            effects.consume_free_text_queue_prompts_with_outcome(file, target)?
+            effects.consume_free_text_queue_prompts_with_outcome(file, target, &queue_edit_guard)?
         }
     } else {
         None
@@ -1826,8 +2007,9 @@ pub fn consume_with_options(
 /// Delegates to the write-layer striker, which guards against desyncing live
 /// open backlog work and keeps the document and snapshot in sync.
 pub fn consume_orphan_id(effects: &impl QueueCommandEffects, file: &Path, id: &str) -> Result<()> {
+    let queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let normalized = backlog::normalize_pending_id(id);
-    if effects.strike_orphan_id_backed_queue_head(file, id)? {
+    if effects.strike_orphan_id_backed_queue_head(file, id, &queue_edit_guard)? {
         println!(
             "{}: struck orphaned id-backed queue head [#{}] (#orphanqhead).",
             file.display(),
@@ -1849,11 +2031,17 @@ pub fn acknowledge_open_id(
     id: &str,
     attempt: Option<&agent_doc_document::queue_projection::QueueOwnerProjection>,
 ) -> Result<()> {
+    let queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let normalized = backlog::normalize_pending_id(id);
     let acknowledged = if attempt.is_some() {
-        effects.acknowledge_open_id_backed_queue_head_for_attempt(file, id, attempt)?
+        effects.acknowledge_open_id_backed_queue_head_for_attempt(
+            file,
+            id,
+            attempt,
+            &queue_edit_guard,
+        )?
     } else {
-        effects.acknowledge_open_id_backed_queue_head(file, id)?
+        effects.acknowledge_open_id_backed_queue_head(file, id, &queue_edit_guard)?
     };
     if acknowledged {
         println!(
@@ -1877,11 +2065,12 @@ pub fn acknowledge_paused_free_text(
     expected_head: &str,
     selector: Option<&crate::queue_consume::AckTextSelector>,
 ) -> Result<()> {
-    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
+    let queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     match effects.acknowledge_paused_free_text_queue_head_with_selector(
         file,
         expected_head,
         selector,
+        &queue_edit_guard,
     )? {
         Some(outcome) => println!(
             "{}: acknowledged exact free-text queue head (remaining: {}); \
@@ -1901,6 +2090,63 @@ pub fn consume(effects: &impl QueueCommandEffects, file: &Path, count: usize) ->
     consume_with_options(effects, file, count, ConsumeOptions::default())
 }
 
+/// `agent-doc queue prune-duplicates <FILE> [--apply]` — collapse live rows
+/// that are already duplicated inside one queue (`#pruneduplicates`).
+///
+/// Identical work text (binary-owned lifecycle prefixes and `[#owner#generation]`
+/// markers stripped) keeps one row, preferring the row that carries the live
+/// claim marker. Conflicting non-bare projections fail closed because this pure
+/// repair has no durable claim authority. Text-prefix shape alone never
+/// authorizes deletion; `truncated_prefix_line` must explicitly select the
+/// exact live document row before a strict semantic prefix can be removed.
+/// Struck history stays. The default is a dry report; `--apply` writes. The
+/// keeper's claim is not released.
+pub fn prune_duplicates(
+    effects: &impl QueueCommandEffects,
+    file: &Path,
+    apply: bool,
+    truncated_prefix_line: Option<usize>,
+) -> Result<()> {
+    // Same single-writer lease as `prune-noise`: idle-watch and preflight
+    // defer across the authoritative read, plan, and converged write.
+    let _queue_edit_guard = apply.then(|| crate::queue_edit_owner::QueueEditGuard::acquire(file));
+    let content = effects.current_document_content(file, "queue_prune_duplicates")?;
+    let plan = match truncated_prefix_line {
+        Some(line) => {
+            agent_doc_queue::prune_duplicates::plan_with_truncated_prefix_line(&content, line)
+        }
+        None => agent_doc_queue::prune_duplicates::plan(&content),
+    }
+    .with_context(|| format!("{}: queue duplicate prune refused to parse", file.display()))?;
+    if plan.drops.is_empty() || !apply {
+        print!("{}", plan.report(&file.display().to_string(), false));
+        return Ok(());
+    }
+    effects
+        .converge_document_or_disk(file, &plan.document, &content, "queue_prune_duplicates")
+        .context("duplicate prune: failed to write document")?;
+    let base_hash = agent_doc_hash::content_hash(&content);
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_prune_duplicates file={} removed={} base_hash={} source_component=queue operation=prune_duplicates proof={} truncated_prefix_line={}",
+            file.display(),
+            plan.drops.len(),
+            base_hash,
+            if truncated_prefix_line.is_some() {
+                "identical_live_head_or_explicit_truncated_prefix"
+            } else {
+                "identical_live_head"
+            },
+            truncated_prefix_line
+                .map(|line| line.to_string())
+                .unwrap_or_else(|| "none".to_string())
+        ),
+    );
+    print!("{}", plan.report(&file.display().to_string(), true));
+    Ok(())
+}
+
 /// `agent-doc queue prune-noise <FILE>` — strike every non-drainable noise queue
 /// head at any position (`#goqstall2`), clearing pasted console output / agent
 /// response fragments that session-check surfaces as
@@ -1917,8 +2163,8 @@ pub fn consume(effects: &impl QueueCommandEffects, file: &Path, count: usize) ->
 pub fn prune_noise(effects: &impl QueueCommandEffects, file: &Path) -> Result<()> {
     // #sqedit-race Phase 2: hold the queue-edit lease across the prune so the
     // supervisor idle-watch + preflight maintenance defer (single queue writer).
-    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
-    let struck = effects.prune_noise_queue_heads(file)?;
+    let queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let struck = effects.prune_noise_queue_heads(file, &queue_edit_guard)?;
     if struck == 0 {
         println!(
             "{}: no predicate-proven queue heads to prune (queue inactive, empty, or all heads are drainable/live).",
@@ -1945,6 +2191,7 @@ pub fn plan_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
 }
 
 pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Result<()> {
+    let queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let previous_content = agent_doc_snapshot_io::load_document_baseline(file)?;
     let mut content = effects.current_document_content(file, "queue_sync")?;
     // A torn realtime merge can place the binary completion cell underneath
@@ -1981,7 +2228,8 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
     // it only after the repair above has restored the completion cell to
     // exchange; otherwise the recovery path itself is blocked by the corruption
     // it is meant to make recoverable.
-    let answered_count = effects.converge_captured_answered_free_text_projection(file)?;
+    let answered_count =
+        effects.converge_captured_answered_free_text_projection(file, &queue_edit_guard)?;
     if answered_count > 0 {
         content = effects.current_document_content(file, "queue_sync_after_captured_answers")?;
     }
@@ -1993,6 +2241,11 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
     // operator rows, including lookalikes with malformed ids, byte-for-byte.
     let normalized_responses =
         agent_doc_markdown_ast::overlay::normalize_generated_response_lifecycle_markers(&content);
+    let normalized_responses =
+        agent_doc_queue::queue_consume::reconcile_superseded_response_blockers(
+            &normalized_responses,
+        )
+        .unwrap_or(normalized_responses);
     let response_metadata_repaired = normalized_responses != content;
     if response_metadata_repaired {
         effects.converge_document_or_disk(
@@ -2079,7 +2332,8 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
         },
     )?;
 
-    let lifecycle_changed = project_all_queue_runtime_state_with_effects(effects, file)?;
+    let lifecycle_changed =
+        project_all_queue_runtime_state_under_apply_guard(effects, file, &queue_edit_guard)?;
     let reconciled = effects.current_document_content(file, "queue_sync_debt")?;
     let plan =
         build_queue_sync_reconciliation_plan(file, &reconciled, previous_content.as_deref())?;
@@ -2306,14 +2560,14 @@ mod tests {
         assert!(
             !projection
                 .target_content
-                .contains(&format!("- 📥 {parent}\n")),
+                .contains(&format!("- ### 📥 {parent}\n")),
             "{}",
             projection.target_content
         );
         assert!(
             !projection
                 .target_content
-                .contains(&format!("- 🔄 {parent}\n")),
+                .contains(&format!("- ### 🔄 {parent}\n")),
             "{}",
             projection.target_content
         );
@@ -2481,6 +2735,7 @@ mod tests {
             &self,
             file: &Path,
             count: usize,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
         ) -> Result<Option<QueueCommandConsumeOutcome>> {
             Self::strike_free_text_heads(file, count)
         }
@@ -2489,15 +2744,26 @@ mod tests {
             &self,
             file: &Path,
             count: usize,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
         ) -> Result<Option<QueueCommandConsumeOutcome>> {
             Self::strike_free_text_heads(file, count)
         }
 
-        fn strike_orphan_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+        fn strike_orphan_id_backed_queue_head(
+            &self,
+            _file: &Path,
+            _id: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<bool> {
             Ok(true)
         }
 
-        fn acknowledge_open_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+        fn acknowledge_open_id_backed_queue_head(
+            &self,
+            _file: &Path,
+            _id: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<bool> {
             Ok(true)
         }
 
@@ -2505,6 +2771,7 @@ mod tests {
             &self,
             file: &Path,
             expected_head: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
         ) -> Result<Option<QueueCommandConsumeOutcome>> {
             let mut content = std::fs::read_to_string(file)?;
             let needle = format!("- {}", expected_head.trim());
@@ -2522,11 +2789,19 @@ mod tests {
             }))
         }
 
-        fn prune_noise_queue_heads(&self, _file: &Path) -> Result<usize> {
+        fn prune_noise_queue_heads(
+            &self,
+            _file: &Path,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<usize> {
             Ok(0)
         }
 
-        fn converge_captured_answered_free_text_projection(&self, file: &Path) -> Result<usize> {
+        fn converge_captured_answered_free_text_projection(
+            &self,
+            file: &Path,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<usize> {
             if self.reject_scaffold_during_capture.get() {
                 let content = self
                     .current
@@ -2541,10 +2816,43 @@ mod tests {
         }
     }
 
+    #[test]
+    fn direct_queue_mutations_defer_while_an_apply_guard_is_active() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "- do [#alpha]\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#alpha] alpha\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        let effects = FakeEffects::with_current(content);
+        let active = crate::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+
+        for error in [
+            sync_with_effects(&effects, &doc).unwrap_err(),
+            clean_slate_with_effects(&effects, &doc).unwrap_err(),
+            consume_orphan_id(&effects, &doc, "alpha").unwrap_err(),
+            acknowledge_open_id(&effects, &doc, "alpha", None).unwrap_err(),
+        ] {
+            assert!(
+                error.to_string().contains("queue mutation deferred"),
+                "{error:#}"
+            );
+        }
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+
+        drop(active);
+        sync_with_effects(&effects, &doc).unwrap();
+    }
+
     struct RacingClaimEffects {
         current: Mutex<String>,
         discarded_convergences: AtomicUsize,
-        first_convergence_round: Barrier,
     }
 
     impl RacingClaimEffects {
@@ -2552,7 +2860,6 @@ mod tests {
             Self {
                 current: Mutex::new(current),
                 discarded_convergences: AtomicUsize::new(0),
-                first_convergence_round: Barrier::new(2),
             }
         }
 
@@ -2575,9 +2882,10 @@ mod tests {
         ) -> Result<()> {
             let ordinal = self.discarded_convergences.fetch_add(1, Ordering::SeqCst);
             if ordinal < 2 {
-                // Model two concurrent cell merges choosing the editor's
-                // normalized text instead of either marker successor.
-                self.first_convergence_round.wait();
+                // Model two editor-normalization merges choosing the live
+                // normalized text instead of either marker successor. Apply
+                // exclusion serializes the two public projector calls, while
+                // each still has to re-observe the normalized authority cut.
                 return Ok(());
             }
             *self.current.lock().unwrap() = target_content.to_string();
@@ -2607,6 +2915,7 @@ mod tests {
             &self,
             _file: &Path,
             _count: usize,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
         ) -> Result<Option<QueueCommandConsumeOutcome>> {
             Ok(None)
         }
@@ -2615,15 +2924,26 @@ mod tests {
             &self,
             _file: &Path,
             _count: usize,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
         ) -> Result<Option<QueueCommandConsumeOutcome>> {
             Ok(None)
         }
 
-        fn strike_orphan_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+        fn strike_orphan_id_backed_queue_head(
+            &self,
+            _file: &Path,
+            _id: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<bool> {
             Ok(false)
         }
 
-        fn acknowledge_open_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+        fn acknowledge_open_id_backed_queue_head(
+            &self,
+            _file: &Path,
+            _id: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<bool> {
             Ok(false)
         }
 
@@ -2631,11 +2951,16 @@ mod tests {
             &self,
             _file: &Path,
             _expected_head: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
         ) -> Result<Option<QueueCommandConsumeOutcome>> {
             Ok(None)
         }
 
-        fn prune_noise_queue_heads(&self, _file: &Path) -> Result<usize> {
+        fn prune_noise_queue_heads(
+            &self,
+            _file: &Path,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<usize> {
             Ok(0)
         }
     }
@@ -2713,6 +3038,54 @@ mod tests {
 
         sync_with_effects(&effects, &doc).expect("the waiting repair should be idempotent");
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), repaired);
+    }
+
+    #[test]
+    fn sync_reconciles_a_historical_blocker_after_its_prompt_tree_completes() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("s.md");
+        let blocked = "BLOCKED independent review of the opened pull request base=fbdb13a5352c56e182f3e01789370591ad30e64a head=f4488e840f6fb51a3c585eda5effc80b9eec111c cycles=0";
+        let content = format!(
+            concat!(
+                "<!-- agent:queue keep -->\n",
+                "- ~~Review PR405 and keep the prompt tree live until complete.~~\n",
+                "  - **Response [#r-d5d5a6a6b7b7]**\n",
+                "    - **Timestamp:** 2026-11-12T04:00:00.000Z\n",
+                "    - **Summary:** {blocked}\n",
+                "    - **State:** Waiting on operator input.\n",
+                "    - **Guidance:** The row stopped. Keep this tree until the blocker in the summary is cleared.\n",
+                "  - ~~complete the independent review~~\n",
+                "    - **Response [#r-e6e6b7b7c8c8]**\n",
+                "      - **Timestamp:** 2026-11-12T05:00:00.000Z\n",
+                "      - **Summary:** REVIEW-CLEAN merged at 24bb90b into c11668a\n",
+                "      - **State:** Complete.\n",
+                "      - **Guidance:** This row is complete.\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            blocked = blocked,
+        );
+        std::fs::write(&doc, &content).unwrap();
+        let effects = FakeEffects::with_current(&content);
+
+        sync_with_effects(&effects, &doc)
+            .expect("queue sync should reconcile stale binary-owned response metadata");
+
+        let reconciled = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            reconciled.contains(&format!("**Summary:** {blocked}")),
+            "historical receipt must remain verbatim:\n{reconciled}"
+        );
+        assert_eq!(reconciled.matches("**State:** Complete.").count(), 2);
+        assert!(
+            reconciled.contains(
+                "Historical blocker resolved by the owning prompt tree is durably complete"
+            ),
+            "{reconciled}"
+        );
+
+        sync_with_effects(&effects, &doc).expect("response reconciliation must be idempotent");
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), reconciled);
     }
 
     #[test]
@@ -4224,7 +4597,15 @@ mod tests {
                 claimed.wait();
                 crate::queue_claim::start_attempt(&doc, item, owner, worker_id, 600, 1).unwrap();
                 started.wait();
-                project_claim_runtime_state_with_effects(effects.as_ref(), &doc, None).unwrap();
+                loop {
+                    match project_claim_runtime_state_with_effects(effects.as_ref(), &doc, None) {
+                        Ok(_) => break,
+                        Err(error) if error.to_string().contains("queue mutation deferred") => {
+                            std::thread::yield_now();
+                        }
+                        Err(error) => panic!("runtime projection failed: {error:#}"),
+                    }
+                }
             }));
         }
         for worker in workers {
@@ -6149,5 +6530,238 @@ mod waiting_item_claim_projection_tests {
             1,
             "only `retry_crdt_merge` refusals earn a retry"
         );
+    }
+
+    #[test]
+    fn public_runtime_projection_and_claim_mutators_defer_under_apply_contention() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &waiting_doc());
+        let effects = DiskEffects::default();
+        let guard = crate::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+
+        let errors = vec![
+            project_claim_runtime_state_with_effects(&effects, &doc, None)
+                .unwrap_err()
+                .to_string(),
+            project_claim_item_runtime_state_with_effects(&effects, &doc, "#answered", false)
+                .unwrap_err()
+                .to_string(),
+            claim_with_runtime_projection(&effects, &doc, "#answered", "subagent:w", 600)
+                .unwrap_err()
+                .to_string(),
+            project_all_queue_runtime_state_with_effects(&effects, &doc)
+                .unwrap_err()
+                .to_string(),
+            project_blocker_runtime_state_with_effects(&effects, &doc)
+                .unwrap_err()
+                .to_string(),
+        ];
+
+        assert!(
+            errors
+                .iter()
+                .all(|error| error.contains("queue mutation deferred")),
+            "all public mutation wrappers must fail closed under contention: {errors:?}"
+        );
+        drop(guard);
+    }
+}
+
+#[cfg(test)]
+mod prune_duplicates_cmd_tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::path::Path;
+
+    struct Mem {
+        content: std::cell::RefCell<String>,
+        writes: Cell<usize>,
+        expect_lease: Cell<bool>,
+    }
+
+    impl QueueCommandEffects for Mem {
+        fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            if self.expect_lease.get() {
+                assert!(
+                    crate::queue_edit_owner::read_queue_edit_owner_lease(&file.to_string_lossy())
+                        .is_some(),
+                    "apply must hold the queue-edit lease during its authority read"
+                );
+            }
+            Ok(self.content.borrow().clone())
+        }
+
+        fn converge_document_or_disk(
+            &self,
+            file: &Path,
+            target_content: &str,
+            source_content: &str,
+            _reason: &str,
+        ) -> Result<()> {
+            if self.expect_lease.get() {
+                assert!(
+                    crate::queue_edit_owner::read_queue_edit_owner_lease(&file.to_string_lossy())
+                        .is_some(),
+                    "apply must hold the queue-edit lease through convergence"
+                );
+            }
+            assert_eq!(source_content, self.content.borrow().as_str());
+            *self.content.borrow_mut() = target_content.to_string();
+            self.writes.set(self.writes.get() + 1);
+            Ok(())
+        }
+
+        fn consume_free_text_queue_prompts_force_disk(
+            &self,
+            _file: &Path,
+            _count: usize,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<Option<QueueCommandConsumeOutcome>> {
+            Ok(None)
+        }
+
+        fn consume_free_text_queue_prompts_with_outcome(
+            &self,
+            _file: &Path,
+            _count: usize,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<Option<QueueCommandConsumeOutcome>> {
+            Ok(None)
+        }
+
+        fn strike_orphan_id_backed_queue_head(
+            &self,
+            _file: &Path,
+            _id: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<bool> {
+            Ok(false)
+        }
+
+        fn acknowledge_open_id_backed_queue_head(
+            &self,
+            _file: &Path,
+            _id: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<bool> {
+            Ok(false)
+        }
+
+        fn acknowledge_paused_free_text_queue_head(
+            &self,
+            _file: &Path,
+            _expected_head: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<Option<QueueCommandConsumeOutcome>> {
+            Ok(None)
+        }
+
+        fn prune_noise_queue_heads(
+            &self,
+            _file: &Path,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<usize> {
+            Ok(0)
+        }
+    }
+
+    #[test]
+    fn prune_duplicates_dry_run_writes_nothing_and_apply_keeps_the_claim() {
+        let source = "\
+<!-- agent:run id=\"main\" -->
+- 🚧 [#subagent:shell#1] If the claiming tmux pane for a document is in shell, start agent-doc.
+- If the claiming
+- 🚧 [#subagent:shell#1] If the claiming tmux pane for a document is in shell, start agent-doc.
+<!-- /agent:run -->
+";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, source).unwrap();
+        let effects = Mem {
+            content: std::cell::RefCell::new(source.to_string()),
+            writes: Cell::new(0),
+            expect_lease: Cell::new(false),
+        };
+        prune_duplicates(&effects, &file, false, Some(3)).unwrap();
+        assert_eq!(effects.writes.get(), 0);
+        assert_eq!(effects.content.borrow().as_str(), source);
+        effects.expect_lease.set(true);
+        prune_duplicates(&effects, &file, true, Some(3)).unwrap();
+        assert!(
+            crate::queue_edit_owner::read_queue_edit_owner_lease(&file.to_string_lossy()).is_none(),
+            "apply must release the queue-edit lease after convergence"
+        );
+        assert_eq!(effects.writes.get(), 1);
+        let written = effects.content.borrow().clone();
+        assert!(written.contains("[#subagent:shell#1]"));
+        assert!(!written.contains("- If the claiming\n"));
+        assert_eq!(written.matches("[#subagent:shell#1]").count(), 1);
+        prune_duplicates(&effects, &file, true, Some(3)).unwrap();
+        assert_eq!(effects.writes.get(), 1, "a second apply is a no-op");
+        assert_eq!(effects.content.borrow().as_str(), written);
+    }
+
+    #[test]
+    fn prune_duplicates_dry_run_and_apply_fail_closed_on_conflicting_attempts() {
+        let source = "\
+<!-- agent:run id=\"main\" -->
+- 🚧 [#subagent:old#1] Run the independently reviewed queue repair.
+- ☑️ [#subagent:current#2] Run the independently reviewed queue repair.
+<!-- /agent:run -->
+";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, source).unwrap();
+        let effects = Mem {
+            content: std::cell::RefCell::new(source.to_string()),
+            writes: Cell::new(0),
+            expect_lease: Cell::new(false),
+        };
+
+        prune_duplicates(&effects, &file, false, None).unwrap();
+        assert_eq!(effects.writes.get(), 0);
+        assert_eq!(effects.content.borrow().as_str(), source);
+
+        effects.expect_lease.set(true);
+        prune_duplicates(&effects, &file, true, None).unwrap();
+        assert_eq!(effects.writes.get(), 0);
+        assert_eq!(effects.content.borrow().as_str(), source);
+        assert!(
+            crate::queue_edit_owner::read_queue_edit_owner_lease(&file.to_string_lossy()).is_none(),
+            "no-op apply must release the queue-edit lease"
+        );
+    }
+
+    #[test]
+    fn prune_duplicates_requires_an_exact_line_before_removing_a_semantic_prefix() {
+        let source = "\
+<!-- agent:run id=\"main\" -->
+- 📥 Run queue tests
+- Run queue tests before publishing the release
+<!-- /agent:run -->
+";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, source).unwrap();
+        let effects = Mem {
+            content: std::cell::RefCell::new(source.to_string()),
+            writes: Cell::new(0),
+            expect_lease: Cell::new(false),
+        };
+
+        prune_duplicates(&effects, &file, false, None).unwrap();
+        prune_duplicates(&effects, &file, true, None).unwrap();
+        assert_eq!(effects.writes.get(), 0);
+        assert_eq!(effects.content.borrow().as_str(), source);
+
+        effects.expect_lease.set(true);
+        prune_duplicates(&effects, &file, true, Some(2)).unwrap();
+        assert_eq!(effects.writes.get(), 1);
+        let written = effects.content.borrow();
+        assert!(!written.contains("- 📥 Run queue tests\n"));
+        assert!(written.contains("- Run queue tests before publishing the release\n"));
     }
 }

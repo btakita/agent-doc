@@ -237,6 +237,19 @@ fn enforce_selected_queue_response_contract(
             agent_doc_queue::queue_response::QUEUE_PROMPT_DEFERRAL_MARKER
         );
     }
+    // `#closepressure`: an exact echo is evidence the head was addressed, not
+    // evidence a required pull request was created. Fail before capture so the
+    // turn cannot close on a citation of a pull request that already existed.
+    let missing_pull_request =
+        agent_doc_queue::queue_closeout_guard::echoed_heads_missing_created_pull_request(
+            current, response,
+        )?;
+    if !missing_pull_request.is_empty() {
+        anyhow::bail!(
+            "[finalize] pre-write gate: the task requires a pull request and this response does not show one was created (#closepressure): {}. Create the pull request and include its URL as the effect this turn opened. Citing a pull request that already existed does not complete the task. Writing that the leaf is answered and safe to delete does not complete it either (#promptpressure). A real blocker is only the review structure (`<!-- agent-doc:prompt-blocker -->` with the incomplete work, **Complete by:**, and **Prompt:**). No response has been captured.",
+            missing_pull_request.join("; ")
+        );
+    }
     Ok(())
 }
 
@@ -422,7 +435,11 @@ fn clear_replayed_editor_ops_after_write(file: &Path, replayed: bool, source: &s
     }
 }
 
-fn recover_empty_response_if_configured(file: &Path, flags: &WriteFlags) -> Result<bool> {
+fn recover_empty_response_if_configured(
+    file: &Path,
+    flags: &WriteFlags,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<bool> {
     if let Some(recover) = flags.empty_response_recovery {
         recover(
             file,
@@ -430,6 +447,7 @@ fn recover_empty_response_if_configured(file: &Path, flags: &WriteFlags) -> Resu
             flags.has_pending_mutation || flags.retained_tracked_work_landed,
             flags.force_disk,
             flags.commit_requested,
+            apply_guard,
         )
     } else {
         Ok(false)
@@ -855,7 +873,12 @@ pub(crate) fn refuse_unlandable_response_before_capture(file: &Path, response: &
     )
 }
 
-pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()> {
+pub(crate) fn run(
+    file: &Path,
+    baseline: Option<&str>,
+    flags: WriteFlags,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -865,7 +888,7 @@ pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Res
     let response = read_response_input_for_closeout(flags.strict_closeout)?;
 
     if response.trim().is_empty() {
-        if recover_empty_response_if_configured(file, &flags)? {
+        if recover_empty_response_if_configured(file, &flags, apply_guard)? {
             return Ok(());
         }
         anyhow::bail!(EMPTY_RESPONSE_ERROR);
@@ -1081,6 +1104,7 @@ pub(crate) fn run_template(
     baseline: Option<&str>,
     origin: Option<&str>,
     flags: WriteFlags,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -1092,7 +1116,7 @@ pub(crate) fn run_template(
     let mut response = read_response_input_for_closeout(flags.strict_closeout)?;
 
     if response.trim().is_empty() {
-        if recover_empty_response_if_configured(file, &flags)? {
+        if recover_empty_response_if_configured(file, &flags, apply_guard)? {
             return Ok(());
         }
         anyhow::bail!(EMPTY_RESPONSE_ERROR);
@@ -1473,6 +1497,7 @@ pub(crate) fn run_stream(
     force_disk: bool,
     origin: Option<&str>,
     flags: WriteFlags,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> Result<()> {
     let t_total = std::time::Instant::now();
 
@@ -1489,7 +1514,7 @@ pub(crate) fn run_stream(
     let mut response = read_response_input_for_closeout(flags.strict_closeout)?;
 
     if response.trim().is_empty() {
-        if recover_empty_response_if_configured(file, &flags)? {
+        if recover_empty_response_if_configured(file, &flags, apply_guard)? {
             return Ok(());
         }
         anyhow::bail!(EMPTY_RESPONSE_ERROR);
@@ -2236,10 +2261,11 @@ pub(crate) fn run_stream(
         )?
     };
     if let Some(plan) = integrated_queue_plan.as_ref() {
-        queue_consume::record_queue_consumption_proofs(
+        queue_consume::record_queue_consumption_proofs_under_apply_guard(
             file,
             plan,
             QueueConsumptionProofStage::BeforeMutation,
+            apply_guard,
         )?;
         final_content = plan.new_document.clone();
         snapshot_content = plan.new_snapshot.clone();
@@ -2293,10 +2319,11 @@ pub(crate) fn run_stream(
         }
     }
     if let Some(plan) = integrated_queue_plan.as_ref() {
-        queue_consume::record_queue_consumption_proofs(
+        queue_consume::record_queue_consumption_proofs_under_apply_guard(
             file,
             plan,
             QueueConsumptionProofStage::AfterMutation,
+            apply_guard,
         )?;
         if plan.consumed_texts.len() == 1 {
             eprintln!(
@@ -2488,14 +2515,19 @@ fn capture_closeout_mutation_plan_before_authority_resolution(
 
 /// Explicit editor mode: deliver through the registered Lazily replica.
 /// Fails closed when no PID-scoped endpoint accepts the retained intent.
-pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()> {
+pub(crate) fn run_ipc(
+    file: &Path,
+    baseline: Option<&str>,
+    flags: WriteFlags,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
     let mut response = read_response_input_for_closeout(flags.strict_closeout)?;
 
     if response.trim().is_empty() {
-        if recover_empty_response_if_configured(file, &flags)? {
+        if recover_empty_response_if_configured(file, &flags, apply_guard)? {
             return Ok(());
         }
         anyhow::bail!(EMPTY_RESPONSE_ERROR);
@@ -3584,6 +3616,59 @@ mod tests {
             &flags,
         )
         .expect("a claimed head is owned by its worker, not by this cycle");
+    }
+
+    /// `#closepressure`: an exact queue-prompt echo of a setup head is not
+    /// completion when the answer only cites a pull request that already
+    /// existed. The turn fails before capture. A creation receipt and a
+    /// stated deferral still close.
+    #[test]
+    fn closepressure_refuses_a_setup_head_closed_on_an_existing_pull_request() {
+        let head = "haiven-sdk: Setup Release Please workflow to merge sdk-dev into main [#q-bac390dcf354]";
+        let current = format!("<!-- agent:queue go -->\n- 📥 {head}\n<!-- /agent:queue -->\n");
+        let flags = WriteFlags {
+            strict_closeout: true,
+            require_recap: false,
+            commit_requested: true,
+            ..Default::default()
+        };
+        let cited = format!(
+            "### Re: setup — codex\n\n> **Queue prompt:**\n> {head}\n\nThe setup pull request is the merged https://github.com/haiven-dev/haiven-sdk/pull/228. It is off the open list. The promotion that workflow opened is https://github.com/haiven-dev/haiven-sdk/pull/227, and that pull stays OPEN and CONFLICTING. This leaf is answered and is safe to delete.\n"
+        );
+        let error = enforce_selected_queue_response_contract(
+            None,
+            Some(&current),
+            &current,
+            &cited,
+            &flags,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("#closepressure"), "{error}");
+        assert!(error.contains("No response has been captured"), "{error}");
+        assert!(error.contains(head), "{error}");
+
+        let opened = format!(
+            "### Re: setup — codex\n\n> **Queue prompt:**\n> {head}\n\nOpened https://github.com/haiven-dev/haiven-sdk/pull/229\n"
+        );
+        enforce_selected_queue_response_contract(None, Some(&current), &current, &opened, &flags)
+            .expect("a pull request this turn opened completes the setup head");
+
+        let deferred = format!(
+            "### Re: setup — codex\n\n> **Queue prompt:**\n> {head}\n\n**Deferred:** the credentials for opening the pull request are absent.\n"
+        );
+        enforce_selected_queue_response_contract(None, Some(&current), &current, &deferred, &flags)
+            .expect("a stated deferral keeps the head queued without failing close");
+
+        let ordinary = "<!-- agent:queue go -->\n- Fix the widget export\n<!-- /agent:queue -->\n";
+        enforce_selected_queue_response_contract(
+            None,
+            Some(ordinary),
+            ordinary,
+            "> **Queue prompt:** Fix the widget export\n\nFinished the widget.\n",
+            &flags,
+        )
+        .expect("an ordinary echoed head still closes");
     }
 
     #[test]

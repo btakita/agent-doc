@@ -753,10 +753,10 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
         &self,
         file: &Path,
     ) -> anyhow::Result<agent_doc_turn::repair::RepairOutcome> {
-        agent_doc_repair_io::repair_stale_preflight_started_cycle(
-            &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-            file,
-        )
+        let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+        let effects =
+            agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &apply_guard)?;
+        agent_doc_repair_io::repair_stale_preflight_started_cycle(&effects, file)
     }
 
     fn save_pending(&self, file: &Path, response: &str) -> anyhow::Result<()> {
@@ -772,7 +772,7 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
         &self,
         file: &Path,
     ) -> anyhow::Result<agent_doc_sync_io::SyncSessionCheckStatus> {
-        match agent_doc_session_check_io::inspect(
+        match agent_doc_session_check_io::inspect_read_only(
             file,
             &agent_doc_closeout_runtime_io::session_check_effects(),
         )? {
@@ -979,7 +979,7 @@ impl agent_doc_workflow_io::doctor::WorkflowDoctorEffects for CliWorkflowDoctorE
         &mut self,
         file: &Path,
     ) -> anyhow::Result<Option<agent_doc_workflow_io::doctor::LiveSessionCheckFacts>> {
-        let report = agent_doc_session_check_io::inspect_with_warnings(
+        let report = agent_doc_session_check_io::inspect_read_only_with_warnings(
             file,
             &agent_doc_closeout_runtime_io::session_check_effects(),
         )?;
@@ -1692,12 +1692,14 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffec
         &self,
         file: &Path,
         count: usize,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
-        agent_doc_queue_io::queue_consume::consume_free_text_queue_prompts_with_outcome(
+        agent_doc_queue_io::queue_consume::consume_free_text_queue_prompts_under_apply_guard(
             file,
             count,
             true,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
         .map(|outcome| outcome.map(queue_command_consume_outcome))
     }
@@ -1706,29 +1708,44 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffec
         &self,
         file: &Path,
         count: usize,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
-        agent_doc_queue_io::queue_consume::consume_free_text_queue_prompts_with_outcome(
+        agent_doc_queue_io::queue_consume::consume_free_text_queue_prompts_under_apply_guard(
             file,
             count,
             false,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
         .map(|outcome| outcome.map(queue_command_consume_outcome))
     }
 
-    fn strike_orphan_id_backed_queue_head(&self, file: &Path, id: &str) -> anyhow::Result<bool> {
-        agent_doc_queue_io::queue_consume::strike_orphan_id_backed_queue_head(
+    fn strike_orphan_id_backed_queue_head(
+        &self,
+        file: &Path,
+        id: &str,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> anyhow::Result<bool> {
+        agent_doc_queue_io::queue_consume::strike_orphan_id_backed_queue_head_under_apply_guard(
             file,
             id,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
     }
 
-    fn acknowledge_open_id_backed_queue_head(&self, file: &Path, id: &str) -> anyhow::Result<bool> {
-        agent_doc_queue_io::queue_consume::acknowledge_open_id_backed_queue_head(
+    fn acknowledge_open_id_backed_queue_head(
+        &self,
+        file: &Path,
+        id: &str,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> anyhow::Result<bool> {
+        agent_doc_queue_io::queue_consume::acknowledge_open_id_backed_queue_head_under_apply_guard(
             file,
             id,
+            None,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
     }
 
@@ -1737,12 +1754,14 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffec
         file: &Path,
         id: &str,
         attempt: Option<&agent_doc_document::queue_projection::QueueOwnerProjection>,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> anyhow::Result<bool> {
-        agent_doc_queue_io::queue_consume::acknowledge_open_id_backed_queue_head_for_attempt(
+        agent_doc_queue_io::queue_consume::acknowledge_open_id_backed_queue_head_under_apply_guard(
             file,
             id,
             attempt,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
     }
 
@@ -1750,11 +1769,14 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffec
         &self,
         file: &Path,
         expected_head: &str,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
-        agent_doc_queue_io::queue_consume::acknowledge_paused_free_text_queue_head_with_outcome(
+        agent_doc_queue_io::queue_consume::acknowledge_paused_free_text_queue_head_under_apply_guard(
             file,
             expected_head,
+            None,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
         .map(|outcome| outcome.map(queue_command_consume_outcome))
     }
@@ -1764,30 +1786,39 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffec
         file: &Path,
         expected_head: &str,
         selector: Option<&agent_doc_queue_io::queue_consume::AckTextSelector>,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
-        agent_doc_queue_io::queue_consume::acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
+        agent_doc_queue_io::queue_consume::acknowledge_paused_free_text_queue_head_under_apply_guard(
             file,
             expected_head,
             selector,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
         .map(|outcome| outcome.map(queue_command_consume_outcome))
     }
 
-    fn prune_noise_queue_heads(&self, file: &Path) -> anyhow::Result<usize> {
-        agent_doc_queue_io::queue_consume::prune_noise_queue_heads(
+    fn prune_noise_queue_heads(
+        &self,
+        file: &Path,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> anyhow::Result<usize> {
+        agent_doc_queue_io::queue_consume::prune_noise_queue_heads_under_apply_guard(
             file,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
     }
 
     fn converge_captured_answered_free_text_projection(
         &self,
         file: &Path,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> anyhow::Result<usize> {
-        agent_doc_queue_io::queue_consume::converge_captured_answered_free_text_projection(
+        agent_doc_queue_io::queue_consume::converge_captured_answered_free_text_projection_under_apply_guard(
             file,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
     }
 }
@@ -3368,6 +3399,18 @@ enum Commands {
         /// (`#preflight-probe-side-effect-free`).
         #[arg(long)]
         probe: bool,
+        /// Internal detached effect: run comprehensive queue reconciliation
+        /// after the admission process has returned its bounded read model.
+        #[arg(long, hide = true, conflicts_with = "probe")]
+        queue_maintenance_only: bool,
+        /// Internal detached-effect commit policy for a no-changes admission.
+        #[arg(
+            long,
+            hide = true,
+            requires = "queue_maintenance_only",
+            conflicts_with = "probe"
+        )]
+        commit_queue_maintenance: bool,
     },
     /// Diagnose workflow invariant status for a session document
     ///
@@ -5645,9 +5688,11 @@ enum QueueAction {
         /// Extend the TTL of an already-started claim `--owner` holds on
         /// `--item` (a heartbeat for a long-running worker). With the exact
         /// `--generation` it also revives that attempt if it expired with its
-        /// worker still bound, including a harness `queue freeze` whose worker
-        /// resumed through its transcript. It does not revive an explicit
-        /// `queue release --requeue`. Refuses, without creating or promoting a
+        /// worker still bound and no worker stop was recorded. A low-level
+        /// frozen entry may accept proof before recovery, but the public
+        /// `queue freeze` command immediately directs a fresh generation. It
+        /// does not revive an explicit `queue release --requeue` or a recovered
+        /// harness stop. Refuses, without creating or promoting a
         /// claim, when the item is unclaimed, unstarted, otherwise expired, or
         /// another owner holds it. Also adopts the claim into the calling
         /// harness session after the coordinator `/clear`ed.
@@ -5738,14 +5783,12 @@ enum QueueAction {
     /// (`#subagentworkpool`), e.g. a harness reporting that the worker ended
     /// without a result. A notice that a worker is waiting on its own
     /// background work is proof of life: run `queue claim --refresh` for that,
-    /// never this. The worker's work-pool slot is freed so the coordinator
-    /// refills it now; its claim, generation, and worker binding are kept, so
-    /// a later report from the same worker is still accepted and `queue claim
-    /// --refresh` with the exact owner and generation clears the freeze,
-    /// including after the claim TTL. Expiry does not turn that frozen attempt
-    /// into lost or make its head eligible for dispatch. An attempt that
-    /// expired with its worker bound may be frozen too. Prints the pool refill
-    /// (next heads' claim / brief / start commands).
+    /// never this. The worker's work-pool slot is freed and failed-continue
+    /// recovery runs immediately. Prints the authoritative pool refill; when
+    /// it offers the same item, follow its exact claim / brief / start commands
+    /// to create a fresh generation. Do not rebind the stopped generation with
+    /// an old `queue start` command. An attempt that expired with its worker
+    /// bound may be frozen too.
     #[command(after_help = agent_doc_frontmatter::frontmatter::queue_marker_legend_help())]
     Freeze {
         /// Path to the session document
@@ -6231,6 +6274,27 @@ enum QueueAction {
     PruneNoise {
         /// Path to the session document
         file: PathBuf,
+    },
+    /// Remove live queue rows that are already duplicated (`#pruneduplicates`).
+    ///
+    /// Collapses live rows in one queue whose work text is identical after
+    /// binary-owned markers (`[#subagent:…]`, lifecycle prefixes) are stripped,
+    /// keeping the row that carries the live claim. A semantic prefix is kept
+    /// unless `--truncated-prefix-line` explicitly selects its exact document
+    /// row; text-prefix shape alone is never deletion authority. Struck history
+    /// stays. Identical directive heads that `prune-noise` keeps are in scope
+    /// here. Dry run unless `--apply`. Does not release a claim.
+    #[command(name = "prune-duplicates")]
+    PruneDuplicates {
+        /// Path to the session document
+        file: PathBuf,
+        /// Remove the duplicate rows (default: report only)
+        #[arg(long)]
+        apply: bool,
+        /// One-based document line of a live row explicitly identified as a
+        /// truncated prefix. Only that row may be prefix-pruned.
+        #[arg(long, value_name = "N")]
+        truncated_prefix_line: Option<std::num::NonZeroUsize>,
     },
 }
 
@@ -7115,7 +7179,10 @@ fn write_terminal_error_report(writer: &mut impl Write, report: &str) -> std::io
 /// - every turn stage re-checks before it writes
 ///   (`recycle_stale_supervisor_for_turn_stage`).
 fn command_entry_supervisor_probe_applies(command: &Commands) -> bool {
-    !matches!(command, Commands::Tmux { .. })
+    !matches!(
+        command,
+        Commands::Tmux { .. } | Commands::SessionCheck { .. }
+    )
 }
 
 fn try_main() -> anyhow::Result<()> {
@@ -7683,10 +7750,7 @@ fn try_main() -> anyhow::Result<()> {
         }
         Commands::Dedupe { file } => dedupe_cmd::run(&file),
         Commands::Cancel { file } => {
-            match agent_doc_repair_io::cancel_preflight_cycle(
-                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-                &file,
-            )? {
+            match agent_doc_repair_command_io::cancel_preflight_cycle(&file)? {
                 agent_doc_turn::repair::CancelOutcome::Abandoned => {
                     println!(
                         "[cancel] abandoned orphaned preflight_started cycle; next dispatch starts fresh"
@@ -8365,10 +8429,7 @@ fn try_main() -> anyhow::Result<()> {
             }
             if apply_recovery {
                 use agent_doc_flow_io::closeout::RecoveryApplication;
-                match agent_doc_flow_io::closeout::apply_closeout_recovery(
-                    &file,
-                    &agent_doc_closeout_runtime_io::closeout_effects(),
-                )? {
+                match agent_doc_closeout_runtime_io::apply_closeout_recovery(&file)? {
                     RecoveryApplication::NothingToDo => {
                         eprintln!("[repair] {} is clean — no recovery needed", file.display());
                     }
@@ -8401,13 +8462,27 @@ fn try_main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Commands::Preflight { file, probe } => agent_doc_preflight_command_io::run_with_options(
-            &file,
-            agent_doc_preflight_command_io::PreflightOptions {
-                probe,
-                ..Default::default()
-            },
-        ),
+        Commands::Preflight {
+            file,
+            probe,
+            queue_maintenance_only,
+            commit_queue_maintenance,
+        } => {
+            if queue_maintenance_only {
+                agent_doc_preflight_command_io::run_background_queue_maintenance(
+                    &file,
+                    commit_queue_maintenance,
+                )
+            } else {
+                agent_doc_preflight_command_io::run_with_options(
+                    &file,
+                    agent_doc_preflight_command_io::PreflightOptions {
+                        probe,
+                        ..Default::default()
+                    },
+                )
+            }
+        }
         Commands::Admit { file } => {
             let output = agent_doc_session_check_io::midturn_steering::admit_with_steering_seed(
                 &file,
@@ -10403,6 +10478,20 @@ fn try_main() -> anyhow::Result<()> {
                             pressure.incomplete,
                             pressure.complete_by,
                         );
+                    } else if agent_doc_queue::queue_response::hand_back_lacks_required_pull_request(
+                        &pressure.claim.item_text,
+                        &response,
+                    ) {
+                        eprintln!(
+                            "[queue] prompt hand-back for {:?} (owner {}, generation {}) does not show a pull request this turn created; the row stays open and the attempt was requeued (#closepressure). Citing a pull request that already existed does not complete the task. Create the pull request and include its URL as the effect this turn opened, or return only the review structure. Next: {} and dispatch the same row.",
+                            pressure.claim.item_text,
+                            pressure.claim.owner,
+                            pressure.claim.generation,
+                            agent_doc_queue_io::subagent_dispatch::claim_command(
+                                &file.display().to_string(),
+                                &pressure.claim.item_text,
+                            ),
+                        );
                     } else {
                         eprintln!(
                             "[queue] prompt hand-back for {:?} (owner {}, generation {}) does not complete the prompt; the row stays open and the attempt was requeued, so it is dispatchable again (#promptpressure). Next: {} and dispatch the same row. Finish the prompt, or return only the review structure. A prose blocker in agent:exchange does not complete the prompt.",
@@ -10531,7 +10620,7 @@ fn try_main() -> anyhow::Result<()> {
                     &file, &item, generation, &reason,
                 )?;
                 eprintln!(
-                    "[queue] froze {:?} (owner {}, generation {}); its work-pool slot is free, its claim and worker binding are kept. A report from the same worker is still accepted; `queue claim --refresh` clears the freeze.",
+                    "[queue] froze {:?} (owner {}, generation {}); its work-pool slot is free. The authoritative refill below runs failed-continue recovery: if it offers this item, use its exact claim / brief / start commands for a fresh generation; do not reuse the frozen generation's start command.",
                     claim.item_text, claim.owner, claim.generation,
                 );
                 emit_subagent_pool_refill(
@@ -10900,6 +10989,19 @@ fn try_main() -> anyhow::Result<()> {
             QueueAction::PruneNoise { file } => {
                 let queue_effects = CliQueueCommandEffects;
                 agent_doc_queue_io::queue_cmd::prune_noise(&queue_effects, &file)
+            }
+            QueueAction::PruneDuplicates {
+                file,
+                apply,
+                truncated_prefix_line,
+            } => {
+                let queue_effects = CliQueueCommandEffects;
+                agent_doc_queue_io::queue_cmd::prune_duplicates(
+                    &queue_effects,
+                    &file,
+                    apply,
+                    truncated_prefix_line.map(std::num::NonZeroUsize::get),
+                )
             }
         },
         Commands::ResolveGateCmd { gate_type, scope } => {
@@ -11412,6 +11514,22 @@ mod recycle_force_tests {
                 let help = queue.render_long_help().to_string();
                 assert!(help.contains(&legend), "{help}");
                 assert!(help.contains("🔄  needs reconcile"), "{help}");
+                let claim_help = queue
+                    .find_subcommand_mut("claim")
+                    .expect("claim")
+                    .render_long_help()
+                    .to_string();
+                let claim_help = claim_help.split_whitespace().collect::<Vec<_>>().join(" ");
+                assert!(
+                    claim_help.contains(
+                        "the public `queue freeze` command immediately directs a fresh generation"
+                    ),
+                    "{claim_help}"
+                );
+                assert!(!claim_help.contains(concat!(
+                    "including after a harness freeze whose worker resumes",
+                    " through its transcript"
+                )));
                 for name in [
                     "claim",
                     "start",
@@ -11455,6 +11573,36 @@ mod recycle_force_tests {
                 }
             }
         ));
+    }
+
+    #[test]
+    fn queue_prune_duplicates_parses_the_exact_prefix_line_selector() {
+        match parse(&[
+            "agent-doc",
+            "queue",
+            "prune-duplicates",
+            "tasks/session.md",
+            "--apply",
+            "--truncated-prefix-line",
+            "17",
+        ]) {
+            Commands::Queue {
+                action:
+                    QueueAction::PruneDuplicates {
+                        file,
+                        apply,
+                        truncated_prefix_line,
+                    },
+            } => {
+                assert_eq!(file, PathBuf::from("tasks/session.md"));
+                assert!(apply);
+                assert_eq!(
+                    truncated_prefix_line.map(std::num::NonZeroUsize::get),
+                    Some(17)
+                );
+            }
+            _ => panic!("expected queue prune-duplicates"),
+        }
     }
 
     #[test]

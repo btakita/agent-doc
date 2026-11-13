@@ -1803,6 +1803,10 @@ struct PaneLayoutRouteLease {
     generation: u64,
     document: String,
     defer_all_passive: bool,
+    /// Identical overlapping manual commands share one physical intent and
+    /// therefore one generation. Retain the lease until every waiting command
+    /// guard has released it.
+    holders: usize,
     /// Cross-root routes retain their lease in the main-window owner while a
     /// different controller dispatches. The deadline is a fail-open boundary
     /// when that client disappears before sending its release RPC. Local
@@ -2062,7 +2066,25 @@ impl ControllerPaneLayoutGraph {
             self.plane_seen.fetch_max(version, Ordering::SeqCst);
             self.waiters.notify_all();
         }
-        if let Some(active_route) = &publication_state.active_route {
+        if let Some(active_route) = &mut publication_state.active_route {
+            // `#manualsynclayoutlease`: two foreground callers can publish the
+            // same command while its first effect is still in flight (for
+            // example, Run Agent Doc rebuilding a pane immediately after the
+            // operator killed it). They are one physical intent. Let the later
+            // caller join the leased generation instead of superseding it and
+            // making the first caller report `superseded_by_newer_layout_state`.
+            // Once the lease drops, a later retry still mints a fresh
+            // generation as required by the manual retry contract.
+            if publication == PaneLayoutPublication::FreshCommandIntent
+                && active_route.defer_all_passive
+                && current.as_ref().is_some_and(|current| {
+                    current.generation == active_route.generation
+                        && current.invocation == invocation
+                })
+            {
+                active_route.holders += 1;
+                return current.expect("the active command lease retains desired layout state");
+            }
             if publication == PaneLayoutPublication::CoalesceIdentical
                 && invocation.caller_kind == "automatic"
             {
@@ -2127,6 +2149,7 @@ impl ControllerPaneLayoutGraph {
                 generation: desired.generation,
                 document,
                 defer_all_passive: publication == PaneLayoutPublication::FreshCommandIntent,
+                holders: 1,
                 expires_at: None,
             });
         }
@@ -2283,11 +2306,12 @@ impl ControllerPaneLayoutGraph {
     /// held back, if one was published now.
     fn release_route_lease(&self, generation: u64) -> Option<PaneLayoutDesired> {
         let mut publication_state = self.publication_state.lock();
-        if !publication_state
+        let active_route = publication_state
             .active_route
-            .as_ref()
-            .is_some_and(|active| active.generation == generation)
-        {
+            .as_mut()
+            .filter(|active| active.generation == generation)?;
+        if active_route.holders > 1 {
+            active_route.holders -= 1;
             return None;
         }
         publication_state.active_route = None;
@@ -13816,6 +13840,44 @@ pub fn upsert_coordination_lease(
     state_store::upsert_coordination_lease_in_db(&conn, lease)
 }
 
+pub fn claim_coordination_lease_if_expired(
+    project_root: &Path,
+    lease: &state_store::CoordinationLeaseRecord,
+    eligible_at_or_before_secs: u64,
+) -> Result<bool> {
+    let conn = open_state_db(project_root)?;
+    state_store::claim_coordination_lease_if_expired_in_db(&conn, lease, eligible_at_or_before_secs)
+}
+
+pub fn refresh_coordination_lease_if_holder(
+    project_root: &Path,
+    scope_kind: &str,
+    scope_id: &str,
+    holder: &str,
+    holder_pid: u32,
+    heartbeat_secs: u64,
+) -> Result<bool> {
+    let conn = open_state_db(project_root)?;
+    state_store::refresh_coordination_lease_if_holder_in_db(
+        &conn,
+        scope_kind,
+        scope_id,
+        holder,
+        holder_pid,
+        heartbeat_secs,
+    )
+}
+
+pub fn clear_coordination_lease_if_holder(
+    project_root: &Path,
+    scope_kind: &str,
+    scope_id: &str,
+    holder: &str,
+) -> Result<bool> {
+    let conn = open_state_db(project_root)?;
+    state_store::clear_coordination_lease_if_holder_in_db(&conn, scope_kind, scope_id, holder)
+}
+
 pub fn load_coordination_lease(
     project_root: &Path,
     scope_kind: &str,
@@ -16640,6 +16702,7 @@ mod tests {
             owner: Some(agent_doc_state_backbone::CloseoutOwnerProjection {
                 cycle_id: "cycle-dead-owner".into(),
                 owner_id: "foreground-finalize-other".into(),
+                owner_token: "gh130-owner-token".into(),
                 owner_pid,
                 role: "foreground_finalize".into(),
                 claimed_secs: now,
@@ -17330,6 +17393,72 @@ mod tests {
         let projected = graph.desired().unwrap();
         assert_eq!(projected.invocation, passive);
         assert!(projected.generation > manual.generation);
+    }
+
+    /// A pane restart can make Run Agent Doc and the editor's immediate retry
+    /// publish the same foreground command before the first effect completes.
+    /// The duplicate must join the command lease; otherwise it supersedes the
+    /// first generation and surfaces a false sync failure to the operator.
+    #[test]
+    fn identical_foreground_commands_share_the_active_generation() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let actors = ControllerActorGraph::new_in(&scope, BTreeMap::new());
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, actors.live_bindings_handle());
+
+        let mut command = pane_layout_desired_for_test(1).invocation;
+        command.caller_kind = "manual".to_string();
+        command.no_autostart = false;
+        let first = graph.set_desired_attributed(
+            command.clone(),
+            None,
+            PaneLayoutPublication::FreshCommandIntent,
+            PaneLayoutPublisher::Command,
+        );
+        let duplicate = graph.set_desired_attributed(
+            command.clone(),
+            None,
+            PaneLayoutPublication::FreshCommandIntent,
+            PaneLayoutPublisher::Command,
+        );
+
+        assert_eq!(duplicate.generation, first.generation);
+        assert_eq!(duplicate.invocation, command);
+        assert_eq!(graph.desired().unwrap().generation, first.generation);
+
+        let mut passive = command.clone();
+        passive.caller_kind = "automatic".to_string();
+        passive.no_autostart = true;
+        graph.set_desired_attributed(
+            passive.clone(),
+            Some(42),
+            PaneLayoutPublication::CoalesceIdentical,
+            PaneLayoutPublisher::EditorSurface,
+        );
+
+        graph.release_route_lease(first.generation);
+        assert_eq!(graph.desired().unwrap().generation, first.generation);
+        graph.release_route_lease(duplicate.generation);
+        let projected = graph.desired().unwrap();
+        assert_eq!(projected.invocation, passive);
+        assert!(projected.generation > first.generation);
+
+        let retry = graph.set_desired_attributed(
+            command.clone(),
+            None,
+            PaneLayoutPublication::FreshCommandIntent,
+            PaneLayoutPublisher::Command,
+        );
+        assert!(retry.generation > projected.generation);
+
+        let mut changed = command;
+        changed.focus = Some("tasks/other.md".to_string());
+        let changed = graph.set_desired_attributed(
+            changed,
+            None,
+            PaneLayoutPublication::FreshCommandIntent,
+            PaneLayoutPublisher::Command,
+        );
+        assert!(changed.generation > retry.generation);
     }
 
     /// GH #224 case 1: an escalation may derive from retained columns, then
@@ -22010,7 +22139,7 @@ mod tests {
             agent_doc_session_actor_io::record_session_start_direct(
                 &doc,
                 "session-jbr",
-                "%52",
+                "%999999",
                 "@1",
                 1,
             )
@@ -22018,7 +22147,7 @@ mod tests {
             agent_doc_session_actor_io::transition_state_direct(
                 &doc,
                 "session-jbr",
-                "%52",
+                "%999999",
                 Some(1),
                 agent_doc_controller::actor::ActorState::Ready,
                 "supervisor",
@@ -22054,7 +22183,7 @@ mod tests {
                 command: "dispatch".to_string(),
                 file: Some(doc.clone()),
                 session_id: Some("session-jbr".to_string()),
-                pane_id: Some("%52".to_string()),
+                pane_id: Some("%999999".to_string()),
                 window_id: None,
                 generation: Some(1),
                 state: None,
@@ -22090,7 +22219,10 @@ mod tests {
         let (recoverable, recoverable_ops_log) = paused_dispatch_error(
             "churn-stop: do[#c2b6] operator-verify head re-injected by stale supervisor pid1368698 (pre-0.34.0); needs operator recycle, not agent drain",
         );
-        assert!(recoverable.contains("failed_stage=queue_paused"));
+        assert!(
+            recoverable.contains("failed_stage=queue_paused"),
+            "stale-supervisor pause did not reach queue_paused: {recoverable}"
+        );
         assert!(
             recoverable.contains(
                 agent_doc_controller::dispatch::DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER

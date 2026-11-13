@@ -1386,10 +1386,7 @@ pub fn is_noise_freeform_line(line: &str) -> bool {
         return false;
     }
     let de_bulleted = trimmed.strip_prefix("- ").unwrap_or(trimmed);
-    if is_reference_directive(de_bulleted) {
-        return false;
-    }
-    true
+    !is_reference_directive(de_bulleted)
 }
 
 /// Extract the `#id` from `do [#id]` (or `do #id`) prompt text, normalized to
@@ -2560,10 +2557,17 @@ pub fn project_prompt_runtime_projections_with(
         .collect::<Vec<_>>();
     let marked_entries = set_prompt_runtime_projections_with(&entries, targets, policy)
         .unwrap_or_else(|| entries.clone());
-    let has_group_heading_change = spans.iter().enumerate().any(|(index, (_, range))| {
-        rendered_top_level_group_parent(&marked_entries, index)
-            .is_some_and(|rendered| rendered != body[range.clone()])
-    });
+    let has_group_heading_change =
+        spans
+            .iter()
+            .zip(&marked_entries)
+            .enumerate()
+            .any(|(index, ((before, range), after))| {
+                !(matches!(before, QueueEntry::Completed(_))
+                    && matches!(after, QueueEntry::Completed(_)))
+                    && rendered_top_level_group_parent(&marked_entries, index)
+                        .is_some_and(|rendered| rendered != body[range.clone()])
+            });
     if marked_entries == entries && !has_group_heading_change {
         return Ok(None);
     }
@@ -2572,8 +2576,15 @@ pub fn project_prompt_runtime_projections_with(
     let mut projected = body.to_string();
     for (index, ((before, range), after)) in spans.iter().zip(&marked_entries).enumerate().rev() {
         let source = &body[range.clone()];
-        let canonical_group_parent = rendered_top_level_group_parent(&marked_entries, index)
-            .filter(|rendered| rendered != source);
+        // An unchanged completed parent may own source-only terminal suffix
+        // evidence (auto-strike reason, response id, addressed-at receipt).
+        // Canonical rendering is safe for live parents and a real reopen, but
+        // must not erase that proof merely to add a presentation heading.
+        let canonical_group_parent = (!(matches!(before, QueueEntry::Completed(_))
+            && matches!(after, QueueEntry::Completed(_))))
+        .then(|| rendered_top_level_group_parent(&marked_entries, index))
+        .flatten()
+        .filter(|rendered| rendered != source);
         if before != after || canonical_group_parent.is_some() {
             let replacement = canonical_group_parent.unwrap_or_else(|| match (before, after) {
                 // `#nestedsubprompts`: a list row with sub-prompts renders
@@ -8227,6 +8238,45 @@ mod tests {
             )
         );
         assert!(normalize_top_level_navigation_headings(&normalized).is_none());
+    }
+
+    #[test]
+    fn runtime_projection_preserves_terminal_evidence_while_repainting_a_sibling() {
+        use agent_doc_document::queue_projection::{QueueLifecycleMarker, QueueOwnerProjection};
+
+        let body = concat!(
+            "- ~~finished work [#q-f07f85cbaefd] ⟦local⟧~~ — auto-struck: answered this cycle (#ftstrike); response: [#r-0648593c3bc4] ⟦addressed-at:2026-11-01T12:08:38.000Z⟧\n",
+            "  - **Response [#r-0648593c3bc4]:** Added the response id.\n",
+            "  - **Response [#r-fedcba987654]:** Older retained response context.\n",
+            "- live work\n",
+        );
+        let targets = [QueueRowProjection {
+            text: "live work".to_string(),
+            marker: QueueLifecycleMarker::Running,
+            owner: Some(QueueOwnerProjection {
+                owner: "subagent:worker".to_string(),
+                generation: 2,
+            }),
+            blockers: Vec::new(),
+        }];
+
+        let (projected, _) = project_prompt_runtime_projections(body, &targets)
+            .unwrap()
+            .expect("runtime marker should project without rewriting its sibling");
+        assert_eq!(
+            projected,
+            concat!(
+                "- ~~finished work [#q-f07f85cbaefd] ⟦local⟧~~ — auto-struck: answered this cycle (#ftstrike); response: [#r-0648593c3bc4] ⟦addressed-at:2026-11-01T12:08:38.000Z⟧\n",
+                "  - **Response [#r-0648593c3bc4]:** Added the response id.\n",
+                "  - **Response [#r-fedcba987654]:** Older retained response context.\n",
+                "- 🚧 [#subagent:worker#2] live work\n",
+            )
+        );
+        assert_eq!(
+            project_prompt_runtime_projections(&projected, &targets).unwrap(),
+            None,
+            "the source-preserving runtime projection is idempotent"
+        );
     }
 
     #[test]

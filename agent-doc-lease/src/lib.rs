@@ -16,6 +16,13 @@ pub fn timestamp_is_fresh(observed_secs: u64, now_secs: u64, ttl: Duration) -> b
     now_secs.saturating_sub(observed_secs) <= ttl.as_secs()
 }
 
+/// Oldest heartbeat timestamp eligible for an atomic expired-lease claim.
+/// Domain crates pass this cutoff into their storage CAS instead of
+/// reimplementing the TTL arithmetic beside the lease body.
+pub fn expiration_cutoff(now_secs: u64, ttl: Duration) -> u64 {
+    now_secs.saturating_sub(ttl.as_secs())
+}
+
 /// Build the `tsift local-model lease reap` arg vector.
 pub fn local_model_reap_command_args(lease_file: Option<&str>, host: Option<&str>) -> Vec<String> {
     let mut args = vec![
@@ -126,6 +133,12 @@ mod tests {
         assert!(timestamp_is_fresh(1_000, 1_030, ttl), "at the ttl edge");
         assert!(!timestamp_is_fresh(1_000, 1_031, ttl), "past the ttl");
         assert!(timestamp_is_fresh(2_000, 1_000, ttl), "future timestamp");
+    }
+
+    #[test]
+    fn expiration_cutoff_saturates_at_the_epoch() {
+        assert_eq!(expiration_cutoff(100, Duration::from_secs(30)), 70);
+        assert_eq!(expiration_cutoff(10, Duration::from_secs(30)), 0);
     }
 
     #[test]

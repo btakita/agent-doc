@@ -22,7 +22,7 @@ use agent_doc_git_io::{
     transaction::{
         CommitFencePhase, CommitTransactionError, CommitTransactionFence,
         stage_and_commit_exact_paths_once, stage_and_commit_exact_paths_once_with_fence,
-        update_parent_submodule_pointer,
+        update_parent_submodule_pointer, update_parent_submodule_pointer_with_fence,
     },
 };
 use anyhow::{Context, Result};
@@ -899,6 +899,52 @@ pub struct RuntimeForceDiskPipelineFrontmatterEffects;
 pub static FORCE_DISK_PIPELINE_FRONTMATTER_EFFECTS: RuntimeForceDiskPipelineFrontmatterEffects =
     RuntimeForceDiskPipelineFrontmatterEffects;
 
+fn maybe_pause_ref_landed_before_terminal_promotion(file: &Path) -> Result<()> {
+    if !std::env::var("AGENT_DOC_TEST_CLOSEOUT_REF_LANDED_BARRIER_FILE")
+        .ok()
+        .is_some_and(|target| Path::new(&target) == file)
+    {
+        return Ok(());
+    }
+    if let Ok(ready) = std::env::var("AGENT_DOC_TEST_CLOSEOUT_REF_LANDED_BARRIER_READY") {
+        std::fs::write(ready, b"ready")?;
+    }
+    if let Ok(release) = std::env::var("AGENT_DOC_TEST_CLOSEOUT_REF_LANDED_BARRIER_RELEASE") {
+        let started = std::time::Instant::now();
+        while !Path::new(&release).exists() {
+            anyhow::ensure!(
+                started.elapsed() < std::time::Duration::from_secs(30),
+                "timed out waiting for ref-landed closeout promotion barrier release",
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+    Ok(())
+}
+
+fn maybe_pause_ignored_path_before_terminal_promotion(file: &Path) -> Result<()> {
+    if !std::env::var("AGENT_DOC_TEST_CLOSEOUT_IGNORED_PATH_BARRIER_FILE")
+        .ok()
+        .is_some_and(|target| Path::new(&target) == file)
+    {
+        return Ok(());
+    }
+    if let Ok(ready) = std::env::var("AGENT_DOC_TEST_CLOSEOUT_IGNORED_PATH_BARRIER_READY") {
+        std::fs::write(ready, b"ready")?;
+    }
+    if let Ok(release) = std::env::var("AGENT_DOC_TEST_CLOSEOUT_IGNORED_PATH_BARRIER_RELEASE") {
+        let started = std::time::Instant::now();
+        while !Path::new(&release).exists() {
+            anyhow::ensure!(
+                started.elapsed() < std::time::Duration::from_secs(30),
+                "timed out waiting for ignored-path closeout barrier release",
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+    Ok(())
+}
+
 #[doc(hidden)]
 pub static POST_COMMIT_CLEANUP_EFFECTS: RuntimePostCommitCleanupEffects<'static> =
     RuntimePostCommitCleanupEffects {
@@ -911,6 +957,11 @@ struct RuntimeCommitTransactionFence<'a> {
 
 impl CommitTransactionFence for RuntimeCommitTransactionFence<'_> {
     fn ensure(&self, target: &Path, phase: CommitFencePhase) -> Result<()> {
+        if phase == CommitFencePhase::BeforeParentRefUpdate {
+            return self
+                .capability
+                .ensure_parent_submodule_transaction_boundary(target);
+        }
         self.capability
             .ensure_git_transaction_boundary(target, phase == CommitFencePhase::BeforeRefUpdate)
     }
@@ -1388,6 +1439,7 @@ impl agent_doc_git_io::post_commit_cleanup::PostCommitCleanupEffects
         file_content: Option<&str>,
     ) -> Result<()> {
         if let Some(fence) = self.closeout_owner_fence {
+            maybe_pause_ref_landed_before_terminal_promotion(file)?;
             fence.ensure_protects(file)?;
             fence.ensure_still_held()?;
         }
@@ -4145,7 +4197,18 @@ where
 
         if in_submodule && agent_doc_git_io::submodule::is_submodule_pointer_stale(file) {
             eprintln!("[commit] submodule pointer stale in parent after no-op commit - updating");
-            update_parent_submodule_pointer(&super_root, &git_root, &msg)?;
+            if let Some(fence) = ports.closeout_owner_fence {
+                let transaction_fence = RuntimeCommitTransactionFence { capability: fence };
+                update_parent_submodule_pointer_with_fence(
+                    &super_root,
+                    &git_root,
+                    &msg,
+                    file,
+                    &transaction_fence,
+                )?;
+            } else {
+                update_parent_submodule_pointer(&super_root, &git_root, &msg)?;
+            }
         }
 
         let elapsed_total = t_total.elapsed().as_millis();
@@ -4393,12 +4456,22 @@ where
                     // commit is unreachable, not because it succeeded. The refusal
                     // itself is unchanged — same message, same error, still never
                     // committed.
+                    if let Some(fence) = ports.closeout_owner_fence {
+                        maybe_pause_ignored_path_before_terminal_promotion(file)?;
+                        fence.ensure_protects(file)?;
+                        fence.ensure_still_held()?;
+                    }
                     if let Err(abandon_error) = agent_doc_cycle_state_io::mark_abandoned(
                         file,
                         agent_doc_cycle_state_io::COMMIT_REFUSED_IGNORED_PATH_EVENT,
                         None,
                         None,
                     ) {
+                        if ports.closeout_owner_fence.is_some() {
+                            return Err(abandon_error).with_context(|| {
+                                format!("could not close fenced cycle for ignored path {path}")
+                            });
+                        }
                         eprintln!(
                             "[commit] WARNING: could not close the cycle for ignored path {path}: {abandon_error:#}"
                         );
@@ -4541,7 +4614,18 @@ where
         elapsed_postcommit_check = postcommit_check_started.elapsed().as_millis();
 
         if in_submodule {
-            update_parent_submodule_pointer(&super_root, &git_root, &msg)?;
+            if let Some(fence) = ports.closeout_owner_fence {
+                let transaction_fence = RuntimeCommitTransactionFence { capability: fence };
+                update_parent_submodule_pointer_with_fence(
+                    &super_root,
+                    &git_root,
+                    &msg,
+                    file,
+                    &transaction_fence,
+                )?;
+            } else {
+                update_parent_submodule_pointer(&super_root, &git_root, &msg)?;
+            }
         }
 
         if did_commit {

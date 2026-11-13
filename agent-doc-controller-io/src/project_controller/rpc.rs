@@ -7831,7 +7831,8 @@ pub struct CloseoutOwnerCapability {
     lease_lost: Arc<AtomicBool>,
     terminal_effect_in_progress: Arc<AtomicBool>,
     terminal_effect_landed: Arc<AtomicBool>,
-    commit_transaction_landed: Arc<AtomicBool>,
+    git_ref_landed: Arc<AtomicBool>,
+    terminal_promotion_landed: Arc<AtomicBool>,
 }
 
 impl std::fmt::Debug for CloseoutOwnerCapability {
@@ -7873,7 +7874,8 @@ impl CloseoutOwnerCapability {
             lease_lost: self.lease_lost.clone(),
             terminal_effect_in_progress: self.terminal_effect_in_progress.clone(),
             terminal_effect_landed: self.terminal_effect_landed.clone(),
-            commit_transaction_landed: self.commit_transaction_landed.clone(),
+            git_ref_landed: self.git_ref_landed.clone(),
+            terminal_promotion_landed: self.terminal_promotion_landed.clone(),
         }
     }
 
@@ -7939,16 +7941,100 @@ impl CloseoutOwnerCapability {
         self.ensure_still_held()
     }
 
+    /// Revalidate at the exact sibling-repository ref CAS. This barrier is
+    /// distinct from the primary document commit so deterministic races can
+    /// pause after sibling commit-tree work without intercepting the earlier
+    /// session-document ref update.
+    pub fn ensure_sibling_git_transaction_boundary(&self, file: &Path) -> Result<()> {
+        self.ensure_protects(file)?;
+        if std::env::var("AGENT_DOC_TEST_CLOSEOUT_INNER_SIBLING_BARRIER_FILE")
+            .ok()
+            .is_some_and(|target| Path::new(&target) == self.file)
+        {
+            if let Ok(ready) = std::env::var("AGENT_DOC_TEST_CLOSEOUT_INNER_SIBLING_BARRIER_READY")
+            {
+                std::fs::write(ready, b"ready")?;
+            }
+            if let Ok(release) =
+                std::env::var("AGENT_DOC_TEST_CLOSEOUT_INNER_SIBLING_BARRIER_RELEASE")
+            {
+                let started = std::time::Instant::now();
+                while !Path::new(&release).exists() {
+                    anyhow::ensure!(
+                        started.elapsed() < Duration::from_secs(30),
+                        "timed out waiting for inner sibling closeout barrier release",
+                    );
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+            if std::env::var("AGENT_DOC_TEST_CLOSEOUT_INNER_SIBLING_HELD_BY_OTHER_FILE")
+                .ok()
+                .is_some_and(|target| Path::new(&target) == self.file)
+            {
+                self.mark_lease_lost();
+            }
+        }
+        self.ensure_still_held()
+    }
+
+    /// Revalidate after the parent gitlink commit object is prepared and
+    /// immediately before the superproject ref CAS.
+    pub fn ensure_parent_submodule_transaction_boundary(&self, file: &Path) -> Result<()> {
+        self.ensure_protects(file)?;
+        if std::env::var("AGENT_DOC_TEST_CLOSEOUT_INNER_PARENT_BARRIER_FILE")
+            .ok()
+            .is_some_and(|target| Path::new(&target) == self.file)
+        {
+            if let Ok(ready) = std::env::var("AGENT_DOC_TEST_CLOSEOUT_INNER_PARENT_BARRIER_READY") {
+                std::fs::write(ready, b"ready")?;
+            }
+            if let Ok(release) =
+                std::env::var("AGENT_DOC_TEST_CLOSEOUT_INNER_PARENT_BARRIER_RELEASE")
+            {
+                let started = std::time::Instant::now();
+                while !Path::new(&release).exists() {
+                    anyhow::ensure!(
+                        started.elapsed() < Duration::from_secs(30),
+                        "timed out waiting for inner parent-submodule closeout barrier release",
+                    );
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+            if std::env::var("AGENT_DOC_TEST_CLOSEOUT_INNER_PARENT_HELD_BY_OTHER_FILE")
+                .ok()
+                .is_some_and(|target| Path::new(&target) == self.file)
+            {
+                self.mark_lease_lost();
+            }
+        }
+        self.ensure_still_held()
+    }
+
     /// Causal receipt set only after the exact Git ref CAS succeeds.
     pub fn record_commit_ref_updated(&self, file: &Path) {
         if self.ensure_protects(file).is_ok() {
-            self.commit_transaction_landed.store(true, Ordering::SeqCst);
+            self.git_ref_landed.store(true, Ordering::SeqCst);
         }
     }
 
     pub fn record_terminal_promotion_landed(&self, file: &Path) -> Result<()> {
         self.ensure_protects(file)?;
-        self.commit_transaction_landed.store(true, Ordering::SeqCst);
+        let state =
+            agent_doc_cycle_state_io::load_with_closeout_projection(file)?.with_context(|| {
+                format!(
+                    "terminal promotion for {} did not persist cycle state",
+                    file.display()
+                )
+            })?;
+        anyhow::ensure!(
+            state.cycle_id == self.cycle_id && !state.is_open(),
+            "terminal promotion receipt does not cover owned cycle {} for {} (observed cycle={} phase={})",
+            self.cycle_id,
+            file.display(),
+            state.cycle_id,
+            state.phase.as_str(),
+        );
+        self.terminal_promotion_landed.store(true, Ordering::SeqCst);
         Ok(())
     }
 
@@ -7974,6 +8060,12 @@ impl CloseoutOwnerCapability {
     }
 
     pub fn refresh(&self) -> Result<CloseoutOwnerClaimOutcome> {
+        if std::env::var("AGENT_DOC_TEST_CLOSEOUT_FORCE_CYCLE_SUPERSEDED_FILE")
+            .ok()
+            .is_some_and(|target| Path::new(&target) == self.file)
+        {
+            return Ok(CloseoutOwnerClaimOutcome::CycleSuperseded);
+        }
         if self.actorless {
             return Ok(CloseoutOwnerClaimOutcome::Acquired(
                 CloseoutOwnerProjection {
@@ -8019,8 +8111,8 @@ impl CloseoutOwnerCapability {
         // causal receipt permits only that outcome: we must still perform the
         // refresh so a concurrent `HeldByOther` (or mismatched acquisition) is
         // observed synchronously at every post-commit promotion boundary.
-        let causal_commit_landed = self.terminal_effect_landed.load(Ordering::SeqCst)
-            || self.commit_transaction_landed.load(Ordering::SeqCst);
+        let causal_terminal_promotion = self.terminal_effect_landed.load(Ordering::SeqCst)
+            || self.terminal_promotion_landed.load(Ordering::SeqCst);
         let outcome = self.refresh()?;
         anyhow::ensure!(
             match &outcome {
@@ -8031,7 +8123,7 @@ impl CloseoutOwnerCapability {
                         && owner.owner_pid == self.owner_pid
                         && owner.role == self.role =>
                     true,
-                CloseoutOwnerClaimOutcome::CycleSuperseded if causal_commit_landed => true,
+                CloseoutOwnerClaimOutcome::CycleSuperseded if causal_terminal_promotion => true,
                 _ => false,
             },
             "closeout owner lease for cycle {} owner {} pid={} role={} was lost before the next durable effect: {outcome:?}",
@@ -8054,7 +8146,8 @@ impl CloseoutOwnerCapability {
             self.cycle_id,
             self.owner_id,
         );
-        self.commit_transaction_landed
+        self.git_ref_landed.store(false, Ordering::SeqCst);
+        self.terminal_promotion_landed
             .store(false, Ordering::SeqCst);
         let outcome = (|| {
             self.ensure_still_held()?;
@@ -8144,7 +8237,7 @@ impl ClaimedCloseoutOwnerGuard {
                     }
                     Ok(CloseoutOwnerClaimOutcome::CycleSuperseded)
                         if heartbeat_capability
-                            .commit_transaction_landed
+                            .terminal_promotion_landed
                             .load(Ordering::SeqCst)
                             || heartbeat_capability
                                 .terminal_effect_landed
@@ -8321,7 +8414,8 @@ pub fn claim_closeout_owner_guard_for_file(
     let lease_lost = Arc::new(AtomicBool::new(false));
     let terminal_effect_in_progress = Arc::new(AtomicBool::new(false));
     let terminal_effect_landed = Arc::new(AtomicBool::new(false));
-    let commit_transaction_landed = Arc::new(AtomicBool::new(false));
+    let git_ref_landed = Arc::new(AtomicBool::new(false));
+    let terminal_promotion_landed = Arc::new(AtomicBool::new(false));
 
     if agent_doc_project_root_io::project_root_containing(file).is_none() {
         return Ok(CloseoutOwnerGuardClaimOutcome::Acquired(
@@ -8337,7 +8431,8 @@ pub fn claim_closeout_owner_guard_for_file(
                 lease_lost,
                 terminal_effect_in_progress,
                 terminal_effect_landed,
-                commit_transaction_landed,
+                git_ref_landed,
+                terminal_promotion_landed,
             }),
         ));
     }
@@ -8371,7 +8466,8 @@ pub fn claim_closeout_owner_guard_for_file(
                     lease_lost,
                     terminal_effect_in_progress,
                     terminal_effect_landed,
-                    commit_transaction_landed,
+                    git_ref_landed,
+                    terminal_promotion_landed,
                 }),
             ))
         }

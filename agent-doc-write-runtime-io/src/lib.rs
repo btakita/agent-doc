@@ -665,6 +665,11 @@ impl agent_doc_git_io::transaction::CommitTransactionFence for SiblingCloseoutFe
         target: &Path,
         phase: agent_doc_git_io::transaction::CommitFencePhase,
     ) -> Result<()> {
+        if phase == agent_doc_git_io::transaction::CommitFencePhase::BeforeSiblingRefUpdate {
+            return self
+                .capability
+                .ensure_sibling_git_transaction_boundary(target);
+        }
         self.capability.ensure_git_transaction_boundary(
             target,
             phase == agent_doc_git_io::transaction::CommitFencePhase::BeforeRefUpdate,

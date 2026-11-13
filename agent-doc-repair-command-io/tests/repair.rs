@@ -3090,6 +3090,120 @@ mod tests {
     }
 
     #[test]
+    fn captured_resume_rejects_cycle_superseded_after_ref_before_terminal_promotion() {
+        let _env = agent_doc_test_support::env_lock();
+        let dir = setup_project();
+        let doc = dir.path().join("resume-ref-landed-before-promotion.md");
+        let content = "---\nsession: test\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n## User\n\nHello\n";
+        let response = "Ref landed, but terminal promotion still needs exact ownership.";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let plan_json = serde_json::to_string(
+            &agent_doc_write_command_io::CapturedCloseoutMutationPlan::default(),
+        )
+        .unwrap();
+        agent_doc_capture_io::capture_response_with_current_content_and_intent_and_plan(
+            &doc,
+            response,
+            content,
+            Some(response),
+            Some(&plan_json),
+        )
+        .unwrap();
+        let key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
+            .unwrap()
+            .expect("captured response");
+        let marker = dir.path().join("ref-landed-promotion.marker");
+        let release = dir.path().join("ref-landed-promotion.release");
+        unsafe {
+            std::env::set_var("AGENT_DOC_TEST_CLOSEOUT_REF_LANDED_BARRIER_FILE", &doc);
+            std::env::set_var("AGENT_DOC_TEST_CLOSEOUT_REF_LANDED_BARRIER_READY", &marker);
+            std::env::set_var(
+                "AGENT_DOC_TEST_CLOSEOUT_REF_LANDED_BARRIER_RELEASE",
+                &release,
+            );
+        }
+        let resume_doc = doc.clone();
+        let resume_key = key.clone();
+        let resume = std::thread::spawn(move || {
+            agent_doc_repair_command_io::resume_captured_finalize(&resume_doc, &resume_key)
+        });
+        wait_for_resume_commit_barrier(&marker);
+        let ref_landed_head = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .expect("ref-landed HEAD");
+        assert!(
+            ref_landed_head.contains(response),
+            "the barrier must be after the Git ref CAS"
+        );
+        assert_ne!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+                .unwrap()
+                .expect("pre-promotion cycle")
+                .phase,
+            agent_doc_turn::CyclePhase::Committed,
+            "the barrier must be before terminal cycle promotion"
+        );
+        unsafe {
+            std::env::set_var("AGENT_DOC_TEST_CLOSEOUT_FORCE_CYCLE_SUPERSEDED_FILE", &doc);
+        }
+        std::fs::write(&release, b"release").unwrap();
+        let interrupted = resume.join().unwrap();
+        assert!(
+            !matches!(
+                interrupted,
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed { .. }
+            ),
+            "a bare ref receipt must not authorize stale terminal promotion: {interrupted:?}"
+        );
+        assert_ne!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+                .unwrap()
+                .expect("retained pre-promotion cycle")
+                .phase,
+            agent_doc_turn::CyclePhase::Committed
+        );
+        unsafe {
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_REF_LANDED_BARRIER_FILE");
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_REF_LANDED_BARRIER_READY");
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_REF_LANDED_BARRIER_RELEASE");
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_FORCE_CYCLE_SUPERSEDED_FILE");
+        }
+        let retry_guard =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        let retry_effects = agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(
+            &doc,
+            &retry_guard,
+        )
+        .unwrap();
+        use agent_doc_session_check_io::SessionCheckEffects;
+        let recovered = retry_effects
+            .resume_captured_finalize(&doc)
+            .expect("retry must promote the already-landed exact response");
+        assert!(
+            matches!(
+                recovered,
+                agent_doc_session_check_io::CapturedFinalizeResumeOutcome::Committed
+            ),
+            "{recovered:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&doc)
+                .unwrap()
+                .matches(response)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
     fn captured_resume_aborts_when_outer_lease_is_lost_during_session_recovery() {
         let _env = agent_doc_test_support::env_lock();
         let dir = setup_project();

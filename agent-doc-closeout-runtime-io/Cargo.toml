@@ -43,4 +43,5 @@ agent-doc-turn-status-io = { path = "../agent-doc-turn-status-io", version = "0.
 anyhow = "1"
 
 [dev-dependencies]
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.573", features = ["test-support"] }
 tempfile = "3"

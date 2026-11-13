@@ -2,6 +2,27 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.574
+
+- **Publish `a3a909baf31b6b95bdafdf77c8d5365b1bd804f6` as `0.35.574`.** Tag `v0.35.573` remains `b1aca6d251e42eafebd500a322d33e954a4324cc`. That tip is 275 commits after the previous tag. Package manifests, internal constraints, `Cargo.lock`, `pyproject.toml`, and the bundled skill sources move to `0.35.574`. JetBrains plugin generations are classic `0.2.991`, IDE 262 `0.2.989`, and IDE 263 `0.2.990`. `pluginReleaseVersion` moves to `0.35.574`. VS Code is `0.2.101`. Zed is `0.1.8`.
+- **The release gate's admission flake is fixed at its cause** (#415, `d64f9f44d0`). Admission was bound by synchronous disk flushes, not by waiting on detached maintenance: fresh `state.db` schema creation now runs in one transaction (44 commits to 1), and a parked-worker test replaces the timing assertion.
+- **A supervisor recycle epoch is minted above any durable foreign request** (#413, `d8f01de013`), so an orphan drain during a preserved child re-exec defers to the restarting supervisor instead of being discarded on reload.
+- **A worker waiting on its own background work is alive, not frozen** (#414, `991cb3d881`); the pool no longer offers a duplicate dispatch for it.
+- **A response waits through the apply-lock handoff window** (#412, `14ab4a69ea`) instead of failing with `queue mutation deferred` when the background maintenance worker has cleared its lease but still holds the lock.
+- **Auto-named `*:agent-doc` tmux windows no longer pose as layout targets** (#410, #412, `30deef3765`), and a staged start pane says where it waits and how to show it (`196dbdd77a`).
+- **Queue maintenance has a durable Lazily claim and an ordered effect plan** (`9a0eb19807`).
+- **Steering that lands during q-id admission keeps one queue row** (#407, `824de2477f`). A seen prompt shows `👀` until prepare emits it (`0e9991bf56`); admission keeps the heading and paints `📥` when it promotes a seen row (`ac729dc561`, `8533008b4b`), and keeps projection pins (`fa90ae2d58`).
+- **Identical live heads and truncated prefix rows are pruned** (#402, `4715152502`). Pruning needs an explicit prefix target and whitespace, and keeps lifecycle conflicts and diverging punctuation (`facbde4279`, `a089adb415`, `da05085231`, `40f217b945`).
+- **A close that never created its required pull request is refused** (#408, `5e3333cf4f`). Only affirmative pull-request receipts count; prompt citations and documentation do not (`2f811118f3`, `6d9fa46682`, `4f69174d5e`, `75755c27b2`).
+- **Run Agent Doc on a starting turn enqueues steering** instead of failing (#409, `81e1ad34d7`). An interrupted queue head is redriven, gated on steering (`805ea341e2`, `6d9131e09e`).
+- **Queue maintenance left the admission path.** Preflight detaches pending maintenance (`72c2548b77`, `8e6ffc9c80`) and runs its compare-and-swap through Lazily `EffectCasCore` (`1986b52a08`). Deferred and background maintenance, closeout, resume, repair, and cancellation transactions are fenced and serialized (`b26b07aa8a`, `917f07182d`, `36f0eae1ea`, `58a26671f2`, `3fcd2ba529`). Status-only checks and inspections stay pure (`7b33423135`, `47718a5d5b`, `b1f9203af5`). A reserved background worker is retained (`473fffed8e`).
+- **Lost claims and harness freezes continue, then retry** (`dc2bcc9486`, `fbdb13a535`, `c1b30ec620`). A live heartbeat stays on its generation (`f44b3ed378`), duplicate attempt projections settle (`51a5f11b34`), and closeout is refused while a live row is transient (`cf64d5b06a`, `f4488e840f`).
+- **tmux sockets are restored and checked** (#406). A live server's missing socket is recreated (`ab853e4cf2`), open sessions survive a down socket (`8aab52268b`), and a non-private socket parent is refused (`22a5ee935b`). A bare-shell claiming pane starts agent-doc (#403, `5ba8a9acfa`, `6f48c9042e`).
+- **Install keeps one canonical binary.** The cdylib is placed beside the Cargo binary and a binary/library reload skew is refused (`8680ebb31f`, `d28befba6e`, `1a345ed558`).
+- **`presets=` aliases `preset=`** on every marker that accepts it (`4a0d493585`). A `keep` queue keeps operator rows (`6836fe5cea`). A closing pull request is associated with its todo or backlog item (`6125b1ff27`). The exchange heading carries a response id (`e44b74d38e`).
+- **Editors keep the caret and viewport across agent-doc writes** (`2cb04390f4`, `da138c9f30`, `c5dd536174`). JetBrains acknowledges a pending tmux layout sync (`76fb5875fe`) and keeps the remote status projection in memory (`ec82eae25e`).
+- **CI supports Rust 1.100** (`887079c531`, `970924d8de`).
+
 ## 0.35.573
 
 - **Publish `c8dee5ac8b0fa327b3d055a21d8718cd7cd61b59` as `0.35.573`.** Tag `v0.35.572` remains `cb1ef066307bbe15183313a98b47ab4e670d3d51`. That tip is 33 commits after the previous tag. Package manifests, internal constraints, `Cargo.lock`, `pyproject.toml`, and the bundled skill sources move to `0.35.573`. JetBrains plugin generations stay classic `0.2.973`, IDE 262 `0.2.975`, and IDE 263 `0.2.974`. `pluginReleaseVersion` moves to `0.35.573`. VS Code stays `0.2.99`. Zed stays `0.1.7`.

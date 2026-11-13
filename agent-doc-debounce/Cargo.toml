@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-debounce"
-version = "0.35.573"
+version = "0.35.574"
 edition = "2024"
 description = "Bounded Lazily current-state settle budgets for agent-doc"
 license = "Apache-2.0"

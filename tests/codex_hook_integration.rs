@@ -4,6 +4,7 @@ use predicates::prelude::*;
 use serde_json::json;
 use std::collections::BTreeSet;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use tempfile::TempDir;
@@ -28,6 +29,141 @@ fn agent_doc() -> Command {
         CONTROLLER_LAUNCH_REASON,
     );
     cmd
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct StateDbSnapshot {
+    user_version: i64,
+    schema: Vec<String>,
+    rows: Vec<String>,
+}
+
+fn state_db_snapshot(root: &Path) -> StateDbSnapshot {
+    let conn = agent_doc_sqlite::state_store::open_state_db_read_only(root).unwrap();
+    let user_version = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    let schema = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT type, name, tbl_name, COALESCE(sql, '') FROM sqlite_schema \
+                 ORDER BY type, name, tbl_name",
+            )
+            .unwrap();
+        stmt.query_map([], |row| {
+            Ok(format!(
+                "{}|{}|{}|{}",
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })
+        .unwrap()
+        .map(Result::unwrap)
+        .collect::<Vec<_>>()
+    };
+    let tables = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT name FROM sqlite_schema \
+                 WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+            )
+            .unwrap();
+        stmt.query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect::<Vec<_>>()
+    };
+    let mut rows = Vec::new();
+    for table in tables {
+        let quoted_table = format!("\"{}\"", table.replace('"', "\"\""));
+        let columns = {
+            let mut stmt = conn
+                .prepare(&format!("PRAGMA table_info({quoted_table})"))
+                .unwrap();
+            stmt.query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect::<Vec<_>>()
+        };
+        if columns.is_empty() {
+            continue;
+        }
+        let encoded_columns = columns
+            .iter()
+            .map(|column| {
+                let quoted = format!("\"{}\"", column.replace('"', "\"\""));
+                format!("typeof({quoted}) || ':' || quote({quoted})")
+            })
+            .collect::<Vec<_>>()
+            .join(" || '|' || ");
+        let mut stmt = conn
+            .prepare(&format!("SELECT {encoded_columns} FROM {quoted_table}"))
+            .unwrap();
+        rows.extend(
+            stmt.query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .map(|row| format!("{table}|{row}")),
+        );
+    }
+    rows.sort();
+    StateDbSnapshot {
+        user_version,
+        schema,
+        rows,
+    }
+}
+
+/// Make the next ordinary state-store open observably effectful: schema
+/// convergence would recreate the canonical index and document-version/data
+/// retention would rewrite or prune these copied baseline events. A genuine
+/// status-only transaction must leave all of it byte-for-byte logical-state
+/// identical while still classifying the session.
+fn stage_pre_migration_over_retention_state(root: &Path) {
+    let conn = agent_doc_sqlite::state_store::open_state_db(root).unwrap();
+    conn.execute_batch(
+        "DROP INDEX IF EXISTS state_events_document_hash_document_version; \
+         PRAGMA user_version = 73;",
+    )
+    .unwrap();
+    for ordinal in 0..4_i64 {
+        let inserted = conn
+            .execute(
+                "INSERT INTO state_events(\
+                    event_id, document_hash, domain, fact_type, payload_json, timestamp, document_version\
+                 ) \
+                 SELECT ?1, document_hash, domain, fact_type, payload_json, timestamp + ?2, 0 \
+                 FROM state_events \
+                 WHERE fact_type = 'document_baseline_checkpointed' \
+                 ORDER BY id DESC LIMIT 1",
+                (
+                    format!("status-only-retention-probe-{ordinal}"),
+                    ordinal + 1,
+                ),
+            )
+            .unwrap();
+        assert_eq!(inserted, 1, "fixture needs a baseline event to duplicate");
+    }
+}
+
+fn await_authority_handoff_drain(root: &Path, doc: &Path) {
+    let document_hash = agent_doc_fs::document_state_hash(doc).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        if agent_doc_sqlite::state_store::load_document_authority_handoff(root, &document_hash)
+            .unwrap()
+            .is_none()
+        {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "controller authority-handoff worker did not reach its empty receipt"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
 }
 
 fn template_doc_content() -> String {
@@ -118,9 +254,15 @@ fn session_check_terminal_gate_leaves_active_auto_queue_to_background() {
         }
         cmd.assert()
             .success()
-            .stdout(predicate::str::contains("[session-check] ok"))
+            .stdout(predicate::str::contains(
+                "[session-check] no cycle state or ops.log — ok",
+            ))
             .stdout(predicate::str::contains("queue_continuation_required").not());
     }
+    assert!(
+        !agent_doc_sqlite::state_store::state_db_path(tmp.path()).exists(),
+        "status-only cold inspection must not initialize state.db"
+    );
 }
 
 /// A committed cycle whose live document carries an operator prompt added
@@ -165,6 +307,38 @@ fn session_check_cli_reports_post_commit_steering_as_pending_with_exit_zero() {
     // The CLI exits 0, names it `steering pending`, lists the item verbatim
     // with its dispatch, and defers queue continuation behind it.
     let (tmp, doc) = committed_cycle_with_post_commit_steering();
+    // Warm the real CLI/controller path and wait for its asynchronous authority
+    // lane to reach an exact empty receipt before taking the purity cut.
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("AGENT_DOC_SESSION_CHECK_SETTLE_SECS", "0")
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .success();
+    await_authority_handoff_drain(tmp.path(), &doc);
+    let before_authority = agent_doc_cycle_state_io::load_latest_document_authority(&doc).unwrap();
+    stage_pre_migration_over_retention_state(tmp.path());
+    let before_state = state_db_snapshot(tmp.path());
+    assert_eq!(before_state.user_version, 73);
+    assert!(
+        before_state
+            .schema
+            .iter()
+            .all(|entry| !entry.contains("state_events_document_hash_document_version")),
+        "fixture must start with canonical index convergence pending"
+    );
+    assert!(
+        before_state
+            .rows
+            .iter()
+            .filter(|row| row.contains("status-only-retention-probe-"))
+            .count()
+            >= 4,
+        "fixture must start above the per-document baseline retention cap"
+    );
+    let ops = tmp.path().join(".agent-doc/logs/ops.log");
+    let before_ops = std::fs::read(&ops).unwrap_or_default();
+
     let out = agent_doc()
         .current_dir(tmp.path())
         .env("AGENT_DOC_SESSION_CHECK_SETTLE_SECS", "0")
@@ -184,6 +358,27 @@ fn session_check_cli_reports_post_commit_steering_as_pending_with_exit_zero() {
             "queue_continuation_required=false steering_pending=true",
         ))
         .stdout(predicate::str::contains("INTERRUPTED").not());
+    await_authority_handoff_drain(tmp.path(), &doc);
+    let after_state = state_db_snapshot(tmp.path());
+    assert_eq!(after_state.user_version, before_state.user_version);
+    assert_eq!(
+        after_state.rows, before_state.rows,
+        "status-only CLI changed logical rows or duplicate row counts",
+    );
+    assert_eq!(
+        after_state.schema, before_state.schema,
+        "status-only CLI must not initialize/migrate schema or indexes"
+    );
+    assert_eq!(
+        std::fs::read(&ops).unwrap_or_default(),
+        before_ops,
+        "status-only CLI must not append diagnostics to ops.log"
+    );
+    assert_eq!(
+        agent_doc_cycle_state_io::load_latest_document_authority(&doc).unwrap(),
+        before_authority,
+        "status-only CLI must not publish an authority observation"
+    );
     let stdout = String::from_utf8_lossy(&out.get_output().stdout).to_ascii_lowercase();
     assert!(
         !stdout.contains("current turn"),
@@ -201,6 +396,62 @@ fn session_check_cli_reports_post_commit_steering_as_pending_with_exit_zero() {
         .stdout(predicate::str::contains(
             "[session-check] steering pending:",
         ));
+}
+
+#[test]
+fn direct_read_only_inspect_preserves_stale_schema_retention_and_ops() {
+    let (tmp, doc) = committed_cycle_with_post_commit_steering();
+    let before_authority = agent_doc_cycle_state_io::load_latest_document_authority(&doc).unwrap();
+    stage_pre_migration_over_retention_state(tmp.path());
+    let before_state = state_db_snapshot(tmp.path());
+    assert_eq!(before_state.user_version, 73);
+    assert!(
+        before_state
+            .schema
+            .iter()
+            .all(|entry| !entry.contains("state_events_document_hash_document_version")),
+        "fixture must retain a missing canonical index"
+    );
+    assert_eq!(
+        before_state
+            .rows
+            .iter()
+            .filter(|row| row.contains("status-only-retention-probe-"))
+            .count(),
+        4,
+        "fixture must retain every unversioned over-retention row"
+    );
+    let ops = tmp.path().join(".agent-doc/logs/ops.log");
+    let before_ops = std::fs::read(&ops).unwrap_or_default();
+
+    let report = agent_doc_session_check_io::inspect_read_only_with_warnings(
+        &doc,
+        &agent_doc_closeout_runtime_io::session_check_effects(),
+    )
+    .unwrap();
+    assert!(matches!(
+        report.status,
+        agent_doc_session_check_io::SessionCheckStatus::SteeringPending(_)
+    ));
+
+    let after_state = state_db_snapshot(tmp.path());
+    assert_eq!(after_state.user_version, before_state.user_version);
+    let before_schema = before_state.schema.iter().collect::<BTreeSet<_>>();
+    let after_schema = after_state.schema.iter().collect::<BTreeSet<_>>();
+    assert_eq!(
+        after_state.schema,
+        before_state.schema,
+        "direct inspect changed schema; added={:?}; removed={:?}",
+        after_schema.difference(&before_schema).collect::<Vec<_>>(),
+        before_schema.difference(&after_schema).collect::<Vec<_>>()
+    );
+    assert_eq!(after_state.rows, before_state.rows);
+    assert_eq!(std::fs::read(&ops).unwrap_or_default(), before_ops);
+    assert_eq!(
+        agent_doc_cycle_state_io::load_latest_document_authority(&doc).unwrap(),
+        before_authority,
+        "direct read-only inspect must not publish authority"
+    );
 }
 
 /// `#codexsteerinterrupt`: the `#steerinterruptexit` fixture inside a bound
@@ -420,13 +671,58 @@ fn codex_hook_cli_auto_closes_open_cycle_after_user_prompt_submit() {
         "stop_hook_active": false,
     });
 
-    agent_doc()
+    let marker = tmp.path().join("stop-closeout-after-pending.marker");
+    let release = tmp.path().join("stop-closeout-after-pending.release");
+    let mut stop = ProcessCommand::new(env!("CARGO_BIN_EXE_agent-doc"))
+        .env("AGENT_DOC_CODEX_STOP_HOOK_DEADLINE", "worker_completion")
+        .env(
+            agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+            CONTROLLER_LAUNCH_REASON,
+        )
+        .env("AGENT_DOC_TEST_CLOSEOUT_AFTER_PENDING_MARKER", &marker)
+        .env("AGENT_DOC_TEST_CLOSEOUT_AFTER_PENDING_RELEASE", &release)
         .current_dir(tmp.path())
         .args(["hook", "codex-stop"])
-        .write_stdin(stop_payload.to_string())
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("\"continue\":true"));
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    stop.stdin
+        .as_mut()
+        .unwrap()
+        .write_all(stop_payload.to_string().as_bytes())
+        .unwrap();
+    drop(stop.stdin.take());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !marker.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for Stop closeout transaction barrier"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(
+        !agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
+            &doc.to_string_lossy(),
+            "maintenance-during-stop-closeout",
+            std::process::id(),
+        )
+        .unwrap(),
+        "detached maintenance must not enter between Stop maintenance and commit"
+    );
+    assert!(
+        stop.try_wait().unwrap().is_none(),
+        "Stop must remain inside the guarded closeout transaction at the barrier"
+    );
+    fs::write(&release, b"release").unwrap();
+    let stop = stop.wait_with_output().unwrap();
+    assert!(
+        stop.status.success(),
+        "Stop hook failed: {}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    assert!(String::from_utf8_lossy(&stop.stdout).contains("\"continue\":true"));
 
     let content = fs::read_to_string(&doc).unwrap();
     assert!(content.contains("### Re: hook proof — gpt-5"));

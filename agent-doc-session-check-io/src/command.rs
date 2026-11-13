@@ -400,6 +400,19 @@ impl ReadOnlyRetainedCloseoutResumeProjection {
 }
 
 pub trait SessionCheckEffects {
+    /// Whether every inspection through this adapter is observational only.
+    ///
+    /// This is stronger than [`Self::applies_self_heals`]: direct workflow
+    /// effects such as removed-claim cancellation do not dispatch through an
+    /// effects method.  The public inspection entrypoints use this bit to
+    /// install the status-only mutation fence and suppress ops/advisory writes
+    /// around the entire pass, so a caller cannot accidentally turn a
+    /// read-only adapter into an applying session-check by choosing `inspect`
+    /// instead of `inspect_read_only`.
+    fn read_only_inspection(&self) -> bool {
+        false
+    }
+
     /// `#sessioncheckread`: whether this caller may APPLY session-check's
     /// self-heals — archive/index restoration, response-replay
     /// canonicalization, snapshot rebasing, editor-native save requests,
@@ -708,18 +721,22 @@ fn committed_cycle_steering_status(
     // `#steerbaselineabsorb`: a pending prompt the committed baseline already
     // carries would read as `no_changes` to the next preflight; persist it so
     // the next contract carries it.
-    crate::absorbed_steering::record_reported_logged(file, &items, &state.cycle_id);
+    if !crate::status_only_pass_active() {
+        crate::absorbed_steering::record_reported_logged(file, &items, &state.cycle_id);
+    }
     let items = crate::midturn_steering::render_pending_steering_items(&items)
         .map(|rendered| format!("\n{rendered}"))
         .unwrap_or_default();
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "session_check_steering_pending file={} cycle_id={} (#steerinterruptexit)",
-            file.display(),
-            state.cycle_id,
-        ),
-    );
+    if !crate::status_only_pass_active() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "session_check_steering_pending file={} cycle_id={} (#steerinterruptexit)",
+                file.display(),
+                state.cycle_id,
+            ),
+        );
+    }
     SessionCheckStatus::SteeringPending(format!(
         "{} {detail}{items}\n{guidance}",
         agent_doc_turn::response_text::SESSION_CHECK_STEERING_PENDING_PREFIX,
@@ -1623,7 +1640,7 @@ pub fn try_run_with_options(
     crate::profile::reset();
     let started = std::time::Instant::now();
     if !effects.applies_self_heals() {
-        let out = crate::with_status_only_pass(|| {
+        let out = crate::with_status_only_transaction(|| {
             try_run_with_options_pass(file, codex_final_gate, effects)
         });
         crate::profile::report(file, started.elapsed());
@@ -1991,6 +2008,17 @@ pub fn run_self_heal(file: &Path, effects: &impl SessionCheckEffects) -> Result<
     exit_on_interrupted(file, try_run_with_options(file, false, &heal))
 }
 
+#[doc(hidden)]
+pub fn run_self_heal_under_apply_guard(
+    file: &Path,
+    effects: &impl SessionCheckEffects,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<()> {
+    apply_guard.ensure_protects(file)?;
+    let _scope = QueueApplyGuardScope::enter();
+    run_self_heal(file, effects)
+}
+
 /// The explicit command that applies a self-heal `session-check` reported.
 pub fn session_check_heal_command(file: &Path) -> String {
     format!("agent-doc repair {} --session-check-heal", file.display())
@@ -2166,6 +2194,10 @@ struct StatusOnlySessionCheckEffects<'a, E> {
 }
 
 impl<E: SessionCheckEffects> SessionCheckEffects for StatusOnlySessionCheckEffects<'_, E> {
+    fn read_only_inspection(&self) -> bool {
+        true
+    }
+
     fn applies_self_heals(&self) -> bool {
         false
     }
@@ -2894,10 +2926,14 @@ fn run_with_options_inner(
     let replay_canonicalization_requires_settlement = effects
         .allows_response_replay_canonicalization()
         && (replay_healed || response_replay_canonicalization_pending_commit(file)?);
-    // Phase E rung 2 (`#adstatechart2`): advisory read-only observability of the
+    // Phase E rung 2 (`#adstatechart2`): advisory observability of the
     // local-process four-region state, logged alongside the existing ops.log
-    // markers. Never gates closeout — emitted regardless of the check outcome.
-    agent_doc_state_observer_io::log_advisory_snapshot(file);
+    // markers. A status-only transaction is intrinsically pure, so its
+    // observability result stays in the returned report instead of appending a
+    // diagnostic to ops.log. Applying checks retain the diagnostic.
+    if !crate::status_only_pass_active() {
+        agent_doc_state_observer_io::log_advisory_snapshot(file);
+    }
     let report = crate::profile::timed("inspect_with_warnings", || {
         inspect_with_warnings(file, effects)
     })?;
@@ -3658,8 +3694,35 @@ pub fn inspect_read_only(
     file: &Path,
     effects: &impl SessionCheckEffects,
 ) -> Result<SessionCheckStatus> {
+    Ok(inspect_read_only_with_warnings(file, effects)?.status)
+}
+
+pub fn inspect_read_only_with_warnings(
+    file: &Path,
+    effects: &impl SessionCheckEffects,
+) -> Result<SessionCheckReport> {
     let status_only = StatusOnlySessionCheckEffects { inner: effects };
-    crate::with_status_only_pass(|| inspect(file, &status_only))
+    // This public entrypoint is used directly by preflight proof, Stop, route,
+    // sync, and MCP callers that never pass through the CLI wrapper. Its whole
+    // call graph therefore needs the same durable-state and diagnostic purity
+    // boundary as `run_read_only_settling`.
+    crate::with_status_only_transaction(|| {
+        crate::with_current_document_pass(|| inspect_with_warnings_inner(file, &status_only))
+    })
+}
+
+/// Inspect from a transaction that already owns the document apply capability.
+/// Only the redundant foreign-owner probe is suppressed; ordinary lifecycle
+/// and closeout debt remain fail-closed.
+#[doc(hidden)]
+pub fn inspect_under_apply_guard(
+    file: &Path,
+    effects: &impl SessionCheckEffects,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<SessionCheckStatus> {
+    apply_guard.ensure_protects(file)?;
+    let _scope = QueueApplyGuardScope::enter();
+    inspect(file, effects)
 }
 
 /// `#sessioncheckread`: [`inspect`] for an internal closeout caller that
@@ -3675,6 +3738,17 @@ pub fn inspect_self_healing(
     inspect(file, &heal)
 }
 
+#[doc(hidden)]
+pub fn inspect_self_healing_under_apply_guard(
+    file: &Path,
+    effects: &impl SessionCheckEffects,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<SessionCheckStatus> {
+    apply_guard.ensure_protects(file)?;
+    let _scope = QueueApplyGuardScope::enter();
+    inspect_self_healing(file, effects)
+}
+
 pub fn is_committed_head_response_missing_interruption(message: &str) -> bool {
     message.starts_with("[session-check] INTERRUPTED:")
         && message
@@ -3685,6 +3759,9 @@ pub fn inspect_with_warnings(
     file: &Path,
     effects: &impl SessionCheckEffects,
 ) -> Result<SessionCheckReport> {
+    if effects.read_only_inspection() {
+        return inspect_read_only_with_warnings(file, effects);
+    }
     // `#sccurrentpass`: callers outside `run_with_options` (compact/write
     // closeout) get the same one-version-per-sweep memo. Nested inside a pass
     // this reuses the outer one.
@@ -3737,9 +3814,60 @@ fn refuse_transient_queue_closeout(
     file: &Path,
     status: SessionCheckStatus,
 ) -> Result<SessionCheckStatus> {
+    let SessionCheckStatus::Ok(_) = &status else {
+        return Ok(status);
+    };
+    if closeout_caller_holds_queue_apply_guard() {
+        return refuse_transient_queue_lifecycle_debt(file, status);
+    }
+    match agent_doc_queue_io::queue_edit_owner::queue_apply_in_flight(file) {
+        Ok(true) => {
+            return Ok(SessionCheckStatus::Interrupted(format!(
+                "[session-check] INTERRUPTED: queue maintenance apply is in flight for {}; terminal closeout is withheld until the apply lock is released (#transientcloseout)",
+                file.display(),
+            )));
+        }
+        Err(error) => {
+            return Ok(SessionCheckStatus::Interrupted(format!(
+                "[session-check] INTERRUPTED: queue maintenance apply state could not be proven for {}: {error:#}; terminal closeout is withheld (#transientcloseout)",
+                file.display(),
+            )));
+        }
+        Ok(false) => {}
+    }
+    if agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_pending(file) {
+        return Ok(SessionCheckStatus::Interrupted(format!(
+            "[session-check] INTERRUPTED: queue maintenance request is pending for {}; terminal closeout is withheld until its admitted generation completes (#transientcloseout)",
+            file.display(),
+        )));
+    }
+    if let Some(attempt) =
+        agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(&file.to_string_lossy())
+        && attempt
+            .holder
+            .starts_with(agent_doc_queue_io::queue_edit_owner::BACKGROUND_QUEUE_EDIT_OWNER_PREFIX)
+    {
+        return Ok(SessionCheckStatus::Interrupted(format!(
+            "[session-check] INTERRUPTED: queue maintenance attempt is incomplete for {} (holder_pid={}, holder={}); terminal closeout is withheld. The next admission will recover a dead owner or coalesce with a live one (#transientcloseout)",
+            file.display(),
+            attempt.holder_pid,
+            attempt.holder,
+        )));
+    }
+    refuse_transient_queue_lifecycle_debt(file, status)
+}
+
+fn refuse_transient_queue_lifecycle_debt(
+    file: &Path,
+    status: SessionCheckStatus,
+) -> Result<SessionCheckStatus> {
     let SessionCheckStatus::Ok(message) = &status else {
         return Ok(status);
     };
+    // Comprehensive queue maintenance is detached from admission. A terminal
+    // result must not race that authority-checked projection: either the worker
+    // finishes and the ordinary lifecycle debt below becomes visible, or the
+    // next check retries after the short-lived lease settles.
     let content = match crate::resolve_current_document_content(file, "transient_closeout") {
         Ok(content) => content,
         Err(error) => {
@@ -3749,6 +3877,25 @@ fn refuse_transient_queue_closeout(
             )));
         }
     };
+    let live_ids = agent_doc_queue::queue_closeout_guard::live_queue_line_reference_ids(&content);
+    let closeout_state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
+    let mut same_cycle_pending = closeout_state
+        .filter(|state| state.capture_id.is_none() && state.response_sha256.is_none())
+        .into_iter()
+        .flat_map(|state| state.pending_actionable_ids)
+        .filter(|id| live_ids.contains(id))
+        .collect::<Vec<_>>();
+    same_cycle_pending.sort();
+    if !same_cycle_pending.is_empty() {
+        return Ok(SessionCheckStatus::Interrupted(format!(
+            "[session-check] INTERRUPTED: normal closeout refused while same-cycle queue ingress is still pending lifecycle projection (#transientcloseout): {}",
+            same_cycle_pending
+                .iter()
+                .map(|id| format!("#{id}"))
+                .collect::<Vec<_>>()
+                .join(", "),
+        )));
+    }
     match agent_doc_queue::transient_closeout::closeout_failure_for_success_message(
         message, &content,
     )? {
@@ -4280,6 +4427,46 @@ pub fn enforce_clean_closeout_with_force_disk(
     })
 }
 
+thread_local! {
+    static CLOSEOUT_CALLER_HOLDS_QUEUE_APPLY_GUARD: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+fn closeout_caller_holds_queue_apply_guard() -> bool {
+    CLOSEOUT_CALLER_HOLDS_QUEUE_APPLY_GUARD.with(|depth| depth.get() > 0)
+}
+
+struct QueueApplyGuardScope;
+
+impl QueueApplyGuardScope {
+    fn enter() -> Self {
+        CLOSEOUT_CALLER_HOLDS_QUEUE_APPLY_GUARD
+            .with(|depth| depth.set(depth.get().saturating_add(1)));
+        Self
+    }
+}
+
+impl Drop for QueueApplyGuardScope {
+    fn drop(&mut self) {
+        CLOSEOUT_CALLER_HOLDS_QUEUE_APPLY_GUARD
+            .with(|depth| depth.set(depth.get().saturating_sub(1)));
+    }
+}
+
+/// Embedded closeout for a transaction that already owns the document apply
+/// capability. The capability is validated before session-check suppresses
+/// only its foreign-owner probes; all lifecycle/debt checks still run.
+#[doc(hidden)]
+pub fn enforce_clean_closeout_with_force_disk_under_apply_guard(
+    file: &Path,
+    force_disk: bool,
+    effects: &impl SessionCheckEffects,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<()> {
+    apply_guard.ensure_protects(file)?;
+    let _scope = QueueApplyGuardScope::enter();
+    enforce_clean_closeout_with_force_disk(file, force_disk, effects)
+}
+
 fn enforce_clean_closeout_inner(file: &Path, effects: &impl SessionCheckEffects) -> Result<()> {
     if let Some(message) =
         agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_turn_stage(
@@ -4341,10 +4528,15 @@ pub fn detect_uncommitted_closeout_drift_with_context(
             return Ok(None);
         }
     }
-    if effects
-        .repair_committed_historical_snapshot_drift(file)?
-        .is_some()
-    {
+    let historical_snapshot_drift = if effects.applies_self_heals() {
+        effects.repair_committed_historical_snapshot_drift(file)?
+    } else {
+        // Drift admission is a classifier, not a repair boundary. A read-only
+        // adapter must make the same decision from the pure pending probe and
+        // leave the snapshot untouched for the guarded heal transaction.
+        effects.pending_committed_historical_snapshot_drift(file)?
+    };
+    if historical_snapshot_drift.is_some() {
         return Ok(None);
     }
     if let Some(drift) = agent_doc_git_io::submodule::submodule_pointer_drift(file)? {
@@ -5632,6 +5824,7 @@ mod terminal_convergence_tests {
     #[test]
     fn transient_queue_rows_refuse_a_successful_closeout() {
         let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("task.md");
         std::fs::write(
             &file,
@@ -5689,6 +5882,73 @@ mod terminal_convergence_tests {
         )
         .unwrap();
         assert!(matches!(steering, SessionCheckStatus::SteeringPending(_)));
+    }
+
+    #[test]
+    fn crashed_maintenance_attempt_withholds_terminal_status_until_redispatched() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        std::fs::write(
+            &file,
+            "<!-- agent:queue -->\n- ⏳ awaiting operator\n<!-- /agent:queue -->\n",
+        )
+        .unwrap();
+        let file_text = file.to_string_lossy();
+        let crashed_token = format!(
+            "{}crashed-attempt",
+            agent_doc_queue_io::queue_edit_owner::BACKGROUND_QUEUE_EDIT_OWNER_PREFIX
+        );
+        assert!(
+            agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
+                &file_text,
+                &crashed_token,
+                4_000_000,
+            )
+            .unwrap()
+        );
+
+        let crashed = refuse_transient_queue_closeout(
+            &file,
+            SessionCheckStatus::Ok("[session-check] OK".to_string()),
+        )
+        .unwrap();
+        match crashed {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(
+                    message.contains("maintenance attempt is incomplete"),
+                    "{message}"
+                );
+                assert!(message.contains(&crashed_token), "{message}");
+            }
+            other => panic!("dead maintenance owner falsely reported terminal: {other:?}"),
+        }
+
+        let recovery = format!(
+            "{}recovery-attempt",
+            agent_doc_queue_io::queue_edit_owner::BACKGROUND_QUEUE_EDIT_OWNER_PREFIX
+        );
+        assert!(
+            agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
+                &file_text,
+                &recovery,
+                std::process::id(),
+            )
+            .unwrap(),
+            "a dead attempt must be recoverable immediately, without waiting for the TTL"
+        );
+        let guard =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::adopt_reserved(&file, &recovery)
+                .unwrap()
+                .expect("the recovery worker adopts its durable reservation");
+        drop(guard);
+
+        let settled = refuse_transient_queue_closeout(
+            &file,
+            SessionCheckStatus::Ok("[session-check] OK".to_string()),
+        )
+        .unwrap();
+        assert!(matches!(settled, SessionCheckStatus::Ok(_)), "{settled:?}");
     }
 
     /// `#steerinterruptexit`: a guard finding whose recovery IS the pending

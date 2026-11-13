@@ -105,6 +105,24 @@ fn current_text_via_preflight_authority(
     )
 }
 
+fn peek_current_text_via_preflight_authority(
+    file: &Path,
+    source: &str,
+) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
+    #[cfg(test)]
+    if agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file) {
+        let authority = agent_doc_crdt_relay_io::crdt_authority_for_file(file);
+        return Ok(Some(
+            agent_doc_crdt_relay_io::peek_current_text_for_file_with_authority_nonblocking(
+                file, authority,
+            )?,
+        ));
+    }
+    agent_doc_controller_io::project_controller::peek_current_text_via_controller_model_read_for_doc(
+        file, source,
+    )
+}
+
 /// `#px82` — how many bounded authority observations queue maintenance makes
 /// before it gives up and discards the recomputed queue. Override with
 /// `AGENT_DOC_QUEUE_AUTHORITY_ATTEMPTS`.
@@ -163,21 +181,59 @@ fn current_text_via_preflight_authority_retrying(
     file: &Path,
     source: &str,
 ) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
-    observe_current_text_with_bounded_retry(file, source, queue_authority_attempts(), |file| {
-        current_text_via_preflight_authority(file, source)
-    })
+    current_text_via_preflight_authority_retrying_with_fence(file, source, None)
 }
 
+fn current_text_via_preflight_authority_retrying_with_fence(
+    file: &Path,
+    source: &str,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
+) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
+    observe_current_text_with_bounded_retry_fenced(
+        file,
+        source,
+        queue_authority_attempts(),
+        effect_fence,
+        |file| {
+            let observed = peek_current_text_via_preflight_authority(file, source);
+            fence_queue_maintenance_effect(
+                file,
+                effect_fence,
+                QueueMaintenanceEffectFamily::Controller,
+            )?;
+            agent_doc_controller_io::project_controller::publish_controller_model_read_diagnostic_for_doc(
+                file,
+                source,
+                observed.as_ref(),
+            );
+            observed
+        },
+    )
+}
+
+#[cfg(test)]
 fn observe_current_text_with_bounded_retry(
     file: &Path,
     source: &str,
     attempts: u32,
+    observe: impl FnMut(&Path) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>>,
+) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
+    observe_current_text_with_bounded_retry_fenced(file, source, attempts, None, observe)
+}
+
+fn observe_current_text_with_bounded_retry_fenced(
+    file: &Path,
+    source: &str,
+    attempts: u32,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
     mut observe: impl FnMut(&Path) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>>,
 ) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
     let attempts = attempts.max(1);
+    fence_pending_maintenance_effect(file, effect_fence)?;
     let mut observed = observe(file);
     for attempt in 1..=attempts {
         let status = current_text_status_token(&observed);
+        fence_pending_maintenance_effect(file, effect_fence)?;
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -235,6 +291,7 @@ fn observe_current_text_with_bounded_retry(
         // Ask for re-registration and then re-observe rather than reporting an
         // error the operator has to clear with two manual admin commands.
         if request_plugin_refresh {
+            fence_pending_maintenance_effect(file, effect_fence)?;
             let reregister = match agent_doc_crdt_relay_io::signal_crdt_replica_event(
                 file,
                 agent_doc_crdt_relay_io::CrdtReplicaEventReason::EditorReplicaReregister,
@@ -243,6 +300,7 @@ fn observe_current_text_with_bounded_retry(
                 Ok(()) => "requested".to_string(),
                 Err(err) => format!("failed:{}", format!("{err:#}").replace('\n', "\\n")),
             };
+            fence_pending_maintenance_effect(file, effect_fence)?;
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -255,6 +313,7 @@ fn observe_current_text_with_bounded_retry(
             );
         }
         std::thread::sleep(QUEUE_AUTHORITY_RETRY_BACKOFF);
+        fence_pending_maintenance_effect(file, effect_fence)?;
         observed = observe(file);
     }
     observed
@@ -2251,9 +2310,19 @@ pub struct PendingMaintenanceReport {
     pub todo_signals: Vec<TodoSignal>,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 struct PendingMaintenanceOptions {
     force_disk: bool,
+    persist: bool,
+}
+
+impl Default for PendingMaintenanceOptions {
+    fn default() -> Self {
+        Self {
+            force_disk: false,
+            persist: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -2269,28 +2338,165 @@ pub fn run_pending_maintenance(
     file: &Path,
     write_effects: &dyn PreflightMaintenanceWriteEffects,
 ) -> Result<PendingMaintenanceReport> {
-    run_pending_maintenance_with_options(file, PendingMaintenanceOptions::default(), write_effects)
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    run_pending_maintenance_under_apply_guard(file, write_effects, &apply_guard)
+}
+
+#[doc(hidden)]
+pub fn run_pending_maintenance_under_apply_guard(
+    file: &Path,
+    write_effects: &dyn PreflightMaintenanceWriteEffects,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<PendingMaintenanceReport> {
+    apply_guard.ensure_protects(file)?;
+    run_pending_maintenance_with_options(
+        file,
+        PendingMaintenanceOptions::default(),
+        write_effects,
+        None,
+        Some(apply_guard),
+        None,
+    )
+}
+
+pub trait PendingMaintenanceEffectFence {
+    fn check(&self, file: &Path) -> Result<()>;
+
+    /// Record and verify the exact authority cut produced by this owner. The
+    /// default keeps ordinary foreground callers source-compatible; detached
+    /// admitted-cut owners override it so later effects fence against their
+    /// own proven successor rather than the stale admission hash.
+    fn record_applied_content(&self, _file: &Path, _content: &str) -> Result<()> {
+        Ok(())
+    }
+
+    fn expected_authority_hash(&self) -> Option<String> {
+        None
+    }
+}
+
+impl<F> PendingMaintenanceEffectFence for F
+where
+    F: Fn(&Path) -> Result<()>,
+{
+    fn check(&self, file: &Path) -> Result<()> {
+        self(file)
+    }
+}
+
+/// Run pending maintenance while fencing every durable effect through
+/// `effect_fence`. Detached workers use this to prove that their coalescing
+/// reservation is still current immediately before publishing evidence,
+/// removing worktrees, archiving done items, or converging document state.
+pub fn run_pending_maintenance_fenced(
+    file: &Path,
+    admitted_content: &str,
+    write_effects: &dyn PreflightMaintenanceWriteEffects,
+    effect_fence: &dyn PendingMaintenanceEffectFence,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<PendingMaintenanceReport> {
+    apply_guard.ensure_protects(file)?;
+    run_pending_maintenance_with_options(
+        file,
+        PendingMaintenanceOptions::default(),
+        write_effects,
+        Some(effect_fence),
+        Some(apply_guard),
+        Some(admitted_content),
+    )
 }
 
 pub fn run_pending_maintenance_force_disk(
     file: &Path,
     write_effects: &dyn PreflightMaintenanceWriteEffects,
 ) -> Result<PendingMaintenanceReport> {
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    run_pending_maintenance_force_disk_under_apply_guard(file, write_effects, &apply_guard)
+}
+
+#[doc(hidden)]
+pub fn run_pending_maintenance_force_disk_under_apply_guard(
+    file: &Path,
+    write_effects: &dyn PreflightMaintenanceWriteEffects,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<PendingMaintenanceReport> {
+    apply_guard.ensure_protects(file)?;
     run_pending_maintenance_with_options(
         file,
-        PendingMaintenanceOptions { force_disk: true },
+        PendingMaintenanceOptions {
+            force_disk: true,
+            persist: true,
+        },
         write_effects,
+        None,
+        Some(apply_guard),
+        None,
     )
+}
+
+/// Derive the pending-maintenance report without persisting any projected
+/// bookkeeping. Admission uses this pure view while the detached maintenance
+/// owner performs editor/snapshot convergence after the response contract has
+/// been emitted.
+pub fn inspect_pending_maintenance(
+    file: &Path,
+    write_effects: &dyn PreflightMaintenanceWriteEffects,
+) -> Result<PendingMaintenanceReport> {
+    run_pending_maintenance_with_options(
+        file,
+        PendingMaintenanceOptions {
+            force_disk: false,
+            persist: false,
+        },
+        write_effects,
+        None,
+        None,
+        None,
+    )
+}
+
+fn fence_pending_maintenance_effect(
+    file: &Path,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
+) -> Result<()> {
+    if let Some(fence) = effect_fence {
+        fence
+            .check(file)
+            .context("pending maintenance effect lease was superseded")?;
+    }
+    Ok(())
+}
+
+fn archive_pending_done_for_maintenance(
+    file: &Path,
+    content: &str,
+    removed: &[agent_doc_element_backlog::backlog::PendingItem],
+    persist: bool,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
+) -> Result<Option<String>> {
+    if !persist {
+        // External done archives are an effect, not a projection. The detached
+        // owner repeats this derivation with persistence enabled after admission.
+        return Ok(None);
+    }
+    fence_pending_maintenance_effect(file, effect_fence)?;
+    agent_doc_element_backlog_io::done_archive::archive_pending_done(file, content, removed)
 }
 
 fn run_pending_maintenance_with_options(
     file: &Path,
     options: PendingMaintenanceOptions,
     write_effects: &dyn PreflightMaintenanceWriteEffects,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
+    apply_guard: Option<&agent_doc_queue_io::queue_edit_owner::QueueEditGuard>,
+    admitted_content: Option<&str>,
 ) -> Result<PendingMaintenanceReport> {
-    let content = match std::fs::read_to_string(file) {
-        Ok(c) => c,
-        Err(_) => return Ok(PendingMaintenanceReport::default()),
+    let content = match admitted_content {
+        Some(content) => content.to_string(),
+        None => match std::fs::read_to_string(file) {
+            Ok(c) => c,
+            Err(_) => return Ok(PendingMaintenanceReport::default()),
+        },
     };
     let components = match agent_doc_element::element::parse(&content) {
         Ok(cs) => cs,
@@ -2341,14 +2547,17 @@ fn run_pending_maintenance_with_options(
             "[preflight] terminal boundary: pruned {} proven-redundant debris line(s)",
             terminal_debris_lines_pruned
         );
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "terminal_debris_pruned file={} lines={} authority=maintenance_convergence",
-                file.display(),
-                terminal_debris_lines_pruned
-            ),
-        );
+        if options.persist {
+            fence_pending_maintenance_effect(file, effect_fence)?;
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "terminal_debris_pruned file={} lines={} authority=maintenance_convergence",
+                    file.display(),
+                    terminal_debris_lines_pruned
+                ),
+            );
+        }
     }
     if let Some(ref mut snapshot) = snapshot_content
         && let Some(pruned) =
@@ -2366,21 +2575,24 @@ fn run_pending_maintenance_with_options(
         eprintln!("[preflight] tracked lists: {action} (#managedlistnodrift)");
     }
     if let Some(projected) = tracked.content {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "tracked_lists_projected file={} moved={} (#managedlistnodrift)",
-                file.display(),
-                tracked
-                    .actions
-                    .iter()
-                    .filter(|action| matches!(
-                        action,
-                        agent_doc_work_projection::managed_list::ReconcileAction::Migrate { .. }
-                    ))
-                    .count()
-            ),
-        );
+        if options.persist {
+            fence_pending_maintenance_effect(file, effect_fence)?;
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "tracked_lists_projected file={} moved={} (#managedlistnodrift)",
+                    file.display(),
+                    tracked
+                        .actions
+                        .iter()
+                        .filter(|action| matches!(
+                            action,
+                            agent_doc_work_projection::managed_list::ReconcileAction::Migrate { .. }
+                        ))
+                        .count()
+                ),
+            );
+        }
         current_content = projected;
         mutated = true;
     }
@@ -2392,7 +2604,13 @@ fn run_pending_maintenance_with_options(
         snapshot_mutated = true;
     }
     let mut saw_completed_before = false;
-    advise_misplaced_legacy_done_archive(file, &content);
+    // The admission path is inspection-only. Advisories are durable evidence
+    // (`ops.log` plus `.agent-doc/advisories`) and therefore belong to the
+    // detached maintenance owner, alongside the document write itself.
+    if options.persist {
+        fence_pending_maintenance_effect(file, effect_fence)?;
+        advise_misplaced_legacy_done_archive(file, &content);
+    }
     let already_done_ids = collect_agent_done_ids(file, &content)?;
     let done_item_texts = collect_agent_done_texts(file, &content)?;
 
@@ -2451,32 +2669,33 @@ fn run_pending_maintenance_with_options(
                 &current_body,
                 &already_done_ids,
             );
-            let mirror_ids: std::collections::HashSet<String> = id_matches
-                .iter()
-                .filter(|item| {
-                    let mirrored = done_item_texts
-                        .get(&item.id.to_ascii_lowercase())
-                        .is_none_or(|done| {
-                            agent_doc_element_done::done_entry_matches_item(done, &item.text)
-                        });
-                    if !mirrored {
-                        eprintln!(
-                            "[preflight] {}: kept #{} although a done entry shares its id: the texts describe different work (id collision)",
-                            surface_label, item.id
-                        );
-                        agent_doc_ops_log_io::log_op(
-                            file,
-                            &format!(
-                                "done_mirror_reap_skipped_id_collision file={} id={} texts_differ=true",
-                                file.display(),
-                                item.id
-                            ),
-                        );
-                    }
-                    mirrored
-                })
-                .map(|item| item.id.clone())
-                .collect();
+            let mut mirror_ids = std::collections::HashSet::new();
+            for item in &id_matches {
+                let mirrored = done_item_texts
+                    .get(&item.id.to_ascii_lowercase())
+                    .is_none_or(|done| {
+                        agent_doc_element_done::done_entry_matches_item(done, &item.text)
+                    });
+                if mirrored {
+                    mirror_ids.insert(item.id.clone());
+                    continue;
+                }
+                eprintln!(
+                    "[preflight] {}: kept #{} although a done entry shares its id: the texts describe different work (id collision)",
+                    surface_label, item.id
+                );
+                if options.persist {
+                    fence_pending_maintenance_effect(file, effect_fence)?;
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "done_mirror_reap_skipped_id_collision file={} id={} texts_differ=true",
+                            file.display(),
+                            item.id
+                        ),
+                    );
+                }
+            }
             let (after_mirror_reap, mirror_items) =
                 agent_doc_element_backlog::backlog::op_take_active_items_by_ids(
                     &current_body,
@@ -2561,20 +2780,28 @@ fn run_pending_maintenance_with_options(
                             .get(&item.id)
                             .map(String::as_str)
                             .unwrap_or("ops_proof");
-                        agent_doc_ops_log_io::log_op(
-                            file,
-                            &format!(
-                                "auto_complete_ops_proof file={} id={} surface={} evidence={}",
-                                file.display(),
-                                item.id,
-                                surface_label,
-                                evidence
-                            ),
-                        );
+                        if options.persist {
+                            fence_pending_maintenance_effect(file, effect_fence)?;
+                            agent_doc_ops_log_io::log_op(
+                                file,
+                                &format!(
+                                    "auto_complete_ops_proof file={} id={} surface={} evidence={}",
+                                    file.display(),
+                                    item.id,
+                                    surface_label,
+                                    evidence
+                                ),
+                            );
+                        }
                     }
-                    let _ = agent_doc_cycle_state_io::record_pending_done_ids(file, &removed_ids);
-                    let _ = agent_doc_cycle_state_io::record_reaped_pending_ids(file, &removed_ids);
-                    let _ = agent_doc_cycle_state_io::mark_pending_mutations(file);
+                    if options.persist {
+                        fence_pending_maintenance_effect(file, effect_fence)?;
+                        let _ =
+                            agent_doc_cycle_state_io::record_pending_done_ids(file, &removed_ids);
+                        let _ =
+                            agent_doc_cycle_state_io::record_reaped_pending_ids(file, &removed_ids);
+                        let _ = agent_doc_cycle_state_io::mark_pending_mutations(file);
+                    }
                     current_body = after_ops_proof_reap;
                     mutated = true;
                     removed_items.extend(ops_proof_items);
@@ -2592,7 +2819,10 @@ fn run_pending_maintenance_with_options(
                 reaped_items.len(),
                 removed_ids.join(", ")
             );
-            let _ = agent_doc_cycle_state_io::record_reaped_pending_ids(file, &removed_ids);
+            if options.persist {
+                fence_pending_maintenance_effect(file, effect_fence)?;
+                let _ = agent_doc_cycle_state_io::record_reaped_pending_ids(file, &removed_ids);
+            }
             current_body = after_reap;
             mutated = true;
         }
@@ -2632,22 +2862,26 @@ fn run_pending_maintenance_with_options(
                     snapshot_mutated = true;
                 }
                 if !removed_items.is_empty()
-                    && let Some(archived) =
-                        agent_doc_element_backlog_io::done_archive::archive_pending_done(
-                            file,
-                            snap_content,
-                            &removed_items,
-                        )?
+                    && let Some(archived) = archive_pending_done_for_maintenance(
+                        file,
+                        snap_content,
+                        &removed_items,
+                        options.persist,
+                        effect_fence,
+                    )?
                 {
                     *snap_content = archived;
                     snapshot_mutated = true;
                 }
             } else {
-                log_snapshot_recovery_warning(
-                    file,
-                    "pending maintenance tracked-surface sync",
-                    format!("snapshot is missing the {} component", surface),
-                );
+                if options.persist {
+                    fence_pending_maintenance_effect(file, effect_fence)?;
+                    log_snapshot_recovery_warning(
+                        file,
+                        "pending maintenance tracked-surface sync",
+                        format!("snapshot is missing the {} component", surface),
+                    );
+                }
             }
         }
 
@@ -2657,31 +2891,36 @@ fn run_pending_maintenance_with_options(
 
         current_content = comp.replace_content(&current_content, &current_body);
         if !removed_items.is_empty()
-            && let Some(archived) =
-                agent_doc_element_backlog_io::done_archive::archive_pending_done(
-                    file,
-                    &current_content,
-                    &removed_items,
-                )?
+            && let Some(archived) = archive_pending_done_for_maintenance(
+                file,
+                &current_content,
+                &removed_items,
+                options.persist,
+                effect_fence,
+            )?
         {
             current_content = archived;
         }
     }
 
-    if let Some(archived) = agent_doc_element_backlog_io::done_archive::archive_pending_done(
+    if let Some(archived) = archive_pending_done_for_maintenance(
         file,
         &current_content,
         &[],
+        options.persist,
+        effect_fence,
     )? && archived != current_content
     {
         current_content = archived;
         mutated = true;
     }
     if let Some(ref mut snap_content) = snapshot_content
-        && let Some(archived) = agent_doc_element_backlog_io::done_archive::archive_pending_done(
+        && let Some(archived) = archive_pending_done_for_maintenance(
             file,
             snap_content,
             &[],
+            options.persist,
+            effect_fence,
         )?
         && archived != *snap_content
     {
@@ -2712,14 +2951,17 @@ fn run_pending_maintenance_with_options(
                     eprintln!(
                         "[preflight] todo: closed [#{id}]: its tracked work is resolved (#managedlistnodrift)"
                     );
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!(
-                            "todo_auto_done file={} id={} basis=linked_work_resolved source=preflight_projection",
-                            file.display(),
-                            id
-                        ),
-                    );
+                    if options.persist {
+                        fence_pending_maintenance_effect(file, effect_fence)?;
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "todo_auto_done file={} id={} basis=linked_work_resolved source=preflight_projection",
+                                file.display(),
+                                id
+                            ),
+                        );
+                    }
                 }
                 current_content = projected;
                 mutated = true;
@@ -2851,9 +3093,20 @@ fn run_pending_maintenance_with_options(
         snapshot_mutated = true;
         active_status_mutated = true;
     }
-    if let Some(reconciled) =
-        agent_doc_queue_io::worktree_inventory::reconcile_maintained(file, &current_content)?
-    {
+    // `reconcile_maintained` may remove a linked checkout and append removal
+    // receipts. Inspection must use the read-only projection; the detached
+    // worker repeats the pass with persistence enabled and owns those effects.
+    let worktrees_reconciled = if options.persist {
+        fence_pending_maintenance_effect(file, effect_fence)?;
+        agent_doc_queue_io::worktree_inventory::reconcile_maintained_under_apply_guard(
+            file,
+            &current_content,
+            apply_guard.context("persisting pending maintenance requires an apply guard")?,
+        )?
+    } else {
+        agent_doc_queue_io::worktree_inventory::reconcile(file, &current_content)?
+    };
+    if let Some(reconciled) = worktrees_reconciled {
         eprintln!("[preflight] worktrees: reconciled managed list");
         current_content = reconciled;
         mutated = true;
@@ -2903,7 +3156,8 @@ fn run_pending_maintenance_with_options(
     //    independently of the file write so a write-phase pending mutation that
     //    only diverged the snapshot (gate/edit/review-add) is still committed
     //    rather than stranded (#pending-gate-snapshot-desync).
-    if mutated {
+    if mutated && options.persist {
+        fence_pending_maintenance_effect(file, effect_fence)?;
         // `#fcc0`: converge the reconciled document through the editor IPC when a
         // live JB listener is active so per-cycle pending maintenance never raises a
         // `File Cache Conflict`; `content` is the pre-maintenance on-disk baseline.
@@ -2982,6 +3236,7 @@ fn run_pending_maintenance_with_options(
                 && !stale_marker_before.2
                 && deferable_status_error
             {
+                fence_pending_maintenance_effect(file, effect_fence)?;
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
@@ -3005,6 +3260,7 @@ fn run_pending_maintenance_with_options(
                 } else {
                     "realtime_buffer_busy"
                 };
+                fence_pending_maintenance_effect(file, effect_fence)?;
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
@@ -3031,20 +3287,25 @@ fn run_pending_maintenance_with_options(
             } else {
                 return Err(err);
             }
+        } else if let Some(fence) = effect_fence {
+            fence.record_applied_content(file, &current_content)?;
         }
     }
-    if (mutated || snapshot_mutated)
+    if options.persist
+        && (mutated || snapshot_mutated)
         && let Some(snap_content) = &snapshot_content
-        && let Err(e) = agent_doc_snapshot_io::checkpoint_document_baseline(
+    {
+        fence_pending_maintenance_effect(file, effect_fence)?;
+        if let Err(e) = agent_doc_snapshot_io::checkpoint_document_baseline(
             file,
             snap_content,
             agent_doc_ops_log_io::log_op,
-        )
-    {
-        eprintln!("[preflight] pending: snapshot sync warning: {}", e);
+        ) {
+            eprintln!("[preflight] pending: snapshot sync warning: {}", e);
+        }
     }
 
-    if saw_completed_before && !maintenance_deferred {
+    if options.persist && saw_completed_before && !maintenance_deferred {
         let persisted_content = if mutated {
             current_content.clone()
         } else {
@@ -3056,6 +3317,7 @@ fn run_pending_maintenance_with_options(
         match agent_doc_snapshot_io::load_document_baseline(file) {
             Ok(Some(snapshot_content)) => {
                 if let Err(err) = ensure_no_completed_tracked_items(&snapshot_content, "snapshot") {
+                    fence_pending_maintenance_effect(file, effect_fence)?;
                     log_snapshot_recovery_warning(
                         file,
                         "pending maintenance reap verification",
@@ -3063,12 +3325,16 @@ fn run_pending_maintenance_with_options(
                     );
                 }
             }
-            Ok(None) => log_snapshot_recovery_warning(
-                file,
-                "pending maintenance reap verification",
-                "snapshot is missing after completed tracked items were reaped",
-            ),
+            Ok(None) => {
+                fence_pending_maintenance_effect(file, effect_fence)?;
+                log_snapshot_recovery_warning(
+                    file,
+                    "pending maintenance reap verification",
+                    "snapshot is missing after completed tracked items were reaped",
+                )
+            }
             Err(err) => {
+                fence_pending_maintenance_effect(file, effect_fence)?;
                 log_snapshot_recovery_warning(file, "pending maintenance reap verification", err)
             }
         }
@@ -3890,6 +4156,7 @@ fn record_selected_queue_head_state(
     content: &str,
     head_text: &str,
     drainable: bool,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
 ) -> Result<()> {
     let canonical = file.canonicalize().with_context(|| {
         format!(
@@ -3923,9 +4190,11 @@ fn record_selected_queue_head_state(
             hosting_epoch: None,
         },
     );
+    fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Controller)?;
     let inserted = publish_reactive_state_event(&project_root, &event)?;
-    agent_doc_ops_log_io::log_op(
+    queue_maintenance_log_op(
         file,
+        effect_fence,
         &format!(
             "queue_selected_state_event_recorded file={} event_id={} inserted={} document_hash={} node_id={} drainable={}",
             file.display(),
@@ -3935,7 +4204,7 @@ fn record_selected_queue_head_state(
             node_key,
             drainable
         ),
-    );
+    )?;
     Ok(())
 }
 
@@ -3944,6 +4213,7 @@ fn record_deferred_queue_head_state(
     content: &str,
     head_text: &str,
     reason: &str,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
 ) -> Result<()> {
     let canonical = file.canonicalize().with_context(|| {
         format!(
@@ -3977,6 +4247,7 @@ fn record_deferred_queue_head_state(
             hosting_epoch: None,
         },
     );
+    fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Controller)?;
     let selected_inserted = publish_reactive_state_event(&project_root, &selected_event)?;
     let reason_hash = agent_doc_hash::content_hash(reason);
     let deferred_event = agent_doc_state_backbone::StateEvent::new(
@@ -3990,9 +4261,11 @@ fn record_deferred_queue_head_state(
             hosting_epoch: None,
         },
     );
+    fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Controller)?;
     let deferred_inserted = publish_reactive_state_event(&project_root, &deferred_event)?;
-    agent_doc_ops_log_io::log_op(
+    queue_maintenance_log_op(
         file,
+        effect_fence,
         &format!(
             "queue_deferred_state_event_recorded file={} selected_event_id={} selected_inserted={} deferred_event_id={} deferred_inserted={} document_hash={} node_id={} reason={}",
             file.display(),
@@ -4004,7 +4277,7 @@ fn record_deferred_queue_head_state(
             node_key,
             reason
         ),
-    );
+    )?;
     Ok(())
 }
 
@@ -4013,6 +4286,7 @@ fn record_queue_worklist_state(
     content: &str,
     entries: &[agent_doc_queue::document_queue::QueueEntry],
     active: bool,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
 ) -> Result<()> {
     let canonical = file.canonicalize().with_context(|| {
         format!(
@@ -4059,9 +4333,11 @@ fn record_queue_worklist_state(
             hosting_epoch: None,
         },
     );
+    fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Controller)?;
     let inserted = publish_reactive_state_event(&project_root, &event)?;
-    agent_doc_ops_log_io::log_op(
+    queue_maintenance_log_op(
         file,
+        effect_fence,
         &format!(
             "queue_worklist_state_event_recorded file={} event_id={} inserted={} document_hash={} queue_hash={} active={}",
             file.display(),
@@ -4071,7 +4347,7 @@ fn record_queue_worklist_state(
             queue_hash,
             active
         ),
-    );
+    )?;
     Ok(())
 }
 
@@ -4148,12 +4424,36 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
         Ok(content) => content,
         Err(_) => return Ok(QueueState::default()),
     };
+    inspect_queue_state_from_content(file, diff, content)
+}
+
+/// Read-only queue admission from an already admitted authoritative document cut.
+///
+/// Preflight's reactive diff source has already failed closed when an attached
+/// editor cannot provide a current replica. Reusing that exact cut here keeps the
+/// admission lane bounded: claim/relevance selection is pure and comprehensive
+/// queue convergence can run as a later Effect without another editor save RPC.
+/// The disk-reading [`inspect_queue_state`] remains the diagnostic/probe adapter.
+pub fn inspect_queue_state_from_content(
+    file: &Path,
+    diff: Option<&str>,
+    content: String,
+) -> Result<QueueState> {
     let snapshot_content = agent_doc_snapshot_io::load_document_baseline(file)
         .ok()
         .flatten();
     let (content, _) =
         converge_queue_control_binding_content(&content, snapshot_content.as_deref())?;
     let (content, _) = infer_queue_go_from_prompt_edit(&content, snapshot_content.as_deref())?;
+    // Candidate identity is part of admission, not comprehensive maintenance:
+    // the contract hands `[#q-…]` selectors to claim/dispatch immediately, so
+    // derive the exact deterministic projection on the authoritative cut even
+    // when its persistence is deferred to the background reconciler.
+    let content = agent_doc_queue::prompt_identity::project(
+        &content,
+        &agent_doc_hash::document_id_for_path(file),
+    )
+    .content;
     let _nested_claim_steer =
         agent_doc_queue_io::queue_claim::nested_claim_steer_for(file, &content);
     let components = match agent_doc_element::element::parse(&content) {
@@ -4400,6 +4700,19 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
         queue_drainable_head_count,
         &claimed_queue_heads,
     );
+    // Admission must preserve warning facts even though comprehensive queue
+    // convergence now runs after the JSON response.  This classification is a
+    // pure comparison against the admitted cut and cycle-start snapshot; the
+    // detached worker remains solely responsible for any projection write.
+    let warnings = inactive_queue_residue_warning(
+        file,
+        &activation.entries_after,
+        activation.active,
+        activation.deferred,
+        has_auto,
+    )
+    .into_iter()
+    .collect();
 
     Ok(QueueState {
         authoritative_content: Some(content),
@@ -4432,7 +4745,44 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
         synced_queue_ids: vec![],
         mirrored_queue_ids: vec![],
         free_text_promotions: vec![],
-        warnings: vec![],
+        warnings,
+    })
+}
+
+fn inactive_queue_residue_warning(
+    file: &Path,
+    entries: &[agent_doc_queue::document_queue::QueueEntry],
+    active: bool,
+    deferred: bool,
+    has_immediate_activation: bool,
+) -> Option<PreflightWarning> {
+    let queue_has_prompts = !agent_doc_queue::document_queue::prompts(entries).is_empty();
+    let drained_residue = queue_entries_are_drained_residue(entries);
+    let need_strip_activation = has_immediate_activation && !queue_has_prompts;
+    let need_clear_non_auto_residue =
+        !has_immediate_activation && !active && !deferred && drained_residue;
+    let drained_body_clearable = (need_strip_activation || need_clear_non_auto_residue)
+        && !deferred
+        && queue_body_clear_is_lossless(entries);
+    if active || deferred || entries.is_empty() || drained_body_clearable {
+        return None;
+    }
+
+    // This is a per-edit signal, not a steady-state nag. A detached worker may
+    // later converge the queue, but admission compares the operator's exact cut
+    // to the cycle-start snapshot so the warning cannot disappear merely
+    // because persistence moved off the foreground lane.
+    let inactive_queue_changed = match agent_doc_snapshot_io::load_document_baseline(file) {
+        Ok(Some(snapshot_content)) => {
+            inactive_queue_changed_vs_snapshot(&snapshot_content, entries)
+        }
+        _ => true,
+    };
+    inactive_queue_changed.then(|| PreflightWarning {
+        code: "inactive_queue_residue".to_string(),
+        message: "agent:queue is inactive but still contains directive/item residue; only active queue state is executable priority context".to_string(),
+        document_agent: None,
+        active_harness: None,
     })
 }
 
@@ -5003,16 +5353,30 @@ fn adopt_proven_newer_disk_save(
 /// registered CRDT cut catches up. Fast-forward the validated durable branch
 /// only from its exact unchanged baseline, then give CRDT/editor projection the
 /// same bounded chance to converge that other attached writes receive.
+#[cfg(test)]
 fn observe_queue_authority_after_native_save_with_bounded_retry(
     file: &Path,
     source: &str,
     attempts: u32,
     observe: impl FnMut(&Path) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>>,
 ) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
+    observe_queue_authority_after_native_save_with_bounded_retry_fenced(
+        file, source, attempts, None, observe,
+    )
+}
+
+fn observe_queue_authority_after_native_save_with_bounded_retry_fenced(
+    file: &Path,
+    source: &str,
+    attempts: u32,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
+    observe: impl FnMut(&Path) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>>,
+) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
     observe_queue_authority_after_native_save_with_bounded_retry_and_adopt(
         file,
         source,
         attempts,
+        effect_fence,
         observe,
         adopt_proven_newer_disk_save,
     )
@@ -5022,10 +5386,12 @@ fn observe_queue_authority_after_native_save_with_bounded_retry_and_adopt(
     file: &Path,
     source: &str,
     attempts: u32,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
     mut observe: impl FnMut(&Path) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>>,
     mut adopt: impl FnMut(&Path, &str, &str, &str) -> Result<()>,
 ) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
     let attempts = attempts.max(1);
+    fence_pending_maintenance_effect(file, effect_fence)?;
     let mut observed = observe(file);
     // Preserve one exact-base operation epoch across this bounded reconciliation.
     // The first CP projection fences the active epoch, but subsequent observations
@@ -5077,6 +5443,7 @@ fn observe_queue_authority_after_native_save_with_bounded_retry_and_adopt(
             Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })) => text,
             _ => unreachable!("newer_disk is only populated for a live current authority"),
         };
+        fence_pending_maintenance_effect(file, effect_fence)?;
         adopt(file, authority, &disk, source).map_err(|err| {
             QueueAuthorityUnavailable::new(format!(
                 "could not fast-forward the proven newer durable queue save: {err:#}"
@@ -5087,6 +5454,7 @@ fn observe_queue_authority_after_native_save_with_bounded_retry_and_adopt(
         } else {
             "refused"
         };
+        fence_pending_maintenance_effect(file, effect_fence)?;
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -5107,6 +5475,7 @@ fn observe_queue_authority_after_native_save_with_bounded_retry_and_adopt(
             .into());
         }
         std::thread::sleep(QUEUE_AUTHORITY_RETRY_BACKOFF);
+        fence_pending_maintenance_effect(file, effect_fence)?;
         observed = observe(file);
     }
     observed
@@ -5411,9 +5780,14 @@ fn queue_maintenance_skipped(
     file: &Path,
     skip: agent_doc_queue::backlog_sync::QueueMaintenanceSkip,
     detail: Option<&str>,
-) -> QueueState {
-    agent_doc_ops_log_io::log_op(file, &skip.log_line(&file.display().to_string(), detail));
-    QueueState::default()
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
+) -> Result<QueueState> {
+    queue_maintenance_log_op(
+        file,
+        effect_fence,
+        &skip.log_line(&file.display().to_string(), detail),
+    )?;
+    Ok(QueueState::default())
 }
 
 pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> {
@@ -5450,6 +5824,184 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
     coin_gate: &FreeTextCoinGate,
     admission_snapshot: Option<&str>,
 ) -> Result<QueueState> {
+    let apply_guard = match agent_doc_queue_io::queue_edit_owner::QueueEditGuard::try_acquire(file)?
+    {
+        Some(guard) => guard,
+        None => anyhow::bail!(
+            "queue maintenance unsettled: another owner holds the apply lock for {}; retry after it completes",
+            file.display(),
+        ),
+    };
+    run_queue_maintenance_with_options_under_apply_guard(
+        file,
+        diff,
+        coin_gate,
+        admission_snapshot,
+        &apply_guard,
+        None,
+        None,
+    )
+}
+
+/// Queue maintenance for a caller that already holds the document's apply
+/// guard. This prevents nested flock acquisition while preserving a typed
+/// proof that the detached worker holds exclusion across pending + queue apply.
+pub fn run_queue_maintenance_under_apply_guard(
+    file: &Path,
+    diff: Option<&str>,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<QueueState> {
+    run_queue_maintenance_with_options_under_apply_guard(
+        file,
+        diff,
+        &FreeTextCoinGate::structural_only(),
+        None,
+        apply_guard,
+        None,
+        None,
+    )
+}
+
+/// Queue maintenance bound to the exact authority cut admitted by foreground
+/// preflight. A detached worker must not reinterpret later operator steering as
+/// work owned by the older admission.
+pub fn run_queue_maintenance_for_admitted_authority_under_apply_guard(
+    file: &Path,
+    diff: Option<&str>,
+    admitted_authority_hash: &str,
+    effect_fence: &dyn PendingMaintenanceEffectFence,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<QueueState> {
+    run_queue_maintenance_with_options_under_apply_guard(
+        file,
+        diff,
+        &FreeTextCoinGate::structural_only(),
+        None,
+        apply_guard,
+        Some(admitted_authority_hash),
+        Some(effect_fence),
+    )
+}
+
+#[derive(Debug)]
+pub struct QueueMaintenanceAuthoritySuperseded {
+    expected: String,
+    observed: String,
+}
+
+impl std::fmt::Display for QueueMaintenanceAuthoritySuperseded {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "queue maintenance admitted authority was superseded (expected={}, observed={})",
+            self.expected, self.observed
+        )
+    }
+}
+
+impl std::error::Error for QueueMaintenanceAuthoritySuperseded {}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum QueueMaintenanceEffectFamily {
+    Ops,
+    Controller,
+    Document,
+    Ledger,
+    Snapshot,
+    Worktree,
+}
+
+impl QueueMaintenanceEffectFamily {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Ops => "ops",
+            Self::Controller => "controller",
+            Self::Document => "document",
+            Self::Ledger => "ledger",
+            Self::Snapshot => "snapshot",
+            Self::Worktree => "worktree",
+        }
+    }
+}
+
+fn fence_queue_maintenance_effect(
+    file: &Path,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
+    family: QueueMaintenanceEffectFamily,
+) -> Result<()> {
+    let Some(effect_fence) = effect_fence else {
+        return Ok(());
+    };
+    effect_fence.check(file)?;
+    let delayed_family = std::env::var("AGENT_DOC_TEST_QUEUE_MAINTENANCE_EFFECT_DELAY_FAMILY").ok();
+    if delayed_family.as_deref() == Some(family.label()) {
+        let delay_ms = std::env::var("AGENT_DOC_TEST_QUEUE_MAINTENANCE_EFFECT_DELAY_MS")
+            .ok()
+            .and_then(|raw| raw.trim().parse::<u64>().ok())
+            .unwrap_or(750);
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_maintenance_internal_effect_test_delay file={} family={} delay_ms={delay_ms}",
+                file.display(),
+                family.label(),
+            ),
+        );
+        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        effect_fence.check(file)?;
+    }
+    Ok(())
+}
+
+fn queue_maintenance_log_op(
+    file: &Path,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
+    message: &str,
+) -> Result<()> {
+    fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Ops)?;
+    agent_doc_ops_log_io::log_op(file, message);
+    Ok(())
+}
+
+/// Revalidate the admitted authority immediately before the authority
+/// acquisition path. That path may repair a missing replica or adopt a proven
+/// native save, so a stale detached owner must be rejected before entering it.
+fn fence_queue_maintenance_authority_acquisition(
+    file: &Path,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
+) -> Result<()> {
+    let Some(effect_fence) = effect_fence else {
+        return Ok(());
+    };
+    effect_fence.check(file)?;
+    if let Some(delay_ms) = std::env::var("AGENT_DOC_TEST_QUEUE_MAINTENANCE_ACQUISITION_DELAY_MS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .filter(|delay| *delay > 0)
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_maintenance_authority_acquisition_test_delay file={} delay_ms={delay_ms}",
+                file.display(),
+            ),
+        );
+        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        effect_fence.check(file)?;
+    }
+    Ok(())
+}
+
+fn run_queue_maintenance_with_options_under_apply_guard(
+    file: &Path,
+    diff: Option<&str>,
+    coin_gate: &FreeTextCoinGate,
+    admission_snapshot: Option<&str>,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    admitted_authority_hash: Option<&str>,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
+) -> Result<QueueState> {
+    apply_guard.ensure_protects(file)?;
     // #sqedit-race Phase 2: defer ALL queue maintenance mutation while a different,
     // live process holds a fresh queue-edit lease (a direct `queue prune-noise` /
     // `queue consume` in flight). Round-tripping a torn intermediate queue through
@@ -5460,24 +6012,31 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
     if let Some(holder_pid) =
         agent_doc_queue_io::queue_edit_owner::foreign_queue_edit_in_flight(&file.to_string_lossy())
     {
-        agent_doc_ops_log_io::log_op(
+        queue_maintenance_log_op(
             file,
+            effect_fence,
             &format!(
                 "queue_maintenance_deferred reason=queue_edit_lease holder_pid={holder_pid} (#sqedit-race)"
             ),
-        );
+        )?;
         eprintln!(
             "[preflight] queue: deferring maintenance — direct queue edit in flight (pid {holder_pid}; #sqedit-race)"
         );
         return Ok(QueueState::default());
     }
+    fence_queue_maintenance_authority_acquisition(file, effect_fence)?;
     let (mut content, authority_queue_unresolved_prompts) =
-        match observe_queue_authority_after_native_save_with_bounded_retry(
+        match observe_queue_authority_after_native_save_with_bounded_retry_fenced(
             file,
             "preflight_queue_maintenance",
             queue_authority_attempts(),
+            effect_fence,
             |file| {
-                current_text_via_preflight_authority_retrying(file, "preflight_queue_maintenance")
+                current_text_via_preflight_authority_retrying_with_fence(
+                    file,
+                    "preflight_queue_maintenance",
+                    effect_fence,
+                )
             },
         ) {
             Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
@@ -5490,11 +6049,12 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
                 match std::fs::read_to_string(file) {
                     Ok(content) => (content, None),
                     Err(err) => {
-                        return Ok(queue_maintenance_skipped(
+                        return queue_maintenance_skipped(
                             file,
                             agent_doc_queue::backlog_sync::QueueMaintenanceSkip::DocumentUnreadable,
                             Some(&err.to_string()),
-                        ));
+                            effect_fence,
+                        );
                     }
                 }
             }
@@ -5502,38 +6062,68 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
                 agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
                 | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending,
             )) => {
-                agent_doc_ops_log_io::log_op(
+                queue_maintenance_log_op(
                     file,
+                    effect_fence,
                     &format!(
                         "queue_maintenance_deferred file={} reason=editor_authority_not_current",
                         file.display()
                     ),
-                );
+                )?;
                 return Err(QueueAuthorityUnavailable::new(
                     "editor authority is attached but its current replica cut is unavailable after bounded recovery",
                 )
                 .into());
             }
             Err(err) => {
-                agent_doc_ops_log_io::log_op(
+                queue_maintenance_log_op(
                     file,
+                    effect_fence,
                     &format!(
                         "queue_maintenance_deferred file={} reason=current_text_unavailable error={}",
                         file.display(),
                         err
                     ),
-                );
+                )?;
                 return Err(QueueAuthorityUnavailable::new(format!(
                     "current queue authority is unavailable after bounded recovery: {err:#}"
                 ))
                 .into());
             }
         };
+    if let Some(expected) = admitted_authority_hash {
+        let observed = agent_doc_hash::content_hash(&content);
+        if observed != expected {
+            return Err(QueueMaintenanceAuthoritySuperseded {
+                expected: expected.to_string(),
+                observed,
+            }
+            .into());
+        }
+    }
     // `content` already came from the CP/editor authority above. Do not reread
     // disk or run a second queue-only merge here: that used to compare the live
     // frontier with itself, making the supposed deletion-adoption branch dead
     // while obscuring which authority maintenance actually mutated.
     let authority_baseline = content.clone();
+    // Deterministic integration barrier inside the queue-maintenance body.
+    // The detached owner already holds the per-document apply lock here, so a
+    // concurrent direct mutation must fail closed rather than supersede it.
+    if let Some(delay) = std::env::var("AGENT_DOC_TEST_BACKGROUND_QUEUE_MAINTENANCE_DELAY_MS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .filter(|delay| *delay > 0)
+    {
+        queue_maintenance_log_op(
+            file,
+            effect_fence,
+            &format!(
+                "queue_maintenance_background_test_delay file={} delay_ms={delay}",
+                file.display(),
+            ),
+        )?;
+        std::thread::sleep(std::time::Duration::from_millis(delay));
+    }
     let normalized_generated_responses =
         agent_doc_markdown_ast::overlay::normalize_generated_response_lifecycle_markers(&content);
     let generated_response_markers_normalized = normalized_generated_responses != content;
@@ -5555,11 +6145,12 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
     let mut components = match agent_doc_element::element::parse(&current_content) {
         Ok(cs) => cs,
         Err(err) => {
-            return Ok(queue_maintenance_skipped(
+            return queue_maintenance_skipped(
                 file,
                 agent_doc_queue::backlog_sync::QueueMaintenanceSkip::ComponentParseFailed,
                 Some(&err.to_string()),
-            ));
+                effect_fence,
+            );
         }
     };
     let exchange_prompt =
@@ -5577,11 +6168,12 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         components = match agent_doc_element::element::parse(&current_content) {
             Ok(cs) => cs,
             Err(err) => {
-                return Ok(queue_maintenance_skipped(
+                return queue_maintenance_skipped(
                     file,
                     agent_doc_queue::backlog_sync::QueueMaintenanceSkip::ComponentParseFailed,
                     Some(&err.to_string()),
-                ));
+                    effect_fence,
+                );
             }
         };
         mutated = true;
@@ -5605,11 +6197,12 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         Ok(None) => {}
         Err(err) => {
             eprintln!("[preflight] queue topology warning: {err}");
-            return Ok(queue_maintenance_skipped(
+            return queue_maintenance_skipped(
                 file,
                 agent_doc_queue::backlog_sync::QueueMaintenanceSkip::QueueTopologyInvalid,
                 Some(&err.to_string()),
-            ));
+                effect_fence,
+            );
         }
     }
     // A valued backlog `queue=<id>` is durable ownership, not a hint to the
@@ -5655,20 +6248,22 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
             {
                 Some(queue) => queue.id.clone(),
                 None => {
-                    return Ok(queue_maintenance_skipped(
+                    return queue_maintenance_skipped(
                         file,
                         agent_doc_queue::backlog_sync::QueueMaintenanceSkip::NoQueueComponent,
                         None,
-                    ));
+                        effect_fence,
+                    );
                 }
             },
             Err(err) => {
                 eprintln!("[preflight] queue topology warning: {err}");
-                return Ok(queue_maintenance_skipped(
+                return queue_maintenance_skipped(
                     file,
                     agent_doc_queue::backlog_sync::QueueMaintenanceSkip::QueueTopologyInvalid,
                     Some(&err.to_string()),
-                ));
+                    effect_fence,
+                );
             }
         };
     let mut comp = agent_doc_queue::queue_set::component_for_id(
@@ -5815,17 +6410,23 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         Ok(e) => e,
         Err(e) => {
             eprintln!("[preflight] queue parse warning: {}", e);
-            return Ok(queue_maintenance_skipped(
+            return queue_maintenance_skipped(
                 file,
                 agent_doc_queue::backlog_sync::QueueMaintenanceSkip::QueueBodyParseFailed,
                 Some(&e.to_string()),
-            ));
+                effect_fence,
+            );
         }
     };
     // Publish authoritative markdown before any worklist projection. The
     // controller's document-scoped Computed persists terminal lifecycle facts
     // and returns only after its durable receipt feeds back into projection.
-    agent_doc_queue_io::queue_consume::observe_authoritative_queue_state(file, &current_content)?;
+    fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Controller)?;
+    agent_doc_queue_io::queue_consume::observe_authoritative_queue_state_under_apply_guard(
+        file,
+        &current_content,
+        apply_guard,
+    )?;
 
     let mut entries = entries;
     let mut free_text_promotions: Vec<(String, String)> = Vec::new();
@@ -5957,10 +6558,11 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         .clone();
         mutated = true;
         eprintln!("[preflight] queue: operator queue edit armed `queue: go` (#queueeditgo)");
-        agent_doc_ops_log_io::log_op(
+        queue_maintenance_log_op(
             file,
+            effect_fence,
             &format!("queue_edit_go_inferred file={}", file.display()),
-        );
+        )?;
     }
 
     let project_root = file.canonicalize().ok().and_then(|canonical| {
@@ -5986,15 +6588,16 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
     let (queue_free_text_scope, held_free_text) =
         gate_free_text_admission_scope(queue_free_text_scope, &entries, coin_gate);
     if !held_free_text.is_empty() {
-        agent_doc_ops_log_io::log_op(
+        queue_maintenance_log_op(
             file,
+            effect_fence,
             &format!(
                 "free_text_coin_held file={} held={} observed_typing={} (#halftypedcoin)",
                 file.display(),
                 held_free_text.len(),
                 coin_gate.observed.is_some(),
             ),
-        );
+        )?;
         eprintln!(
             "[preflight] queue: held {} free-text line(s) from backlog coining; still being typed (#halftypedcoin)",
             held_free_text.len()
@@ -6064,6 +6667,7 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         // keeps its owner — the claim follows the exact promotion receipt, so
         // the new id head never resurfaces as unclaimed dispatch work.
         // Best-effort: a claim-store failure must not abort maintenance.
+        fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Ledger)?;
         if let Err(err) =
             agent_doc_queue_io::queue_claim::transfer_promoted_claims(file, &promotions)
         {
@@ -6220,6 +6824,11 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
                 .filter(|e| matches!(e, agent_doc_queue::document_queue::QueueEntry::Prompt(_)))
                 .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
                 .collect();
+            fence_queue_maintenance_effect(
+                file,
+                effect_fence,
+                QueueMaintenanceEffectFamily::Ledger,
+            )?;
             agent_doc_queue_io::queue_tombstone::reconcile_for_file(
                 file,
                 &snapshot_active_ids,
@@ -6284,14 +6893,15 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
                  from backlog→queue mirror (#provauth2 tombstone)",
                 sync_plan.tombstone_suppressed_count
             );
-            agent_doc_ops_log_io::log_op(
+            queue_maintenance_log_op(
                 file,
+                effect_fence,
                 &format!(
                     "queue_mirror_tombstone_suppressed file={} count={} (#provauth2)",
                     file.display(),
                     sync_plan.tombstone_suppressed_count
                 ),
-            );
+            )?;
         }
         match sync_plan.active_policy {
             AutoBacklogQueueSyncPolicy::ExplicitlyStopped if sync_plan.active_held_count > 0 => {
@@ -6340,13 +6950,14 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
                 if !skipped.is_empty() {
                     let session_label = if live_ipc { "live_ipc" } else { "clean" };
                     for skip in &skipped {
-                        agent_doc_ops_log_io::log_op(
+                        queue_maintenance_log_op(
                             file,
+                            effect_fence,
                             &format!(
                                 "go_queue_mirror_deferred id=#{} reason={} session={} (#mirrorall)",
                                 skip.id, skip.reason, session_label
                             ),
-                        );
+                        )?;
                     }
                     // #mirrorall (operator directive 2026-06-18): mirror ALL open
                     // `queue`-attr backlog ids into the queue, INCLUDING `[operator-verify]`
@@ -6459,6 +7070,13 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
             .collect::<std::collections::HashSet<String>>()
             .into_iter()
             .collect();
+        if !mirror_owned.is_empty() {
+            fence_queue_maintenance_effect(
+                file,
+                effect_fence,
+                QueueMaintenanceEffectFamily::Ledger,
+            )?;
+        }
         if !mirror_owned.is_empty()
             && let Err(err) = agent_doc_project_root_io::project_root_containing(file)
                 .context("queue head provenance: no project root for state.db")
@@ -6677,13 +7295,14 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         eprintln!(
             "[preflight] queue: removed displaced struck queue item(s) below the closing marker"
         );
-        agent_doc_ops_log_io::log_op(
+        queue_maintenance_log_op(
             file,
+            effect_fence,
             &format!(
                 "queue_escape_repair file={} reason=struck_items_below_close_marker",
                 file.display()
             ),
-        );
+        )?;
     }
 
     if let Some((deduped_content, dropped)) =
@@ -7177,17 +7796,19 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
             })
             .collect();
         if predating_echo_heads > 0 {
-            agent_doc_ops_log_io::log_op(
+            queue_maintenance_log_op(
                 file,
+                effect_fence,
                 &format!(
                     "preflight_freetext_residue_strike_skipped_echo_predates_head_entry file={} heads={predating_echo_heads} (#qheadresiduescope)",
                     file.display(),
                 ),
-            );
+            )?;
         }
         if !loop_scope_skips.is_empty() {
-            agent_doc_ops_log_io::log_op(
+            queue_maintenance_log_op(
                 file,
+                effect_fence,
                 &format!(
                     "preflight_freetext_residue_strike_skipped_loop_echo_outside_pass file={} queue_id={} heads={} anchors={} (GH #327)",
                     file.display(),
@@ -7195,7 +7816,7 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
                     loop_scope_skips.len(),
                     loop_scope_skips.join(","),
                 ),
-            );
+            )?;
         }
         if struck_count > 0 {
             let new_body = agent_doc_queue::document_queue::render(&new_entries);
@@ -7216,17 +7837,23 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
             eprintln!(
                 "[preflight] queue: auto-struck {struck_count} answered free-text head(s) by committed exchange match (#qheadresidue)"
             );
-            agent_doc_ops_log_io::log_op(
+            queue_maintenance_log_op(
                 file,
+                effect_fence,
                 &format!(
                     "preflight_freetext_residue_strike file={} struck={struck_count}",
                     file.display(),
                 ),
-            );
+            )?;
             // `#claimstrike`: the answered head's claim ends with its strike.
             // Never fatal: a claim on a closed head is inert, and closeout
             // reconciliation prunes it.
             for head in &struck_claimed_heads {
+                fence_queue_maintenance_effect(
+                    file,
+                    effect_fence,
+                    QueueMaintenanceEffectFamily::Ledger,
+                )?;
                 if let Err(err) = agent_doc_queue_io::queue_claim::release_closed_head(file, head) {
                     eprintln!(
                         "[preflight] WARNING: could not release the claim on a struck free-text head in {}: {err:#}",
@@ -7394,14 +8021,15 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
                             display,
                         );
                     }
-                    agent_doc_ops_log_io::log_op(
+                    queue_maintenance_log_op(
                         file,
+                        effect_fence,
                         &format!(
                             "preflight_freetext_backlog_done_strike file={} struck={}",
                             file.display(),
                             struck.len(),
                         ),
-                    );
+                    )?;
                     if agent_doc_queue::document_queue::prompts(&activation.entries_after)
                         .is_empty()
                     {
@@ -7434,15 +8062,16 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
     if struck_retirement.content != current_content {
         current_content = struck_retirement.content;
         mutated = true;
-        agent_doc_ops_log_io::log_op(
+        queue_maintenance_log_op(
             file,
+            effect_fence,
             &format!(
                 "preflight_struck_completion_cells_retired file={} heads={} cells={} (#strikeretires)",
                 file.display(),
                 struck_retirement.struck_heads.len(),
                 struck_retirement.retired_keys.len(),
             ),
-        );
+        )?;
     }
     let struck_heads_this_pass = struck_retirement.struck_heads;
 
@@ -7466,6 +8095,7 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
                 )
             })
             .collect::<Vec<_>>();
+        fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Ledger)?;
         if let Err(err) = agent_doc_queue_io::queue_claim::transfer_prompt_identity_admissions(
             file,
             &claim_admissions,
@@ -7518,12 +8148,24 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
             current_content = frontmatter::merge_queue_hold(&current_content)?;
             // Persist to file + snapshot (skip the raw disk write behind a live
             // editor; #fccqueue routes the queue shape through IPC convergence).
-            current_content = persist_queue_maintenance_doc(
+            fence_queue_maintenance_effect(
+                file,
+                effect_fence,
+                QueueMaintenanceEffectFamily::Document,
+            )?;
+            current_content = persist_queue_maintenance_doc_with_admitted_authority(
                 file,
                 &current_content,
                 &authority_baseline,
                 project_root.as_deref(),
                 "queue_halt",
+                admitted_authority_hash,
+                effect_fence,
+            )?;
+            fence_queue_maintenance_effect(
+                file,
+                effect_fence,
+                QueueMaintenanceEffectFamily::Ledger,
             )?;
             agent_doc_queue_io::claim_release_receipt::retire_struck_or_warn(
                 file,
@@ -7550,21 +8192,32 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
                     if let Ok(m) = frontmatter::merge_queue_hold(&new_snap) {
                         new_snap = m;
                     }
-                    if new_snap != snap
-                        && let Err(e) = agent_doc_snapshot_io::checkpoint_document_baseline(
+                    if new_snap != snap {
+                        fence_queue_maintenance_effect(
+                            file,
+                            effect_fence,
+                            QueueMaintenanceEffectFamily::Snapshot,
+                        )?;
+                        if let Err(e) = agent_doc_snapshot_io::checkpoint_document_baseline(
                             file,
                             &new_snap,
                             agent_doc_ops_log_io::log_op,
-                        )
-                    {
-                        eprintln!("[preflight] queue halt: snapshot sync warning: {}", e);
+                        ) {
+                            eprintln!("[preflight] queue halt: snapshot sync warning: {}", e);
+                        }
                     }
                 }
             }
-            record_queue_worklist_state(file, &current_content, &after_stop, false)?;
+            record_queue_worklist_state(file, &current_content, &after_stop, false, effect_fence)?;
             if let Some(head) = agent_doc_queue::document_queue::first_prompt(&after_stop) {
                 let head_text = strip_in_progress_marker(&head.text);
-                record_deferred_queue_head_state(file, &current_content, &head_text, "stop_fence")?;
+                record_deferred_queue_head_state(
+                    file,
+                    &current_content,
+                    &head_text,
+                    "stop_fence",
+                    effect_fence,
+                )?;
             }
             return Ok(QueueState {
                 authoritative_content: Some(current_content),
@@ -7597,21 +8250,35 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         {
             eprintln!("[preflight] queue: deferred — time gate at head: {}", dt);
             if prompt_identity_admitted {
-                current_content = persist_queue_maintenance_doc(
+                current_content = persist_queue_maintenance_doc_with_admitted_authority(
                     file,
                     &current_content,
                     &authority_baseline,
                     project_root.as_deref(),
                     "queue_prompt_identity_deferred",
+                    admitted_authority_hash,
+                    effect_fence,
                 )?;
             }
-            record_queue_worklist_state(file, &current_content, &activation.entries_after, false)?;
+            record_queue_worklist_state(
+                file,
+                &current_content,
+                &activation.entries_after,
+                false,
+                effect_fence,
+            )?;
             if let Some(head) =
                 agent_doc_queue::document_queue::first_prompt(&activation.entries_after)
             {
                 let head_text = strip_in_progress_marker(&head.text);
                 let reason = format!("time_gate:{dt}");
-                record_deferred_queue_head_state(file, &current_content, &head_text, &reason)?;
+                record_deferred_queue_head_state(
+                    file,
+                    &current_content,
+                    &head_text,
+                    &reason,
+                    effect_fence,
+                )?;
             }
             return Ok(QueueState {
                 authoritative_content: Some(current_content),
@@ -7689,6 +8356,11 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
                 eprintln!(
                     "[preflight] queue: head prompt modified in Lazily current — adopting edited head and continuing loop (#queue-no-stall-on-head-edit)"
                 );
+                fence_queue_maintenance_effect(
+                    file,
+                    effect_fence,
+                    QueueMaintenanceEffectFamily::Snapshot,
+                )?;
                 adopt_edited_queue_head_into_snapshot(file, &current_content);
             }
         }
@@ -7819,37 +8491,22 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         }
     }
 
-    if !activation.active
+    if let Some(warning) = inactive_queue_residue_warning(
+        file,
+        &activation.entries_after,
+        activation.active,
+        activation.deferred,
+        has_immediate_activation,
+    ) {
+        queue_warnings.push(warning);
+    } else if !activation.active
         && !activation.deferred
         && !activation.entries_after.is_empty()
         && !drained_body_clearable
     {
-        // `inactive_queue_residue` is a per-*edit* signal, not a per-preflight
-        // nag. It is useful when the operator just added/changed content in an
-        // inactive queue (so a `do [#id]` they expected to run silently will
-        // not). It is pure noise when the inactive queue is unchanged from the
-        // committed snapshot — exactly the steady state an `item_modified` halt
-        // leaves behind, where re-warning on every preflight with no user edit
-        // drives the #adoc-queue-ipc-drift loop. Only warn when the inactive
-        // queue body actually changed since the snapshot this cycle.
-        let inactive_queue_changed = match agent_doc_snapshot_io::load_document_baseline(file) {
-            Ok(Some(snapshot_content)) => {
-                inactive_queue_changed_vs_snapshot(&snapshot_content, &activation.entries_after)
-            }
-            _ => true,
-        };
-        if inactive_queue_changed {
-            queue_warnings.push(PreflightWarning {
-                code: "inactive_queue_residue".to_string(),
-                message: "agent:queue is inactive but still contains directive/item residue; only active queue state is executable priority context".to_string(),
-                document_agent: None,
-                active_harness: None,
-            });
-        } else {
-            eprintln!(
-                "[preflight] queue: inactive with retained entries unchanged from snapshot — stable, not re-flagged as residue"
-            );
-        }
+        eprintln!(
+            "[preflight] queue: inactive with retained entries unchanged from snapshot — stable, not re-flagged as residue"
+        );
     }
 
     // Strip auto attribute from opening tag when queue drains
@@ -7994,14 +8651,15 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         .collect::<Vec<_>>();
     claims_held_after_report.sort();
     if !claims_held_after_report.is_empty() {
-        agent_doc_ops_log_io::log_op(
+        queue_maintenance_log_op(
             file,
+            effect_fence,
             &format!(
                 "preflight_queue_claim_held_after_report file={} ids={} (#queueawaitop)",
                 file.display(),
                 claims_held_after_report.join(","),
             ),
-        );
+        )?;
         queue_warnings.push(PreflightWarning {
             code: "queue_claim_held_after_report".to_string(),
             message: format!(
@@ -8077,14 +8735,15 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         if !operator_unskipped.is_empty() {
             let mut ids = operator_unskipped.iter().cloned().collect::<Vec<_>>();
             ids.sort();
-            agent_doc_ops_log_io::log_op(
+            queue_maintenance_log_op(
                 file,
+                effect_fence,
                 &format!(
                     "preflight_queue_operator_unskip file={} ids={} (#releaseskipcarried)",
                     file.display(),
                     ids.join(","),
                 ),
-            );
+            )?;
         }
         let mut fresh = advance_skipped_queue_head_ids(
             carried,
@@ -8098,6 +8757,7 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
     } else {
         std::collections::HashSet::new()
     };
+    fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Ledger)?;
     if let Err(err) = agent_doc_cycle_state_io::set_skipped_queue_head_ids(
         file,
         &skipped_queue_head_ids.iter().cloned().collect::<Vec<_>>(),
@@ -8159,14 +8819,15 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         agent_doc_document::queue_projection::ActiveQueuePromptProjection::default()
     };
     if !skipped_queue_head_ids.is_empty() {
-        agent_doc_ops_log_io::log_op(
+        queue_maintenance_log_op(
             file,
+            effect_fence,
             &format!(
                 "preflight_queue_skip file={} skipped={} (#queueskip)",
                 file.display(),
                 skipped_queue_head_ids.len(),
             ),
-        );
+        )?;
     }
     if active_queue_projection.retargeted {
         eprintln!(
@@ -8202,11 +8863,13 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
     // visible queue projection derives every attempt state from the ledger.
     // Durable completion cells can restore a matching attempt to Reported
     // after restart; unmatched/older-generation evidence never creates state.
-    if activation.active
-        && let Err(err) =
+    if activation.active {
+        fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Ledger)?;
+        if let Err(err) =
             agent_doc_queue_io::queue_claim::reconcile_completion_evidence(file, &current_content)
-    {
-        eprintln!("[preflight] queue: completion evidence recovery failed ({err:#})");
+        {
+            eprintln!("[preflight] queue: completion evidence recovery failed ({err:#})");
+        }
     }
     let claim_ledger = activation
         .active
@@ -8251,16 +8914,17 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
             .filter(|claim| claim.state.blocks_dispatch())
             .map(|claim| claim.item_text.clone()),
     );
-    if activation.active
-        && let Err(err) = agent_doc_cycle_state_io::set_projected_in_progress_queue_heads(
+    if activation.active {
+        fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Ledger)?;
+        if let Err(err) = agent_doc_cycle_state_io::set_projected_in_progress_queue_heads(
             file,
             &in_progress_queue_prompt_texts
                 .iter()
                 .map(|text| strip_priority_markers(text))
                 .collect::<Vec<_>>(),
-        )
-    {
-        eprintln!("[preflight] queue: failed to persist projected in-progress heads ({err:#})");
+        ) {
+            eprintln!("[preflight] queue: failed to persist projected in-progress heads ({err:#})");
+        }
     }
     let marker_components = agent_doc_element::element::parse(&current_content)?;
     let marker_body = agent_doc_queue::queue_set::component_for_id(
@@ -8517,8 +9181,13 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         mutated = true;
         eprintln!("[preflight] active: reconciled after queue lifecycle projection");
     }
+    fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Worktree)?;
     if let Some(reconciled) =
-        agent_doc_queue_io::worktree_inventory::reconcile_maintained(file, &current_content)?
+        agent_doc_queue_io::worktree_inventory::reconcile_maintained_under_apply_guard(
+            file,
+            &current_content,
+            apply_guard,
+        )?
     {
         current_content = reconciled;
         mutated = true;
@@ -8527,13 +9196,17 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
 
     // Persist file mutations.
     if mutated {
-        current_content = persist_queue_maintenance_doc(
+        fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Document)?;
+        current_content = persist_queue_maintenance_doc_with_admitted_authority(
             file,
             &current_content,
             &authority_baseline,
             project_root.as_deref(),
             "queue_maintenance",
+            admitted_authority_hash,
+            effect_fence,
         )?;
+        fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Ledger)?;
         agent_doc_queue_io::claim_release_receipt::retire_struck_or_warn(
             file,
             &struck_heads_this_pass,
@@ -8687,20 +9360,26 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         {
             new_snap = reconciled;
         }
+        fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Worktree)?;
         if let Some(reconciled) =
             agent_doc_queue_io::worktree_inventory::reconcile(file, &new_snap)?
         {
             new_snap = reconciled;
         }
 
-        if new_snap != snap_content
-            && let Err(e) = agent_doc_snapshot_io::checkpoint_document_baseline(
+        if new_snap != snap_content {
+            fence_queue_maintenance_effect(
+                file,
+                effect_fence,
+                QueueMaintenanceEffectFamily::Snapshot,
+            )?;
+            if let Err(e) = agent_doc_snapshot_io::checkpoint_document_baseline(
                 file,
                 &new_snap,
                 agent_doc_ops_log_io::log_op,
-            )
-        {
-            eprintln!("[preflight] queue: snapshot sync warning: {}", e);
+            ) {
+                eprintln!("[preflight] queue: snapshot sync warning: {}", e);
+            }
         }
     }
 
@@ -8720,6 +9399,7 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         })
         .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
         .collect();
+    fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Ledger)?;
     agent_doc_queue_io::queue_tombstone::record_observed_active_ids(
         file,
         &observed_active_queue_ids,
@@ -8814,16 +9494,28 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
     // Publish the final authority frontier before worklist/selection facts.
     // Lifecycle persistence remains a projection Effect, not a maintenance
     // companion write.
-    agent_doc_queue_io::queue_consume::observe_authoritative_queue_state(file, &current_content)?;
+    fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Controller)?;
+    agent_doc_queue_io::queue_consume::observe_authoritative_queue_state_under_apply_guard(
+        file,
+        &current_content,
+        apply_guard,
+    )?;
     record_queue_worklist_state(
         file,
         &current_content,
         &activation.entries_after,
         activation.active,
+        effect_fence,
     )?;
     if activation.active && !active_queue_prompt_texts.is_empty() {
         for head_text in &active_queue_prompt_texts {
-            record_selected_queue_head_state(file, &current_content, head_text, true)?;
+            record_selected_queue_head_state(
+                file,
+                &current_content,
+                head_text,
+                true,
+                effect_fence,
+            )?;
         }
     } else if activation.deferred
         && let Some(head) = agent_doc_queue::document_queue::first_prompt(&activation.entries_after)
@@ -8834,7 +9526,13 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
             .as_deref()
             .map(|start_at| format!("time_gate:{start_at}"))
             .unwrap_or_else(|| "deferred".to_string());
-        record_deferred_queue_head_state(file, &current_content, &head_text, &reason)?;
+        record_deferred_queue_head_state(
+            file,
+            &current_content,
+            &head_text,
+            &reason,
+            effect_fence,
+        )?;
     }
 
     Ok(QueueState {
@@ -8917,6 +9615,21 @@ pub fn sync_same_cycle_actionable_backlog_into_go_queue(
     file: &Path,
     placement: agent_doc_queue::backlog_sync::FollowUpQueuePlacement,
 ) -> Result<Vec<String>> {
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    sync_same_cycle_actionable_backlog_into_go_queue_under_apply_guard(
+        file,
+        placement,
+        &apply_guard,
+    )
+}
+
+#[doc(hidden)]
+pub fn sync_same_cycle_actionable_backlog_into_go_queue_under_apply_guard(
+    file: &Path,
+    placement: agent_doc_queue::backlog_sync::FollowUpQueuePlacement,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<Vec<String>> {
+    apply_guard.ensure_protects(file)?;
     let actionable_this_cycle = agent_doc_cycle_state_io::pending_actionable_ids(file);
     if actionable_this_cycle.is_empty() {
         return Ok(Vec::new());
@@ -9591,16 +10304,18 @@ fn reproject_marker_only_queue_over_live_head(
 fn ensure_document_model_via_authority(
     file: &Path,
     source: &str,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
 ) -> Result<agent_doc_crdt_relay_io::CurrentText> {
-    if agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file) {
-        return agent_doc_crdt_relay_io::ensure_document_model(file, source);
-    }
-    match agent_doc_controller_io::project_controller::current_text_via_controller_model_for_doc(
-        file, source,
-    )? {
-        Some(current) => Ok(current),
-        None => Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica),
-    }
+    // Do not call the opaque combined controller-model API here. That API
+    // combines observation, controller launch, pressure bookkeeping, model
+    // recovery, polling, and diagnostics behind one socket call, so authority
+    // can drift after the outer fence and before any of those internal effects.
+    // The bounded observer below reads through the effect-free RPC and fences
+    // each diagnostic, replica signal, and re-observation independently.
+    Ok(
+        current_text_via_preflight_authority_retrying_with_fence(file, source, effect_fence)?
+            .unwrap_or(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica),
+    )
 }
 
 /// `#px82`/`#bn41` — retry `ensure_document_model` with an explicit replica
@@ -9615,10 +10330,16 @@ fn ensure_document_model_with_replica_reregistration(
     file: &Path,
     source: &str,
     first_err: anyhow::Error,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
 ) -> Result<agent_doc_crdt_relay_io::CurrentText> {
     let attempts = queue_authority_attempts();
     let mut last_err = first_err;
     for attempt in 1..=attempts {
+        fence_queue_maintenance_effect(
+            file,
+            effect_fence,
+            QueueMaintenanceEffectFamily::Controller,
+        )?;
         let reregister = match agent_doc_crdt_relay_io::signal_crdt_replica_event(
             file,
             agent_doc_crdt_relay_io::CrdtReplicaEventReason::EditorReplicaReregister,
@@ -9628,9 +10349,10 @@ fn ensure_document_model_with_replica_reregistration(
             Err(err) => format!("failed:{}", format!("{err:#}").replace('\n', "\\n")),
         };
         std::thread::sleep(QUEUE_AUTHORITY_RETRY_BACKOFF);
-        let retried = ensure_document_model_via_authority(file, source);
-        agent_doc_ops_log_io::log_op(
+        let retried = ensure_document_model_via_authority(file, source, effect_fence);
+        queue_maintenance_log_op(
             file,
+            effect_fence,
             &format!(
                 "queue_maintenance_model_ensure_retry file={} source={} attempt={}/{} reregister={} outcome={} (#px82)",
                 file.display(),
@@ -9650,7 +10372,7 @@ fn ensure_document_model_with_replica_reregistration(
                     ),
                 }
             ),
-        );
+        )?;
         match retried {
             Ok(current) => return Ok(current),
             Err(err) => last_err = err,
@@ -9683,6 +10405,12 @@ fn load_projected_in_progress_queue_heads(file: &Path) -> std::collections::Hash
 /// preceded by a fresh authoritative observation.
 const QUEUE_MAINTENANCE_CAS_ATTEMPTS: usize = 3;
 
+#[derive(Clone, Copy)]
+struct QueueMaintenancePersistenceContext<'a> {
+    source: &'a str,
+    effect_fence: Option<&'a dyn PendingMaintenanceEffectFence>,
+}
+
 fn queue_maintenance_cas_is_retryable(err: &anyhow::Error) -> bool {
     format!("{err:#}").contains("recovery=retry_crdt_merge")
 }
@@ -9691,11 +10419,15 @@ fn persist_attached_queue_maintenance_with_retry(
     file: &Path,
     content: &str,
     expected_current: &str,
-    source: &str,
+    context: QueueMaintenancePersistenceContext<'_>,
     initial_current: String,
     mut apply: impl FnMut(&str, &str) -> Result<bool>,
     mut observe: impl FnMut() -> Result<String>,
 ) -> Result<String> {
+    let QueueMaintenancePersistenceContext {
+        source,
+        effect_fence,
+    } = context;
     let mut current = initial_current;
     for attempt in 1..=QUEUE_MAINTENANCE_CAS_ATTEMPTS {
         let rebased =
@@ -9707,8 +10439,9 @@ fn persist_attached_queue_maintenance_with_retry(
                 if attempt < QUEUE_MAINTENANCE_CAS_ATTEMPTS
                     && queue_maintenance_cas_is_retryable(&err) =>
             {
-                agent_doc_ops_log_io::log_op(
+                queue_maintenance_log_op(
                     file,
+                    effect_fence,
                     &format!(
                         "queue_maintenance_cas_retry file={} source={} attempt={}/{} expected_hash={} attempted_hash={} recovery=retry_crdt_merge",
                         file.display(),
@@ -9718,7 +10451,7 @@ fn persist_attached_queue_maintenance_with_retry(
                         agent_doc_hash::content_hash(&current),
                         agent_doc_hash::content_hash(&rebased),
                     ),
-                );
+                )?;
                 current = observe()?;
             }
             Err(err) => return Err(err),
@@ -9734,7 +10467,28 @@ pub(crate) fn persist_queue_maintenance_doc(
     project_root: Option<&Path>,
     source: &str,
 ) -> Result<String> {
+    persist_queue_maintenance_doc_with_admitted_authority(
+        file,
+        content,
+        expected_current,
+        project_root,
+        source,
+        None,
+        None,
+    )
+}
+
+fn persist_queue_maintenance_doc_with_admitted_authority(
+    file: &Path,
+    content: &str,
+    expected_current: &str,
+    project_root: Option<&Path>,
+    source: &str,
+    admitted_authority_hash: Option<&str>,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
+) -> Result<String> {
     let _ = project_root;
+    fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Document)?;
     // `#qdonestrike-durable`: a not-ready editor head must not silently discard the
     // maintenance plan. Queue maintenance is idempotent and recomputed every
     // preflight, so a missing/pending replica used to mean the auto-strike of
@@ -9746,8 +10500,9 @@ pub(crate) fn persist_queue_maintenance_doc(
     // so this stays fail-closed against clobbering a live buffer.
     // `#ensurereplicagen`: observe through the hub-owning process, not this
     // CLI process's always-empty local registry.
-    let observed = current_text_via_preflight_authority_retrying(file, source)?
-        .unwrap_or(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica);
+    let observed =
+        current_text_via_preflight_authority_retrying_with_fence(file, source, effect_fence)?
+            .unwrap_or(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica);
     let current = match queue_maintenance_head_action(&observed, false) {
         QueueMaintenanceHeadAction::EnsureThenReobserve => {
             // `#ensurewindowsize`: log the outcome on BOTH paths. This log used to
@@ -9755,18 +10510,20 @@ pub(crate) fn persist_queue_maintenance_doc(
             // to debug — recorded no before/after label at all, and the ops.log
             // showed a bare `document_model_ensure_failed` with no queue-side
             // context.
-            let ensured = ensure_document_model_via_authority(file, source);
+            let ensured = ensure_document_model_via_authority(file, source, effect_fence);
             match &ensured {
-                Ok(ensured) => agent_doc_ops_log_io::log_op(
+                Ok(ensured) => queue_maintenance_log_op(
                     file,
+                    effect_fence,
                     &format!(
                         "queue_maintenance_model_ensure source={source} before={} after={} outcome=ready",
                         queue_maintenance_head_label(&observed),
                         queue_maintenance_head_label(ensured),
                     ),
-                ),
-                Err(err) => agent_doc_ops_log_io::log_op(
+                )?,
+                Err(err) => queue_maintenance_log_op(
                     file,
+                    effect_fence,
                     &format!(
                         "queue_maintenance_model_ensure source={source} before={} outcome=failed error={}",
                         queue_maintenance_head_label(&observed),
@@ -9776,7 +10533,7 @@ pub(crate) fn persist_queue_maintenance_doc(
                             .take(240)
                             .collect::<String>(),
                     ),
-                ),
+                )?,
             }
             // `#px82`: a FAILED ensure used to `?` straight out of here, which
             // discarded the whole recomputed queue on the FIRST failure. The
@@ -9786,9 +10543,12 @@ pub(crate) fn persist_queue_maintenance_doc(
             // re-observe within a bounded budget before giving up.
             match ensured {
                 Ok(ensured) => ensured,
-                Err(first_err) => {
-                    ensure_document_model_with_replica_reregistration(file, source, first_err)?
-                }
+                Err(first_err) => ensure_document_model_with_replica_reregistration(
+                    file,
+                    source,
+                    first_err,
+                    effect_fence,
+                )?,
             }
         }
         _ => observed,
@@ -9798,6 +10558,47 @@ pub(crate) fn persist_queue_maintenance_doc(
     }
     match current {
         agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => {
+            if let Some(expected_hash) = admitted_authority_hash {
+                let observed_hash = agent_doc_hash::content_hash(&text);
+                if observed_hash != expected_hash
+                    || agent_doc_hash::content_hash(expected_current) != expected_hash
+                {
+                    return Err(QueueMaintenanceAuthoritySuperseded {
+                        expected: expected_hash.to_string(),
+                        observed: observed_hash,
+                    }
+                    .into());
+                }
+                let embedded = agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file);
+                fence_queue_maintenance_effect(
+                    file,
+                    effect_fence,
+                    QueueMaintenanceEffectFamily::Document,
+                )?;
+                let write = if embedded {
+                    agent_doc_crdt_relay_io::apply_cp_write_for_file(file, &text, content, source)?
+                } else {
+                    agent_doc_controller_io::project_controller::apply_cp_write_via_controller_model_for_doc(
+                        file, &text, content, source,
+                    )?
+                };
+                anyhow::ensure!(
+                    write.is_some(),
+                    "{source}: admitted queue-maintenance compare-and-swap was not applied"
+                );
+                if let Some(effect_fence) = effect_fence {
+                    effect_fence.record_applied_content(file, content)?;
+                }
+                queue_maintenance_log_op(
+                    file,
+                    effect_fence,
+                    &format!(
+                        "write_authority action=compare_and_swap authority=lazily surface=queue_maintenance source={source} admitted_hash={expected_hash} len={}",
+                        content.len()
+                    ),
+                )?;
+                return Ok(content.to_string());
+            }
             // `#qtypeclobber`: queue maintenance is a structural successor, not
             // a whole-document replacement. The editor may publish even a few
             // bytes after preflight captured `expected_current`; rebase the
@@ -9817,9 +10618,17 @@ pub(crate) fn persist_queue_maintenance_doc(
                 file,
                 content,
                 expected_current,
-                source,
+                QueueMaintenancePersistenceContext {
+                    source,
+                    effect_fence,
+                },
                 text,
                 |expected, target| {
+                    fence_queue_maintenance_effect(
+                        file,
+                        effect_fence,
+                        QueueMaintenanceEffectFamily::Document,
+                    )?;
                     let write = if embedded {
                         agent_doc_crdt_relay_io::apply_cp_write_for_file(
                             file, expected, target, source,
@@ -9832,10 +10641,12 @@ pub(crate) fn persist_queue_maintenance_doc(
                     Ok(write.is_some())
                 },
                 || {
-                    let observed = current_text_via_preflight_authority_retrying(file, source)?
-                        .unwrap_or(
-                            agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica,
-                        );
+                    let observed = current_text_via_preflight_authority_retrying_with_fence(
+                        file,
+                        source,
+                        effect_fence,
+                    )?
+                    .unwrap_or(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica);
                     match observed {
                         agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => Ok(text),
                         other => anyhow::bail!(
@@ -9845,13 +10656,17 @@ pub(crate) fn persist_queue_maintenance_doc(
                     }
                 },
             )?;
-            agent_doc_ops_log_io::log_op(
+            if let Some(effect_fence) = effect_fence {
+                effect_fence.record_applied_content(file, &rebased)?;
+            }
+            queue_maintenance_log_op(
                 file,
+                effect_fence,
                 &format!(
                     "write_authority action=compare_and_swap authority=lazily surface=queue_maintenance source={source} len={}",
                     rebased.len()
                 ),
-            );
+            )?;
             Ok(rebased)
         }
         agent_doc_crdt_relay_io::CurrentText::Detached => {
@@ -9866,21 +10681,42 @@ pub(crate) fn persist_queue_maintenance_doc(
                 "{source}: refusing detached queue-maintenance disk write while durable editor liveness remains"
             );
             let disk = std::fs::read_to_string(file)?;
+            if let Some(expected_hash) = admitted_authority_hash {
+                let observed_hash = agent_doc_hash::content_hash(&disk);
+                if observed_hash != expected_hash
+                    || agent_doc_hash::content_hash(expected_current) != expected_hash
+                {
+                    return Err(QueueMaintenanceAuthoritySuperseded {
+                        expected: expected_hash.to_string(),
+                        observed: observed_hash,
+                    }
+                    .into());
+                }
+            }
             anyhow::ensure!(
                 disk == expected_current || disk == content,
                 "{source}: disk head advanced during detached queue maintenance"
             );
+            fence_queue_maintenance_effect(
+                file,
+                effect_fence,
+                QueueMaintenanceEffectFamily::Document,
+            )?;
             if disk != content {
                 std::fs::write(file, content)
                     .with_context(|| format!("{source}: failed to write {}", file.display()))?;
             }
-            agent_doc_ops_log_io::log_op(
+            if let Some(effect_fence) = effect_fence {
+                effect_fence.record_applied_content(file, content)?;
+            }
+            queue_maintenance_log_op(
                 file,
+                effect_fence,
                 &format!(
                     "write_authority action=compare_and_swap authority=lazily surface=queue_maintenance source={source} len={}",
                     content.len()
                 ),
-            );
+            )?;
             Ok(content.to_string())
         }
         agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
@@ -10225,7 +11061,10 @@ mod tests {
             &file,
             maintenance,
             base,
-            "test",
+            QueueMaintenancePersistenceContext {
+                source: "test",
+                effect_fence: None,
+            },
             base.to_string(),
             |expected, target| {
                 attempts.push((expected.to_string(), target.to_string()));
@@ -10248,6 +11087,101 @@ mod tests {
         assert!(written.contains("🚧 active head"), "{written}");
         assert!(written.contains("operator-added item"), "{written}");
         assert_eq!(attempts[1].1, written);
+    }
+
+    #[test]
+    fn queue_maintenance_cas_drift_is_fenced_before_retry_diagnostics_or_reobserve() {
+        let dir = setup_project();
+        let file = dir.path().join("session.md");
+        let base = concat!(
+            "<!-- agent:queue go -->\n",
+            "- active head\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let maintenance = base.replace("- active head", "- 🚧 active head");
+        let superseding = base.replace("- active head", "- operator head");
+        std::fs::write(&file, base).unwrap();
+        let expected_hash = agent_doc_hash::content_hash(base);
+        let fence = |path: &Path| {
+            let observed = std::fs::read_to_string(path)?;
+            anyhow::ensure!(
+                agent_doc_hash::content_hash(&observed) == expected_hash,
+                "injected persistence authority superseded"
+            );
+            Ok(())
+        };
+        let ops_path = dir.path().join(".agent-doc/logs/ops.log");
+        let state_path = dir.path().join(".agent-doc/state.db");
+        drop(agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap());
+        let before_ops = std::fs::read(&ops_path).ok();
+        let before_state = std::fs::read(&state_path).ok();
+        let mut observations = 0usize;
+
+        let err = persist_attached_queue_maintenance_with_retry(
+            &file,
+            &maintenance,
+            base,
+            QueueMaintenancePersistenceContext {
+                source: "test_persistence_drift",
+                effect_fence: Some(&fence),
+            },
+            base.to_string(),
+            |_, _| {
+                std::fs::write(&file, &superseding).unwrap();
+                anyhow::bail!("CAS refused recovery=retry_crdt_merge")
+            },
+            || {
+                observations += 1;
+                Ok(superseding.clone())
+            },
+        )
+        .unwrap_err();
+
+        assert!(format!("{err:#}").contains("superseded"), "{err:#}");
+        assert_eq!(
+            observations, 0,
+            "a stale persistence owner must not reobserve"
+        );
+        assert_eq!(std::fs::read(&ops_path).ok(), before_ops);
+        assert_eq!(std::fs::read(&state_path).ok(), before_state);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), superseding);
+    }
+
+    #[test]
+    fn queue_maintenance_model_reregister_is_fenced_before_signal() {
+        let dir = setup_project();
+        let file = dir.path().join("session.md");
+        let admitted = "admitted persistence authority\n";
+        let superseding = "operator persistence authority\n";
+        std::fs::write(&file, admitted).unwrap();
+        let expected_hash = agent_doc_hash::content_hash(admitted);
+        let fence = |path: &Path| {
+            let observed = std::fs::read_to_string(path)?;
+            anyhow::ensure!(
+                agent_doc_hash::content_hash(&observed) == expected_hash,
+                "injected reregister authority superseded"
+            );
+            Ok(())
+        };
+        let ops_path = dir.path().join(".agent-doc/logs/ops.log");
+        let state_path = dir.path().join(".agent-doc/state.db");
+        drop(agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap());
+        let before_ops = std::fs::read(&ops_path).ok();
+        let before_state = std::fs::read(&state_path).ok();
+        std::fs::write(&file, superseding).unwrap();
+
+        let err = ensure_document_model_with_replica_reregistration(
+            &file,
+            "test_reregister_drift",
+            anyhow::anyhow!("injected initial ensure failure"),
+            Some(&fence),
+        )
+        .unwrap_err();
+
+        assert!(format!("{err:#}").contains("superseded"), "{err:#}");
+        assert_eq!(std::fs::read(&ops_path).ok(), before_ops);
+        assert_eq!(std::fs::read(&state_path).ok(), before_state);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), superseding);
     }
 
     struct TestPreflightMaintenanceWriteEffects;
@@ -11264,6 +12198,50 @@ mod tests {
     }
 
     #[test]
+    fn queue_authority_retry_rechecks_fence_after_each_observation() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let admitted = "admitted authority\n";
+        let superseding = "operator authority\n";
+        std::fs::write(&doc, admitted).unwrap();
+        let expected_hash = agent_doc_hash::content_hash(admitted);
+        let fence = |path: &Path| {
+            let observed = std::fs::read_to_string(path)?;
+            anyhow::ensure!(
+                agent_doc_hash::content_hash(&observed) == expected_hash,
+                "injected acquisition authority superseded"
+            );
+            Ok(())
+        };
+        let ops_path = dir.path().join(".agent-doc/logs/ops.log");
+        let before_ops = std::fs::read(&ops_path).ok();
+        let mut observations = 0usize;
+
+        let err = observe_current_text_with_bounded_retry_fenced(
+            &doc,
+            "test_inner_acquisition_fence",
+            2,
+            Some(&fence),
+            |_| {
+                observations += 1;
+                std::fs::write(&doc, superseding).unwrap();
+                Ok(Some(
+                    agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica,
+                ))
+            },
+        )
+        .unwrap_err();
+
+        assert!(format!("{err:#}").contains("superseded"), "{err:#}");
+        assert_eq!(observations, 1, "the stale acquisition must not retry");
+        assert_eq!(
+            std::fs::read(&ops_path).ok(),
+            before_ops,
+            "drift after an authority observation must be rejected before diagnostics or replica recovery"
+        );
+    }
+
+    #[test]
     fn queue_authority_status_token_names_each_observation() {
         assert_eq!(
             current_text_status_token(&Ok(Some(
@@ -11323,6 +12301,7 @@ mod tests {
             &doc,
             "test",
             3,
+            None,
             |_| {
                 calls += 1;
                 let text = if calls < 3 { baseline } else { &saved };
@@ -11358,6 +12337,79 @@ mod tests {
             saved,
             "preflight reconciliation must never rewrite the native save"
         );
+    }
+
+    #[test]
+    fn queue_authority_native_save_adoption_rechecks_fence_after_observation() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let baseline = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n",
+            "agent_doc_write: crdt\nqueue: go\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n- inspect the cut\n<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let admitted = baseline.replace(
+            "<!-- agent:queue go -->",
+            "<!-- agent:queue go admitted -->",
+        );
+        let superseding = admitted.replace(
+            "<!-- agent:backlog -->",
+            "<!-- agent:backlog operator-newer -->",
+        );
+        std::fs::write(&doc, &admitted).unwrap();
+
+        let expected_hash = agent_doc_hash::content_hash(&admitted);
+        let fence = |path: &Path| {
+            let observed = std::fs::read_to_string(path)?;
+            anyhow::ensure!(
+                agent_doc_hash::content_hash(&observed) == expected_hash,
+                "injected admitted authority superseded"
+            );
+            Ok(())
+        };
+        let adopted = std::cell::Cell::new(false);
+        let mut observations = 0usize;
+        let err = observe_queue_authority_after_native_save_with_bounded_retry_and_adopt(
+            &doc,
+            "test_fenced_native_save",
+            2,
+            Some(&fence),
+            |_| {
+                observations += 1;
+                if observations == 1 {
+                    std::fs::write(&doc, &superseding).unwrap();
+                }
+                Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
+                    text: baseline.to_string(),
+                    live_editors: 1,
+                    delivery_converged: true,
+                    delivery_version: observations as u64,
+                    semantics: None,
+                    quarantined_replicas: 0,
+                }))
+            },
+            |_, _, _, _| {
+                adopted.set(true);
+                Ok(())
+            },
+        )
+        .unwrap_err();
+
+        assert!(format!("{err:#}").contains("superseded"), "{err:#}");
+        assert!(
+            !adopted.get(),
+            "a stale worker must be fenced before native-save adoption"
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), superseding);
     }
 
     fn component_body(content: &str, name: &str) -> String {
@@ -11842,6 +12894,30 @@ mod tests {
             "an open (not operator-verify) item never shows awaiting:\n{updated}"
         );
         assert_eq!(queue_line(&updated, "verify"), "- ### ⏳ do [#verify]");
+    }
+
+    #[test]
+    fn authoritative_queue_admission_skips_claimed_and_processed_candidates() {
+        let (_dir, doc) = sdk_queue_lifecycle_fixture("#claimed");
+        let authority = std::fs::read_to_string(&doc).unwrap();
+
+        let state = inspect_queue_state_from_content(&doc, None, authority).unwrap();
+
+        assert_eq!(state.selected_queue_prompts, vec!["do [#plain]"]);
+        assert!(
+            state
+                .claimed_queue_heads
+                .iter()
+                .any(|fact| fact.item.contains("#claimed")),
+            "the skipped live claim remains visible in the admission contract"
+        );
+        assert!(
+            !state
+                .selected_queue_prompts
+                .iter()
+                .any(|prompt| prompt.contains("#verify") || prompt.contains("#claimed")),
+            "operator-verify and claimed rows are not currently relevant inline candidates"
+        );
     }
 
     /// `#queueawaitop`: a claim held on a head whose item already waits on the
@@ -13873,12 +14949,10 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         );
     }
     #[test]
-    fn run_queue_maintenance_defers_while_foreign_queue_edit_lease_held() {
+    fn run_queue_maintenance_defers_while_queue_apply_lock_is_held() {
         // #sqedit-race Phase 2: a backlog `queue=sync` would normally regenerate
-        // the empty queue. While a DIFFERENT live process holds a fresh queue-edit
-        // lease (a direct `queue prune-noise` / `queue consume` in flight),
-        // preflight maintenance must defer entirely — no mutation, no sync — so it
-        // never round-trips a torn intermediate queue.
+        // the empty queue. While a direct queue owner holds the apply lock,
+        // maintenance must defer entirely — no mutation, no sync.
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let content = concat!(
@@ -13904,31 +14978,25 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         )
         .unwrap();
 
-        // pid 1 (init) is always live on Unix and is never this test process →
-        // a genuine foreign in-flight queue edit.
-        let doc_str = doc.to_string_lossy().to_string();
-        agent_doc_queue_io::queue_edit_owner::refresh_queue_edit_owner_lease(&doc_str, 1).unwrap();
+        let direct_guard =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
 
-        let state = run_queue_maintenance(&doc, None).unwrap();
+        let error = run_queue_maintenance(&doc, None).unwrap_err();
 
         let after = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(
             after, content,
             "queue must be untouched while a foreign edit is in flight"
         );
-        assert!(
-            state.synced_queue_ids.is_empty(),
-            "no backlog→queue sync may run while deferred, got {:?}",
-            state.synced_queue_ids
-        );
+        assert!(error.to_string().contains("queue maintenance unsettled"));
         assert!(
             !after.contains("- do [#alpha]"),
             "deferred maintenance must not mint the queue head:\n{after}"
         );
 
-        // Once the lease clears, the next pass syncs normally (the defer is a
+        // Once the apply guard clears, the next pass syncs normally (the defer is a
         // yield, not a permanent skip).
-        agent_doc_queue_io::queue_edit_owner::clear_queue_edit_owner_lease(&doc_str);
+        drop(direct_guard);
         let resumed = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(resumed.synced_queue_ids, vec!["alpha".to_string()]);
         assert!(
@@ -17604,7 +18672,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert_eq!(head.defer_reason.as_deref(), Some("stop_fence"));
         assert!(!head.drainable);
 
-        record_selected_queue_head_state(&doc, &updated, "do [#alpha]", true).unwrap();
+        record_selected_queue_head_state(&doc, &updated, "do [#alpha]", true, None).unwrap();
         let ledger =
             agent_doc_controller_io::project_controller::load_state_event_ledger(dir.path())
                 .unwrap();
@@ -20057,6 +21125,53 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         );
     }
 
+    #[test]
+    fn pending_maintenance_inspection_has_no_persistence_side_effects() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let archive = dir.path().join("session.done.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [x] [#done1] Completed item\n",
+            "- legacy item without bookkeeping\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done archive=\"session.done.md\" -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let effects = GuardFailingPreflightMaintenanceWriteEffects::default();
+        let ops = dir.path().join(".agent-doc/logs/ops.log");
+        let ops_before = std::fs::read_to_string(&ops).unwrap_or_default();
+
+        inspect_pending_maintenance(&doc, &effects).unwrap();
+
+        assert_eq!(effects.authority_checks.get(), 0);
+        assert_eq!(effects.converge_calls.get(), 0);
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .unwrap(),
+            content
+        );
+        assert!(
+            !archive.exists(),
+            "pure admission inspection must not append an external done archive"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&ops).unwrap_or_default(),
+            ops_before,
+            "pure admission inspection must not publish durable maintenance evidence"
+        );
+    }
+
     // #realtime-maintenance-defer: when the visible maintenance write cannot land
     // because the realtime editor buffer is mid-reconcile (the operator is NOT
     // typing — the last committed response is still being reconciled back into the
@@ -21589,6 +22704,27 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert!(
             append < repair,
             "binary diagnostic must join the open recovery image before repair can close its cycle"
+        );
+    }
+
+    #[test]
+    fn persistence_model_ensure_uses_only_the_fenced_effect_free_observer() {
+        let source = include_str!("lib.rs");
+        let body = source
+            .split_once("fn ensure_document_model_via_authority(")
+            .expect("model-ensure helper")
+            .1
+            .split_once("fn ensure_document_model_with_replica_reregistration(")
+            .expect("bounded replica-reregistration helper")
+            .0;
+
+        assert!(
+            body.contains("current_text_via_preflight_authority_retrying_with_fence("),
+            "persistence model ensure must observe through the effect-free RPC and per-effect fence"
+        );
+        assert!(
+            !body.contains("current_text_via_controller_model_for_doc("),
+            "persistence model ensure must not call the opaque effectful controller-model API"
         );
     }
 

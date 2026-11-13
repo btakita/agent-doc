@@ -51,6 +51,34 @@ pub use agent_doc_controller_io::live_turn_follow_up::STEERING_SURROGATE_TTL_MS;
 
 const STEERING_SURROGATE_KEY_PREFIX: &str = "steering-surrogate:";
 
+#[cfg(test)]
+struct ClaimCancellationLockOrderHook {
+    file: PathBuf,
+    reached: std::sync::mpsc::SyncSender<()>,
+    release: std::sync::mpsc::Receiver<()>,
+}
+
+#[cfg(test)]
+static CLAIM_CANCELLATION_LOCK_ORDER_HOOK: std::sync::OnceLock<
+    std::sync::Mutex<Option<ClaimCancellationLockOrderHook>>,
+> = std::sync::OnceLock::new();
+
+#[cfg(test)]
+fn pause_claim_cancellation_after_completion_lock(file: &Path) {
+    let hook_slot = CLAIM_CANCELLATION_LOCK_ORDER_HOOK.get_or_init(Default::default);
+    let mut slot = hook_slot.lock().unwrap();
+    let Some(hook) = slot.take() else {
+        return;
+    };
+    if hook.file != file {
+        *slot = Some(hook);
+        return;
+    }
+    drop(slot);
+    hook.reached.send(()).unwrap();
+    hook.release.recv().unwrap();
+}
+
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Eq)]
 struct SteeringSurrogate {
     document: String,
@@ -535,8 +563,13 @@ fn route_claimed_items(
             file.display()
         );
     }
-    let ledger = agent_doc_queue_io::queue_claim::load_ledger_following(file, content)
-        .with_context(|| format!("read queue claims while routing {}", file.display()))?;
+    let status_only = crate::status_only_pass_active();
+    let ledger = if status_only {
+        agent_doc_queue_io::queue_claim::load_ledger_following_read_only(file, content)
+    } else {
+        agent_doc_queue_io::queue_claim::load_ledger_following(file, content)
+    }
+    .with_context(|| format!("read queue claims while routing {}", file.display()))?;
     let now = agent_doc_queue_io::queue_claim::claim_clock_now_secs();
     let mut attempts = ledger
         .active(now, None)
@@ -607,8 +640,12 @@ fn route_claimed_items(
         .keys()
         .cloned()
         .collect::<std::collections::HashSet<_>>();
-    let released = agent_doc_queue_io::claim_release_receipt::load(file)
-        .with_context(|| format!("read reported receipts while routing {}", file.display()))?;
+    let released = if status_only {
+        agent_doc_queue_io::claim_release_receipt::load_read_only(file)
+    } else {
+        agent_doc_queue_io::claim_release_receipt::load(file)
+    }
+    .with_context(|| format!("read reported receipts while routing {}", file.display()))?;
     for receipt in &released.receipts {
         // `#consumedclaimmismatch`: a receipt whose row a binary strike closed
         // is a retained response capture, not a reported attempt that owns work.
@@ -701,32 +738,25 @@ fn route_claimed_items(
         &live_claimed,
         items,
     )?;
-    for item in items
-        .iter()
-        .filter(|item| item.dispatch == core::SteeringDispatch::CancelClaimed)
+    // Classification is intrinsically pure. Applying consumers run the
+    // generation-fenced cancellation in an explicit completion-lock -> queue-
+    // apply transaction; status/Stop/idle callers never acquire either lock.
+    if status_only
+        && items
+            .iter()
+            .any(|item| item.dispatch == core::SteeringDispatch::CancelClaimed)
     {
-        // `#sessioncheckread`: the cancellation tombstones the claim and
-        // retires its completion cell from the document. A status-only
-        // `session-check` reports the removal but leaves that write to an
-        // applying consumer (finalize/preflight closeout, the steering hook, or
-        // `agent-doc repair <FILE> --session-check-heal`).
-        if crate::status_only_pass_active() {
-            crate::note_status_only_deferred_write();
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "session_check_self_heal_pending file={} heal=cancel_removed_claim_attempt applied=false (#sessioncheckread)",
-                    file.display(),
-                ),
-            );
-            continue;
-        }
-        cancel_removed_claim_attempt(file, content, item)?;
+        crate::note_status_only_deferred_write();
     }
     // `#reportedrelease`: a line whose worker reported (released with a
     // receipt) is the coordinator's to persist now, never new dispatch work.
-    let reported =
-        agent_doc_queue_io::claim_release_receipt::reported_owners_for_content(file, content);
+    let reported = if status_only {
+        agent_doc_queue_io::claim_release_receipt::reported_owners_for_content_read_only(
+            file, content,
+        )
+    } else {
+        agent_doc_queue_io::claim_release_receipt::reported_owners_for_content(file, content)
+    };
     if !reported.is_empty() {
         core::apply_release_receipts(items, |text| {
             reported
@@ -918,14 +948,13 @@ fn append_struck_removal_mismatches(
 /// claim generation, and publish a completion-cell retirement successor. The
 /// shared lock closes the report-marked/cell-not-yet-retained race; the
 /// retained `queue_consume` composition closes the delayed-outbox replay race.
-fn cancel_removed_claim_attempt(file: &Path, content: &str, item: &SteeringItem) -> Result<()> {
-    // `#completionlockload`: the same progress-aware wait as report-complete,
-    // so this owner's handoff is visible to the reporters queued behind it.
-    let _lock = agent_doc_queue_io::completion_feedback_lock::acquire_completion_feedback_lock(
-        file,
-        "tombstone removed queue claim",
-        |_| {},
-    )?;
+fn cancel_removed_claim_attempt_under_locks(
+    file: &Path,
+    content: &str,
+    item: &SteeringItem,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<()> {
+    apply_guard.ensure_protects(file)?;
     let receipt = match agent_doc_queue_io::queue_claim::cancel_removed_attempt(
         file,
         &item.verbatim,
@@ -1006,6 +1035,49 @@ fn cancel_removed_claim_attempt(file: &Path, content: &str, item: &SteeringItem)
         ),
     );
     Ok(())
+}
+
+/// Apply removed-claim cancellations as one explicit top-level transaction.
+/// The lock order matches completion feedback: completion lock first, then the
+/// document apply capability. Pure status/Stop/idle inspection never calls it.
+fn apply_claim_cancellations(file: &Path, candidates: &[SteeringItem]) -> Result<usize> {
+    if !candidates
+        .iter()
+        .any(|item| item.dispatch == core::SteeringDispatch::CancelClaimed)
+    {
+        return Ok(0);
+    }
+    let _completion =
+        agent_doc_queue_io::completion_feedback_lock::acquire_completion_feedback_lock(
+            file,
+            "tombstone removed queue claim",
+            |_| {},
+        )?;
+    #[cfg(test)]
+    pause_claim_cancellation_after_completion_lock(file);
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let current = crate::resolve_current_document_content(file, "claim_cancellation_apply")?;
+    let current_identities = all_queue_item_identities(&current);
+    let mut applied = 0;
+    for item in candidates
+        .iter()
+        .filter(|item| item.dispatch == core::SteeringDispatch::CancelClaimed)
+    {
+        if current_identities.contains(&agent_doc_queue::queue_claim::claim_identity(
+            &item.verbatim,
+        )) {
+            continue;
+        }
+        cancel_removed_claim_attempt_under_locks(file, &current, item, &apply_guard)?;
+        applied += 1;
+    }
+    Ok(applied)
+}
+
+pub fn apply_pending_claim_cancellations(file: &Path) -> Result<usize> {
+    let current = crate::resolve_current_document_content(file, "claim_cancellation_probe")?;
+    let candidates = pending_steering_items(file, &current);
+    apply_claim_cancellations(file, &candidates)
 }
 
 fn load_watermark(
@@ -1256,8 +1328,11 @@ fn prepare_with_gate_at(
     // and does not suppress recovery.
     let turn_in_progress =
         policy == ClosedCyclePolicy::Hook || cycle.as_ref().is_some_and(|cycle| cycle.is_open());
-    if let Err(error) =
-        agent_doc_queue_io::lost_running::recover_lost_running_automatically(file, turn_in_progress)
+    if !crate::status_only_pass_active()
+        && let Err(error) = agent_doc_queue_io::lost_running::recover_lost_running_automatically(
+            file,
+            turn_in_progress,
+        )
     {
         agent_doc_ops_log_io::log_op(
             file,
@@ -1539,7 +1614,11 @@ fn prepare_with_gate_at(
     let struck_removals = route_claimed_items(file, &content, &watermark, &mut observation.ready)?;
     // `#steerbaselineabsorb`: a prompt a cycle already carried or answered is
     // never re-surfaced (the watermark still advances past it).
-    crate::absorbed_steering::drop_consumed(file, &mut observation.ready);
+    if crate::status_only_pass_active() {
+        crate::absorbed_steering::drop_consumed_read_only(file, &mut observation.ready);
+    } else {
+        crate::absorbed_steering::drop_consumed(file, &mut observation.ready);
+    }
     let mut next = observation.next;
     // `#deletedstruckmismatch`: a degraded struck-row deletion is delivered
     // once; acknowledging this observation records it.
@@ -1589,6 +1668,11 @@ pub fn observe(file: &Path, consumer: &str, advance: bool) -> Result<Option<Stee
         return Ok(None);
     };
     if advance {
+        if !crate::status_only_pass_active()
+            && let Some(report) = prepared.report.as_ref()
+        {
+            apply_claim_cancellations(file, &report.items)?;
+        }
         prepared.acknowledge(file)?;
     }
     Ok(prepared.report)
@@ -2232,26 +2316,14 @@ pub fn pending_steering_items(file: &Path, current: &str) -> Vec<SteeringItem> {
         // the contract fail-closed: surface nothing and leave a durable reason
         // for the next repair/session-check path. Stateless callers do not
         // advance a watermark, so later observations can retry.
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "pending_steering_lineage_ambiguous file={} error={err:#} (#assistantsteeringlineage)",
-                file.display(),
-            ),
-        );
+        let _ = err;
         ready.clear();
     }
     if let Err(err) = route_claimed_items(file, current, &base, &mut ready) {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "pending_steering_claim_cancellation_ambiguous file={} error={err:#} (#queue-removal-cancels)",
-                file.display(),
-            ),
-        );
+        let _ = err;
         ready.clear();
     }
-    crate::absorbed_steering::drop_consumed(file, &mut ready);
+    crate::absorbed_steering::drop_consumed_read_only(file, &mut ready);
     ready
 }
 
@@ -2339,7 +2411,13 @@ pub fn emit_closeout_steering(file: &Path, writer: &mut impl std::io::Write) {
 /// advanced, so the next applying consumer still cancels the claim and
 /// delivers the item.
 pub fn emit_closeout_steering_status_only(file: &Path, writer: &mut impl std::io::Write) {
-    emit_closeout_steering_inner(file, writer, true);
+    // This is a complete public status transaction, not merely a different
+    // acknowledgement policy. Keep every legacy state-store reader and every
+    // error diagnostic behind the same intrinsic purity boundary as the main
+    // session-check pass.
+    crate::with_status_only_transaction(|| {
+        emit_closeout_steering_inner(file, writer, true);
+    });
 }
 
 fn emit_closeout_steering_inner(file: &Path, writer: &mut impl std::io::Write, status_only: bool) {
@@ -2358,11 +2436,13 @@ fn emit_closeout_steering_inner(file: &Path, writer: &mut impl std::io::Write, s
             writeln!(writer, "{text}").context("write closeout steering report")?;
             writer.flush().context("flush closeout steering report")?;
         }
-        if status_only && crate::take_status_only_deferred_write() {
-            eprintln!(
-                "[session-check] warn: a claimed queue row was removed; its claim cancellation is pending and `session-check` is read-only, so the steering watermark was not advanced. Run `{}` (or let the next finalize/preflight closeout) apply it.",
-                crate::session_check_heal_command(file),
-            );
+        if status_only {
+            if crate::take_status_only_deferred_write() {
+                eprintln!(
+                    "[session-check] warn: a claimed queue row was removed; its claim cancellation is pending and `session-check` is read-only, so the steering watermark was not advanced. Run `{}` to apply it.",
+                    crate::session_check_heal_command(file),
+                );
+            }
             return Ok(rendered.is_some());
         }
         prepared.acknowledge(file)?;
@@ -5396,9 +5476,84 @@ mod tests {
         )
         .unwrap();
 
+        // A clean committed boundary makes the stateless Stop/idle projection
+        // eligible to classify the post-close removal.
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            &baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        close_cycle(&file, &baseline);
+
         let deleted = baseline.replace(&format!("- {head}\n"), "");
-        std::fs::write(&file, deleted).unwrap();
+        std::fs::write(&file, &deleted).unwrap();
         backdate(&file);
+
+        // Stateless inspection is used by Codex Stop, idle watch, route, MCP,
+        // and read-only session-check. It must classify the cancellation while
+        // leaving every durable plane byte-for-byte untouched; only an
+        // applying top-level transaction may tombstone the attempt.
+        let state_db = agent_doc_sqlite::state_store::state_db_path(dir.path());
+        let state_before = std::fs::read(&state_db).unwrap();
+        let wal_path = state_db.with_file_name("state.db-wal");
+        let wal_before = std::fs::read(&wal_path).ok();
+        let ops_path = dir.path().join(".agent-doc/logs/ops.log");
+        let ops_before = std::fs::read(&ops_path).ok();
+        let doc_before = std::fs::read(&file).unwrap();
+        let ledger_before = agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap();
+        let pending = pending_steering_items(&file, &deleted);
+        assert_eq!(pending.len(), 1, "{pending:?}");
+        assert_eq!(pending[0].dispatch, core::SteeringDispatch::CancelClaimed);
+        assert_eq!(std::fs::read(&state_db).unwrap(), state_before);
+        assert_eq!(std::fs::read(&wal_path).ok(), wal_before);
+        assert_eq!(std::fs::read(&ops_path).ok(), ops_before);
+        assert_eq!(std::fs::read(&file).unwrap(), doc_before);
+        assert_eq!(
+            agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap(),
+            ledger_before
+        );
+
+        // The applying transaction must queue behind completion feedback
+        // before it can own the queue apply capability. This exact barrier
+        // makes the completion -> QueueEditGuard order observable and rules
+        // out the historical queue -> completion ABBA path.
+        let completion =
+            agent_doc_queue_io::completion_feedback_lock::acquire_completion_feedback_lock(
+                &file,
+                "lock-order regression owner",
+                |_| {},
+            )
+            .unwrap();
+        let (reached_tx, reached_rx) = std::sync::mpsc::sync_channel(0);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(0);
+        *CLAIM_CANCELLATION_LOCK_ORDER_HOOK
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap() = Some(ClaimCancellationLockOrderHook {
+            file: file.clone(),
+            reached: reached_tx,
+            release: release_rx,
+        });
+        let worker_file = file.clone();
+        let worker = std::thread::spawn(move || apply_pending_claim_cancellations(&worker_file));
+        assert!(
+            reached_rx
+                .recv_timeout(std::time::Duration::from_millis(100))
+                .is_err(),
+            "cancellation passed the after-completion barrier while completion lock was held",
+        );
+        drop(completion);
+        reached_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("cancellation acquired completion lock");
+        let apply_probe = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::try_acquire(&file)
+            .unwrap()
+            .expect("cancellation must not own queue guard before its completion lock");
+        drop(apply_probe);
+        release_tx.send(()).unwrap();
+        assert_eq!(worker.join().unwrap().unwrap(), 1);
+
         let report = observe(&file, CONSUMER_HOOK, true).unwrap().expect("hook");
         assert_eq!(report.items.len(), 1, "{report:?}");
         let item = &report.items[0];
@@ -6738,6 +6893,15 @@ mod tests {
                 agent_doc_ops_log_io::log_op,
             )
             .unwrap();
+            // Keep the first observation deterministically inside the settle
+            // window even when the parallel suite spends several seconds in
+            // claim projection before reaching this assertion.
+            std::fs::File::options()
+                .write(true)
+                .open(&file)
+                .unwrap()
+                .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(60))
+                .unwrap();
             let fresh = observe(&file, CONSUMER_CLI, false).unwrap();
             let fresh_wake = observe_for_wake(&file).unwrap();
             backdate(&file);

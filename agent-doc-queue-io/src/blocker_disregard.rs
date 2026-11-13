@@ -17,7 +17,7 @@ pub fn edit_with_effects(
     file: &Path,
     target: DisregardTarget,
 ) -> Result<DisregardPlan> {
-    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let current = effects.current_document_content(file, "blocker_disregard")?;
     let plan = agent_doc_queue::blocker_disregard::plan(&current, target)?;
     if !plan.changed {

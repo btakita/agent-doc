@@ -645,7 +645,7 @@ fn tool_plan(args: &Map<String, Value>) -> Result<Value> {
 fn tool_session_check(args: &Map<String, Value>) -> Result<Value> {
     ensure_mcp_binary_fresh_for_mutation()?;
     let file = required_path_arg(args, "file")?;
-    let report = agent_doc_session_check_io::inspect_with_warnings(
+    let report = agent_doc_session_check_io::inspect_read_only_with_warnings(
         &file,
         &agent_doc_closeout_runtime_io::session_check_effects(),
     )?;
@@ -843,7 +843,7 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
         agent_doc_write_command_io::CommitMode::Required,
         response,
     )?;
-    let report = agent_doc_session_check_io::inspect_with_warnings(
+    let report = agent_doc_session_check_io::inspect_read_only_with_warnings(
         &file,
         &agent_doc_closeout_runtime_io::session_check_effects(),
     )?;

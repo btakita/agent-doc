@@ -1618,6 +1618,7 @@ mod late_fallback_patch_guard_tests {
             _is_stream: bool,
             _force_disk: bool,
             _queue_completion_ids: &[String],
+            _apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
         ) -> anyhow::Result<()> {
             anyhow::bail!("unexpected strict replay in write IPC transport test")
         }
@@ -1629,11 +1630,17 @@ mod late_fallback_patch_guard_tests {
             _file: &Path,
             _response: &str,
             _force_disk: bool,
+            _apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
         ) -> anyhow::Result<()> {
             anyhow::bail!("unexpected template replay in write IPC transport test")
         }
 
-        fn apply_append_from_string(&self, _file: &Path, _response: &str) -> anyhow::Result<()> {
+        fn apply_append_from_string(
+            &self,
+            _file: &Path,
+            _response: &str,
+            _apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+        ) -> anyhow::Result<()> {
             anyhow::bail!("unexpected append replay in write IPC transport test")
         }
     }
@@ -1643,6 +1650,7 @@ mod late_fallback_patch_guard_tests {
             &self,
             _file: &Path,
             _expected_head: &str,
+            _apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
         ) -> anyhow::Result<()> {
             Ok(())
         }
@@ -1651,6 +1659,7 @@ mod late_fallback_patch_guard_tests {
             &self,
             _file: &Path,
             _replay_body: &str,
+            _apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
         ) -> anyhow::Result<usize> {
             Ok(0)
         }
@@ -2650,7 +2659,10 @@ Implemented.
         .unwrap();
 
         let head_before = head_count(root);
-        let recovered = agent_doc_repair_runtime_io::recover_dedupe_only_drift(&doc)
+        let guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        let effects =
+            agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(&doc, &guard).unwrap();
+        let recovered = agent_doc_repair_runtime_io::recover_dedupe_only_drift(&effects, &doc)
             .expect("dedupe-only drift recovery should succeed");
         assert!(
             recovered,
@@ -2710,7 +2722,11 @@ Implemented.
         )
         .unwrap();
 
-        let recovered = agent_doc_repair_runtime_io::recover_dedupe_only_drift(&doc).unwrap();
+        let guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        let effects =
+            agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(&doc, &guard).unwrap();
+        let recovered =
+            agent_doc_repair_runtime_io::recover_dedupe_only_drift(&effects, &doc).unwrap();
         assert!(
             !recovered,
             "no drift between file and HEAD should not trigger dedupe-only recovery"
@@ -2750,7 +2766,11 @@ Implemented.
         )
         .unwrap();
 
-        let recovered = agent_doc_repair_runtime_io::recover_dedupe_only_drift(&doc).unwrap();
+        let guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        let effects =
+            agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(&doc, &guard).unwrap();
+        let recovered =
+            agent_doc_repair_runtime_io::recover_dedupe_only_drift(&effects, &doc).unwrap();
         assert!(
             !recovered,
             "arbitrary working-tree drift must not be auto-committed as a dedupe recovery"
@@ -2798,8 +2818,12 @@ Implemented.
         .unwrap();
 
         let head_before = head_count(root);
+        let guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        let effects =
+            agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(&doc, &guard).unwrap();
         let recovered = agent_doc_repair_io::recover_empty_response_for_strict_closeout(
             agent_doc_repair_runtime_io::repair_coordinator_effects(
+                &effects,
                 &NOOP_REPAIR_REPLAY_WRITE_EFFECTS,
             ),
             &doc,
@@ -2862,8 +2886,12 @@ Implemented.
         .unwrap();
 
         let head_before = head_count(root);
+        let guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        let effects =
+            agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(&doc, &guard).unwrap();
         let recovered = agent_doc_repair_io::recover_empty_response_for_strict_closeout(
             agent_doc_repair_runtime_io::repair_coordinator_effects(
+                &effects,
                 &NOOP_REPAIR_REPLAY_WRITE_EFFECTS,
             ),
             &doc,

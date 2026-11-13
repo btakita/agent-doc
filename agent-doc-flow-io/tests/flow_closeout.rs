@@ -11,21 +11,38 @@ pub use agent_doc_flow_io::closeout::{
 };
 
 pub fn complete_required_closeout(file: &Path) -> Result<bool> {
-    agent_doc_flow_io::closeout::complete_required_closeout(
+    agent_doc_closeout_runtime_io::complete_required_closeout(file, false)
+}
+
+fn record_terminal_closeout_proof(
+    file: &Path,
+    did_commit: bool,
+    options: agent_doc_flow_io::closeout::CompleteRequiredCloseoutOptions,
+) -> Result<()> {
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    agent_doc_closeout_runtime_io::record_terminal_closeout_proof_under_apply_guard(
         file,
-        &agent_doc_closeout_runtime_io::closeout_effects(),
+        did_commit,
+        options,
+        &apply_guard,
     )
 }
 
-struct LocalCrdtBarrierCloseoutEffects;
+struct LocalCrdtBarrierCloseoutEffects<'a> {
+    delegate: agent_doc_closeout_runtime_io::RuntimeCloseoutEffects<'a>,
+}
 
-impl agent_doc_flow_io::closeout::CloseoutEffects for LocalCrdtBarrierCloseoutEffects {
+impl agent_doc_flow_io::closeout::CloseoutEffects for LocalCrdtBarrierCloseoutEffects<'_> {
+    fn require_mutation_capability(&self, file: &Path) -> Result<()> {
+        self.delegate.require_mutation_capability(file)
+    }
+
     fn commit(&self, file: &Path) -> Result<bool> {
-        agent_doc_closeout_runtime_io::closeout_effects().commit(file)
+        self.delegate.commit(file)
     }
 
     fn commit_for_authority(&self, file: &Path, force_disk: bool) -> Result<bool> {
-        agent_doc_closeout_runtime_io::closeout_effects().commit_for_authority(file, force_disk)
+        self.delegate.commit_for_authority(file, force_disk)
     }
 
     fn crdt_commit_barrier(
@@ -42,37 +59,37 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for LocalCrdtBarrierCloseoutEf
         file: &Path,
         force_disk: bool,
     ) -> Result<agent_doc_preflight_io::PendingMaintenanceReport> {
-        agent_doc_closeout_runtime_io::closeout_effects().run_pending_maintenance(file, force_disk)
+        self.delegate.run_pending_maintenance(file, force_disk)
     }
 
     fn enforce_clean_closeout(&self, file: &Path) -> Result<()> {
-        agent_doc_closeout_runtime_io::closeout_effects().enforce_clean_closeout(file)
+        self.delegate.enforce_clean_closeout(file)
     }
 
     fn enforce_clean_closeout_for_authority(&self, file: &Path, force_disk: bool) -> Result<()> {
-        agent_doc_closeout_runtime_io::closeout_effects()
+        self.delegate
             .enforce_clean_closeout_for_authority(file, force_disk)
     }
 
     fn cancel_preflight_cycle(&self, file: &Path) -> Result<agent_doc_turn::repair::CancelOutcome> {
-        agent_doc_closeout_runtime_io::closeout_effects().cancel_preflight_cycle(file)
+        self.delegate.cancel_preflight_cycle(file)
     }
 
     fn cancel_preflight_cycle_after_owner_release(
         &self,
         file: &Path,
     ) -> Result<agent_doc_turn::repair::CancelOutcome> {
-        agent_doc_closeout_runtime_io::closeout_effects()
+        self.delegate
             .cancel_preflight_cycle_after_owner_release(file)
     }
 
     fn detect_jb_cache_conflict_cancel_recoverable(&self, file: &Path) -> Result<bool> {
-        agent_doc_closeout_runtime_io::closeout_effects()
+        self.delegate
             .detect_jb_cache_conflict_cancel_recoverable(file)
     }
 
     fn detect_bypassed_response_write(&self, file: &Path) -> Result<Option<String>> {
-        agent_doc_closeout_runtime_io::closeout_effects().detect_bypassed_response_write(file)
+        self.delegate.detect_bypassed_response_write(file)
     }
 
     fn resolve_current_document(
@@ -80,7 +97,7 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for LocalCrdtBarrierCloseoutEf
         file: &Path,
         source: &str,
     ) -> Result<agent_doc_document_realtime::CurrentDocument> {
-        agent_doc_closeout_runtime_io::closeout_effects().resolve_current_document(file, source)
+        self.delegate.resolve_current_document(file, source)
     }
 
     fn resolve_current_document_for_authority(
@@ -89,7 +106,7 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for LocalCrdtBarrierCloseoutEf
         source: &str,
         force_disk: bool,
     ) -> Result<agent_doc_document_realtime::CurrentDocument> {
-        agent_doc_closeout_runtime_io::closeout_effects()
+        self.delegate
             .resolve_current_document_for_authority(file, source, force_disk)
     }
 
@@ -99,8 +116,7 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for LocalCrdtBarrierCloseoutEf
         content: &str,
         source: &str,
     ) -> Result<()> {
-        agent_doc_closeout_runtime_io::closeout_effects()
-            .write_current_document(doc, content, source)
+        self.delegate.write_current_document(doc, content, source)
     }
 
     fn mark_committed_frontmatter(
@@ -110,12 +126,8 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for LocalCrdtBarrierCloseoutEf
         snapshot_content: Option<&str>,
         file_content: Option<&str>,
     ) -> Result<agent_doc_cycle_state_io::CycleState> {
-        agent_doc_closeout_runtime_io::closeout_effects().mark_committed_frontmatter(
-            file,
-            event,
-            snapshot_content,
-            file_content,
-        )
+        self.delegate
+            .mark_committed_frontmatter(file, event, snapshot_content, file_content)
     }
 
     fn mark_abandoned_frontmatter(
@@ -125,37 +137,37 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for LocalCrdtBarrierCloseoutEf
         snapshot_content: Option<&str>,
         file_content: Option<&str>,
     ) -> Result<agent_doc_cycle_state_io::CycleState> {
-        agent_doc_closeout_runtime_io::closeout_effects().mark_abandoned_frontmatter(
-            file,
-            event,
-            snapshot_content,
-            file_content,
-        )
+        self.delegate
+            .mark_abandoned_frontmatter(file, event, snapshot_content, file_content)
     }
 }
 
 fn complete_required_closeout_with_local_crdt_barrier(file: &Path) -> Result<bool> {
-    agent_doc_flow_io::closeout::complete_required_closeout(file, &LocalCrdtBarrierCloseoutEffects)
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let effects = LocalCrdtBarrierCloseoutEffects {
+        delegate: agent_doc_closeout_runtime_io::closeout_effects_under_apply_guard(
+            file,
+            &apply_guard,
+        )?,
+    };
+    agent_doc_flow_io::closeout::complete_required_closeout(file, &effects)
 }
 
 pub fn apply_closeout_recovery(file: &Path) -> Result<RecoveryApplication> {
-    agent_doc_flow_io::closeout::apply_closeout_recovery(
-        file,
-        &agent_doc_closeout_runtime_io::closeout_effects(),
-    )
+    agent_doc_closeout_runtime_io::apply_closeout_recovery(file)
 }
 
 pub fn gather_closeout_recovery_evidence(file: &Path) -> Result<CloseoutRecoveryEvidence> {
     agent_doc_flow_io::closeout::gather_closeout_recovery_evidence(
         file,
-        &agent_doc_closeout_runtime_io::closeout_effects(),
+        &agent_doc_closeout_runtime_io::closeout_inspection_effects(),
     )
 }
 
 pub fn observe_closeout_recovery_evidence(file: &Path) -> Result<CloseoutRecoveryEvidence> {
     agent_doc_flow_io::closeout::observe_closeout_recovery_evidence(
         file,
-        &agent_doc_closeout_runtime_io::closeout_effects(),
+        &agent_doc_closeout_runtime_io::closeout_inspection_effects(),
     )
 }
 
@@ -164,7 +176,7 @@ pub fn load_current_observed_closeout_recovery_evidence(
 ) -> Result<Option<CloseoutRecoveryEvidence>> {
     agent_doc_flow_io::closeout::load_current_observed_closeout_recovery_evidence(
         file,
-        &agent_doc_closeout_runtime_io::closeout_effects(),
+        &agent_doc_closeout_runtime_io::closeout_inspection_effects(),
     )
 }
 
@@ -173,7 +185,7 @@ pub fn classify_closeout_recovery_state_for_file(
 ) -> agent_doc_turn::closeout_recovery::CloseoutRecoveryState {
     agent_doc_flow_io::closeout::classify_closeout_recovery_state_for_file(
         file,
-        &agent_doc_closeout_runtime_io::closeout_effects(),
+        &agent_doc_closeout_runtime_io::closeout_inspection_effects(),
     )
 }
 
@@ -374,10 +386,9 @@ mod tests {
         );
         std::fs::write(&doc, &visible).unwrap();
 
-        agent_doc_flow_io::closeout::record_terminal_closeout_proof(
+        record_terminal_closeout_proof(
             &doc,
             true,
-            &agent_doc_closeout_runtime_io::closeout_effects(),
             agent_doc_flow_io::closeout::CompleteRequiredCloseoutOptions::default(),
         )
         .expect("newer queue-only visible state must not invalidate committed response proof");
@@ -440,10 +451,9 @@ mod tests {
 
         // Without a prior proof (preflight, any first-time caller) the strict
         // fail-closed guard is unchanged.
-        let err = agent_doc_flow_io::closeout::record_terminal_closeout_proof(
+        let err = record_terminal_closeout_proof(
             &doc,
             true,
-            &agent_doc_closeout_runtime_io::closeout_effects(),
             agent_doc_flow_io::closeout::CompleteRequiredCloseoutOptions::default(),
         )
         .unwrap_err()
@@ -455,10 +465,9 @@ mod tests {
 
         // With this closeout's own commit proof, the lagging read is repaired
         // instead of failing a closeout whose commit already succeeded.
-        agent_doc_flow_io::closeout::record_terminal_closeout_proof(
+        record_terminal_closeout_proof(
             &doc,
             true,
-            &agent_doc_closeout_runtime_io::closeout_effects(),
             agent_doc_flow_io::closeout::CompleteRequiredCloseoutOptions {
                 force_disk: false,
                 proven_committed_cycle: Some(state.cycle_id.clone()),

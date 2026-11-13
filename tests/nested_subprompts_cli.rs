@@ -123,14 +123,33 @@ fn committed_session(dir: &std::path::Path, kind: &str, run_rows: &str) -> std::
 }
 
 fn preflight_json(dir: &std::path::Path, doc: &std::path::Path) -> serde_json::Value {
+    let ops = dir.join(".agent-doc/logs/ops.log");
+    let previous_ops_len = fs::metadata(&ops).map(|meta| meta.len()).unwrap_or(0);
     let output = run_agent_doc(dir, &["preflight", doc.to_str().unwrap()]);
     assert_ok(&output, "preflight");
-    serde_json::from_slice(&output.stdout).unwrap_or_else(|err| {
+    let state = serde_json::from_slice(&output.stdout).unwrap_or_else(|err| {
         panic!(
             "preflight stdout is not JSON ({err}): {}",
             String::from_utf8_lossy(&output.stdout)
         )
-    })
+    });
+    // Admission intentionally returns before comprehensive queue projection.
+    // Tests below that inspect the persisted tree wait for the detached effect,
+    // while the admission contract itself remains the captured `state` above.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        let current = fs::read_to_string(&ops).unwrap_or_default();
+        let appended = current.get(previous_ops_len as usize..).unwrap_or(&current);
+        if appended.contains("queue_maintenance_background_completed") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "detached queue maintenance did not complete: {appended}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+    state
 }
 
 /// `agent:loop` is a scheduled runnable list. This tree-shape test is about an

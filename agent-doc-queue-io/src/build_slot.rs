@@ -330,6 +330,9 @@ pub fn run_with_parent(options: BuildSlotOptions, parent: Option<OsString>) -> R
     let status = command
         .status()
         .with_context(|| format!("run {}", program.to_string_lossy()))?;
+    // Make the handoff boundary explicit: the child has exited and the slot
+    // is released before its status becomes observable to a successor.
+    drop(_held);
     Ok(exit_code(status))
 }
 

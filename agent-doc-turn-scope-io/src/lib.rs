@@ -58,21 +58,35 @@ pub fn save(doc: &Path, scope: &TurnScope) -> Result<()> {
 
 /// Load the persisted turn scope, conservatively returning `None` if ledger
 /// access or decoding fails.
+pub fn try_load(doc: &Path) -> Result<Option<TurnScope>> {
+    let (root, document_hash, _) = state_identity(doc)?;
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    let Some(record) = agent_doc_sqlite::state_store::load_document_runtime_state_from_db(
+        &conn,
+        &document_hash,
+        TURN_SCOPE_STATE_KIND,
+    )?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(serde_json::from_str(&record.payload_json)?))
+}
+
+pub fn try_load_read_only(doc: &Path) -> Result<Option<TurnScope>> {
+    let (root, document_hash, _) = state_identity(doc)?;
+    let Some(record) = agent_doc_sqlite::state_store::load_document_runtime_state_read_only(
+        &root,
+        &document_hash,
+        TURN_SCOPE_STATE_KIND,
+    )?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(serde_json::from_str(&record.payload_json)?))
+}
+
 pub fn load(doc: &Path) -> Option<TurnScope> {
-    let result = (|| -> Result<Option<TurnScope>> {
-        let (root, document_hash, _) = state_identity(doc)?;
-        let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
-        let Some(record) = agent_doc_sqlite::state_store::load_document_runtime_state_from_db(
-            &conn,
-            &document_hash,
-            TURN_SCOPE_STATE_KIND,
-        )?
-        else {
-            return Ok(None);
-        };
-        Ok(Some(serde_json::from_str(&record.payload_json)?))
-    })();
-    match result {
+    match try_load(doc) {
         Ok(scope) => scope,
         Err(err) => {
             eprintln!(

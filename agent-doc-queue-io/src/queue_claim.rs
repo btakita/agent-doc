@@ -383,6 +383,18 @@ pub fn load_ledger_following(file: &Path, content: &str) -> Result<QueueClaimLed
     Ok(ledger)
 }
 
+/// Status-only counterpart that never initializes, migrates, repairs, or
+/// retention-prunes the project state database.
+pub fn load_ledger_following_read_only(file: &Path, content: &str) -> Result<QueueClaimLedger> {
+    let mut ledger = load_ledger_read_only(file)?;
+    if !ledger.claims.is_empty()
+        && let Some(view) = ClaimQueueView::from_content(content)
+    {
+        ledger.follow_edits_in_view(now_secs(), &view);
+    }
+    Ok(ledger)
+}
+
 /// Compatibility baselines for an older folded `#nestedclaimsteer` entry.
 /// Canonical parsed trees are already leaf-only.
 pub fn nested_claim_steer_snapshots(
@@ -476,6 +488,20 @@ pub fn load_ledger(file: &Path) -> Result<QueueClaimLedger> {
     load_from_conn(&conn, &document_hash)
 }
 
+pub fn load_ledger_read_only(file: &Path) -> Result<QueueClaimLedger> {
+    let Some((root, document_hash, _)) = state_identity(file)? else {
+        return Ok(QueueClaimLedger::default());
+    };
+    if !agent_doc_sqlite::state_store::state_db_path(&root).exists() {
+        return Ok(QueueClaimLedger::default());
+    }
+    let conn = agent_doc_sqlite::state_store::open_state_db_read_only(&root)?;
+    if !agent_doc_sqlite::state_store::state_table_exists(&conn, "queue_document_state")? {
+        return Ok(QueueClaimLedger::default());
+    }
+    load_from_conn(&conn, &document_hash)
+}
+
 /// Work texts of projection-bearing queue-head rows.
 fn row_head_texts(rows: &[String]) -> Vec<String> {
     rows.iter()
@@ -533,6 +559,40 @@ fn resolve_expanded_claim_target(
     .ok()
 }
 
+/// Resolve a generated prompt selector against the same pure identity
+/// projection preflight exposes before comprehensive maintenance persists it.
+/// Return the authored row text so the durable claim remains valid both before
+/// and after the background reconciler annotates the document.
+fn resolve_projected_claim_target(
+    file: &Path,
+    item: &str,
+    disk_content: &str,
+    authority_content: Option<&str>,
+) -> Option<(String, ClaimHeadSource)> {
+    let (content, source) = authority_content
+        .map(|content| (content, ClaimHeadSource::EditorAuthority))
+        .unwrap_or((disk_content, ClaimHeadSource::Disk));
+    let authored_heads = all_queue_head_texts(content)?;
+    let projection = agent_doc_queue::prompt_identity::project(
+        content,
+        &agent_doc_hash::document_id_for_path(file),
+    );
+    if projection.assignments.is_empty() {
+        return None;
+    }
+    let projected_heads = all_queue_head_texts(&projection.content)?;
+    let projected_target =
+        agent_doc_queue::queue_claim::resolve_claim_target(item, &projected_heads).ok()?;
+    let target_identity = claim_identity(&projected_target);
+    let index = projected_heads
+        .iter()
+        .position(|head| claim_identity(head) == target_identity)?;
+    authored_heads
+        .get(index)
+        .cloned()
+        .map(|target| (target, source))
+}
+
 /// Resolve a claim `--item` against the live editor authority when available,
 /// otherwise against the on-disk document (GH #124 ask 5, GH #296): dispatch
 /// and claim must agree on what a live head is even while an editor save to
@@ -572,8 +632,11 @@ fn resolve_live_claim_target(
     let (target, view) = match resolved {
         Ok(resolved) => resolved,
         Err(miss) if miss.ambiguous.is_empty() => {
-            let expanded =
-                resolve_expanded_claim_target(file, item, &content, authority_text.as_deref());
+            let projected =
+                resolve_projected_claim_target(file, item, &content, authority_text.as_deref());
+            let expanded = projected.or_else(|| {
+                resolve_expanded_claim_target(file, item, &content, authority_text.as_deref())
+            });
             if let Some(resolved) = expanded {
                 resolved
             } else {
@@ -2860,13 +2923,32 @@ fn claimed_items_with_queue_holds(
 /// unreadable ledger contributes no claims (the gate this feeds stays armed).
 pub fn worker_owned_items_for_content(file: &Path, content: &str) -> ClaimedQueueItems {
     use agent_doc_queue::queue_claim::QueueClaimState;
-    let claims = claim_states_for_content(file, content).unwrap_or_else(|err| {
+    // Preflight can hand a deterministic `[#q-…]` selector to a worker before
+    // the background reconciler persists that annotation. Follow the claim on
+    // the same pure identity projection so the closeout capture gate observes
+    // one identity on both sides of that short persistence window.
+    let projected = agent_doc_queue::prompt_identity::project(
+        content,
+        &agent_doc_hash::document_id_for_path(file),
+    );
+    let claims_for_cut = |cut: &str| {
+        claim_states_for_content(file, cut).unwrap_or_else(|err| {
         eprintln!(
             "[queue-claim] WARNING: could not read queue claims for {}; treating every head as unowned: {err:#}",
             file.display()
         );
         Vec::new()
-    });
+    })
+    };
+    // Keep both identity cuts. Pure prompt-id projection can mint a stable q-id
+    // before the background reconciler persists it, but an already-running or
+    // Reported plain-text claim is still authoritative during that window. If
+    // we classify only the projected cut, the newly minted id hides that claim
+    // and incorrectly admits its coordinator debt into the inline drain.
+    let mut claims = claims_for_cut(content);
+    if projected.content != content {
+        claims.extend(claims_for_cut(&projected.content));
+    }
     ClaimedQueueItems::from_identities(
         claims
             .into_iter()

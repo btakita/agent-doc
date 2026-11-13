@@ -143,7 +143,7 @@ fn route_run_pending_maintenance(file: &Path, force_disk: bool) -> Result<()> {
 }
 
 fn route_inspect_session(file: &Path) -> Result<agent_doc_session_check_io::SessionCheckStatus> {
-    agent_doc_session_check_io::inspect(
+    agent_doc_session_check_io::inspect_read_only(
         file,
         &agent_doc_closeout_runtime_io::session_check_effects(),
     )
@@ -166,27 +166,24 @@ fn route_await_closeout_projection(
 /// cleared turn wedged the route until the stall deadline or a manual
 /// `session cancel-turn`.
 fn route_cancel_empty_preflight(file: &Path) -> Result<bool> {
-    agent_doc_repair_io::cancel_preflight_cycle_after_harness_turn_end(
-        &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-        file,
-    )
-    .map(|outcome| matches!(outcome, agent_doc_turn::repair::CancelOutcome::Abandoned))
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let effects = agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &apply_guard)?;
+    agent_doc_repair_io::cancel_preflight_cycle_after_harness_turn_end(&effects, file)
+        .map(|outcome| matches!(outcome, agent_doc_turn::repair::CancelOutcome::Abandoned))
 }
 
 fn route_cancel_empty_preflight_after_stable_dispatch_ready_pane(file: &Path) -> Result<bool> {
-    agent_doc_repair_io::cancel_preflight_cycle_after_stable_dispatch_ready_pane(
-        &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-        file,
-    )
-    .map(|outcome| matches!(outcome, agent_doc_turn::repair::CancelOutcome::Abandoned))
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let effects = agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &apply_guard)?;
+    agent_doc_repair_io::cancel_preflight_cycle_after_stable_dispatch_ready_pane(&effects, file)
+        .map(|outcome| matches!(outcome, agent_doc_turn::repair::CancelOutcome::Abandoned))
 }
 
 fn route_cancel_empty_preflight_after_owner_release(file: &Path) -> Result<bool> {
-    agent_doc_repair_io::cancel_preflight_cycle_after_owner_release(
-        &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-        file,
-    )
-    .map(|outcome| matches!(outcome, agent_doc_turn::repair::CancelOutcome::Abandoned))
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let effects = agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &apply_guard)?;
+    agent_doc_repair_io::cancel_preflight_cycle_after_owner_release(&effects, file)
+        .map(|outcome| matches!(outcome, agent_doc_turn::repair::CancelOutcome::Abandoned))
 }
 
 fn route_decide_closeout_recovery(
@@ -196,7 +193,7 @@ fn route_decide_closeout_recovery(
     agent_doc_flow_io::closeout::decide_closeout_recovery(
         file,
         input,
-        &agent_doc_closeout_runtime_io::closeout_effects(),
+        &agent_doc_closeout_runtime_io::closeout_inspection_effects(),
     )
 }
 

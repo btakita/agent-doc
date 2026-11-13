@@ -363,6 +363,13 @@ pub fn reliable_sync_editor_live_for_file(file: &Path) -> bool {
     if let Some(live) = agent_doc_reliable_sync_io::plane_editor_live_for_path(&file_string) {
         return live;
     }
+    // Status-only inspection must not initialize the reliable-sync inbox or
+    // Lazily outbox schemas inside the shared state.db. The in-process plane is
+    // still a valid positive observation; an unhydrated cold plane is simply
+    // not evidence of a live editor.
+    if agent_doc_sqlite::state_store::state_db_read_only_scope_active() {
+        return false;
+    }
     let document_hash = agent_doc_hash::document_id_for_path(file);
     if let Err(error) = restore_durable_liveness(file, &document_hash) {
         eprintln!(
@@ -2353,7 +2360,7 @@ pub fn current_text_for_file_with_authority(
     file: &Path,
     authority: CrdtAuthority,
 ) -> Result<CurrentText> {
-    current_text_for_file_with_authority_inner(file, authority, false, true)
+    current_text_for_file_with_authority_inner(file, authority, false, true, true)
 }
 
 /// [`current_text_for_file_with_authority`] without flushing live editor ops.
@@ -2365,7 +2372,17 @@ pub fn current_text_for_file_with_authority_nonblocking(
     file: &Path,
     authority: CrdtAuthority,
 ) -> Result<CurrentText> {
-    current_text_for_file_with_authority_inner(file, authority, false, false)
+    current_text_for_file_with_authority_inner(file, authority, false, false, true)
+}
+
+/// Effect-free sibling of [`current_text_for_file_with_authority_nonblocking`]
+/// for transaction fences. It reads the already-hosted relay cut without
+/// recovery, flushes, or durable diagnostics.
+pub fn peek_current_text_for_file_with_authority_nonblocking(
+    file: &Path,
+    authority: CrdtAuthority,
+) -> Result<CurrentText> {
+    current_text_for_file_with_authority_inner(file, authority, false, false, false)
 }
 
 /// Resolve current text after a Lazily-current observation request has had a
@@ -2379,7 +2396,7 @@ pub fn current_text_for_file_with_authority_recovering_projection(
     file: &Path,
     authority: CrdtAuthority,
 ) -> Result<CurrentText> {
-    current_text_for_file_with_authority_inner(file, authority, false, true)
+    current_text_for_file_with_authority_inner(file, authority, false, true, true)
 }
 
 fn current_text_for_file_with_authority_inner(
@@ -2387,12 +2404,14 @@ fn current_text_for_file_with_authority_inner(
     authority: CrdtAuthority,
     recover_missing_from_projection: bool,
     flush_barrier: bool,
+    publish_diagnostic: bool,
 ) -> Result<CurrentText> {
     current_text_for_file_with_authority_inner_before_log(
         file,
         authority,
         recover_missing_from_projection,
         flush_barrier,
+        publish_diagnostic,
         || {},
     )
 }
@@ -2402,6 +2421,7 @@ fn current_text_for_file_with_authority_inner_before_log(
     authority: CrdtAuthority,
     recover_missing_from_projection: bool,
     flush_barrier: bool,
+    publish_diagnostic: bool,
     mut before_log: impl FnMut(),
 ) -> Result<CurrentText> {
     if !authority.editor_attached() {
@@ -2414,17 +2434,19 @@ fn current_text_for_file_with_authority_inner_before_log(
     // `delivery_converged=true`. It is not a replica of the current document, so
     // report the replica as missing here instead of serving its text.
     if relay_authority_retired_for_file(file) {
-        before_log();
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "{} file={} authority=multi_replica reason=relay_authority_retired disposition=successor_promoted doc_hash={} process_pid={}",
-                OpsLogEvent::CrdtCurrentTextUnavailable,
-                file.display(),
-                hash,
-                std::process::id(),
-            ),
-        );
+        if publish_diagnostic {
+            before_log();
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{} file={} authority=multi_replica reason=relay_authority_retired disposition=successor_promoted doc_hash={} process_pid={}",
+                    OpsLogEvent::CrdtCurrentTextUnavailable,
+                    file.display(),
+                    hash,
+                    std::process::id(),
+                ),
+            );
+        }
         return Ok(CurrentText::EditorAttachedMissingReplica);
     }
     let mut handle = hub_handle(&hash);
@@ -2452,19 +2474,21 @@ fn current_text_for_file_with_authority_inner_before_log(
         // grep `disposition=recovery_exhausted` for the case worth chasing, and
         // `recovery_attempted` says whether the miss was even given a chance to
         // resolve.
-        let disposition = missing_replica_disposition(recover_missing_from_projection);
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "{} file={} authority=multi_replica reason=missing_replica disposition={} recovery_attempted={} doc_hash={} process_pid={}",
-                OpsLogEvent::CrdtCurrentTextUnavailable,
-                file.display(),
-                disposition,
-                recover_missing_from_projection,
-                hash,
-                std::process::id(),
-            ),
-        );
+        if publish_diagnostic {
+            let disposition = missing_replica_disposition(recover_missing_from_projection);
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{} file={} authority=multi_replica reason=missing_replica disposition={} recovery_attempted={} doc_hash={} process_pid={}",
+                    OpsLogEvent::CrdtCurrentTextUnavailable,
+                    file.display(),
+                    disposition,
+                    recover_missing_from_projection,
+                    hash,
+                    std::process::id(),
+                ),
+            );
+        }
         return Ok(CurrentText::EditorAttachedMissingReplica);
     };
     let mut hub_guard = handle.lock();
@@ -2491,18 +2515,20 @@ fn current_text_for_file_with_authority_inner_before_log(
         // inverse order used to strand every later controller request behind
         // `crdt_current_text` during finalize.
         drop(hub_guard);
-        before_log();
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "{} file={} authority=multi_replica reason=sync_pending live_editors={} delivery_converged={} delivery_version={}",
-                OpsLogEvent::CrdtCurrentTextUnavailable,
-                file.display(),
-                live_editors,
-                delivery_converged,
-                delivery.version,
-            ),
-        );
+        if publish_diagnostic {
+            before_log();
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{} file={} authority=multi_replica reason=sync_pending live_editors={} delivery_converged={} delivery_version={}",
+                    OpsLogEvent::CrdtCurrentTextUnavailable,
+                    file.display(),
+                    live_editors,
+                    delivery_converged,
+                    delivery.version,
+                ),
+            );
+        }
         return Ok(CurrentText::EditorSyncPending);
     }
 
@@ -2521,28 +2547,30 @@ fn current_text_for_file_with_authority_inner_before_log(
     // document-local relay authority first so state-ledger and relay operations
     // have one lock order under concurrent editor callbacks and closeout reads.
     drop(hub_guard);
-    before_log();
-    // `process_pid` mirrors the `crdt_current_text_unavailable` sibling above.
-    // Without it this line says a full-document read happened but not *who*
-    // asked: the relay-side log carries no `source=` (only the controller RPC
-    // handler adds one), so an in-process caller is anonymous. Chasing a 10s
-    // read triple on 2026-07-26 cost two wrong hypotheses for exactly this
-    // reason — the pid alone separates controller from supervisor from the
-    // editor's cdylib and would have answered it immediately.
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "crdt_current_text file={} authority=multi_replica len={} hash={} live_editors={} delivery_converged={} delivery_version={} quarantined_replicas={} process_pid={}",
-            file.display(),
-            text.len(),
-            agent_doc_hash::content_hash(&text),
-            live_editors,
-            delivery_converged,
-            delivery.version,
-            quarantined_replicas,
-            std::process::id(),
-        ),
-    );
+    if publish_diagnostic {
+        before_log();
+        // `process_pid` mirrors the `crdt_current_text_unavailable` sibling above.
+        // Without it this line says a full-document read happened but not *who*
+        // asked: the relay-side log carries no `source=` (only the controller RPC
+        // handler adds one), so an in-process caller is anonymous. Chasing a 10s
+        // read triple on 2026-07-26 cost two wrong hypotheses for exactly this
+        // reason — the pid alone separates controller from supervisor from the
+        // editor's cdylib and would have answered it immediately.
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_current_text file={} authority=multi_replica len={} hash={} live_editors={} delivery_converged={} delivery_version={} quarantined_replicas={} process_pid={}",
+                file.display(),
+                text.len(),
+                agent_doc_hash::content_hash(&text),
+                live_editors,
+                delivery_converged,
+                delivery.version,
+                quarantined_replicas,
+                std::process::id(),
+            ),
+        );
+    }
     Ok(CurrentText::Current {
         text,
         live_editors,
@@ -8599,6 +8627,7 @@ mod tests {
             CrdtAuthority::MultiReplica,
             false,
             false,
+            true,
             || {
                 let handle = hub_handle(&document_hash).expect("seeded relay hub");
                 assert!(

@@ -753,10 +753,10 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
         &self,
         file: &Path,
     ) -> anyhow::Result<agent_doc_turn::repair::RepairOutcome> {
-        agent_doc_repair_io::repair_stale_preflight_started_cycle(
-            &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-            file,
-        )
+        let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+        let effects =
+            agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &apply_guard)?;
+        agent_doc_repair_io::repair_stale_preflight_started_cycle(&effects, file)
     }
 
     fn save_pending(&self, file: &Path, response: &str) -> anyhow::Result<()> {
@@ -772,7 +772,7 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
         &self,
         file: &Path,
     ) -> anyhow::Result<agent_doc_sync_io::SyncSessionCheckStatus> {
-        match agent_doc_session_check_io::inspect(
+        match agent_doc_session_check_io::inspect_read_only(
             file,
             &agent_doc_closeout_runtime_io::session_check_effects(),
         )? {
@@ -979,7 +979,7 @@ impl agent_doc_workflow_io::doctor::WorkflowDoctorEffects for CliWorkflowDoctorE
         &mut self,
         file: &Path,
     ) -> anyhow::Result<Option<agent_doc_workflow_io::doctor::LiveSessionCheckFacts>> {
-        let report = agent_doc_session_check_io::inspect_with_warnings(
+        let report = agent_doc_session_check_io::inspect_read_only_with_warnings(
             file,
             &agent_doc_closeout_runtime_io::session_check_effects(),
         )?;
@@ -1692,12 +1692,14 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffec
         &self,
         file: &Path,
         count: usize,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
-        agent_doc_queue_io::queue_consume::consume_free_text_queue_prompts_with_outcome(
+        agent_doc_queue_io::queue_consume::consume_free_text_queue_prompts_under_apply_guard(
             file,
             count,
             true,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
         .map(|outcome| outcome.map(queue_command_consume_outcome))
     }
@@ -1706,29 +1708,44 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffec
         &self,
         file: &Path,
         count: usize,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
-        agent_doc_queue_io::queue_consume::consume_free_text_queue_prompts_with_outcome(
+        agent_doc_queue_io::queue_consume::consume_free_text_queue_prompts_under_apply_guard(
             file,
             count,
             false,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
         .map(|outcome| outcome.map(queue_command_consume_outcome))
     }
 
-    fn strike_orphan_id_backed_queue_head(&self, file: &Path, id: &str) -> anyhow::Result<bool> {
-        agent_doc_queue_io::queue_consume::strike_orphan_id_backed_queue_head(
+    fn strike_orphan_id_backed_queue_head(
+        &self,
+        file: &Path,
+        id: &str,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> anyhow::Result<bool> {
+        agent_doc_queue_io::queue_consume::strike_orphan_id_backed_queue_head_under_apply_guard(
             file,
             id,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
     }
 
-    fn acknowledge_open_id_backed_queue_head(&self, file: &Path, id: &str) -> anyhow::Result<bool> {
-        agent_doc_queue_io::queue_consume::acknowledge_open_id_backed_queue_head(
+    fn acknowledge_open_id_backed_queue_head(
+        &self,
+        file: &Path,
+        id: &str,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> anyhow::Result<bool> {
+        agent_doc_queue_io::queue_consume::acknowledge_open_id_backed_queue_head_under_apply_guard(
             file,
             id,
+            None,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
     }
 
@@ -1737,12 +1754,14 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffec
         file: &Path,
         id: &str,
         attempt: Option<&agent_doc_document::queue_projection::QueueOwnerProjection>,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> anyhow::Result<bool> {
-        agent_doc_queue_io::queue_consume::acknowledge_open_id_backed_queue_head_for_attempt(
+        agent_doc_queue_io::queue_consume::acknowledge_open_id_backed_queue_head_under_apply_guard(
             file,
             id,
             attempt,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
     }
 
@@ -1750,11 +1769,14 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffec
         &self,
         file: &Path,
         expected_head: &str,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
-        agent_doc_queue_io::queue_consume::acknowledge_paused_free_text_queue_head_with_outcome(
+        agent_doc_queue_io::queue_consume::acknowledge_paused_free_text_queue_head_under_apply_guard(
             file,
             expected_head,
+            None,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
         .map(|outcome| outcome.map(queue_command_consume_outcome))
     }
@@ -1764,30 +1786,39 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffec
         file: &Path,
         expected_head: &str,
         selector: Option<&agent_doc_queue_io::queue_consume::AckTextSelector>,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
-        agent_doc_queue_io::queue_consume::acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
+        agent_doc_queue_io::queue_consume::acknowledge_paused_free_text_queue_head_under_apply_guard(
             file,
             expected_head,
             selector,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
         .map(|outcome| outcome.map(queue_command_consume_outcome))
     }
 
-    fn prune_noise_queue_heads(&self, file: &Path) -> anyhow::Result<usize> {
-        agent_doc_queue_io::queue_consume::prune_noise_queue_heads(
+    fn prune_noise_queue_heads(
+        &self,
+        file: &Path,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> anyhow::Result<usize> {
+        agent_doc_queue_io::queue_consume::prune_noise_queue_heads_under_apply_guard(
             file,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
     }
 
     fn converge_captured_answered_free_text_projection(
         &self,
         file: &Path,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> anyhow::Result<usize> {
-        agent_doc_queue_io::queue_consume::converge_captured_answered_free_text_projection(
+        agent_doc_queue_io::queue_consume::converge_captured_answered_free_text_projection_under_apply_guard(
             file,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
         )
     }
 }
@@ -3368,6 +3399,18 @@ enum Commands {
         /// (`#preflight-probe-side-effect-free`).
         #[arg(long)]
         probe: bool,
+        /// Internal detached effect: run comprehensive queue reconciliation
+        /// after the admission process has returned its bounded read model.
+        #[arg(long, hide = true, conflicts_with = "probe")]
+        queue_maintenance_only: bool,
+        /// Internal detached-effect commit policy for a no-changes admission.
+        #[arg(
+            long,
+            hide = true,
+            requires = "queue_maintenance_only",
+            conflicts_with = "probe"
+        )]
+        commit_queue_maintenance: bool,
     },
     /// Diagnose workflow invariant status for a session document
     ///
@@ -7136,7 +7179,10 @@ fn write_terminal_error_report(writer: &mut impl Write, report: &str) -> std::io
 /// - every turn stage re-checks before it writes
 ///   (`recycle_stale_supervisor_for_turn_stage`).
 fn command_entry_supervisor_probe_applies(command: &Commands) -> bool {
-    !matches!(command, Commands::Tmux { .. })
+    !matches!(
+        command,
+        Commands::Tmux { .. } | Commands::SessionCheck { .. }
+    )
 }
 
 fn try_main() -> anyhow::Result<()> {
@@ -7704,10 +7750,7 @@ fn try_main() -> anyhow::Result<()> {
         }
         Commands::Dedupe { file } => dedupe_cmd::run(&file),
         Commands::Cancel { file } => {
-            match agent_doc_repair_io::cancel_preflight_cycle(
-                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-                &file,
-            )? {
+            match agent_doc_repair_command_io::cancel_preflight_cycle(&file)? {
                 agent_doc_turn::repair::CancelOutcome::Abandoned => {
                     println!(
                         "[cancel] abandoned orphaned preflight_started cycle; next dispatch starts fresh"
@@ -8386,10 +8429,7 @@ fn try_main() -> anyhow::Result<()> {
             }
             if apply_recovery {
                 use agent_doc_flow_io::closeout::RecoveryApplication;
-                match agent_doc_flow_io::closeout::apply_closeout_recovery(
-                    &file,
-                    &agent_doc_closeout_runtime_io::closeout_effects(),
-                )? {
+                match agent_doc_closeout_runtime_io::apply_closeout_recovery(&file)? {
                     RecoveryApplication::NothingToDo => {
                         eprintln!("[repair] {} is clean — no recovery needed", file.display());
                     }
@@ -8422,13 +8462,27 @@ fn try_main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Commands::Preflight { file, probe } => agent_doc_preflight_command_io::run_with_options(
-            &file,
-            agent_doc_preflight_command_io::PreflightOptions {
-                probe,
-                ..Default::default()
-            },
-        ),
+        Commands::Preflight {
+            file,
+            probe,
+            queue_maintenance_only,
+            commit_queue_maintenance,
+        } => {
+            if queue_maintenance_only {
+                agent_doc_preflight_command_io::run_background_queue_maintenance(
+                    &file,
+                    commit_queue_maintenance,
+                )
+            } else {
+                agent_doc_preflight_command_io::run_with_options(
+                    &file,
+                    agent_doc_preflight_command_io::PreflightOptions {
+                        probe,
+                        ..Default::default()
+                    },
+                )
+            }
+        }
         Commands::Admit { file } => {
             let output = agent_doc_session_check_io::midturn_steering::admit_with_steering_seed(
                 &file,

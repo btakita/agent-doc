@@ -214,7 +214,7 @@ pub fn edit_with_effects(
     sets: &[QueueAttrSet],
     removes: &[String],
 ) -> Result<bool> {
-    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let current = effects.current_document_content(file, "queue_attr")?;
     let plan = plan_queue_attr_edit(&current, queue_id, sets, removes)?;
     if !plan.changed {
@@ -409,6 +409,7 @@ mod tests {
             &self,
             _file: &Path,
             _count: usize,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
         ) -> Result<Option<crate::queue_cmd::QueueCommandConsumeOutcome>> {
             unreachable!()
         }
@@ -416,23 +417,39 @@ mod tests {
             &self,
             _file: &Path,
             _count: usize,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
         ) -> Result<Option<crate::queue_cmd::QueueCommandConsumeOutcome>> {
             unreachable!()
         }
-        fn strike_orphan_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+        fn strike_orphan_id_backed_queue_head(
+            &self,
+            _file: &Path,
+            _id: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<bool> {
             unreachable!()
         }
-        fn acknowledge_open_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+        fn acknowledge_open_id_backed_queue_head(
+            &self,
+            _file: &Path,
+            _id: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<bool> {
             unreachable!()
         }
         fn acknowledge_paused_free_text_queue_head(
             &self,
             _file: &Path,
             _expected_head: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
         ) -> Result<Option<crate::queue_cmd::QueueCommandConsumeOutcome>> {
             unreachable!()
         }
-        fn prune_noise_queue_heads(&self, _file: &Path) -> Result<usize> {
+        fn prune_noise_queue_heads(
+            &self,
+            _file: &Path,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<usize> {
             unreachable!()
         }
     }

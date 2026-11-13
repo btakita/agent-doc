@@ -1,10 +1,251 @@
 use std::fs;
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 /// `#integrationtesttargets`: this target drives the real `agent-doc` CLI, and
 /// a controller launch by that CLI is production behavior, so every spawned
 /// command opts in with this reason.
 const CONTROLLER_LAUNCH_REASON: &str = "queue claim/repair CLI commands reach the project controller, which they launch as production does";
+
+fn wait_for_path(path: &std::path::Path) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !path.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for {}",
+            path.display()
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn ops_log_len(doc: &std::path::Path) -> u64 {
+    let ops = doc.parent().unwrap().join(".agent-doc/logs/ops.log");
+    fs::metadata(ops)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0)
+}
+
+fn wait_for_background_queue_maintenance(doc: &std::path::Path, previous_ops_len: u64) {
+    let ops = doc.parent().unwrap().join(".agent-doc/logs/ops.log");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let current = fs::read_to_string(&ops).unwrap_or_default();
+        let appended = current.get(previous_ops_len as usize..).unwrap_or(&current);
+        if appended.lines().any(|line| {
+            line.contains("queue_maintenance_background_completed") && line.contains("mutated=")
+        }) {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "detached queue maintenance did not complete: {appended}"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+#[test]
+fn report_complete_holds_queue_apply_exclusion_across_the_whole_transaction() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
+    let doc = dir.path().join("session.md");
+    let item = "prove report transaction exclusion";
+    fs::write(
+        &doc,
+        format!(
+            "---\nagent_doc_session: report-transaction\nagent_doc_format: template\n---\n\n<!-- agent:exchange patch=append subagents -->\n### Re: prior — gpt-5\n\nDone.\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue subagents -->\n- {item}\n<!-- /agent:queue -->\n"
+        ),
+    )
+    .unwrap();
+    let binary = env!("CARGO_BIN_EXE_agent-doc");
+    let owner = "subagent:transaction";
+    let run = |args: &[&str]| {
+        let output = Command::new(binary)
+            .env(
+                agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+                CONTROLLER_LAUNCH_REASON,
+            )
+            .current_dir(dir.path())
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "command failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    run(&[
+        "queue",
+        "claim",
+        doc.to_str().unwrap(),
+        "--item",
+        item,
+        "--owner",
+        owner,
+    ]);
+    run(&[
+        "queue",
+        "start",
+        doc.to_str().unwrap(),
+        "--item",
+        item,
+        "--owner",
+        owner,
+        "--generation",
+        "1",
+        "--worker-id",
+        "worker:transaction",
+    ]);
+
+    let marker = dir.path().join("report-after-capture.marker");
+    let release = dir.path().join("report-after-capture.release");
+    let child = Command::new(binary)
+        .env(
+            agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+            CONTROLLER_LAUNCH_REASON,
+        )
+        .env(
+            "AGENT_DOC_TEST_REPORT_COMPLETE_AFTER_CAPTURE_MARKER",
+            &marker,
+        )
+        .env(
+            "AGENT_DOC_TEST_REPORT_COMPLETE_AFTER_CAPTURE_RELEASE",
+            &release,
+        )
+        .current_dir(dir.path())
+        .args([
+            "queue",
+            "report-complete",
+            "--prose-only",
+            doc.to_str().unwrap(),
+            "--item",
+            item,
+            "--generation",
+            "1",
+            "--response",
+            "transaction response",
+        ])
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait_for_path(&marker);
+
+    let paused = fs::read_to_string(&doc).unwrap();
+    assert!(!paused.contains("transaction response"));
+    assert!(
+        !agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
+            &doc.to_string_lossy(),
+            "detached-maintenance-during-report",
+            std::process::id(),
+        )
+        .unwrap(),
+        "detached maintenance must coalesce while report-complete owns the transaction"
+    );
+    assert!(
+        agent_doc_queue_io::queue_edit_owner::QueueEditGuard::try_acquire(&doc)
+            .unwrap()
+            .is_none()
+    );
+
+    fs::write(&release, b"release").unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "report-complete failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        fs::read_to_string(&doc)
+            .unwrap()
+            .contains("transaction response")
+    );
+}
+
+#[test]
+fn report_complete_apply_contention_fails_before_any_transaction_effect() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
+    let doc = dir.path().join("session.md");
+    let item = "reject report before capture";
+    fs::write(
+        &doc,
+        format!(
+            "---\nagent_doc_session: report-contention\nagent_doc_format: template\n---\n\n<!-- agent:exchange patch=append subagents -->\n### Re: prior — gpt-5\n\nDone.\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue subagents -->\n- {item}\n<!-- /agent:queue -->\n"
+        ),
+    )
+    .unwrap();
+    let binary = env!("CARGO_BIN_EXE_agent-doc");
+    let owner = "subagent:contention";
+    for args in [
+        vec![
+            "queue",
+            "claim",
+            doc.to_str().unwrap(),
+            "--item",
+            item,
+            "--owner",
+            owner,
+        ],
+        vec![
+            "queue",
+            "start",
+            doc.to_str().unwrap(),
+            "--item",
+            item,
+            "--owner",
+            owner,
+            "--generation",
+            "1",
+            "--worker-id",
+            "worker:contention",
+        ],
+    ] {
+        let status = Command::new(binary)
+            .env(
+                agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+                CONTROLLER_LAUNCH_REASON,
+            )
+            .current_dir(dir.path())
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+    let before = fs::read(&doc).unwrap();
+    let _guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+    let output = Command::new(binary)
+        .env(
+            agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+            CONTROLLER_LAUNCH_REASON,
+        )
+        .current_dir(dir.path())
+        .args([
+            "queue",
+            "report-complete",
+            "--prose-only",
+            doc.to_str().unwrap(),
+            "--item",
+            item,
+            "--generation",
+            "1",
+            "--response",
+            "must never be captured",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("queue mutation deferred"));
+    assert_eq!(fs::read(&doc).unwrap(), before);
+    assert!(
+        agent_doc_queue_io::claim_release_receipt::load(&doc)
+            .unwrap()
+            .receipts
+            .is_empty(),
+        "contention must be rejected before response capture"
+    );
+}
 
 #[test]
 fn four_cli_reporters_serialize_without_losing_completion_feedback() {
@@ -686,6 +927,7 @@ fn assert_session_check_does_not_accuse_patchback(dir: &std::path::Path, doc: &s
 }
 
 fn assert_preflight_admits(dir: &std::path::Path, doc: &std::path::Path, expected_cells: usize) {
+    let previous_ops_len = ops_log_len(doc);
     let output = run_agent_doc(dir, &["preflight", doc.to_str().unwrap()]);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -694,6 +936,7 @@ fn assert_preflight_admits(dir: &std::path::Path, doc: &std::path::Path, expecte
     );
     assert!(!stderr.contains("failed closed"), "stderr={stderr}");
     assert!(!stderr.contains("refused to replay"), "stderr={stderr}");
+    wait_for_background_queue_maintenance(doc, previous_ops_len);
     assert!(
         !dir.join(".agent-doc/repair-blocked").exists()
             || fs::read_dir(dir.join(".agent-doc/repair-blocked"))
@@ -1151,12 +1394,19 @@ fn assert_ok(output: &std::process::Output, what: &str) {
 }
 
 fn preflight_json(dir: &std::path::Path, doc: &std::path::Path) -> serde_json::Value {
+    let previous_ops_len = ops_log_len(doc);
     let output = run_agent_doc(dir, &["preflight", doc.to_str().unwrap()]);
     assert_ok(&output, "preflight");
-    serde_json::from_slice(&output.stdout).unwrap_or_else(|err| {
+    wait_for_background_queue_maintenance(doc, previous_ops_len);
+    // The production admission result intentionally precedes comprehensive
+    // projection. These assertions inspect the settled tree, so take a pure
+    // probe after the detached receipt rather than opening another cycle.
+    let settled = run_agent_doc(dir, &["preflight", "--probe", doc.to_str().unwrap()]);
+    assert_ok(&settled, "settled preflight probe");
+    serde_json::from_slice(&settled.stdout).unwrap_or_else(|err| {
         panic!(
             "preflight stdout is not JSON ({err}): {}",
-            String::from_utf8_lossy(&output.stdout)
+            String::from_utf8_lossy(&settled.stdout)
         )
     })
 }

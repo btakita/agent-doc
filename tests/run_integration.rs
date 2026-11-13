@@ -2069,7 +2069,6 @@ fn write_applied_interruption_names_the_commit_that_resolves_it() {
     agent_doc()
         .current_dir(tmp.path())
         .env("XDG_CONFIG_HOME", &config_root)
-        .env("AGENT_DOC_SESSION_CHECK_SETTLE_SECS", "0")
         .args(["session-check", doc.to_str().unwrap()])
         .assert()
         .success();

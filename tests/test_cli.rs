@@ -10,6 +10,7 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command as ProcessCommand, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Barrier};
 
 /// `#integrationtesttargets`: this target drives the real `agent-doc` CLI, and
 /// a controller launch by that CLI is production behavior, so every spawned
@@ -33,6 +34,21 @@ fn agent_doc_cmd() -> Command {
     // rewrite the operator's real `~/.claude/settings.json` (observed
     // 2026-10-27). Scope it to the temp dir as `make test` does; the install
     // then skips any user layer outside it.
+    if std::env::var_os(agent_doc_fs::TEST_RUNTIME_SCOPE_ENV).is_none() {
+        command.env(agent_doc_fs::TEST_RUNTIME_SCOPE_ENV, std::env::temp_dir());
+    }
+    command
+}
+
+fn agent_doc_process_cmd() -> ProcessCommand {
+    let mut command = ProcessCommand::new(assert_cmd::cargo::cargo_bin!("agent-doc"));
+    command.env(
+        agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+        CONTROLLER_LAUNCH_REASON,
+    );
+    if std::env::var_os("AGENT_DOC_ROOT_CEILING_DIRECTORIES").is_none() {
+        command.env("AGENT_DOC_ROOT_CEILING_DIRECTORIES", std::env::temp_dir());
+    }
     if std::env::var_os(agent_doc_fs::TEST_RUNTIME_SCOPE_ENV).is_none() {
         command.env(agent_doc_fs::TEST_RUNTIME_SCOPE_ENV, std::env::temp_dir());
     }
@@ -116,9 +132,11 @@ fn init_git_repo(root: &Path, tracked: &Path) {
         .args(["config", "user.name", "Test User"])
         .status()
         .unwrap();
+    let tracked_relative = tracked.strip_prefix(root).unwrap_or(tracked);
     ProcessCommand::new("git")
         .current_dir(root)
-        .args(["add", tracked.file_name().unwrap().to_str().unwrap()])
+        .arg("add")
+        .arg(tracked_relative)
         .status()
         .unwrap();
     ProcessCommand::new("git")
@@ -131,6 +149,1522 @@ fn init_git_repo(root: &Path, tracked: &Path) {
 fn seed_snapshot(root: &Path, doc: &Path, content: &str) {
     let _ = root;
     agent_doc_snapshot_io::checkpoint_document_baseline(doc, content, |_, _| {}).unwrap();
+}
+
+/// Durable queue/controller state excluding the background owner's request and
+/// lease bookkeeping. Those coordination rows are expected to disappear when
+/// a superseded worker exits; every row below is an externally visible effect
+/// that the stale admitted cut must leave untouched.
+fn queue_maintenance_effect_digest(root: &Path) -> Vec<String> {
+    let conn = agent_doc_sqlite::state_store::open_state_db(root).unwrap();
+    let mut statement = conn
+        .prepare(
+            "SELECT row_value FROM (\
+             SELECT 'project_runtime_state|' || quote(state_key) || '|' || quote(payload) || '|' || updated_at_ms AS row_value \
+               FROM project_runtime_state WHERE state_key NOT LIKE 'queue_maintenance_request:%' \
+             UNION ALL \
+             SELECT 'document_runtime_state|' || quote(document_hash) || '|' || quote(state_kind) || '|' || quote(canonical_path) || '|' || quote(payload_json) || '|' || updated_at_ms \
+               FROM document_runtime_state \
+             UNION ALL \
+             SELECT 'state_events|' || id || '|' || quote(event_id) || '|' || quote(document_hash) || '|' || quote(domain) || '|' || quote(fact_type) || '|' || quote(payload_json) || '|' || timestamp || '|' || document_version \
+               FROM state_events \
+             UNION ALL \
+             SELECT 'queue_heads|' || quote(document_id) || '|' || quote(queue_name) || '|' || quote(generation) || '|' || quote(head_id) || '|' || quote(prompt) || '|' || quote(state) || '|' || priority || '|' || selected_at || '|' || updated_at \
+               FROM queue_heads \
+             UNION ALL \
+             SELECT 'queue_head_provenance|' || quote(document_id) || '|' || quote(head_identity) || '|' || quote(source) || '|' || recorded_at \
+               FROM queue_head_provenance \
+             UNION ALL \
+             SELECT 'queue_document_state|' || quote(document_hash) || '|' || quote(state_kind) || '|' || quote(canonical_path) || '|' || quote(payload_json) || '|' || updated_at_secs \
+               FROM queue_document_state \
+             UNION ALL \
+             SELECT 'document_cycles|' || quote(document_id) || '|' || quote(cycle_id) || '|' || quote(state) || '|' || quote(queue_head_id) || '|' || quote(response_commit) || '|' || updated_at \
+               FROM document_cycles\
+             ) ORDER BY row_value",
+        )
+        .unwrap();
+    statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .map(|row| row.unwrap())
+        .collect()
+}
+
+fn queue_effect_ops(lines: &str) -> Vec<&str> {
+    lines
+        .lines()
+        .filter(|line| {
+            !line.contains("queue_maintenance_internal_effect_test_delay")
+                && !line.contains("queue_maintenance_background_")
+                && !line.contains("pending_maintenance_background_")
+        })
+        .collect()
+}
+
+#[test]
+fn preflight_admits_under_five_seconds_while_slow_queue_maintenance_stays_detached() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: timing-test\n",
+        "agent_doc_format: template\n",
+        "agent: codex\n",
+        "model: gpt-5\n",
+        "queue: start\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- agent:boundary:1234abcd -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue priority go -->\n",
+        "- do [#timed]\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog priority queue -->\n",
+        "- [ ] [#timed] slow comprehensive maintenance\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let started = std::time::Instant::now();
+    let output = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .env(
+            "AGENT_DOC_TEST_BACKGROUND_QUEUE_MAINTENANCE_DELAY_MS",
+            "6000",
+        )
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let admitted_elapsed = started.elapsed();
+    eprintln!("bounded queue admission elapsed: {admitted_elapsed:?}");
+    assert!(
+        output.status.success(),
+        "preflight failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        admitted_elapsed < std::time::Duration::from_secs(5),
+        "bounded admission waited for six-second comprehensive maintenance: {admitted_elapsed:?}"
+    );
+    let contract: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        contract["selected_queue_prompts"].as_array().unwrap().len(),
+        1
+    );
+
+    let ops = tmp.path().join(".agent-doc/logs/ops.log");
+    let initial_ops = fs::read_to_string(&ops).unwrap_or_default();
+    assert!(
+        initial_ops.contains("queue_maintenance_background_dispatched"),
+        "admission did not dispatch comprehensive maintenance: {initial_ops}"
+    );
+    assert!(
+        !initial_ops.contains("queue_maintenance_background_completed"),
+        "six-second comprehensive maintenance completed before bounded admission returned"
+    );
+
+    let mid_run_deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let current_ops = fs::read_to_string(&ops).unwrap_or_default();
+        if current_ops.contains("queue_maintenance_background_test_delay") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < mid_run_deadline,
+            "background worker never reached the in-body queue barrier: {current_ops}",
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let direct_attempt = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc);
+    assert!(
+        direct_attempt
+            .unwrap_err()
+            .to_string()
+            .contains("queue mutation deferred"),
+        "direct queue edit entered during mid-run maintenance",
+    );
+
+    // The foreground SLA is asserted above. The deliberately delayed detached
+    // child also initializes a real controller and can share a saturated test
+    // host with thousands of nextest cases, so give eventual durability a
+    // separate, non-admission timeout.
+    let completion_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let current_ops = fs::read_to_string(&ops).unwrap_or_default();
+        if current_ops.contains("queue_maintenance_background_completed") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < completion_deadline,
+            "detached comprehensive maintenance never completed: {current_ops}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn preflight_admits_under_five_seconds_while_slow_pending_maintenance_stays_detached() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: pending-timing-test\n",
+        "agent_doc_format: template\n",
+        "agent: codex\n",
+        "model: gpt-5\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- agent:boundary:1234abcd -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:backlog priority queue -->\n",
+        "- legacy pending item\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let started = std::time::Instant::now();
+    let output = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .env(
+            "AGENT_DOC_TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS",
+            "6000",
+        )
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let admitted_elapsed = started.elapsed();
+    eprintln!("bounded pending admission elapsed: {admitted_elapsed:?}");
+    assert!(
+        output.status.success(),
+        "preflight failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        admitted_elapsed < std::time::Duration::from_secs(5),
+        "bounded admission waited for six-second pending maintenance: {admitted_elapsed:?}"
+    );
+
+    let ops = tmp.path().join(".agent-doc/logs/ops.log");
+    let initial_ops = fs::read_to_string(&ops).unwrap_or_default();
+    assert!(
+        initial_ops.contains("queue_maintenance_background_dispatched"),
+        "admission did not dispatch maintenance: {initial_ops}"
+    );
+    assert!(
+        !initial_ops.contains("pending_maintenance_background_completed"),
+        "six-second pending maintenance completed before bounded admission returned"
+    );
+
+    let completion_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let current_ops = fs::read_to_string(&ops).unwrap_or_default();
+        if current_ops.contains("pending_maintenance_background_completed") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < completion_deadline,
+            "detached pending maintenance never completed: {current_ops}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let converged = fs::read_to_string(&doc).unwrap();
+    assert!(
+        converged.contains("- [ ] [#"),
+        "pending backfill did not converge durably: {converged}"
+    );
+}
+
+#[test]
+fn superseded_delayed_worker_has_no_advisory_archive_or_worktree_effects() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path().join("repo");
+    let doc = root.join("tasks/a/session.md");
+    let worktree = tmp.path().join("remove-me");
+    fs::create_dir_all(doc.parent().unwrap()).unwrap();
+    let item = "remove the obsolete linked checkout";
+    let content = format!(
+        concat!(
+            "---\n",
+            "agent_doc_session: fenced-effects-test\n",
+            "agent_doc_format: template\n",
+            "agent: codex\n",
+            "model: gpt-5\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- agent:boundary:1234abcd -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- legacy pending item\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done archive=tasks/history.done.md -->\n",
+            "<!-- /agent:done -->\n\n",
+            "<!-- agent:run -->\n",
+            "- {item}\n",
+            "<!-- /agent:run -->\n\n",
+            "<!-- agent:worktrees -->\n",
+            "- **Topic:** {item}\n",
+            "  - **Branch:** feat/remove-me\n",
+            "  - **Directory:** `{worktree}`\n",
+            "  - remove\n",
+            "<!-- /agent:worktrees -->\n",
+        ),
+        item = item,
+        worktree = worktree.display(),
+    );
+    fs::write(&doc, &content).unwrap();
+    init_git_repo(&root, &doc);
+    seed_snapshot(&root, &doc, &content);
+    let git = |cwd: &Path, args: &[&str]| {
+        let output = ProcessCommand::new("git")
+            .current_dir(cwd)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr),
+        );
+    };
+    git(
+        &root,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "feat/remove-me",
+            worktree.to_str().unwrap(),
+            "HEAD",
+        ],
+    );
+    let head_before = ProcessCommand::new("git")
+        .current_dir(&root)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap()
+        .stdout;
+    let (_outcome, claim) =
+        agent_doc_queue_io::queue_claim::claim(&doc, item, "subagent:fence-test", 600).unwrap();
+    let claim = agent_doc_queue_io::queue_claim::start_attempt(
+        &doc,
+        item,
+        "subagent:fence-test",
+        "worker:fence-test",
+        600,
+        claim.generation,
+    )
+    .unwrap();
+    agent_doc_queue_io::queue_lineage::record_started(&doc, &claim).unwrap();
+    agent_doc_queue_io::queue_lineage::record(
+        &doc,
+        item,
+        claim.generation,
+        agent_doc_queue_io::queue_lineage::RecordRequest {
+            kind: agent_doc_queue_io::queue_lineage::QueueLineageEventKind::Attached,
+            worker_id: Some("worker:fence-test".to_string()),
+            repo_path: Some(root.clone()),
+            worktree_path: Some(worktree.clone()),
+            branch: Some("feat/remove-me".to_string()),
+            ..agent_doc_queue_io::queue_lineage::RecordRequest::default()
+        },
+    )
+    .unwrap();
+
+    let misplaced = root.join("tasks/a/tasks/history.done.md");
+    fs::create_dir_all(misplaced.parent().unwrap()).unwrap();
+    fs::write(&misplaced, "- 2026-11-12 [#legacy] misplaced\n").unwrap();
+
+    let started = std::time::Instant::now();
+    let output = agent_doc_cmd()
+        .current_dir(&root)
+        .env(
+            "AGENT_DOC_TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS",
+            "6100",
+        )
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let admitted_elapsed = started.elapsed();
+    assert!(
+        output.status.success(),
+        "preflight failed: {}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+    assert!(
+        admitted_elapsed < std::time::Duration::from_secs(5),
+        "admission waited for delayed effect owner: {admitted_elapsed:?}",
+    );
+
+    let ops = root.join(".agent-doc/logs/ops.log");
+    let delay_deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let current_ops = fs::read_to_string(&ops).unwrap_or_default();
+        if current_ops.contains("pending_maintenance_background_test_delay") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < delay_deadline,
+            "detached worker never entered its deterministic delay: {current_ops}",
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    // A direct edit cannot enter or overwrite the already-running detached
+    // apply owner while its deterministic delay is active.
+    let direct_attempt = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc);
+    assert!(
+        direct_attempt
+            .unwrap_err()
+            .to_string()
+            .contains("queue mutation deferred"),
+        "direct queue mutation did not fail closed on the held apply lock",
+    );
+    // Simulate controller cancellation after the rejected direct attempt. The
+    // old worker still owns the OS apply lock, but its token is gone; when the
+    // barrier releases it must publish no effect and drop exclusion cleanly.
+    agent_doc_queue_io::queue_edit_owner::clear_queue_edit_owner_lease(&doc.to_string_lossy());
+    let ops_after_supersede = fs::read_to_string(&ops).unwrap_or_default();
+    assert!(!root.join(".agent-doc/advisories").exists());
+    assert!(!root.join("tasks/history.done.md").exists());
+    assert!(worktree.is_dir());
+    assert_eq!(fs::read_to_string(&doc).unwrap(), content);
+    std::thread::sleep(std::time::Duration::from_millis(6500));
+    assert_eq!(
+        fs::read_to_string(&ops).unwrap_or_default(),
+        ops_after_supersede,
+        "superseded worker published durable evidence",
+    );
+    assert!(!root.join(".agent-doc/advisories").exists());
+    assert!(!root.join("tasks/history.done.md").exists());
+    assert!(worktree.is_dir(), "superseded worker removed the checkout");
+    assert_eq!(fs::read_to_string(&doc).unwrap(), content);
+    assert_eq!(
+        agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap(),
+        content,
+        "admission or stale worker changed the maintenance snapshot",
+    );
+    assert_eq!(
+        ProcessCommand::new("git")
+            .current_dir(&root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap()
+            .stdout,
+        head_before,
+        "admission or stale worker created a git commit",
+    );
+    assert!(
+        agent_doc_queue_io::queue_lineage::load(&doc)
+            .unwrap()
+            .attempts
+            .iter()
+            .flat_map(|attempt| &attempt.events)
+            .all(|event| event.kind
+                != agent_doc_queue_io::queue_lineage::QueueLineageEventKind::Removed),
+        "superseded worker wrote a removal receipt",
+    );
+    // A newly reserved owner performs the exact durable maintenance the stale
+    // worker was forbidden to publish.
+    let token = "integration-successor-token";
+    assert!(
+        agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
+            &doc.to_string_lossy(),
+            token,
+            std::process::id(),
+        )
+        .unwrap(),
+    );
+    let successor_output = agent_doc_cmd()
+        .current_dir(&root)
+        .env("AGENT_DOC_BACKGROUND_QUEUE_MAINTENANCE_TOKEN", token)
+        .env(
+            "AGENT_DOC_BACKGROUND_QUEUE_MAINTENANCE_AUTHORITY_HASH",
+            agent_doc_hash::content_hash(&content),
+        )
+        .args([
+            "preflight",
+            doc.to_str().unwrap(),
+            "--queue-maintenance-only",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        successor_output.status.success(),
+        "successor maintenance failed: {}",
+        String::from_utf8_lossy(&successor_output.stderr),
+    );
+    assert!(root.join(".agent-doc/advisories").is_dir());
+    assert!(!worktree.exists(), "successor did not remove the checkout");
+    assert!(
+        agent_doc_queue_io::queue_lineage::load(&doc)
+            .unwrap()
+            .attempts
+            .iter()
+            .flat_map(|attempt| &attempt.events)
+            .any(|event| event.kind
+                == agent_doc_queue_io::queue_lineage::QueueLineageEventKind::Removed),
+        "successor did not write the removal receipt",
+    );
+    assert!(
+        fs::read_to_string(&doc).unwrap().contains("- [ ] [#"),
+        "successor did not durably backfill pending maintenance",
+    );
+}
+
+#[test]
+fn simultaneous_preflights_coalesce_to_one_background_maintenance_body() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: dispatch-coalescing-test\n",
+        "agent_doc_format: template\n",
+        "agent: codex\n",
+        "model: gpt-5\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- agent:boundary:1234abcd -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:backlog priority queue -->\n",
+        "- legacy coalesced item\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    seed_snapshot(tmp.path(), &doc, content);
+
+    let barrier = Arc::new(Barrier::new(3));
+    let mut contenders = Vec::new();
+    for _ in 0..2 {
+        let barrier = Arc::clone(&barrier);
+        let root = tmp.path().to_path_buf();
+        let doc = doc.clone();
+        contenders.push(std::thread::spawn(move || {
+            barrier.wait();
+            let started = std::time::Instant::now();
+            let output = agent_doc_process_cmd()
+                .current_dir(root)
+                .env(
+                    "AGENT_DOC_TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS",
+                    "6000",
+                )
+                .args(["preflight", doc.to_str().unwrap()])
+                .output()
+                .unwrap();
+            (output, started.elapsed())
+        }));
+    }
+    barrier.wait();
+    for contender in contenders {
+        let (output, admitted_elapsed) = contender.join().unwrap();
+        assert!(
+            output.status.success(),
+            "racing preflight failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            admitted_elapsed < std::time::Duration::from_secs(5),
+            "racing admission waited for detached maintenance: {admitted_elapsed:?}",
+        );
+    }
+
+    let ops = tmp.path().join(".agent-doc/logs/ops.log");
+    // This integration target shares the debug binary with the full 14k-test
+    // nextest run. Under that scheduler load the already-dispatched detached
+    // child can take more than 30 seconds to enter its body; keep the deadline
+    // at ten times the injected 6-second delay so the assertion measures
+    // eventual ownership/completion rather than host scheduling latency.
+    let completion_deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        let current_ops = fs::read_to_string(&ops).unwrap_or_default();
+        if current_ops.contains("pending_maintenance_background_completed") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < completion_deadline,
+            "coalesced background maintenance never completed: {current_ops}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    let final_ops = fs::read_to_string(&ops).unwrap_or_default();
+    assert_eq!(
+        final_ops
+            .matches("pending_maintenance_background_test_delay")
+            .count(),
+        1,
+        "more than one background maintenance body ran: {final_ops}"
+    );
+    assert_eq!(
+        final_ops
+            .matches("pending_maintenance_background_completed")
+            .count(),
+        1,
+        "more than one background maintenance body completed: {final_ops}"
+    );
+}
+
+#[test]
+fn newer_admission_coalesces_durably_and_incumbent_applies_latest_cut_once() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let first = concat!(
+        "---\nagent_doc_session: latest-request-test\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\n---\n\n",
+        "<!-- agent:exchange -->\n### Re: prior — gpt-5\n\nDone.\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n",
+        "<!-- agent:backlog priority queue -->\n- first legacy item\n<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, first).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let first_output = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .env(
+            "AGENT_DOC_TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS",
+            "750",
+        )
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        first_output.status.success(),
+        "first admission failed: {}",
+        String::from_utf8_lossy(&first_output.stderr),
+    );
+    let ops = tmp.path().join(".agent-doc/logs/ops.log");
+    let delay_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !fs::read_to_string(&ops)
+        .unwrap_or_default()
+        .contains("pending_maintenance_background_test_delay")
+    {
+        assert!(std::time::Instant::now() < delay_deadline);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    let second = first.replace("first legacy item", "second admitted legacy item");
+    fs::write(&doc, &second).unwrap();
+    let second_output = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .env(
+            "AGENT_DOC_TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS",
+            "750",
+        )
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        second_output.status.success(),
+        "coalesced admission failed: {}",
+        String::from_utf8_lossy(&second_output.stderr),
+    );
+    assert!(
+        fs::read_to_string(&doc)
+            .unwrap()
+            .contains("- second admitted legacy item"),
+        "the stale generation mutated the newer cut before handoff",
+    );
+
+    let completion_deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        let current_ops = fs::read_to_string(&ops).unwrap_or_default();
+        if current_ops
+            .matches("pending_maintenance_background_completed")
+            .count()
+            == 1
+            && !agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_pending(&doc)
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < completion_deadline,
+            "latest generation never completed: {current_ops}",
+        );
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+    let converged = fs::read_to_string(&doc).unwrap();
+    assert!(
+        converged.contains("second admitted legacy item") && converged.contains("- [ ] [#"),
+        "latest admitted cut was not maintained: {converged}",
+    );
+    assert!(!converged.contains("first legacy item"), "{converged}");
+    let final_ops = fs::read_to_string(&ops).unwrap_or_default();
+    assert_eq!(
+        final_ops
+            .matches("pending_maintenance_background_completed")
+            .count(),
+        1,
+        "only the latest generation may publish completion: {final_ops}",
+    );
+}
+
+#[test]
+fn non_exchange_authority_drift_supersedes_stale_pending_effects() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let admitted = concat!(
+        "---\nagent_doc_session: full-authority-fence-test\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\n---\n\n",
+        "<!-- agent:exchange -->\n### Re: prior — gpt-5\n\nDone.\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n",
+        "<!-- agent:backlog priority queue -->\n- stale legacy item\n<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, admitted).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let output = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .env(
+            "AGENT_DOC_TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS",
+            "750",
+        )
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let ops = tmp.path().join(".agent-doc/logs/ops.log");
+    let delay_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !fs::read_to_string(&ops)
+        .unwrap_or_default()
+        .contains("pending_maintenance_background_test_delay")
+    {
+        assert!(std::time::Instant::now() < delay_deadline);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    // Exchange is unchanged: only full-authority fencing can detect this edit.
+    let edited = admitted.replace("stale legacy item", "operator added newer backlog work");
+    fs::write(&doc, &edited).unwrap();
+    let settle_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_pending(&doc) {
+        assert!(std::time::Instant::now() < settle_deadline);
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+    assert_eq!(
+        fs::read_to_string(&doc).unwrap(),
+        edited,
+        "stale admitted maintenance rewrote post-admission backlog state",
+    );
+    let final_ops = fs::read_to_string(&ops).unwrap_or_default();
+    assert_eq!(
+        final_ops
+            .matches("pending_maintenance_background_completed")
+            .count(),
+        0,
+        "a stale generation published completion: {final_ops}",
+    );
+}
+
+#[test]
+fn authority_drift_fences_every_internal_queue_maintenance_effect_family() {
+    for family in [
+        "ops",
+        "controller",
+        "ledger",
+        "worktree",
+        "document",
+        "snapshot",
+    ] {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = tmp.path().join("session.md");
+        let admitted = concat!(
+            "---\n",
+            "agent_doc_session: internal-effect-fence-test\n",
+            "agent_doc_format: template\n",
+            "agent: codex\n",
+            "model: gpt-5\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- agent:boundary:1234abcd -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- do [#fenced]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#fenced] stale admitted maintenance\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        fs::write(&doc, admitted).unwrap();
+        init_git_repo(tmp.path(), &doc);
+        seed_snapshot(tmp.path(), &doc, admitted);
+
+        let output = agent_doc_cmd()
+            .current_dir(tmp.path())
+            // Guarantee an ops-family call even when this fixture needs no
+            // diagnostic logging before its controller projection.
+            .env("AGENT_DOC_TEST_BACKGROUND_QUEUE_MAINTENANCE_DELAY_MS", "1")
+            .env(
+                "AGENT_DOC_TEST_QUEUE_MAINTENANCE_EFFECT_DELAY_FAMILY",
+                family,
+            )
+            .env("AGENT_DOC_TEST_QUEUE_MAINTENANCE_EFFECT_DELAY_MS", "1500")
+            .args(["preflight", doc.to_str().unwrap()])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{family}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let ops_path = tmp.path().join(".agent-doc/logs/ops.log");
+        let marker = format!(
+            "queue_maintenance_internal_effect_test_delay file={} family={family}",
+            doc.display()
+        );
+        let marker_deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
+        loop {
+            let ops = fs::read_to_string(&ops_path).unwrap_or_default();
+            if ops.contains(&marker) {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < marker_deadline,
+                "{family}: internal effect barrier was never reached; ops={ops}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        let before_doc = fs::read_to_string(&doc).unwrap();
+        let edited = before_doc.replace(
+            "stale admitted maintenance",
+            "operator-authored post-admission maintenance",
+        );
+        assert_ne!(before_doc, edited, "{family}: fixture edit did not apply");
+        let before_state = queue_maintenance_effect_digest(tmp.path());
+        let before_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc).unwrap();
+        let before_ops = fs::read_to_string(&ops_path).unwrap_or_default();
+        fs::write(&doc, &edited).unwrap();
+
+        let settle_deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
+        while agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_pending(&doc) {
+            assert!(
+                std::time::Instant::now() < settle_deadline,
+                "{family}: superseded background request did not settle"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(30));
+        }
+
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            edited,
+            "{family}: stale worker rewrote the operator authority"
+        );
+        assert_eq!(
+            queue_maintenance_effect_digest(tmp.path()),
+            before_state,
+            "{family}: stale worker mutated controller/ledger state after authority drift"
+        );
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc).unwrap(),
+            before_snapshot,
+            "{family}: stale worker advanced the recovery baseline"
+        );
+        let final_ops = fs::read_to_string(&ops_path).unwrap_or_default();
+        assert_eq!(
+            queue_effect_ops(&final_ops),
+            queue_effect_ops(&before_ops),
+            "{family}: stale worker emitted an unfenced durable operation"
+        );
+        assert!(
+            !final_ops.contains("queue_maintenance_background_completed"),
+            "{family}: stale worker published completion: {final_ops}"
+        );
+    }
+}
+
+#[test]
+fn authority_drift_fences_edited_queue_head_snapshot_adoption() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let snapshot = concat!(
+        "---\n",
+        "agent_doc_session: edited-head-snapshot-fence\n",
+        "agent_doc_format: template\n",
+        "agent: codex\n",
+        "model: gpt-5\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- agent:boundary:1234abcd -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- do [#oldhead]\n",
+        "- do [#nexthead]\n",
+        "<!-- /agent:queue -->\n",
+    );
+    let admitted = snapshot.replace("do [#oldhead]", "do [#newhead]");
+    fs::write(&doc, &admitted).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    seed_snapshot(tmp.path(), &doc, snapshot);
+
+    let output = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .env(
+            "AGENT_DOC_TEST_QUEUE_MAINTENANCE_EFFECT_DELAY_FAMILY",
+            "snapshot",
+        )
+        .env("AGENT_DOC_TEST_QUEUE_MAINTENANCE_EFFECT_DELAY_MS", "1500")
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let ops_path = tmp.path().join(".agent-doc/logs/ops.log");
+    let marker = format!(
+        "queue_maintenance_internal_effect_test_delay file={} family=snapshot",
+        doc.display()
+    );
+    let marker_deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
+    loop {
+        let ops = fs::read_to_string(&ops_path).unwrap_or_default();
+        if ops.contains(&marker) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < marker_deadline,
+            "edited-head adoption did not reach its snapshot fence: {ops}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    let before_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc).unwrap();
+    assert_eq!(before_snapshot.as_deref(), Some(snapshot));
+    let before_state = queue_maintenance_effect_digest(tmp.path());
+    let before_ops = fs::read_to_string(&ops_path).unwrap_or_default();
+    let superseding = fs::read_to_string(&doc)
+        .unwrap()
+        .replace("do [#newhead]", "do [#operator-newer]");
+    fs::write(&doc, &superseding).unwrap();
+
+    let settle_deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
+    while agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_pending(&doc) {
+        assert!(
+            std::time::Instant::now() < settle_deadline,
+            "superseded edited-head adoption did not settle"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+
+    assert_eq!(fs::read_to_string(&doc).unwrap(), superseding);
+    assert_eq!(
+        agent_doc_snapshot_io::load_document_baseline(&doc).unwrap(),
+        before_snapshot,
+        "stale edited-head adoption advanced the baseline snapshot"
+    );
+    assert_eq!(
+        queue_maintenance_effect_digest(tmp.path()),
+        before_state,
+        "stale edited-head adoption mutated durable queue/controller state"
+    );
+    let final_ops = fs::read_to_string(&ops_path).unwrap_or_default();
+    assert_eq!(
+        queue_effect_ops(&final_ops),
+        queue_effect_ops(&before_ops),
+        "stale edited-head adoption emitted a durable queue effect"
+    );
+}
+
+#[test]
+fn authority_drift_before_queue_authority_acquisition_skips_recovery_effects() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let admitted = concat!(
+        "---\n",
+        "agent_doc_session: authority-acquisition-fence-test\n",
+        "agent_doc_format: template\n",
+        "agent: codex\n",
+        "model: gpt-5\n",
+        "queue: start\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- agent:boundary:1234abcd -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue priority go -->\n",
+        "- do [#acquire]\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog priority queue -->\n",
+        "- [ ] [#acquire] stale acquisition\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, admitted).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    seed_snapshot(tmp.path(), &doc, admitted);
+
+    let output = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .env(
+            "AGENT_DOC_TEST_QUEUE_MAINTENANCE_ACQUISITION_DELAY_MS",
+            "1500",
+        )
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let ops_path = tmp.path().join(".agent-doc/logs/ops.log");
+    let marker = format!(
+        "queue_maintenance_authority_acquisition_test_delay file={}",
+        doc.display()
+    );
+    let marker_deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
+    loop {
+        let ops = fs::read_to_string(&ops_path).unwrap_or_default();
+        if ops.contains(&marker) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < marker_deadline,
+            "authority acquisition barrier was never reached; ops={ops}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    let before_doc = fs::read_to_string(&doc).unwrap();
+    let edited = before_doc.replace(
+        "stale acquisition",
+        "operator-authored post-admission acquisition",
+    );
+    assert_ne!(before_doc, edited);
+    let before_state = queue_maintenance_effect_digest(tmp.path());
+    let before_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc).unwrap();
+    let before_ops = fs::read_to_string(&ops_path).unwrap_or_default();
+    fs::write(&doc, &edited).unwrap();
+
+    let settle_deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
+    while agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_pending(&doc) {
+        assert!(
+            std::time::Instant::now() < settle_deadline,
+            "superseded authority acquisition did not settle"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+
+    assert_eq!(fs::read_to_string(&doc).unwrap(), edited);
+    assert_eq!(
+        queue_maintenance_effect_digest(tmp.path()),
+        before_state,
+        "stale acquisition mutated controller/ledger state"
+    );
+    assert_eq!(
+        agent_doc_snapshot_io::load_document_baseline(&doc).unwrap(),
+        before_snapshot,
+        "stale acquisition advanced the recovery baseline"
+    );
+    let final_ops = fs::read_to_string(&ops_path).unwrap_or_default();
+    assert_eq!(
+        queue_effect_ops(&final_ops),
+        queue_effect_ops(&before_ops),
+        "stale acquisition entered recovery/adoption before rejection"
+    );
+    assert!(!final_ops.contains("queue_maintenance_background_completed"));
+}
+
+#[test]
+fn crashed_worker_is_visible_and_promptly_redispatched_without_ttl_wait() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: crash-recovery-test\n",
+        "agent_doc_format: template\n",
+        "agent: codex\n",
+        "model: gpt-5\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- agent:boundary:1234abcd -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:backlog priority queue -->\n",
+        "- legacy crash recovery item\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let first = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .env(
+            "AGENT_DOC_TEST_BACKGROUND_MAINTENANCE_CRASH_AFTER_LOCK",
+            "1",
+        )
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        first.status.success(),
+        "admission failed before detached crash: {}",
+        String::from_utf8_lossy(&first.stderr),
+    );
+
+    let crash_deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        if agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(&doc.to_string_lossy())
+            .is_some()
+            && !agent_doc_queue_io::queue_edit_owner::queue_apply_in_flight(&doc).unwrap()
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < crash_deadline,
+            "crashed worker did not leave a durable incomplete attempt",
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    let recovery_started = std::time::Instant::now();
+    let recovery = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        recovery.status.success(),
+        "recovery admission failed: {}",
+        String::from_utf8_lossy(&recovery.stderr),
+    );
+    assert!(
+        recovery_started.elapsed() < std::time::Duration::from_secs(5),
+        "dead worker recovery waited for the lease TTL: {:?}",
+        recovery_started.elapsed(),
+    );
+
+    let ops = tmp.path().join(".agent-doc/logs/ops.log");
+    let completion_deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    loop {
+        let current_ops = fs::read_to_string(&ops).unwrap_or_default();
+        if current_ops.contains("pending_maintenance_background_completed") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < completion_deadline,
+            "successor never completed the crashed attempt: {current_ops}",
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert!(
+        fs::read_to_string(&doc).unwrap().contains("- [ ] [#"),
+        "successor did not durably apply pending maintenance",
+    );
+}
+
+#[test]
+fn panic_after_background_effect_retains_incomplete_attempt_until_successor_completes() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: panic-recovery-test\n",
+        "agent_doc_format: template\n",
+        "agent: codex\n",
+        "model: gpt-5\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- agent:boundary:1234abcd -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:backlog priority queue -->\n",
+        "- legacy panic recovery item\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let admission = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .env(
+            "AGENT_DOC_TEST_BACKGROUND_MAINTENANCE_PANIC_AFTER_EFFECT",
+            "1",
+        )
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        admission.status.success(),
+        "admission failed before detached panic: {}",
+        String::from_utf8_lossy(&admission.stderr),
+    );
+
+    let panic_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        if agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(&doc.to_string_lossy())
+            .is_some()
+            && !agent_doc_queue_io::queue_edit_owner::queue_apply_in_flight(&doc).unwrap()
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < panic_deadline,
+            "panicking worker cleared its incomplete attempt during unwind",
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    let check = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .args(["session-check", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let check_text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&check.stdout),
+        String::from_utf8_lossy(&check.stderr),
+    );
+    assert!(
+        check_text.contains("queue maintenance")
+            && check_text.contains("[session-check] INTERRUPTED")
+            && !check_text.contains("[session-check] ok"),
+        "session-check falsely terminalized a panicked attempt: {check_text}",
+    );
+
+    let ops = tmp.path().join(".agent-doc/logs/ops.log");
+    let recovery_ops_len = fs::read_to_string(&ops).unwrap_or_default().len();
+    let recovery = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        recovery.status.success(),
+        "successor admission failed: {}",
+        String::from_utf8_lossy(&recovery.stderr),
+    );
+
+    let completion_deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    loop {
+        let current_ops = fs::read_to_string(&ops).unwrap_or_default();
+        if current_ops
+            .get(recovery_ops_len..)
+            .is_some_and(|appended| appended.contains("queue_maintenance_background_completed"))
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < completion_deadline,
+            "successor never completed the panicked attempt: {current_ops}",
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    while agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(&doc.to_string_lossy())
+        .is_some()
+    {
+        assert!(
+            std::time::Instant::now() < completion_deadline,
+            "successful successor left stale incomplete ownership",
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn every_public_queue_mutation_entrypoint_acquires_apply_exclusion() {
+    let queue_cmd = include_str!("../agent-doc-queue-io/src/queue_cmd.rs");
+    for function in [
+        "clean_slate_with_effects",
+        "consume_with_options",
+        "consume_orphan_id",
+        "acknowledge_open_id",
+        "acknowledge_paused_free_text",
+        "prune_noise",
+        "sync_with_effects",
+        "project_claim_runtime_state_with_effects",
+        "project_claim_item_runtime_state_with_effects",
+        "claim_with_runtime_projection",
+        "claim_with_runtime_projection_for_harness",
+        "project_all_queue_runtime_state_with_effects",
+        "project_all_queue_runtime_state_once_with_effects",
+        "project_all_queue_runtime_state_once_run_with_effects",
+        "project_all_queue_runtime_state_once_for_generation_with_effects",
+        "project_background_self_heal_runtime_state_once_for_generation_with_effects",
+        "project_blocker_runtime_state_with_effects",
+        "record_claim_runtime_projection",
+    ] {
+        let marker = format!("pub fn {function}");
+        let start = queue_cmd.find(&marker).unwrap();
+        let tail = &queue_cmd[start..];
+        let end = tail[1..]
+            .find("\npub fn ")
+            .map(|index| index + 1)
+            .unwrap_or(tail.len());
+        assert!(
+            tail[..end].contains("QueueEditGuard::acquire(file)?"),
+            "{function} bypasses queue apply exclusion",
+        );
+    }
+
+    for internal in [
+        "fn project_claim_runtime_state_under_apply_guard",
+        "fn project_claim_item_runtime_state_under_apply_guard",
+        "fn claim_with_runtime_projection_under_apply_guard",
+        "fn project_all_queue_runtime_state_under_apply_guard",
+        "fn project_all_queue_runtime_state_once_for_generation_under_apply_guard",
+        "fn project_blocker_runtime_state_under_apply_guard",
+        "fn record_claim_runtime_projection_under_apply_guard",
+        "fn project_runtime_state_with_effects",
+    ] {
+        let start = queue_cmd.find(internal).unwrap();
+        let signature = &queue_cmd[start..start + 900.min(queue_cmd.len() - start)];
+        assert!(
+            signature.contains("apply_guard: &crate::queue_edit_owner::QueueEditGuard"),
+            "low-level mutator {internal} lacks a compile-time apply capability"
+        );
+    }
+    let worktree_inventory = include_str!("../agent-doc-queue-io/src/worktree_inventory.rs");
+    for function in ["maintain", "reconcile_maintained"] {
+        let start = worktree_inventory
+            .find(&format!("pub fn {function}"))
+            .unwrap();
+        let body = &worktree_inventory[start..start + 700.min(worktree_inventory.len() - start)];
+        assert!(
+            body.contains("QueueEditGuard::acquire(file)?"),
+            "worktree mutator {function} bypasses queue apply exclusion"
+        );
+    }
+    for internal in [
+        "maintain_under_apply_guard",
+        "reconcile_maintained_under_apply_guard",
+    ] {
+        let start = worktree_inventory
+            .find(&format!("pub fn {internal}"))
+            .unwrap();
+        let body = &worktree_inventory[start..start + 700.min(worktree_inventory.len() - start)];
+        assert!(
+            body.contains("apply_guard: &crate::queue_edit_owner::QueueEditGuard"),
+            "worktree low-level mutator {internal} lacks a compile-time apply capability"
+        );
+    }
+
+    let queue_consume = include_str!("../agent-doc-queue-io/src/queue_consume.rs");
+    for function in [
+        "consume_queue_prompt",
+        "consume_queue_prompt_with_outcome",
+        "consume_free_text_queue_prompts_with_outcome",
+        "consume_queue_prompts_for_done_ids_with_outcome",
+        "consume_queue_prompts_for_done_ids_force_disk_with_outcome",
+        "consume_queue_prompts_for_done_ids_selected_with_outcome",
+        "consume_queue_prompt_force_disk",
+        "consume_queue_prompts_with_outcome",
+        "consume_queue_prompt_if_head_matches_with_outcome",
+        "acknowledge_paused_free_text_queue_head_with_outcome",
+        "acknowledge_paused_free_text_queue_head_with_selector_and_outcome",
+        "refresh_waiting_on_you_tree",
+        "annotate_newly_completed_queue_prompts_with_response_id",
+        "strike_answered_free_text_queue_heads",
+        "strike_free_text_heads_answered_by_committed_heading_replay",
+        "converge_captured_answered_free_text_projection",
+        "prune_noise_queue_heads",
+        "strike_orphan_id_backed_queue_head",
+        "acknowledge_open_id_backed_queue_head",
+        "acknowledge_open_id_backed_queue_head_for_attempt",
+        "mark_completed_queue_prompts_for_done_ids",
+        "mark_completed_queue_prompts_for_done_ids_with_response",
+        "record_queue_consumption_proofs",
+        "observe_authoritative_queue_state",
+    ] {
+        let marker = format!("pub fn {function}");
+        let start = queue_consume.find(&marker).unwrap();
+        let body = &queue_consume[start..start + 1400.min(queue_consume.len() - start)];
+        assert!(
+            body.contains("QueueEditGuard::acquire(file)?"),
+            "queue-consume mutator {function} bypasses queue apply exclusion"
+        );
+    }
+    for internal in [
+        "consume_free_text_queue_prompts_under_apply_guard",
+        "acknowledge_paused_free_text_queue_head_under_apply_guard",
+        "refresh_waiting_on_you_tree_under_apply_guard",
+        "annotate_newly_completed_queue_prompts_with_response_id_under_apply_guard",
+        "converge_captured_answered_free_text_projection_under_apply_guard",
+        "prune_noise_queue_heads_under_apply_guard",
+        "strike_orphan_id_backed_queue_head_under_apply_guard",
+        "acknowledge_open_id_backed_queue_head_under_apply_guard",
+        "mark_completed_queue_prompts_for_done_ids_under_apply_guard",
+        "record_queue_consumption_proofs_under_apply_guard",
+        "consume_queue_prompts_for_done_ids_selected_under_apply_guard",
+        "observe_authoritative_queue_state_under_apply_guard",
+    ] {
+        let start = queue_consume.find(&format!("pub fn {internal}")).unwrap();
+        let body = &queue_consume[start..start + 900.min(queue_consume.len() - start)];
+        assert!(
+            body.contains("apply_guard: &crate::queue_edit_owner::QueueEditGuard"),
+            "queue-consume low-level mutator {internal} lacks a compile-time apply capability"
+        );
+    }
+
+    let pending = include_str!("../agent-doc-preflight-io/src/lib.rs");
+    for function in [
+        "run_pending_maintenance",
+        "run_pending_maintenance_force_disk",
+    ] {
+        let marker = format!("pub fn {function}");
+        let start = pending.find(&marker).unwrap();
+        let body = &pending[start..start + 900.min(pending.len() - start)];
+        assert!(
+            body.contains("QueueEditGuard::acquire(file)?"),
+            "{function} bypasses pending apply exclusion",
+        );
+    }
+
+    let session_check = include_str!("../agent-doc-session-check-io/src/command.rs");
+    let closeout_guard = &session_check[session_check
+        .find("fn refuse_transient_queue_closeout")
+        .expect("session-check closeout guard exists")..];
+    let apply_probe = closeout_guard
+        .find("queue_apply_in_flight(file)")
+        .expect("session-check must probe the OS apply lock");
+    let lease_probe = closeout_guard
+        .find("read_queue_edit_owner_lease")
+        .expect("session-check must inspect durable incomplete attempts");
+    assert!(
+        apply_probe < lease_probe,
+        "session-check must close the lock-before-lease visibility gap",
+    );
+
+    let closeout = include_str!("../agent-doc-closeout-runtime-io/src/lib.rs");
+    assert!(
+        closeout.contains("run_queue_maintenance_under_apply_guard(file, None, &apply_guard)?"),
+        "closeout must propagate typed maintenance contention while retaining its transaction capability",
+    );
+
+    let completion = include_str!("../src/queue_completion_feedback.rs");
+    let report = &completion[completion
+        .find("fn report_complete_with_lock_wait")
+        .expect("completion transaction entry exists")..];
+    assert!(
+        report.find("QueueEditGuard::acquire(file)?").unwrap()
+            < report.find("capture_response(file").unwrap(),
+        "report-complete must acquire apply exclusion before its first durable effect"
+    );
+    assert!(
+        report.contains("record_claim_runtime_projection_under_apply_guard"),
+        "report-complete must pass its transaction capability into nested projection"
+    );
+
+    let write = include_str!("../agent-doc-write-runtime-io/src/lib.rs");
+    let transaction = &write[write
+        .find("fn run_command_inner_within_pass")
+        .expect("write transaction entry exists")..];
+    assert!(
+        transaction
+            .find("QueueEditGuard::acquire_for_response(file)?")
+            .unwrap()
+            < transaction.find("let write_result =").unwrap(),
+        "write/finalize must acquire apply exclusion before response publication"
+    );
+    assert!(
+        transaction.contains("complete_required_closeout_under_apply_guard"),
+        "write/finalize must retain the capability through strict closeout and commit"
+    );
+    assert!(
+        closeout.contains("complete_required_closeout_under_apply_guard")
+            && closeout.contains("run_pending_maintenance_under_apply_guard")
+            && session_check.contains("enforce_clean_closeout_with_force_disk_under_apply_guard",),
+        "embedded closeout must thread the held capability through maintenance and session-check"
+    );
+    let public_closeout = &closeout[closeout
+        .find("pub fn complete_required_closeout(")
+        .expect("public closeout entry exists")..];
+    let residue_closeout = &closeout[closeout
+        .find("pub fn complete_answered_free_text_queue_residue(")
+        .expect("public residue closeout entry exists")..];
+    assert!(
+        public_closeout[..public_closeout.find("#[doc(hidden)]").unwrap()]
+            .contains("QueueEditGuard::acquire(file)?"),
+        "standalone Stop/repair/run closeout must acquire one transaction capability"
+    );
+    let residue_body = &residue_closeout[..residue_closeout.find("\nimpl ").unwrap()];
+    assert!(
+        residue_body.contains("QueueEditGuard::acquire(file)?")
+            && residue_body.contains("run_queue_maintenance_under_apply_guard")
+            && residue_body.contains("complete_required_closeout_under_apply_guard"),
+        "answered-residue closeout must retain one capability through queue maintenance and commit"
+    );
+    for (label, source) in [
+        (
+            "Codex Stop",
+            include_str!("../agent-doc-codex-stop-io/src/lib.rs"),
+        ),
+        (
+            "repair runtime",
+            include_str!("../agent-doc-repair-runtime-io/src/lib.rs"),
+        ),
+        (
+            "run runtime",
+            include_str!("../agent-doc-run-runtime-io/src/lib.rs"),
+        ),
+    ] {
+        assert!(
+            source.contains("agent_doc_closeout_runtime_io::complete_required_closeout"),
+            "{label} must route standalone closeout through the guarded runtime entry"
+        );
+    }
+    let main_source = include_str!("../src/main.rs");
+    assert!(
+        main_source.contains("agent_doc_closeout_runtime_io::apply_closeout_recovery(&file)?")
+            && !main_source.contains(
+                "agent_doc_flow_io::closeout::apply_closeout_recovery(\n                    &file",
+            ),
+        "operator recovery must acquire the runtime apply capability before classification or mutation"
+    );
+    let preflight_command = include_str!("../agent-doc-preflight-command-io/src/run.rs");
+    let proof_transaction = &preflight_command[preflight_command
+        .find("fn record_preflight_terminal_closeout_proof(")
+        .expect("preflight proof transaction exists")..];
+    assert!(
+        proof_transaction
+            .find("crate::acquire_preflight_apply_guard(file)?")
+            .unwrap()
+            < proof_transaction
+                .find("persist_session_actor_closeout(file)")
+                .unwrap()
+            && proof_transaction.contains("record_terminal_closeout_proof_under_apply_guard",),
+        "terminal proof must acquire once before actor projection and retain the capability through ledger persistence"
+    );
+    assert!(
+        closeout.contains("pub fn closeout_inspection_effects()")
+            && closeout.contains("fn require_apply_guard(")
+            && closeout.contains("fn require_mutation_capability(&self, file: &Path)")
+            && closeout.contains(
+                "mutating closeout runtime operation requires a held queue apply capability",
+            )
+            && !closeout.contains("pub fn closeout_effects()"),
+        "unguarded runtime effects must be inspection-only and reject every mutation method"
+    );
+    let flow_closeout = include_str!("../agent-doc-flow-io/src/closeout.rs");
+    for entrypoint in [
+        "pub fn complete_required_closeout_with_options(",
+        "pub fn record_terminal_closeout_proof(",
+        "pub fn apply_closeout_recovery(",
+        "pub fn apply_closeout_recovery_mutation(",
+    ] {
+        let body = &flow_closeout[flow_closeout.find(entrypoint).unwrap()..];
+        assert!(
+            body[..1000.min(body.len())].contains("effects.require_mutation_capability(file)?"),
+            "flow mutation entrypoint {entrypoint} must demand the typed runtime capability before direct effects"
+        );
+    }
 }
 
 fn read_cycle_phase(root: &Path, doc: &Path) -> Option<String> {
@@ -1083,6 +2617,22 @@ fn mcp_finalize_close_after_capture_recovers_on_next_preflight_once() {
         agent_doc_capture_io::CaptureState::Committed,
     );
 
+    let ops = root.join(".agent-doc/logs/ops.log");
+    let maintenance_deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    loop {
+        if fs::read_to_string(&ops)
+            .unwrap_or_default()
+            .contains("queue_maintenance_background_completed")
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < maintenance_deadline,
+            "detached maintenance did not settle after close-after-capture recovery"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
     let mut check = agent_doc_cmd();
     check.current_dir(root);
     check.args(["session-check", doc.to_str().unwrap()]);
@@ -1163,6 +2713,21 @@ fn preflight_parks_committed_heading_replay_and_strikes_its_answered_head() {
         String::from_utf8_lossy(&output.stderr)
     );
 
+    let ops = root.join(".agent-doc/logs/ops.log");
+    let maintenance_deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    loop {
+        if fs::read_to_string(&ops)
+            .unwrap_or_default()
+            .contains("queue_maintenance_background_completed")
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < maintenance_deadline,
+            "detached queue projection did not settle"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
     let after = fs::read_to_string(&doc).unwrap();
     assert!(
         after.contains(&format!("~~{head}")),
@@ -2065,7 +3630,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // of orchestration into `agent-doc-session-check-io`. Orchestration keeps
         // visible-write guard adapters and closeout sequencing; the focused
         // session-check IO module owns the pending closeout guard tokens.
-        ("agent-doc-write-runtime-io/src/lib.rs", "guard_") => 28,
+        // 28 -> 34 (#queue-apply-capability, #closeout-owner-capability): the
+        // write transaction now names its compile-time apply/owner capability
+        // boundaries when entering guarded closeout/session-check adapters.
+        // These are typed exclusion/fence handoffs, not new stringly flow
+        // reasons; the owned closeout policy remains in agent-doc-flow-io.
+        ("agent-doc-write-runtime-io/src/lib.rs", "guard_") => 34,
         ("agent-doc-session-check-io/src/write_pending_checks.rs", "guard_") => 6,
         // 3 -> 1 (#template-materialization-policy): raw-response probe
         // construction now lives in `agent-doc-template::response_materialization`,
@@ -4140,25 +5710,33 @@ fn test_agent_doc_model_tier_owns_context_usage_policy() {
             "preflight/run.rs must not re-own model-tier attribution or harness policy: {forbidden_snippet}"
         );
     }
-    // `#n39j` / `#queuepersiststall`: when queue maintenance fails to PERSIST,
-    // preflight must report the queue's REAL drainability by probing it
-    // read-only, never a zeroed `QueueState::default()`. Those two are
-    // indistinguishable to the loop gate, so a persistence failure silently
-    // presenting as "queue empty" stalls a drain that still has work — observed
-    // live (0 -> 14 drainable on brookebrodack-dev.md).
-    //
-    // Reproducing the real failure needs a simulated editor-authority outage,
-    // so this pins the CONTRACT at the branch instead: the probe is called, and
-    // the zeroed default survives only as the probe's own last resort.
+    // Admission must not wait for comprehensive queue projection/persistence.
+    // It takes one fail-closed authoritative cut, derives candidate identity,
+    // claim filtering and relevance purely, emits the contract, and only then
+    // dispatches the editor-authoritative maintenance worker.
     assert!(
-        preflight_run_source.contains("inspect_queue_state(file, diff_result.as_deref())"),
-        "the queue-maintenance persist-failure branch must probe real drainability (#queuepersiststall)"
+        preflight_run_source
+            .contains("resolve_current_preflight_document(file, \"preflight_queue_admission\")")
+            && preflight_run_source.contains("inspect_queue_state_from_content(")
+            && !preflight_run_source.contains("run_queue_maintenance_with_coin_gate_and_snapshot("),
+        "preflight admission must remain a bounded read-only queue decision"
+    );
+    assert!(
+        preflight_source.contains("pub fn spawn_background_queue_maintenance(")
+            && preflight_source.contains("pub fn run_background_queue_maintenance(")
+            && preflight_run_source.contains("crate::spawn_background_queue_maintenance(")
+            && preflight_run_source.contains("background_queue_maintenance_dispatch_cut")
+            && preflight_run_source.contains("&admitted_hash"),
+        "comprehensive queue maintenance must be dispatched through the detached worker boundary"
     );
     assert!(
         preflight_run_source
-            .contains("inspect_queue_state(file, diff_result.as_deref()).unwrap_or_else("),
-        "the zeroed QueueState::default() must remain the PROBE's fallback (`unwrap_or_else`), never the \
-         primary persist-failure answer (#queuepersiststall)"
+            .find("writeln!(writer, \"{}\", json)?;")
+            .expect("serialized admission write")
+            < preflight_run_source
+                .find("crate::spawn_background_queue_maintenance(")
+                .expect("background maintenance dispatch"),
+        "the admission contract must be written before comprehensive maintenance is dispatched"
     );
 
     assert!(
@@ -4876,7 +6454,7 @@ fn test_orchestration_write_uses_closeout_commit_adapter() {
         !write.contains("fn commit_via_closeout_effects(")
             && write
                 .contains("agent_doc_flow_io::closeout::CloseoutEffects::commit_for_authority(")
-            && write.contains("&agent_doc_closeout_runtime_io::closeout_effects()"),
+            && write.contains("agent_doc_closeout_runtime_io::closeout_effects_under_apply_guard("),
         "write.rs should route commit boundaries through the injected closeout effects adapter without a local helper facade"
     );
 }
@@ -5381,9 +6959,11 @@ fn test_agent_doc_queue_owns_queue_convergence_policy() {
         );
     }
     assert!(
-        preflight_run.contains("use agent_doc_queue::queue_convergence::{")
-            && preflight_run.contains("realign_baseline_to_converged_queue")
-            && preflight_run.contains("queue_body_diff_is_non_selected_future_state"),
+        preflight_run.contains(
+            "use agent_doc_queue::queue_convergence::realign_baseline_to_converged_queue;",
+        ) && preflight_run.contains(
+            "use agent_doc_queue::queue_convergence::queue_body_diff_is_non_selected_future_state;",
+        ),
         "preflight/run.rs should call focused queue convergence policy directly"
     );
     let preflight_maintenance =
@@ -13227,11 +14807,112 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         fs::read_to_string(manifest_dir.join("agent-doc-closeout-runtime-io/src/lib.rs")).unwrap();
     assert!(
         closeout_runtime.contains("pub fn session_check_effects()")
+            && closeout_runtime.contains("fn read_only_inspection(&self) -> bool")
             && closeout_runtime.contains(
-                "impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffects"
+                "impl agent_doc_session_check_io::SessionCheckEffects for RuntimeReadOnlySessionCheckEffects"
+            )
+            && closeout_runtime.contains(
+                "impl agent_doc_session_check_io::SessionCheckEffects for RuntimeApplyingSessionCheckEffects"
             ),
-        "agent-doc-closeout-runtime-io should own the session-check runtime effects port"
+        "agent-doc-closeout-runtime-io should own separate read-only and applying session-check runtime effects ports"
     );
+    let write_runtime =
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
+    let repair_command =
+        fs::read_to_string(manifest_dir.join("agent-doc-repair-command-io/src/lib.rs")).unwrap();
+    let controller_rpc = fs::read_to_string(
+        manifest_dir.join("agent-doc-controller-io/src/project_controller/rpc.rs"),
+    )
+    .unwrap();
+    let capability_struct = controller_rpc
+        .split("pub struct CloseoutOwnerCapability {")
+        .nth(1)
+        .and_then(|tail| tail.split("\n}").next())
+        .expect("opaque closeout-owner capability struct");
+    let claimed_guard_struct = controller_rpc
+        .split("pub struct ClaimedCloseoutOwnerGuard {")
+        .nth(1)
+        .and_then(|tail| tail.split("\n}").next())
+        .expect("controller-owned closeout-owner guard struct");
+    assert!(
+        write_runtime.contains("pub fn applying_session_check_effects")
+            && repair_command.contains("closeout_lease.applying_session_check_effects")
+            && controller_rpc.contains("pub struct CloseoutOwnerCapability")
+            && controller_rpc.contains("pub fn claim_closeout_owner_guard_for_file(")
+            && controller_rpc.contains("Acquired(ClaimedCloseoutOwnerGuard)")
+            && capability_struct.contains("lease_lost: Arc<AtomicBool>")
+            && !capability_struct
+                .lines()
+                .any(|line| line.trim_start().starts_with("pub "))
+            && claimed_guard_struct.contains("capability: CloseoutOwnerCapability")
+            && !claimed_guard_struct
+                .lines()
+                .any(|line| line.trim_start().starts_with("pub "))
+            && !controller_rpc.contains("pub fn verify_closeout_owner")
+            && !controller_rpc.contains("impl Clone for CloseoutOwnerCapability")
+            && !controller_rpc.contains("#[derive(Clone)]\npub struct CloseoutOwnerCapability")
+            && !closeout_runtime.contains("pub struct VerifiedCloseoutOwnerFence")
+            && write_runtime.contains("closeout_lease.fence()")
+            && write_runtime.contains(
+                "claimed: agent_doc_controller_io::project_controller::ClaimedCloseoutOwnerGuard"
+            )
+            && write_runtime.contains("self.guard.claimed.capability()")
+            && write_runtime.contains(
+                "ensure_active_closeout_fence(file, _closeout_owner.as_ref(), outer_closeout_fence)?;"
+            )
+            && !closeout_runtime.contains("closeout_owner_already_held"),
+        "captured-finalize session recovery must carry the typed closeout lease through the nested applying adapter instead of reverse-claiming a second owner"
+    );
+    let session_check_command =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs")).unwrap();
+    let session_check_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/lib.rs")).unwrap();
+    for required in [
+        "fn read_only_inspection(&self) -> bool",
+        "pub fn inspect_read_only_with_warnings(",
+        "if effects.read_only_inspection()",
+        "crate::with_status_only_transaction",
+    ] {
+        assert!(
+            session_check_command.contains(required),
+            "read-only effects must intrinsically fence the complete inspection, including direct removed-claim cancellation: {required}"
+        );
+    }
+    for required in [
+        "with_status_only_pass",
+        "agent_doc_sqlite::state_store::with_state_db_read_only",
+        "agent_doc_ops_log_io::with_ops_log_suppressed",
+    ] {
+        assert!(
+            session_check_lib.contains(required),
+            "the shared status-only transaction must suppress every durable inspection effect: {required}"
+        );
+    }
+    for (production_source, required) in [
+        (
+            "agent-doc-route-io/src/runtime_effects.rs",
+            "agent_doc_session_check_io::inspect_read_only(",
+        ),
+        (
+            "src/main.rs",
+            "agent_doc_session_check_io::inspect_read_only(",
+        ),
+        (
+            "src/mcp.rs",
+            "agent_doc_session_check_io::inspect_read_only_with_warnings(",
+        ),
+        (
+            "agent-doc-codex-stop-io/src/lib.rs",
+            "agent_doc_session_check_io::inspect_read_only(",
+        ),
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(production_source)).unwrap();
+        assert!(
+            source.contains(required)
+                && source.contains("agent_doc_closeout_runtime_io::session_check_effects()"),
+            "{production_source} status inspection must use the intrinsic read-only adapter through the explicit read-only API"
+        );
+    }
     for production_source in [
         "src/main.rs",
         "src/mcp.rs",
@@ -13293,8 +14974,6 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
             "session-check closeout guards must not retain moved prompt-bearing IO adapter: {forbidden}"
         );
     }
-    let session_check_command =
-        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs")).unwrap();
     assert!(
         session_check_command.contains("crate::check_shadow_backlog_guard")
             && session_check_command.contains("crate::check_free_text_queue_head_provenance")
@@ -13377,7 +15056,7 @@ fn test_agent_doc_flow_io_owns_closeout_effect_adapter() {
     assert!(
         !orchestration_lib.contains("pub mod flow;")
             && !orchestration_lib.contains("mod flow;")
-            && !orchestration_lib.contains("pub fn closeout_effects()")
+            && !orchestration_lib.contains("pub fn closeout_inspection_effects()")
             && !orchestration_lib.contains(
                 "impl agent_doc_flow_io::closeout::CloseoutEffects for OrchestrationCloseoutEffects"
             ),
@@ -13386,12 +15065,21 @@ fn test_agent_doc_flow_io_owns_closeout_effect_adapter() {
     let closeout_runtime =
         fs::read_to_string(manifest_dir.join("agent-doc-closeout-runtime-io/src/lib.rs")).unwrap();
     assert!(
-        closeout_runtime.contains("pub fn closeout_effects()")
+        closeout_runtime.contains("pub fn closeout_inspection_effects()")
+            && closeout_runtime.contains("pub fn closeout_effects_under_apply_guard")
             && closeout_runtime.contains(
                 "impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects"
             )
-            && closeout_runtime.contains("pub static REPAIR_IO_EFFECTS"),
-        "agent-doc-closeout-runtime-io should own closeout and repair runtime effects ports"
+            && closeout_runtime.contains("pub struct RuntimeRepairIoEffects<'a>")
+            && closeout_runtime.contains("pub struct RuntimeReadOnlySessionCheckEffects")
+            && closeout_runtime.contains("pub struct RuntimeApplyingSessionCheckEffects<'a>")
+            && closeout_runtime
+                .contains("pub fn session_check_effects() -> RuntimeReadOnlySessionCheckEffects")
+            && closeout_runtime.contains(") -> Result<RuntimeApplyingSessionCheckEffects<'a>>")
+            && closeout_runtime
+                .contains("apply_guard: &'a agent_doc_queue_io::queue_edit_owner::QueueEditGuard")
+            && !closeout_runtime.contains("pub static REPAIR_IO_EFFECTS"),
+        "agent-doc-closeout-runtime-io should split read-only inspection from capability-guarded closeout, repair, and session-heal ports"
     );
 
     assert!(
@@ -13406,7 +15094,8 @@ fn test_agent_doc_flow_io_owns_closeout_effect_adapter() {
     assert!(
         !closeout_tests.contains("crate::")
             && closeout_tests.contains("agent_doc_flow_io::closeout::")
-            && closeout_tests.contains("agent_doc_closeout_runtime_io::closeout_effects()"),
+            && closeout_tests
+                .contains("agent_doc_closeout_runtime_io::closeout_effects_under_apply_guard",),
         "moved closeout boundary tests should call flow-io directly through the focused closeout runtime effects port"
     );
 
@@ -14743,7 +16432,8 @@ fn test_agent_doc_preflight_io_owns_baseline_content_graph() {
         "orchestration preflight must not own baseline content IO"
     );
     assert!(
-        orchestration_preflight_run.contains("checkpoint_baseline_content(file,")
+        orchestration_preflight_run
+            .contains("use agent_doc_preflight_io::checkpoint_baseline_content;")
             && orchestration_preflight_run.contains("checkpoint_baseline_content(&doc,"),
         "preflight/run should call focused baseline content IO directly"
     );
@@ -23567,10 +25257,10 @@ fn test_agent_doc_preflight_io_owns_cycle_completion_coordinator() {
         "agent_doc_repair_io::RepairCoordinatorEffects",
         "repair_effects:",
         "session_check_effects: SessionCheckEffects",
-        "impl<RepairIoEffects, ReplayWriteEffects, SessionCheckEffects>",
+        "impl<'a, RepairIoEffects, ReplayWriteEffects, SessionCheckEffects>",
         "agent_doc_repair_io::run(self.repair_effects, file)",
         "agent_doc_commit_io::commit(file)",
-        "agent_doc_session_check_io::inspect(file, &self.session_check_effects)",
+        "agent_doc_session_check_io::inspect_under_apply_guard(",
         "agent_doc_session_check_io::detect_bypassed_response_write(file)",
     ] {
         assert!(
@@ -23619,8 +25309,9 @@ fn test_agent_doc_preflight_io_owns_cycle_completion_coordinator() {
                 .contains("agent_doc_repair_runtime_io::repair_coordinator_effects(")
             && orchestration_preflight
                 .contains("&agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS")
-            && orchestration_preflight
-                .contains("agent_doc_closeout_runtime_io::session_check_effects()"),
+            && orchestration_preflight.contains(
+                "agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard("
+            ),
         "orchestration preflight.rs should only inject the focused repair replay writer and session-check runtime effects"
     );
     assert!(
@@ -28741,7 +30432,7 @@ fn test_agent_doc_commit_io_marks_capture_committed_from_resolved_current_conten
         .expect("commit should resolve initial current document content");
     let stage_commit_idx = initial_current_idx
         + commit_source[initial_current_idx..]
-            .find("match stage_and_commit_exact_paths_once(")
+            .find("match stage_and_commit_exact_paths_once_with_fence(")
             .expect(
                 "normal commit should run a git stage/commit transaction after authority resolve",
             );
@@ -35322,6 +37013,9 @@ fn test_cli_resync_of_a_rootless_document_never_touches_the_cwd_project() {
 
     let mut resync = agent_doc_cmd();
     resync.current_dir(&cwd_project).arg("resync").arg(&doc);
+    // This assertion is about resync's store selection. Keep optional global
+    // debug tracing from creating a cwd-owned log before command dispatch.
+    resync.env_remove("AGENT_DOC_LOG");
     tmux.configure(&mut resync);
     let output = resync.output().unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);

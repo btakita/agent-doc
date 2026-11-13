@@ -110,7 +110,7 @@ fn preflight_drift_refusal(doc: &Path) -> Option<String> {
 
 fn session_check(doc: &Path) -> SessionCheckStatus {
     let _lock = agent_doc_test_support::env_lock();
-    agent_doc_session_check_io::inspect(
+    agent_doc_session_check_io::inspect_read_only(
         doc,
         &agent_doc_closeout_runtime_io::session_check_effects(),
     )
@@ -359,7 +359,7 @@ fn queue_revision_steering_is_never_classified_into_reset_from_current() {
         let _lock = agent_doc_test_support::env_lock();
         agent_doc_flow_io::closeout::classify_closeout_recovery_state_for_file(
             &doc,
-            &agent_doc_closeout_runtime_io::closeout_effects(),
+            &agent_doc_closeout_runtime_io::closeout_inspection_effects(),
         )
     };
     assert_eq!(

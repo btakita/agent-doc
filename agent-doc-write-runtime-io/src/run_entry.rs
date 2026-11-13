@@ -435,7 +435,11 @@ fn clear_replayed_editor_ops_after_write(file: &Path, replayed: bool, source: &s
     }
 }
 
-fn recover_empty_response_if_configured(file: &Path, flags: &WriteFlags) -> Result<bool> {
+fn recover_empty_response_if_configured(
+    file: &Path,
+    flags: &WriteFlags,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<bool> {
     if let Some(recover) = flags.empty_response_recovery {
         recover(
             file,
@@ -443,6 +447,7 @@ fn recover_empty_response_if_configured(file: &Path, flags: &WriteFlags) -> Resu
             flags.has_pending_mutation || flags.retained_tracked_work_landed,
             flags.force_disk,
             flags.commit_requested,
+            apply_guard,
         )
     } else {
         Ok(false)
@@ -868,7 +873,12 @@ pub(crate) fn refuse_unlandable_response_before_capture(file: &Path, response: &
     )
 }
 
-pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()> {
+pub(crate) fn run(
+    file: &Path,
+    baseline: Option<&str>,
+    flags: WriteFlags,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -878,7 +888,7 @@ pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Res
     let response = read_response_input_for_closeout(flags.strict_closeout)?;
 
     if response.trim().is_empty() {
-        if recover_empty_response_if_configured(file, &flags)? {
+        if recover_empty_response_if_configured(file, &flags, apply_guard)? {
             return Ok(());
         }
         anyhow::bail!(EMPTY_RESPONSE_ERROR);
@@ -1094,6 +1104,7 @@ pub(crate) fn run_template(
     baseline: Option<&str>,
     origin: Option<&str>,
     flags: WriteFlags,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -1105,7 +1116,7 @@ pub(crate) fn run_template(
     let mut response = read_response_input_for_closeout(flags.strict_closeout)?;
 
     if response.trim().is_empty() {
-        if recover_empty_response_if_configured(file, &flags)? {
+        if recover_empty_response_if_configured(file, &flags, apply_guard)? {
             return Ok(());
         }
         anyhow::bail!(EMPTY_RESPONSE_ERROR);
@@ -1486,6 +1497,7 @@ pub(crate) fn run_stream(
     force_disk: bool,
     origin: Option<&str>,
     flags: WriteFlags,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> Result<()> {
     let t_total = std::time::Instant::now();
 
@@ -1502,7 +1514,7 @@ pub(crate) fn run_stream(
     let mut response = read_response_input_for_closeout(flags.strict_closeout)?;
 
     if response.trim().is_empty() {
-        if recover_empty_response_if_configured(file, &flags)? {
+        if recover_empty_response_if_configured(file, &flags, apply_guard)? {
             return Ok(());
         }
         anyhow::bail!(EMPTY_RESPONSE_ERROR);
@@ -2249,10 +2261,11 @@ pub(crate) fn run_stream(
         )?
     };
     if let Some(plan) = integrated_queue_plan.as_ref() {
-        queue_consume::record_queue_consumption_proofs(
+        queue_consume::record_queue_consumption_proofs_under_apply_guard(
             file,
             plan,
             QueueConsumptionProofStage::BeforeMutation,
+            apply_guard,
         )?;
         final_content = plan.new_document.clone();
         snapshot_content = plan.new_snapshot.clone();
@@ -2306,10 +2319,11 @@ pub(crate) fn run_stream(
         }
     }
     if let Some(plan) = integrated_queue_plan.as_ref() {
-        queue_consume::record_queue_consumption_proofs(
+        queue_consume::record_queue_consumption_proofs_under_apply_guard(
             file,
             plan,
             QueueConsumptionProofStage::AfterMutation,
+            apply_guard,
         )?;
         if plan.consumed_texts.len() == 1 {
             eprintln!(
@@ -2501,14 +2515,19 @@ fn capture_closeout_mutation_plan_before_authority_resolution(
 
 /// Explicit editor mode: deliver through the registered Lazily replica.
 /// Fails closed when no PID-scoped endpoint accepts the retained intent.
-pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()> {
+pub(crate) fn run_ipc(
+    file: &Path,
+    baseline: Option<&str>,
+    flags: WriteFlags,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
     let mut response = read_response_input_for_closeout(flags.strict_closeout)?;
 
     if response.trim().is_empty() {
-        if recover_empty_response_if_configured(file, &flags)? {
+        if recover_empty_response_if_configured(file, &flags, apply_guard)? {
             return Ok(());
         }
         anyhow::bail!(EMPTY_RESPONSE_ERROR);

@@ -13840,6 +13840,44 @@ pub fn upsert_coordination_lease(
     state_store::upsert_coordination_lease_in_db(&conn, lease)
 }
 
+pub fn claim_coordination_lease_if_expired(
+    project_root: &Path,
+    lease: &state_store::CoordinationLeaseRecord,
+    eligible_at_or_before_secs: u64,
+) -> Result<bool> {
+    let conn = open_state_db(project_root)?;
+    state_store::claim_coordination_lease_if_expired_in_db(&conn, lease, eligible_at_or_before_secs)
+}
+
+pub fn refresh_coordination_lease_if_holder(
+    project_root: &Path,
+    scope_kind: &str,
+    scope_id: &str,
+    holder: &str,
+    holder_pid: u32,
+    heartbeat_secs: u64,
+) -> Result<bool> {
+    let conn = open_state_db(project_root)?;
+    state_store::refresh_coordination_lease_if_holder_in_db(
+        &conn,
+        scope_kind,
+        scope_id,
+        holder,
+        holder_pid,
+        heartbeat_secs,
+    )
+}
+
+pub fn clear_coordination_lease_if_holder(
+    project_root: &Path,
+    scope_kind: &str,
+    scope_id: &str,
+    holder: &str,
+) -> Result<bool> {
+    let conn = open_state_db(project_root)?;
+    state_store::clear_coordination_lease_if_holder_in_db(&conn, scope_kind, scope_id, holder)
+}
+
 pub fn load_coordination_lease(
     project_root: &Path,
     scope_kind: &str,
@@ -16650,6 +16688,7 @@ mod tests {
             owner: Some(agent_doc_state_backbone::CloseoutOwnerProjection {
                 cycle_id: "cycle-dead-owner".into(),
                 owner_id: "foreground-finalize-other".into(),
+                owner_token: "gh130-owner-token".into(),
                 owner_pid,
                 role: "foreground_finalize".into(),
                 claimed_secs: now,
@@ -22086,7 +22125,7 @@ mod tests {
             agent_doc_session_actor_io::record_session_start_direct(
                 &doc,
                 "session-jbr",
-                "%52",
+                "%999999",
                 "@1",
                 1,
             )
@@ -22094,7 +22133,7 @@ mod tests {
             agent_doc_session_actor_io::transition_state_direct(
                 &doc,
                 "session-jbr",
-                "%52",
+                "%999999",
                 Some(1),
                 agent_doc_controller::actor::ActorState::Ready,
                 "supervisor",
@@ -22130,7 +22169,7 @@ mod tests {
                 command: "dispatch".to_string(),
                 file: Some(doc.clone()),
                 session_id: Some("session-jbr".to_string()),
-                pane_id: Some("%52".to_string()),
+                pane_id: Some("%999999".to_string()),
                 window_id: None,
                 generation: Some(1),
                 state: None,
@@ -22166,7 +22205,10 @@ mod tests {
         let (recoverable, recoverable_ops_log) = paused_dispatch_error(
             "churn-stop: do[#c2b6] operator-verify head re-injected by stale supervisor pid1368698 (pre-0.34.0); needs operator recycle, not agent drain",
         );
-        assert!(recoverable.contains("failed_stage=queue_paused"));
+        assert!(
+            recoverable.contains("failed_stage=queue_paused"),
+            "stale-supervisor pause did not reach queue_paused: {recoverable}"
+        );
         assert!(
             recoverable.contains(
                 agent_doc_controller::dispatch::DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER

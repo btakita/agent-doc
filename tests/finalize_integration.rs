@@ -3,6 +3,7 @@ use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use tempfile::TempDir;
@@ -584,6 +585,7 @@ fn finalize_requires_git_repo_before_mutating_document() {
 fn finalize_skips_ignored_untracked_session_doc() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join("scratch")).unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
     fs::write(tmp.path().join(".gitignore"), "scratch/\n.agent-doc/\n").unwrap();
     let doc = tmp.path().join("scratch/session.md");
     fs::write(&doc, session_template_doc_content()).unwrap();
@@ -1978,6 +1980,125 @@ fn finalize_writes_and_commits_template_response() {
 }
 
 #[test]
+fn finalize_holds_queue_apply_exclusion_from_response_write_through_commit() {
+    let (tmp, doc) = setup_template_doc();
+    init_git_repo(tmp.path(), &doc);
+    let marker = tmp.path().join("closeout-after-write.marker");
+    let release = tmp.path().join("closeout-after-write.release");
+    let binary = env!("CARGO_BIN_EXE_agent-doc");
+    let mut child = ProcessCommand::new(binary)
+        .env(
+            agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+            CONTROLLER_LAUNCH_REASON,
+        )
+        .env(
+            "AGENT_DOC_TEST_CLOSEOUT_AFTER_RESPONSE_WRITE_MARKER",
+            &marker,
+        )
+        .env(
+            "AGENT_DOC_TEST_CLOSEOUT_AFTER_RESPONSE_WRITE_RELEASE",
+            &release,
+        )
+        .current_dir(tmp.path())
+        .args(["finalize", doc.to_str().unwrap(), "--force-disk"])
+        .stdin(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(
+            "<!-- patch:exchange -->\n### Re: transaction — gpt-5\ntransaction body\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n"
+                .as_bytes(),
+        )
+        .unwrap();
+    drop(child.stdin.take());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !marker.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for closeout transaction barrier"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    assert!(
+        fs::read_to_string(&doc)
+            .unwrap()
+            .contains("transaction body"),
+        "barrier must run after the response write"
+    );
+    let head_blob = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["show", "HEAD:session.md"])
+        .output()
+        .unwrap();
+    assert!(!String::from_utf8_lossy(&head_blob.stdout).contains("transaction body"));
+    assert!(
+        !agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
+            &doc.to_string_lossy(),
+            "maintenance-during-closeout",
+            std::process::id(),
+        )
+        .unwrap(),
+        "detached maintenance must coalesce during closeout"
+    );
+    assert!(
+        agent_doc_queue_io::queue_edit_owner::QueueEditGuard::try_acquire(&doc)
+            .unwrap()
+            .is_none()
+    );
+
+    fs::write(&release, b"release").unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "finalize failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let head_blob = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["show", "HEAD:session.md"])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&head_blob.stdout).contains("transaction body"));
+}
+
+#[test]
+fn finalize_apply_contention_fails_before_response_write_or_closeout_effects() {
+    let (tmp, doc) = setup_template_doc();
+    init_git_repo(tmp.path(), &doc);
+    let before = fs::read(&doc).unwrap();
+    let head_before = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap()
+        .stdout;
+    let _guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+    let output = agent_doc()
+        .current_dir(tmp.path())
+        .args(["finalize", doc.to_str().unwrap(), "--force-disk"])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: blocked — gpt-5\nmust not land\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nBlocked.\n<!-- /patch:recap -->\n",
+        )
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("queue mutation deferred"));
+    assert_eq!(fs::read(&doc).unwrap(), before);
+    let head_after = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap()
+        .stdout;
+    assert_eq!(head_after, head_before);
+}
+
+#[test]
 fn finalize_stream_auto_reopens_committed_cycle_for_new_response() {
     // #finalize-stale-baseline-reopen-friction: a genuinely new response supplied
     // after a committed cycle (even with the stale baseline file) must auto-reopen
@@ -2836,6 +2957,21 @@ fn finalize_prewrite_guard_failure_leaves_cycle_open_for_retry() {
         read_cycle_phase(tmp.path(), &doc).as_deref(),
         Some("preflight_started")
     );
+    let ops_path = tmp.path().join(".agent-doc/logs/ops.log");
+    let maintenance_deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    loop {
+        if fs::read_to_string(&ops_path)
+            .unwrap_or_default()
+            .contains("queue_maintenance_background_completed")
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < maintenance_deadline,
+            "detached preflight maintenance did not settle before finalize"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
 
     let response = "<!-- patch:exchange -->\n### Re: recommendations — gpt-5\n## Recommendations\n1. Add regression coverage\n2. Update the spec\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n";
 
@@ -3362,6 +3498,10 @@ fn finalize_reports_concurrent_prompt_added_after_baseline_as_pending_steering()
     checkpoint_baseline(tmp.path(), &baseline_content);
     agent_doc()
         .current_dir(tmp.path())
+        .env(
+            "AGENT_DOC_TEST_BACKGROUND_QUEUE_MAINTENANCE_DELAY_MS",
+            "500",
+        )
         .args(["preflight", doc.to_str().unwrap()])
         .assert()
         .success();
@@ -3394,6 +3534,19 @@ fn finalize_reports_concurrent_prompt_added_after_baseline_as_pending_steering()
     let content = fs::read_to_string(&doc).unwrap();
     assert!(content.contains("### Re: Please reply — gpt-5"));
     assert!(content.contains("❯ What remains after this response?"));
+    let settle_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_pending(&doc) {
+        assert!(
+            std::time::Instant::now() < settle_deadline,
+            "the stale admitted maintenance request did not settle"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let ops = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+    assert!(
+        !ops.contains("pending_maintenance_background_completed"),
+        "the stale admitted cut published a maintenance completion: {ops}",
+    );
 
     let head = head_blob(tmp.path());
     assert!(head.contains("### Re: Please reply — gpt-5"));

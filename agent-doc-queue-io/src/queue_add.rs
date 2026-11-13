@@ -145,6 +145,9 @@ pub fn add_with_effects(
     }
     let text =
         queue_inbound::normalize_inbound_text(&agent_doc_secret_redact::redact(request.text))?;
+    // Exclusion starts before attachment persistence, not only before the
+    // document projection, so a deferred direct add leaves no partial apply.
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let project_root = project_root_for(file);
     let attachments = request
         .attachments
@@ -155,7 +158,6 @@ pub fn add_with_effects(
 
     // #sqedit-race: one queue writer at a time; preflight maintenance and the
     // supervisor idle watch defer while this lease is held.
-    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
     let current = effects.current_document_content(file, "queue_add")?;
     let plan = queue_inbound::plan_inbound_append(&current, &head, request.source, request.key)
         .with_context(|| format!("queue add: {}", file.display()))?;
@@ -198,7 +200,7 @@ pub fn add_followups_with_effects(
     origin: &str,
     followups: &[String],
 ) -> Result<usize> {
-    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let current = effects.current_document_content(file, "queue_followup")?;
     let plan = queue_inbound::plan_queue_followups_targeted(&current, queue_id, origin, followups)
         .with_context(|| format!("queue follow-up: {}", file.display()))?;
@@ -283,6 +285,7 @@ mod tests {
             &self,
             _file: &Path,
             _count: usize,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
         ) -> Result<Option<QueueCommandConsumeOutcome>> {
             unreachable!("queue add never consumes")
         }
@@ -290,23 +293,39 @@ mod tests {
             &self,
             _file: &Path,
             _count: usize,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
         ) -> Result<Option<QueueCommandConsumeOutcome>> {
             unreachable!("queue add never consumes")
         }
-        fn strike_orphan_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+        fn strike_orphan_id_backed_queue_head(
+            &self,
+            _file: &Path,
+            _id: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<bool> {
             unreachable!("queue add never strikes")
         }
-        fn acknowledge_open_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+        fn acknowledge_open_id_backed_queue_head(
+            &self,
+            _file: &Path,
+            _id: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<bool> {
             unreachable!("queue add never acknowledges")
         }
         fn acknowledge_paused_free_text_queue_head(
             &self,
             _file: &Path,
             _expected_head: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
         ) -> Result<Option<QueueCommandConsumeOutcome>> {
             unreachable!("queue add never acknowledges")
         }
-        fn prune_noise_queue_heads(&self, _file: &Path) -> Result<usize> {
+        fn prune_noise_queue_heads(
+            &self,
+            _file: &Path,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<usize> {
             unreachable!("queue add never prunes")
         }
     }

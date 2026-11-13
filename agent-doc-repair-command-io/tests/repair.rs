@@ -64,8 +64,11 @@ use std::path::Path;
 
 #[cfg(test)]
 fn run(file: &Path) -> Result<RepairOutcome> {
+    let guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let effects = agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &guard)?;
     agent_doc_repair_io::run(
         agent_doc_repair_runtime_io::repair_coordinator_effects(
+            &effects,
             &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
         ),
         file,
@@ -73,8 +76,11 @@ fn run(file: &Path) -> Result<RepairOutcome> {
 }
 
 pub fn repair(file: &Path) -> Result<RepairOutcome> {
+    let guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let effects = agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &guard)?;
     agent_doc_repair_io::repair(
         agent_doc_repair_runtime_io::repair_coordinator_effects(
+            &effects,
             &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
         ),
         file,
@@ -98,6 +104,121 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
         dir
+    }
+
+    fn wait_for_resume_owner_claim_barrier(marker: &Path) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(15);
+        while !marker.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for captured-finalize resume owner-claim barrier"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn wait_for_resume_commit_barrier(marker: &Path) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(15);
+        while !marker.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for captured-finalize resume commit barrier"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn ordinary_repair_refuses_apply_contention_before_any_repair_effect() {
+        let dir = setup_project();
+        let doc = dir.path().join("repair-contention.md");
+        let content = "# Doc\n\n## User\n\nDo the thing\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_repair_io::pending::save_pending_with_current_content(
+            &doc,
+            "Recovered answer.",
+            content,
+        )
+        .unwrap();
+        let before_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc).unwrap();
+        let before_capture = agent_doc_capture_io::load_active(&doc).unwrap();
+        let _incumbent =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+
+        let error = agent_doc_repair_command_io::repair(&doc).unwrap_err();
+        assert!(error.to_string().contains("queue mutation deferred"));
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc).unwrap(),
+            before_snapshot
+        );
+        assert_eq!(
+            agent_doc_capture_io::load_active(&doc).unwrap(),
+            before_capture
+        );
+    }
+
+    #[test]
+    fn empty_cycle_cancel_refuses_apply_contention_before_baseline_or_cycle_effects() {
+        let dir = setup_project();
+        let doc = dir.path().join("cancel-contention.md");
+        let content = "# Doc\n\n## User\n\nDo the thing\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let before_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc).unwrap();
+        let before_cycle = agent_doc_cycle_state_io::load(&doc).unwrap();
+        let _incumbent =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+
+        let error =
+            agent_doc_repair_command_io::cancel_preflight_cycle_after_run_cancel(&doc).unwrap_err();
+        assert!(error.to_string().contains("queue mutation deferred"));
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc).unwrap(),
+            before_snapshot
+        );
+        assert_eq!(agent_doc_cycle_state_io::load(&doc).unwrap(), before_cycle);
+    }
+
+    #[test]
+    fn session_check_heal_refuses_apply_contention_before_any_heal_effect() {
+        let dir = setup_project();
+        let doc = dir.path().join("heal-contention.md");
+        let content = "# Doc\n\n## User\n\nDo the thing\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let before_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc).unwrap();
+        let before_cycle = agent_doc_cycle_state_io::load(&doc).unwrap();
+        let _incumbent =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+
+        let error = agent_doc_repair_command_io::run_session_check_heal(&doc).unwrap_err();
+        assert!(error.to_string().contains("queue mutation deferred"));
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc).unwrap(),
+            before_snapshot
+        );
+        assert_eq!(agent_doc_cycle_state_io::load(&doc).unwrap(), before_cycle);
     }
 
     fn init_git_repo(root: &Path, tracked: &Path) {
@@ -627,11 +748,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         assert_eq!(
-            agent_doc_repair_io::cancel_preflight_cycle(
-                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-                &doc
-            )
-            .unwrap(),
+            agent_doc_repair_command_io::cancel_preflight_cycle(&doc).unwrap(),
             CancelOutcome::Protected
         );
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
@@ -647,11 +764,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         assert_eq!(
-            agent_doc_repair_io::cancel_preflight_cycle_after_run_cancel(
-                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-                &doc
-            )
-            .unwrap(),
+            agent_doc_repair_command_io::cancel_preflight_cycle_after_run_cancel(&doc).unwrap(),
             CancelOutcome::Abandoned
         );
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
@@ -676,20 +789,12 @@ mod tests {
 
         // The same cycle, asked without proof, is still protected.
         assert_eq!(
-            agent_doc_repair_io::cancel_preflight_cycle(
-                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-                &doc
-            )
-            .unwrap(),
+            agent_doc_repair_command_io::cancel_preflight_cycle(&doc).unwrap(),
             CancelOutcome::Protected
         );
 
         assert_eq!(
-            agent_doc_repair_io::cancel_preflight_cycle_after_owner_release(
-                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-                &doc
-            )
-            .unwrap(),
+            agent_doc_repair_command_io::cancel_preflight_cycle_after_owner_release(&doc).unwrap(),
             CancelOutcome::Abandoned
         );
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
@@ -718,11 +823,7 @@ mod tests {
             agent_doc_cycle_state_io::STALLED_CYCLE_RESOLVE_SECS + 1,
         );
 
-        let applied = agent_doc_flow_io::closeout::apply_closeout_recovery(
-            &doc,
-            &agent_doc_closeout_runtime_io::closeout_effects(),
-        )
-        .unwrap();
+        let applied = agent_doc_closeout_runtime_io::apply_closeout_recovery(&doc).unwrap();
         assert!(
             matches!(
                 applied,
@@ -746,11 +847,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
-        let applied = agent_doc_flow_io::closeout::apply_closeout_recovery(
-            &doc,
-            &agent_doc_closeout_runtime_io::closeout_effects(),
-        )
-        .unwrap();
+        let applied = agent_doc_closeout_runtime_io::apply_closeout_recovery(&doc).unwrap();
         assert!(
             matches!(
                 applied,
@@ -778,11 +875,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         assert_eq!(
-            agent_doc_repair_io::cancel_preflight_cycle_after_owner_release(
-                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-                &doc
-            )
-            .unwrap(),
+            agent_doc_repair_command_io::cancel_preflight_cycle_after_owner_release(&doc).unwrap(),
             CancelOutcome::Protected,
             "a fresh cycle may still be generating its first response"
         );
@@ -805,11 +898,7 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         assert_eq!(
-            agent_doc_repair_io::cancel_preflight_cycle_after_run_cancel(
-                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-                &doc
-            )
-            .unwrap(),
+            agent_doc_repair_command_io::cancel_preflight_cycle_after_run_cancel(&doc).unwrap(),
             CancelOutcome::Abandoned
         );
     }
@@ -830,11 +919,7 @@ mod tests {
         );
 
         assert_eq!(
-            agent_doc_repair_io::cancel_preflight_cycle_after_owner_release(
-                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-                &doc
-            )
-            .unwrap(),
+            agent_doc_repair_command_io::cancel_preflight_cycle_after_owner_release(&doc).unwrap(),
             CancelOutcome::Protected
         );
         assert!(
@@ -857,11 +942,7 @@ mod tests {
         agent_doc_capture_io::capture_response(&doc, "### Re: do — opus-4-8\n\nDone.\n").unwrap();
 
         assert_eq!(
-            agent_doc_repair_io::cancel_preflight_cycle(
-                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-                &doc
-            )
-            .unwrap(),
+            agent_doc_repair_command_io::cancel_preflight_cycle(&doc).unwrap(),
             CancelOutcome::Protected
         );
         assert!(
@@ -889,11 +970,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            agent_doc_repair_io::cancel_preflight_cycle(
-                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-                &doc
-            )
-            .unwrap(),
+            agent_doc_repair_command_io::cancel_preflight_cycle(&doc).unwrap(),
             CancelOutcome::Protected
         );
     }
@@ -904,11 +981,7 @@ mod tests {
         let doc = dir.path().join("test.md");
         std::fs::write(&doc, "# Doc\n\nNothing\n").unwrap();
         assert_eq!(
-            agent_doc_repair_io::cancel_preflight_cycle(
-                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
-                &doc
-            )
-            .unwrap(),
+            agent_doc_repair_command_io::cancel_preflight_cycle(&doc).unwrap(),
             CancelOutcome::NoOpenCycle
         );
     }
@@ -2347,6 +2420,29 @@ mod tests {
         let key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
             .unwrap()
             .expect("captured response should expose a durable resume key");
+        let before_document = std::fs::read_to_string(&doc).unwrap();
+        let before_cycle = agent_doc_cycle_state_io::load_with_closeout_projection(&doc).unwrap();
+        let before_capture = agent_doc_capture_io::load_active(&doc).unwrap();
+        let incumbent =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        let deferred = agent_doc_repair_command_io::resume_captured_finalize(&doc, &key);
+        assert!(
+            !matches!(
+                deferred,
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed { .. }
+            ),
+            "contended legacy resume must defer before effects: {deferred:?}",
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), before_document);
+        assert_eq!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc).unwrap(),
+            before_cycle
+        );
+        assert_eq!(
+            agent_doc_capture_io::load_active(&doc).unwrap(),
+            before_capture
+        );
+        drop(incumbent);
         let outcome = agent_doc_repair_command_io::resume_captured_finalize(&doc, &key);
         assert!(
             matches!(
@@ -2369,6 +2465,98 @@ mod tests {
                 .phase,
             agent_doc_turn::CyclePhase::Committed
         ));
+    }
+
+    /// The unlocked resume observation is only an admission hint. A normal
+    /// closeout that wins the controller lease while the resume is paused must
+    /// land once; after the pause, the stale resume revalidates under the same
+    /// lease -> apply-guard order and retires as superseded without effects.
+    #[test]
+    fn legacy_resume_revalidates_after_a_foreground_closeout_wins_pre_lock() {
+        let _env = agent_doc_test_support::env_lock();
+        let dir = setup_project();
+        let doc = dir.path().join("legacy-pre-lock.md");
+        let content = "---\nsession: test\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n## User\n\nHello\n";
+        let response = "Foreground closeout wins.";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        let key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
+            .unwrap()
+            .expect("capture key");
+
+        let marker = dir.path().join("resume-before-owner.marker");
+        let release = dir.path().join("resume-before-owner.release");
+        unsafe {
+            std::env::set_var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_FILE", &doc);
+            std::env::set_var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_MARKER", &marker);
+            std::env::set_var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_RELEASE", &release);
+        }
+        let resume_doc = doc.clone();
+        let resume_key = key.clone();
+        let resume = std::thread::spawn(move || {
+            agent_doc_repair_command_io::resume_captured_finalize(&resume_doc, &resume_key)
+        });
+        wait_for_resume_owner_claim_barrier(&marker);
+
+        let winner = agent_doc_write_runtime_io::run_command_with_response(
+            agent_doc_write_command_io::CommandOptions::repair_replay(
+                &doc,
+                false,
+                false,
+                false,
+                &[],
+            ),
+            agent_doc_write_command_io::CommitMode::Required,
+            response.to_string(),
+        );
+        let after_winner_document = std::fs::read_to_string(&doc).unwrap();
+        let after_winner_cycle =
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc).unwrap();
+        let after_winner_capture = agent_doc_capture_io::load_active(&doc).unwrap();
+        let ops_path = dir.path().join(".agent-doc/logs/ops.log");
+        let after_winner_ops = std::fs::read_to_string(&ops_path).unwrap_or_default();
+        std::fs::write(&release, b"release").unwrap();
+        let stale_outcome = resume.join().unwrap();
+        unsafe {
+            std::env::remove_var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_FILE");
+            std::env::remove_var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_MARKER");
+            std::env::remove_var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_RELEASE");
+        }
+
+        winner.unwrap();
+        assert!(
+            matches!(
+                stale_outcome,
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Superseded
+            ),
+            "{stale_outcome:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            after_winner_document
+        );
+        assert_eq!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc).unwrap(),
+            after_winner_cycle
+        );
+        assert_eq!(
+            agent_doc_capture_io::load_active(&doc).unwrap(),
+            after_winner_capture
+        );
+        assert_eq!(
+            std::fs::read_to_string(&ops_path).unwrap_or_default(),
+            after_winner_ops,
+            "the stale resume must not append an operation after the winner lands"
+        );
+        assert_eq!(after_winner_document.matches(response).count(), 1);
     }
 
     fn gh90_append_doc(dir: &TempDir) -> (std::path::PathBuf, &'static str) {
@@ -2736,6 +2924,29 @@ mod tests {
         let key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
             .unwrap()
             .expect("write-applied capture should expose a durable resume key");
+        let before_document = std::fs::read_to_string(&doc).unwrap();
+        let before_cycle = agent_doc_cycle_state_io::load_with_closeout_projection(&doc).unwrap();
+        let before_capture = agent_doc_capture_io::load_active(&doc).unwrap();
+        let incumbent =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        let deferred = agent_doc_repair_command_io::resume_captured_finalize(&doc, &key);
+        assert!(
+            !matches!(
+                deferred,
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed { .. }
+            ),
+            "contended materialized resume must defer before effects: {deferred:?}",
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), before_document);
+        assert_eq!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc).unwrap(),
+            before_cycle
+        );
+        assert_eq!(
+            agent_doc_capture_io::load_active(&doc).unwrap(),
+            before_capture
+        );
+        drop(incumbent);
         let outcome = agent_doc_repair_command_io::resume_captured_finalize(&doc, &key);
         assert!(
             matches!(
@@ -2756,6 +2967,543 @@ mod tests {
                 .phase,
             agent_doc_turn::CyclePhase::Committed
         ));
+    }
+
+    #[test]
+    fn captured_resume_aborts_on_held_by_other_inside_git_ref_update_interval() {
+        let _env = agent_doc_test_support::env_lock();
+        let dir = setup_project();
+        let doc = dir.path().join("resume-write-lease-loss.md");
+        let content = "---\nsession: test\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n## User\n\nHello\n";
+        let response = "Retained across a mid-write lease loss.";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let plan_json = serde_json::to_string(
+            &agent_doc_write_command_io::CapturedCloseoutMutationPlan::default(),
+        )
+        .unwrap();
+        agent_doc_capture_io::capture_response_with_current_content_and_intent_and_plan(
+            &doc,
+            response,
+            content,
+            Some(response),
+            Some(&plan_json),
+        )
+        .unwrap();
+        let key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
+            .unwrap()
+            .expect("captured response");
+        let marker = dir.path().join("resume-closeout-before-commit.marker");
+        let release = dir.path().join("resume-closeout-before-commit.release");
+        unsafe {
+            std::env::set_var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_FILE", &doc);
+            std::env::set_var(
+                "AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_READY",
+                &marker,
+            );
+            std::env::set_var(
+                "AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_RELEASE",
+                &release,
+            );
+        }
+        let resume_doc = doc.clone();
+        let resume_key = key.clone();
+        let resume = std::thread::spawn(move || {
+            agent_doc_repair_command_io::resume_captured_finalize(&resume_doc, &resume_key)
+        });
+        wait_for_resume_commit_barrier(&marker);
+        unsafe {
+            std::env::set_var(
+                "AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_HELD_BY_OTHER_FILE",
+                &doc,
+            );
+        }
+        std::fs::write(&release, b"release").unwrap();
+        let interrupted = resume.join().unwrap();
+        assert!(
+            !matches!(
+                interrupted,
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed { .. }
+            ),
+            "lease loss must abort the terminal commit: {interrupted:?}"
+        );
+        let interrupted_state = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+            .unwrap()
+            .expect("retained cycle");
+        assert_ne!(
+            interrupted_state.phase,
+            agent_doc_turn::CyclePhase::Committed
+        );
+        let interrupted_head = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .expect("initial HEAD");
+        assert!(
+            !interrupted_head.contains(response),
+            "HeldByOther at the inner pre-update-ref fence must leave HEAD unchanged"
+        );
+
+        unsafe {
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_FILE");
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_READY");
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_RELEASE");
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_HELD_BY_OTHER_FILE");
+        }
+        let retry_guard =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        let retry_effects = agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(
+            &doc,
+            &retry_guard,
+        )
+        .unwrap();
+        use agent_doc_session_check_io::SessionCheckEffects;
+        let recovered = retry_effects
+            .resume_captured_finalize(&doc)
+            .expect("the next guarded recovery must finish the retained closeout");
+        assert!(
+            matches!(
+                recovered,
+                agent_doc_session_check_io::CapturedFinalizeResumeOutcome::Committed
+            ),
+            "{recovered:?}"
+        );
+        assert_eq!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+                .unwrap()
+                .expect("recovered cycle")
+                .phase,
+            agent_doc_turn::CyclePhase::Committed
+        );
+        assert_eq!(
+            std::fs::read_to_string(&doc)
+                .unwrap()
+                .matches(response)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn foreground_finalize_aborts_on_owner_loss_inside_git_ref_update_interval() {
+        let _env = agent_doc_test_support::env_lock();
+        let dir = setup_project();
+        let doc = dir.path().join("foreground-write-lease-loss.md");
+        let content = "---\nsession: test\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n## User\n\nHello\n";
+        let response = "Foreground ownership is fenced through the exact Git CAS.";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let marker = dir.path().join("foreground-inner-commit.marker");
+        let release = dir.path().join("foreground-inner-commit.release");
+        unsafe {
+            std::env::set_var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_FILE", &doc);
+            std::env::set_var(
+                "AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_READY",
+                &marker,
+            );
+            std::env::set_var(
+                "AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_RELEASE",
+                &release,
+            );
+        }
+        let write_doc = doc.clone();
+        let writer = std::thread::spawn(move || {
+            agent_doc_write_runtime_io::run_command_with_response(
+                agent_doc_write_command_io::CommandOptions::repair_replay(
+                    &write_doc,
+                    false,
+                    false,
+                    false,
+                    &[],
+                ),
+                agent_doc_write_command_io::CommitMode::Required,
+                response.to_string(),
+            )
+        });
+        wait_for_resume_commit_barrier(&marker);
+        unsafe {
+            std::env::set_var(
+                "AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_HELD_BY_OTHER_FILE",
+                &doc,
+            );
+        }
+        std::fs::write(&release, b"release").unwrap();
+        let interrupted = writer.join().unwrap();
+        assert!(
+            interrupted.is_err(),
+            "ordinary foreground finalize must carry its owner capability into the inner Git CAS"
+        );
+        assert_ne!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+                .unwrap()
+                .expect("retained foreground cycle")
+                .phase,
+            agent_doc_turn::CyclePhase::Committed
+        );
+        assert!(
+            !agent_doc_git_io::revision::show_head(&doc)
+                .unwrap()
+                .expect("initial HEAD")
+                .contains(response),
+            "owner loss before update-ref must leave foreground response out of HEAD"
+        );
+        unsafe {
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_FILE");
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_READY");
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_RELEASE");
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_HELD_BY_OTHER_FILE");
+        }
+        let retry_guard =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        let retry_effects = agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(
+            &doc,
+            &retry_guard,
+        )
+        .unwrap();
+        use agent_doc_session_check_io::SessionCheckEffects;
+        let recovered = retry_effects
+            .resume_captured_finalize(&doc)
+            .expect("guarded recovery must finish the retained foreground capture");
+        assert!(
+            matches!(
+                recovered,
+                agent_doc_session_check_io::CapturedFinalizeResumeOutcome::Committed
+            ),
+            "{recovered:?}"
+        );
+    }
+
+    #[test]
+    fn captured_resume_rejects_cycle_superseded_after_ref_before_terminal_promotion() {
+        let _env = agent_doc_test_support::env_lock();
+        let dir = setup_project();
+        let doc = dir.path().join("resume-ref-landed-before-promotion.md");
+        let content = "---\nsession: test\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n## User\n\nHello\n";
+        let response = "Ref landed, but terminal promotion still needs exact ownership.";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let plan_json = serde_json::to_string(
+            &agent_doc_write_command_io::CapturedCloseoutMutationPlan::default(),
+        )
+        .unwrap();
+        agent_doc_capture_io::capture_response_with_current_content_and_intent_and_plan(
+            &doc,
+            response,
+            content,
+            Some(response),
+            Some(&plan_json),
+        )
+        .unwrap();
+        let key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
+            .unwrap()
+            .expect("captured response");
+        let marker = dir.path().join("ref-landed-promotion.marker");
+        let release = dir.path().join("ref-landed-promotion.release");
+        unsafe {
+            std::env::set_var("AGENT_DOC_TEST_CLOSEOUT_REF_LANDED_BARRIER_FILE", &doc);
+            std::env::set_var("AGENT_DOC_TEST_CLOSEOUT_REF_LANDED_BARRIER_READY", &marker);
+            std::env::set_var(
+                "AGENT_DOC_TEST_CLOSEOUT_REF_LANDED_BARRIER_RELEASE",
+                &release,
+            );
+        }
+        let resume_doc = doc.clone();
+        let resume_key = key.clone();
+        let resume = std::thread::spawn(move || {
+            agent_doc_repair_command_io::resume_captured_finalize(&resume_doc, &resume_key)
+        });
+        wait_for_resume_commit_barrier(&marker);
+        let ref_landed_head = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .expect("ref-landed HEAD");
+        assert!(
+            ref_landed_head.contains(response),
+            "the barrier must be after the Git ref CAS"
+        );
+        assert_ne!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+                .unwrap()
+                .expect("pre-promotion cycle")
+                .phase,
+            agent_doc_turn::CyclePhase::Committed,
+            "the barrier must be before terminal cycle promotion"
+        );
+        unsafe {
+            std::env::set_var("AGENT_DOC_TEST_CLOSEOUT_FORCE_CYCLE_SUPERSEDED_FILE", &doc);
+        }
+        std::fs::write(&release, b"release").unwrap();
+        let interrupted = resume.join().unwrap();
+        assert!(
+            !matches!(
+                interrupted,
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed { .. }
+            ),
+            "a bare ref receipt must not authorize stale terminal promotion: {interrupted:?}"
+        );
+        assert_ne!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+                .unwrap()
+                .expect("retained pre-promotion cycle")
+                .phase,
+            agent_doc_turn::CyclePhase::Committed
+        );
+        unsafe {
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_REF_LANDED_BARRIER_FILE");
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_REF_LANDED_BARRIER_READY");
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_REF_LANDED_BARRIER_RELEASE");
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_FORCE_CYCLE_SUPERSEDED_FILE");
+        }
+        let retry_guard =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        let retry_effects = agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(
+            &doc,
+            &retry_guard,
+        )
+        .unwrap();
+        use agent_doc_session_check_io::SessionCheckEffects;
+        let recovered = retry_effects
+            .resume_captured_finalize(&doc)
+            .expect("retry must promote the already-landed exact response");
+        assert!(
+            matches!(
+                recovered,
+                agent_doc_session_check_io::CapturedFinalizeResumeOutcome::Committed
+            ),
+            "{recovered:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&doc)
+                .unwrap()
+                .matches(response)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn captured_resume_aborts_when_outer_lease_is_lost_during_session_recovery() {
+        let _env = agent_doc_test_support::env_lock();
+        let dir = setup_project();
+        let doc = dir.path().join("resume-session-lease-loss.md");
+        let content = "---\nsession: test\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n## User\n\nHello\n";
+        let response = "Materialized before recovery lost its lease.";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        let applied = format!("{content}\n## Assistant\n\n{response}\n");
+        std::fs::write(&doc, &applied).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "test_materialized_response_write_applied",
+            Some(&applied),
+            Some(&applied),
+        )
+        .unwrap();
+        agent_doc_repair_io::pending::clear_pending(&doc).unwrap();
+        let key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
+            .unwrap()
+            .expect("materialized capture");
+        let marker = dir.path().join("resume-session-before-commit.marker");
+        let release = dir.path().join("resume-session-before-commit.release");
+        unsafe {
+            std::env::set_var(
+                "AGENT_DOC_TEST_CAPTURED_RESUME_SESSION_BEFORE_COMMIT_FILE",
+                &doc,
+            );
+            std::env::set_var(
+                "AGENT_DOC_TEST_CAPTURED_RESUME_SESSION_BEFORE_COMMIT_MARKER",
+                &marker,
+            );
+            std::env::set_var(
+                "AGENT_DOC_TEST_CAPTURED_RESUME_SESSION_BEFORE_COMMIT_RELEASE",
+                &release,
+            );
+        }
+        let resume_doc = doc.clone();
+        let resume_key = key.clone();
+        let resume = std::thread::spawn(move || {
+            agent_doc_repair_command_io::resume_captured_finalize(&resume_doc, &resume_key)
+        });
+        wait_for_resume_commit_barrier(&marker);
+        unsafe {
+            std::env::set_var("AGENT_DOC_TEST_CAPTURED_RESUME_FORCE_LEASE_LOST_FILE", &doc);
+        }
+        std::fs::write(&release, b"release").unwrap();
+        let interrupted = resume.join().unwrap();
+        assert!(
+            !matches!(
+                interrupted,
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed { .. }
+            ),
+            "lease loss must abort recovery commit: {interrupted:?}"
+        );
+        assert_ne!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+                .unwrap()
+                .expect("retained cycle")
+                .phase,
+            agent_doc_turn::CyclePhase::Committed
+        );
+
+        unsafe {
+            std::env::remove_var("AGENT_DOC_TEST_CAPTURED_RESUME_SESSION_BEFORE_COMMIT_FILE");
+            std::env::remove_var("AGENT_DOC_TEST_CAPTURED_RESUME_SESSION_BEFORE_COMMIT_MARKER");
+            std::env::remove_var("AGENT_DOC_TEST_CAPTURED_RESUME_SESSION_BEFORE_COMMIT_RELEASE");
+            std::env::remove_var("AGENT_DOC_TEST_CAPTURED_RESUME_FORCE_LEASE_LOST_FILE");
+        }
+        let recovered = agent_doc_repair_command_io::resume_captured_finalize(&doc, &key);
+        assert!(
+            matches!(
+                recovered,
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed { .. }
+            ),
+            "retry must finish the materialized closeout: {recovered:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&doc)
+                .unwrap()
+                .matches(response)
+                .count(),
+            1
+        );
+    }
+
+    /// A materialized response can be committed by the normal closeout owner
+    /// after the resume's unlocked read but before its owner claim. The stale
+    /// resume must classify that exact phase/generation cut as superseded and
+    /// leave every durable plane at the winner's state.
+    #[test]
+    fn materialized_resume_revalidates_after_closeout_lands_pre_lock() {
+        let _env = agent_doc_test_support::env_lock();
+        let dir = setup_project();
+        let doc = dir.path().join("materialized-pre-lock.md");
+        let content = "---\nsession: test\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n## User\n\nHello\n";
+        let response = "Materialized closeout winner.";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        let applied = format!("{content}\n## Assistant\n\n{response}\n");
+        std::fs::write(&doc, &applied).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "test_materialized_response_write_applied",
+            Some(&applied),
+            Some(&applied),
+        )
+        .unwrap();
+        agent_doc_repair_io::pending::clear_pending(&doc).unwrap();
+        let key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
+            .unwrap()
+            .expect("materialized capture key");
+
+        let marker = dir.path().join("materialized-before-owner.marker");
+        let release = dir.path().join("materialized-before-owner.release");
+        unsafe {
+            std::env::set_var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_FILE", &doc);
+            std::env::set_var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_MARKER", &marker);
+            std::env::set_var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_RELEASE", &release);
+        }
+        let resume_doc = doc.clone();
+        let resume_key = key.clone();
+        let resume = std::thread::spawn(move || {
+            agent_doc_repair_command_io::resume_captured_finalize(&resume_doc, &resume_key)
+        });
+        wait_for_resume_owner_claim_barrier(&marker);
+
+        let lease = match agent_doc_write_runtime_io::claim_captured_finalize_resume_closeout_lease(
+            &doc,
+            &cycle.cycle_id,
+        )
+        .unwrap()
+        {
+            agent_doc_write_runtime_io::CapturedFinalizeResumeLeaseClaim::Acquired(lease) => lease,
+            agent_doc_write_runtime_io::CapturedFinalizeResumeLeaseClaim::CycleSuperseded => {
+                panic!("the materialized cycle must still be open")
+            }
+        };
+        let guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        let winner = agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "test_foreground_materialized_closeout_committed",
+            Some(&applied),
+            Some(&applied),
+        );
+        drop(guard);
+        drop(lease);
+        let after_winner_document = std::fs::read_to_string(&doc).unwrap();
+        let after_winner_cycle =
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc).unwrap();
+        let after_winner_capture = agent_doc_capture_io::load_active(&doc).unwrap();
+        let ops_path = dir.path().join(".agent-doc/logs/ops.log");
+        let after_winner_ops = std::fs::read_to_string(&ops_path).unwrap_or_default();
+        std::fs::write(&release, b"release").unwrap();
+        let stale_outcome = resume.join().unwrap();
+        unsafe {
+            std::env::remove_var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_FILE");
+            std::env::remove_var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_MARKER");
+            std::env::remove_var("AGENT_DOC_TEST_RESUME_BEFORE_OWNER_CLAIM_RELEASE");
+        }
+
+        winner.unwrap();
+        assert!(
+            matches!(
+                stale_outcome,
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Superseded
+            ),
+            "{stale_outcome:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            after_winner_document
+        );
+        assert_eq!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc).unwrap(),
+            after_winner_cycle
+        );
+        assert_eq!(
+            agent_doc_capture_io::load_active(&doc).unwrap(),
+            after_winner_capture
+        );
+        assert_eq!(
+            std::fs::read_to_string(&ops_path).unwrap_or_default(),
+            after_winner_ops,
+            "the stale materialized resume must not append an operation"
+        );
+        assert_eq!(after_winner_document.matches(response).count(), 1);
     }
 
     /// A capture can retain a response-only proof and a larger write intent.
@@ -2888,7 +3636,7 @@ mod tests {
 
         // The live `respond` closeout holds the lease through the actor.
         let respond_owner = controller::new_closeout_owner_id("test-foreground-finalize");
-        let claimed = controller::claim_closeout_owner_for_file(
+        let claimed = controller::claim_closeout_owner_guard_for_file(
             &doc,
             controller::CloseoutOwnerClaimRequest {
                 expected_cycle_id: Some(cycle.cycle_id.clone()),
@@ -2905,7 +3653,10 @@ mod tests {
         )
         .unwrap();
         assert!(
-            matches!(claimed, controller::CloseoutOwnerClaimOutcome::Acquired(_)),
+            matches!(
+                &claimed,
+                controller::CloseoutOwnerGuardClaimOutcome::Acquired(_)
+            ),
             "{claimed:?}"
         );
 
@@ -2931,15 +3682,7 @@ mod tests {
             "the resume must not commit a cycle another closeout owns"
         );
 
-        assert!(
-            controller::release_closeout_owner_for_file(
-                &doc,
-                &cycle.cycle_id,
-                &respond_owner,
-                "test_foreground_closeout_finished",
-            )
-            .unwrap()
-        );
+        drop(claimed);
 
         let landed = agent_doc_repair_command_io::resume_captured_finalize(&doc, &key);
         assert!(

@@ -27,6 +27,30 @@ fn agent_doc() -> Command {
     command
 }
 
+fn ops_log_len(doc: &std::path::Path) -> u64 {
+    let ops = doc.parent().unwrap().join(".agent-doc/logs/ops.log");
+    fs::metadata(ops)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0)
+}
+
+fn wait_for_pending_maintenance(doc: &std::path::Path, previous_ops_len: u64) {
+    let ops = doc.parent().unwrap().join(".agent-doc/logs/ops.log");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        let current = fs::read_to_string(&ops).unwrap_or_default();
+        let appended = current.get(previous_ops_len as usize..).unwrap_or(&current);
+        if appended.contains("pending_maintenance_background_completed") {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "detached pending maintenance did not complete: {appended}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+}
+
 fn setup_doc(body: &str) -> (TempDir, PathBuf) {
     let tmp = TempDir::new().unwrap();
     // Project marker + snapshots dir so canonicalize finds a root.
@@ -3747,10 +3771,16 @@ fn preflight_emits_backlog_reordered_flag() {
     let (_tmp, doc) = setup_doc("- [ ] [#aaaa] one\n- [ ] [#bbbb] two");
 
     // First preflight: initialize snapshot.
+    let previous_ops_len = ops_log_len(&doc);
     let _ = agent_doc()
         .args(["preflight", doc.to_str().unwrap()])
         .output()
         .unwrap();
+    // Admission returns before detached maintenance by design. Wait for its
+    // durable receipt before editing the document so the worker cannot observe
+    // the reordered content and advance the cycle-start snapshot past the cut
+    // this assertion is intended to exercise.
+    wait_for_pending_maintenance(&doc, previous_ops_len);
 
     // Swap the order in the document.
     let content = fs::read_to_string(&doc).unwrap();
@@ -4071,10 +4101,12 @@ fn review_set_attr_priority_sorts_review_items_on_preflight() {
         String::from_utf8_lossy(&output.stderr)
     );
 
+    let previous_ops_len = ops_log_len(&doc);
     let output = agent_doc()
         .args(["preflight", doc.to_str().unwrap()])
         .output()
         .unwrap();
+    wait_for_pending_maintenance(&doc, previous_ops_len);
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value =
         serde_json::from_str(&stdout).expect("preflight output should be JSON");
@@ -4162,10 +4194,12 @@ fn preflight_moves_gated_backlog_items_into_review() {
         ),
     )
     .unwrap();
+    let previous_ops_len = ops_log_len(&doc);
     let output = agent_doc()
         .args(["preflight", doc.to_str().unwrap()])
         .output()
         .unwrap();
+    wait_for_pending_maintenance(&doc, previous_ops_len);
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value =
         serde_json::from_str(&stdout).expect("preflight output should be JSON");

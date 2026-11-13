@@ -84,6 +84,19 @@ pub(crate) fn with_status_only_pass<T>(f: impl FnOnce() -> T) -> T {
     })
 }
 
+/// Run a complete status-only transaction behind all three purity barriers:
+/// domain helpers classify rather than apply, state-store opens are physically
+/// read-only (so they cannot initialize/migrate/repair/prune), and diagnostics
+/// cannot append to the ops ledger. Public status entrypoints use this wrapper
+/// around their whole call graph, including post-status steering projection.
+pub fn with_status_only_transaction<T>(f: impl FnOnce() -> T) -> T {
+    with_status_only_pass(|| {
+        agent_doc_sqlite::state_store::with_state_db_read_only(|| {
+            agent_doc_ops_log_io::with_ops_log_suppressed(f)
+        })
+    })
+}
+
 pub(crate) fn status_only_pass_active() -> bool {
     STATUS_ONLY_PASS.with(Cell::get)
 }
@@ -103,7 +116,19 @@ pub(crate) fn resolve_current_document(
     source: &str,
 ) -> Result<agent_doc_document_realtime_io::CurrentDocument> {
     if force_disk_resolution_enabled() {
+        if status_only_pass_active() {
+            return agent_doc_document_realtime_io::peek_disk_document(
+                file,
+                &format!("session-check:{source}"),
+            );
+        }
         return agent_doc_document_realtime_io::resolve_disk_current_document(
+            file,
+            &format!("session-check:{source}"),
+        );
+    }
+    if status_only_pass_active() {
+        return agent_doc_document_realtime_io::peek_current_document(
             file,
             &format!("session-check:{source}"),
         );
@@ -131,6 +156,12 @@ pub(crate) fn resolve_current_document_with_force_disk(
     if !force_disk {
         return resolve_current_document(file, source);
     }
+    if status_only_pass_active() {
+        return agent_doc_document_realtime_io::peek_disk_document(
+            file,
+            &format!("session-check:{source}"),
+        );
+    }
     agent_doc_document_realtime_io::resolve_disk_current_document(
         file,
         &format!("session-check:{source}"),
@@ -148,6 +179,12 @@ pub(crate) fn resolve_current_document_content(file: &Path, source: &str) -> Res
 
 pub(crate) fn resolve_disk_document_content(file: &Path, source: &str) -> Result<String> {
     profile::timed("resolve_disk_document_content", || {
+        if status_only_pass_active() {
+            return agent_doc_document_realtime_io::peek_disk_document_content(
+                file,
+                &format!("session-check:{source}"),
+            );
+        }
         agent_doc_document_realtime_io::resolve_disk_current_document_content(
             file,
             &format!("session-check:{source}"),

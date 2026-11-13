@@ -2196,7 +2196,7 @@ fn apply_bound_stop(
     cleanup_roots: &[PathBuf],
 ) -> Result<StopResponse> {
     stop_phase("session_check_inspect");
-    match agent_doc_session_check_io::inspect(
+    match agent_doc_session_check_io::inspect_read_only(
         file,
         &agent_doc_closeout_runtime_io::session_check_effects(),
     )? {
@@ -2366,7 +2366,13 @@ fn apply_bound_stop(
                 // newer typed edit outside the committed snapshot. That edit is
                 // still next-cycle work: do not immediately select it using the
                 // predecessor's recursive Stop invocation.
-                if answered_residue_has_post_commit_drift && closeout_result.is_ok() {
+                if answered_residue_has_post_commit_drift
+                    && (closeout_result.is_ok()
+                        || closeout_result
+                            .as_ref()
+                            .err()
+                            .is_some_and(transient_queue_closeout_refusal))
+                {
                     invalidate_stop_document_cache();
                     agent_doc_ops_log_io::log_op(
                         file,
@@ -2375,7 +2381,7 @@ fn apply_bound_stop(
                     return Ok(StopResponse::AllowExit);
                 }
                 invalidate_stop_document_cache();
-                let status = agent_doc_session_check_io::inspect(
+                let status = agent_doc_session_check_io::inspect_read_only(
                     file,
                     &agent_doc_closeout_runtime_io::session_check_effects(),
                 )?;
@@ -2740,7 +2746,7 @@ fn try_resume_captured_finalize_in_hook(file: &Path) -> CapturedFinalizeHookResu
                 return CapturedFinalizeHookResume::Pending;
             }
             agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Superseded => {
-                return if agent_doc_session_check_io::inspect(
+                return if agent_doc_session_check_io::inspect_read_only(
                     file,
                     &agent_doc_closeout_runtime_io::session_check_effects(),
                 )
@@ -3788,13 +3794,18 @@ fn try_recover_repeated_queue_head_response(
     );
 
     stop_phase("repeated_queue_repair");
+    let repair_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let repair_effects =
+        agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &repair_guard)?;
     let repair_outcome = agent_doc_repair_io::run_with_queue_completion_ids(
         agent_doc_repair_runtime_io::repair_coordinator_effects(
+            &repair_effects,
             &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
         ),
         file,
         &queue_completion_ids,
     )?;
+    drop(repair_guard);
     // Repair wrote the document; the pre-repair memo is now stale.
     invalidate_stop_document_cache();
     if repair_outcome.replayed_response() {
@@ -4750,8 +4761,12 @@ fn attempt_stop_closeout(
     // write retained under a deferred intent while the controller hands off) is a still-open
     // closeout whose owner the ownership predicate derives, not a hook failure. Propagating it here surfaced as "Stop hook failed closed" on fpe.md
     // (2026-09-30) while the same intent settled and committed 29s later.
+    let repair_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let repair_effects =
+        agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &repair_guard)?;
     let repair_outcome = match agent_doc_repair_io::run_with_queue_completion_ids(
         agent_doc_repair_runtime_io::repair_coordinator_effects(
+            &repair_effects,
             &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
         ),
         file,
@@ -4783,6 +4798,7 @@ fn attempt_stop_closeout(
             return Ok(StopCloseAttempt::StillOpen { note });
         }
     };
+    drop(repair_guard);
     // Repair wrote the document; the pre-repair memo is now stale.
     invalidate_stop_document_cache();
     log_slow_stop_closeout_phase(file, "intent_repair", &mut phase_started);
@@ -4909,6 +4925,12 @@ fn attempt_stop_closeout(
 fn unanswered_edit_pending_commit_refusal(error: &anyhow::Error) -> bool {
     agent_doc_commit_io::retained_write_commit_refusal_verdict(error)
         == Some(agent_doc_turn::write_ownership::RetainedWriteVerdict::UnansweredEditPending)
+}
+
+fn transient_queue_closeout_refusal(error: &anyhow::Error) -> bool {
+    format!("{error:#}").contains(
+        "normal closeout refused while live queue rows are still transient (#transientcloseout)",
+    )
 }
 
 /// Whether a failed commit boundary is a deferral the binary already owns.

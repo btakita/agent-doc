@@ -369,6 +369,7 @@ fn restore_empty_preflight_baseline_to_head(
 }
 
 pub trait RepairStrictReplayWriteEffects {
+    #[allow(clippy::too_many_arguments)]
     fn run_strict_write_replay(
         &self,
         file: &Path,
@@ -377,6 +378,7 @@ pub trait RepairStrictReplayWriteEffects {
         is_stream: bool,
         force_disk: bool,
         queue_completion_ids: &[String],
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> Result<()>;
 }
 
@@ -386,14 +388,24 @@ pub trait RepairFallbackWriteEffects {
         file: &Path,
         response: &str,
         force_disk: bool,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> Result<()>;
 
-    fn apply_append_from_string(&self, file: &Path, response: &str) -> Result<()>;
+    fn apply_append_from_string(
+        &self,
+        file: &Path,
+        response: &str,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> Result<()>;
 }
 
 pub trait RepairRecoveredQueueHeadEffects {
-    fn strike_recovered_free_text_queue_head(&self, file: &Path, expected_head: &str)
-    -> Result<()>;
+    fn strike_recovered_free_text_queue_head(
+        &self,
+        file: &Path,
+        expected_head: &str,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> Result<()>;
 
     /// `#qresiduewedge`: strike the free-text heads a parked committed-heading
     /// replay answers, where the document already holds an answer titled with
@@ -402,6 +414,7 @@ pub trait RepairRecoveredQueueHeadEffects {
         &self,
         file: &Path,
         replay_body: &str,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     ) -> Result<usize>;
 }
 
@@ -449,10 +462,11 @@ pub struct RepairCoordinatorEffects<
 > {
     pub repair_io_effects: &'a R,
     pub replay_write_effects: &'a W,
-    pub complete_required_closeout: fn(&Path) -> Result<bool>,
-    pub inspect_session: fn(&Path) -> Result<agent_doc_session_check_io::SessionCheckStatus>,
-    pub recover_missing_committed_head_response: fn(&Path) -> Result<bool>,
-    pub recover_dedupe_only_drift: fn(&Path) -> Result<bool>,
+    pub apply_guard: &'a agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    pub complete_required_closeout: fn(&R, &Path) -> Result<bool>,
+    pub inspect_session: fn(&R, &Path) -> Result<agent_doc_session_check_io::SessionCheckStatus>,
+    pub recover_missing_committed_head_response: fn(&R, &Path) -> Result<bool>,
+    pub recover_dedupe_only_drift: fn(&R, &Path) -> Result<bool>,
 }
 
 impl<'a, R, W> Copy for RepairCoordinatorEffects<'a, R, W>
@@ -486,13 +500,13 @@ pub fn recover_empty_response_for_strict_closeout<
         let outcome =
             run_with_queue_completion_ids_and_force_disk(effects, file, &[], force_disk_override)?;
         if force_disk_override != Some(true)
-            && (effects.recover_missing_committed_head_response)(file)?
+            && (effects.recover_missing_committed_head_response)(effects.repair_io_effects, file)?
         {
             return Ok(true);
         }
         if outcome.repaired() {
             if outcome == RepairOutcome::AlreadyApplied {
-                (effects.complete_required_closeout)(file)?;
+                (effects.complete_required_closeout)(effects.repair_io_effects, file)?;
             }
             eprintln!(
                 "[write] empty response stdin; recovered existing agent-doc response state with {:?}",
@@ -500,7 +514,7 @@ pub fn recover_empty_response_for_strict_closeout<
             );
             return Ok(true);
         }
-        if (effects.recover_dedupe_only_drift)(file)? {
+        if (effects.recover_dedupe_only_drift)(effects.repair_io_effects, file)? {
             return Ok(true);
         }
     }
@@ -1134,11 +1148,12 @@ pub fn run_with_queue_completion_ids_and_force_disk<
         // materialized. The strike re-proves materialization and the baseline gate
         // itself, and skips heads already struck.
         if force_disk_override != Some(true) {
-            match agent_doc_queue_io::queue_consume::strike_answered_free_text_queue_heads(
+            match agent_doc_queue_io::queue_consume::strike_answered_free_text_queue_heads_under_apply_guard(
                 file,
                 &response,
                 false,
                 &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
+                effects.apply_guard,
             ) {
                 Ok(0) => {}
                 Ok(struck) => eprintln!(
@@ -1251,6 +1266,7 @@ pub fn run_with_queue_completion_ids_and_force_disk<
             queue_completion_ids,
             historical_capture_present: historical_capture.is_some(),
             force_disk_override,
+            apply_guard: effects.apply_guard,
         },
     )
 }
@@ -1472,11 +1488,11 @@ fn repair_with_force_disk_override<
                 )?,
             )?
         {
-            (effects.complete_required_closeout)(file)?;
+            (effects.complete_required_closeout)(effects.repair_io_effects, file)?;
         }
     } else if !outcome.repaired()
         && let agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) =
-            (effects.inspect_session)(file)?
+            (effects.inspect_session)(effects.repair_io_effects, file)?
     {
         agent_doc_flow_io::closeout::log_closeout_guard_event(
             file,
@@ -1588,10 +1604,13 @@ fn park_committed_heading_replay(
     doc_content: &str,
     response: &str,
     reason: &str,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> Result<agent_doc_turn::repair::RepairOutcome> {
-    let struck = match effects
-        .strike_free_text_heads_answered_by_committed_heading_replay(file, response)
-    {
+    let struck = match effects.strike_free_text_heads_answered_by_committed_heading_replay(
+        file,
+        response,
+        apply_guard,
+    ) {
         Ok(struck) => struck,
         Err(err) => {
             eprintln!(
@@ -1701,6 +1720,7 @@ fn repair_replay_force_disk_with_override(_file: &Path, force_disk_override: Opt
     force_disk_override == Some(true)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn replay_orphaned_response_through_strict_write(
     effects: &impl RepairReplayWriteEffects,
     file: &Path,
@@ -1709,6 +1729,7 @@ fn replay_orphaned_response_through_strict_write(
     is_stream: bool,
     queue_completion_ids: &[String],
     force_disk_override: Option<bool>,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> Result<()> {
     let force_disk = repair_replay_force_disk_with_override(file, force_disk_override);
     let mode = if is_stream {
@@ -1735,6 +1756,7 @@ fn replay_orphaned_response_through_strict_write(
         is_stream,
         force_disk,
         queue_completion_ids,
+        apply_guard,
     )
 }
 
@@ -1746,6 +1768,7 @@ pub struct OrphanedResponseReplay<'a> {
     pub queue_completion_ids: &'a [String],
     pub historical_capture_present: bool,
     pub force_disk_override: Option<bool>,
+    pub apply_guard: &'a agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 }
 
 pub fn replay_orphaned_response(
@@ -1760,6 +1783,7 @@ pub fn replay_orphaned_response(
         queue_completion_ids,
         historical_capture_present,
         force_disk_override,
+        apply_guard,
     } = request;
 
     eprintln!(
@@ -1791,6 +1815,7 @@ pub fn replay_orphaned_response(
                         doc_content,
                         response,
                         &reason,
+                        apply_guard,
                     );
                 }
                 fail_closed_on_blocked_template_replay(file, response, &reason)?;
@@ -1837,12 +1862,14 @@ pub fn replay_orphaned_response(
                 false,
                 queue_completion_ids,
                 force_disk_override,
+                apply_guard,
             )?;
         } else {
             effects.apply_template_from_string(
                 file,
                 &response_to_write,
                 repair_replay_force_disk_with_override(file, force_disk_override),
+                apply_guard,
             )?;
         }
     } else if agent_doc_git_io::status::is_in_git_repo(file) {
@@ -1854,9 +1881,10 @@ pub fn replay_orphaned_response(
             false,
             queue_completion_ids,
             force_disk_override,
+            apply_guard,
         )?;
     } else {
-        effects.apply_append_from_string(file, &response_to_write)?;
+        effects.apply_append_from_string(file, &response_to_write, apply_guard)?;
     }
 
     materialize_replayed_response(
@@ -1866,6 +1894,7 @@ pub fn replay_orphaned_response(
         &response_to_write,
         historical_capture_present,
         expected_recovered_queue_head.as_deref(),
+        apply_guard,
     )?;
     Ok(agent_doc_turn::repair::RepairOutcome::ReplayedResponse)
 }
@@ -1877,6 +1906,7 @@ fn materialize_replayed_response(
     response_to_write: &str,
     historical_capture_present: bool,
     expected_recovered_queue_head: Option<&str>,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> Result<()> {
     let final_doc_after_write =
         agent_doc_document_realtime_io::try_resolve_current_document_content(
@@ -1889,7 +1919,8 @@ fn materialize_replayed_response(
 
     if recovered_queue_head_is_free_text(&final_doc_after_write)
         && let Some(expected_head) = expected_recovered_queue_head
-        && let Err(err) = effects.strike_recovered_free_text_queue_head(file, expected_head)
+        && let Err(err) =
+            effects.strike_recovered_free_text_queue_head(file, expected_head, apply_guard)
     {
         eprintln!("[repair] queue-head strike after replay failed: {err} (non-fatal)");
     }
@@ -3663,7 +3694,11 @@ fn cycle_has_captured_response_projection(
 }
 
 pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<&'static str>> {
-    let Some(plan) = plan_committed_historical_snapshot_drift_repair(file)? else {
+    let Some(plan) = plan_committed_historical_snapshot_drift_repair(
+        file,
+        SnapshotDriftPlanObservation::Applying,
+    )?
+    else {
         return Ok(None);
     };
     agent_doc_snapshot_io::checkpoint_document_baseline(
@@ -3725,24 +3760,88 @@ struct SnapshotDriftRepairPlan {
     head_doc: String,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SnapshotDriftPlanObservation {
+    Applying,
+    ReadOnly,
+}
+
+#[derive(Clone, Copy)]
+enum SnapshotDriftCaptureWarning {
+    Projection,
+    Snapshot,
+}
+
+impl SnapshotDriftPlanObservation {
+    fn current_document(self, file: &Path) -> Result<String> {
+        match self {
+            Self::Applying => agent_doc_document_realtime_io::try_resolve_current_document_content(
+                file,
+                "committed_historical_snapshot_drift",
+            ),
+            Self::ReadOnly => agent_doc_document_realtime_io::peek_current_document_content(
+                file,
+                "committed_historical_snapshot_drift",
+            ),
+        }
+    }
+
+    fn turn_scope(self, file: &Path) -> Option<agent_doc_turn::turn_scope::TurnScope> {
+        match self {
+            Self::Applying => agent_doc_turn_scope_io::load(file),
+            Self::ReadOnly => agent_doc_turn_scope_io::try_load_read_only(file)
+                .ok()
+                .flatten(),
+        }
+    }
+
+    fn report_capture_warning(
+        self,
+        file: &Path,
+        kind: SnapshotDriftCaptureWarning,
+        error: &anyhow::Error,
+    ) {
+        if self == Self::ReadOnly {
+            return;
+        }
+        let (message_kind, op) = match kind {
+            SnapshotDriftCaptureWarning::Projection => (
+                "projection",
+                "snapshot_repair_committed_capture_projection_warning",
+            ),
+            SnapshotDriftCaptureWarning::Snapshot => (
+                "snapshot repair",
+                "snapshot_repair_committed_capture_warning",
+            ),
+        };
+        eprintln!(
+            "[repair] committed-capture {message_kind} warning for {}: {error}",
+            file.display(),
+        );
+        agent_doc_ops_log_io::log_op(file, &format!("{op} file={} err={error}", file.display()));
+    }
+}
+
 /// Read-only half of [`repair_committed_historical_snapshot_drift`]: the drift
 /// reason that repair WOULD rebase the snapshot for, without checkpointing the
 /// baseline or converging the CRDT canonical (`#sessioncheckread`). A
 /// status-only `session-check` reports it and names the explicit repair.
 pub fn pending_committed_historical_snapshot_drift(file: &Path) -> Result<Option<&'static str>> {
-    Ok(plan_committed_historical_snapshot_drift_repair(file)?.map(|plan| plan.reason))
+    Ok(plan_committed_historical_snapshot_drift_repair(
+        file,
+        SnapshotDriftPlanObservation::ReadOnly,
+    )?
+    .map(|plan| plan.reason))
 }
 
 fn plan_committed_historical_snapshot_drift_repair(
     file: &Path,
+    observation: SnapshotDriftPlanObservation,
 ) -> Result<Option<SnapshotDriftRepairPlan>> {
     let Some(snapshot_doc) = agent_doc_snapshot_io::load_document_baseline(file)? else {
         return Ok(None);
     };
-    let current_doc = match agent_doc_document_realtime_io::try_resolve_current_document_content(
-        file,
-        "committed_historical_snapshot_drift",
-    ) {
+    let current_doc = match observation.current_document(file) {
         Ok(content) => content,
         Err(_) => return Ok(None),
     };
@@ -3762,13 +3861,15 @@ fn plan_committed_historical_snapshot_drift_repair(
         &snapshot_doc,
         &current_doc,
     ) {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "snapshot_repair_skipped file={} reason=pending_completion_cells_only (#statussynccommitrefusal)",
-                file.display()
-            ),
-        );
+        if observation == SnapshotDriftPlanObservation::Applying {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "snapshot_repair_skipped file={} reason=pending_completion_cells_only (#statussynccommitrefusal)",
+                    file.display()
+                ),
+            );
+        }
         return Ok(None);
     }
 
@@ -3776,9 +3877,9 @@ fn plan_committed_historical_snapshot_drift_repair(
         return Ok(None);
     };
     let committed_capture_materialized_in_head =
-        committed_capture_response_materialized_in_content(file, &head_doc);
+        committed_capture_response_materialized_in_content(file, &head_doc, observation);
     let committed_capture_materialized_in_snapshot =
-        committed_capture_response_materialized_in_content(file, &snapshot_doc);
+        committed_capture_response_materialized_in_content(file, &snapshot_doc, observation);
     let historical_mutation =
         agent_doc_document_realtime::write_policy::classify_committed_historical_agent_doc_mutation(
             &snapshot_doc,
@@ -3787,7 +3888,7 @@ fn plan_committed_historical_snapshot_drift_repair(
     // #nm1x: intersect the drift against the current turn scope so independent
     // out-of-scope edits (e.g. a queue item added beside the running one) do not
     // block the historical snapshot repair.
-    let turn_scope = agent_doc_turn_scope_io::load(file);
+    let turn_scope = observation.turn_scope(file);
     let non_exchange_component_drift = agent_doc_git::has_blocking_non_exchange_component_drift(
         &snapshot_doc,
         &head_doc,
@@ -3892,7 +3993,11 @@ fn converge_crdt_canonical_to_head(file: &Path, head_doc: &str) {
     }
 }
 
-fn committed_capture_response_materialized_in_content(file: &Path, content: &str) -> bool {
+fn committed_capture_response_materialized_in_content(
+    file: &Path,
+    content: &str,
+    observation: SnapshotDriftPlanObservation,
+) -> bool {
     match projected_committed_capture_response_body(file) {
         Ok(Some(response_body)) => {
             return !response_body.trim().is_empty()
@@ -3902,40 +4007,18 @@ fn committed_capture_response_materialized_in_content(file: &Path, content: &str
                 );
         }
         Ok(None) => {}
-        Err(e) => {
-            eprintln!(
-                "[repair] committed-capture projection warning for {}: {}",
-                file.display(),
-                e
-            );
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "snapshot_repair_committed_capture_projection_warning file={} err={}",
-                    file.display(),
-                    e
-                ),
-            );
-        }
+        Err(error) => observation.report_capture_warning(
+            file,
+            SnapshotDriftCaptureWarning::Projection,
+            &error,
+        ),
     }
 
     let capture = match agent_doc_capture_io::latest_committed(file) {
         Ok(Some(capture)) => capture,
         Ok(None) => return false,
-        Err(e) => {
-            eprintln!(
-                "[repair] committed-capture snapshot repair warning for {}: {}",
-                file.display(),
-                e
-            );
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "snapshot_repair_committed_capture_warning file={} err={}",
-                    file.display(),
-                    e
-                ),
-            );
+        Err(error) => {
+            observation.report_capture_warning(file, SnapshotDriftCaptureWarning::Snapshot, &error);
             return false;
         }
     };
@@ -4324,6 +4407,29 @@ mod tests {
     use super::*;
     use std::cell::Cell;
     use std::process::Command as ProcessCommand;
+
+    #[test]
+    fn read_only_snapshot_drift_error_policy_emits_no_ops() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, "# Session\n").unwrap();
+        let ops = dir.path().join(".agent-doc/logs/ops.log");
+        let before = std::fs::read(&ops).unwrap_or_default();
+
+        SnapshotDriftPlanObservation::ReadOnly.report_capture_warning(
+            &file,
+            SnapshotDriftCaptureWarning::Projection,
+            &anyhow::anyhow!("malformed projection"),
+        );
+        SnapshotDriftPlanObservation::ReadOnly.report_capture_warning(
+            &file,
+            SnapshotDriftCaptureWarning::Snapshot,
+            &anyhow::anyhow!("malformed capture"),
+        );
+
+        assert_eq!(std::fs::read(&ops).unwrap_or_default(), before);
+    }
 
     #[test]
     fn missing_replica_adopts_an_exact_disk_visible_response() {
@@ -5654,7 +5760,11 @@ mod tests {
 
         let head_doc = format!("{content}\n{response}");
         assert!(
-            committed_capture_response_materialized_in_content(&doc, &head_doc),
+            committed_capture_response_materialized_in_content(
+                &doc,
+                &head_doc,
+                SnapshotDriftPlanObservation::Applying,
+            ),
             "committed captured-response projection must prove materialization without capture JSON"
         );
     }

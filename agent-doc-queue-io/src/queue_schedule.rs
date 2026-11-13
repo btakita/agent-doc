@@ -26,6 +26,26 @@ use agent_doc_queue::queue_schedule;
 /// operator restriction, so the failure direction is "wait for the
 /// controller", never "drain off-schedule".
 pub fn schedule_held_heads(file: &Path, content: &str) -> Vec<String> {
+    schedule_held_heads_with_initial_dispatch(file, content, false)
+}
+
+/// Schedule holds for pure subagent admission.
+///
+/// A newly declared interval or bare-loop schedule fires immediately when the
+/// controller first reconciles it. Preflight may therefore plan that first
+/// pass without waiting for the controller to persist its admission row. A
+/// time-only schedule is not necessarily due now and remains held. Ordinary
+/// inline drain paths continue to use [`schedule_held_heads`] and stay
+/// fail-closed until the controller receipt exists.
+pub fn schedule_held_heads_for_dispatch(file: &Path, content: &str) -> Vec<String> {
+    schedule_held_heads_with_initial_dispatch(file, content, true)
+}
+
+fn schedule_held_heads_with_initial_dispatch(
+    file: &Path,
+    content: &str,
+    admit_immediately_due_initial: bool,
+) -> Vec<String> {
     let schedules = match queue_schedule::identified_queue_schedules(content) {
         Ok(schedules) => schedules,
         Err(err) => {
@@ -42,10 +62,25 @@ pub fn schedule_held_heads(file: &Path, content: &str) -> Vec<String> {
             file,
             &schedule.queue_id,
         ) {
-            Ok(state) => held.extend(
-                queue_schedule::held_heads_for_queue(content, &schedule, state.as_ref())
-                    .unwrap_or_default(),
-            ),
+            Ok(state) => {
+                let immediately_due_initial = admit_immediately_due_initial
+                    && state.is_none()
+                    && schedule.is_valid()
+                    && schedule
+                        .spec
+                        .as_ref()
+                        .is_some_and(|spec| spec.times.is_empty());
+                let mut schedule_held =
+                    queue_schedule::held_heads_for_queue(content, &schedule, state.as_ref())
+                        .unwrap_or_default();
+                if immediately_due_initial {
+                    let nested =
+                        queue_schedule::nested_live_heads_for_queue(content, &schedule.queue_id)
+                            .unwrap_or_default();
+                    schedule_held.retain(|head| !nested.contains(head));
+                }
+                held.extend(schedule_held);
+            }
             Err(err) => {
                 eprintln!(
                     "[queue-schedule] WARNING: could not read queue schedule id={} for {}; holding only that queue's heads: {err:#}",
@@ -105,7 +140,7 @@ pub fn restore_loop_items_for_queue_with_effects(
     roster: &[String],
 ) -> Result<usize> {
     // `#sqedit-race`: one queue writer at a time, including the source read.
-    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let current = effects.current_document_content(file, "queue_schedule_loop_restore")?;
     restore_loop_items_for_queue_from_source_locked(effects, file, queue_id, roster, &current)
 }
@@ -122,7 +157,7 @@ pub fn restore_loop_items_for_queue_from_source_with_effects(
     source_content: &str,
 ) -> Result<usize> {
     // `#sqedit-race`: one queue writer at a time.
-    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     restore_loop_items_for_queue_from_source_locked(effects, file, queue_id, roster, source_content)
 }
 
@@ -373,6 +408,7 @@ mod tests {
             &self,
             _file: &Path,
             _count: usize,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
         ) -> Result<Option<QueueCommandConsumeOutcome>> {
             unreachable!()
         }
@@ -380,23 +416,39 @@ mod tests {
             &self,
             _file: &Path,
             _count: usize,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
         ) -> Result<Option<QueueCommandConsumeOutcome>> {
             unreachable!()
         }
-        fn strike_orphan_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+        fn strike_orphan_id_backed_queue_head(
+            &self,
+            _file: &Path,
+            _id: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<bool> {
             unreachable!()
         }
-        fn acknowledge_open_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+        fn acknowledge_open_id_backed_queue_head(
+            &self,
+            _file: &Path,
+            _id: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<bool> {
             unreachable!()
         }
         fn acknowledge_paused_free_text_queue_head(
             &self,
             _file: &Path,
             _expected_head: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
         ) -> Result<Option<QueueCommandConsumeOutcome>> {
             unreachable!()
         }
-        fn prune_noise_queue_heads(&self, _file: &Path) -> Result<usize> {
+        fn prune_noise_queue_heads(
+            &self,
+            _file: &Path,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<usize> {
             unreachable!()
         }
     }
@@ -424,6 +476,7 @@ mod tests {
             &self,
             _file: &Path,
             _count: usize,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
         ) -> Result<Option<QueueCommandConsumeOutcome>> {
             unreachable!()
         }
@@ -431,23 +484,39 @@ mod tests {
             &self,
             _file: &Path,
             _count: usize,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
         ) -> Result<Option<QueueCommandConsumeOutcome>> {
             unreachable!()
         }
-        fn strike_orphan_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+        fn strike_orphan_id_backed_queue_head(
+            &self,
+            _file: &Path,
+            _id: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<bool> {
             unreachable!()
         }
-        fn acknowledge_open_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+        fn acknowledge_open_id_backed_queue_head(
+            &self,
+            _file: &Path,
+            _id: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<bool> {
             unreachable!()
         }
         fn acknowledge_paused_free_text_queue_head(
             &self,
             _file: &Path,
             _expected_head: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
         ) -> Result<Option<QueueCommandConsumeOutcome>> {
             unreachable!()
         }
-        fn prune_noise_queue_heads(&self, _file: &Path) -> Result<usize> {
+        fn prune_noise_queue_heads(
+            &self,
+            _file: &Path,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<usize> {
             unreachable!()
         }
     }
@@ -473,6 +542,7 @@ mod tests {
             &self,
             _file: &Path,
             _count: usize,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
         ) -> Result<Option<QueueCommandConsumeOutcome>> {
             unreachable!()
         }
@@ -480,23 +550,39 @@ mod tests {
             &self,
             _file: &Path,
             _count: usize,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
         ) -> Result<Option<QueueCommandConsumeOutcome>> {
             unreachable!()
         }
-        fn strike_orphan_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+        fn strike_orphan_id_backed_queue_head(
+            &self,
+            _file: &Path,
+            _id: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<bool> {
             unreachable!()
         }
-        fn acknowledge_open_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+        fn acknowledge_open_id_backed_queue_head(
+            &self,
+            _file: &Path,
+            _id: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<bool> {
             unreachable!()
         }
         fn acknowledge_paused_free_text_queue_head(
             &self,
             _file: &Path,
             _expected_head: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
         ) -> Result<Option<QueueCommandConsumeOutcome>> {
             unreachable!()
         }
-        fn prune_noise_queue_heads(&self, _file: &Path) -> Result<usize> {
+        fn prune_noise_queue_heads(
+            &self,
+            _file: &Path,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<usize> {
             unreachable!()
         }
     }
@@ -539,6 +625,25 @@ mod tests {
             ),
             None,
             "the supervisor does not drain a closed schedule window"
+        );
+    }
+
+    #[test]
+    fn initial_due_dispatch_releases_nested_steering_but_inline_drain_stays_held() {
+        let content = doc(
+            "loop subagents",
+            "- parent\n  - child one\n  - child two\n- flat\n",
+        );
+        let (_dir, file) = project(&content);
+
+        assert_eq!(
+            schedule_held_heads(&file, &content),
+            vec!["child one", "child two", "flat"]
+        );
+        assert_eq!(
+            schedule_held_heads_for_dispatch(&file, &content),
+            vec!["flat"],
+            "pure admission treats current nested additions as first-pass work without opening inline drain"
         );
     }
 

@@ -3534,10 +3534,18 @@ fn finalize_reports_concurrent_prompt_added_after_baseline_as_pending_steering()
     let content = fs::read_to_string(&doc).unwrap();
     assert!(content.contains("### Re: Please reply — gpt-5"));
     assert!(content.contains("❯ What remains after this response?"));
+    let settle_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_pending(&doc) {
+        assert!(
+            std::time::Instant::now() < settle_deadline,
+            "the stale admitted maintenance request did not settle"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
     let ops = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
     assert!(
-        ops.contains("queue_maintenance_background_superseded_authority"),
-        "the delayed worker did not record its stale admitted cut: {ops}",
+        !ops.contains("pending_maintenance_background_completed"),
+        "the stale admitted cut published a maintenance completion: {ops}",
     );
 
     let head = head_blob(tmp.path());

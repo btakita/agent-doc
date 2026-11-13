@@ -721,18 +721,22 @@ fn committed_cycle_steering_status(
     // `#steerbaselineabsorb`: a pending prompt the committed baseline already
     // carries would read as `no_changes` to the next preflight; persist it so
     // the next contract carries it.
-    crate::absorbed_steering::record_reported_logged(file, &items, &state.cycle_id);
+    if !crate::status_only_pass_active() {
+        crate::absorbed_steering::record_reported_logged(file, &items, &state.cycle_id);
+    }
     let items = crate::midturn_steering::render_pending_steering_items(&items)
         .map(|rendered| format!("\n{rendered}"))
         .unwrap_or_default();
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "session_check_steering_pending file={} cycle_id={} (#steerinterruptexit)",
-            file.display(),
-            state.cycle_id,
-        ),
-    );
+    if !crate::status_only_pass_active() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "session_check_steering_pending file={} cycle_id={} (#steerinterruptexit)",
+                file.display(),
+                state.cycle_id,
+            ),
+        );
+    }
     SessionCheckStatus::SteeringPending(format!(
         "{} {detail}{items}\n{guidance}",
         agent_doc_turn::response_text::SESSION_CHECK_STEERING_PENDING_PREFIX,
@@ -3824,6 +3828,12 @@ fn refuse_transient_queue_closeout(
             )));
         }
         Ok(false) => {}
+    }
+    if agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_pending(file) {
+        return Ok(SessionCheckStatus::Interrupted(format!(
+            "[session-check] INTERRUPTED: queue maintenance request is pending for {}; terminal closeout is withheld until its admitted generation completes (#transientcloseout)",
+            file.display(),
+        )));
     }
     if let Some(attempt) =
         agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(&file.to_string_lossy())

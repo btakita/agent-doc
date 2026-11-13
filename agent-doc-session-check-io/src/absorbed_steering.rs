@@ -619,6 +619,21 @@ pub fn drop_consumed(file: &Path, items: &mut Vec<SteeringItem>) {
     items.retain(|item| !ledger.is_consumed(item));
 }
 
+/// Read-only counterpart used by status/Stop/idle inspection. It deliberately
+/// does not TTL-prune or persist the ledger and emits no diagnostics.
+pub fn drop_consumed_read_only(file: &Path, items: &mut Vec<SteeringItem>) {
+    if !items.iter().any(is_absorbable) {
+        return;
+    }
+    let Ok(Some(conn)) = open_conn(file) else {
+        return;
+    };
+    let Ok(ledger) = load(&conn, file) else {
+        return;
+    };
+    items.retain(|item| !ledger.is_consumed(item));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

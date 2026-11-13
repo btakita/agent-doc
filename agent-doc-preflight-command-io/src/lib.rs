@@ -166,6 +166,11 @@ pub fn spawn_background_queue_maintenance(
     admitted_authority_hash: &str,
 ) -> Result<u32> {
     let binary = agent_doc_controller_io::project_controller::current_binary_identity()?.path;
+    let _request = agent_doc_queue_io::queue_edit_owner::publish_queue_maintenance_request(
+        file,
+        admitted_authority_hash,
+        commit_if_mutated,
+    )?;
     let token = new_background_queue_maintenance_token();
     // Claim before process creation. Concurrent admissions race in one SQLite
     // statement, so only the winner launches a child at all. The unique token
@@ -386,6 +391,13 @@ impl BackgroundQueueMaintenanceLease {
     fn mark_completed(&mut self) {
         self.completed = true;
     }
+
+    fn complete_request(
+        &mut self,
+        request: &agent_doc_queue_io::queue_edit_owner::QueueMaintenanceRequest,
+    ) -> Result<bool> {
+        self._guard.complete_queue_maintenance_request(request)
+    }
 }
 
 impl agent_doc_preflight_io::PendingMaintenanceEffectFence for BackgroundQueueMaintenanceLease {
@@ -409,6 +421,82 @@ impl Drop for BackgroundQueueMaintenanceLease {
     }
 }
 
+struct BackgroundRequestEffectFence<'a> {
+    lease: &'a BackgroundQueueMaintenanceLease,
+    request: &'a agent_doc_queue_io::queue_edit_owner::QueueMaintenanceRequest,
+    expected_authority_hash: std::sync::Mutex<String>,
+}
+
+impl<'a> BackgroundRequestEffectFence<'a> {
+    fn new(
+        lease: &'a BackgroundQueueMaintenanceLease,
+        request: &'a agent_doc_queue_io::queue_edit_owner::QueueMaintenanceRequest,
+    ) -> Self {
+        Self {
+            lease,
+            request,
+            expected_authority_hash: std::sync::Mutex::new(request.admitted_authority_hash.clone()),
+        }
+    }
+
+    fn current_request_is_exact(&self, file: &Path) -> Result<bool> {
+        Ok(
+            agent_doc_queue_io::queue_edit_owner::load_queue_maintenance_request(file)?
+                .is_some_and(|current| current == *self.request),
+        )
+    }
+
+    fn fence_effect(&self, file: &Path) -> Result<()> {
+        agent_doc_preflight_io::PendingMaintenanceEffectFence::check(self, file)
+    }
+}
+
+impl agent_doc_preflight_io::PendingMaintenanceEffectFence for BackgroundRequestEffectFence<'_> {
+    fn check(&self, file: &Path) -> Result<()> {
+        self.lease.fence_effect(file)?;
+        anyhow::ensure!(
+            self.current_request_is_exact(file)?,
+            "background queue maintenance request was superseded"
+        );
+        let observed = agent_doc_document_realtime_io::try_resolve_current_document_with_source(
+            file,
+            "background_queue_maintenance_effect_fence",
+        )?
+        .into_content();
+        let observed_hash = agent_doc_hash::content_hash(&observed);
+        let expected = self.expected_authority_hash.lock().unwrap().clone();
+        anyhow::ensure!(
+            observed_hash == expected,
+            "background queue maintenance admitted authority was superseded: expected={expected} observed={observed_hash}"
+        );
+        Ok(())
+    }
+
+    fn record_applied_content(&self, file: &Path, content: &str) -> Result<()> {
+        self.lease.fence_effect(file)?;
+        anyhow::ensure!(
+            self.current_request_is_exact(file)?,
+            "background queue maintenance request was superseded"
+        );
+        let target_hash = agent_doc_hash::content_hash(content);
+        let observed = agent_doc_document_realtime_io::try_resolve_current_document_with_source(
+            file,
+            "background_queue_maintenance_applied_cut",
+        )?
+        .into_content();
+        anyhow::ensure!(
+            agent_doc_hash::content_hash(&observed) == target_hash,
+            "background queue maintenance applied cut was superseded before receipt"
+        );
+        *self.expected_authority_hash.lock().unwrap() = target_hash;
+        Ok(())
+    }
+
+    fn expected_authority_hash(&self) -> Option<String> {
+        Some(self.expected_authority_hash.lock().unwrap().clone())
+    }
+}
+
 /// Hidden child-process entrypoint for comprehensive queue reconciliation.
 ///
 /// The queue mutation lease coalesces overlapping admissions: a worker that
@@ -427,18 +515,16 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
             &token,
             std::process::id(),
         )?;
+        let content = std::fs::read_to_string(file)?;
+        agent_doc_queue_io::queue_edit_owner::publish_queue_maintenance_request(
+            file,
+            &agent_doc_hash::content_hash(&content),
+            commit_if_mutated,
+        )?;
         token
     } else {
         std::env::var(BACKGROUND_QUEUE_MAINTENANCE_TOKEN_ENV)
             .context("background queue maintenance reservation token is missing")?
-    };
-    let admitted_authority_hash = if cfg!(test) {
-        None
-    } else {
-        Some(
-            std::env::var(BACKGROUND_QUEUE_MAINTENANCE_AUTHORITY_HASH_ENV)
-                .context("background queue maintenance admitted authority hash is missing")?,
-        )
     };
     let Some(mut queue_mutation) = BackgroundQueueMaintenanceLease::adopt_reserved(file, &token)?
     else {
@@ -455,137 +541,105 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
         // durable adoption but before any maintenance success/effect.
         std::process::exit(91);
     }
-    let result = (|| -> Result<()> {
-        if let Some(delay) = std::env::var(TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS_ENV)
-            .ok()
-            .and_then(|raw| raw.trim().parse::<u64>().ok())
-            .filter(|delay| *delay > 0)
-        {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "pending_maintenance_background_test_delay file={} delay_ms={delay}",
-                    file.display(),
-                ),
-            );
-            std::thread::sleep(std::time::Duration::from_millis(delay));
-        }
-        if !queue_mutation.refresh_owned()? {
-            eprintln!(
-                "[preflight] background maintenance reservation was superseded for {} (child_pid={})",
-                file.display(),
-                std::process::id(),
-            );
+    loop {
+        let Some(request) =
+            agent_doc_queue_io::queue_edit_owner::load_queue_maintenance_request(file)?
+        else {
+            queue_mutation.mark_completed();
             return Ok(());
-        }
-        let admitted_content = if let Some(expected) = admitted_authority_hash.as_deref() {
-            let observed =
+        };
+        let effect_fence = BackgroundRequestEffectFence::new(&queue_mutation, &request);
+        let result = (|| -> Result<()> {
+            effect_fence.fence_effect(file)?;
+            if let Some(delay) = std::env::var(TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS_ENV)
+                .ok()
+                .and_then(|raw| raw.trim().parse::<u64>().ok())
+                .filter(|delay| *delay > 0)
+            {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "pending_maintenance_background_test_delay file={} delay_ms={delay}",
+                        file.display(),
+                    ),
+                );
+                std::thread::sleep(std::time::Duration::from_millis(delay));
+            }
+            effect_fence.fence_effect(file)?;
+            let admitted_content =
                 agent_doc_document_realtime_io::try_resolve_current_document_with_source(
                     file,
                     "background_queue_maintenance_admitted_cut",
                 )?
                 .into_content();
-            let observed_hash = agent_doc_hash::content_hash(&observed);
-            if observed_hash != expected {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "queue_maintenance_background_superseded_authority file={} expected={} observed={observed_hash}",
-                        file.display(),
-                        expected,
-                    ),
-                );
-                return Ok(());
-            }
-            Some(observed)
-        } else {
-            None
-        };
-        let pending_report = match agent_doc_preflight_io::run_pending_maintenance_fenced(
-            file,
-            &PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
-            &queue_mutation,
-            queue_mutation.apply_guard(),
-        ) {
-            Ok(report) => report,
-            Err(error) if !queue_mutation.refresh_owned()? => {
-                eprintln!(
-                    "[preflight] background pending maintenance stopped after lease loss for {}: {error:#}",
-                    file.display(),
-                );
-                return Ok(());
-            }
-            Err(error) => return Err(error),
-        };
-        queue_mutation.fence_effect(file)?;
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "pending_maintenance_background_completed file={} reordered={} backlog_gated={} review_count={} todo_signals={}",
-                file.display(),
-                pending_report.reordered,
-                pending_report.backlog_gated_count,
-                pending_report.review_count,
-                pending_report.todo_signals.len(),
-            ),
-        );
-        if std::env::var_os(TEST_BACKGROUND_MAINTENANCE_PANIC_AFTER_EFFECT_ENV).is_some() {
-            panic!("injected background maintenance panic after pending effect");
-        }
-        queue_mutation.fence_effect(file)?;
-        let queue_authority_hash = if let Some(admitted_content) = admitted_content.as_deref() {
-            let current = agent_doc_document_realtime_io::try_resolve_current_document_with_source(
+            let pending_report = match agent_doc_preflight_io::run_pending_maintenance_fenced(
                 file,
-                "background_queue_maintenance_after_pending",
-            )?
-            .into_content();
-            if agent_doc_queue::queue_head_entry::exchange_component_text(admitted_content)
-                != agent_doc_queue::queue_head_entry::exchange_component_text(&current)
-            {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "queue_maintenance_background_superseded_authority file={} reason=exchange_advanced_during_pending",
+                &admitted_content,
+                &PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                &effect_fence,
+                queue_mutation.apply_guard(),
+            ) {
+                Ok(report) => report,
+                Err(error) if !queue_mutation.refresh_owned()? => {
+                    eprintln!(
+                        "[preflight] background pending maintenance stopped after lease loss for {}: {error:#}",
                         file.display(),
-                    ),
-                );
-                return Ok(());
+                    );
+                    return Ok(());
+                }
+                Err(error) => return Err(error),
+            };
+            effect_fence.fence_effect(file)?;
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "pending_maintenance_background_completed file={} reordered={} backlog_gated={} review_count={} todo_signals={}",
+                    file.display(),
+                    pending_report.reordered,
+                    pending_report.backlog_gated_count,
+                    pending_report.review_count,
+                    pending_report.todo_signals.len(),
+                ),
+            );
+            if std::env::var_os(TEST_BACKGROUND_MAINTENANCE_PANIC_AFTER_EFFECT_ENV).is_some() {
+                panic!("injected background maintenance panic after pending effect");
             }
-            Some(agent_doc_hash::content_hash(&current))
-        } else {
-            None
-        };
-        let outcome = match queue_authority_hash.as_deref() {
-            Some(expected) => {
-                agent_doc_preflight_io::run_queue_maintenance_for_admitted_authority_under_apply_guard(
-                    file,
-                    None,
-                    expected,
-                    queue_mutation.apply_guard(),
+            effect_fence.fence_effect(file)?;
+            let queue_authority_hash =
+                agent_doc_preflight_io::PendingMaintenanceEffectFence::expected_authority_hash(
+                    &effect_fence,
                 )
-            }
-            None => agent_doc_preflight_io::run_queue_maintenance_under_apply_guard(
+                .context("background maintenance fence lost its authority cut")?;
+            let outcome =
+            agent_doc_preflight_io::run_queue_maintenance_for_admitted_authority_under_apply_guard(
                 file,
                 None,
+                &queue_authority_hash,
                 queue_mutation.apply_guard(),
-            ),
-        };
-        match outcome {
+            );
+            match outcome {
             Ok(state) => {
-                queue_mutation.fence_effect(file)?;
+                if let Some(authoritative) = state.authoritative_content.as_deref() {
+                    agent_doc_preflight_io::PendingMaintenanceEffectFence::record_applied_content(
+                        &effect_fence,
+                        file,
+                        authoritative,
+                    )?;
+                }
+                effect_fence.fence_effect(file)?;
                 agent_doc_cycle_state_io::record_queue_mirrored_ids_or_warn(
                     file,
                     &state.mirrored_queue_ids,
                     "background_queue_maintenance",
                 );
-                let committed = match commit_if_mutated {
-                    true => match queue_mutation
+                let committed = match request.commit_if_mutated {
+                    true => match effect_fence
                         .fence_effect(file)
                         .and_then(|()| agent_doc_commit_io::commit(file))
                     {
                         Ok(committed) => committed,
                         Err(error) => {
-                            queue_mutation.fence_effect(file)?;
+                            effect_fence.fence_effect(file)?;
                             agent_doc_ops_log_io::log_op(
                                 file,
                                 &format!(
@@ -599,7 +653,7 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
                     },
                     false => false,
                 };
-                queue_mutation.fence_effect(file)?;
+                effect_fence.fence_effect(file)?;
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
@@ -617,7 +671,7 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
                     .downcast_ref::<agent_doc_preflight_io::QueueMaintenanceAuthoritySuperseded>()
                     .is_some() =>
             {
-                queue_mutation.fence_effect(file)?;
+                effect_fence.fence_effect(file)?;
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
@@ -629,7 +683,7 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
                 Ok(())
             }
             Err(error) => {
-                queue_mutation.fence_effect(file)?;
+                effect_fence.fence_effect(file)?;
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
@@ -641,11 +695,36 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
                 Err(error)
             }
         }
-    })();
-    if result.is_ok() {
-        queue_mutation.mark_completed();
+        })();
+
+        match result {
+            Ok(()) => {
+                if queue_mutation.complete_request(&request)? {
+                    queue_mutation.mark_completed();
+                    return Ok(());
+                }
+                // A newer admitted generation arrived while this one ran. The
+                // incumbent retains the flock/lease and immediately owns it.
+            }
+            Err(error) => {
+                let current =
+                    agent_doc_queue_io::queue_edit_owner::load_queue_maintenance_request(file)?;
+                if current.as_ref().is_some_and(|current| current != &request) {
+                    continue;
+                }
+                if error.to_string().contains("authority was superseded")
+                    || error.to_string().contains("request was superseded")
+                {
+                    if queue_mutation.complete_request(&request)? {
+                        queue_mutation.mark_completed();
+                        return Ok(());
+                    }
+                    continue;
+                }
+                return Err(error);
+            }
+        }
     }
-    result
 }
 
 /// Run the preflight sequence for a session document.

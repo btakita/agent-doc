@@ -22125,7 +22125,7 @@ mod tests {
             agent_doc_session_actor_io::record_session_start_direct(
                 &doc,
                 "session-jbr",
-                "%52",
+                "%999999",
                 "@1",
                 1,
             )
@@ -22133,7 +22133,7 @@ mod tests {
             agent_doc_session_actor_io::transition_state_direct(
                 &doc,
                 "session-jbr",
-                "%52",
+                "%999999",
                 Some(1),
                 agent_doc_controller::actor::ActorState::Ready,
                 "supervisor",
@@ -22169,7 +22169,7 @@ mod tests {
                 command: "dispatch".to_string(),
                 file: Some(doc.clone()),
                 session_id: Some("session-jbr".to_string()),
-                pane_id: Some("%52".to_string()),
+                pane_id: Some("%999999".to_string()),
                 window_id: None,
                 generation: Some(1),
                 state: None,
@@ -22205,7 +22205,10 @@ mod tests {
         let (recoverable, recoverable_ops_log) = paused_dispatch_error(
             "churn-stop: do[#c2b6] operator-verify head re-injected by stale supervisor pid1368698 (pre-0.34.0); needs operator recycle, not agent drain",
         );
-        assert!(recoverable.contains("failed_stage=queue_paused"));
+        assert!(
+            recoverable.contains("failed_stage=queue_paused"),
+            "stale-supervisor pause did not reach queue_paused: {recoverable}"
+        );
         assert!(
             recoverable.contains(
                 agent_doc_controller::dispatch::DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER

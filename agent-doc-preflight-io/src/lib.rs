@@ -2294,11 +2294,24 @@ pub fn run_pending_maintenance_under_apply_guard(
         write_effects,
         None,
         Some(apply_guard),
+        None,
     )
 }
 
 pub trait PendingMaintenanceEffectFence {
     fn check(&self, file: &Path) -> Result<()>;
+
+    /// Record and verify the exact authority cut produced by this owner. The
+    /// default keeps ordinary foreground callers source-compatible; detached
+    /// admitted-cut owners override it so later effects fence against their
+    /// own proven successor rather than the stale admission hash.
+    fn record_applied_content(&self, _file: &Path, _content: &str) -> Result<()> {
+        Ok(())
+    }
+
+    fn expected_authority_hash(&self) -> Option<String> {
+        None
+    }
 }
 
 impl<F> PendingMaintenanceEffectFence for F
@@ -2316,6 +2329,7 @@ where
 /// removing worktrees, archiving done items, or converging document state.
 pub fn run_pending_maintenance_fenced(
     file: &Path,
+    admitted_content: &str,
     write_effects: &dyn PreflightMaintenanceWriteEffects,
     effect_fence: &dyn PendingMaintenanceEffectFence,
     apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
@@ -2327,6 +2341,7 @@ pub fn run_pending_maintenance_fenced(
         write_effects,
         Some(effect_fence),
         Some(apply_guard),
+        Some(admitted_content),
     )
 }
 
@@ -2354,6 +2369,7 @@ pub fn run_pending_maintenance_force_disk_under_apply_guard(
         write_effects,
         None,
         Some(apply_guard),
+        None,
     )
 }
 
@@ -2372,6 +2388,7 @@ pub fn inspect_pending_maintenance(
             persist: false,
         },
         write_effects,
+        None,
         None,
         None,
     )
@@ -2411,10 +2428,14 @@ fn run_pending_maintenance_with_options(
     write_effects: &dyn PreflightMaintenanceWriteEffects,
     effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
     apply_guard: Option<&agent_doc_queue_io::queue_edit_owner::QueueEditGuard>,
+    admitted_content: Option<&str>,
 ) -> Result<PendingMaintenanceReport> {
-    let content = match std::fs::read_to_string(file) {
-        Ok(c) => c,
-        Err(_) => return Ok(PendingMaintenanceReport::default()),
+    let content = match admitted_content {
+        Some(content) => content.to_string(),
+        None => match std::fs::read_to_string(file) {
+            Ok(c) => c,
+            Err(_) => return Ok(PendingMaintenanceReport::default()),
+        },
     };
     let components = match agent_doc_element::element::parse(&content) {
         Ok(cs) => cs,
@@ -3205,6 +3226,8 @@ fn run_pending_maintenance_with_options(
             } else {
                 return Err(err);
             }
+        } else if let Some(fence) = effect_fence {
+            fence.record_applied_content(file, &current_content)?;
         }
     }
     if options.persist

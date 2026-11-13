@@ -1201,6 +1201,10 @@ pub fn run_session_check(file: &Path, codex_final_gate: bool) -> Result<()> {
 /// exactly the self-heals the read-only `session-check` reports, through the
 /// same check, then report its terminal status. Rerun `session-check` after.
 pub fn run_session_check_heal(file: &Path) -> Result<()> {
+    // Removed-claim settlement has its own completion-feedback transaction.
+    // It must finish before this repair owns QueueEditGuard so the global lock
+    // order remains completion -> queue apply and cannot ABBA with reporters.
+    agent_doc_session_check_io::midturn_steering::apply_pending_claim_cancellations(file)?;
     let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let session_effects =
         agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(file, &apply_guard)?;
@@ -1209,8 +1213,8 @@ pub fn run_session_check_heal(file: &Path) -> Result<()> {
         &session_effects,
         &apply_guard,
     )?;
-    // The applying twin of `run_session_check`'s steering block: a claimed
-    // queue-row cancellation the status check deferred is applied here.
+    // The applying twin advances the report only after the cancellation
+    // transaction above and the remaining guarded self-heals both succeeded.
     agent_doc_session_check_io::midturn_steering::emit_closeout_steering(
         file,
         &mut std::io::stdout().lock(),

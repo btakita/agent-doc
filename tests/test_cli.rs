@@ -659,6 +659,157 @@ fn simultaneous_preflights_coalesce_to_one_background_maintenance_body() {
 }
 
 #[test]
+fn newer_admission_coalesces_durably_and_incumbent_applies_latest_cut_once() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let first = concat!(
+        "---\nagent_doc_session: latest-request-test\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\n---\n\n",
+        "<!-- agent:exchange -->\n### Re: prior — gpt-5\n\nDone.\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n",
+        "<!-- agent:backlog priority queue -->\n- first legacy item\n<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, first).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let first_output = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .env(
+            "AGENT_DOC_TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS",
+            "750",
+        )
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        first_output.status.success(),
+        "first admission failed: {}",
+        String::from_utf8_lossy(&first_output.stderr),
+    );
+    let ops = tmp.path().join(".agent-doc/logs/ops.log");
+    let delay_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !fs::read_to_string(&ops)
+        .unwrap_or_default()
+        .contains("pending_maintenance_background_test_delay")
+    {
+        assert!(std::time::Instant::now() < delay_deadline);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    let second = first.replace("first legacy item", "second admitted legacy item");
+    fs::write(&doc, &second).unwrap();
+    let second_output = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .env(
+            "AGENT_DOC_TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS",
+            "750",
+        )
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        second_output.status.success(),
+        "coalesced admission failed: {}",
+        String::from_utf8_lossy(&second_output.stderr),
+    );
+    assert!(
+        fs::read_to_string(&doc)
+            .unwrap()
+            .contains("- second admitted legacy item"),
+        "the stale generation mutated the newer cut before handoff",
+    );
+
+    let completion_deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        let current_ops = fs::read_to_string(&ops).unwrap_or_default();
+        if current_ops
+            .matches("pending_maintenance_background_completed")
+            .count()
+            == 1
+            && !agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_pending(&doc)
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < completion_deadline,
+            "latest generation never completed: {current_ops}",
+        );
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+    let converged = fs::read_to_string(&doc).unwrap();
+    assert!(
+        converged.contains("second admitted legacy item") && converged.contains("- [ ] [#"),
+        "latest admitted cut was not maintained: {converged}",
+    );
+    assert!(!converged.contains("first legacy item"), "{converged}");
+    let final_ops = fs::read_to_string(&ops).unwrap_or_default();
+    assert_eq!(
+        final_ops
+            .matches("pending_maintenance_background_completed")
+            .count(),
+        1,
+        "only the latest generation may publish completion: {final_ops}",
+    );
+}
+
+#[test]
+fn non_exchange_authority_drift_supersedes_stale_pending_effects() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let admitted = concat!(
+        "---\nagent_doc_session: full-authority-fence-test\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\n---\n\n",
+        "<!-- agent:exchange -->\n### Re: prior — gpt-5\n\nDone.\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n",
+        "<!-- agent:backlog priority queue -->\n- stale legacy item\n<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, admitted).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let output = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .env(
+            "AGENT_DOC_TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS",
+            "750",
+        )
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let ops = tmp.path().join(".agent-doc/logs/ops.log");
+    let delay_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !fs::read_to_string(&ops)
+        .unwrap_or_default()
+        .contains("pending_maintenance_background_test_delay")
+    {
+        assert!(std::time::Instant::now() < delay_deadline);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    // Exchange is unchanged: only full-authority fencing can detect this edit.
+    let edited = admitted.replace("stale legacy item", "operator added newer backlog work");
+    fs::write(&doc, &edited).unwrap();
+    let settle_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_pending(&doc) {
+        assert!(std::time::Instant::now() < settle_deadline);
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+    assert_eq!(
+        fs::read_to_string(&doc).unwrap(),
+        edited,
+        "stale admitted maintenance rewrote post-admission backlog state",
+    );
+    let final_ops = fs::read_to_string(&ops).unwrap_or_default();
+    assert_eq!(
+        final_ops
+            .matches("pending_maintenance_background_completed")
+            .count(),
+        0,
+        "a stale generation published completion: {final_ops}",
+    );
+}
+
+#[test]
 fn crashed_worker_is_visible_and_promptly_redispatched_without_ttl_wait() {
     let tmp = tempfile::TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
@@ -809,7 +960,8 @@ fn panic_after_background_effect_retains_incomplete_attempt_until_successor_comp
         String::from_utf8_lossy(&check.stderr),
     );
     assert!(
-        check_text.contains("queue maintenance attempt is incomplete")
+        check_text.contains("queue maintenance")
+            && check_text.contains("[session-check] INTERRUPTED")
             && !check_text.contains("[session-check] ok"),
         "session-check falsely terminalized a panicked attempt: {check_text}",
     );

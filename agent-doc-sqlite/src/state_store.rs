@@ -2687,6 +2687,78 @@ pub fn upsert_project_runtime_state_in_db(
     Ok(())
 }
 
+/// Publish a latest-wins runtime request and return its durable generation.
+/// Identical payloads coalesce without advancing the generation; a changed
+/// payload advances it atomically in the same statement.
+pub fn upsert_latest_project_runtime_request_in_db(
+    conn: &Connection,
+    state_key: &str,
+    payload: &str,
+) -> Result<u64> {
+    let generation: i64 = conn.query_row(
+        "INSERT INTO project_runtime_state (state_key, payload, updated_at_ms) \
+         VALUES (?1, ?2, 1) \
+         ON CONFLICT(state_key) DO UPDATE SET \
+           payload = excluded.payload, \
+           updated_at_ms = CASE \
+             WHEN project_runtime_state.payload = excluded.payload \
+             THEN project_runtime_state.updated_at_ms \
+             ELSE project_runtime_state.updated_at_ms + 1 \
+           END \
+         RETURNING updated_at_ms",
+        params![state_key, payload],
+        |row| row.get(0),
+    )?;
+    u64::try_from(generation).context("project runtime request generation became negative")
+}
+
+pub fn load_project_runtime_state_with_generation_from_db(
+    conn: &Connection,
+    state_key: &str,
+) -> Result<Option<(String, u64)>> {
+    conn.query_row(
+        "SELECT payload, updated_at_ms FROM project_runtime_state WHERE state_key = ?1",
+        params![state_key],
+        |row| {
+            let generation: i64 = row.get(1)?;
+            Ok((row.get(0)?, u64::try_from(generation).unwrap_or_default()))
+        },
+    )
+    .optional()
+    .context("load generated project runtime state")
+}
+
+/// Atomically consume one exact runtime request and its matching coordination
+/// owner. The caller holds the corresponding OS apply lock throughout.
+pub fn consume_runtime_request_and_coordination_lease_in_db(
+    conn: &mut Connection,
+    state_key: &str,
+    payload: &str,
+    generation: u64,
+    scope_kind: &str,
+    scope_id: &str,
+    holder: &str,
+) -> Result<bool> {
+    let generation = i64::try_from(generation).context("request generation exceeds i64")?;
+    let transaction = crate::immediate_transaction(conn)?;
+    let consumed = transaction.execute(
+        "DELETE FROM project_runtime_state \
+         WHERE state_key = ?1 AND payload = ?2 AND updated_at_ms = ?3",
+        params![state_key, payload, generation],
+    )? > 0;
+    if !consumed {
+        transaction.rollback()?;
+        return Ok(false);
+    }
+    transaction.execute(
+        "DELETE FROM coordination_leases \
+         WHERE scope_kind = ?1 AND scope_id = ?2 AND holder = ?3",
+        params![scope_kind, scope_id, holder],
+    )?;
+    transaction.commit()?;
+    Ok(true)
+}
+
 /// Monotonically raise a numeric project-runtime marker in one write statement.
 ///
 /// Callers that read a marker in a deferred transaction and then upgrade that

@@ -643,14 +643,35 @@ fn ensure_closeout_lease_still_held(owner: Option<&CloseoutOwnerGuard>) -> Resul
 }
 
 fn ensure_active_closeout_fence(
+    file: &Path,
     owner: Option<&CloseoutOwnerGuard>,
     outer_fence: Option<&agent_doc_controller_io::project_controller::CloseoutOwnerCapability>,
 ) -> Result<()> {
     ensure_closeout_lease_still_held(owner)?;
     if let Some(fence) = outer_fence {
+        fence.ensure_protects(file)?;
         fence.ensure_still_held()?;
     }
     Ok(())
+}
+
+struct SiblingCloseoutFence<'a> {
+    capability: &'a agent_doc_controller_io::project_controller::CloseoutOwnerCapability,
+}
+
+impl agent_doc_git_io::transaction::CommitTransactionFence for SiblingCloseoutFence<'_> {
+    fn ensure(
+        &self,
+        target: &Path,
+        phase: agent_doc_git_io::transaction::CommitFencePhase,
+    ) -> Result<()> {
+        self.capability.ensure_git_transaction_boundary(
+            target,
+            phase == agent_doc_git_io::transaction::CommitFencePhase::BeforeRefUpdate,
+        )
+    }
+
+    fn ref_updated(&self, _target: &Path) {}
 }
 
 /// `#netadv3` F4: one owner id per (process, thread, role).
@@ -807,7 +828,7 @@ fn claim_foreground_closeout_owner(
     role: WriteCloseoutOwnerRole,
 ) -> Result<Option<CloseoutOwnerGuard>> {
     Ok(match claim_closeout_owner(file, role, None)? {
-        CloseoutOwnerClaim::Held(guard) => Some(guard),
+        CloseoutOwnerClaim::Held(guard) => Some(*guard),
         CloseoutOwnerClaim::Covered | CloseoutOwnerClaim::CycleSuperseded => None,
     })
 }
@@ -817,7 +838,7 @@ fn claim_foreground_closeout_owner(
 /// while a superseded cycle means there is nothing left for this caller to
 /// close out.
 enum CloseoutOwnerClaim {
-    Held(CloseoutOwnerGuard),
+    Held(Box<CloseoutOwnerGuard>),
     /// No project actor (ignored/standalone document), or an outer closeout
     /// guard on this thread already holds the lease for this document.
     Covered,
@@ -889,10 +910,10 @@ fn claim_closeout_owner(
         }
     };
     ACTIVE_FOREGROUND_CLOSEOUTS.with(|active| active.borrow_mut().push(owner_key.clone()));
-    Ok(CloseoutOwnerClaim::Held(CloseoutOwnerGuard {
+    Ok(CloseoutOwnerClaim::Held(Box::new(CloseoutOwnerGuard {
         owner_key,
         claimed,
-    }))
+    })))
 }
 
 /// The closeout lease a captured-finalize resume holds while it drives a
@@ -943,7 +964,7 @@ impl CapturedFinalizeResumeCloseoutLease {
 
 /// Outcome of [`claim_captured_finalize_resume_closeout_lease`].
 pub enum CapturedFinalizeResumeLeaseClaim {
-    Acquired(CapturedFinalizeResumeCloseoutLease),
+    Acquired(Box<CapturedFinalizeResumeCloseoutLease>),
     /// The expected cycle is no longer the open one; there is nothing for this
     /// resume to close out, and it must not mutate.
     CycleSuperseded,
@@ -966,11 +987,9 @@ pub fn claim_captured_finalize_resume_closeout_lease(
             WriteCloseoutOwnerRole::CapturedFinalizeResume,
             Some(expected_cycle_id),
         )? {
-            CloseoutOwnerClaim::Held(guard) => {
-                CapturedFinalizeResumeLeaseClaim::Acquired(CapturedFinalizeResumeCloseoutLease {
-                    guard,
-                })
-            }
+            CloseoutOwnerClaim::Held(guard) => CapturedFinalizeResumeLeaseClaim::Acquired(
+                Box::new(CapturedFinalizeResumeCloseoutLease { guard: *guard }),
+            ),
             CloseoutOwnerClaim::Covered => anyhow::bail!(
                 "captured-finalize resume attempted to reconstruct a closeout owner inside an active closeout transaction"
             ),
@@ -3301,6 +3320,7 @@ fn run_command_inner_under_apply_guard_and_closeout_fence(
     apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     closeout_fence: &agent_doc_controller_io::project_controller::CloseoutOwnerCapability,
 ) -> Result<()> {
+    closeout_fence.ensure_protects(&options.file)?;
     agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
         run_command_inner_within_pass(
             options,
@@ -3435,6 +3455,9 @@ fn run_command_inner_within_pass(
     let mut options = options;
     let file_buf = options.file.clone();
     let file = file_buf.as_path();
+    if let Some(fence) = outer_closeout_fence {
+        fence.ensure_protects(file)?;
+    }
     quote_component_markers_in_tracked_item_inputs(file, &mut options)?;
     let closeout_role = WriteCloseoutOwnerRole::from_origin(options.origin.as_deref());
     // A captured-finalize resume carries the controller-minted owner
@@ -3739,7 +3762,7 @@ fn run_command_inner_within_pass(
             }
         }
         maybe_pause_captured_resume_before_write_commit(file, outer_closeout_fence)?;
-        ensure_active_closeout_fence(_closeout_owner.as_ref(), outer_closeout_fence)?;
+        ensure_active_closeout_fence(file, _closeout_owner.as_ref(), outer_closeout_fence)?;
         return finalize_commit(
             file,
             commit_mode,
@@ -4666,16 +4689,17 @@ fn run_command_inner_within_pass(
 
     let commit_result = if write_result.is_ok() {
         maybe_pause_captured_resume_before_write_commit(file, outer_closeout_fence)?;
-        let primary = ensure_active_closeout_fence(_closeout_owner.as_ref(), outer_closeout_fence)
-            .and_then(|()| {
-                finalize_commit(
-                    file,
-                    commit_mode,
-                    options.force_disk,
-                    queue_apply_guard,
-                    outer_closeout_fence,
-                )
-            });
+        let primary =
+            ensure_active_closeout_fence(file, _closeout_owner.as_ref(), outer_closeout_fence)
+                .and_then(|()| {
+                    finalize_commit(
+                        file,
+                        commit_mode,
+                        options.force_disk,
+                        queue_apply_guard,
+                        outer_closeout_fence,
+                    )
+                });
         if primary.is_ok() && !options.commit_sibling.is_empty() {
             let pairs: Vec<(std::path::PathBuf, String)> = options
                 .commit_sibling
@@ -4683,8 +4707,16 @@ fn run_command_inner_within_pass(
                 .cloned()
                 .zip(options.commit_sibling_message.iter().cloned())
                 .collect();
-            ensure_active_closeout_fence(_closeout_owner.as_ref(), outer_closeout_fence)?;
-            agent_doc_git_io::sibling::commit_siblings_for_session_doc(file, &pairs)?;
+            ensure_active_closeout_fence(file, _closeout_owner.as_ref(), outer_closeout_fence)?;
+            let sibling_fence =
+                outer_closeout_fence.map(|capability| SiblingCloseoutFence { capability });
+            agent_doc_git_io::sibling::commit_siblings_for_session_doc_with_fence(
+                file,
+                &pairs,
+                sibling_fence.as_ref().map(|fence| {
+                    fence as &dyn agent_doc_git_io::transaction::CommitTransactionFence
+                }),
+            )?;
         }
         primary
     } else {

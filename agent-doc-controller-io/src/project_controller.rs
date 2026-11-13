@@ -16688,6 +16688,7 @@ mod tests {
             owner: Some(agent_doc_state_backbone::CloseoutOwnerProjection {
                 cycle_id: "cycle-dead-owner".into(),
                 owner_id: "foreground-finalize-other".into(),
+                owner_token: "gh130-owner-token".into(),
                 owner_pid,
                 role: "foreground_finalize".into(),
                 claimed_secs: now,

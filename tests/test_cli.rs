@@ -14252,7 +14252,7 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
             )
             && write_runtime.contains("self.guard.claimed.capability()")
             && write_runtime.contains(
-                "ensure_active_closeout_fence(_closeout_owner.as_ref(), outer_closeout_fence)?;"
+                "ensure_active_closeout_fence(file, _closeout_owner.as_ref(), outer_closeout_fence)?;"
             )
             && !closeout_runtime.contains("closeout_owner_already_held"),
         "captured-finalize session recovery must carry the typed closeout lease through the nested applying adapter instead of reverse-claiming a second owner"

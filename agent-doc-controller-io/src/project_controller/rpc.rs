@@ -7823,6 +7823,7 @@ pub struct CloseoutOwnerCapability {
     file: PathBuf,
     cycle_id: String,
     owner_id: String,
+    owner_token: String,
     owner_pid: u32,
     role: String,
     lease_secs: u64,
@@ -7830,6 +7831,7 @@ pub struct CloseoutOwnerCapability {
     lease_lost: Arc<AtomicBool>,
     terminal_effect_in_progress: Arc<AtomicBool>,
     terminal_effect_landed: Arc<AtomicBool>,
+    commit_transaction_landed: Arc<AtomicBool>,
 }
 
 impl std::fmt::Debug for CloseoutOwnerCapability {
@@ -7839,6 +7841,7 @@ impl std::fmt::Debug for CloseoutOwnerCapability {
             .field("file", &self.file)
             .field("cycle_id", &self.cycle_id)
             .field("owner_id", &self.owner_id)
+            .field("owner_token", &"<opaque>")
             .field("owner_pid", &self.owner_pid)
             .field("role", &self.role)
             .field("lease_secs", &self.lease_secs)
@@ -7862,6 +7865,7 @@ impl CloseoutOwnerCapability {
             file: self.file.clone(),
             cycle_id: self.cycle_id.clone(),
             owner_id: self.owner_id.clone(),
+            owner_token: self.owner_token.clone(),
             owner_pid: self.owner_pid,
             role: self.role.clone(),
             lease_secs: self.lease_secs,
@@ -7869,6 +7873,7 @@ impl CloseoutOwnerCapability {
             lease_lost: self.lease_lost.clone(),
             terminal_effect_in_progress: self.terminal_effect_in_progress.clone(),
             terminal_effect_landed: self.terminal_effect_landed.clone(),
+            commit_transaction_landed: self.commit_transaction_landed.clone(),
         }
     }
 
@@ -7882,6 +7887,69 @@ impl CloseoutOwnerCapability {
 
     pub fn owner_id(&self) -> &str {
         &self.owner_id
+    }
+
+    pub fn ensure_protects(&self, file: &Path) -> Result<()> {
+        let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+        anyhow::ensure!(
+            canonical == self.file,
+            "closeout owner capability for {} cannot protect effects on {}",
+            self.file.display(),
+            canonical.display(),
+        );
+        Ok(())
+    }
+
+    /// Revalidate the opaque owner at one exact Git transaction boundary.
+    /// The test barrier deliberately lives here so loss is injected after the
+    /// commit object exists but before the ref CAS, not at an outer wrapper.
+    pub fn ensure_git_transaction_boundary(
+        &self,
+        file: &Path,
+        before_ref_update: bool,
+    ) -> Result<()> {
+        self.ensure_protects(file)?;
+        if before_ref_update
+            && std::env::var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_FILE")
+                .ok()
+                .is_some_and(|target| Path::new(&target) == self.file)
+        {
+            if let Ok(ready) = std::env::var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_READY") {
+                std::fs::write(ready, b"ready")?;
+            }
+            if let Ok(release) =
+                std::env::var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_RELEASE")
+            {
+                let started = std::time::Instant::now();
+                while !Path::new(&release).exists() {
+                    anyhow::ensure!(
+                        started.elapsed() < Duration::from_secs(30),
+                        "timed out waiting for inner closeout commit barrier release",
+                    );
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+            if std::env::var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_HELD_BY_OTHER_FILE")
+                .ok()
+                .is_some_and(|target| Path::new(&target) == self.file)
+            {
+                self.mark_lease_lost();
+            }
+        }
+        self.ensure_still_held()
+    }
+
+    /// Causal receipt set only after the exact Git ref CAS succeeds.
+    pub fn record_commit_ref_updated(&self, file: &Path) {
+        if self.ensure_protects(file).is_ok() {
+            self.commit_transaction_landed.store(true, Ordering::SeqCst);
+        }
+    }
+
+    pub fn record_terminal_promotion_landed(&self, file: &Path) -> Result<()> {
+        self.ensure_protects(file)?;
+        self.commit_transaction_landed.store(true, Ordering::SeqCst);
+        Ok(())
     }
 
     pub fn owner_pid(&self) -> u32 {
@@ -7911,6 +7979,7 @@ impl CloseoutOwnerCapability {
                 CloseoutOwnerProjection {
                     cycle_id: self.cycle_id.clone(),
                     owner_id: self.owner_id.clone(),
+                    owner_token: self.owner_token.clone(),
                     owner_pid: self.owner_pid,
                     role: self.role.clone(),
                     claimed_secs: timestamp_secs(),
@@ -7946,23 +8015,25 @@ impl CloseoutOwnerCapability {
             self.owner_id,
         );
         // The successful fenced commit itself closes the cycle and therefore
-        // makes a subsequent owner refresh answer `CycleSuperseded`. Retain
-        // that exact terminal receipt so the same transaction can finish its
-        // idempotent reap/proof work without treating its own commit as lease
-        // theft. A heartbeat-observed loss still wins above.
-        if self.terminal_effect_landed.load(Ordering::SeqCst) {
-            return Ok(());
-        }
+        // can make a subsequent owner refresh answer `CycleSuperseded`. The
+        // causal receipt permits only that outcome: we must still perform the
+        // refresh so a concurrent `HeldByOther` (or mismatched acquisition) is
+        // observed synchronously at every post-commit promotion boundary.
+        let causal_commit_landed = self.terminal_effect_landed.load(Ordering::SeqCst)
+            || self.commit_transaction_landed.load(Ordering::SeqCst);
         let outcome = self.refresh()?;
         anyhow::ensure!(
-            matches!(
-                outcome,
-                CloseoutOwnerClaimOutcome::Acquired(ref owner)
+            match &outcome {
+                CloseoutOwnerClaimOutcome::Acquired(owner)
                     if owner.cycle_id == self.cycle_id
                         && owner.owner_id == self.owner_id
+                        && owner.owner_token == self.owner_token
                         && owner.owner_pid == self.owner_pid
-                        && owner.role == self.role
-            ),
+                        && owner.role == self.role =>
+                    true,
+                CloseoutOwnerClaimOutcome::CycleSuperseded if causal_commit_landed => true,
+                _ => false,
+            },
             "closeout owner lease for cycle {} owner {} pid={} role={} was lost before the next durable effect: {outcome:?}",
             self.cycle_id,
             self.owner_id,
@@ -7983,6 +8054,8 @@ impl CloseoutOwnerCapability {
             self.cycle_id,
             self.owner_id,
         );
+        self.commit_transaction_landed
+            .store(false, Ordering::SeqCst);
         let outcome = (|| {
             self.ensure_still_held()?;
             let result = effect()?;
@@ -8062,23 +8135,26 @@ impl ClaimedCloseoutOwnerGuard {
                     Ok(CloseoutOwnerClaimOutcome::Acquired(ref owner))
                         if owner.cycle_id == heartbeat_capability.cycle_id
                             && owner.owner_id == heartbeat_capability.owner_id
+                            && owner.owner_token == heartbeat_capability.owner_token
                             && owner.owner_pid == heartbeat_capability.owner_pid
                             && owner.role == heartbeat_capability.role =>
                     {
                         lost_refreshes = 0;
                         wait = interval;
                     }
-                    Ok(_)
+                    Ok(CloseoutOwnerClaimOutcome::CycleSuperseded)
                         if heartbeat_capability
-                            .terminal_effect_in_progress
+                            .commit_transaction_landed
                             .load(Ordering::SeqCst)
                             || heartbeat_capability
                                 .terminal_effect_landed
                                 .load(Ordering::SeqCst) =>
                     {
-                        wait = Duration::from_millis(10);
+                        break;
                     }
-                    Ok(_) => {
+                    Ok(CloseoutOwnerClaimOutcome::HeldByOther(_))
+                    | Ok(CloseoutOwnerClaimOutcome::CycleSuperseded)
+                    | Ok(CloseoutOwnerClaimOutcome::Acquired(_)) => {
                         heartbeat_capability.mark_lease_lost();
                         break;
                     }
@@ -8110,10 +8186,8 @@ impl Drop for ClaimedCloseoutOwnerGuard {
             let _ = heartbeat.join();
         }
         if !self.capability.is_actorless() {
-            let _ = release_closeout_owner_for_file(
-                self.capability.file(),
-                self.capability.cycle_id(),
-                self.capability.owner_id(),
+            let _ = release_closeout_owner_for_capability(
+                &self.capability,
                 "foreground_closeout_finished",
             );
         }
@@ -8138,6 +8212,9 @@ pub enum CloseoutCycleWaitOutcome {
 struct CloseoutOwnerReleaseRequest {
     cycle_id: String,
     owner_id: String,
+    owner_token: String,
+    owner_pid: u32,
+    role: String,
     reason: String,
     released_secs: u64,
 }
@@ -8181,7 +8258,7 @@ fn ensure_closeout_test_controller(project_root: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn claim_closeout_owner_for_file(
+fn claim_closeout_owner_for_file(
     file: &Path,
     request: CloseoutOwnerClaimRequest,
 ) -> Result<CloseoutOwnerClaimOutcome> {
@@ -8244,6 +8321,7 @@ pub fn claim_closeout_owner_guard_for_file(
     let lease_lost = Arc::new(AtomicBool::new(false));
     let terminal_effect_in_progress = Arc::new(AtomicBool::new(false));
     let terminal_effect_landed = Arc::new(AtomicBool::new(false));
+    let commit_transaction_landed = Arc::new(AtomicBool::new(false));
 
     if agent_doc_project_root_io::project_root_containing(file).is_none() {
         return Ok(CloseoutOwnerGuardClaimOutcome::Acquired(
@@ -8251,6 +8329,7 @@ pub fn claim_closeout_owner_guard_for_file(
                 file: canonical_file,
                 cycle_id: expected_cycle_id.unwrap_or_else(|| "actorless".to_string()),
                 owner_id,
+                owner_token: new_closeout_owner_id("actorless-closeout-token"),
                 owner_pid,
                 role,
                 lease_secs,
@@ -8258,6 +8337,7 @@ pub fn claim_closeout_owner_guard_for_file(
                 lease_lost,
                 terminal_effect_in_progress,
                 terminal_effect_landed,
+                commit_transaction_landed,
             }),
         ));
     }
@@ -8266,6 +8346,7 @@ pub fn claim_closeout_owner_guard_for_file(
         CloseoutOwnerClaimOutcome::Acquired(owner) => {
             anyhow::ensure!(
                 owner.owner_id == owner_id
+                    && !owner.owner_token.is_empty()
                     && owner.owner_pid == owner_pid
                     && owner.role == role
                     && expected_cycle_id
@@ -8282,6 +8363,7 @@ pub fn claim_closeout_owner_guard_for_file(
                     file: canonical_file,
                     cycle_id: owner.cycle_id,
                     owner_id,
+                    owner_token: owner.owner_token,
                     owner_pid,
                     role,
                     lease_secs,
@@ -8289,6 +8371,7 @@ pub fn claim_closeout_owner_guard_for_file(
                     lease_lost,
                     terminal_effect_in_progress,
                     terminal_effect_landed,
+                    commit_transaction_landed,
                 }),
             ))
         }
@@ -8301,13 +8384,13 @@ pub fn claim_closeout_owner_guard_for_file(
     }
 }
 
-pub fn release_closeout_owner_for_file(
-    file: &Path,
-    cycle_id: &str,
-    owner_id: &str,
+fn release_closeout_owner_for_capability(
+    capability: &CloseoutOwnerCapability,
     reason: &str,
 ) -> Result<bool> {
     use super::command_plane::{CloseoutOwnerReleasePayload, build_closeout_owner_release_submit};
+    let file = capability.file();
+    capability.ensure_protects(file)?;
     let project_root = agent_doc_project_root_io::project_root_containing(file)
         .with_context(|| format!("no project root found for {}", file.display()))?;
     // `#netadv5` RTT budget: `request_controller_with_timeout` already
@@ -8319,15 +8402,22 @@ pub fn release_closeout_owner_for_file(
         .to_string_lossy()
         .to_string();
     let released_secs = timestamp_secs();
-    let command_id = format!("closeout-owner-release:{cycle_id}:{owner_id}:{released_secs}");
+    let command_id = format!(
+        "closeout-owner-release:{}:{}:{released_secs}",
+        capability.cycle_id(),
+        capability.owner_id(),
+    );
     let submit = build_closeout_owner_release_submit(
         &command_id,
         &command_id,
         0,
         CloseoutOwnerReleasePayload {
             document_path,
-            cycle_id: cycle_id.to_string(),
-            owner_id: owner_id.to_string(),
+            cycle_id: capability.cycle_id().to_string(),
+            owner_id: capability.owner_id().to_string(),
+            owner_token: capability.owner_token.clone(),
+            owner_pid: capability.owner_pid(),
+            role: capability.role().to_string(),
             reason: reason.to_string(),
             released_secs,
         },
@@ -26831,8 +26921,18 @@ fn run_closeout_owner_claim(
         );
     }
     let ordinary_outcome = current.decide_owner_claim(&claim, current_owner_alive);
-    let outcome =
+    let mut outcome =
         current.decide_owner_claim_with_authorization(&claim, current_owner_alive, &authorization);
+    if let CloseoutOwnerClaimOutcome::Acquired(owner) = &mut outcome
+        && owner.owner_token.is_empty()
+    {
+        owner.owner_token = format!(
+            "closeout-owner-token:{}:{}:{}",
+            owner.cycle_id,
+            owner.owner_id,
+            closeout_owner_event_nonce(),
+        );
+    }
     let retained_handoff = matches!(ordinary_outcome, CloseoutOwnerClaimOutcome::HeldByOther(_))
         && matches!(&outcome, CloseoutOwnerClaimOutcome::Acquired(_));
     if let CloseoutOwnerClaimOutcome::Acquired(owner) = &outcome {
@@ -26847,6 +26947,7 @@ fn run_closeout_owner_claim(
                 document_hash: document_hash.clone(),
                 cycle_id: owner.cycle_id.clone(),
                 owner_id: owner.owner_id.clone(),
+                owner_token: owner.owner_token.clone(),
                 owner_pid: owner.owner_pid,
                 role: owner.role.clone(),
                 claimed_secs: owner.claimed_secs,
@@ -26906,9 +27007,13 @@ fn run_closeout_owner_release(
             .state_projection
             .document(&document_hash)
             .filter(|document| {
-                document
-                    .closeout
-                    .owner_release_matches(&release.cycle_id, &release.owner_id)
+                document.closeout.owner_release_matches(
+                    &release.cycle_id,
+                    &release.owner_id,
+                    &release.owner_token,
+                    release.owner_pid,
+                    &release.role,
+                )
             })
             .map_or((false, None), |document| {
                 (
@@ -27171,6 +27276,9 @@ fn service_closeout_owner_release(
         CloseoutOwnerReleaseRequest {
             cycle_id: payload.cycle_id,
             owner_id: payload.owner_id,
+            owner_token: payload.owner_token,
+            owner_pid: payload.owner_pid,
+            role: payload.role,
             reason: payload.reason,
             released_secs: payload.released_secs,
         },
@@ -46192,6 +46300,35 @@ mod tests {
 
     /// `#netadv5` RTT budget for the closeout ACK lease: one claim and one
     /// release each cost exactly their budgeted serial controller round trips.
+    #[test]
+    fn closeout_owner_capability_is_bound_to_its_canonical_document() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let first = dir.path().join("first.md");
+        let second = dir.path().join("second.md");
+        std::fs::write(&first, "first\n").unwrap();
+        std::fs::write(&second, "second\n").unwrap();
+        let outcome = claim_closeout_owner_guard_for_file(
+            &first,
+            CloseoutOwnerClaimRequest {
+                expected_cycle_id: Some("actorless-cycle".into()),
+                owner_id: "actorless-owner".into(),
+                owner_pid: std::process::id(),
+                role: CLOSEOUT_OWNER_ROLE_FOREGROUND_FINALIZE.into(),
+                now_secs: timestamp_secs(),
+                lease_secs: CLOSEOUT_OWNER_LEASE_SECS,
+                allow_dead_owner_takeover: true,
+            },
+        )
+        .unwrap();
+        let CloseoutOwnerGuardClaimOutcome::Acquired(guard) = outcome else {
+            panic!("actorless closeout guard must be acquired");
+        };
+        assert!(guard.capability().ensure_protects(&first).is_ok());
+        assert!(guard.capability().ensure_protects(&second).is_err());
+    }
+
+    /// `#netadv5` RTT budget for the closeout ACK lease: one claim and one
+    /// release each cost exactly their budgeted serial controller round trips.
     #[cfg(feature = "test-support")]
     #[test]
     fn closeout_owner_claim_and_release_stay_within_round_trip_budget() {
@@ -46205,7 +46342,7 @@ mod tests {
         ensure_state_actor_for_tests(root).unwrap();
 
         let before = controller_round_trips_on_this_thread();
-        let outcome = claim_closeout_owner_for_file(
+        let outcome = claim_closeout_owner_guard_for_file(
             &doc,
             CloseoutOwnerClaimRequest {
                 expected_cycle_id: None,
@@ -46224,7 +46361,13 @@ mod tests {
         );
 
         let before = controller_round_trips_on_this_thread();
-        let released = release_closeout_owner_for_file(&doc, "cycle", "rtt-owner", "netadv5");
+        let released: Result<bool> = match outcome {
+            Ok(CloseoutOwnerGuardClaimOutcome::Acquired(guard)) => {
+                drop(guard);
+                Ok(true)
+            }
+            other => Err(anyhow::anyhow!("claim was not acquired: {other:?}")),
+        };
         let release_rtt = controller_round_trips_on_this_thread() - before;
         assert_eq!(
             release_rtt, CLOSEOUT_OWNER_RELEASE_SERIAL_ROUND_TRIPS,
@@ -66063,12 +66206,16 @@ mod tests {
             "the controller must stamp a fresh lease instead of trusting the client's stale now_secs"
         );
         assert!(matches!(
-            first,
+            &first,
             CloseoutOwnerClaimOutcome::Acquired(CloseoutOwnerProjection {
-                ref owner_id,
+                owner_id,
                 ..
             }) if owner_id == "owner-1"
         ));
+        let first_owner = match &first {
+            CloseoutOwnerClaimOutcome::Acquired(owner) => owner.clone(),
+            _ => unreachable!(),
+        };
         let second =
             handle_closeout_owner_claim(&bootstrap, &runtime, claim_request("owner-2")).unwrap();
         assert!(matches!(
@@ -66099,6 +66246,9 @@ mod tests {
                     serde_json::to_string(&CloseoutOwnerReleaseRequest {
                         cycle_id: cycle.cycle_id.clone(),
                         owner_id: "owner-1".to_string(),
+                        owner_token: first_owner.owner_token.clone(),
+                        owner_pid: first_owner.owner_pid,
+                        role: first_owner.role.clone(),
                         reason: "finished".to_string(),
                         released_secs: 11,
                     })
@@ -66296,24 +66446,25 @@ mod tests {
         let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
 
         let claim_and_release = |owner_id: &str, role: &str| {
-            assert!(matches!(
-                run_closeout_owner_claim(
-                    &bootstrap,
-                    &runtime,
-                    &doc,
-                    CloseoutOwnerClaimRequest {
-                        expected_cycle_id: Some(cycle.cycle_id.clone()),
-                        owner_id: owner_id.into(),
-                        owner_pid: std::process::id(),
-                        role: role.into(),
-                        now_secs: timestamp_secs(),
-                        lease_secs: CLOSEOUT_OWNER_LEASE_SECS,
-                        allow_dead_owner_takeover: false,
-                    },
-                )
-                .unwrap(),
-                CloseoutOwnerClaimOutcome::Acquired(_)
-            ));
+            let owner = match run_closeout_owner_claim(
+                &bootstrap,
+                &runtime,
+                &doc,
+                CloseoutOwnerClaimRequest {
+                    expected_cycle_id: Some(cycle.cycle_id.clone()),
+                    owner_id: owner_id.into(),
+                    owner_pid: std::process::id(),
+                    role: role.into(),
+                    now_secs: timestamp_secs(),
+                    lease_secs: CLOSEOUT_OWNER_LEASE_SECS,
+                    allow_dead_owner_takeover: false,
+                },
+            )
+            .unwrap()
+            {
+                CloseoutOwnerClaimOutcome::Acquired(owner) => owner,
+                other => panic!("owner claim failed: {other:?}"),
+            };
             clear_captured_finalize_wake(&runtime, &document_hash);
             assert!(
                 run_closeout_owner_release(
@@ -66323,6 +66474,9 @@ mod tests {
                     CloseoutOwnerReleaseRequest {
                         cycle_id: cycle.cycle_id.clone(),
                         owner_id: owner_id.into(),
+                        owner_token: owner.owner_token.clone(),
+                        owner_pid: owner.owner_pid,
+                        role: owner.role.clone(),
                         reason: "finished".into(),
                         released_secs: timestamp_secs(),
                     },
@@ -66389,12 +66543,16 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(matches!(claim, CloseoutOwnerClaimOutcome::Acquired(_)));
+        let claimed_owner = match claim {
+            CloseoutOwnerClaimOutcome::Acquired(owner) => owner,
+            other => panic!("owner claim failed: {other:?}"),
+        };
 
         let releaser = Arc::clone(&runtime);
         let release_bootstrap = bootstrap.clone();
         let release_doc = doc.clone();
         let release_cycle = cycle.cycle_id.clone();
+        let release_owner = claimed_owner.clone();
         let releaser = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(150));
             run_closeout_owner_release(
@@ -66404,6 +66562,9 @@ mod tests {
                 CloseoutOwnerReleaseRequest {
                     cycle_id: release_cycle,
                     owner_id: owner_id.to_string(),
+                    owner_token: release_owner.owner_token,
+                    owner_pid: release_owner.owner_pid,
+                    role: release_owner.role,
                     reason: "request_guard_dropped".to_string(),
                     released_secs: timestamp_secs(),
                 },
@@ -67354,9 +67515,13 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            first,
-            CloseoutOwnerClaimOutcome::Acquired(ref p) if p.owner_id == "owner-1"
+            &first,
+            CloseoutOwnerClaimOutcome::Acquired(p) if p.owner_id == "owner-1"
         ));
+        let first_owner = match &first {
+            CloseoutOwnerClaimOutcome::Acquired(owner) => owner.clone(),
+            _ => unreachable!(),
+        };
         let second = serde_json::from_value::<CloseoutOwnerClaimOutcome>(
             dispatch_command_plane_submit(&bootstrap, runtime.as_ref(), &claim_submit("owner-2"))
                 .unwrap(),
@@ -67367,6 +67532,31 @@ mod tests {
             CloseoutOwnerClaimOutcome::HeldByOther(ref p) if p.owner_id == "owner-1"
         ));
 
+        let forged_release = build_closeout_owner_release_submit(
+            "closeout-owner-release-forged",
+            "closeout-owner-release-forged",
+            0,
+            CloseoutOwnerReleasePayload {
+                document_path: doc.to_string_lossy().to_string(),
+                cycle_id: cycle.cycle_id.clone(),
+                owner_id: "owner-1".to_string(),
+                owner_token: "forged-token".to_string(),
+                owner_pid: first_owner.owner_pid,
+                role: first_owner.role.clone(),
+                reason: "forged".to_string(),
+                released_secs: 10,
+            },
+        )
+        .unwrap();
+        let forged_released = serde_json::from_value::<bool>(
+            dispatch_command_plane_submit(&bootstrap, runtime.as_ref(), &forged_release).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            !forged_released,
+            "a reconstructed scalar release must not clear the owner"
+        );
+
         // Release owner-1 over the command plane, then owner-2 can claim.
         let release = build_closeout_owner_release_submit(
             "closeout-owner-release",
@@ -67376,6 +67566,9 @@ mod tests {
                 document_path: doc.to_string_lossy().to_string(),
                 cycle_id: cycle.cycle_id.clone(),
                 owner_id: "owner-1".to_string(),
+                owner_token: first_owner.owner_token,
+                owner_pid: first_owner.owner_pid,
+                role: first_owner.role,
                 reason: "finished".to_string(),
                 released_secs: 11,
             },

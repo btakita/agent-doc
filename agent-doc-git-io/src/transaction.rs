@@ -88,6 +88,20 @@ pub enum CommitTransactionError {
     Fatal(anyhow::Error),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommitFencePhase {
+    BeforeStage,
+    BeforeRefUpdate,
+}
+
+/// Borrowed authority checked at the actual private-index transaction
+/// boundaries. Implementations are minted by the owning coordination layer;
+/// git-io only invokes the proof and never reconstructs it from scalar ids.
+pub trait CommitTransactionFence {
+    fn ensure(&self, target: &Path, phase: CommitFencePhase) -> anyhow::Result<()>;
+    fn ref_updated(&self, target: &Path);
+}
+
 fn git_path_is_tracked(
     git_root: &Path,
     rel_path: &Path,
@@ -186,6 +200,29 @@ pub fn stage_and_commit_exact_paths_once(
     additional_paths: &[PathBuf],
     msg: &str,
 ) -> std::result::Result<Output, CommitTransactionError> {
+    stage_and_commit_exact_paths_once_with_fence(
+        git_root,
+        resolved,
+        snapshot_content,
+        additional_paths,
+        msg,
+        None,
+    )
+}
+
+pub fn stage_and_commit_exact_paths_once_with_fence(
+    git_root: &Path,
+    resolved: &Path,
+    snapshot_content: Option<&str>,
+    additional_paths: &[PathBuf],
+    msg: &str,
+    fence: Option<&dyn CommitTransactionFence>,
+) -> std::result::Result<Output, CommitTransactionError> {
+    if let Some(fence) = fence {
+        fence
+            .ensure(resolved, CommitFencePhase::BeforeStage)
+            .map_err(CommitTransactionError::Fatal)?;
+    }
     let (blob_hash, rel_path) = staged_blob_for_commit(git_root, resolved, snapshot_content)?;
     let mut cacheinfos = vec![format!("100644,{blob_hash},{rel_path}")];
     for path in additional_paths {
@@ -273,6 +310,11 @@ pub fn stage_and_commit_exact_paths_once(
 
     let zero_oid = "0000000000000000000000000000000000000000";
     let expected = base.as_deref().unwrap_or(zero_oid);
+    if let Some(fence) = fence {
+        fence
+            .ensure(resolved, CommitFencePhase::BeforeRefUpdate)
+            .map_err(CommitTransactionError::Fatal)?;
+    }
     let update_ref = Command::new("git")
         .current_dir(git_root)
         .args(["update-ref", "HEAD", &commit_oid, expected])
@@ -284,6 +326,9 @@ pub fn stage_and_commit_exact_paths_once(
             return Err(CommitTransactionError::RetryableHeadMoved { detail });
         }
         return git_output_or_transaction_error(update_ref, "update-ref");
+    }
+    if let Some(fence) = fence {
+        fence.ref_updated(resolved);
     }
 
     // Advance only the typed transaction paths in the real index to their new

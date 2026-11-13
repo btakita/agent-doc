@@ -252,6 +252,14 @@ pub fn commit_siblings_for_session_doc(
     session_doc: &Path,
     sibling_pairs: &[(PathBuf, String)],
 ) -> Result<Vec<(PathBuf, String)>> {
+    commit_siblings_for_session_doc_with_fence(session_doc, sibling_pairs, None)
+}
+
+pub fn commit_siblings_for_session_doc_with_fence(
+    session_doc: &Path,
+    sibling_pairs: &[(PathBuf, String)],
+    fence: Option<&dyn crate::transaction::CommitTransactionFence>,
+) -> Result<Vec<(PathBuf, String)>> {
     if sibling_pairs.is_empty() {
         return Ok(Vec::new());
     }
@@ -317,6 +325,12 @@ pub fn commit_siblings_for_session_doc(
                 "--commit-sibling {} has no staged changes (git diff --cached is empty); stage files before invoking finalize",
                 sibling.display()
             );
+        }
+        if let Some(fence) = fence {
+            fence.ensure(
+                session_doc,
+                crate::transaction::CommitFencePhase::BeforeRefUpdate,
+            )?;
         }
         let sha = commit_sibling_with_trailer(&sibling_top, message, &trailer_url)?;
         eprintln!(

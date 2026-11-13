@@ -2970,7 +2970,7 @@ mod tests {
     }
 
     #[test]
-    fn captured_resume_aborts_when_outer_lease_is_lost_after_write_before_commit() {
+    fn captured_resume_aborts_on_held_by_other_inside_git_ref_update_interval() {
         let _env = agent_doc_test_support::env_lock();
         let dir = setup_project();
         let doc = dir.path().join("resume-write-lease-loss.md");
@@ -3003,16 +3003,13 @@ mod tests {
         let marker = dir.path().join("resume-closeout-before-commit.marker");
         let release = dir.path().join("resume-closeout-before-commit.release");
         unsafe {
+            std::env::set_var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_FILE", &doc);
             std::env::set_var(
-                "AGENT_DOC_TEST_CAPTURED_RESUME_CLOSEOUT_BEFORE_COMMIT_FILE",
-                &doc,
-            );
-            std::env::set_var(
-                "AGENT_DOC_TEST_CAPTURED_RESUME_CLOSEOUT_BEFORE_COMMIT_MARKER",
+                "AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_READY",
                 &marker,
             );
             std::env::set_var(
-                "AGENT_DOC_TEST_CAPTURED_RESUME_CLOSEOUT_BEFORE_COMMIT_RELEASE",
+                "AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_RELEASE",
                 &release,
             );
         }
@@ -3023,7 +3020,10 @@ mod tests {
         });
         wait_for_resume_commit_barrier(&marker);
         unsafe {
-            std::env::set_var("AGENT_DOC_TEST_CAPTURED_RESUME_FORCE_LEASE_LOST_FILE", &doc);
+            std::env::set_var(
+                "AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_HELD_BY_OTHER_FILE",
+                &doc,
+            );
         }
         std::fs::write(&release, b"release").unwrap();
         let interrupted = resume.join().unwrap();
@@ -3041,12 +3041,19 @@ mod tests {
             interrupted_state.phase,
             agent_doc_turn::CyclePhase::Committed
         );
+        let interrupted_head = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .expect("initial HEAD");
+        assert!(
+            !interrupted_head.contains(response),
+            "HeldByOther at the inner pre-update-ref fence must leave HEAD unchanged"
+        );
 
         unsafe {
-            std::env::remove_var("AGENT_DOC_TEST_CAPTURED_RESUME_CLOSEOUT_BEFORE_COMMIT_FILE");
-            std::env::remove_var("AGENT_DOC_TEST_CAPTURED_RESUME_CLOSEOUT_BEFORE_COMMIT_MARKER");
-            std::env::remove_var("AGENT_DOC_TEST_CAPTURED_RESUME_CLOSEOUT_BEFORE_COMMIT_RELEASE");
-            std::env::remove_var("AGENT_DOC_TEST_CAPTURED_RESUME_FORCE_LEASE_LOST_FILE");
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_FILE");
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_READY");
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_RELEASE");
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_HELD_BY_OTHER_FILE");
         }
         let retry_guard =
             agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
@@ -3419,7 +3426,7 @@ mod tests {
 
         // The live `respond` closeout holds the lease through the actor.
         let respond_owner = controller::new_closeout_owner_id("test-foreground-finalize");
-        let claimed = controller::claim_closeout_owner_for_file(
+        let claimed = controller::claim_closeout_owner_guard_for_file(
             &doc,
             controller::CloseoutOwnerClaimRequest {
                 expected_cycle_id: Some(cycle.cycle_id.clone()),
@@ -3436,7 +3443,10 @@ mod tests {
         )
         .unwrap();
         assert!(
-            matches!(claimed, controller::CloseoutOwnerClaimOutcome::Acquired(_)),
+            matches!(
+                &claimed,
+                controller::CloseoutOwnerGuardClaimOutcome::Acquired(_)
+            ),
             "{claimed:?}"
         );
 
@@ -3462,15 +3472,7 @@ mod tests {
             "the resume must not commit a cycle another closeout owns"
         );
 
-        assert!(
-            controller::release_closeout_owner_for_file(
-                &doc,
-                &cycle.cycle_id,
-                &respond_owner,
-                "test_foreground_closeout_finished",
-            )
-            .unwrap()
-        );
+        drop(claimed);
 
         let landed = agent_doc_repair_command_io::resume_captured_finalize(&doc, &key);
         assert!(

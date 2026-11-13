@@ -1313,7 +1313,7 @@ impl LegacyResumeRepairEffects for RuntimeLegacyResumeRepair {
                 file, cycle_id,
             )? {
                 agent_doc_write_runtime_io::CapturedFinalizeResumeLeaseClaim::Acquired(lease) => {
-                    Some(lease)
+                    Some(*lease)
                 }
                 agent_doc_write_runtime_io::CapturedFinalizeResumeLeaseClaim::CycleSuperseded => {
                     None

@@ -72,6 +72,12 @@ pub struct CloseoutOwnerReleasePayload {
     pub document_path: String,
     pub cycle_id: String,
     pub owner_id: String,
+    #[serde(default)]
+    pub owner_token: String,
+    #[serde(default)]
+    pub owner_pid: u32,
+    #[serde(default)]
+    pub role: String,
     pub reason: String,
     pub released_secs: u64,
 }

@@ -785,6 +785,8 @@ pub enum StateFact {
         document_hash: String,
         cycle_id: String,
         owner_id: String,
+        #[serde(default)]
+        owner_token: String,
         owner_pid: u32,
         role: String,
         claimed_secs: u64,
@@ -2496,6 +2498,7 @@ impl DocumentStateProjection {
             StateFact::CloseoutOwnerClaimed {
                 cycle_id,
                 owner_id,
+                owner_token,
                 owner_pid,
                 role,
                 claimed_secs,
@@ -2508,6 +2511,7 @@ impl DocumentStateProjection {
                     self.closeout.owner = Some(CloseoutOwnerProjection {
                         cycle_id: cycle_id.clone(),
                         owner_id: owner_id.clone(),
+                        owner_token: owner_token.clone(),
                         owner_pid: *owner_pid,
                         role: role.clone(),
                         claimed_secs: *claimed_secs,
@@ -4533,9 +4537,21 @@ impl CloseoutProjection {
             }
         }
 
+        let owner_token = self
+            .owner
+            .as_ref()
+            .filter(|owner| {
+                owner.cycle_id == cycle_id
+                    && owner.owner_id == request.owner_id
+                    && owner.owner_pid == request.owner_pid
+                    && owner.role == request.role
+            })
+            .map(|owner| owner.owner_token.clone())
+            .unwrap_or_default();
         CloseoutOwnerClaimOutcome::Acquired(CloseoutOwnerProjection {
             cycle_id: cycle_id.to_string(),
             owner_id: request.owner_id.clone(),
+            owner_token,
             owner_pid: request.owner_pid,
             role: request.role.clone(),
             claimed_secs: request.now_secs,
@@ -4543,10 +4559,22 @@ impl CloseoutProjection {
         })
     }
 
-    pub fn owner_release_matches(&self, cycle_id: &str, owner_id: &str) -> bool {
-        self.owner
-            .as_ref()
-            .is_some_and(|owner| owner.cycle_id == cycle_id && owner.owner_id == owner_id)
+    pub fn owner_release_matches(
+        &self,
+        cycle_id: &str,
+        owner_id: &str,
+        owner_token: &str,
+        owner_pid: u32,
+        role: &str,
+    ) -> bool {
+        self.owner.as_ref().is_some_and(|owner| {
+            owner.cycle_id == cycle_id
+                && owner.owner_id == owner_id
+                && !owner.owner_token.is_empty()
+                && owner.owner_token == owner_token
+                && owner.owner_pid == owner_pid
+                && owner.role == role
+        })
     }
 
     /// A pre-commit lifecycle fact (`ResponseCaptured`, `WriteApplied`,
@@ -4756,6 +4784,8 @@ pub struct CapturedResponseProjection {
 pub struct CloseoutOwnerProjection {
     pub cycle_id: String,
     pub owner_id: String,
+    #[serde(default)]
+    pub owner_token: String,
     pub owner_pid: u32,
     pub role: String,
     pub claimed_secs: u64,
@@ -6675,6 +6705,7 @@ mod tests {
         CloseoutOwnerProjection {
             cycle_id: cycle_id.to_string(),
             owner_id: "owner-old".to_string(),
+            owner_token: "token-old".to_string(),
             owner_pid: 4242,
             role: CLOSEOUT_ROLE_SESSION_CHECK_RECOVERY.to_string(),
             claimed_secs: claimed,
@@ -6810,6 +6841,7 @@ mod tests {
         let owner = CloseoutOwnerProjection {
             cycle_id: "cycle-1".to_string(),
             owner_id: "owner-1".to_string(),
+            owner_token: "token-1".to_string(),
             owner_pid: 1,
             role: CLOSEOUT_ROLE_SESSION_CHECK_RECOVERY.to_string(),
             claimed_secs: claimed,
@@ -6902,9 +6934,10 @@ mod tests {
             allow_dead_owner_takeover: true,
         };
         let acquired = projection.decide_owner_claim(&request, None);
-        let CloseoutOwnerClaimOutcome::Acquired(owner) = acquired else {
+        let CloseoutOwnerClaimOutcome::Acquired(mut owner) = acquired else {
             panic!("open Lazily cycle should be claimable");
         };
+        owner.owner_token = "controller-minted-token".into();
         assert_eq!(owner.cycle_id, "cycle-1");
         assert_eq!(owner.expires_secs, 40);
         projection.owner = Some(owner.clone());
@@ -6939,8 +6972,42 @@ mod tests {
             projection.decide_owner_claim(&stale_cycle, Some(false)),
             CloseoutOwnerClaimOutcome::CycleSuperseded
         );
-        assert!(projection.owner_release_matches("cycle-1", "foreground-1"));
-        assert!(!projection.owner_release_matches("cycle-1", "recovery-1"));
+        let owner = projection.owner.as_ref().unwrap();
+        assert!(projection.owner_release_matches(
+            "cycle-1",
+            "foreground-1",
+            &owner.owner_token,
+            owner.owner_pid,
+            &owner.role,
+        ));
+        assert!(!projection.owner_release_matches(
+            "cycle-1",
+            "recovery-1",
+            &owner.owner_token,
+            owner.owner_pid,
+            &owner.role,
+        ));
+        assert!(!projection.owner_release_matches(
+            "cycle-1",
+            "foreground-1",
+            "forged-token",
+            owner.owner_pid,
+            &owner.role,
+        ));
+        assert!(!projection.owner_release_matches(
+            "cycle-1",
+            "foreground-1",
+            &owner.owner_token,
+            owner.owner_pid.saturating_add(1),
+            &owner.role,
+        ));
+        assert!(!projection.owner_release_matches(
+            "cycle-1",
+            "foreground-1",
+            &owner.owner_token,
+            owner.owner_pid,
+            "forged-role",
+        ));
     }
 
     #[test]
@@ -6948,6 +7015,7 @@ mod tests {
         let owner = CloseoutOwnerProjection {
             cycle_id: "cycle-1".into(),
             owner_id: "owner-1".into(),
+            owner_token: "token-1".into(),
             owner_pid: 101,
             role: CLOSEOUT_OWNER_ROLE_CAPTURED_FINALIZE_RESUME.into(),
             claimed_secs: 10,
@@ -6995,6 +7063,7 @@ mod tests {
         let foreground = CloseoutOwnerProjection {
             cycle_id: "cycle-1".into(),
             owner_id: "foreground-1".into(),
+            owner_token: "token-foreground".into(),
             owner_pid: 101,
             role: CLOSEOUT_OWNER_ROLE_FOREGROUND_FINALIZE.into(),
             claimed_secs: 10,
@@ -7079,6 +7148,7 @@ mod tests {
             document_hash: "doc-owner".into(),
             cycle_id: "cycle-1".into(),
             owner_id: "owner-new".into(),
+            owner_token: "token-new".into(),
             owner_pid: 202,
             role: "recovery".into(),
             claimed_secs: 20,

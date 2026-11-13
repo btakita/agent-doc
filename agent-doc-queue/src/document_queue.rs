@@ -1603,9 +1603,24 @@ pub fn sync_backlog_into_queue_with_external_ids(
             // Once an operator nests or annotates one, it is no longer safe for
             // sync to replace it. Preserve those rows and count their referenced
             // ids as already represented so the mirror does not add a duplicate.
+            //
+            // `#mirrorrequeuepublished`: a struck mirror row whose item is
+            // still open is that item's queue presence (`#ackkeepsopen`), and
+            // a struck leaf is terminal (`#terminalitemstability`). Keep it in
+            // place and never replace it with a fresh live row; only a struck
+            // row whose item left the backlog is reaped with the mirror.
+            let open_ids: std::collections::HashSet<&str> =
+                ordered_ids.iter().map(String::as_str).collect();
+            let keeps = |entry: &QueueEntry| {
+                !is_canonical_top_level_backlog_mirror(entry)
+                    || (matches!(entry, QueueEntry::Completed(_))
+                        && queue_entry_reference_ids(entry)
+                            .iter()
+                            .any(|id| open_ids.contains(id.as_str())))
+            };
             let mut preserved_reference_ids: std::collections::HashSet<String> = entries
                 .iter()
-                .filter(|entry| !is_canonical_top_level_backlog_mirror(entry))
+                .filter(|entry| keeps(entry))
                 .flat_map(queue_entry_reference_ids)
                 .collect();
             preserved_reference_ids.extend(normalized_external_ids.iter().cloned());
@@ -1617,7 +1632,7 @@ pub fn sync_backlog_into_queue_with_external_ids(
             let mut rebuilt = Vec::with_capacity(entries.len().max(mirror.len()));
             let mut inserted_mirror = false;
             for entry in entries {
-                if !is_canonical_top_level_backlog_mirror(entry) {
+                if keeps(entry) {
                     rebuilt.push(entry.clone());
                 } else if !inserted_mirror {
                     rebuilt.extend(mirror.iter().cloned());

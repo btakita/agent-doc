@@ -355,17 +355,34 @@ fn project_explicit_backlog_queue_routes_scoped(
             .flat_map(document_queue::queue_entry_reference_ids)
             .collect();
         let mut seen = HashSet::new();
-        newly_materialized.extend(
-            synced
-                .iter()
-                .flat_map(document_queue::queue_entry_reference_ids)
-                .filter(|id| !before.contains(id) && seen.insert(id.clone())),
-        );
+        let minted: Vec<String> = synced
+            .iter()
+            .flat_map(document_queue::queue_entry_reference_ids)
+            .filter(|id| !before.contains(id) && seen.insert(id.clone()))
+            .collect();
+        if minted.is_empty() && mode != BacklogQueueSyncMode::Sync {
+            continue;
+        }
+        // `#mirrorrequeuepublished`: insert-only. Rendering the parsed entries
+        // back over the body dropped the `#ackstrikeopenbacklog` note of every
+        // acknowledged row (`~~do [#id]~~ — auto-struck: acknowledged; backlog
+        // #id stays open: ...`), so the one statement that the struck row is
+        // the open item's queue presence vanished the first time any other id
+        // routed into the same queue.
+        let body = target.component.content(content);
+        let new_body = match mode {
+            // `sync` owns its canonical rows and rewrites them by design.
+            BacklogQueueSyncMode::Sync => document_queue::render(&synced),
+            BacklogQueueSyncMode::Append | BacklogQueueSyncMode::Prepend => {
+                splice_mirror_rows(body, &minted, mode)
+            }
+        };
+        newly_materialized.extend(minted);
         target_queue_ids.push(target.id.clone());
         replacements.push((
             target.component.open_end,
             target.component.close_start,
-            document_queue::render(&synced),
+            new_body,
         ));
     }
 
@@ -388,6 +405,27 @@ fn project_explicit_backlog_queue_routes_scoped(
         placement_debt,
         target_queue_ids,
     })
+}
+
+/// Splice freshly minted `do [#id]` rows into a queue body at the `mode` edge,
+/// copying every existing byte through unchanged (`#queueatcreate`,
+/// `#mirrorrequeuepublished`). New rows use the canonical rendered shape.
+fn splice_mirror_rows(body: &str, ids: &[String], mode: BacklogQueueSyncMode) -> String {
+    let block = document_queue::render(
+        &ids.iter()
+            .map(|id| QueueEntry::Prompt(document_queue::QueuePrompt::new(format!("do [#{id}]"))))
+            .collect::<Vec<_>>(),
+    );
+    if body.trim().is_empty() {
+        return block;
+    }
+    match mode {
+        BacklogQueueSyncMode::Prepend => format!("{block}{body}"),
+        BacklogQueueSyncMode::Append | BacklogQueueSyncMode::Sync => {
+            let sep = if body.ends_with('\n') { "" } else { "\n" };
+            format!("{body}{sep}{block}")
+        }
+    }
 }
 
 /// Why preflight queue maintenance returned without maintaining the queue
@@ -2782,6 +2820,205 @@ priority= rank and the filed order:\n{updated}"
         assert_eq!(
             FollowUpQueuePlacement::default(),
             FollowUpQueuePlacement::Prepend
+        );
+    }
+
+    /// `#mirrorrequeuepublished` fixture: one queue holding the three shapes the
+    /// mirror has to tell apart.
+    ///
+    /// - `#published` / `#plainack`: struck by `queue consume --ack-id` while the
+    ///   backlog item stays open (`#ackstrikeopenbacklog` note). The struck row is
+    ///   the item's queue presence (`#ackkeepsopen`).
+    /// - `#finished`: struck, and the backlog item is checked off.
+    /// - `#fresh`: a genuinely new open item with no queue row at all.
+    fn ack_fixture(backlog_attrs: &str) -> String {
+        format!(
+            concat!(
+                "## Run <!-- agent:run id=\"main\" subagents priority go -->\n",
+                "- ### ~~do [#published] \u{27e6}published\u{27e7}~~ \u{2014} auto-struck: acknowledged; ",
+                "backlog #published stays open: PR 415 is unmerged\n",
+                "- ### ~~do [#plainack]~~ \u{2014} auto-struck: acknowledged; ",
+                "backlog #plainack stays open: PR 414 is unmerged and not installed\n",
+                "- ### ~~do [#finished]~~\n",
+                "- ### \u{1f4e5} do [#live]\n",
+                "<!-- /agent:run -->\n\n",
+                "## Backlog <!-- agent:backlog {} -->\n",
+                "- [ ] [#published] Fix the gate flake. PR https://github.com/o/r/pull/415 ",
+                "(stays open: PR 415 is unmerged)\n",
+                "- [ ] [#plainack] Fix the freeze. (stays open: PR 414 is unmerged and not installed)\n",
+                "- [x] [#finished] Already resolved.\n",
+                "- [ ] [#live] Still queued.\n",
+                "- [ ] [#fresh] Filed this cycle.\n",
+                "<!-- /agent:backlog -->\n",
+            ),
+            backlog_attrs
+        )
+    }
+
+    const ACK_STRUCK_LINES: [&str; 3] = [
+        "- ### ~~do [#published] \u{27e6}published\u{27e7}~~ \u{2014} auto-struck: acknowledged; backlog #published stays open: PR 415 is unmerged\n",
+        "- ### ~~do [#plainack]~~ \u{2014} auto-struck: acknowledged; backlog #plainack stays open: PR 414 is unmerged and not installed\n",
+        "- ### ~~do [#finished]~~\n",
+    ];
+
+    fn run_body(content: &str) -> String {
+        let components = element::parse(content).unwrap();
+        let queues = crate::queue_set::QueueSet::parse(content, &components).unwrap();
+        queues
+            .block("main")
+            .unwrap()
+            .component
+            .content(content)
+            .to_string()
+    }
+
+    fn assert_only_fresh_minted(body: &str, label: &str) {
+        for line in ACK_STRUCK_LINES {
+            assert!(
+                body.contains(line),
+                "{label}: struck row and its acknowledgement note must survive byte-for-byte: {line:?}\n{body}"
+            );
+        }
+        for id in ["published", "plainack", "finished", "live"] {
+            assert_eq!(
+                body.matches(&format!("[#{id}]")).count(),
+                1,
+                "{label}: #{id} keeps exactly its one existing row:\n{body}"
+            );
+        }
+        assert_eq!(
+            body.matches("do [#fresh]").count(),
+            1,
+            "{label}: the genuinely new item is mirrored once:\n{body}"
+        );
+    }
+
+    #[test]
+    fn preflight_route_never_requeues_an_acknowledged_stays_open_row() {
+        let content = ack_fixture("priority queue=\"main\"");
+        let components = element::parse(&content).unwrap();
+        let projection = project_explicit_backlog_queue_routes(&components, &content).unwrap();
+        assert_eq!(projection.newly_materialized, vec!["fresh".to_string()]);
+        let projected = projection.content.expect("the new item routes");
+        let body = run_body(&projected);
+        assert_only_fresh_minted(&body, "preflight route");
+        assert!(
+            body.ends_with("- ### \u{1f4e5} do [#live]\n- ### do [#fresh]\n"),
+            "append keeps every existing byte and adds only the new row:\n{body}"
+        );
+
+        // Idempotent: the acknowledged rows stay the items' queue presence.
+        let again =
+            project_explicit_backlog_queue_routes(&element::parse(&projected).unwrap(), &projected)
+                .unwrap();
+        assert!(again.content.is_none(), "{:?}", again.newly_materialized);
+    }
+
+    #[test]
+    fn closeout_route_never_requeues_an_acknowledged_stays_open_row() {
+        let content = ack_fixture("priority queue=\"main\"");
+        let components = element::parse(&content).unwrap();
+        let ids: Vec<String> = ["published", "plainack", "finished", "live", "fresh"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        for mode in [BacklogQueueSyncMode::Prepend, BacklogQueueSyncMode::Append] {
+            let projection =
+                project_explicit_backlog_queue_routes_for_ids(&components, &content, &ids, mode)
+                    .unwrap();
+            assert_eq!(
+                projection.newly_materialized,
+                vec!["fresh".to_string()],
+                "{mode:?}"
+            );
+            let body = run_body(&projection.content.expect("the new item routes"));
+            assert_only_fresh_minted(&body, &format!("closeout route {mode:?}"));
+            if mode == BacklogQueueSyncMode::Prepend {
+                assert!(
+                    body.starts_with("- ### do [#fresh]\n- ### ~~do [#published]"),
+                    "{body}"
+                );
+            }
+        }
+
+        // Only acknowledged / finished / already-queued ids: nothing to write.
+        let none = project_explicit_backlog_queue_routes_for_ids(
+            &components,
+            &content,
+            &ids[..4],
+            BacklogQueueSyncMode::Prepend,
+        )
+        .unwrap();
+        assert!(none.content.is_none() && none.newly_materialized.is_empty());
+    }
+
+    #[test]
+    fn same_cycle_mirror_never_requeues_an_acknowledged_stays_open_row() {
+        let content = ack_fixture("priority queue");
+        let ids: Vec<String> = ["published", "plainack", "finished", "live", "fresh"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        for placement in [
+            FollowUpQueuePlacement::Prepend,
+            FollowUpQueuePlacement::Append,
+        ] {
+            let MirrorOutcome::Mirrored(next) =
+                enqueue_actionable_ids_reporting(&content, &ids, placement, &[]).unwrap()
+            else {
+                panic!("{placement:?}: the new item must mirror");
+            };
+            assert_only_fresh_minted(&run_body(&next), &format!("same-cycle {placement:?}"));
+        }
+        assert_eq!(
+            enqueue_actionable_ids_reporting(
+                &content,
+                &ids[..4],
+                FollowUpQueuePlacement::Prepend,
+                &[],
+            )
+            .unwrap(),
+            MirrorOutcome::Refused(MirrorRefusal::AlreadyQueued),
+            "an acknowledged row is a queue presence, not a gap"
+        );
+    }
+
+    #[test]
+    fn sync_mode_keeps_an_acknowledged_stays_open_row_instead_of_reviving_it() {
+        // `queue=sync` owns canonical `do [#id]` rows. A struck canonical row of
+        // a still-open item used to be replaced by a fresh live row, reopening
+        // acknowledged work (`#terminalitemstability`).
+        let content = ack_fixture("priority queue=sync");
+        let body = run_body(&content);
+        let entries = document_queue::parse(&body).unwrap();
+        let ids: Vec<String> = ["published", "plainack", "live", "fresh"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let synced =
+            document_queue::sync_backlog_into_queue(&entries, &ids, BacklogQueueSyncMode::Sync)
+                .expect("the new item mirrors");
+        let rendered = document_queue::render(&synced);
+        assert!(
+            rendered.contains("~~do [#plainack]~~") && rendered.contains("~~do [#published]"),
+            "acknowledged rows stay struck:\n{rendered}"
+        );
+        for id in ["published", "plainack", "live"] {
+            assert_eq!(
+                rendered.matches(&format!("[#{id}]")).count(),
+                1,
+                "#{id} is not re-minted:\n{rendered}"
+            );
+        }
+        assert_eq!(rendered.matches("do [#fresh]").count(), 1, "{rendered}");
+        assert!(
+            !rendered.contains("[#finished]"),
+            "a struck row whose item is done is still reaped by sync:\n{rendered}"
+        );
+        assert!(
+            document_queue::sync_backlog_into_queue(&synced, &ids, BacklogQueueSyncMode::Sync)
+                .is_none(),
+            "sync is idempotent over acknowledged rows"
         );
     }
 }

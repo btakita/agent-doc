@@ -3150,9 +3150,10 @@ mod tests {
     }
 
     /// `#queuesyncterminalresponse`: an explicit full queue sync is a derived-state
-    /// repaint, not an instruction to reopen an answered row. The canonical
-    /// visible response child makes the terminal parent a context heading; it
-    /// must not project that parent back to `Pending`.
+    /// repaint, not an instruction to reopen an answered row.  In particular, the
+    /// canonical visible response child is context for the terminal parent; it
+    /// must not cause the parent to be treated as a live group and projected back
+    /// to `Pending`.
     #[test]
     fn sync_preserves_terminal_row_with_current_and_retained_response_children() {
         let dir = tempfile::tempdir().unwrap();
@@ -3175,10 +3176,6 @@ mod tests {
 
         let expected = content
             .replace(
-                "- ~~The response id belongs in every related response header. [#q-f07f85cbaefd] ⟦local⟧~~ — auto-struck: answered this cycle (#ftstrike); response: [#r-0648593c3bc4] ⟦addressed-at:2026-11-01T12:08:38.000Z⟧\n",
-                "- ### ~~The response id belongs in every related response header. [#q-f07f85cbaefd] ⟦local⟧~~\n",
-            )
-            .replace(
                 "  - 📥 **Response [#r-fedcba987654]:**",
                 "  - **Response [#r-fedcba987654]:**",
             )
@@ -3186,7 +3183,7 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(&doc).unwrap(),
             expected,
-            "queue sync may paint live siblings and context headings but must not reopen a terminal row"
+            "queue sync may paint live siblings but must not reopen or canonicalize a terminal row"
         );
 
         sync_with_effects(&effects, &doc).expect("response metadata repair must be idempotent");

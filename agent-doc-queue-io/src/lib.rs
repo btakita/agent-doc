@@ -24,6 +24,7 @@ pub mod queue_consumption_proof;
 pub mod queue_continuation;
 pub mod queue_edit_owner;
 pub mod queue_lineage;
+pub mod queue_maintenance_claim;
 pub mod queue_marker_audit;
 pub mod queue_schedule;
 pub mod queue_tombstone;

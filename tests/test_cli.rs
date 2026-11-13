@@ -155,6 +155,10 @@ fn seed_snapshot(root: &Path, doc: &Path, content: &str) {
 /// lease bookkeeping. Those coordination rows are expected to disappear when
 /// a superseded worker exits; every row below is an externally visible effect
 /// that the stale admitted cut must leave untouched.
+/// Durable effect state a stale maintenance worker must not touch. The latest-wins
+/// request row and the durable Lazily claim image are the worker's own
+/// coordination state (the claim records the stale epoch as superseded), not
+/// controller/ledger effects, so both are excluded.
 fn queue_maintenance_effect_digest(root: &Path) -> Vec<String> {
     let conn = agent_doc_sqlite::state_store::open_state_db(root).unwrap();
     let mut statement = conn
@@ -162,6 +166,7 @@ fn queue_maintenance_effect_digest(root: &Path) -> Vec<String> {
             "SELECT row_value FROM (\
              SELECT 'project_runtime_state|' || quote(state_key) || '|' || quote(payload) || '|' || updated_at_ms AS row_value \
                FROM project_runtime_state WHERE state_key NOT LIKE 'queue_maintenance_request:%' \
+               AND state_key NOT LIKE 'queue_maintenance_claim:%' \
              UNION ALL \
              SELECT 'document_runtime_state|' || quote(document_hash) || '|' || quote(state_kind) || '|' || quote(canonical_path) || '|' || quote(payload_json) || '|' || updated_at_ms \
                FROM document_runtime_state \

@@ -277,23 +277,41 @@ owning-crate defaults, semantics not yet reviewed), `deleted`.
 
 Progress (`#implementlazilyowned`):
 
-- agent-doc pins lazily-rs `91657b5` (EffectCasCore) through `[patch.crates-io]`
-  until the next Lazily release.
+- agent-doc pins lazily-rs through `[patch.crates-io]` until the next Lazily
+  release: `91657b5` (EffectCasCore) plus `EffectCasCore::durable_state` /
+  `EffectCasCore::hydrate` (the full-fidelity `EffectCasDurableState` image the
+  spec's "Crash recovery hydrates the retained intent ..." clause requires, with
+  optional serde).
 - Queue-maintenance document CAS: the hand-rolled refusal/re-observe loop in
   `persist_attached_queue_maintenance_with_retry` now runs through
   `queue_maintenance_effect_cas::persist_document_cut`; a retryable refusal is
   Lazily `Superseded { observed }` and the producer re-desires at the observed
   cut as the next epoch.
-- Detached-owner authority lineage: `BackgroundRequestEffectFence` reads its
-  expected authority from a Lazily in-flight attempt
-  (`AdmittedAuthorityLineage`); receipted cuts complete an epoch and supersession
-  is sticky. The queue-edit lease and exact-request checks remain.
-- Not yet done: cross-process persistence of the effect core (needed to replace
-  `BackgroundQueueMaintenanceLease` with a Lazily claim and to resume after a
-  crash), the ordered per-family `EffectPlan` that replaces
-  `QueueMaintenanceEffectFamily` barriers, the Git/controller/snapshot/worktree/
-  ops adapters, triage of the `triage` rows, and deletion of the remaining
-  bespoke orchestration.
+- Cross-process claim: `BackgroundQueueMaintenanceLease` is deleted. The
+  detached worker's ownership is `agent_doc_queue_io::queue_maintenance_claim`,
+  a durable Lazily claim persisted in `state.db`
+  (`queue_maintenance_claim:<document>` holds the `EffectCasDurableState`). Every
+  transition is load → hydrate → operate → store in one IMMEDIATE transaction.
+  A worker reconnects as the newest actor generation (fencing a crashed
+  predecessor and requeuing its retained request under the same identity);
+  each admitted request is one claimed epoch; a newer admission or a lost
+  backend lease is Lazily `Superseded`; completion consumes the exact request row
+  and coordination lease in the same transaction that receipts the epoch. The
+  flock + lease row (`QueueEditGuard`) remain the backend lock behind the claim.
+- Ordered effect plan: `QueueMaintenanceEffectFamily` /
+  `fence_queue_maintenance_effect` and the `AdmittedAuthorityLineage` are
+  deleted. Each barrier is one step of `QueueMaintenanceEffectPlan`, a Lazily
+  receipted sequence keyed by document: a step's expected authority is the
+  previous step's receipt (a receipted document cut replaces the admission),
+  the applied frontier is the plan cursor, and the first mismatch is a sticky
+  Lazily supersession that refuses every later step. The barriers stay where
+  the effects are; the plan does not yet reorder the maintenance body so the
+  document CAS is literally the first step.
+- Not yet done: the Git/controller/snapshot/worktree/ops adapters, persisting
+  per-step plan receipts for crash resume inside one request (today a resumed
+  request re-derives its idempotent effects), reordering the maintenance body
+  so the document cut is the first plan step, triage of the `triage` rows, and
+  deletion of the remaining bespoke orchestration.
 
 ## Integration order
 

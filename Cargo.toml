@@ -336,7 +336,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 libc = "0.2"
-lazily = { version = "0.61.1", features = ["ipc", "durable-sqlite"] }
+lazily = { version = "0.62.0", features = ["ipc", "durable-sqlite"] }
 tiny_http = { version = "0.12", default-features = false, features = ["ssl-rustls"] }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
 
@@ -372,12 +372,13 @@ tempfile = "3"
 # 32-core host for the shared `make check` build: cold CPU 1543s -> 1117s,
 # incremental CPU after a core-crate edit 733s -> 429s, target dir 44G -> 20G.
 # For a debugger session with locals, build with CARGO_PROFILE_DEV_DEBUG=2.
-# `#implementlazilyowned`: Lazily-owned effect CAS (`lazily::EffectCasCore`)
-# landed on lazily-rs main after the v0.61.1 crates.io release. Pin that exact
-# revision for every workspace `lazily = "0.61.1"` requirement until the next
-# Lazily release is published, then delete this patch and bump the requirement.
+# `#implementlazilyowned`: lazily 0.62.0 (crates.io) ships `EffectCasCore`; the
+# cross-process queue-maintenance claim also needs `EffectCasCore::durable_state`
+# / `hydrate` (lazily-rs e0e3b95, on top of v0.62.0). Pin that exact revision for
+# every workspace `lazily = "0.62.0"` requirement until the next Lazily release
+# is published, then delete this patch and bump the requirement.
 [patch.crates-io]
-lazily = { git = "https://github.com/lazily-hub/lazily-rs.git", rev = "91657b5998acfe7a3fa832a004a79742f2aae91a" }
+lazily = { git = "https://github.com/lazily-hub/lazily-rs.git", rev = "e0e3b9548506b683177310fadc17b90cae29b717" }
 
 [profile.dev]
 debug = "line-tables-only"

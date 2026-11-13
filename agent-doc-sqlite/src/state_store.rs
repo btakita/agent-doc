@@ -12,6 +12,7 @@
 
 use anyhow::{Context, Result};
 pub use rusqlite::Connection;
+pub use rusqlite::Transaction;
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::cell::Cell;
@@ -2808,9 +2809,12 @@ pub fn load_project_runtime_state_with_generation_from_db(
 }
 
 /// Atomically consume one exact runtime request and its matching coordination
-/// owner. The caller holds the corresponding OS apply lock throughout.
-pub fn consume_runtime_request_and_coordination_lease_in_db(
-    conn: &mut Connection,
+/// owner inside the caller's open transaction, so the caller can record the
+/// outcome (the durable queue-maintenance claim's receipt) atomically with it.
+/// A non-matching request mutates nothing. The caller holds the corresponding
+/// OS apply lock throughout.
+pub fn consume_runtime_request_and_coordination_lease_in_transaction(
+    transaction: &Transaction<'_>,
     state_key: &str,
     payload: &str,
     generation: u64,
@@ -2819,23 +2823,41 @@ pub fn consume_runtime_request_and_coordination_lease_in_db(
     holder: &str,
 ) -> Result<bool> {
     let generation = i64::try_from(generation).context("request generation exceeds i64")?;
-    let transaction = crate::immediate_transaction(conn)?;
     let consumed = transaction.execute(
         "DELETE FROM project_runtime_state \
          WHERE state_key = ?1 AND payload = ?2 AND updated_at_ms = ?3",
         params![state_key, payload, generation],
     )? > 0;
-    if !consumed {
-        transaction.rollback()?;
-        return Ok(false);
+    if consumed {
+        transaction.execute(
+            "DELETE FROM coordination_leases \
+             WHERE scope_kind = ?1 AND scope_id = ?2 AND holder = ?3",
+            params![scope_kind, scope_id, holder],
+        )?;
     }
-    transaction.execute(
-        "DELETE FROM coordination_leases \
-         WHERE scope_kind = ?1 AND scope_id = ?2 AND holder = ?3",
-        params![scope_kind, scope_id, holder],
-    )?;
+    Ok(consumed)
+}
+
+/// Read one project-runtime record, transform it, and write the result back in
+/// a single IMMEDIATE transaction. `update` receives the open transaction (so a
+/// backend comparator can run inside the same atomic boundary) and the current
+/// payload; returning `Some(payload)` stores it, `None` leaves the row as is.
+/// An error rolls back every write made through the transaction.
+pub fn update_project_runtime_state_in_transaction<T>(
+    conn: &mut Connection,
+    state_key: &str,
+    update: impl FnOnce(&Transaction<'_>, Option<String>) -> Result<(Option<String>, T)>,
+) -> Result<T> {
+    let transaction = crate::immediate_transaction(conn)?;
+    let current = load_project_runtime_state_from_db(&transaction, state_key)?;
+    let (next, value) = update(&transaction, current.clone())?;
+    if let Some(next) = next
+        && current.as_deref() != Some(next.as_str())
+    {
+        upsert_project_runtime_state_in_db(&transaction, state_key, &next, 0)?;
+    }
     transaction.commit()?;
-    Ok(true)
+    Ok(value)
 }
 
 /// Monotonically raise a numeric project-runtime marker in one write statement.

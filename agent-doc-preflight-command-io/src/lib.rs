@@ -290,23 +290,29 @@ fn detach_queue_effect(command: &mut Command) {
 #[cfg(not(unix))]
 fn detach_queue_effect(_command: &mut Command) {}
 
-struct BackgroundQueueMaintenanceLease {
+/// A detached maintenance worker's ownership of one document's queue
+/// maintenance. Ownership is the durable Lazily claim
+/// (`agent_doc_queue_io::queue_maintenance_claim`): this worker reconnects as
+/// the claim's newest actor generation, and each admitted request is one
+/// claimed Lazily epoch. The OS apply flock and coordination-lease row held by
+/// `QueueEditGuard` are the backend lock behind the claim; the heartbeat keeps
+/// that lease fresh and reports its loss to Lazily as supersession.
+struct BackgroundQueueMaintenanceClaim {
     file: PathBuf,
     token: String,
-    lost: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    claim: agent_doc_queue_io::queue_maintenance_claim::QueueMaintenanceClaim,
     stop: Option<std::sync::mpsc::Sender<()>>,
     heartbeat: Option<std::thread::JoinHandle<()>>,
-    completed: bool,
-    _guard: agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    guard: agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 }
 
-impl BackgroundQueueMaintenanceLease {
+impl BackgroundQueueMaintenanceClaim {
     fn adopt_reserved(file: &Path, token: &str) -> Result<Option<Self>> {
         // A concurrent preflight can acquire the apply flock immediately after
         // this worker's reservation probe releases it, then observe the live
         // reservation and back out. Do not abandon the sole reserved worker in
-        // that short lock-before-lease-check window. Retry only while the exact
-        // token is still ours; supersession remains an immediate stop.
+        // that short lock-before-lease-check window. Wait only while the exact
+        // token is still ours; losing the reservation is an immediate stop.
         let started = std::time::Instant::now();
         let deadline = started + std::time::Duration::from_secs(5);
         let guard = loop {
@@ -351,39 +357,53 @@ impl BackgroundQueueMaintenanceLease {
                 ),
             );
         }
+        // Holding the flock and the lease row makes this worker the only live
+        // owner; reconnecting fences any crashed predecessor's late receipts
+        // and requeues its retained request under the same effect identity.
+        let claim =
+            agent_doc_queue_io::queue_maintenance_claim::QueueMaintenanceClaim::reconnect(file)?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_maintenance_background_claim_reconnected file={} pid={} generation={} retained={}",
+                file.display(),
+                std::process::id(),
+                claim.generation(),
+                claim.retains_work().unwrap_or(true),
+            ),
+        );
         let file = file.to_path_buf();
         let heartbeat_file = file.clone();
         let heartbeat_token = token.to_string();
-        let lost = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let heartbeat_lost = std::sync::Arc::clone(&lost);
+        let heartbeat_claim = claim.clone();
         let (stop, stopped) = std::sync::mpsc::channel();
         let heartbeat = match std::thread::Builder::new()
-            .name("queue-maintenance-lease-heartbeat".to_string())
+            .name("queue-maintenance-claim-heartbeat".to_string())
             .spawn(move || loop {
                 match stopped.recv_timeout(std::time::Duration::from_secs(5)) {
                     Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                        match agent_doc_queue_io::queue_edit_owner::refresh_queue_edit_owner_lease_if_holder(
+                        let refreshed = agent_doc_queue_io::queue_edit_owner::refresh_queue_edit_owner_lease_if_holder(
                             &heartbeat_file.to_string_lossy(),
                             &heartbeat_token,
                             std::process::id(),
-                        ) {
-                            Err(error) => {
-                                heartbeat_lost.store(true, std::sync::atomic::Ordering::Release);
-                                eprintln!(
-                                    "[preflight] background maintenance lease refresh failed for {}: {error:#}",
-                                    heartbeat_file.display(),
-                                );
-                            }
-                            Ok(false) => {
-                                heartbeat_lost.store(true, std::sync::atomic::Ordering::Release);
-                                eprintln!(
-                                    "[preflight] background maintenance lease was superseded for {}",
-                                    heartbeat_file.display(),
-                                );
-                            }
-                            Ok(true) => {}
+                        );
+                        let lost = match refreshed {
+                            Ok(true) => continue,
+                            Ok(false) => "superseded".to_string(),
+                            Err(error) => format!("refresh failed: {error:#}"),
+                        };
+                        eprintln!(
+                            "[preflight] background maintenance lease {lost} for {}",
+                            heartbeat_file.display(),
+                        );
+                        if let Err(error) = heartbeat_claim.record_backend_lock_lost() {
+                            eprintln!(
+                                "[preflight] could not record lease loss on the maintenance claim for {}: {error:#}",
+                                heartbeat_file.display(),
+                            );
                         }
+                        break;
                     }
                 }
             }) {
@@ -402,61 +422,77 @@ impl BackgroundQueueMaintenanceLease {
         Ok(Some(Self {
             file,
             token: token.to_string(),
-            lost,
+            claim,
             stop: heartbeat.as_ref().map(|_| stop),
             heartbeat,
-            completed: false,
-            _guard: guard,
+            guard,
         }))
     }
 
-    fn refresh_owned(&self) -> Result<bool> {
-        if self.lost.load(std::sync::atomic::Ordering::Acquire) {
+    /// Whether this worker still owns the document's maintenance: its actor
+    /// generation is current and the backend lease still names it.
+    fn owns(&self) -> Result<bool> {
+        if self.heartbeat.is_none() {
+            // Without a heartbeat thread, keep the backend lease fresh here.
+            let _ = agent_doc_queue_io::queue_edit_owner::refresh_queue_edit_owner_lease_if_holder(
+                &self.file.to_string_lossy(),
+                &self.token,
+                std::process::id(),
+            )?;
+        }
+        let holder = agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(
+            &self.file.to_string_lossy(),
+        );
+        if !holder.is_some_and(|lease| lease.holder == self.token) {
+            self.claim.record_backend_lock_lost()?;
             return Ok(false);
         }
-        agent_doc_queue_io::queue_edit_owner::refresh_queue_edit_owner_lease_if_holder(
-            &self.file.to_string_lossy(),
-            &self.token,
-            std::process::id(),
-        )
-    }
-
-    fn fence_effect(&self, _file: &Path) -> Result<()> {
-        if !self.refresh_owned()? {
-            anyhow::bail!("background queue maintenance reservation was superseded");
-        }
-        Ok(())
+        self.claim.is_current_actor()
     }
 
     fn apply_guard(&self) -> &agent_doc_queue_io::queue_edit_owner::QueueEditGuard {
-        &self._guard
+        &self.guard
     }
 
-    fn mark_completed(&mut self) {
-        self.completed = true;
+    fn claim_request(
+        &self,
+        request: &agent_doc_queue_io::queue_edit_owner::QueueMaintenanceRequest,
+    ) -> Result<agent_doc_queue_io::queue_maintenance_claim::QueueMaintenanceClaimed> {
+        self.claim.claim_request(request)
+    }
+
+    /// Verify the claim still holds `request` and the backend lock is ours.
+    fn verify(
+        &self,
+        request: &agent_doc_queue_io::queue_edit_owner::QueueMaintenanceRequest,
+    ) -> Result<()> {
+        if !self.owns()? {
+            return Err(
+                agent_doc_queue_io::queue_maintenance_claim::QueueMaintenanceClaimSuperseded::new(
+                    "background queue maintenance reservation was superseded",
+                )
+                .into(),
+            );
+        }
+        self.claim.verify(request)
     }
 
     fn complete_request(
         &mut self,
         request: &agent_doc_queue_io::queue_edit_owner::QueueMaintenanceRequest,
     ) -> Result<bool> {
-        self._guard.complete_queue_maintenance_request(request)
+        self.claim.complete(&mut self.guard, request)
     }
 }
 
-impl agent_doc_preflight_io::PendingMaintenanceEffectFence for BackgroundQueueMaintenanceLease {
-    fn check(&self, file: &Path) -> Result<()> {
-        self.fence_effect(file)
-    }
-}
-
-impl Drop for BackgroundQueueMaintenanceLease {
+impl Drop for BackgroundQueueMaintenanceClaim {
     fn drop(&mut self) {
-        // Incomplete is the safe default. This executes during ordinary errors
-        // and panic unwinding, preserving fail-closed recovery evidence even
-        // when control never reaches the worker's result handling.
-        if !self.completed {
-            self._guard.retain_incomplete_attempt_on_drop();
+        // Unfinished claimed work keeps the coordination lease durable. This
+        // runs during ordinary errors and panic unwinding, so the incomplete
+        // attempt stays visible to session-check and recoverable by the next
+        // worker, which reconnects and resumes the retained Lazily intent.
+        if self.claim.retains_work().unwrap_or(true) {
+            self.guard.retain_incomplete_attempt_on_drop();
         }
         self.stop.take();
         if let Some(heartbeat) = self.heartbeat.take() {
@@ -465,38 +501,31 @@ impl Drop for BackgroundQueueMaintenanceLease {
     }
 }
 
-/// Fence for one detached maintenance request. The queue-edit lease (backend
-/// lock) and exact-request check stay here; the owned authority cut, its
-/// receipt lineage, and supersession are Lazily effect-CAS state
-/// (`#implementlazilyowned`).
+/// Fence for one detached maintenance request: the durable Lazily claim must
+/// still hold the exact request, and every effect crosses one step of the
+/// request's ordered Lazily effect plan against the canonical document
+/// authority (`#implementlazilyowned`).
 struct BackgroundRequestEffectFence<'a> {
-    lease: &'a BackgroundQueueMaintenanceLease,
+    owner: &'a BackgroundQueueMaintenanceClaim,
     request: &'a agent_doc_queue_io::queue_edit_owner::QueueMaintenanceRequest,
-    lineage: agent_doc_preflight_io::queue_maintenance_effect_cas::AdmittedAuthorityLineage,
+    plan: agent_doc_preflight_io::queue_maintenance_effect_cas::QueueMaintenanceEffectPlan,
 }
 
 impl<'a> BackgroundRequestEffectFence<'a> {
     fn new(
         file: &Path,
-        lease: &'a BackgroundQueueMaintenanceLease,
+        owner: &'a BackgroundQueueMaintenanceClaim,
         request: &'a agent_doc_queue_io::queue_edit_owner::QueueMaintenanceRequest,
-    ) -> Result<Self> {
-        Ok(Self {
-            lease,
+    ) -> Self {
+        Self {
+            owner,
             request,
-            lineage:
-                agent_doc_preflight_io::queue_maintenance_effect_cas::AdmittedAuthorityLineage::admit(
+            plan:
+                agent_doc_preflight_io::queue_maintenance_effect_cas::QueueMaintenanceEffectPlan::admit(
                     file,
                     &request.admitted_authority_hash,
-                )?,
-        })
-    }
-
-    fn current_request_is_exact(&self, file: &Path) -> Result<bool> {
-        Ok(
-            agent_doc_queue_io::queue_edit_owner::load_queue_maintenance_request(file)?
-                .is_some_and(|current| current == *self.request),
-        )
+                ),
+        }
     }
 
     fn fence_effect(&self, file: &Path) -> Result<()> {
@@ -504,44 +533,40 @@ impl<'a> BackgroundRequestEffectFence<'a> {
     }
 }
 
+fn observe_document_authority(file: &Path, label: &str) -> Result<String> {
+    agent_doc_document_realtime_io::peek_current_document_content(file, label)
+        .map(|observed| agent_doc_hash::content_hash(&observed))
+}
+
 impl agent_doc_preflight_io::PendingMaintenanceEffectFence for BackgroundRequestEffectFence<'_> {
     fn check(&self, file: &Path) -> Result<()> {
-        self.lease.fence_effect(file)?;
-        anyhow::ensure!(
-            self.current_request_is_exact(file)?,
-            "background queue maintenance request was superseded"
-        );
-        let observed = agent_doc_document_realtime_io::peek_current_document_content(
+        self.apply_step(
             file,
-            "background_queue_maintenance_effect_fence",
-        )?;
-        self.lineage
-            .compare_observed(&agent_doc_hash::content_hash(&observed))
-    }
-
-    fn record_applied_content(&self, file: &Path, content: &str) -> Result<()> {
-        self.lease.fence_effect(file)?;
-        anyhow::ensure!(
-            self.current_request_is_exact(file)?,
-            "background queue maintenance request was superseded"
-        );
-        let observe = || {
-            agent_doc_document_realtime_io::peek_current_document_content(
-                file,
-                "background_queue_maintenance_applied_cut",
-            )
-            .map(|observed| agent_doc_hash::content_hash(&observed))
-        };
-        self.lineage.record_applied_cut(
-            &agent_doc_preflight_io::queue_maintenance_effect_cas::DocumentCutReceipt::new(
-                agent_doc_hash::content_hash(content),
-                &observe,
-            ),
+            agent_doc_preflight_io::QueueMaintenanceEffectStep::Verify,
         )
     }
 
+    fn apply_step(
+        &self,
+        file: &Path,
+        step: agent_doc_preflight_io::QueueMaintenanceEffectStep,
+    ) -> Result<()> {
+        self.owner.verify(self.request)?;
+        let observe =
+            || observe_document_authority(file, "background_queue_maintenance_effect_fence");
+        self.plan.cross(step, &observe)
+    }
+
+    fn record_applied_content(&self, file: &Path, content: &str) -> Result<()> {
+        self.owner.verify(self.request)?;
+        let observe =
+            || observe_document_authority(file, "background_queue_maintenance_applied_cut");
+        self.plan
+            .record_document_cut(agent_doc_hash::content_hash(content), &observe)
+    }
+
     fn expected_authority_hash(&self) -> Option<String> {
-        self.lineage.expected_authority_hash()
+        self.plan.expected_authority_hash()
     }
 }
 
@@ -582,7 +607,7 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
         std::env::var(BACKGROUND_QUEUE_MAINTENANCE_TOKEN_ENV)
             .context("background queue maintenance reservation token is missing")?
     };
-    let Some(mut queue_mutation) = BackgroundQueueMaintenanceLease::adopt_reserved(file, &token)?
+    let Some(mut queue_mutation) = BackgroundQueueMaintenanceClaim::adopt_reserved(file, &token)?
     else {
         let lease = agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(
             &file.to_string_lossy(),
@@ -617,10 +642,37 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
         let Some(request) =
             agent_doc_queue_io::queue_edit_owner::load_queue_maintenance_request(file)?
         else {
-            queue_mutation.mark_completed();
             return Ok(());
         };
-        let effect_fence = BackgroundRequestEffectFence::new(file, &queue_mutation, &request)?;
+        match queue_mutation.claim_request(&request) {
+            Ok(claimed) => agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "queue_maintenance_background_claimed file={} pid={} generation={} claim={claimed:?}",
+                    file.display(),
+                    std::process::id(),
+                    request.generation,
+                ),
+            ),
+            Err(error)
+                if error
+                    .downcast_ref::<agent_doc_queue_io::queue_maintenance_claim::QueueMaintenanceClaimSuperseded>()
+                    .is_some() =>
+            {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_maintenance_background_claim_superseded file={} pid={} error={}",
+                        file.display(),
+                        std::process::id(),
+                        format!("{error:#}").replace('\n', " | "),
+                    ),
+                );
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        }
+        let effect_fence = BackgroundRequestEffectFence::new(file, &queue_mutation, &request);
         let result = (|| -> Result<()> {
             effect_fence.fence_effect(file)?;
             if let Some(delay) = std::env::var(TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS_ENV)
@@ -656,7 +708,7 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
                 queue_mutation.apply_guard(),
             ) {
                 Ok(report) => report,
-                Err(error) if !queue_mutation.refresh_owned()? => {
+                Err(error) if !queue_mutation.owns()? => {
                     eprintln!(
                         "[preflight] background pending maintenance stopped after lease loss for {}: {error:#}",
                         file.display(),
@@ -777,7 +829,6 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
         match result {
             Ok(()) => {
                 if queue_mutation.complete_request(&request)? {
-                    queue_mutation.mark_completed();
                     return Ok(());
                 }
                 // A newer admitted generation arrived while this one ran. The
@@ -793,7 +844,6 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
                     || error.to_string().contains("request was superseded")
                 {
                     if queue_mutation.complete_request(&request)? {
-                        queue_mutation.mark_completed();
                         return Ok(());
                     }
                     continue;
@@ -1130,7 +1180,7 @@ mod tests {
         let (adopted_tx, adopted_rx) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
             adopted_tx
-                .send(BackgroundQueueMaintenanceLease::adopt_reserved(
+                .send(BackgroundQueueMaintenanceClaim::adopt_reserved(
                     &worker_doc,
                     token,
                 ))
@@ -1144,12 +1194,12 @@ mod tests {
         );
 
         fs2::FileExt::unlock(&lock).unwrap();
-        let mut lease = adopted_rx
+        let lease = adopted_rx
             .recv_timeout(std::time::Duration::from_secs(5))
             .expect("worker did not adopt after transient contention")
             .unwrap()
             .expect("the exact reserved token should remain adoptable");
-        lease.mark_completed();
+        assert!(!lease.claim.retains_work().unwrap());
         drop(lease);
         worker.join().unwrap();
         assert!(

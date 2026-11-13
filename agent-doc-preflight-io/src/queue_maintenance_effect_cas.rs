@@ -10,15 +10,19 @@
 //!
 //! Two seams are migrated here:
 //!
-//! - [`AdmittedAuthorityLineage`] replaces the detached worker's bespoke
-//!   `Mutex<String>` "latest own authority cut" state. Every authority cut the
-//!   worker owns is one Lazily effect epoch; a receipted document cut completes
-//!   that epoch and the next epoch's expected authority is the receipt, never
-//!   the stale admission hash.
+//! - [`QueueMaintenanceEffectPlan`] replaces the bespoke per-family barrier
+//!   (`QueueMaintenanceEffectFamily` + `fence_queue_maintenance_effect`) and the
+//!   detached worker's "latest own authority cut" state with an ordered Lazily
+//!   effect plan. Every barrier is one receipted step whose expected authority
+//!   is the previous step's receipt; a receipted document cut makes every later
+//!   step expect that cut, never the stale admission hash.
 //! - [`persist_document_cut`] replaces the hand-rolled
 //!   `for attempt in 1..=QUEUE_MAINTENANCE_CAS_ATTEMPTS` refusal/re-observe loop.
 //!   A retryable CAS refusal is `Superseded { observed }`; the maintenance
 //!   producer re-desires its delta at the observed authority as the next epoch.
+//!
+//! Which detached worker owns a request is the cross-process durable claim in
+//! `agent_doc_queue_io::queue_maintenance_claim`.
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -28,11 +32,12 @@ use anyhow::Result;
 use lazily::{
     CompareAndApply, EffectApply, EffectAttempt, EffectCasApplied, EffectCasClaim, EffectCasCore,
     EffectCasFailure, EffectCasOutcome, EffectCasUpsert, EffectIdentity, EffectIntent, EffectPlan,
+    EffectTerminal,
 };
 
 /// The single actor generation of an in-process effect core. Cross-process
-/// fencing stays with the queue-edit lease (a backend lock, not effect
-/// orchestration), so the in-process core never reconnects.
+/// ownership is the durable queue-maintenance claim, so these per-request cores
+/// never reconnect.
 const GENERATION: u64 = 0;
 
 /// Logical clock for claims. These cores never schedule a timed retry: a
@@ -63,162 +68,237 @@ impl std::fmt::Display for QueueMaintenanceEffectSuperseded {
 
 impl std::error::Error for QueueMaintenanceEffectSuperseded {}
 
-/// Payload of one admitted authority epoch: the worker owns this cut until a
-/// receipted document mutation or a supersession ends the epoch.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AdmittedAuthorityStep {
-    OwnAuthorityCut,
+/// One step of the ordered queue-maintenance effect plan.
+///
+/// The detached maintenance owner crosses one step immediately before each
+/// durable effect it performs. The step names the effect family the barrier
+/// protects; its compare-and-apply proves the canonical document authority
+/// still equals the plan's expected authority (the admitted cut, or the last
+/// cut this owner receipted).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueMaintenanceEffectStep {
+    /// A plain authority verification between effects.
+    Verify,
+    /// Ops-log evidence describing an effect.
+    Ops,
+    /// Controller state or recovery.
+    Controller,
+    /// A canonical document mutation.
+    Document,
+    /// Claim/lineage/answer ledger writes.
+    Ledger,
+    /// Snapshot writes.
+    Snapshot,
+    /// Worktree or archive cleanup.
+    Worktree,
+    /// Receipt of a document cut this owner produced: the backend must now
+    /// equal the produced cut, which every later step then expects.
+    DocumentCut,
 }
 
-type LineageCore = EffectCasCore<PathBuf, String, AdmittedAuthorityStep, String, String>;
+impl QueueMaintenanceEffectStep {
+    /// Stable label used by diagnostics and the test delay barrier.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Verify => "verify",
+            Self::Ops => "ops",
+            Self::Controller => "controller",
+            Self::Document => "document",
+            Self::Ledger => "ledger",
+            Self::Snapshot => "snapshot",
+            Self::Worktree => "worktree",
+            Self::DocumentCut => "document_cut",
+        }
+    }
+}
 
-/// Lazily-owned authority lineage for one detached queue-maintenance request.
+/// Receipt of one crossed plan step: which step, at which authority.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueMaintenanceStepReceipt {
+    pub step: QueueMaintenanceEffectStep,
+    pub authority: String,
+}
+
+type PlanCore =
+    EffectCasCore<PathBuf, String, QueueMaintenanceEffectStep, QueueMaintenanceStepReceipt, String>;
+
+/// Lazily-owned ordered effect plan for one admitted queue-maintenance request.
 ///
-/// The expected authority hash is read from the Lazily in-flight attempt; a
-/// mismatch is recorded as Lazily supersession before it is reported, so every
-/// later comparison fails closed without any application-owned flag.
+/// Each crossed step is one Lazily effect epoch keyed by the document: Lazily
+/// owns the step identity, its expected authority (derived from the previous
+/// step's receipt, never from the stale admission once a cut is receipted),
+/// the single in-flight attempt, the monotone applied frontier (the plan
+/// cursor), and supersession. A mismatch is recorded as Lazily supersession
+/// before it is reported, and a superseded plan refuses every later step
+/// without any application-owned flag. Steps are ordered and receipted, not
+/// atomic across backends: each later effect is idempotent and the plan stops
+/// at the first supersession.
 #[derive(Debug)]
-pub struct AdmittedAuthorityLineage {
+pub struct QueueMaintenanceEffectPlan {
     key: PathBuf,
     identity: String,
-    core: Mutex<LineageCore>,
+    admitted: String,
+    core: Mutex<PlanCore>,
 }
 
-impl AdmittedAuthorityLineage {
-    /// Admit `admitted_authority_hash` as epoch 1 and claim it.
-    pub fn admit(file: &Path, admitted_authority_hash: &str) -> Result<Self> {
-        let lineage = Self {
+impl QueueMaintenanceEffectPlan {
+    /// Start the plan for one admitted authority cut.
+    pub fn admit(file: &Path, admitted_authority_hash: &str) -> Self {
+        Self {
             key: file.to_path_buf(),
-            identity: format!("queue-maintenance-authority:{admitted_authority_hash}"),
-            core: Mutex::new(LineageCore::new(GENERATION)),
-        };
-        {
-            let mut core = lineage.core.lock().unwrap();
-            lineage.desire_and_claim(&mut core, 1, admitted_authority_hash.to_string())?;
-        }
-        Ok(lineage)
-    }
-
-    fn desire_and_claim(&self, core: &mut LineageCore, epoch: u64, expected: String) -> Result<()> {
-        let intent = EffectIntent {
-            identity: EffectIdentity::new(format!("{}#{epoch}", self.identity))
-                .map_err(|error| anyhow::anyhow!("invalid effect identity: {error:?}"))?,
-            epoch,
-            key: self.key.clone(),
-            expected,
-            plan: EffectPlan::single(AdmittedAuthorityStep::OwnAuthorityCut),
-        };
-        match core.upsert_desired(intent).1 {
-            EffectCasUpsert::Accepted => {}
-            other => anyhow::bail!(
-                "queue maintenance authority epoch {epoch} was not accepted: {other:?}"
-            ),
-        }
-        match core.claim(&self.key, GENERATION, NOW).1 {
-            EffectCasClaim::Claimed(_) => Ok(()),
-            other => anyhow::bail!(
-                "queue maintenance authority epoch {epoch} was not claimed: {other:?}"
-            ),
+            identity: format!("queue-maintenance-plan:{admitted_authority_hash}"),
+            admitted: admitted_authority_hash.to_string(),
+            core: Mutex::new(PlanCore::new(GENERATION)),
         }
     }
 
-    fn inflight(
-        core: &LineageCore,
-        key: &PathBuf,
-    ) -> Option<EffectAttempt<PathBuf, String, AdmittedAuthorityStep, String>> {
-        core.state(key).and_then(|state| state.inflight)
+    /// The authority the next step expects, or `None` once superseded.
+    fn expected(&self, core: &PlanCore) -> Option<String> {
+        match core.state(&self.key).and_then(|state| state.terminal) {
+            None => Some(self.admitted.clone()),
+            Some(EffectTerminal::Applied { receipts, .. }) => receipts
+                .last()
+                .map(|receipt| receipt.authority.clone())
+                .or_else(|| Some(self.admitted.clone())),
+            Some(EffectTerminal::Superseded { .. } | EffectTerminal::Rejected { .. }) => None,
+        }
     }
 
     /// The authority this owner currently holds, or `None` once superseded.
     pub fn expected_authority_hash(&self) -> Option<String> {
         let core = self.core.lock().unwrap();
-        Self::inflight(&core, &self.key).map(|attempt| attempt.expected)
+        self.expected(&core)
     }
 
-    /// Highest receipted epoch (Lazily's monotone applied frontier).
+    /// Lazily's monotone applied frontier: the number of crossed steps.
     pub fn applied_through(&self) -> Option<u64> {
         let core = self.core.lock().unwrap();
         core.state(&self.key)
             .and_then(|state| state.applied_through)
     }
 
-    /// Compare an observed authority against the Lazily-owned expectation.
-    pub fn compare_observed(&self, observed_hash: &str) -> Result<()> {
-        let mut core = self.core.lock().unwrap();
-        let Some(attempt) = Self::inflight(&core, &self.key) else {
-            return Err(QueueMaintenanceEffectSuperseded::new(
-                "background queue maintenance admitted authority was superseded: no owned authority remains",
-            )
-            .into());
+    /// Cross `step` against the observed canonical authority. `observe` is an
+    /// effect-free read of the document authority hash.
+    pub fn cross(
+        &self,
+        step: QueueMaintenanceEffectStep,
+        observe: &dyn Fn() -> Result<String>,
+    ) -> Result<()> {
+        let adapter = StepAuthority {
+            observe,
+            target: None,
+            error: RefCell::new(None),
         };
-        if attempt.expected == observed_hash {
-            return Ok(());
-        }
-        let _ = core.record_superseded(&self.key, &attempt.identity, observed_hash.to_string());
-        Err(QueueMaintenanceEffectSuperseded::new(format!(
-            "background queue maintenance admitted authority was superseded: expected={} observed={observed_hash}",
-            attempt.expected
-        ))
-        .into())
+        self.apply(step, &adapter, || {
+            "background queue maintenance admitted authority was superseded".to_string()
+        })
     }
 
-    /// Receipt a document cut produced by this owner. `adapter` performs the
-    /// atomic comparison; on success the next epoch expects the receipted cut.
-    pub fn record_applied_cut(&self, adapter: &DocumentCutReceipt<'_>) -> Result<()> {
+    /// Receipt a document cut this owner just produced. The backend must now
+    /// equal `cut_hash`; every later step expects it instead of the admission.
+    pub fn record_document_cut(
+        &self,
+        cut_hash: String,
+        observe: &dyn Fn() -> Result<String>,
+    ) -> Result<()> {
+        let adapter = StepAuthority {
+            observe,
+            target: Some(cut_hash),
+            error: RefCell::new(None),
+        };
+        self.apply(QueueMaintenanceEffectStep::DocumentCut, &adapter, || {
+            "background queue maintenance applied cut was superseded before receipt".to_string()
+        })
+    }
+
+    fn apply(
+        &self,
+        step: QueueMaintenanceEffectStep,
+        adapter: &StepAuthority<'_>,
+        superseded: impl Fn() -> String,
+    ) -> Result<()> {
         let mut core = self.core.lock().unwrap();
-        let Some(attempt) = Self::inflight(&core, &self.key) else {
-            return Err(QueueMaintenanceEffectSuperseded::new(
-                "background queue maintenance applied cut was superseded before receipt",
-            )
+        let Some(expected) = self.expected(&core) else {
+            return Err(QueueMaintenanceEffectSuperseded::new(format!(
+                "{}: the plan was already superseded",
+                superseded()
+            ))
             .into());
         };
+        let epoch = core
+            .state(&self.key)
+            .and_then(|state| state.applied_through)
+            .unwrap_or(0)
+            + 1;
+        let intent = EffectIntent {
+            identity: EffectIdentity::new(format!("{}#{epoch}", self.identity))
+                .map_err(|error| anyhow::anyhow!("invalid effect identity: {error:?}"))?,
+            epoch,
+            key: self.key.clone(),
+            expected: expected.clone(),
+            plan: EffectPlan::single(step),
+        };
+        match core.upsert_desired(intent).1 {
+            EffectCasUpsert::Accepted => {}
+            other => anyhow::bail!(
+                "queue maintenance plan step {epoch} ({}) was not accepted: {other:?}",
+                step.label()
+            ),
+        }
+        let attempt = match core.claim(&self.key, GENERATION, NOW).1 {
+            EffectCasClaim::Claimed(attempt) => attempt,
+            other => anyhow::bail!(
+                "queue maintenance plan step {epoch} ({}) was not claimed: {other:?}",
+                step.label()
+            ),
+        };
         let outcome = adapter.compare_and_apply(&attempt);
-        let receipt = match &outcome {
-            EffectApply::Applied { receipt, .. } => Some(receipt.clone()),
+        let observed = match &outcome {
+            EffectApply::Superseded { observed } => Some(observed.clone()),
             _ => None,
         };
-        let (_, recorded) = core.record_outcome(&self.key, &attempt.identity, outcome, NOW);
-        match (receipt, recorded) {
-            (
-                Some(receipt),
-                EffectCasOutcome::Applied(EffectCasApplied::Completed { applied_through }),
-            ) => self.desire_and_claim(&mut core, applied_through + 1, receipt),
-            (_, EffectCasOutcome::Failure(EffectCasFailure::Superseded)) => {
-                Err(QueueMaintenanceEffectSuperseded::new(
-                    "background queue maintenance applied cut was superseded before receipt",
-                )
+        match core
+            .record_outcome(&self.key, &attempt.identity, outcome, NOW)
+            .1
+        {
+            EffectCasOutcome::Applied(EffectCasApplied::Completed { .. }) => Ok(()),
+            EffectCasOutcome::Failure(EffectCasFailure::Superseded) => {
+                Err(QueueMaintenanceEffectSuperseded::new(format!(
+                    "{}: expected={expected} observed={} step={}",
+                    superseded(),
+                    observed.unwrap_or_default(),
+                    step.label()
+                ))
                 .into())
             }
-            (_, recorded) => Err(adapter.take_error().unwrap_or_else(|| {
-                anyhow::anyhow!("queue maintenance applied cut receipt failed: {recorded:?}")
+            recorded => Err(adapter.take_error().unwrap_or_else(|| {
+                anyhow::anyhow!(
+                    "queue maintenance plan step {} failed: {recorded:?}",
+                    step.label()
+                )
             })),
         }
     }
 }
 
-/// Adapter: the canonical document authority must equal the cut this owner
-/// just applied. Observation is effect-free.
-pub struct DocumentCutReceipt<'a> {
-    target_hash: String,
+/// Adapter: compare the observed canonical document authority with the step's
+/// expected authority (or, for a produced cut, with that cut). Observation is
+/// effect-free; a mismatch mutates nothing and reports the observed authority.
+struct StepAuthority<'a> {
     observe: &'a dyn Fn() -> Result<String>,
+    target: Option<String>,
     error: RefCell<Option<anyhow::Error>>,
 }
 
-impl<'a> DocumentCutReceipt<'a> {
-    pub fn new(target_hash: String, observe: &'a dyn Fn() -> Result<String>) -> Self {
-        Self {
-            target_hash,
-            observe,
-            error: RefCell::new(None),
-        }
-    }
-
+impl StepAuthority<'_> {
     fn take_error(&self) -> Option<anyhow::Error> {
         self.error.borrow_mut().take()
     }
 }
 
-impl CompareAndApply<PathBuf, String, AdmittedAuthorityStep, String> for DocumentCutReceipt<'_> {
+impl CompareAndApply<PathBuf, String, QueueMaintenanceEffectStep, QueueMaintenanceStepReceipt>
+    for StepAuthority<'_>
+{
     type Error = String;
 
     fn observe(&self, _key: &PathBuf) -> Result<String, String> {
@@ -227,11 +307,20 @@ impl CompareAndApply<PathBuf, String, AdmittedAuthorityStep, String> for Documen
 
     fn compare_and_apply(
         &self,
-        _attempt: &EffectAttempt<PathBuf, String, AdmittedAuthorityStep, String>,
-    ) -> EffectApply<String, String, String> {
+        attempt: &EffectAttempt<
+            PathBuf,
+            String,
+            QueueMaintenanceEffectStep,
+            QueueMaintenanceStepReceipt,
+        >,
+    ) -> EffectApply<QueueMaintenanceStepReceipt, String, String> {
+        let wanted = self.target.as_ref().unwrap_or(&attempt.expected);
         match (self.observe)() {
-            Ok(observed) if observed == self.target_hash => EffectApply::Applied {
-                receipt: observed.clone(),
+            Ok(observed) if &observed == wanted => EffectApply::Applied {
+                receipt: QueueMaintenanceStepReceipt {
+                    step: attempt.payload,
+                    authority: observed.clone(),
+                },
                 authority: observed,
             },
             Ok(observed) => EffectApply::Superseded { observed },
@@ -544,65 +633,153 @@ mod tests {
         assert_eq!(backend.swaps.len(), 1);
     }
 
+    use std::cell::Cell;
+
+    fn authority(values: &[&str]) -> impl Fn() -> Result<String> + use<> {
+        let values: Vec<String> = values.iter().map(|value| value.to_string()).collect();
+        let index = Cell::new(0usize);
+        move || {
+            let at = index.get().min(values.len() - 1);
+            index.set(index.get() + 1);
+            Ok(values[at].clone())
+        }
+    }
+
+    const FAMILIES: [QueueMaintenanceEffectStep; 6] = [
+        QueueMaintenanceEffectStep::Ops,
+        QueueMaintenanceEffectStep::Controller,
+        QueueMaintenanceEffectStep::Document,
+        QueueMaintenanceEffectStep::Ledger,
+        QueueMaintenanceEffectStep::Snapshot,
+        QueueMaintenanceEffectStep::Worktree,
+    ];
+
     #[test]
-    fn lineage_expects_admission_then_receipted_cut() {
-        let lineage = AdmittedAuthorityLineage::admit(Path::new("doc.md"), "h-admitted").unwrap();
+    fn plan_steps_are_ordered_receipted_epochs_against_the_admission() {
+        let plan = QueueMaintenanceEffectPlan::admit(Path::new("doc.md"), "h-admitted");
+        let observe = authority(&["h-admitted"]);
+        for (index, step) in FAMILIES.into_iter().enumerate() {
+            plan.cross(step, &observe).unwrap();
+            assert_eq!(plan.applied_through(), Some(index as u64 + 1));
+        }
         assert_eq!(
-            lineage.expected_authority_hash().as_deref(),
+            plan.expected_authority_hash().as_deref(),
             Some("h-admitted")
         );
-        lineage.compare_observed("h-admitted").unwrap();
-        let observe = || Ok("h-applied".to_string());
-        lineage
-            .record_applied_cut(&DocumentCutReceipt::new("h-applied".into(), &observe))
-            .unwrap();
+        let core = plan.core.lock().unwrap();
+        let Some(EffectTerminal::Applied {
+            identity, receipts, ..
+        }) = core.state(&plan.key).and_then(|state| state.terminal)
+        else {
+            panic!("the last crossed step is an applied terminal");
+        };
+        assert_eq!(identity.as_str(), "queue-maintenance-plan:h-admitted#6");
+        assert_eq!(receipts.len(), 1);
         assert_eq!(
-            lineage.expected_authority_hash().as_deref(),
-            Some("h-applied")
+            receipts[0].receipt.step,
+            QueueMaintenanceEffectStep::Worktree
         );
-        assert_eq!(lineage.applied_through(), Some(1));
-        lineage.compare_observed("h-applied").unwrap();
-        // The stale admission is no longer the owned authority.
-        assert!(lineage.compare_observed("h-admitted").is_err());
+    }
+
+    /// Authority drift at each of the six effect-family barriers supersedes the
+    /// plan at that step: no later step (of any family) can be crossed and the
+    /// cursor stops at the last receipted step.
+    #[test]
+    fn drift_at_every_family_barrier_supersedes_and_stops_the_plan() {
+        for (drift_at, family) in FAMILIES.into_iter().enumerate() {
+            let plan = QueueMaintenanceEffectPlan::admit(Path::new("doc.md"), "h-admitted");
+            let admitted = authority(&["h-admitted"]);
+            for step in FAMILIES.into_iter().take(drift_at) {
+                plan.cross(step, &admitted).unwrap();
+            }
+            let drifted = authority(&["h-operator"]);
+            let error = plan.cross(family, &drifted).unwrap_err();
+            assert!(
+                error
+                    .downcast_ref::<QueueMaintenanceEffectSuperseded>()
+                    .is_some(),
+                "{family:?}: {error:#}"
+            );
+            let message = error.to_string();
+            assert!(
+                message.contains("authority was superseded")
+                    && message.contains("expected=h-admitted observed=h-operator")
+                    && message.contains(family.label()),
+                "{message}"
+            );
+            assert_eq!(
+                plan.applied_through(),
+                (drift_at > 0).then_some(drift_at as u64)
+            );
+            assert_eq!(plan.expected_authority_hash(), None);
+            for later in FAMILIES {
+                assert!(
+                    plan.cross(later, &admitted).is_err(),
+                    "{later:?} crossed after supersession at {family:?}"
+                );
+            }
+            assert_eq!(
+                plan.applied_through(),
+                (drift_at > 0).then_some(drift_at as u64)
+            );
+        }
     }
 
     #[test]
-    fn lineage_supersession_is_sticky_and_typed() {
-        let lineage = AdmittedAuthorityLineage::admit(Path::new("doc.md"), "h-admitted").unwrap();
-        let error = lineage.compare_observed("h-operator").unwrap_err();
+    fn receipted_document_cut_becomes_the_expected_authority() {
+        let plan = QueueMaintenanceEffectPlan::admit(Path::new("doc.md"), "h-admitted");
+        plan.cross(
+            QueueMaintenanceEffectStep::Ledger,
+            &authority(&["h-admitted"]),
+        )
+        .unwrap();
+        plan.record_document_cut("h-applied".into(), &authority(&["h-applied"]))
+            .unwrap();
+        assert_eq!(plan.expected_authority_hash().as_deref(), Some("h-applied"));
+        assert_eq!(plan.applied_through(), Some(2));
+        plan.cross(
+            QueueMaintenanceEffectStep::Snapshot,
+            &authority(&["h-applied"]),
+        )
+        .unwrap();
+        // The stale admission no longer satisfies a later step.
         assert!(
-            error
-                .downcast_ref::<QueueMaintenanceEffectSuperseded>()
-                .is_some()
-        );
-        assert!(
-            error.to_string().contains("authority was superseded"),
-            "{error}"
-        );
-        assert_eq!(lineage.expected_authority_hash(), None);
-        // Even the original admission no longer passes after supersession.
-        assert!(lineage.compare_observed("h-admitted").is_err());
-        let observe = || Ok("h-admitted".to_string());
-        assert!(
-            lineage
-                .record_applied_cut(&DocumentCutReceipt::new("h-admitted".into(), &observe))
+            plan.cross(QueueMaintenanceEffectStep::Ops, &authority(&["h-admitted"]))
                 .is_err()
         );
-        assert_eq!(lineage.applied_through(), None);
     }
 
     #[test]
-    fn lineage_receipt_mismatch_supersedes_without_advancing_frontier() {
-        let lineage = AdmittedAuthorityLineage::admit(Path::new("doc.md"), "h-admitted").unwrap();
-        let observe = || Ok("h-operator".to_string());
-        let error = lineage
-            .record_applied_cut(&DocumentCutReceipt::new("h-applied".into(), &observe))
+    fn document_cut_receipt_mismatch_supersedes_without_advancing_frontier() {
+        let plan = QueueMaintenanceEffectPlan::admit(Path::new("doc.md"), "h-admitted");
+        let error = plan
+            .record_document_cut("h-applied".into(), &authority(&["h-operator"]))
             .unwrap_err();
         assert!(
             error.to_string().contains("superseded before receipt"),
             "{error}"
         );
-        assert_eq!(lineage.applied_through(), None);
-        assert_eq!(lineage.expected_authority_hash(), None);
+        assert_eq!(plan.applied_through(), None);
+        assert_eq!(plan.expected_authority_hash(), None);
+    }
+
+    #[test]
+    fn observation_failure_is_rejected_not_superseded() {
+        let plan = QueueMaintenanceEffectPlan::admit(Path::new("doc.md"), "h-admitted");
+        let failing = || -> Result<String> { anyhow::bail!("editor authority unavailable") };
+        let error = plan
+            .cross(QueueMaintenanceEffectStep::Document, &failing)
+            .unwrap_err();
+        assert!(
+            error
+                .downcast_ref::<QueueMaintenanceEffectSuperseded>()
+                .is_none()
+        );
+        assert!(error.to_string().contains("editor authority unavailable"));
+        assert_eq!(
+            plan.expected_authority_hash(),
+            None,
+            "rejection is terminal"
+        );
     }
 }

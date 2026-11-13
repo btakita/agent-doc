@@ -49,7 +49,7 @@ agent-doc-topic = { path = "../agent-doc-topic", version = "0.35.573" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.573" }
 agent-doc-work-projection = { path = "../agent-doc-work-projection", version = "0.35.573" }
 anyhow = "1"
-lazily = { version = "0.61.1", features = ["ipc", "durable-sqlite"] }
+lazily = { version = "0.62.0", features = ["ipc", "durable-sqlite"] }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]

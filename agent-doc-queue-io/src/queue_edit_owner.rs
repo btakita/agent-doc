@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-const QUEUE_EDIT_OWNER_SCOPE: &str = "queue_mutation";
+pub(crate) const QUEUE_EDIT_OWNER_SCOPE: &str = "queue_mutation";
 const QUEUE_MAINTENANCE_REQUEST_PREFIX: &str = "queue_maintenance_request:";
 const DEFAULT_QUEUE_EDIT_OWNER_TTL_SECS: u64 = 15;
 const QUEUE_EDIT_OWNER_TTL_SECS_ENV: &str = "AGENT_DOC_QUEUE_EDIT_OWNER_TTL_SECS";
@@ -38,10 +38,20 @@ pub struct QueueMaintenanceRequest {
     payload: String,
 }
 
-fn maintenance_request_location(file: &Path) -> Result<(std::path::PathBuf, String, String)> {
+pub(crate) fn maintenance_request_location(
+    file: &Path,
+) -> Result<(std::path::PathBuf, String, String)> {
     let (root, document_hash) = state_location(&file.to_string_lossy())?;
     let key = format!("{QUEUE_MAINTENANCE_REQUEST_PREFIX}{document_hash}");
     Ok((root, document_hash, key))
+}
+
+impl QueueMaintenanceRequest {
+    /// The exact persisted payload; with `generation` it is the request row's
+    /// version that the durable maintenance claim compares and consumes.
+    pub(crate) fn payload(&self) -> &str {
+        &self.payload
+    }
 }
 
 pub fn publish_queue_maintenance_request(
@@ -490,30 +500,16 @@ impl QueueEditGuard {
         self.holder.clear();
     }
 
-    /// Consume one exact latest-wins request and this guard's reservation in a
-    /// single SQLite transaction while retaining the OS apply lock. A newer
-    /// request makes the CAS fail and the incumbent must loop; a publisher
-    /// arriving after success observes no lease and reserves after unlock.
-    pub fn complete_queue_maintenance_request(
-        &mut self,
-        request: &QueueMaintenanceRequest,
-    ) -> Result<bool> {
-        let (root, document_hash, key) = maintenance_request_location(Path::new(&self.file))?;
-        let mut conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
-        let consumed =
-            agent_doc_sqlite::state_store::consume_runtime_request_and_coordination_lease_in_db(
-                &mut conn,
-                &key,
-                &request.payload,
-                request.generation,
-                QUEUE_EDIT_OWNER_SCOPE,
-                &document_hash,
-                &self.holder,
-            )?;
-        if consumed {
-            self.holder.clear();
-        }
-        Ok(consumed)
+    /// The coordination-lease holder token this guard owns (empty once the
+    /// lease was consumed or deliberately retained).
+    pub(crate) fn holder(&self) -> &str {
+        &self.holder
+    }
+
+    /// The durable maintenance claim consumed this guard's lease row together
+    /// with its request; Drop must not try to clear it again.
+    pub(crate) fn forget_consumed_holder(&mut self) {
+        self.holder.clear();
     }
 
     fn release_with_handoff_hook(&mut self, after_clear_before_unlock: impl FnOnce()) {
@@ -980,19 +976,19 @@ mod tests {
             load_queue_maintenance_request(&file).unwrap(),
             Some(successor.clone())
         );
+        let claim =
+            crate::queue_maintenance_claim::QueueMaintenanceClaim::reconnect(&file).unwrap();
+        claim.claim_request(&first).unwrap();
         assert!(
-            !guard.complete_queue_maintenance_request(&first).unwrap(),
+            !claim.complete(&mut guard, &first).unwrap(),
             "the incumbent must not consume a newer coalesced generation"
         );
         assert_eq!(
             read_queue_edit_owner_lease(&file_text).unwrap().holder,
             token
         );
-        assert!(
-            guard
-                .complete_queue_maintenance_request(&successor)
-                .unwrap()
-        );
+        claim.claim_request(&successor).unwrap();
+        assert!(claim.complete(&mut guard, &successor).unwrap());
         assert!(load_queue_maintenance_request(&file).unwrap().is_none());
         assert!(read_queue_edit_owner_lease(&file_text).is_none());
     }

@@ -28528,6 +28528,31 @@ fn append_and_apply_state_event(
     runtime.supervisor_recycle_projection_for(document_hash.as_deref())
 }
 
+/// The epoch a controller-minted `Requested`/`Started` recycle fact takes: one
+/// above both the live projection's epoch and every durable recycle epoch of
+/// the document (`#orphandrainclearflake`).
+///
+/// The live projection alone is not enough. `request_recycle_for_doc` and
+/// install fan-out append `Requested` straight to `state.db` at an epoch above
+/// the document's ledger high-water, and this controller folds that row only
+/// when a predecessor-write drain next runs. A `Started` minted in between from
+/// the lagging projection (CI run 43482564388: the drain refolded the test's
+/// `Requested@55` while the outgoing supervisor's `Started` was being minted at
+/// a single-digit epoch) is dropped by the reducer's epoch fence on that fold,
+/// so the recycle never reads `InFlight`: the orphan drain's route saw no
+/// restarting supervisor and typed the next queue item into the pane without
+/// the replacement image's between-items `/clear`.
+fn next_supervisor_recycle_epoch(
+    bootstrap: &ControllerBootstrap,
+    event_hash: &str,
+    current: &agent_doc_state_backbone::SupervisorRecycleProjection,
+) -> Result<u64> {
+    let conn = open_state_db(&bootstrap.project_root)?;
+    let durable =
+        agent_doc_sqlite::state_store::max_supervisor_recycle_epoch_in_db(&conn, event_hash)?;
+    Ok(current.recycle_epoch.max(durable).saturating_add(1))
+}
+
 pub(crate) fn handle_supervisor_recycle_requested(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
@@ -28547,7 +28572,7 @@ pub(crate) fn handle_supervisor_recycle_requested(
     ) {
         return Ok(current);
     }
-    let recycle_epoch = current.recycle_epoch.saturating_add(1);
+    let recycle_epoch = next_supervisor_recycle_epoch(bootstrap, event_hash, &current)?;
     let reason = request
         .reason
         .as_deref()
@@ -28585,7 +28610,7 @@ pub(crate) fn handle_supervisor_recycle_started(
     let event_hash = document_hash
         .as_deref()
         .unwrap_or(agent_doc_state_backbone::PROJECT_SUPERVISOR_DOCUMENT_HASH);
-    let recycle_epoch = current.recycle_epoch.saturating_add(1);
+    let recycle_epoch = next_supervisor_recycle_epoch(bootstrap, event_hash, &current)?;
     let reason = request
         .reason
         .as_deref()

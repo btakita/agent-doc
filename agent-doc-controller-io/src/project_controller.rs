@@ -24265,6 +24265,115 @@ agent:queue\n\
         );
     }
 
+    /// `#orphandrainclearflake` (main CI run 43482564388): a recycle request
+    /// appended straight to `state.db` (`request_recycle_for_doc`, install
+    /// fan-out) carries an epoch above the document's ledger high-water, and the
+    /// controller folds it only on its next predecessor-write drain. The
+    /// supervisor mirrored the request (minted `Requested@1` from the unfolded
+    /// projection) and then published `Started` before that drain ran, so
+    /// `Started` was minted at `2`. The fold replayed `Requested@55` and the
+    /// reducer dropped both controller facts as stale: the restarting
+    /// supervisor read `Requested`, never `InFlight`, and the orphan drain's
+    /// route typed queue item two into the pane without the `/clear`.
+    ///
+    /// Ordered by construction: the foreign row is committed before either
+    /// handler runs, and the fold is an explicit `refresh_memory`.
+    #[test]
+    fn recycle_started_minted_before_a_foreign_request_is_folded_survives_the_fold() {
+        use agent_doc_state_backbone::{StateEvent, StateFact, SupervisorRecyclePhase};
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap =
+            preparing_runtime_bootstrap(dir.path(), ControllerHandoffState::Stable, None);
+        let runtime = Arc::new(runtime_for_bootstrap(bootstrap.clone()));
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, "# doc").unwrap();
+        let hash = agent_doc_hash::document_id_for_path(&doc);
+        let request = |command: &str, reason: &str| -> ControllerRequest {
+            serde_json::from_value(serde_json::json!({
+                "command": command, "file": doc, "reason": reason
+            }))
+            .unwrap()
+        };
+
+        // Another process's request, committed behind this controller's back.
+        let foreign_epoch = 55;
+        assert!(
+            append_state_event(
+                dir.path(),
+                &StateEvent::new(
+                    format!("supervisor-recycle-requested:{hash}:epoch-{foreign_epoch}"),
+                    StateFact::SupervisorRecycleRequested {
+                        document_hash: hash.clone(),
+                        reason: "test_reexec_orphan_drain".to_string(),
+                        recycle_epoch: foreign_epoch,
+                        marked_secs: timestamp_secs(),
+                    },
+                ),
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            runtime
+                .supervisor_recycle_projection_for(Some(&hash))
+                .unwrap()
+                .phase,
+            SupervisorRecyclePhase::Settled,
+            "precondition: the live projection has not folded the foreign row"
+        );
+
+        // The supervisor's idle watch mirrors the request, then the outgoing
+        // image publishes `Started` before its `execve`.
+        rpc::handle_supervisor_recycle_requested(
+            &bootstrap,
+            &runtime,
+            request("supervisor_recycle_requested", "test_reexec_orphan_drain"),
+        )
+        .unwrap();
+        let started = rpc::handle_supervisor_recycle_started(
+            &bootstrap,
+            &runtime,
+            request("supervisor_recycle_started", "auto_install_reexec"),
+        )
+        .unwrap();
+        assert_eq!(started.phase, SupervisorRecyclePhase::InFlight);
+        assert!(
+            started.recycle_epoch > foreign_epoch,
+            "Started must clear the durable request it consumes: {started:?}"
+        );
+
+        // The predecessor-write drain folds the foreign row.
+        runtime.refresh_memory().unwrap();
+        let folded = runtime
+            .supervisor_recycle_projection_for(Some(&hash))
+            .unwrap();
+        assert_eq!(
+            (folded.phase, folded.recycle_epoch),
+            (SupervisorRecyclePhase::InFlight, started.recycle_epoch),
+            "the restarting supervisor stays InFlight across the fold"
+        );
+        let settled = rpc::settle_supervisor_recycle_from(
+            &bootstrap,
+            &runtime,
+            &hash,
+            "watch_loop_started",
+            folded,
+        )
+        .unwrap();
+        assert_eq!(
+            settled.phase,
+            SupervisorRecyclePhase::Settled,
+            "the replacement image's settle still closes the recycle"
+        );
+        let replayed = load_state_event_ledger(dir.path())
+            .unwrap()
+            .project()
+            .document(&hash)
+            .map(|document| document.supervisor.recycle.clone())
+            .unwrap();
+        assert_eq!(replayed.phase, SupervisorRecyclePhase::Settled);
+    }
+
     /// `#runfrontenddispatch`: a `refresh_memory` whose unlocked durable load
     /// began before a controller-owned `Started` append committed must not swap
     /// the pre-append snapshot over the applied fact. On 2026-10-10 that lost

@@ -4670,6 +4670,30 @@ pub fn state_event_sequence_in_db(conn: &Connection, event_id: &str) -> Result<O
     .map_err(Into::into)
 }
 
+/// The highest `recycle_epoch` any durable supervisor-recycle fact
+/// (`requested`/`started`/`settled`) of `document_hash` carries, or `0`.
+///
+/// `#orphandrainclearflake`: recycle facts have more than one writer. The
+/// controller mints them from its live projection, but install fan-out and
+/// `request_recycle_for_doc` append `Requested` straight to `state.db`, at an
+/// epoch above the document's ledger high-water, while the controller is
+/// running. Until a predecessor-write drain folds that row, the controller's
+/// projection does not hold its epoch. A `Started` minted from that lagging
+/// read sits below the durable request, and the reducer's epoch fence drops it
+/// on the next fold. This read is the floor a minted epoch must clear.
+pub fn max_supervisor_recycle_epoch_in_db(conn: &Connection, document_hash: &str) -> Result<u64> {
+    conn.query_row(
+        "SELECT MAX(CAST(json_extract(payload_json, '$.fact.recycle_epoch') AS INTEGER)) \
+         FROM state_events \
+         WHERE document_hash = ?1 \
+           AND fact_type IN ('supervisor_recycle_requested', 'supervisor_recycle_started', 'supervisor_recycle_settled')",
+        [document_hash],
+        |row| row.get::<_, Option<i64>>(0),
+    )
+    .map(|epoch| epoch.unwrap_or(0).max(0) as u64)
+    .map_err(Into::into)
+}
+
 /// Stable key for the PID-scoped editor registration that owns a replay cursor.
 ///
 /// The decimal PID is terminated by a delimiter, so arbitrary editor ids remain

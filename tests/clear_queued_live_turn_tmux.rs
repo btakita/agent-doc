@@ -2289,6 +2289,12 @@ fn queue_auto_clear_carries_its_baseline_across_a_preserved_child_reexec() {
 ///    restart still lands in the window, and it defers to the idle watch, which
 ///    clears and then dispatches item two.
 ///
+/// The route's fence reads the recycle `InFlight`, so the outgoing image's
+/// `Started` must survive the controller folding this test's directly
+/// appended `Requested` (`#orphandrainclearflake`, main CI run 43482564388:
+/// `Started` was minted below it from the unfolded projection, the fold
+/// dropped it, and item two was typed with no `/clear`).
+///
 /// Ordered by handshake: the orphan drain is closed until the replacement
 /// image is held before registering, the sweep's yield is observed for that
 /// exact pid, and the image is released only once the drain's route for item

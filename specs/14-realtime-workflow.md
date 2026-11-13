@@ -1172,6 +1172,42 @@ and one-to-one on both sides; two live prefix-related prompts or any other
 ambiguous family remain distinct. This policy is shared by both the legacy
 component merge and the persisted document-cell merge.
 
+A mid-clause reword during that same admission is one row (`#editsteer`).
+Prepare may project `[#q-…]` and a lifecycle marker onto an earlier spelling
+while the operator replaces that spelling in the same stable-anchor gap. When
+the live row is the only new free-text row in the gap, the operator no longer
+has the earlier spelling, and the work texts contain one another or their
+character-diff ratio is at least 0.5 — each at least 24 characters, and not
+already a strict prefix — merge keeps the operator's words, the admitted q-id,
+and that lifecycle marker. A second copy of either spelling is not reinserted
+when the operator's cut does not have it, including when that copy was never
+in the base. A replacement below the similarity floor does not take the q-id,
+and the earlier spelling the operator removed stays deleted. Two live
+candidates, a settled row kept beside a different new sibling, a lost or
+parent row, and an id-backed `do [#id]` stay distinct. This is the same
+one-to-one gap rule as `#qidtypingcontinuation`, not a fuzzy dedup of settled
+queue items.
+
+The interval after agent-doc first sees a prompt and before prepare emits that
+prompt is its own lifecycle state (`#promptseen`). The prefix is the seen glyph
+`👀`. Prepare's queue-maintenance emit replaces `👀` with `📥` once the row is
+the prompt it emits. A line still being typed, or absent from the settled
+observation, stays unmarked. A background pass paints `👀` on a structurally
+finished bare row and does not replace it with `📥`. An explicit sync still
+paints `📥`. The one-row steering survivor (`#editsteer`) is already an emitted
+prompt and keeps `📥`. When that survivor's live cut shows only the seen
+glyph `👀` and the admitted row carries `📥`, the q-id projection replaces
+`👀` with `📥` before it keeps the q-id. An identical spelling and a
+mid-clause reword both do this, and a later merge whose live cut still has
+no q-id does it again. A top-level head is that same row with a heading
+token in front (`- ### 👀 <words>`). The projection skips that leading
+`### `, the same way it already skips `###` when it reads the glyph, and
+the admitted line is `- ### 📥 <words> [#q-…]`. The heading token stays
+ahead of the glyph. Painting `📥` before `###` would make the heading
+token work text. A nested `  - 👀` row has no heading token and uses the
+same replacement. A live `🚧`, `🟡`, or `☑️` stays, including when it
+sits after `### `.
+
 An id-backed queue head with a nonempty inline operator verdict, such as
 `complete [#push]: hold lifted; do the push`, is fresh executable authority even
 when the referenced item currently lives in `agent:review` and therefore has no

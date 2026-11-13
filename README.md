@@ -161,6 +161,7 @@ agent-doc prefixes each row in an `agent:run` section with its state:
 
 | Marker | Meaning |
 |--------|---------|
+| `👀` | seen: agent-doc has seen the prompt and prepare has not emitted it yet |
 | `📥` | pending, ready to run |
 | `⛔` | blocked: its tracked item waits on open work, named after the marker (`⛔ ⟦blocked by a, b⟧`); it is not drained or dispatched until that work closes |
 | `🟡` | claimed for a worker that has not started yet |

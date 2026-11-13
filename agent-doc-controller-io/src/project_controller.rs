@@ -15371,7 +15371,21 @@ pub fn reap_orphaned_preparing_controllers_all_projects(
         }
         // `#flakyreceipthelpers` foreign bootstrap read: `root` usually belongs to another
         // project. Read its bootstrap without initializing its ledger.
-        let bootstrap = read_foreign_bootstrap(&root)?;
+        let bootstrap = match read_foreign_bootstrap(&root) {
+            Ok(bootstrap) => bootstrap,
+            Err(error) => {
+                // A foreign controller can disappear with its temporary project,
+                // or its ledger can be replaced, between the /proc snapshot and
+                // this read. Fail closed for that candidate instead of aborting
+                // GC in the caller's unrelated project.
+                eprintln!(
+                    "[{caller}] skipped cross-project preparing controller: pid={pid} root={} reason=bootstrap_unreadable error={error:#}",
+                    root.display()
+                );
+                kept += 1;
+                continue;
+            }
+        };
         if bootstrap_record_owns_controller_pid(&root, bootstrap.as_ref(), pid) {
             continue;
         }
@@ -25000,9 +25014,11 @@ agent:queue\n\
         let pids = crate::process::project_controller_pids(dir.path());
         let (reaped, kept) =
             reap_orphaned_preparing_controllers(dir.path(), Duration::from_secs(0), false).unwrap();
-        let (sweep_reaped, _) =
+        // The cross-project sweep may see other tests' preparing sentinels; it
+        // must retain an unreadable foreign candidate instead of erroring.
+        let (_sweep_reaped, _) =
             reap_orphaned_preparing_controllers_all_projects(Duration::from_secs(0), true, "test")
-                .unwrap_or((usize::MAX, 0));
+                .unwrap();
         let fork_image_alive = process_is_alive(fork_image);
         let swept_roots: Vec<u32> = crate::process::controller_serve_pids()
             .into_iter()
@@ -25029,9 +25045,27 @@ agent:queue\n\
             fork_image_alive,
             "the owned controller's fork image must not be reaped"
         );
-        // The cross-project sweep may see other tests' preparing sentinels; it
-        // must not have errored.
-        assert_ne!(sweep_reaped, usize::MAX);
+    }
+
+    #[test]
+    fn all_projects_reaper_retains_an_unreadable_foreign_candidate() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        // A directory at the database path deterministically models a foreign
+        // temp project disappearing/replacing its ledger after the /proc scan.
+        std::fs::create_dir(state_db_path(dir.path())).unwrap();
+        let mut sentinel = spawn_preparing_controller_sentinel(dir.path());
+        let pid = sentinel.id();
+        assert!(crate::process::cmdline_has_preparing_handoff(pid));
+
+        let (_reaped, kept) =
+            reap_orphaned_preparing_controllers_all_projects(Duration::ZERO, true, "test").unwrap();
+        let alive = process_is_alive(pid);
+        let _ = sentinel.kill();
+        let _ = sentinel.wait();
+
+        assert!(kept >= 1, "the unreadable candidate must be retained");
+        assert!(alive, "an unreadable foreign candidate must fail closed");
     }
 
     #[test]

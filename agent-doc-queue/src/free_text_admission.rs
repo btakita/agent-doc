@@ -324,6 +324,28 @@ impl FreeTextCoinGate {
         let text = text.trim().strip_prefix("### ").unwrap_or(text.trim());
         self.allows_coining(without_trailing_prompt_identity(text))
     }
+
+    /// `#promptseen`: agent-doc has seen this prompt and prepare has not emitted
+    /// it yet. The prefix for that interval is the seen glyph `👀`.
+    ///
+    /// True when a live observation contains the line and the line is not
+    /// plainly unfinished. Quiet time stays with [`Self::allows_cosmetic_pending`]:
+    /// once that gate opens, prepare emits `📥` instead. No observation, an
+    /// unfinished line, and a line absent from the settled text stay unmarked.
+    pub fn seen_prompt_awaiting_prepare_emit(&self, text: &str) -> bool {
+        let Some(observed) = &self.observed else {
+            return false;
+        };
+        let text = text.trim().strip_prefix("### ").unwrap_or(text.trim());
+        let work = normalize_admitted_free_text(without_trailing_prompt_identity(text));
+        if work.is_empty()
+            || agent_doc_debounce::edit_settle::completion_signal(&work)
+                == agent_doc_debounce::edit_settle::CompletionSignal::Incomplete
+        {
+            return false;
+        }
+        text_present_in_settled(&work, &observed.settled_text)
+    }
 }
 
 /// Drop one trailing stable prompt id (` [#q-…]`) so a marker decision sees
@@ -2476,6 +2498,47 @@ mod tests {
         let stale = gate("- Add a ``\n".to_string(), 600_000);
         assert!(!stale.allows_coining("Add a ``"));
         assert!(!FreeTextCoinGate::structural_only().allows_coining("Should we publish the"));
+    }
+
+    /// `#promptseen`: a settled line inside the hold window is seen. The prefix
+    /// is `👀`. Prepare emits `📥` once the same line has been quiet long enough.
+    /// An unfinished line and a line absent from the observation stay unmarked.
+    #[test]
+    fn seen_glyph_marks_a_prompt_before_prepare_emits_it() {
+        let line = "Release the sample.";
+        let content = format!("<!-- agent:queue -->\n- {line}\n<!-- /agent:queue -->\n");
+        let gate = |settled_text: String, quiet_for_ms: u64| FreeTextCoinGate {
+            observed: Some(FreeTextCoinObservation {
+                settled_text,
+                quiet_for_ms,
+            }),
+            debounce_ms: 2_000,
+            max_hold_ms: agent_doc_debounce::edit_settle::DEFAULT_MAX_HOLD_MS,
+        };
+        assert_eq!(
+            agent_doc_document::queue_projection::QueueLifecycleMarker::Seen.default_prefix(),
+            "👀",
+            "the seen glyph is `👀`"
+        );
+
+        let held = gate(content.clone(), 300);
+        assert!(
+            held.seen_prompt_awaiting_prepare_emit(line),
+            "a settled prompt still inside the hold wears `👀`"
+        );
+        assert!(!held.allows_cosmetic_pending(line));
+        assert!(held.seen_prompt_awaiting_prepare_emit(&format!("### {line}")));
+
+        let quiet = gate(content, 2_500);
+        assert!(
+            quiet.allows_cosmetic_pending(line),
+            "once quiet, prepare emits `📥` in place of `👀`"
+        );
+
+        let unfinished = gate("- Add a ``\n".to_string(), 2_500);
+        assert!(!unfinished.seen_prompt_awaiting_prepare_emit("Add a ``"));
+        assert!(!gate(String::new(), 2_500).seen_prompt_awaiting_prepare_emit(line));
+        assert!(!FreeTextCoinGate::structural_only().seen_prompt_awaiting_prepare_emit(line));
     }
 
     /// A stub coined from a half-typed line before this fix (`[#gvqv] Add a

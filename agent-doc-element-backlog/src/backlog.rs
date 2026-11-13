@@ -1084,6 +1084,7 @@ fn consume_lifecycle_marker(text: &str) -> (Option<QueueLifecycleMarker>, &str) 
     loop {
         let icons = queue_icons();
         let candidates = [
+            (QueueLifecycleMarker::Seen, icons.seen.as_str()),
             (QueueLifecycleMarker::Pending, icons.pending.as_str()),
             (QueueLifecycleMarker::Claimed, icons.claimed.as_str()),
             (QueueLifecycleMarker::Running, icons.running.as_str()),
@@ -1111,6 +1112,7 @@ fn consume_lifecycle_marker(text: &str) -> (Option<QueueLifecycleMarker>, &str) 
                 QueueLifecycleMarker::AwaitingOperator,
                 icons.awaiting_operator.as_str(),
             ),
+            (QueueLifecycleMarker::Seen, "👀"),
             (QueueLifecycleMarker::Pending, "📥"),
             (QueueLifecycleMarker::Claimed, "🟡"),
             (QueueLifecycleMarker::Running, IN_PROGRESS_MARKER),
@@ -3811,6 +3813,7 @@ fn text_is_bare_queue_directive_reference(text: &str) -> bool {
             icons.agent_prioritized.as_str(),
             icons.claimed.as_str(),
             icons.running.as_str(),
+            icons.seen.as_str(),
             icons.pending.as_str(),
             icons.reported.as_str(),
             icons.lost.as_str(),
@@ -3822,6 +3825,7 @@ fn text_is_bare_queue_directive_reference(text: &str) -> bool {
             "📍",
             "🟡",
             "🚧",
+            "👀",
             "📥",
             "☑️",
             "📫",

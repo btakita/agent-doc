@@ -544,6 +544,16 @@ pub fn project_document_queue_sync(
                     } else {
                         QueueExecutionMode::MainInline
                     };
+                    // `#promptseen`: `👀` is the interval before prepare emits the
+                    // prompt. That row is not coordinator work yet.
+                    if claim.is_none()
+                        && agent_doc_document::queue_projection::lifecycle_marker(&prompt.text)
+                            == Some(
+                                agent_doc_document::queue_projection::QueueLifecycleMarker::Seen,
+                            )
+                    {
+                        continue;
+                    }
                     let mut lifecycle = classify_lifecycle(&prompt.text, claim);
                     // An inline queue's selected row is cosmetically `Running`
                     // even though it has no worker claim. It is main-agent work
@@ -744,6 +754,9 @@ fn classify_lifecycle(item: &str, claim: Option<&QueueClaim>) -> QueueSyncLifecy
     use agent_doc_document::queue_projection::QueueLifecycleMarker;
     match agent_doc_document::queue_projection::lifecycle_marker(item) {
         None | Some(QueueLifecycleMarker::Pending) => QueueSyncLifecycle::Pending,
+        // `#promptseen`: `👀` is not ready to run. The projection omits the
+        // row; this arm fails closed if a caller still classifies it.
+        Some(QueueLifecycleMarker::Seen) => QueueSyncLifecycle::Blocked,
         Some(QueueLifecycleMarker::Blocked) => QueueSyncLifecycle::Blocked,
         Some(QueueLifecycleMarker::Reported) => QueueSyncLifecycle::ReportedCheckmark,
         // A visible loss without its durable attempt is provenance-unknown. It

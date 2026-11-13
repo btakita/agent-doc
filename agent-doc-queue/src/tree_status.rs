@@ -343,6 +343,10 @@ fn classify_row(node: &QueueTreeNode, closability: Closability) -> Option<(Bucke
             Bucket::Agent,
             "held behind open prerequisite work; runs once that clears",
         ),
+        S::Seen => (
+            Bucket::Agent,
+            "seen (`👀`); prepare has not emitted this prompt yet",
+        ),
         S::Pending | S::Open => (Bucket::Agent, "pick up this queued item"),
         S::Reply => (Bucket::Agent, "pick up this operator reply"),
         S::Unknown => (

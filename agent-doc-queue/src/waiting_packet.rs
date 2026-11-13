@@ -439,14 +439,16 @@ pub fn normalize_waiting_packets(entries: &[QueueEntry]) -> Option<Vec<QueueEntr
             && owner_projection(&prompt.text).is_none()
             && matches!(
                 lifecycle_marker(&prompt.text),
-                None | Some(QueueLifecycleMarker::Pending)
+                None | Some(QueueLifecycleMarker::Pending | QueueLifecycleMarker::Seen)
             )
         {
             changed = true;
             continue;
         }
-        if lifecycle_marker(&prompt.text) == Some(QueueLifecycleMarker::Pending)
-            && owner_projection(&prompt.text).is_none()
+        if matches!(
+            lifecycle_marker(&prompt.text),
+            Some(QueueLifecycleMarker::Pending | QueueLifecycleMarker::Seen)
+        ) && owner_projection(&prompt.text).is_none()
             && let Some(stripped) =
                 agent_doc_document::queue_projection::strip_in_progress_marker_for_display(
                     &prompt.text,

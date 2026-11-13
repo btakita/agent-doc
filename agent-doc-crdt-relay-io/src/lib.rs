@@ -1437,6 +1437,11 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                     ) {
                         agent_doc_document::queue_projection::lifecycle_marker(&prompt.text)
                             .expect("matched Some lifecycle marker")
+                    } else if agent_doc_document::queue_projection::lifecycle_marker(&prompt.text)
+                        == Some(agent_doc_document::queue_projection::QueueLifecycleMarker::Seen)
+                    {
+                        // `#promptseen`: keep `👀` until prepare emits the prompt.
+                        agent_doc_document::queue_projection::QueueLifecycleMarker::Seen
                     } else {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
                     };

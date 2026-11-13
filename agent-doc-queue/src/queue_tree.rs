@@ -42,6 +42,8 @@ pub enum QueueNodeState {
     Reconciling,
     /// Held behind open prerequisite work.
     Blocked,
+    /// Seen glyph `👀`: the prompt is seen and prepare has not emitted it.
+    Seen,
     /// Queued for pickup (`📥`).
     Pending,
     /// A live row with no projected state yet.
@@ -61,7 +63,7 @@ pub enum QueueNodeState {
 }
 
 /// Summary order: what the operator acts on first.
-const SUMMARY_ORDER: [QueueNodeState; 15] = [
+const SUMMARY_ORDER: [QueueNodeState; 16] = [
     QueueNodeState::Done,
     QueueNodeState::WaitingOnYou,
     QueueNodeState::Answered,
@@ -70,6 +72,7 @@ const SUMMARY_ORDER: [QueueNodeState; 15] = [
     QueueNodeState::Lost,
     QueueNodeState::Reconciling,
     QueueNodeState::Blocked,
+    QueueNodeState::Seen,
     QueueNodeState::Pending,
     QueueNodeState::Open,
     QueueNodeState::Skipped,
@@ -90,6 +93,7 @@ impl QueueNodeState {
             Self::Lost => "lost",
             Self::Reconciling => "reconciling",
             Self::Blocked => "blocked",
+            Self::Seen => "seen",
             Self::Pending => "pending",
             Self::Open => "open",
             Self::Skipped => "skipped",
@@ -121,6 +125,7 @@ impl QueueNodeState {
 
     fn of_marker(marker: QueueLifecycleMarker) -> Self {
         match marker {
+            QueueLifecycleMarker::Seen => Self::Seen,
             QueueLifecycleMarker::Pending => Self::Pending,
             QueueLifecycleMarker::Blocked => Self::Blocked,
             QueueLifecycleMarker::Claimed | QueueLifecycleMarker::Running => Self::Running,

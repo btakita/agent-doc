@@ -59,7 +59,8 @@ pub enum QueueMarker {
 }
 
 /// Legend order. Matches [`QueueIconSet::entries`] one-to-one.
-pub const ALL_QUEUE_MARKERS: [QueueMarker; 16] = [
+pub const ALL_QUEUE_MARKERS: [QueueMarker; 17] = [
+    QueueMarker::Lifecycle(QueueLifecycleMarker::Seen),
     QueueMarker::Lifecycle(QueueLifecycleMarker::Pending),
     QueueMarker::Lifecycle(QueueLifecycleMarker::Blocked),
     QueueMarker::Lifecycle(QueueLifecycleMarker::Claimed),
@@ -83,6 +84,7 @@ impl QueueMarker {
     pub const fn config_key(self) -> &'static str {
         match self {
             Self::Lifecycle(state) => match state {
+                QueueLifecycleMarker::Seen => "seen",
                 QueueLifecycleMarker::Pending => "pending",
                 QueueLifecycleMarker::Blocked => "blocked",
                 QueueLifecycleMarker::Claimed => "claimed",
@@ -117,6 +119,7 @@ impl QueueMarker {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Lifecycle(state) => match state {
+                QueueLifecycleMarker::Seen => "seen",
                 QueueLifecycleMarker::Pending => "pending",
                 QueueLifecycleMarker::Blocked => "blocked",
                 QueueLifecycleMarker::Claimed => "claimed",
@@ -141,6 +144,9 @@ impl QueueMarker {
     pub const fn meaning(self) -> &'static str {
         match self {
             Self::Lifecycle(state) => match state {
+                QueueLifecycleMarker::Seen => {
+                    "Agent-doc has seen this prompt and has not yet emitted it in the prepare step. The prefix is the seen glyph `👀`. Prepare replaces it with pending when it emits the prompt."
+                }
                 QueueLifecycleMarker::Pending => {
                     "Live row with no claim, worker report, or completion evidence; ready to run."
                 }
@@ -357,6 +363,7 @@ mod tests {
     #[test]
     fn every_palette_field_has_a_legend_entry() {
         let QueueIconSet {
+            seen,
             pending,
             blocked,
             claimed,
@@ -375,6 +382,7 @@ mod tests {
             agent_prioritized,
         } = QueueIconSet::default();
         let fields = [
+            seen,
             pending,
             blocked,
             claimed,
@@ -417,6 +425,7 @@ mod tests {
     #[test]
     fn every_lifecycle_state_is_listed_and_documented() {
         for state in [
+            QueueLifecycleMarker::Seen,
             QueueLifecycleMarker::Pending,
             QueueLifecycleMarker::Blocked,
             QueueLifecycleMarker::Claimed,
@@ -432,7 +441,8 @@ mod tests {
             QueueLifecycleMarker::AwaitingOperator,
         ] {
             match state {
-                QueueLifecycleMarker::Pending
+                QueueLifecycleMarker::Seen
+                | QueueLifecycleMarker::Pending
                 | QueueLifecycleMarker::Blocked
                 | QueueLifecycleMarker::Claimed
                 | QueueLifecycleMarker::Running
@@ -457,7 +467,14 @@ mod tests {
                 state.default_prefix()
             );
         }
-        assert_eq!(ALL_LIFECYCLE_STATES.len(), 13);
+        assert_eq!(ALL_LIFECYCLE_STATES.len(), 14);
+        assert_eq!(QueueLifecycleMarker::Seen.default_prefix(), "👀");
+        assert!(
+            QueueMarker::Lifecycle(QueueLifecycleMarker::Seen)
+                .meaning()
+                .contains("👀"),
+            "the spec names the seen glyph"
+        );
     }
 
     #[test]

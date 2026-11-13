@@ -9001,12 +9001,21 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                 // `#queueblocked`: held out of drain and dispatch; names the
                 // open ids it waits on.
                 agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
-            } else if agent_doc_document::queue_projection::lifecycle_marker(&prompt.text).is_none()
-                && !coin_gate.allows_cosmetic_pending(&prompt.text)
+            } else if !coin_gate.allows_cosmetic_pending(&prompt.text)
+                && matches!(
+                    agent_doc_document::queue_projection::lifecycle_marker(&prompt.text),
+                    None | Some(agent_doc_document::queue_projection::QueueLifecycleMarker::Seen)
+                )
             {
-                // `#inboxdup`: the typing gate still holds this bare row. A
-                // pending paint would rewrite it while the operator is typing.
-                return None;
+                if coin_gate.seen_prompt_awaiting_prepare_emit(&prompt.text) {
+                    // `#promptseen`: seen, not yet the prompt prepare emits.
+                    // The prefix is the seen glyph `👀`.
+                    agent_doc_document::queue_projection::QueueLifecycleMarker::Seen
+                } else {
+                    // `#inboxdup`: the typing gate still holds this bare row. A
+                    // pending paint would rewrite it while the operator is typing.
+                    return None;
+                }
             } else {
                 agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
             };
@@ -11796,6 +11805,71 @@ mod tests {
         assert!(
             saved_settled.contains(&format!("📥 {settled}")),
             "{saved_settled}"
+        );
+    }
+
+    /// `#promptseen`: a settled prompt still inside the hold window wears the
+    /// seen glyph `👀`. Prepare emits `📥` only after the gate opens. A line
+    /// absent from the observation stays unmarked.
+    #[test]
+    fn run_queue_maintenance_prefixes_seen_before_prepare_emits_pending() {
+        let composing = "The first 📥 subitems that the operator adds as comments to the parent item get reordered";
+        let settled = "Release the sample.";
+        let content = format!(
+            concat!(
+                "---\n",
+                "agent_doc_session: test\n",
+                "agent_doc_format: template\n",
+                "queue_active: true\n",
+                "---\n\n",
+                "<!-- agent:queue go -->\n",
+                "- {composing}\n",
+                "- {settled}\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            composing = composing,
+            settled = settled,
+        );
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let gate = FreeTextCoinGate {
+            observed: Some(
+                agent_doc_queue::free_text_admission::FreeTextCoinObservation {
+                    settled_text: format!("- {settled}\n"),
+                    quiet_for_ms: 300,
+                },
+            ),
+            debounce_ms: 2_000,
+            max_hold_ms: agent_doc_debounce::edit_settle::DEFAULT_MAX_HOLD_MS,
+        };
+        run_queue_maintenance_with_coin_gate(&doc, None, &gate).unwrap();
+        let projected = std::fs::read_to_string(&doc).unwrap();
+        let line_with = |needle: &str| {
+            projected
+                .lines()
+                .find(|line| line.contains(needle))
+                .unwrap_or_else(|| panic!("missing {needle} in {projected}"))
+                .to_string()
+        };
+        let composing_line = line_with("The first");
+        assert!(
+            !composing_line.contains('👀'),
+            "a line absent from the observation gains no seen glyph `👀`: {composing_line}"
+        );
+        assert!(!composing_line.contains("📥 The first"), "{composing_line}");
+        let settled_line = line_with(settled);
+        assert_eq!(settled_line.matches('👀').count(), 1, "{settled_line}");
+        assert_eq!(settled_line.matches('📥').count(), 0, "{settled_line}");
+        assert!(
+            settled_line.contains(&format!("👀 {settled}")),
+            "the seen glyph `👀` marks the prompt before prepare emits it: {settled_line}"
         );
     }
 

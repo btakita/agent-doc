@@ -81,5 +81,6 @@ agent-doc-element-backlog-runtime-io = { path = "../agent-doc-element-backlog-ru
 agent-doc-turn-status-io = { path = "../agent-doc-turn-status-io", version = "0.35.573" }
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.573", features = ["test-support"] }
 agent-doc-test-support = { path = "../agent-doc-test-support", version = "0.35.573" }
+fs2 = "0.4"
 tempfile = "3"
 tmux-router = { path = "../../tmux-router", version = "0.3.14" }

@@ -302,11 +302,55 @@ struct BackgroundQueueMaintenanceLease {
 
 impl BackgroundQueueMaintenanceLease {
     fn adopt_reserved(file: &Path, token: &str) -> Result<Option<Self>> {
-        let Some(guard) =
-            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::adopt_reserved(file, token)?
-        else {
-            return Ok(None);
+        // A concurrent preflight can acquire the apply flock immediately after
+        // this worker's reservation probe releases it, then observe the live
+        // reservation and back out. Do not abandon the sole reserved worker in
+        // that short lock-before-lease-check window. Retry only while the exact
+        // token is still ours; supersession remains an immediate stop.
+        let started = std::time::Instant::now();
+        let deadline = started + std::time::Duration::from_secs(5);
+        let guard = loop {
+            if let Some(guard) =
+                agent_doc_queue_io::queue_edit_owner::QueueEditGuard::adopt_reserved(file, token)?
+            {
+                break guard;
+            }
+            let lease = agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(
+                &file.to_string_lossy(),
+            );
+            if !lease.as_ref().is_some_and(|lease| lease.holder == token) {
+                return Ok(None);
+            }
+            if std::time::Instant::now() >= deadline {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_maintenance_background_adoption_timed_out file={} pid={} waited_ms={}",
+                        file.display(),
+                        std::process::id(),
+                        started.elapsed().as_millis(),
+                    ),
+                );
+                return Ok(None);
+            }
+            let _ = agent_doc_queue_io::queue_edit_owner::refresh_queue_edit_owner_lease_if_holder(
+                &file.to_string_lossy(),
+                token,
+                std::process::id(),
+            )?;
+            std::thread::sleep(std::time::Duration::from_millis(2));
         };
+        if started.elapsed() >= std::time::Duration::from_millis(2) {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "queue_maintenance_background_adoption_waited file={} pid={} waited_ms={}",
+                    file.display(),
+                    std::process::id(),
+                    started.elapsed().as_millis(),
+                ),
+            );
+        }
         let file = file.to_path_buf();
         let heartbeat_file = file.clone();
         let heartbeat_token = token.to_string();
@@ -509,6 +553,14 @@ impl agent_doc_preflight_io::PendingMaintenanceEffectFence for BackgroundRequest
 /// maintenance implementation, so moving the effect off the admission lane
 /// does not introduce a disk-authority escape hatch.
 pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) -> Result<()> {
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_maintenance_background_worker_entered file={} pid={}",
+            file.display(),
+            std::process::id(),
+        ),
+    );
     let token = if cfg!(test) {
         // Unit tests invoke the worker body directly instead of going through
         // `spawn_background_queue_maintenance`, so reserve the test process as
@@ -532,6 +584,22 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
     };
     let Some(mut queue_mutation) = BackgroundQueueMaintenanceLease::adopt_reserved(file, &token)?
     else {
+        let lease = agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(
+            &file.to_string_lossy(),
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_maintenance_background_adoption_lost file={} pid={} token_matches={} holder_pid={}",
+                file.display(),
+                std::process::id(),
+                lease.as_ref().is_some_and(|lease| lease.holder == token),
+                lease
+                    .as_ref()
+                    .map(|lease| lease.holder_pid)
+                    .unwrap_or_default(),
+            ),
+        );
         eprintln!(
             "[preflight] background maintenance reservation is no longer owned for {} (child_pid={})",
             file.display(),
@@ -1023,6 +1091,72 @@ mod tests {
             started.elapsed() < std::time::Duration::from_millis(500),
             "dispatch waited for the comprehensive effect: {:?}",
             started.elapsed()
+        );
+    }
+
+    #[test]
+    fn reserved_background_worker_waits_out_transient_apply_lock_contention() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "body\n").unwrap();
+        let token = "reserved-background-worker";
+        assert!(
+            agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
+                &doc.to_string_lossy(),
+                token,
+                std::process::id(),
+            )
+            .unwrap()
+        );
+
+        // Model the exact race from two simultaneous preflights: after the
+        // reservation probe unlocks, the other preflight briefly acquires the
+        // flock before it observes the live reservation and backs out.
+        let document_hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        let lock_path = dir
+            .path()
+            .join(".agent-doc/locks/queue-apply")
+            .join(format!("{document_hash}.lock"));
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(lock_path)
+            .unwrap();
+        fs2::FileExt::lock_exclusive(&lock).unwrap();
+
+        let worker_doc = doc.clone();
+        let (adopted_tx, adopted_rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            adopted_tx
+                .send(BackgroundQueueMaintenanceLease::adopt_reserved(
+                    &worker_doc,
+                    token,
+                ))
+                .unwrap();
+        });
+        assert!(
+            adopted_rx
+                .recv_timeout(std::time::Duration::from_millis(25))
+                .is_err(),
+            "worker must still be waiting while the transient flock is held"
+        );
+
+        fs2::FileExt::unlock(&lock).unwrap();
+        let mut lease = adopted_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("worker did not adopt after transient contention")
+            .unwrap()
+            .expect("the exact reserved token should remain adoptable");
+        lease.mark_completed();
+        drop(lease);
+        worker.join().unwrap();
+        assert!(
+            agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(
+                &doc.to_string_lossy()
+            )
+            .is_none()
         );
     }
 

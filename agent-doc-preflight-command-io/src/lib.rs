@@ -131,6 +131,18 @@ use agent_doc_session_accretion::SessionAccretionReport;
 
 const TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS_ENV: &str =
     "AGENT_DOC_TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS";
+/// Integration-only barrier (`#releasegateflake`): the detached worker parks
+/// inside its maintenance body, holding the apply flock, the coordination
+/// lease, and the claimed request, until this path exists. It touches
+/// `<path>.parked` once parked.
+const TEST_BACKGROUND_PENDING_MAINTENANCE_RELEASE_FILE_ENV: &str =
+    "AGENT_DOC_TEST_BACKGROUND_PENDING_MAINTENANCE_RELEASE_FILE";
+/// Integration-only interleaving (`#releasegateflake`): the admitting process
+/// waits after spawning the worker until the worker has parked (the
+/// `<path>.parked` marker of the barrier above), so the worker owns every
+/// maintenance resource before admission finishes its dispatch and exits.
+const TEST_PREFLIGHT_AWAIT_PARKED_WORKER_ENV: &str = "AGENT_DOC_TEST_PREFLIGHT_AWAIT_PARKED_WORKER";
+const TEST_BARRIER_MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(120);
 const TEST_BACKGROUND_MAINTENANCE_CRASH_AFTER_LOCK_ENV: &str =
     "AGENT_DOC_TEST_BACKGROUND_MAINTENANCE_CRASH_AFTER_LOCK";
 const TEST_BACKGROUND_MAINTENANCE_PANIC_AFTER_EFFECT_ENV: &str =
@@ -222,6 +234,7 @@ pub fn spawn_background_queue_maintenance(
             ));
         }
     };
+    await_parked_worker_for_test(file, pid);
     // The reservation starts with the dispatcher's PID so a dispatcher crash
     // before process creation is recoverable. Once spawn succeeds, hand the
     // same token to the child PID immediately. This also makes a child crash
@@ -253,6 +266,70 @@ pub fn spawn_background_queue_maintenance(
         ),
     );
     Ok(pid)
+}
+
+fn parked_marker(release: &Path) -> PathBuf {
+    let mut marker = release.as_os_str().to_owned();
+    marker.push(".parked");
+    PathBuf::from(marker)
+}
+
+/// See [`TEST_PREFLIGHT_AWAIT_PARKED_WORKER_ENV`]. Forces the interleaving in
+/// which the detached worker already holds the apply flock, the lease, and the
+/// claim while admission still has its post-spawn handoff, its log append,
+/// and process exit ahead of it. Admission must still finish on its own.
+fn await_parked_worker_for_test(file: &Path, pid: u32) {
+    let Some(release) = std::env::var_os(TEST_PREFLIGHT_AWAIT_PARKED_WORKER_ENV) else {
+        return;
+    };
+    let marker = parked_marker(Path::new(&release));
+    let started = std::time::Instant::now();
+    while !marker.exists() && started.elapsed() < TEST_BARRIER_MAX_WAIT {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_maintenance_background_test_awaited_parked_worker file={} pid={} parked={} waited_ms={}",
+            file.display(),
+            pid,
+            marker.exists(),
+            started.elapsed().as_millis(),
+        ),
+    );
+}
+
+/// See [`TEST_BACKGROUND_PENDING_MAINTENANCE_RELEASE_FILE_ENV`].
+fn park_worker_for_test(file: &Path) -> Result<()> {
+    let Some(release) = std::env::var_os(TEST_BACKGROUND_PENDING_MAINTENANCE_RELEASE_FILE_ENV)
+    else {
+        return Ok(());
+    };
+    let release = PathBuf::from(release);
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "pending_maintenance_background_test_parked file={} pid={}",
+            file.display(),
+            std::process::id(),
+        ),
+    );
+    std::fs::write(parked_marker(&release), std::process::id().to_string())
+        .context("failed to publish the parked-worker test marker")?;
+    let started = std::time::Instant::now();
+    while !release.exists() && started.elapsed() < TEST_BARRIER_MAX_WAIT {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "pending_maintenance_background_test_released file={} released={} parked_ms={}",
+            file.display(),
+            release.exists(),
+            started.elapsed().as_millis(),
+        ),
+    );
+    Ok(())
 }
 
 fn spawn_detached_queue_effect(command: &mut Command) -> std::io::Result<u32> {
@@ -689,6 +766,7 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
                 );
                 std::thread::sleep(std::time::Duration::from_millis(delay));
             }
+            park_worker_for_test(file)?;
             effect_fence.fence_effect(file)?;
             // The worker must derive its admitted cut without publishing an
             // authority observation. A human edit can land while a routed

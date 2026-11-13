@@ -206,6 +206,150 @@ fn queue_effect_ops(lines: &str) -> Vec<&str> {
         .collect()
 }
 
+/// Evidence for an admission-SLA failure (`#releasegateflake`).
+///
+/// The 0.35.574 release gate failed this SLA once at 6.49s and the fixture's
+/// temp project, the only record of what admission was doing, was already
+/// gone. Whether the detached worker had finished when admission returned is
+/// the question that separates "admission waited for maintenance" from "this
+/// host's disk was slow" (admission performs ~100+ synchronous SQLite commits
+/// on a fresh project, so its wall time tracks fsync latency). Print it.
+fn admission_timing_evidence(root: &Path, output: &std::process::Output) -> String {
+    let ops = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap_or_default();
+    let worker_finished_before_return = ops.contains("pending_maintenance_background_completed")
+        || ops.contains("queue_maintenance_background_completed");
+    format!(
+        "detached worker finished before admission returned: {worker_finished_before_return} \
+         (false means admission did not wait for it)\n--- ops.log ---\n{ops}\n--- stderr ---\n{}",
+        String::from_utf8_lossy(&output.stderr),
+    )
+}
+
+/// `#releasegateflake`: admission must never wait on detached pending
+/// maintenance, proven by causality instead of a wall-clock budget.
+///
+/// The worker parks inside its maintenance body, holding the queue apply
+/// flock, the coordination lease, and the claimed request, until the test
+/// releases it. The admitting process is forced to wait until the worker is
+/// parked before finishing its own dispatch, so every resource the worker can
+/// hold is already held while admission still has its lease handoff, its log
+/// append, and process exit ahead of it. If admission depended on the worker
+/// in any way it could never return; the generous bound below only turns
+/// such a hang into a failure. The five-second SLA tests above stay as they
+/// are; this one is what tells a slow host apart from a real dependency.
+#[test]
+fn preflight_admission_returns_while_detached_pending_maintenance_is_parked() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: pending-parked-test\n",
+        "agent_doc_format: template\n",
+        "agent: codex\n",
+        "model: gpt-5\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- agent:boundary:1234abcd -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:backlog priority queue -->\n",
+        "- legacy pending item\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    let release = tmp.path().join("release-parked-maintenance");
+    let ops_path = tmp.path().join(".agent-doc/logs/ops.log");
+
+    let child = agent_doc_process_cmd()
+        .current_dir(tmp.path())
+        .env(
+            "AGENT_DOC_TEST_BACKGROUND_PENDING_MAINTENANCE_RELEASE_FILE",
+            &release,
+        )
+        .env("AGENT_DOC_TEST_PREFLIGHT_AWAIT_PARKED_WORKER", &release)
+        .args(["preflight", doc.to_str().unwrap()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let admission_pid = child.id();
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = done.send(child.wait_with_output());
+    });
+    let output = match finished.recv_timeout(std::time::Duration::from_secs(90)) {
+        Ok(output) => output.unwrap(),
+        Err(_) => {
+            let _ = ProcessCommand::new("kill")
+                .args(["-KILL", &admission_pid.to_string()])
+                .status();
+            let _ = fs::write(&release, "");
+            panic!(
+                "admission never returned while detached pending maintenance was parked: \
+                 the foreground waits on the worker\n{}",
+                fs::read_to_string(&ops_path).unwrap_or_default(),
+            );
+        }
+    };
+    let ops_at_return = fs::read_to_string(&ops_path).unwrap_or_default();
+    let release_worker = || fs::write(&release, "").unwrap();
+    if !output.status.success() {
+        release_worker();
+        panic!(
+            "preflight failed: {}\n{ops_at_return}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    // The forced interleaving really happened: the worker was parked, holding
+    // everything, before admission finished dispatching it.
+    let awaited = ops_at_return
+        .lines()
+        .find(|line| line.contains("queue_maintenance_background_test_awaited_parked_worker"))
+        .map(str::to_string);
+    let worker_parked_first = awaited
+        .as_deref()
+        .is_some_and(|line| line.contains("parked=true"))
+        && ops_at_return.contains("pending_maintenance_background_test_parked");
+    let worker_still_parked = !ops_at_return
+        .contains("pending_maintenance_background_test_released")
+        && !ops_at_return.contains("pending_maintenance_background_completed");
+    let apply_held_by_worker =
+        agent_doc_queue_io::queue_edit_owner::queue_apply_in_flight(&doc).unwrap();
+    release_worker();
+    assert!(
+        worker_parked_first,
+        "the worker did not own the maintenance resources before admission finished: {awaited:?}\n{ops_at_return}"
+    );
+    assert!(
+        worker_still_parked,
+        "admission returned only after the parked worker was released:\n{ops_at_return}"
+    );
+    assert!(
+        apply_held_by_worker,
+        "the parked worker must still hold the queue apply flock after admission returned"
+    );
+
+    let completion_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let current_ops = fs::read_to_string(&ops_path).unwrap_or_default();
+        if current_ops.contains("pending_maintenance_background_completed") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < completion_deadline,
+            "released pending maintenance never completed: {current_ops}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let converged = fs::read_to_string(&doc).unwrap();
+    assert!(
+        converged.contains("- [ ] [#"),
+        "pending backfill did not converge durably after release: {converged}"
+    );
+}
+
 #[test]
 fn preflight_admits_under_five_seconds_while_slow_queue_maintenance_stays_detached() {
     let tmp = tempfile::TempDir::new().unwrap();
@@ -251,7 +395,9 @@ fn preflight_admits_under_five_seconds_while_slow_queue_maintenance_stays_detach
     );
     assert!(
         admitted_elapsed < std::time::Duration::from_secs(5),
-        "bounded admission waited for six-second comprehensive maintenance: {admitted_elapsed:?}"
+        "bounded admission waited for six-second comprehensive maintenance: {admitted_elapsed:?}\n\
+         {}",
+        admission_timing_evidence(tmp.path(), &output),
     );
     let contract: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(
@@ -350,7 +496,9 @@ fn preflight_admits_under_five_seconds_while_slow_pending_maintenance_stays_deta
     );
     assert!(
         admitted_elapsed < std::time::Duration::from_secs(5),
-        "bounded admission waited for six-second pending maintenance: {admitted_elapsed:?}"
+        "bounded admission waited for six-second pending maintenance: {admitted_elapsed:?}\n\
+         {}",
+        admission_timing_evidence(tmp.path(), &output),
     );
 
     let ops = tmp.path().join(".agent-doc/logs/ops.log");

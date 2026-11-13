@@ -220,9 +220,11 @@ pub struct QueueClaim {
     /// Recorded evidence that this exact worker wrapper stopped
     /// (`#subagentworkpool`): the subagent-end hook or `queue freeze` records
     /// the end, while `queue release --requeue` abandons the attempt. A live
-    /// wrapper waiting on its own background work is a heartbeat. The same
-    /// notice delivered as the wrapper's terminal handback records that the
-    /// wrapper ended. At this low-level ledger boundary the claim, generation,
+    /// wrapper waiting on its own background work is a heartbeat, never a
+    /// freeze: the subagent-end hook records that stop through
+    /// [`QueueClaimLedger::record_worker_proof_of_life`], which also clears a
+    /// freeze an earlier stop recorded on the same generation
+    /// (`#waitingfreezelive`). At this low-level ledger boundary the claim, generation,
     /// and worker binding remain intact only until recovery runs. The public
     /// `queue freeze` command synchronously runs failed-continue recovery and
     /// emits a fresh claim / brief / start refill; its replacement claim retires
@@ -1873,6 +1875,68 @@ impl QueueClaimLedger {
                 abandoned: false,
             });
         }
+        Ok(claim.clone())
+    }
+
+    /// Record harness proof that this exact bound worker is alive
+    /// (`#waitingfreezelive`).
+    ///
+    /// Claude Code ends a worker's turn while that worker's own background
+    /// work is still in flight and tells the parent the worker "is waiting on
+    /// its own background work"; the worker resumes when that work reports.
+    /// That stop is a heartbeat, exactly like the coordinator's
+    /// `queue claim --refresh`: it stamps the heartbeat, keeps the claim
+    /// unexpired, and drops a non-abandon freeze and failed continue an
+    /// earlier stop recorded on this generation, so the pool keeps the slot
+    /// and never offers the row to a duplicate dispatch.
+    ///
+    /// Fenced by generation and worker id. A Lost attempt is revived only
+    /// under the same rules as a generation-fenced refresh: an explicit
+    /// abandon, a recovered completion, or a worker id bound to another live
+    /// attempt is refused, and so is every other state.
+    pub fn record_worker_proof_of_life(
+        &mut self,
+        item: &str,
+        expected_generation: Option<u64>,
+        worker_id: &str,
+        now_secs: u64,
+        ttl_secs: u64,
+    ) -> Result<QueueClaim, QueueClaimTransitionRefused> {
+        let index = self
+            .claim_index(item)
+            .ok_or(QueueClaimTransitionRefused::Missing)?;
+        validate_generation(&self.claims[index], expected_generation)?;
+        let bound = self.claims[index]
+            .worker
+            .as_ref()
+            .map(|worker| worker.worker_id.clone());
+        if bound.as_deref() != Some(worker_id.trim()) {
+            return Err(QueueClaimTransitionRefused::StaleWorker {
+                expected: worker_id.trim().to_string(),
+                current: bound,
+            });
+        }
+        if !self.revivable(index, now_secs) {
+            let claim = &self.claims[index];
+            return Err(match claim.state {
+                QueueClaimState::Claimed => QueueClaimTransitionRefused::NotRunning {
+                    generation: claim.generation,
+                },
+                state => QueueClaimTransitionRefused::Terminal {
+                    generation: claim.generation,
+                    state,
+                },
+            });
+        }
+        let claim = &mut self.claims[index];
+        claim.state = QueueClaimState::Running;
+        claim.lost_from = None;
+        claim.expires_at_secs = claim
+            .expires_at_secs
+            .max(now_secs.saturating_add(ttl_secs.max(1)));
+        claim.heartbeat_at_secs = Some(now_secs);
+        claim.frozen = None;
+        claim.lost_continue = None;
         Ok(claim.clone())
     }
 

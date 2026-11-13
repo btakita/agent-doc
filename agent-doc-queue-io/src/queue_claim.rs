@@ -1599,6 +1599,56 @@ pub(crate) fn freeze_bound_attempt(
     Ok(claim)
 }
 
+/// Record harness proof of life on an attempt already resolved from the
+/// durable worker binding (`#waitingfreezelive`): the worker stopped its turn
+/// while its own background work is still running. Clears a freeze an earlier
+/// stop recorded on this generation. Like [`freeze_bound_attempt`], it does
+/// not re-resolve the item through the live queue projection.
+pub(crate) fn record_bound_worker_proof_of_life(
+    file: &Path,
+    item: &str,
+    generation: Option<u64>,
+    worker_id: &str,
+) -> Result<(QueueClaim, bool)> {
+    let now = now_secs();
+    let (claim, cleared_freeze) = mutate_ledger(file, |ledger| {
+        let cleared_freeze = ledger.claims.iter().any(|claim| {
+            claim
+                .worker
+                .as_ref()
+                .is_some_and(|worker| worker.worker_id == worker_id.trim())
+                && generation.is_none_or(|generation| generation == claim.generation)
+                && (claim.frozen.is_some()
+                    || claim
+                        .lost_continue
+                        .as_ref()
+                        .is_some_and(|record| record.failed))
+        });
+        let claim = ledger
+            .record_worker_proof_of_life(
+                item,
+                generation,
+                worker_id,
+                now,
+                agent_doc_queue::queue_claim::DEFAULT_QUEUE_CLAIM_TTL_SECS,
+            )
+            .map_err(anyhow::Error::from)?;
+        Ok((claim, cleared_freeze))
+    })?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_claim_state state=running_waiting_on_own_background_work owner={} worker={} generation={} cleared_freeze={} item_bytes={} (#waitingfreezelive)",
+            claim.owner,
+            worker_id,
+            claim.generation,
+            cleared_freeze,
+            claim.item_text.len()
+        ),
+    );
+    Ok((claim, cleared_freeze))
+}
+
 fn log_frozen(file: &Path, claim: &QueueClaim) {
     agent_doc_ops_log_io::log_op(
         file,

@@ -10,6 +10,7 @@
 
 use serde_json::Value;
 
+use crate::background_work::{HarnessBackgroundTask, parse_background_tasks};
 use crate::usage_limit::{
     HarnessUsageLimit, SHORT_HANDBACK_LINES, handback_lines, worker_handback_usage_limit,
 };
@@ -44,6 +45,14 @@ pub struct SubagentEnd {
     pub branch: Option<String>,
     /// Structured `error` / `reason` that is exactly a known quota token.
     pub structured_reason: Option<String>,
+    /// The worker's own transcript (`agent_transcript_path`) only. Claude's
+    /// `transcript_path` is the parent's, whose launches include this very
+    /// worker, so it must never attribute background work
+    /// (`#waitingfreezelive`).
+    pub agent_transcript_path: Option<String>,
+    /// In-flight session work the harness listed (`background_tasks`), or
+    /// `None` when the payload has no such field (`#waitingfreezelive`).
+    pub background_tasks: Option<Vec<HarnessBackgroundTask>>,
 }
 
 /// Why [`parse_subagent_end`] did not return a signal.
@@ -109,6 +118,11 @@ pub fn parse_subagent_end(value: &Value) -> Result<SubagentEnd, SubagentEndParse
         worktree: string_field(value, &["worktree_path", "worktreePath", "worktree"]),
         branch: string_field(value, &["branch", "git_branch", "gitBranch"]),
         structured_reason: structured_quota_token(value),
+        agent_transcript_path: string_field(
+            value,
+            &["agent_transcript_path", "agentTranscriptPath"],
+        ),
+        background_tasks: parse_background_tasks(value),
     })
 }
 

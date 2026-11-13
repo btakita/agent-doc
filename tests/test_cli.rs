@@ -309,6 +309,96 @@ fn preflight_admits_under_five_seconds_while_slow_queue_maintenance_stays_detach
     }
 }
 
+/// `#admissionleasechurn`: count admission's coordination-lease writes and
+/// confirm its state.db close checkpoints are deferred, instead of timing it.
+///
+/// `#releasegateflake` (PR 415) found admission wall time tracks the host's
+/// fsync latency, and that the QueueEditGuard lease publish/clear cycles were
+/// about 40 of those fsyncs: every lease write ran on its own connection, and
+/// each close, as the last connection, checkpointed and deleted the WAL. This
+/// fixture's admission writes 12 leases: four guard cycles (8), the auto-gc
+/// stamp, the layout-drift clear, and the background maintenance reservation
+/// and its PID handoff. A new guard cycle or a lease write per stage fails the
+/// budget; losing the deferral fails the deferral check.
+#[test]
+fn preflight_admission_lease_writes_stay_within_budget_with_close_checkpoints_deferred() {
+    const ADMISSION_LEASE_WRITE_BUDGET: u64 = 12;
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: lease-churn-test\n",
+        "agent_doc_format: template\n",
+        "agent: codex\n",
+        "model: gpt-5\n",
+        "queue: start\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- agent:boundary:1234abcd -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue priority go -->\n",
+        "- do [#churn]\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog priority queue -->\n",
+        "- [ ] [#churn] count admission lease writes\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let output = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let ops = tmp.path().join(".agent-doc/logs/ops.log");
+    let admission_ops = fs::read_to_string(&ops).unwrap_or_default();
+    assert!(
+        output.status.success(),
+        "preflight failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let summary = admission_ops
+        .lines()
+        .find(|line| line.contains("preflight_admission_state_db_io "))
+        .unwrap_or_else(|| panic!("admission recorded no state.db IO summary: {admission_ops}"));
+    let field = |name: &str| -> u64 {
+        summary
+            .split_whitespace()
+            .find_map(|token| token.strip_prefix(&format!("{name}=")))
+            .and_then(|value| value.parse().ok())
+            .unwrap_or_else(|| panic!("summary has no numeric `{name}`: {summary}"))
+    };
+    assert!(summary.contains("admitted=true"), "{summary}");
+    let lease_writes = field("lease_writes");
+    assert!(
+        lease_writes <= ADMISSION_LEASE_WRITE_BUDGET,
+        "admission wrote {lease_writes} coordination leases (budget {ADMISSION_LEASE_WRITE_BUDGET}): {summary}"
+    );
+    assert!(
+        admission_ops.contains("preflight_state_db_close_checkpoints_deferred"),
+        "admission must hold state.db open so short-lived connections skip the last-close checkpoint: {admission_ops}"
+    );
+
+    // Let the detached maintenance child finish before the fixture is removed.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let current_ops = fs::read_to_string(&ops).unwrap_or_default();
+        if current_ops.contains("queue_maintenance_background_completed")
+            || !current_ops.contains("queue_maintenance_background_dispatched")
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "detached queue maintenance never completed: {current_ops}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
 #[test]
 fn preflight_admits_under_five_seconds_while_slow_pending_maintenance_stays_detached() {
     let tmp = tempfile::TempDir::new().unwrap();

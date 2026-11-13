@@ -447,6 +447,118 @@ pub fn state_table_exists(conn: &Connection, table: &str) -> Result<bool> {
     .with_context(|| format!("probe state table {table}"))
 }
 
+/// Per-thread count of `state.db` round trips made through this module
+/// (`#admissionleasechurn`).
+///
+/// Every short-lived writable connection costs more than its statements: the
+/// first WAL sync of a new connection also syncs the `.agent-doc` directory,
+/// and when the connection is the last one open it checkpoints the WAL into
+/// the main file and deletes it, so the next writer recreates and re-syncs it.
+/// Measured on a fresh project, one coordination-lease write through its own
+/// connection cost five fsyncs, one of them for the commit itself. These
+/// counters let tests and the preflight admission summary pin how many round
+/// trips a protocol makes, independent of host speed.
+///
+/// Counts are per thread so concurrently running tests cannot perturb each
+/// other; the admission path runs its state.db work on one thread.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StateDbIoCounters {
+    /// Writable connections opened (schema-converging or event-ingress).
+    pub writable_opens: u64,
+    /// Coordination-lease rows written (publish, claim, refresh, or clear).
+    pub lease_writes: u64,
+}
+
+thread_local! {
+    static STATE_DB_IO_COUNTERS: Cell<StateDbIoCounters> =
+        const { Cell::new(StateDbIoCounters { writable_opens: 0, lease_writes: 0 }) };
+}
+
+fn count_state_db_io(update: impl FnOnce(&mut StateDbIoCounters)) {
+    STATE_DB_IO_COUNTERS.with(|cell| {
+        let mut counters = cell.get();
+        update(&mut counters);
+        cell.set(counters);
+    });
+}
+
+/// This thread's [`StateDbIoCounters`] so far. Callers measure a protocol by
+/// subtracting a reading taken before it.
+pub fn state_db_io_counters() -> StateDbIoCounters {
+    STATE_DB_IO_COUNTERS.with(Cell::get)
+}
+
+impl StateDbIoCounters {
+    /// Round trips made since `earlier` (a reading from the same thread).
+    pub fn since(self, earlier: StateDbIoCounters) -> StateDbIoCounters {
+        StateDbIoCounters {
+            writable_opens: self.writable_opens.saturating_sub(earlier.writable_opens),
+            lease_writes: self.lease_writes.saturating_sub(earlier.lease_writes),
+        }
+    }
+}
+
+/// Keeps one idle connection to `state.db` open so short-lived connections
+/// closed meanwhile are never the database's *last* connection
+/// (`#admissionleasechurn`).
+///
+/// SQLite checkpoints the WAL into the main file and deletes it whenever the
+/// last connection to a WAL database closes. Admission opens and closes well
+/// over a hundred connections (leases, the op log, projections), so each
+/// write paid a WAL sync, a main-file sync, and a directory sync for the WAL it
+/// then had to recreate. While this guard is held, an idle connection keeps
+/// its shared lock on the database file, so those closes skip the checkpoint
+/// and the WAL survives between writers. Durability is unchanged: every commit
+/// is still synced to the WAL. Dropping the guard closes the connection, which
+/// performs the one deferred checkpoint if it is then the last connection.
+///
+/// The connection never reads inside a transaction after setup and never
+/// writes, so it holds no WAL read mark and cannot block a checkpoint or a
+/// writer.
+#[derive(Debug)]
+pub struct StateDbCloseCheckpointDeferral {
+    _connection: Connection,
+}
+
+/// Start deferring close checkpoints for an existing `state.db`.
+///
+/// Returns `Ok(None)` without touching the filesystem when the database does
+/// not exist yet, when the thread is in a read-only scope, or when this
+/// process may not open state connections. The guard is an optimization only;
+/// callers should proceed without it on error.
+pub fn defer_state_db_close_checkpoints(
+    project_root: &Path,
+) -> Result<Option<StateDbCloseCheckpointDeferral>> {
+    if state_db_read_only_scope_active() || state_db_connections_forbidden_for_process() {
+        return Ok(None);
+    }
+    let path = state_db_path(project_root);
+    if !path.is_file() {
+        return Ok(None);
+    }
+    agent_doc_fs::guard_test_runtime_target(&path, "a state.db close-checkpoint deferral");
+    // No CREATE: an absent database is not this guard's to make, and no
+    // schema convergence: the guard only needs a shared lock.
+    let connection = Connection::open_with_flags(
+        &path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .with_context(|| format!("open {} to defer close checkpoints", path.display()))?;
+    connection.busy_timeout(STATE_DB_BUSY_TIMEOUT)?;
+    // One completed read puts the connection into WAL mode, where it keeps
+    // the database file's shared lock until it closes.
+    let journal_mode: String = connection.query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
+    if !journal_mode.eq_ignore_ascii_case("wal") {
+        return Ok(None);
+    }
+    connection.query_row("SELECT count(*) FROM sqlite_master", [], |row| {
+        row.get::<_, i64>(0)
+    })?;
+    Ok(Some(StateDbCloseCheckpointDeferral {
+        _connection: connection,
+    }))
+}
+
 pub fn open_state_db(project_root: &Path) -> Result<Connection> {
     open_state_db_with_timeout(project_root, STATE_DB_BUSY_TIMEOUT)
 }
@@ -500,6 +612,7 @@ pub fn open_state_db_for_event_ingress_with_timeout(
             )
         });
     }
+    count_state_db_io(|counters| counters.writable_opens += 1);
     let conn = Connection::open(&path)
         .with_context(|| format!("failed to open {} for state-event ingress", path.display()))?;
     conn.busy_timeout(busy_timeout)?;
@@ -1047,6 +1160,7 @@ pub fn reset_state_db_schema_convergence_memo() {
 /// let the registry rebuild from live panes (`agent-doc fix`). Preserve the
 /// corrupt original — it is the only evidence for diagnosing this properly.
 fn open_and_init_state_db(path: &Path, busy_timeout: Duration) -> Result<Connection> {
+    count_state_db_io(|counters| counters.writable_opens += 1);
     let conn =
         Connection::open(path).with_context(|| format!("failed to open {}", path.display()))?;
     conn.busy_timeout(busy_timeout)?;
@@ -2395,6 +2509,7 @@ pub fn upsert_coordination_lease_in_db(
     conn: &Connection,
     lease: &CoordinationLeaseRecord,
 ) -> Result<()> {
+    count_state_db_io(|counters| counters.lease_writes += 1);
     conn.execute(
         "INSERT INTO coordination_leases \
          (scope_kind, scope_id, holder, holder_pid, heartbeat_secs) \
@@ -2423,6 +2538,7 @@ pub fn claim_coordination_lease_if_expired_in_db(
     lease: &CoordinationLeaseRecord,
     eligible_at_or_before_secs: u64,
 ) -> Result<bool> {
+    count_state_db_io(|counters| counters.lease_writes += 1);
     Ok(conn.execute(
         "INSERT INTO coordination_leases \
          (scope_kind, scope_id, holder, holder_pid, heartbeat_secs) \
@@ -2457,6 +2573,7 @@ pub fn refresh_coordination_lease_if_holder_in_db(
     holder_pid: u32,
     heartbeat_secs: u64,
 ) -> Result<bool> {
+    count_state_db_io(|counters| counters.lease_writes += 1);
     Ok(conn.execute(
         "UPDATE coordination_leases \
          SET holder_pid = ?4, heartbeat_secs = ?5 \
@@ -2528,6 +2645,7 @@ pub fn clear_coordination_lease_in_db(
     scope_kind: &str,
     scope_id: &str,
 ) -> Result<bool> {
+    count_state_db_io(|counters| counters.lease_writes += 1);
     Ok(conn.execute(
         "DELETE FROM coordination_leases WHERE scope_kind = ?1 AND scope_id = ?2",
         params![scope_kind, scope_id],
@@ -2543,6 +2661,7 @@ pub fn clear_coordination_leases_heartbeat_at_or_before_in_db(
     scope_kind: &str,
     cutoff_secs: u64,
 ) -> Result<usize> {
+    count_state_db_io(|counters| counters.lease_writes += 1);
     let cutoff = i64::try_from(cutoff_secs).unwrap_or(i64::MAX);
     conn.execute(
         "DELETE FROM coordination_leases WHERE scope_kind = ?1 AND heartbeat_secs <= ?2",
@@ -2560,6 +2679,7 @@ pub fn clear_coordination_lease_if_heartbeat_at_or_before_in_db(
     scope_id: &str,
     cutoff_secs: u64,
 ) -> Result<bool> {
+    count_state_db_io(|counters| counters.lease_writes += 1);
     let cutoff = i64::try_from(cutoff_secs).unwrap_or(i64::MAX);
     Ok(conn.execute(
         "DELETE FROM coordination_leases \
@@ -2574,11 +2694,39 @@ pub fn clear_coordination_lease_if_holder_in_db(
     scope_id: &str,
     holder: &str,
 ) -> Result<bool> {
+    count_state_db_io(|counters| counters.lease_writes += 1);
     Ok(conn.execute(
         "DELETE FROM coordination_leases \
          WHERE scope_kind = ?1 AND scope_id = ?2 AND holder = ?3",
         params![scope_kind, scope_id, holder],
     )? > 0)
+}
+
+/// Publish `lease` unless `keep_existing` accepts the row it would replace,
+/// in one `BEGIN IMMEDIATE` transaction on `conn` (`#admissionleasechurn`).
+///
+/// Returns the kept row, or `None` when `lease` was published. Read, decide,
+/// and replace share one write lock, so no other writer can publish between
+/// the observation and the upsert; and the caller pays one round trip and at
+/// most one commit, where a separate read, clear, and publish paid three
+/// connections and up to two commits.
+pub fn publish_coordination_lease_unless_in_db(
+    conn: &Connection,
+    lease: &CoordinationLeaseRecord,
+    keep_existing: impl FnOnce(&CoordinationLeaseRecord) -> bool,
+) -> Result<Option<CoordinationLeaseRecord>> {
+    let tx =
+        crate::immediate_transaction_unchecked(conn).context("begin coordination lease publish")?;
+    if let Some(existing) =
+        load_coordination_lease_from_db(&tx, &lease.scope_kind, &lease.scope_id)?
+        && keep_existing(&existing)
+    {
+        tx.rollback().context("release kept coordination lease")?;
+        return Ok(Some(existing));
+    }
+    upsert_coordination_lease_in_db(&tx, lease)?;
+    tx.commit().context("commit coordination lease publish")?;
+    Ok(None)
 }
 
 /// Durable health of the PID-scoped editor transport for one document.
@@ -7376,6 +7524,100 @@ pub fn layout_scope_exists(conn: &Connection, scope: &str) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn lease(holder: &str, pid: u32) -> CoordinationLeaseRecord {
+        CoordinationLeaseRecord {
+            scope_kind: "queue_mutation".to_string(),
+            scope_id: "doc".to_string(),
+            holder: holder.to_string(),
+            holder_pid: Some(pid),
+            heartbeat_secs: 1,
+        }
+    }
+
+    fn state_db_wal_bytes(root: &Path) -> Option<u64> {
+        let mut wal = state_db_path(root).into_os_string();
+        wal.push("-wal");
+        std::fs::metadata(PathBuf::from(wal))
+            .ok()
+            .map(|meta| meta.len())
+    }
+
+    /// `#admissionleasechurn`: while the deferral is held, a short-lived
+    /// writer's close is not the last close, so it neither checkpoints nor
+    /// deletes the WAL (each of which cost syncs). The deferred checkpoint runs
+    /// once, when the deferral itself closes.
+    #[test]
+    fn close_checkpoint_deferral_keeps_the_wal_across_short_lived_writers() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        drop(open_state_db(dir.path())?);
+
+        // Baseline: the last close checkpoints and removes the WAL.
+        upsert_coordination_lease_in_db(&open_state_db(dir.path())?, &lease("a", 1))?;
+        assert_eq!(state_db_wal_bytes(dir.path()), None);
+
+        let deferral = defer_state_db_close_checkpoints(dir.path())?
+            .expect("an existing WAL state.db can defer close checkpoints");
+        for holder in ["b", "c", "d"] {
+            upsert_coordination_lease_in_db(&open_state_db(dir.path())?, &lease(holder, 1))?;
+            assert!(
+                state_db_wal_bytes(dir.path()).is_some_and(|bytes| bytes > 0),
+                "a writer closing under the deferral must not checkpoint away the WAL"
+            );
+        }
+        drop(deferral);
+        assert_eq!(
+            state_db_wal_bytes(dir.path()),
+            None,
+            "dropping the deferral runs the one deferred checkpoint"
+        );
+        let conn = open_state_db(dir.path())?;
+        assert_eq!(
+            load_coordination_lease_from_db(&conn, "queue_mutation", "doc")?
+                .map(|lease| lease.holder),
+            Some("d".to_string()),
+            "every commit made under the deferral is durable"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn close_checkpoint_deferral_never_creates_a_state_db() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        assert!(defer_state_db_close_checkpoints(dir.path())?.is_none());
+        assert!(!state_db_path(dir.path()).exists());
+        assert!(!dir.path().join(".agent-doc").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn publish_unless_keeps_an_accepted_holder_and_replaces_any_other() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+        let before = state_db_io_counters();
+        assert_eq!(
+            publish_coordination_lease_unless_in_db(&conn, &lease("first", 7), |_| true)?,
+            None,
+            "an absent row is published"
+        );
+        let kept = publish_coordination_lease_unless_in_db(&conn, &lease("second", 8), |row| {
+            row.holder == "first"
+        })?;
+        assert_eq!(kept.map(|row| row.holder), Some("first".to_string()));
+        assert_eq!(
+            publish_coordination_lease_unless_in_db(&conn, &lease("third", 9), |_| false)?,
+            None,
+            "a rejected row is replaced in the same transaction"
+        );
+        let row = load_coordination_lease_from_db(&conn, "queue_mutation", "doc")?.unwrap();
+        assert_eq!((row.holder.as_str(), row.holder_pid), ("third", Some(9)));
+        assert_eq!(
+            state_db_io_counters().since(before).lease_writes,
+            2,
+            "a kept holder writes nothing"
+        );
+        Ok(())
+    }
 
     #[test]
     fn starting_actor_timeout_read_uses_document_fact_type_index() -> Result<()> {

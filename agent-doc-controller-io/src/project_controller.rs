@@ -13840,6 +13840,17 @@ pub fn upsert_coordination_lease(
     state_store::upsert_coordination_lease_in_db(&conn, lease)
 }
 
+/// Publish `lease` unless `keep_existing` accepts the current holder, in one
+/// state.db round trip and one transaction. Returns the kept row, if any.
+pub fn publish_coordination_lease_unless(
+    project_root: &Path,
+    lease: &state_store::CoordinationLeaseRecord,
+    keep_existing: impl FnOnce(&state_store::CoordinationLeaseRecord) -> bool,
+) -> Result<Option<state_store::CoordinationLeaseRecord>> {
+    let conn = open_state_db(project_root)?;
+    state_store::publish_coordination_lease_unless_in_db(&conn, lease, keep_existing)
+}
+
 pub fn claim_coordination_lease_if_expired(
     project_root: &Path,
     lease: &state_store::CoordinationLeaseRecord,

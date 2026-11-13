@@ -3163,10 +3163,6 @@ mod tests {
 
         let expected = content
             .replace(
-                "- ~~The response id belongs in every related response header. [#q-f07f85cbaefd] ⟦local⟧~~ — auto-struck: answered this cycle (#ftstrike); response: [#r-0648593c3bc4] ⟦addressed-at:2026-11-01T12:08:38.000Z⟧\n",
-                "- ### ~~The response id belongs in every related response header. [#q-f07f85cbaefd] ⟦local⟧~~\n",
-            )
-            .replace(
                 "  - 📥 **Response [#r-fedcba987654]:**",
                 "  - **Response [#r-fedcba987654]:**",
             )
@@ -3174,7 +3170,7 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(&doc).unwrap(),
             expected,
-            "queue sync may canonicalize presentation but must preserve terminal state and response children"
+            "queue sync may paint live siblings but must not reopen or canonicalize a terminal row"
         );
 
         sync_with_effects(&effects, &doc).expect("response metadata repair must be idempotent");

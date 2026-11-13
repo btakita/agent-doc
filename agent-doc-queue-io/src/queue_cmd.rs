@@ -6589,6 +6589,7 @@ mod prune_duplicates_cmd_tests {
             &self,
             _file: &Path,
             _count: usize,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
         ) -> Result<Option<QueueCommandConsumeOutcome>> {
             Ok(None)
         }
@@ -6597,15 +6598,26 @@ mod prune_duplicates_cmd_tests {
             &self,
             _file: &Path,
             _count: usize,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
         ) -> Result<Option<QueueCommandConsumeOutcome>> {
             Ok(None)
         }
 
-        fn strike_orphan_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+        fn strike_orphan_id_backed_queue_head(
+            &self,
+            _file: &Path,
+            _id: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<bool> {
             Ok(false)
         }
 
-        fn acknowledge_open_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {
+        fn acknowledge_open_id_backed_queue_head(
+            &self,
+            _file: &Path,
+            _id: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<bool> {
             Ok(false)
         }
 
@@ -6613,11 +6625,16 @@ mod prune_duplicates_cmd_tests {
             &self,
             _file: &Path,
             _expected_head: &str,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
         ) -> Result<Option<QueueCommandConsumeOutcome>> {
             Ok(None)
         }
 
-        fn prune_noise_queue_heads(&self, _file: &Path) -> Result<usize> {
+        fn prune_noise_queue_heads(
+            &self,
+            _file: &Path,
+            _apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+        ) -> Result<usize> {
             Ok(0)
         }
     }

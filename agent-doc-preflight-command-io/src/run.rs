@@ -322,6 +322,7 @@ pub fn run(file: &Path) -> Result<()> {
 /// converged snapshot advances while disk remains behind, and only that mismatch
 /// needs the queue-only baseline realignment. `maintenance_baseline` is the safe
 /// checkpoint captured immediately before queue maintenance.
+#[cfg(test)]
 fn maybe_realign_baseline_to_editor_queue_convergence(
     file: &Path,
     maintenance_baseline: &str,

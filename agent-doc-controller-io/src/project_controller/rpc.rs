@@ -2819,6 +2819,19 @@ fn request_existing_controller_with_timeout<T: DeserializeOwned>(
     })
 }
 
+/// One-shot transport for observationally pure fence probes. Handoff refusal
+/// is returned directly: the generic retry policy publishes diagnostics for
+/// first refusal, settlement, and exhaustion, which would make a rejected
+/// read-only transaction mutate ops state.
+fn request_existing_controller_effect_free_with_timeout<T: DeserializeOwned>(
+    project_root: &Path,
+    request: ControllerRequest,
+    timeout: Duration,
+) -> Result<T> {
+    let stream = connect(project_root)?;
+    request_controller_on_stream_with_timeout(project_root, request, timeout, stream)
+}
+
 /// (`#handoffrefusalretry`) Run one client RPC under the handoff settle policy.
 ///
 /// Each attempt reconnects from scratch, so a retry lands on whichever
@@ -10543,34 +10556,43 @@ fn request_existing_controller_crdt_current_text_read_with_diagnostics(
     source: &str,
     publish_diagnostic: bool,
 ) -> Result<agent_doc_crdt_relay_io::CurrentText> {
-    let data: serde_json::Value = request_existing_controller_with_timeout(
-        project_root,
-        ControllerRequest {
-            command: "crdt_current_text".to_string(),
-            file: Some(canonical.to_path_buf()),
-            session_id: None,
-            pane_id: None,
-            window_id: None,
-            generation: None,
-            state: None,
-            caller: None,
-            reason: None,
-            supervisor_pid: None,
-            supervisor_socket: None,
-            command_kind: None,
-            diagnostic_payload: Some(
-                serde_json::json!({
-                    "source": source,
-                    "recover_projection": false,
-                    "flush_barrier": false,
-                    "effect_free": !publish_diagnostic,
-                })
-                .to_string(),
-            ),
-            sequence: None,
-        },
-        CONTROLLER_CRDT_CURRENT_TEXT_READ_TIMEOUT,
-    )?;
+    let request = ControllerRequest {
+        command: "crdt_current_text".to_string(),
+        file: Some(canonical.to_path_buf()),
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: None,
+        state: None,
+        caller: None,
+        reason: None,
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: Some(
+            serde_json::json!({
+                "source": source,
+                "recover_projection": false,
+                "flush_barrier": false,
+                "effect_free": !publish_diagnostic,
+            })
+            .to_string(),
+        ),
+        sequence: None,
+    };
+    let data: serde_json::Value = if publish_diagnostic {
+        request_existing_controller_with_timeout(
+            project_root,
+            request,
+            CONTROLLER_CRDT_CURRENT_TEXT_READ_TIMEOUT,
+        )?
+    } else {
+        request_existing_controller_effect_free_with_timeout(
+            project_root,
+            request,
+            CONTROLLER_CRDT_CURRENT_TEXT_READ_TIMEOUT,
+        )?
+    };
     let current = controller_current_text_from_data(&data)?;
     if publish_diagnostic {
         log_controller_current_text_result(canonical, source, &current);
@@ -66299,6 +66321,70 @@ mod tests {
             std::fs::read(&state_path).ok(),
             before_state,
             "effect-free attached-editor authority probes must not mutate state.db"
+        );
+    }
+
+    #[test]
+    fn effect_free_current_text_client_refusal_is_one_shot_and_pure() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/effect-free-client-refusal.md");
+        std::fs::write(&doc, "Body\n").unwrap();
+        let canonical = doc.canonicalize().unwrap();
+        let state_path = dir.path().join(".agent-doc/state.db");
+        let ops_path = dir.path().join(".agent-doc/logs/ops.log");
+        drop(agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap());
+        let before_state = std::fs::read(&state_path).ok();
+        let before_ops = std::fs::read(&ops_path).ok();
+
+        let sock = socket_path(dir.path());
+        std::fs::create_dir_all(sock.parent().unwrap()).unwrap();
+        let name = sock.to_fs_name::<GenericFilePath>().unwrap();
+        let listener = ListenerOptions::new().name(name).create_sync().unwrap();
+        let server = std::thread::spawn(move || {
+            let stream = listener.accept().unwrap();
+            let (reader_half, mut writer_half) = stream.split();
+            let mut line = String::new();
+            BufReader::new(reader_half).read_line(&mut line).unwrap();
+            let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(request["command"], "crdt_current_text");
+            let diagnostic: serde_json::Value =
+                serde_json::from_str(request["diagnostic_payload"].as_str().unwrap()).unwrap();
+            assert_eq!(diagnostic["effect_free"], true);
+            writeln!(
+                writer_half,
+                "{}",
+                serde_json::json!({
+                    "ok": false,
+                    "error": "controller not authoritative (handoff_state=Preparing)"
+                })
+            )
+            .unwrap();
+            writer_half.flush().unwrap();
+        });
+
+        let err = request_existing_controller_crdt_current_text_read_quiet(
+            dir.path(),
+            &canonical,
+            "test_effect_free_client_refusal",
+        )
+        .unwrap_err();
+        server.join().unwrap();
+
+        assert!(
+            format!("{err:#}").contains("controller not authoritative"),
+            "the one-shot read must surface the authentic refusal: {err:#}"
+        );
+        assert_eq!(
+            std::fs::read(&ops_path).ok(),
+            before_ops,
+            "the effect-free client transport must not publish handoff retry diagnostics"
+        );
+        assert_eq!(
+            std::fs::read(&state_path).ok(),
+            before_state,
+            "the effect-free client transport must not mutate controller state"
         );
     }
 

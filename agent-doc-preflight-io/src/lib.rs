@@ -163,21 +163,46 @@ fn current_text_via_preflight_authority_retrying(
     file: &Path,
     source: &str,
 ) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
-    observe_current_text_with_bounded_retry(file, source, queue_authority_attempts(), |file| {
-        current_text_via_preflight_authority(file, source)
-    })
+    current_text_via_preflight_authority_retrying_with_fence(file, source, None)
 }
 
+fn current_text_via_preflight_authority_retrying_with_fence(
+    file: &Path,
+    source: &str,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
+) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
+    observe_current_text_with_bounded_retry_fenced(
+        file,
+        source,
+        queue_authority_attempts(),
+        effect_fence,
+        |file| current_text_via_preflight_authority(file, source),
+    )
+}
+
+#[cfg(test)]
 fn observe_current_text_with_bounded_retry(
     file: &Path,
     source: &str,
     attempts: u32,
+    observe: impl FnMut(&Path) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>>,
+) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
+    observe_current_text_with_bounded_retry_fenced(file, source, attempts, None, observe)
+}
+
+fn observe_current_text_with_bounded_retry_fenced(
+    file: &Path,
+    source: &str,
+    attempts: u32,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
     mut observe: impl FnMut(&Path) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>>,
 ) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
     let attempts = attempts.max(1);
+    fence_pending_maintenance_effect(file, effect_fence)?;
     let mut observed = observe(file);
     for attempt in 1..=attempts {
         let status = current_text_status_token(&observed);
+        fence_pending_maintenance_effect(file, effect_fence)?;
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -235,6 +260,7 @@ fn observe_current_text_with_bounded_retry(
         // Ask for re-registration and then re-observe rather than reporting an
         // error the operator has to clear with two manual admin commands.
         if request_plugin_refresh {
+            fence_pending_maintenance_effect(file, effect_fence)?;
             let reregister = match agent_doc_crdt_relay_io::signal_crdt_replica_event(
                 file,
                 agent_doc_crdt_relay_io::CrdtReplicaEventReason::EditorReplicaReregister,
@@ -243,6 +269,7 @@ fn observe_current_text_with_bounded_retry(
                 Ok(()) => "requested".to_string(),
                 Err(err) => format!("failed:{}", format!("{err:#}").replace('\n', "\\n")),
             };
+            fence_pending_maintenance_effect(file, effect_fence)?;
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -255,6 +282,7 @@ fn observe_current_text_with_bounded_retry(
             );
         }
         std::thread::sleep(QUEUE_AUTHORITY_RETRY_BACKOFF);
+        fence_pending_maintenance_effect(file, effect_fence)?;
         observed = observe(file);
     }
     observed
@@ -5292,16 +5320,30 @@ fn adopt_proven_newer_disk_save(
 /// registered CRDT cut catches up. Fast-forward the validated durable branch
 /// only from its exact unchanged baseline, then give CRDT/editor projection the
 /// same bounded chance to converge that other attached writes receive.
+#[cfg(test)]
 fn observe_queue_authority_after_native_save_with_bounded_retry(
     file: &Path,
     source: &str,
     attempts: u32,
     observe: impl FnMut(&Path) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>>,
 ) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
+    observe_queue_authority_after_native_save_with_bounded_retry_fenced(
+        file, source, attempts, None, observe,
+    )
+}
+
+fn observe_queue_authority_after_native_save_with_bounded_retry_fenced(
+    file: &Path,
+    source: &str,
+    attempts: u32,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
+    observe: impl FnMut(&Path) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>>,
+) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
     observe_queue_authority_after_native_save_with_bounded_retry_and_adopt(
         file,
         source,
         attempts,
+        effect_fence,
         observe,
         adopt_proven_newer_disk_save,
     )
@@ -5311,10 +5353,12 @@ fn observe_queue_authority_after_native_save_with_bounded_retry_and_adopt(
     file: &Path,
     source: &str,
     attempts: u32,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
     mut observe: impl FnMut(&Path) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>>,
     mut adopt: impl FnMut(&Path, &str, &str, &str) -> Result<()>,
 ) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
     let attempts = attempts.max(1);
+    fence_pending_maintenance_effect(file, effect_fence)?;
     let mut observed = observe(file);
     // Preserve one exact-base operation epoch across this bounded reconciliation.
     // The first CP projection fences the active epoch, but subsequent observations
@@ -5366,6 +5410,7 @@ fn observe_queue_authority_after_native_save_with_bounded_retry_and_adopt(
             Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })) => text,
             _ => unreachable!("newer_disk is only populated for a live current authority"),
         };
+        fence_pending_maintenance_effect(file, effect_fence)?;
         adopt(file, authority, &disk, source).map_err(|err| {
             QueueAuthorityUnavailable::new(format!(
                 "could not fast-forward the proven newer durable queue save: {err:#}"
@@ -5376,6 +5421,7 @@ fn observe_queue_authority_after_native_save_with_bounded_retry_and_adopt(
         } else {
             "refused"
         };
+        fence_pending_maintenance_effect(file, effect_fence)?;
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -5396,6 +5442,7 @@ fn observe_queue_authority_after_native_save_with_bounded_retry_and_adopt(
             .into());
         }
         std::thread::sleep(QUEUE_AUTHORITY_RETRY_BACKOFF);
+        fence_pending_maintenance_effect(file, effect_fence)?;
         observed = observe(file);
     }
     observed
@@ -5946,12 +5993,17 @@ fn run_queue_maintenance_with_options_under_apply_guard(
     }
     fence_queue_maintenance_authority_acquisition(file, effect_fence)?;
     let (mut content, authority_queue_unresolved_prompts) =
-        match observe_queue_authority_after_native_save_with_bounded_retry(
+        match observe_queue_authority_after_native_save_with_bounded_retry_fenced(
             file,
             "preflight_queue_maintenance",
             queue_authority_attempts(),
+            effect_fence,
             |file| {
-                current_text_via_preflight_authority_retrying(file, "preflight_queue_maintenance")
+                current_text_via_preflight_authority_retrying_with_fence(
+                    file,
+                    "preflight_queue_maintenance",
+                    effect_fence,
+                )
             },
         ) {
             Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
@@ -8271,6 +8323,11 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                 eprintln!(
                     "[preflight] queue: head prompt modified in Lazily current — adopting edited head and continuing loop (#queue-no-stall-on-head-edit)"
                 );
+                fence_queue_maintenance_effect(
+                    file,
+                    effect_fence,
+                    QueueMaintenanceEffectFamily::Snapshot,
+                )?;
                 adopt_edited_queue_head_into_snapshot(file, &current_content);
             }
         }
@@ -11981,6 +12038,50 @@ mod tests {
     }
 
     #[test]
+    fn queue_authority_retry_rechecks_fence_after_each_observation() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let admitted = "admitted authority\n";
+        let superseding = "operator authority\n";
+        std::fs::write(&doc, admitted).unwrap();
+        let expected_hash = agent_doc_hash::content_hash(admitted);
+        let fence = |path: &Path| {
+            let observed = std::fs::read_to_string(path)?;
+            anyhow::ensure!(
+                agent_doc_hash::content_hash(&observed) == expected_hash,
+                "injected acquisition authority superseded"
+            );
+            Ok(())
+        };
+        let ops_path = dir.path().join(".agent-doc/logs/ops.log");
+        let before_ops = std::fs::read(&ops_path).ok();
+        let mut observations = 0usize;
+
+        let err = observe_current_text_with_bounded_retry_fenced(
+            &doc,
+            "test_inner_acquisition_fence",
+            2,
+            Some(&fence),
+            |_| {
+                observations += 1;
+                std::fs::write(&doc, superseding).unwrap();
+                Ok(Some(
+                    agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica,
+                ))
+            },
+        )
+        .unwrap_err();
+
+        assert!(format!("{err:#}").contains("superseded"), "{err:#}");
+        assert_eq!(observations, 1, "the stale acquisition must not retry");
+        assert_eq!(
+            std::fs::read(&ops_path).ok(),
+            before_ops,
+            "drift after an authority observation must be rejected before diagnostics or replica recovery"
+        );
+    }
+
+    #[test]
     fn queue_authority_status_token_names_each_observation() {
         assert_eq!(
             current_text_status_token(&Ok(Some(
@@ -12040,6 +12141,7 @@ mod tests {
             &doc,
             "test",
             3,
+            None,
             |_| {
                 calls += 1;
                 let text = if calls < 3 { baseline } else { &saved };
@@ -12075,6 +12177,79 @@ mod tests {
             saved,
             "preflight reconciliation must never rewrite the native save"
         );
+    }
+
+    #[test]
+    fn queue_authority_native_save_adoption_rechecks_fence_after_observation() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let baseline = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n",
+            "agent_doc_write: crdt\nqueue: go\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n- inspect the cut\n<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let admitted = baseline.replace(
+            "<!-- agent:queue go -->",
+            "<!-- agent:queue go admitted -->",
+        );
+        let superseding = admitted.replace(
+            "<!-- agent:backlog -->",
+            "<!-- agent:backlog operator-newer -->",
+        );
+        std::fs::write(&doc, &admitted).unwrap();
+
+        let expected_hash = agent_doc_hash::content_hash(&admitted);
+        let fence = |path: &Path| {
+            let observed = std::fs::read_to_string(path)?;
+            anyhow::ensure!(
+                agent_doc_hash::content_hash(&observed) == expected_hash,
+                "injected admitted authority superseded"
+            );
+            Ok(())
+        };
+        let adopted = std::cell::Cell::new(false);
+        let mut observations = 0usize;
+        let err = observe_queue_authority_after_native_save_with_bounded_retry_and_adopt(
+            &doc,
+            "test_fenced_native_save",
+            2,
+            Some(&fence),
+            |_| {
+                observations += 1;
+                if observations == 1 {
+                    std::fs::write(&doc, &superseding).unwrap();
+                }
+                Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
+                    text: baseline.to_string(),
+                    live_editors: 1,
+                    delivery_converged: true,
+                    delivery_version: observations as u64,
+                    semantics: None,
+                    quarantined_replicas: 0,
+                }))
+            },
+            |_, _, _, _| {
+                adopted.set(true);
+                Ok(())
+            },
+        )
+        .unwrap_err();
+
+        assert!(format!("{err:#}").contains("superseded"), "{err:#}");
+        assert!(
+            !adopted.get(),
+            "a stale worker must be fenced before native-save adoption"
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), superseding);
     }
 
     fn component_body(content: &str, name: &str) -> String {

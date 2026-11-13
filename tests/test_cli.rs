@@ -980,6 +980,103 @@ fn authority_drift_fences_every_internal_queue_maintenance_effect_family() {
 }
 
 #[test]
+fn authority_drift_fences_edited_queue_head_snapshot_adoption() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let snapshot = concat!(
+        "---\n",
+        "agent_doc_session: edited-head-snapshot-fence\n",
+        "agent_doc_format: template\n",
+        "agent: codex\n",
+        "model: gpt-5\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- agent:boundary:1234abcd -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- do [#oldhead]\n",
+        "- do [#nexthead]\n",
+        "<!-- /agent:queue -->\n",
+    );
+    let admitted = snapshot.replace("do [#oldhead]", "do [#newhead]");
+    fs::write(&doc, &admitted).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    seed_snapshot(tmp.path(), &doc, snapshot);
+
+    let output = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .env(
+            "AGENT_DOC_TEST_QUEUE_MAINTENANCE_EFFECT_DELAY_FAMILY",
+            "snapshot",
+        )
+        .env("AGENT_DOC_TEST_QUEUE_MAINTENANCE_EFFECT_DELAY_MS", "1500")
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let ops_path = tmp.path().join(".agent-doc/logs/ops.log");
+    let marker = format!(
+        "queue_maintenance_internal_effect_test_delay file={} family=snapshot",
+        doc.display()
+    );
+    let marker_deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
+    loop {
+        let ops = fs::read_to_string(&ops_path).unwrap_or_default();
+        if ops.contains(&marker) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < marker_deadline,
+            "edited-head adoption did not reach its snapshot fence: {ops}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    let before_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc).unwrap();
+    assert_eq!(before_snapshot.as_deref(), Some(snapshot));
+    let before_state = queue_maintenance_effect_digest(tmp.path());
+    let before_ops = fs::read_to_string(&ops_path).unwrap_or_default();
+    let superseding = fs::read_to_string(&doc)
+        .unwrap()
+        .replace("do [#newhead]", "do [#operator-newer]");
+    fs::write(&doc, &superseding).unwrap();
+
+    let settle_deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
+    while agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_pending(&doc) {
+        assert!(
+            std::time::Instant::now() < settle_deadline,
+            "superseded edited-head adoption did not settle"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+
+    assert_eq!(fs::read_to_string(&doc).unwrap(), superseding);
+    assert_eq!(
+        agent_doc_snapshot_io::load_document_baseline(&doc).unwrap(),
+        before_snapshot,
+        "stale edited-head adoption advanced the baseline snapshot"
+    );
+    assert_eq!(
+        queue_maintenance_effect_digest(tmp.path()),
+        before_state,
+        "stale edited-head adoption mutated durable queue/controller state"
+    );
+    let final_ops = fs::read_to_string(&ops_path).unwrap_or_default();
+    assert_eq!(
+        queue_effect_ops(&final_ops),
+        queue_effect_ops(&before_ops),
+        "stale edited-head adoption emitted a durable queue effect"
+    );
+}
+
+#[test]
 fn authority_drift_before_queue_authority_acquisition_skips_recovery_effects() {
     let tmp = tempfile::TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");

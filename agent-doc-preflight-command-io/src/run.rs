@@ -3752,18 +3752,48 @@ mod tests {
             Some(&baseline),
         )
         .unwrap();
-        let (_, claim) =
-            agent_doc_queue_io::queue_claim::claim(&file, claimed, "subagent:terminal-proof", 3600)
-                .unwrap();
-        agent_doc_queue_io::queue_claim::start_attempt(
-            &file,
-            claimed,
-            "subagent:terminal-proof",
-            "/root/terminal_proof",
-            3600,
-            claim.generation,
+        // Stage the exact durable claim state directly. The public claim/start
+        // transaction also launches a controller projection refresh; letting
+        // that unrelated asynchronous setup write race this read-only assertion
+        // makes the byte-for-byte ops proof nondeterministic. The pure ledger
+        // transitions plus one SQLite upsert are the authoritative state this
+        // inspection consumes, and the read-back below is its explicit receipt.
+        let now = agent_doc_queue_io::queue_claim::claim_clock_now_secs();
+        let mut seeded_claims = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+        assert_eq!(
+            seeded_claims.claim(claimed, "subagent:terminal-proof", now, 3600),
+            agent_doc_queue::queue_claim::ClaimOutcome::Created,
+        );
+        let generation = seeded_claims.claims[0].generation;
+        seeded_claims
+            .start(
+                claimed,
+                "subagent:terminal-proof",
+                "/root/terminal_proof",
+                now,
+                3600,
+                Some(generation),
+            )
+            .unwrap();
+        let document_hash = agent_doc_hash::path_hash(&file).unwrap();
+        let conn = agent_doc_sqlite::state_store::open_state_db(temp.path()).unwrap();
+        agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
+                document_hash,
+                state_kind: agent_doc_queue::queue_claim::QUEUE_CLAIMS_STATE_KIND.to_string(),
+                canonical_path: file.canonicalize().unwrap().to_string_lossy().into_owned(),
+                payload_json: serde_json::to_string(&seeded_claims).unwrap(),
+                updated_at_secs: now,
+            },
         )
         .unwrap();
+        drop(conn);
+        assert_eq!(
+            agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap(),
+            seeded_claims,
+            "the durable ledger read-back is the claim setup receipt",
+        );
         // Keep the committed cycle clean, then publish one real next-turn
         // queue prompt together with the claimed-row removal. The new row
         // makes session-check enter its committed steering classifier; that

@@ -980,6 +980,106 @@ fn authority_drift_fences_every_internal_queue_maintenance_effect_family() {
 }
 
 #[test]
+fn authority_drift_before_queue_authority_acquisition_skips_recovery_effects() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let admitted = concat!(
+        "---\n",
+        "agent_doc_session: authority-acquisition-fence-test\n",
+        "agent_doc_format: template\n",
+        "agent: codex\n",
+        "model: gpt-5\n",
+        "queue: start\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- agent:boundary:1234abcd -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue priority go -->\n",
+        "- do [#acquire]\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog priority queue -->\n",
+        "- [ ] [#acquire] stale acquisition\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, admitted).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    seed_snapshot(tmp.path(), &doc, admitted);
+
+    let output = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .env(
+            "AGENT_DOC_TEST_QUEUE_MAINTENANCE_ACQUISITION_DELAY_MS",
+            "1500",
+        )
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let ops_path = tmp.path().join(".agent-doc/logs/ops.log");
+    let marker = format!(
+        "queue_maintenance_authority_acquisition_test_delay file={}",
+        doc.display()
+    );
+    let marker_deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
+    loop {
+        let ops = fs::read_to_string(&ops_path).unwrap_or_default();
+        if ops.contains(&marker) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < marker_deadline,
+            "authority acquisition barrier was never reached; ops={ops}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    let before_doc = fs::read_to_string(&doc).unwrap();
+    let edited = before_doc.replace(
+        "stale acquisition",
+        "operator-authored post-admission acquisition",
+    );
+    assert_ne!(before_doc, edited);
+    let before_state = queue_maintenance_effect_digest(tmp.path());
+    let before_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc).unwrap();
+    let before_ops = fs::read_to_string(&ops_path).unwrap_or_default();
+    fs::write(&doc, &edited).unwrap();
+
+    let settle_deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
+    while agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_pending(&doc) {
+        assert!(
+            std::time::Instant::now() < settle_deadline,
+            "superseded authority acquisition did not settle"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+
+    assert_eq!(fs::read_to_string(&doc).unwrap(), edited);
+    assert_eq!(
+        queue_maintenance_effect_digest(tmp.path()),
+        before_state,
+        "stale acquisition mutated controller/ledger state"
+    );
+    assert_eq!(
+        agent_doc_snapshot_io::load_document_baseline(&doc).unwrap(),
+        before_snapshot,
+        "stale acquisition advanced the recovery baseline"
+    );
+    let final_ops = fs::read_to_string(&ops_path).unwrap_or_default();
+    assert_eq!(
+        queue_effect_ops(&final_ops),
+        queue_effect_ops(&before_ops),
+        "stale acquisition entered recovery/adoption before rejection"
+    );
+    assert!(!final_ops.contains("queue_maintenance_background_completed"));
+}
+
+#[test]
 fn crashed_worker_is_visible_and_promptly_redispatched_without_ttl_wait() {
     let tmp = tempfile::TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");

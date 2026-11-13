@@ -10563,6 +10563,7 @@ fn request_existing_controller_crdt_current_text_read_with_diagnostics(
                     "source": source,
                     "recover_projection": false,
                     "flush_barrier": false,
+                    "effect_free": !publish_diagnostic,
                 })
                 .to_string(),
             ),
@@ -12254,6 +12255,10 @@ struct ControllerCrdtCurrentTextPayload {
     recover_projection: bool,
     #[serde(default = "default_crdt_current_text_flush_barrier")]
     flush_barrier: bool,
+    /// A fence probe must be a true observation: no projection recovery,
+    /// controller cleanup, or diagnostics may be published by either endpoint.
+    #[serde(default)]
+    effect_free: bool,
 }
 
 fn default_crdt_current_text_flush_barrier() -> bool {
@@ -12400,13 +12405,25 @@ fn handle_crdt_current_text_rpc(
     let file_arg = canonical.to_string_lossy().to_string();
     let payload = crdt_current_text_payload(&request)?;
     let source = crdt_current_text_source(&payload);
+    if payload.effect_free {
+        anyhow::ensure!(
+            !payload.recover_projection && !payload.flush_barrier,
+            "effect-free current-text reads cannot recover or flush projection"
+        );
+    }
     let authority = crdt_authority_for_file(&file_arg);
     if !authority.editor_attached() {
         let current = agent_doc_crdt_relay_io::CurrentText::Detached;
-        log_controller_current_text_result(&canonical, &source, &current);
+        if !payload.effect_free {
+            log_controller_current_text_result(&canonical, &source, &current);
+        }
         return Ok(controller_current_text_response(current));
     }
-    let current = if payload.recover_projection {
+    let current = if payload.effect_free {
+        agent_doc_crdt_relay_io::peek_current_text_for_file_with_authority_nonblocking(
+            &canonical, authority,
+        )?
+    } else if payload.recover_projection {
         agent_doc_crdt_relay_io::current_text_for_file_with_authority_recovering_projection(
             &canonical, authority,
         )?
@@ -12417,7 +12434,9 @@ fn handle_crdt_current_text_rpc(
     } else {
         agent_doc_crdt_relay_io::current_text_for_file_with_authority(&canonical, authority)?
     };
-    log_controller_current_text_result(&canonical, &source, &current);
+    if !payload.effect_free {
+        log_controller_current_text_result(&canonical, &source, &current);
+    }
     Ok(controller_current_text_response(current))
 }
 
@@ -12555,6 +12574,7 @@ fn crdt_current_text_payload(
             source: None,
             recover_projection: false,
             flush_barrier: default_crdt_current_text_flush_barrier(),
+            effect_free: false,
         });
     };
     if payload_json.trim().is_empty() {
@@ -12562,6 +12582,7 @@ fn crdt_current_text_payload(
             source: None,
             recover_projection: false,
             flush_barrier: default_crdt_current_text_flush_barrier(),
+            effect_free: false,
         });
     }
     serde_json::from_str(payload_json).context("failed to parse CRDT current-text payload")
@@ -66213,6 +66234,71 @@ mod tests {
             ops_log.contains("controller_crdt_current_text")
                 && ops_log.contains("status=editor_attached_model_missing"),
             "controller should log the pure relay-read result:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn effect_free_current_text_rpc_is_pure_for_attached_editor_fences() {
+        let _env = reliable_sync_env_lock();
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/effect-free-current-text.md");
+        std::fs::write(&doc, "Body\n").unwrap();
+        let canonical = doc.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        controller_liveness_plane().lock().restore_liveness(&[
+            agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash,
+                pid: std::process::id().into(),
+                tag: "test-editor-effect-free-current-text".into(),
+            },
+        ]);
+        let bootstrap = test_bootstrap(&dir);
+        let ops_path = dir.path().join(".agent-doc/logs/ops.log");
+        let state_path = dir.path().join(".agent-doc/state.db");
+        drop(agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap());
+        let before_ops = std::fs::read(&ops_path).ok();
+        let before_state = std::fs::read(&state_path).ok();
+        let mut should_stop = false;
+
+        let response = handle_request(
+            &(serde_json::json!({
+                "command": "crdt_current_text",
+                "file": canonical,
+                "diagnostic_payload": serde_json::json!({
+                    "source": "test_effect_free_controller_current_text",
+                    "recover_projection": false,
+                    "flush_barrier": false,
+                    "effect_free": true
+                }).to_string()
+            })
+            .to_string()
+                + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: serde_json::Value = serde_json::from_str(&response).unwrap();
+
+        assert_eq!(envelope.get("ok").and_then(|ok| ok.as_bool()), Some(true));
+        assert_eq!(
+            envelope
+                .get("data")
+                .and_then(|data| data.get("status"))
+                .and_then(|status| status.as_str()),
+            Some("editor_attached_model_missing")
+        );
+        assert!(!should_stop);
+        assert_eq!(
+            std::fs::read(&ops_path).ok(),
+            before_ops,
+            "effect-free attached-editor authority probes must not append ops"
+        );
+        assert_eq!(
+            std::fs::read(&state_path).ok(),
+            before_state,
+            "effect-free attached-editor authority probes must not mutate state.db"
         );
     }
 

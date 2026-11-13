@@ -5883,6 +5883,35 @@ fn queue_maintenance_log_op(
     Ok(())
 }
 
+/// Revalidate the admitted authority immediately before the authority
+/// acquisition path. That path may repair a missing replica or adopt a proven
+/// native save, so a stale detached owner must be rejected before entering it.
+fn fence_queue_maintenance_authority_acquisition(
+    file: &Path,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
+) -> Result<()> {
+    let Some(effect_fence) = effect_fence else {
+        return Ok(());
+    };
+    effect_fence.check(file)?;
+    if let Some(delay_ms) = std::env::var("AGENT_DOC_TEST_QUEUE_MAINTENANCE_ACQUISITION_DELAY_MS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .filter(|delay| *delay > 0)
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_maintenance_authority_acquisition_test_delay file={} delay_ms={delay_ms}",
+                file.display(),
+            ),
+        );
+        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        effect_fence.check(file)?;
+    }
+    Ok(())
+}
+
 fn run_queue_maintenance_with_options_under_apply_guard(
     file: &Path,
     diff: Option<&str>,
@@ -5915,6 +5944,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         );
         return Ok(QueueState::default());
     }
+    fence_queue_maintenance_authority_acquisition(file, effect_fence)?;
     let (mut content, authority_queue_unresolved_prompts) =
         match observe_queue_authority_after_native_save_with_bounded_retry(
             file,

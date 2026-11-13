@@ -11,6 +11,7 @@ pub mod gc;
 pub mod layout;
 pub mod moot_decision;
 pub mod premise_rederive;
+pub mod queue_maintenance_effect_cas;
 pub mod sweep;
 pub mod tree_status_query;
 pub mod warnings;
@@ -10397,10 +10398,11 @@ fn load_projected_in_progress_queue_heads(file: &Path) -> std::collections::Hash
 }
 
 /// A queue-maintenance CAS refusal means the editor advanced after our last
-/// observation. Re-observe the authoritative model, rebase the original
-/// maintenance delta over that fresh cut, and retry within a small budget.
+/// observation. Lazily records it as supersession of that effect epoch
+/// (`#implementlazilyowned`); the maintenance producer re-desires its delta at
+/// the freshly observed cut as the next epoch, at most this many epochs.
 ///
-/// This is deliberately actorless and has no timer: every additional attempt is
+/// This is deliberately actorless and has no timer: every additional epoch is
 /// earned by an explicit `retry_crdt_merge` refusal from the owning actor and is
 /// preceded by a fresh authoritative observation.
 const QUEUE_MAINTENANCE_CAS_ATTEMPTS: usize = 3;
@@ -10415,49 +10417,104 @@ fn queue_maintenance_cas_is_retryable(err: &anyhow::Error) -> bool {
     format!("{err:#}").contains("recovery=retry_crdt_merge")
 }
 
+/// Attached-editor backend for the Lazily-owned queue-maintenance document CAS
+/// (`queue_maintenance_effect_cas::persist_document_cut`). Each method is one
+/// backend action; the refusal/supersession policy lives in Lazily.
+struct AttachedQueueMaintenanceCasBackend<'a, Apply, Observe> {
+    file: &'a Path,
+    source: &'a str,
+    effect_fence: Option<&'a dyn PendingMaintenanceEffectFence>,
+    apply: Apply,
+    observe: Observe,
+}
+
+impl<Apply, Observe> queue_maintenance_effect_cas::DocumentCasBackend
+    for AttachedQueueMaintenanceCasBackend<'_, Apply, Observe>
+where
+    Apply: FnMut(&str, &str) -> Result<bool>,
+    Observe: FnMut() -> Result<String>,
+{
+    fn rebase(
+        &mut self,
+        target: &queue_maintenance_effect_cas::DocumentCutTarget,
+        expected: &str,
+    ) -> Result<String> {
+        rebase_queue_maintenance_target(
+            self.file,
+            self.source,
+            &target.base,
+            &target.content,
+            expected,
+        )
+    }
+
+    fn compare_and_swap(&mut self, expected: &str, rebased: &str) -> Result<bool> {
+        (self.apply)(expected, rebased)
+    }
+
+    fn is_authority_mismatch(&self, error: &anyhow::Error) -> bool {
+        queue_maintenance_cas_is_retryable(error)
+    }
+
+    fn record_refusal(
+        &mut self,
+        epoch: u64,
+        max_epochs: u64,
+        expected: &str,
+        rebased: &str,
+    ) -> Result<()> {
+        queue_maintenance_log_op(
+            self.file,
+            self.effect_fence,
+            &format!(
+                "queue_maintenance_cas_retry file={} source={} attempt={epoch}/{max_epochs} expected_hash={} attempted_hash={} recovery=retry_crdt_merge",
+                self.file.display(),
+                self.source,
+                agent_doc_hash::content_hash(expected),
+                agent_doc_hash::content_hash(rebased),
+            ),
+        )
+    }
+
+    fn observe(&mut self) -> Result<String> {
+        (self.observe)()
+    }
+
+    fn not_applied_error(&self) -> anyhow::Error {
+        anyhow::anyhow!("{}: attached Lazily write was not applied", self.source)
+    }
+}
+
 fn persist_attached_queue_maintenance_with_retry(
     file: &Path,
     content: &str,
     expected_current: &str,
     context: QueueMaintenancePersistenceContext<'_>,
     initial_current: String,
-    mut apply: impl FnMut(&str, &str) -> Result<bool>,
-    mut observe: impl FnMut() -> Result<String>,
+    apply: impl FnMut(&str, &str) -> Result<bool>,
+    observe: impl FnMut() -> Result<String>,
 ) -> Result<String> {
     let QueueMaintenancePersistenceContext {
         source,
         effect_fence,
     } = context;
-    let mut current = initial_current;
-    for attempt in 1..=QUEUE_MAINTENANCE_CAS_ATTEMPTS {
-        let rebased =
-            rebase_queue_maintenance_target(file, source, expected_current, content, &current)?;
-        match apply(&current, &rebased) {
-            Ok(true) => return Ok(rebased),
-            Ok(false) => anyhow::bail!("{source}: attached Lazily write was not applied"),
-            Err(err)
-                if attempt < QUEUE_MAINTENANCE_CAS_ATTEMPTS
-                    && queue_maintenance_cas_is_retryable(&err) =>
-            {
-                queue_maintenance_log_op(
-                    file,
-                    effect_fence,
-                    &format!(
-                        "queue_maintenance_cas_retry file={} source={} attempt={}/{} expected_hash={} attempted_hash={} recovery=retry_crdt_merge",
-                        file.display(),
-                        source,
-                        attempt,
-                        QUEUE_MAINTENANCE_CAS_ATTEMPTS,
-                        agent_doc_hash::content_hash(&current),
-                        agent_doc_hash::content_hash(&rebased),
-                    ),
-                )?;
-                current = observe()?;
-            }
-            Err(err) => return Err(err),
-        }
-    }
-    unreachable!("the bounded queue-maintenance CAS loop always returns")
+    let mut backend = AttachedQueueMaintenanceCasBackend {
+        file,
+        source,
+        effect_fence,
+        apply,
+        observe,
+    };
+    queue_maintenance_effect_cas::persist_document_cut(
+        file,
+        queue_maintenance_effect_cas::DocumentCutTarget {
+            base: expected_current.to_string(),
+            content: content.to_string(),
+        },
+        initial_current,
+        QUEUE_MAINTENANCE_CAS_ATTEMPTS as u64,
+        &mut backend,
+    )
 }
 
 pub(crate) fn persist_queue_maintenance_doc(

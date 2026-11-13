@@ -1607,6 +1607,7 @@ dependencies = [
  "agent-doc-workflow-io",
  "agent-doc-write-runtime-io",
  "anyhow",
+ "lazily 0.61.1",
  "libc",
  "parking_lot",
  "serde_json",
@@ -1673,6 +1674,7 @@ dependencies = [
  "agent-doc-workflow",
  "anyhow",
  "indexmap",
+ "lazily 0.61.1",
  "libc",
  "serde",
  "serde_json",
@@ -4531,8 +4533,7 @@ dependencies = [
 [[package]]
 name = "lazily"
 version = "0.61.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6ee0bc58306462c55eb8b42edb56e00f78c1683bd15a189d18e714dfa7d6439"
+source = "git+https://github.com/lazily-hub/lazily-rs.git?rev=91657b5998acfe7a3fa832a004a79742f2aae91a#91657b5998acfe7a3fa832a004a79742f2aae91a"
 dependencies = [
  "arc-swap",
  "lazily-macros 0.23.1",
@@ -4557,8 +4558,7 @@ dependencies = [
 [[package]]
 name = "lazily-macros"
 version = "0.23.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f0edc85c43920f8a62e201b652234f12a97780ed62689a564274971f35bd28d"
+source = "git+https://github.com/lazily-hub/lazily-rs.git?rev=91657b5998acfe7a3fa832a004a79742f2aae91a#91657b5998acfe7a3fa832a004a79742f2aae91a"
 dependencies = [
  "proc-macro2",
  "quote",

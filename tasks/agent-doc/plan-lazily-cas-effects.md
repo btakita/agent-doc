@@ -259,6 +259,42 @@ loop remains.
 6. Update agent-doc architecture/spec comments to make Lazily ownership a
    code-enforced dependency boundary.
 
+## Migration ledger
+
+`tasks/agent-doc/lazily-cas-callsite-ledger.tsv` holds one row per current
+CAS/fence/lease/retry/supersession callsite: symbol, authority backend, Lazily
+adapter, parity test, status, and deletion proof. `tests/lazily_cas_callsite_ledger.rs`
+re-runs the source audit and fails on any unledgered callsite, any stale row, a
+`migrated`/`deleted` row without a parity test or deletion proof, or an
+`absent:` deletion proof whose pattern reappears. The audit definition (scanned
+paths, identifier tokens, call markers) lives in that test's module docs.
+
+Statuses: `migrated` (orchestration runs through `lazily::EffectCasCore`),
+`lazily-adapter` (narrow `CompareAndApply` backend or its atomic primitive),
+`pending-migration` (matching seam, bespoke orchestration still live),
+`excluded` (plan's "Do not migrate" list), `triage` (inventoried with
+owning-crate defaults, semantics not yet reviewed), `deleted`.
+
+Progress (`#implementlazilyowned`):
+
+- agent-doc pins lazily-rs `91657b5` (EffectCasCore) through `[patch.crates-io]`
+  until the next Lazily release.
+- Queue-maintenance document CAS: the hand-rolled refusal/re-observe loop in
+  `persist_attached_queue_maintenance_with_retry` now runs through
+  `queue_maintenance_effect_cas::persist_document_cut`; a retryable refusal is
+  Lazily `Superseded { observed }` and the producer re-desires at the observed
+  cut as the next epoch.
+- Detached-owner authority lineage: `BackgroundRequestEffectFence` reads its
+  expected authority from a Lazily in-flight attempt
+  (`AdmittedAuthorityLineage`); receipted cuts complete an epoch and supersession
+  is sticky. The queue-edit lease and exact-request checks remain.
+- Not yet done: cross-process persistence of the effect core (needed to replace
+  `BackgroundQueueMaintenanceLease` with a Lazily claim and to resume after a
+  crash), the ordered per-family `EffectPlan` that replaces
+  `QueueMaintenanceEffectFamily` barriers, the Git/controller/snapshot/worktree/
+  ops adapters, triage of the `triage` rows, and deletion of the remaining
+  bespoke orchestration.
+
 ## Integration order
 
 1. lazily-spec protocol + fixtures

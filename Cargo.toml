@@ -372,6 +372,13 @@ tempfile = "3"
 # 32-core host for the shared `make check` build: cold CPU 1543s -> 1117s,
 # incremental CPU after a core-crate edit 733s -> 429s, target dir 44G -> 20G.
 # For a debugger session with locals, build with CARGO_PROFILE_DEV_DEBUG=2.
+# `#implementlazilyowned`: Lazily-owned effect CAS (`lazily::EffectCasCore`)
+# landed on lazily-rs main after the v0.61.1 crates.io release. Pin that exact
+# revision for every workspace `lazily = "0.61.1"` requirement until the next
+# Lazily release is published, then delete this patch and bump the requirement.
+[patch.crates-io]
+lazily = { git = "https://github.com/lazily-hub/lazily-rs.git", rev = "91657b5998acfe7a3fa832a004a79742f2aae91a" }
+
 [profile.dev]
 debug = "line-tables-only"
 

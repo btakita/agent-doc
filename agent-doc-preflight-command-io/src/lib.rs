@@ -421,22 +421,31 @@ impl Drop for BackgroundQueueMaintenanceLease {
     }
 }
 
+/// Fence for one detached maintenance request. The queue-edit lease (backend
+/// lock) and exact-request check stay here; the owned authority cut, its
+/// receipt lineage, and supersession are Lazily effect-CAS state
+/// (`#implementlazilyowned`).
 struct BackgroundRequestEffectFence<'a> {
     lease: &'a BackgroundQueueMaintenanceLease,
     request: &'a agent_doc_queue_io::queue_edit_owner::QueueMaintenanceRequest,
-    expected_authority_hash: std::sync::Mutex<String>,
+    lineage: agent_doc_preflight_io::queue_maintenance_effect_cas::AdmittedAuthorityLineage,
 }
 
 impl<'a> BackgroundRequestEffectFence<'a> {
     fn new(
+        file: &Path,
         lease: &'a BackgroundQueueMaintenanceLease,
         request: &'a agent_doc_queue_io::queue_edit_owner::QueueMaintenanceRequest,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        Ok(Self {
             lease,
             request,
-            expected_authority_hash: std::sync::Mutex::new(request.admitted_authority_hash.clone()),
-        }
+            lineage:
+                agent_doc_preflight_io::queue_maintenance_effect_cas::AdmittedAuthorityLineage::admit(
+                    file,
+                    &request.admitted_authority_hash,
+                )?,
+        })
     }
 
     fn current_request_is_exact(&self, file: &Path) -> Result<bool> {
@@ -462,13 +471,8 @@ impl agent_doc_preflight_io::PendingMaintenanceEffectFence for BackgroundRequest
             file,
             "background_queue_maintenance_effect_fence",
         )?;
-        let observed_hash = agent_doc_hash::content_hash(&observed);
-        let expected = self.expected_authority_hash.lock().unwrap().clone();
-        anyhow::ensure!(
-            observed_hash == expected,
-            "background queue maintenance admitted authority was superseded: expected={expected} observed={observed_hash}"
-        );
-        Ok(())
+        self.lineage
+            .compare_observed(&agent_doc_hash::content_hash(&observed))
     }
 
     fn record_applied_content(&self, file: &Path, content: &str) -> Result<()> {
@@ -477,21 +481,23 @@ impl agent_doc_preflight_io::PendingMaintenanceEffectFence for BackgroundRequest
             self.current_request_is_exact(file)?,
             "background queue maintenance request was superseded"
         );
-        let target_hash = agent_doc_hash::content_hash(content);
-        let observed = agent_doc_document_realtime_io::peek_current_document_content(
-            file,
-            "background_queue_maintenance_applied_cut",
-        )?;
-        anyhow::ensure!(
-            agent_doc_hash::content_hash(&observed) == target_hash,
-            "background queue maintenance applied cut was superseded before receipt"
-        );
-        *self.expected_authority_hash.lock().unwrap() = target_hash;
-        Ok(())
+        let observe = || {
+            agent_doc_document_realtime_io::peek_current_document_content(
+                file,
+                "background_queue_maintenance_applied_cut",
+            )
+            .map(|observed| agent_doc_hash::content_hash(&observed))
+        };
+        self.lineage.record_applied_cut(
+            &agent_doc_preflight_io::queue_maintenance_effect_cas::DocumentCutReceipt::new(
+                agent_doc_hash::content_hash(content),
+                &observe,
+            ),
+        )
     }
 
     fn expected_authority_hash(&self) -> Option<String> {
-        Some(self.expected_authority_hash.lock().unwrap().clone())
+        self.lineage.expected_authority_hash()
     }
 }
 
@@ -546,7 +552,7 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
             queue_mutation.mark_completed();
             return Ok(());
         };
-        let effect_fence = BackgroundRequestEffectFence::new(&queue_mutation, &request);
+        let effect_fence = BackgroundRequestEffectFence::new(file, &queue_mutation, &request)?;
         let result = (|| -> Result<()> {
             effect_fence.fence_effect(file)?;
             if let Some(delay) = std::env::var(TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS_ENV)

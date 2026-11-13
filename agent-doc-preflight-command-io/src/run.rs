@@ -3729,7 +3729,7 @@ mod tests {
         let temp = setup_project();
         let claimed = "release claimed work";
         let baseline = format!(
-            "---\nagent_doc_format: template\nagent_doc_steering_debounce_ms: 0\n---\n\n<!-- agent:exchange -->\nPrompt.\n<!-- /agent:exchange -->\n\n<!-- agent:queue go -->\n- current work\n- {claimed}\n<!-- /agent:queue -->\n"
+            "---\nagent_doc_format: template\nagent_doc_steering_debounce_ms: 0\n---\n\n<!-- agent:exchange -->\nPrompt.\n\n### Re: prior\n\nAnswer.\n<!-- /agent:exchange -->\n\n<!-- agent:queue go -->\n- current work\n- {claimed}\n<!-- /agent:queue -->\n"
         );
         let file = write_committed_doc(temp.path(), "session.md", &baseline, "initial", None);
         let cycle =
@@ -3743,9 +3743,7 @@ mod tests {
             Vec::new(),
         )
         .unwrap();
-        agent_doc_capture_io::capture_response(&file, "Answer.").unwrap();
-        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+        agent_doc_cycle_state_io::mark_committed(
             &file,
             "commit_success",
             Some(&baseline),
@@ -3809,7 +3807,7 @@ mod tests {
         let ops_path = temp.path().join(".agent-doc/logs/ops.log");
         let before_ops = std::fs::read_to_string(&ops_path).unwrap_or_default();
 
-        let status = agent_doc_session_check_io::inspect(
+        let status = agent_doc_session_check_io::inspect_read_only(
             &file,
             &agent_doc_closeout_runtime_io::session_check_effects(),
         )

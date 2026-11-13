@@ -66484,7 +66484,7 @@ mod tests {
     }
 
     #[test]
-    fn effect_free_current_text_rpc_stays_pure_when_authority_drifts_mid_request() {
+    fn effect_free_model_ensure_observation_stays_pure_when_authority_drifts_mid_rpc() {
         let _env = reliable_sync_env_lock();
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -66554,7 +66554,7 @@ mod tests {
                     command_kind: None,
                     diagnostic_payload: Some(
                         serde_json::json!({
-                            "source": "test_effect_free_mid_rpc_drift",
+                            "source": "test_model_ensure_mid_rpc_drift",
                             "recover_projection": false,
                             "flush_barrier": false,
                             "effect_free": true,

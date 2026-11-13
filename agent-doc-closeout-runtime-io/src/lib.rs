@@ -638,7 +638,12 @@ fn retained_pending_only_commit_is_pending(
                 }),
             )?;
     }
-    let authority_content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+    // This classifier runs from read-only session-check before any apply
+    // capability exists. A routed resolver can launch/recover the controller
+    // and publish authority/pressure diagnostics; use the intrinsically pure
+    // peek so status inspection cannot mutate state or ops while deciding
+    // whether a retained pending-only commit still blocks.
+    let authority_content = agent_doc_document_realtime_io::peek_current_document_content(
         file,
         "pending_only_commit_pending_authority",
     )?;

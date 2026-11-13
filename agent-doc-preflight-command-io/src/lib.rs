@@ -564,12 +564,16 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
                 std::thread::sleep(std::time::Duration::from_millis(delay));
             }
             effect_fence.fence_effect(file)?;
-            let admitted_content =
-                agent_doc_document_realtime_io::try_resolve_current_document_with_source(
-                    file,
-                    "background_queue_maintenance_admitted_cut",
-                )?
-                .into_content();
+            // The worker must derive its admitted cut without publishing an
+            // authority observation. A human edit can land while a routed
+            // resolver is inside controller recovery; its later fence would
+            // reject the stale cut, but the resolver's state event would
+            // already be durable. `peek` is intrinsically effect-free and the
+            // authentic request fence immediately above/below owns rejection.
+            let admitted_content = agent_doc_document_realtime_io::peek_current_document_content(
+                file,
+                "background_queue_maintenance_admitted_cut",
+            )?;
             let pending_report = match agent_doc_preflight_io::run_pending_maintenance_fenced(
                 file,
                 &admitted_content,

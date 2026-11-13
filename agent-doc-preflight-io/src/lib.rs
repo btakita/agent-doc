@@ -10304,16 +10304,16 @@ fn ensure_document_model_via_authority(
     source: &str,
     effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
 ) -> Result<agent_doc_crdt_relay_io::CurrentText> {
-    fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Controller)?;
-    if agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file) {
-        return agent_doc_crdt_relay_io::ensure_document_model(file, source);
-    }
-    match agent_doc_controller_io::project_controller::current_text_via_controller_model_for_doc(
-        file, source,
-    )? {
-        Some(current) => Ok(current),
-        None => Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica),
-    }
+    // Do not call the opaque combined controller-model API here. That API
+    // combines observation, controller launch, pressure bookkeeping, model
+    // recovery, polling, and diagnostics behind one socket call, so authority
+    // can drift after the outer fence and before any of those internal effects.
+    // The bounded observer below reads through the effect-free RPC and fences
+    // each diagnostic, replica signal, and re-observation independently.
+    Ok(
+        current_text_via_preflight_authority_retrying_with_fence(file, source, effect_fence)?
+            .unwrap_or(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica),
+    )
 }
 
 /// `#px82`/`#bn41` — retry `ensure_document_model` with an explicit replica
@@ -22681,6 +22681,27 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert!(
             append < repair,
             "binary diagnostic must join the open recovery image before repair can close its cycle"
+        );
+    }
+
+    #[test]
+    fn persistence_model_ensure_uses_only_the_fenced_effect_free_observer() {
+        let source = include_str!("lib.rs");
+        let body = source
+            .split_once("fn ensure_document_model_via_authority(")
+            .expect("model-ensure helper")
+            .1
+            .split_once("fn ensure_document_model_with_replica_reregistration(")
+            .expect("bounded replica-reregistration helper")
+            .0;
+
+        assert!(
+            body.contains("current_text_via_preflight_authority_retrying_with_fence("),
+            "persistence model ensure must observe through the effect-free RPC and per-effect fence"
+        );
+        assert!(
+            !body.contains("current_text_via_controller_model_for_doc("),
+            "persistence model ensure must not call the opaque effectful controller-model API"
         );
     }
 

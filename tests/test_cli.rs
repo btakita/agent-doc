@@ -641,6 +641,7 @@ fn simultaneous_preflights_coalesce_to_one_background_maintenance_body() {
     );
     fs::write(&doc, content).unwrap();
     init_git_repo(tmp.path(), &doc);
+    seed_snapshot(tmp.path(), &doc, content);
 
     let barrier = Arc::new(Barrier::new(3));
     let mut contenders = Vec::new();
@@ -678,7 +679,12 @@ fn simultaneous_preflights_coalesce_to_one_background_maintenance_body() {
     }
 
     let ops = tmp.path().join(".agent-doc/logs/ops.log");
-    let completion_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    // This integration target shares the debug binary with the full 14k-test
+    // nextest run. Under that scheduler load the already-dispatched detached
+    // child can take more than 30 seconds to enter its body; keep the deadline
+    // at ten times the injected 6-second delay so the assertion measures
+    // eventual ownership/completion rather than host scheduling latency.
+    let completion_deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     loop {
         let current_ops = fs::read_to_string(&ops).unwrap_or_default();
         if current_ops.contains("pending_maintenance_background_completed") {

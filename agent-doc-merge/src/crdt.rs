@@ -1574,25 +1574,23 @@ pub(crate) fn project_generated_id_onto_live(promoted: &str, live: &str) -> Stri
     // steering edit is the pre-admission line, so the admission's lifecycle
     // marker has to move onto the operator's words with the q-id.
     // `#promptseen`: `👀` is the interval before that emit. When it is the
-    // live row's only projection and the admitted row carries `📥`, this
-    // path replaces `👀` with `📥` for an identical spelling and for a
-    // steering reword. `🚧`, `🟡`, and `☑️` stay. A top-level head keeps
-    // its `### ` ahead of the glyph (`- ### 📥 <words>`).
-    let live_owned =
-        if live_projection_is_only_seen(live) && promoted_projection_is_pending(promoted) {
-            let pending = attempt_projection_tokens(promoted).unwrap_or_else(|| {
-                agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
-                    .default_prefix()
-                    .to_string()
-            });
-            paint_attempt_projection(&strip_leading_attempt_projection(live), &pending)
-        } else if !generated_id_progressive_revision(promoted, live)
-            && let Some(projection) = attempt_projection_tokens(promoted)
-        {
-            paint_attempt_projection(live, &projection)
-        } else {
-            live.to_string()
-        };
+    // live row's lifecycle and the admitted row carries `📥`, this path
+    // replaces only that lifecycle token for an identical spelling and for a
+    // steering reword. Pins and operator-action projection stay. `🚧`, `🟡`,
+    // and `☑️` stay. A top-level head keeps its `### ` ahead of the glyph
+    // (`- ### 📥 <words>`).
+    let live_owned = if live_projection_is_seen(live) && promoted_projection_is_pending(promoted) {
+        replace_first_line_lifecycle_projection(
+            live,
+            agent_doc_document::queue_projection::QueueLifecycleMarker::Pending,
+        )
+    } else if !generated_id_progressive_revision(promoted, live)
+        && let Some(projection) = attempt_projection_tokens(promoted)
+    {
+        paint_attempt_projection(live, &projection)
+    } else {
+        live.to_string()
+    };
     let live = live_owned.as_str();
     let (live_head, tail) = live
         .split_once('\n')
@@ -2680,30 +2678,31 @@ pub(crate) fn attempt_projection_tokens(text: &str) -> Option<String> {
     }
 }
 
-/// True when the row's only attempt projection is the seen glyph `👀`.
-fn live_projection_is_only_seen(text: &str) -> bool {
-    projection_is_only(
+/// True when the row's lifecycle projection is the seen glyph `👀`.
+/// Priority pins and the operator-action marker may surround that lifecycle.
+fn live_projection_is_seen(text: &str) -> bool {
+    projection_has_lifecycle(
         text,
         agent_doc_document::queue_projection::QueueLifecycleMarker::Seen,
     )
 }
 
-/// True when the admitted row's only attempt projection is pending `📥`.
+/// True when the admitted row's lifecycle projection is pending `📥`.
 fn promoted_projection_is_pending(text: &str) -> bool {
-    projection_is_only(
+    projection_has_lifecycle(
         text,
         agent_doc_document::queue_projection::QueueLifecycleMarker::Pending,
     )
 }
 
-fn projection_is_only(
+fn projection_has_lifecycle(
     text: &str,
     marker: agent_doc_document::queue_projection::QueueLifecycleMarker,
 ) -> bool {
-    let Some(projection) = attempt_projection_tokens(text) else {
-        return false;
-    };
-    projection == marker.prefix() || projection == marker.default_prefix()
+    let first = text.lines().next().unwrap_or("");
+    let content = first.trim_start();
+    let (_, projected) = split_list_heading(content);
+    agent_doc_document::queue_projection::lifecycle_marker(projected) == Some(marker)
 }
 
 /// List marker and active-head `### `, then the projection or work that follows.
@@ -2728,27 +2727,24 @@ fn split_list_heading(content: &str) -> (&str, &str) {
     }
 }
 
-/// First line with its leading attempt projection removed. The operator's
-/// words stay. Used when `👀` has to give way to the admission's `📥`.
-/// A leading `### ` stays, so the heading token is not left in the work.
-fn strip_leading_attempt_projection(text: &str) -> String {
+/// Replace only the first line's lifecycle token, preserving pins,
+/// operator-action projection, list indentation, and the active-head heading.
+fn replace_first_line_lifecycle_projection(
+    text: &str,
+    marker: agent_doc_document::queue_projection::QueueLifecycleMarker,
+) -> String {
     let (first, newline_rest) = match text.split_once('\n') {
         Some((first, rest)) => (first, Some(rest)),
         None => (text, None),
     };
     let indent_len = first.len() - first.trim_start().len();
     let (indent, content) = first.split_at(indent_len);
-    let (prefix, work_source) = split_list_heading(content);
-    let work = agent_doc_element_queue::strip_attempt_projection_prefix(work_source);
-    let stripped_content = if prefix.is_empty() {
-        work.to_string()
-    } else {
-        format!("{prefix}{work}")
-    };
-    let stripped = format!("{indent}{stripped_content}");
+    let (prefix, projected) = split_list_heading(content);
+    let replaced = agent_doc_document::queue_projection::apply_lifecycle_marker(projected, marker);
+    let first = format!("{indent}{prefix}{replaced}");
     match newline_rest {
-        Some(rest) => format!("{stripped}\n{rest}"),
-        None => stripped,
+        Some(rest) => format!("{first}\n{rest}"),
+        None => first,
     }
 }
 
@@ -7038,11 +7034,12 @@ Second answer line three.
         assert!(body.contains(earlier_ending), "{body}");
     }
 
-    /// `#promptseen`: a live row whose only attempt projection is `👀` is the
+    /// `#promptseen`: a live row whose lifecycle projection is `👀` is the
     /// interval before prepare emits the prompt. Q-id admission replaces `👀`
     /// with `📥` for an identical spelling and for a mid-clause reword. A
-    /// later merge whose live cut still has no q-id does it again. `🚧`,
-    /// `🟡`, and `☑️` stay on that same projection path.
+    /// later merge whose live cut still has no q-id does it again. Pins and
+    /// operator-action projection stay. `🚧`, `🟡`, and `☑️` stay on that same
+    /// projection path.
     #[test]
     fn seen_live_row_takes_pending_when_qid_admission_projects() {
         let parent = "- ### https://example.test/sample-app/pull/41";
@@ -7074,6 +7071,18 @@ Second answer line three.
         assert_eq!(
             project_generated_id_onto_live(&expected_steered, &seen_steered),
             expected_steered
+        );
+        let seen_pinned = format!("  - 👀 📌 {words}");
+        let admitted_pinned = format!("  - 📥 📌 {words} [#q-0123456789ab]");
+        assert_eq!(
+            project_generated_id_onto_live(&admitted_pinned, &seen_pinned),
+            admitted_pinned
+        );
+        let seen_operator_pinned = format!("  - 🙋👀 📌 {words}");
+        let expected_operator_pinned = format!("  - 🙋📥 📌 {words} [#q-0123456789ab]");
+        assert_eq!(
+            project_generated_id_onto_live(&admitted_pinned, &seen_operator_pinned),
+            expected_operator_pinned
         );
 
         let queue = |rows: &[&str]| rows.join("\n");
@@ -7133,6 +7142,19 @@ Second answer line three.
             &admitted_rows,
             &seen_same_rows,
             &expected_same,
+            &["👀"],
+        );
+        // A pinned nested row replaces only its lifecycle token at every
+        // merge seam; the pin remains ahead of the operator's work.
+        let pinned_earlier = format!("  - 📌 {words}");
+        let pinned_base_rows = queue(&[parent, pinned_earlier.as_str()]);
+        let pinned_admitted_rows = queue(&[parent, admitted_pinned.as_str()]);
+        let pinned_seen_rows = queue(&[parent, seen_pinned.as_str()]);
+        assert_rows(
+            &pinned_base_rows,
+            &pinned_admitted_rows,
+            &pinned_seen_rows,
+            &admitted_pinned,
             &["👀"],
         );
         // Mid-clause reword that leaves `👀` on the live cut.
@@ -7207,7 +7229,8 @@ Second answer line three.
 
     /// A top-level queue head is `- ### 👀 <words>`. Q-id admission skips that
     /// heading token and replaces `👀` with `📥`, so the line is
-    /// `- ### 📥 <words> [#q-…]`. The heading token stays ahead of the glyph.
+    /// `- ### 📥 <words> [#q-…]`. The heading token stays ahead of the glyph,
+    /// and a pin stays after it.
     /// An identical spelling, a mid-clause reword, and a later merge whose
     /// live cut still has no q-id all do this. `🚧`, `🟡`, and `☑️` stay,
     /// including after `### `.
@@ -7222,10 +7245,6 @@ Second answer line three.
         let admitted = format!("- ### 📥 {words} [#q-0123456789ab]");
         let expected_same = admitted.clone();
         let expected_steered = format!("- ### 📥 {steered_words} [#q-0123456789ab]");
-        assert_eq!(
-            strip_leading_attempt_projection(&seen_same),
-            format!("- ### {words}")
-        );
         assert_eq!(
             paint_attempt_projection(&format!("- ### {words}"), "📥"),
             format!("- ### 📥 {words}")
@@ -7249,6 +7268,12 @@ Second answer line three.
         assert_eq!(
             project_generated_id_onto_live(&expected_steered, &seen_steered),
             expected_steered
+        );
+        let seen_pinned = format!("- ### 👀 📌 {words}");
+        let admitted_pinned = format!("- ### 📥 📌 {words} [#q-0123456789ab]");
+        assert_eq!(
+            project_generated_id_onto_live(&admitted_pinned, &seen_pinned),
+            admitted_pinned
         );
 
         let queue = |rows: &[&str]| rows.join("\n");
@@ -7312,6 +7337,19 @@ Second answer line three.
             &seen_same_rows,
             &expected_same,
             &["👀"],
+        );
+        // The pinned top-level heading exercises merge_by_component,
+        // MultiNodeState::merge, and reconcile_component_body together.
+        let pinned_earlier = format!("- ### 📌 {words}");
+        let pinned_base_rows = queue(&[anchor, pinned_earlier.as_str()]);
+        let pinned_admitted_rows = queue(&[anchor, admitted_pinned.as_str()]);
+        let pinned_seen_rows = queue(&[anchor, seen_pinned.as_str()]);
+        assert_rows(
+            &pinned_base_rows,
+            &pinned_admitted_rows,
+            &pinned_seen_rows,
+            &admitted_pinned,
+            &["👀", "📥 ###"],
         );
         let earlier_ending = "superceded by the release bot reason.";
         assert_rows(

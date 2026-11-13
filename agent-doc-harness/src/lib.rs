@@ -49,6 +49,7 @@ pub use grok::{
     enter_cancels_blocked_wait as grok_enter_cancels_blocked_wait,
     follow_up_composer as grok_follow_up_composer,
 };
+pub mod background_work;
 pub mod managed_capability;
 pub mod prompt_source;
 pub mod spawn_program;

@@ -20,6 +20,7 @@ use anyhow::Result;
 
 use crate::queue_claim::{
     block_attempt_on_quota, claim_clock_now_secs, freeze_bound_attempt, load_ledger,
+    record_bound_worker_proof_of_life,
 };
 
 /// A claim this scan moved to, or refreshed as, quota-blocked.
@@ -131,9 +132,84 @@ pub fn apply_subagent_freeze_autodetect(
     worker_id: &str,
     reason: &str,
 ) -> Result<SubagentFreezeAutodetect> {
+    match select_bound_attempt(scan_paths, preferred_doc, worker_id) {
+        BoundAttempt::Selected(hit) => apply_freeze_hit(&hit, reason),
+        BoundAttempt::Ambiguous => Ok(SubagentFreezeAutodetect::Ambiguous),
+        BoundAttempt::None => Ok(SubagentFreezeAutodetect::NoMatch),
+    }
+}
+
+/// Harness proof of life this scan recorded on the bound attempt
+/// (`#waitingfreezelive`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubagentLivenessApplied {
+    pub file: PathBuf,
+    pub claim: QueueClaim,
+    /// An earlier stop had frozen this generation (or failed its continue);
+    /// this proof of life cleared it.
+    pub cleared_freeze: bool,
+}
+
+/// What a waiting-on-own-background-work scan did with one worker id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SubagentLivenessAutodetect {
+    Applied(Box<SubagentLivenessApplied>),
+    /// No Running or Lost attempt is bound to this worker.
+    NoMatch,
+    /// Two eligible attempts of the same rank started together. Nothing was written.
+    Ambiguous,
+}
+
+/// Record that the worker bound to `worker_id` stopped its turn while its own
+/// background work still runs (`#waitingfreezelive`).
+///
+/// Claude Code reports that stop to the parent as `Agent "..." is waiting on
+/// its own background work`, and the worker resumes when the work reports.
+/// It is proof of life: the bound Running or Lost attempt gets a heartbeat,
+/// and a freeze an earlier stop recorded on that generation is cleared, so
+/// the work pool neither frees the slot nor offers the row again. The same
+/// selection as [`apply_subagent_freeze_autodetect`] picks the attempt.
+pub fn apply_subagent_liveness_autodetect(
+    scan_paths: &[PathBuf],
+    preferred_doc: Option<&Path>,
+    worker_id: &str,
+) -> Result<SubagentLivenessAutodetect> {
+    let hit = match select_bound_attempt(scan_paths, preferred_doc, worker_id) {
+        BoundAttempt::Selected(hit) => hit,
+        BoundAttempt::Ambiguous => return Ok(SubagentLivenessAutodetect::Ambiguous),
+        BoundAttempt::None => return Ok(SubagentLivenessAutodetect::NoMatch),
+    };
+    let (claim, cleared_freeze) = record_bound_worker_proof_of_life(
+        &hit.file,
+        &hit.item_text,
+        Some(hit.generation),
+        worker_id.trim(),
+    )?;
+    Ok(SubagentLivenessAutodetect::Applied(Box::new(
+        SubagentLivenessApplied {
+            file: hit.file,
+            claim,
+            cleared_freeze,
+        },
+    )))
+}
+
+enum BoundAttempt {
+    Selected(Hit),
+    Ambiguous,
+    None,
+}
+
+/// The Running or Lost attempt bound to `worker_id`, preferring the parent
+/// session's document when its ledger has one.
+fn select_bound_attempt(
+    scan_paths: &[PathBuf],
+    preferred_doc: Option<&Path>,
+    worker_id: &str,
+) -> BoundAttempt {
     let worker_id = worker_id.trim();
     if worker_id.is_empty() {
-        return Ok(SubagentFreezeAutodetect::NoMatch);
+        return BoundAttempt::None;
     }
     let mut hits = collect_hits(&quota_scan_roots(scan_paths), worker_id);
     if let Some(doc) = preferred_doc {
@@ -142,19 +218,17 @@ pub fn apply_subagent_freeze_autodetect(
             freeze_candidates(hits.iter().filter(|hit| same_file(&hit.file, doc)).cloned());
         match choose(&preferred) {
             QuotaAutodetectChoice::Selected(index) => {
-                return apply_freeze_hit(&preferred[index], reason);
+                return BoundAttempt::Selected(preferred[index].clone());
             }
-            QuotaAutodetectChoice::Ambiguous => {
-                return Ok(SubagentFreezeAutodetect::Ambiguous);
-            }
+            QuotaAutodetectChoice::Ambiguous => return BoundAttempt::Ambiguous,
             QuotaAutodetectChoice::None => {}
         }
     }
     let hits = freeze_candidates(hits.into_iter());
     match choose(&hits) {
-        QuotaAutodetectChoice::Selected(index) => apply_freeze_hit(&hits[index], reason),
-        QuotaAutodetectChoice::Ambiguous => Ok(SubagentFreezeAutodetect::Ambiguous),
-        QuotaAutodetectChoice::None => Ok(SubagentFreezeAutodetect::NoMatch),
+        QuotaAutodetectChoice::Selected(index) => BoundAttempt::Selected(hits[index].clone()),
+        QuotaAutodetectChoice::Ambiguous => BoundAttempt::Ambiguous,
+        QuotaAutodetectChoice::None => BoundAttempt::None,
     }
 }
 

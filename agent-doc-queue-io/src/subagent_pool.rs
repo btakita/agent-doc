@@ -667,6 +667,70 @@ mod tests {
         assert_eq!(held.pools[0].occupancy.running, 1, "{held:#?}");
     }
 
+    /// `#waitingfreezelive` (2026-11-13): the hook froze a worker that was
+    /// only waiting on its own background `make tmux-ci`, and the pool offered
+    /// its row for a duplicate dispatch. Proof of life, whether the
+    /// coordinator's generation-fenced `queue claim --refresh` or the hook's
+    /// next waiting stop, clears that freeze and its failed continue, puts the
+    /// worker back in its slot, and withdraws the offer.
+    #[test]
+    fn proof_of_life_after_a_waiting_freeze_withdraws_the_duplicate_offer() {
+        for via_coordinator_refresh in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+            let file = dir.path().join("task.md");
+            let content = pool_doc("subagents=1", &["do [#a]", "do [#b]"]);
+            std::fs::write(&file, &content).unwrap();
+            start(&file, "do [#a]", "subagent:a");
+            crate::queue_claim::freeze_attempt(
+                &file,
+                "do [#a]",
+                Some(1),
+                "subagent ended before coordinator integration: The commit is in. Waiting on `make tmux-ci` before I push.",
+            )
+            .unwrap();
+            let offered =
+                pool_refill_for_content(&file, &content, PoolRefillTrigger::Frozen).unwrap();
+            assert!(
+                offered.next_heads.iter().any(|head| head.item == "do [#a]"),
+                "the bug's precondition: {offered:#?}"
+            );
+
+            let claim = if via_coordinator_refresh {
+                crate::queue_claim::refresh_attempt(&file, "do [#a]", "subagent:a", 7200, Some(1))
+                    .unwrap()
+            } else {
+                let (claim, cleared) = crate::queue_claim::record_bound_worker_proof_of_life(
+                    &file,
+                    "do [#a]",
+                    Some(1),
+                    "worker:subagent:a",
+                )
+                .unwrap();
+                assert!(cleared);
+                claim
+            };
+            assert!(claim.frozen.is_none(), "{claim:#?}");
+            assert!(claim.lost_continue.is_none(), "{claim:#?}");
+            assert_eq!(claim.generation, 1);
+            assert_eq!(
+                claim
+                    .worker
+                    .as_ref()
+                    .map(|worker| worker.worker_id.as_str()),
+                Some("worker:subagent:a")
+            );
+
+            let held = pool_refill_for_content(&file, &content, PoolRefillTrigger::Plan).unwrap();
+            assert!(
+                held.next_heads.iter().all(|head| head.item != "do [#a]"),
+                "via_coordinator_refresh={via_coordinator_refresh}: {held:#?}"
+            );
+            assert!(held.frozen.is_empty(), "{held:#?}");
+            assert_eq!(held.pools[0].occupancy.running, 1, "{held:#?}");
+        }
+    }
+
     /// `#poolidleheartbeat`, through the real ledger: nothing before the batch
     /// has had its coalesce window, one wake identity while the due set stands,
     /// and nothing once the coordinator refreshed. Expiry inside the frozen

@@ -1640,10 +1640,8 @@ pub fn try_run_with_options(
     crate::profile::reset();
     let started = std::time::Instant::now();
     if !effects.applies_self_heals() {
-        let out = crate::with_status_only_pass(|| {
-            agent_doc_ops_log_io::with_ops_log_suppressed(|| {
-                try_run_with_options_pass(file, codex_final_gate, effects)
-            })
+        let out = crate::with_status_only_transaction(|| {
+            try_run_with_options_pass(file, codex_final_gate, effects)
         });
         crate::profile::report(file, started.elapsed());
         return out;

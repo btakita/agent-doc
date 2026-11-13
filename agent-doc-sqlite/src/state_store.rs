@@ -14,6 +14,7 @@ use anyhow::{Context, Result};
 pub use rusqlite::Connection;
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -23,6 +24,10 @@ const STATE_DB_FILE: &str = "state.db";
 use crate::write_lock::STATE_DB_BUSY_TIMEOUT;
 const STATE_DB_SCHEMA_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 static STATE_DB_CONNECTIONS_FORBIDDEN: AtomicBool = AtomicBool::new(false);
+
+thread_local! {
+    static STATE_DB_READ_ONLY_SCOPE: Cell<bool> = const { Cell::new(false) };
+}
 
 use agent_doc_controller::actor::{
     ActorLastTransition, ActorRecord, ActorRevision, ActorState, ActorStoreWrite,
@@ -368,6 +373,74 @@ pub fn forbid_state_db_connections_for_process() {
 
 pub fn state_db_connections_forbidden_for_process() -> bool {
     STATE_DB_CONNECTIONS_FORBIDDEN.load(Ordering::SeqCst)
+}
+
+/// Run `operation` with every ordinary state-store open on this thread forced
+/// through SQLite's read-only connection mode. Status-only transactions use
+/// this capability boundary so a legacy domain reader cannot accidentally
+/// initialize, migrate, repair, or retention-prune the authoritative ledger.
+pub fn with_state_db_read_only<T>(operation: impl FnOnce() -> T) -> T {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            STATE_DB_READ_ONLY_SCOPE.with(|slot| slot.set(self.0));
+        }
+    }
+
+    STATE_DB_READ_ONLY_SCOPE.with(|slot| {
+        let previous = slot.replace(true);
+        let _restore = Restore(previous);
+        operation()
+    })
+}
+
+fn state_db_read_only_scope_active() -> bool {
+    STATE_DB_READ_ONLY_SCOPE.with(Cell::get)
+}
+
+/// Open an existing state database without creating directories, initializing
+/// schema, running migrations/repairs, or applying retention maintenance.
+pub fn open_state_db_read_only(project_root: &Path) -> Result<Connection> {
+    open_state_db_read_only_with_timeout(project_root, STATE_DB_BUSY_TIMEOUT)
+}
+
+pub fn open_state_db_read_only_with_timeout(
+    project_root: &Path,
+    busy_timeout: Duration,
+) -> Result<Connection> {
+    anyhow::ensure!(
+        !state_db_connections_forbidden_for_process(),
+        "SQLite state connections are forbidden in this process; use the Project Controller projection/command plane"
+    );
+    let path = state_db_path(project_root);
+    agent_doc_fs::guard_test_runtime_target(&path, "a read-only state.db open");
+    if !path.exists() {
+        // A cold status probe must classify an absent ledger as empty without
+        // creating `.agent-doc/state.db`. Give existing typed loaders the
+        // canonical empty shape in process-local memory, then make even that
+        // connection query-only so an accidental write still fails closed.
+        let conn = Connection::open_in_memory().context("open empty read-only state projection")?;
+        conn.busy_timeout(busy_timeout)?;
+        declare_canonical_shape(&conn)?;
+        conn.pragma_update(None, "query_only", true)?;
+        return Ok(conn);
+    }
+    let conn = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .with_context(|| format!("failed to open {} read-only", path.display()))?;
+    conn.busy_timeout(busy_timeout)?;
+    Ok(conn)
+}
+
+/// Probe a persisted table without invoking schema initialization. Read-only
+/// domain loaders use this to treat pre-migration absence as an empty
+/// projection rather than upgrading the ledger during inspection.
+pub fn state_table_exists(conn: &Connection, table: &str) -> Result<bool> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        params![table],
+        |row| row.get(0),
+    )
+    .with_context(|| format!("probe state table {table}"))
 }
 
 pub fn open_state_db(project_root: &Path) -> Result<Connection> {
@@ -804,6 +877,9 @@ pub fn open_state_db_with_timeout(
     project_root: &Path,
     busy_timeout: Duration,
 ) -> Result<Connection> {
+    if state_db_read_only_scope_active() {
+        return open_state_db_read_only_with_timeout(project_root, busy_timeout);
+    }
     anyhow::ensure!(
         !state_db_connections_forbidden_for_process(),
         "SQLite state connections are forbidden in this process; use the Project Controller projection/command plane"

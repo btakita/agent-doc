@@ -7158,7 +7158,10 @@ fn write_terminal_error_report(writer: &mut impl Write, report: &str) -> std::io
 /// - every turn stage re-checks before it writes
 ///   (`recycle_stale_supervisor_for_turn_stage`).
 fn command_entry_supervisor_probe_applies(command: &Commands) -> bool {
-    !matches!(command, Commands::Tmux { .. })
+    !matches!(
+        command,
+        Commands::Tmux { .. } | Commands::SessionCheck { .. }
+    )
 }
 
 fn try_main() -> anyhow::Result<()> {

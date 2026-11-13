@@ -502,8 +502,13 @@ fn route_claimed_items(
             file.display()
         );
     }
-    let ledger = agent_doc_queue_io::queue_claim::load_ledger_following(file, content)
-        .with_context(|| format!("read queue claims while routing {}", file.display()))?;
+    let status_only = crate::status_only_pass_active();
+    let ledger = if status_only {
+        agent_doc_queue_io::queue_claim::load_ledger_following_read_only(file, content)
+    } else {
+        agent_doc_queue_io::queue_claim::load_ledger_following(file, content)
+    }
+    .with_context(|| format!("read queue claims while routing {}", file.display()))?;
     let now = agent_doc_queue_io::queue_claim::claim_clock_now_secs();
     let mut attempts = ledger
         .active(now, None)
@@ -574,8 +579,12 @@ fn route_claimed_items(
         .keys()
         .cloned()
         .collect::<std::collections::HashSet<_>>();
-    let released = agent_doc_queue_io::claim_release_receipt::load(file)
-        .with_context(|| format!("read reported receipts while routing {}", file.display()))?;
+    let released = if status_only {
+        agent_doc_queue_io::claim_release_receipt::load_read_only(file)
+    } else {
+        agent_doc_queue_io::claim_release_receipt::load(file)
+    }
+    .with_context(|| format!("read reported receipts while routing {}", file.display()))?;
     for receipt in &released.receipts {
         // `#consumedclaimmismatch`: a receipt whose row a binary strike closed
         // is a retained response capture, not a reported attempt that owns work.
@@ -671,7 +680,7 @@ fn route_claimed_items(
     // Classification is intrinsically pure. Applying consumers run the
     // generation-fenced cancellation in an explicit completion-lock -> queue-
     // apply transaction; status/Stop/idle callers never acquire either lock.
-    if crate::status_only_pass_active()
+    if status_only
         && items
             .iter()
             .any(|item| item.dispatch == core::SteeringDispatch::CancelClaimed)
@@ -680,8 +689,13 @@ fn route_claimed_items(
     }
     // `#reportedrelease`: a line whose worker reported (released with a
     // receipt) is the coordinator's to persist now, never new dispatch work.
-    let reported =
-        agent_doc_queue_io::claim_release_receipt::reported_owners_for_content(file, content);
+    let reported = if status_only {
+        agent_doc_queue_io::claim_release_receipt::reported_owners_for_content_read_only(
+            file, content,
+        )
+    } else {
+        agent_doc_queue_io::claim_release_receipt::reported_owners_for_content(file, content)
+    };
     if !reported.is_empty() {
         core::apply_release_receipts(items, |text| {
             reported
@@ -2312,7 +2326,13 @@ pub fn emit_closeout_steering(file: &Path, writer: &mut impl std::io::Write) {
 /// advanced, so the next applying consumer still cancels the claim and
 /// delivers the item.
 pub fn emit_closeout_steering_status_only(file: &Path, writer: &mut impl std::io::Write) {
-    emit_closeout_steering_inner(file, writer, true);
+    // This is a complete public status transaction, not merely a different
+    // acknowledgement policy. Keep every legacy state-store reader and every
+    // error diagnostic behind the same intrinsic purity boundary as the main
+    // session-check pass.
+    crate::with_status_only_transaction(|| {
+        emit_closeout_steering_inner(file, writer, true);
+    });
 }
 
 fn emit_closeout_steering_inner(file: &Path, writer: &mut impl std::io::Write, status_only: bool) {

@@ -10895,6 +10895,57 @@ fn observe_retained_write_settlement(file: &Path, source: &str) -> RetainedWrite
     settlement
 }
 
+/// Build the retained-write verdict without publishing observations, refreshing
+/// controller storage, or applying a settlement receipt. Status-only callers
+/// need the same classification while preserving a byte-for-byte state cut.
+fn observe_retained_write_settlement_read_only(
+    file: &Path,
+    source: &str,
+) -> RetainedWriteSettlement {
+    let scope = agent_doc_state_backbone::DocumentScope::new();
+    let settlement = RetainedWriteSettlement::new_in(&scope);
+
+    let Some(pending) = pending_document_write(file) else {
+        return settlement;
+    };
+    let captured_response = projected_captured_response(file);
+    let payload = captured_response.as_deref().filter(|payload| {
+        agent_doc_turn::response_replay::response_materialized_in_content(
+            payload,
+            &pending.target_content,
+        )
+    });
+    let added_lines = agent_doc_state_backbone::retained_write::intent_added_lines(
+        pending.expected_content.as_deref(),
+        &pending.target_content,
+    );
+    settlement.observe_pending(Some(RetainedIntentFacts {
+        intent_id: pending.intent_id.clone(),
+        target_hash: pending.target_hash.clone(),
+        reason: pending.reason.clone(),
+        source: pending.source.clone(),
+        superseding_stage: superseding_closeout_stage(file, &pending),
+        operator_superseding_hash: None,
+        carries_response_payload: payload.is_some(),
+        carries_content_delta: !added_lines.is_empty(),
+        closeout_committed: agent_doc_cycle_state_io::load_with_closeout_projection(file)
+            .ok()
+            .flatten()
+            .is_some_and(|state| state.phase == agent_doc_turn::CyclePhase::Committed),
+    }));
+    settlement.observe_authority(observe_plane(
+        peek_current_document_content(file, source),
+        payload,
+        &added_lines,
+    ));
+    settlement.observe_disk(observe_plane(
+        peek_disk_document_content(file, source),
+        payload,
+        &added_lines,
+    ));
+    settlement
+}
+
 /// Is the retained intent stranded rather than merely slow?
 ///
 /// True when authority and disk have already converged and the intent still
@@ -11375,6 +11426,20 @@ pub fn retained_write_blocks_session_closeout(file: &Path, source: &str) -> bool
     retained_session_closeout_holder(file, source).is_some()
 }
 
+/// Pure status-only form of [`retained_write_blocks_session_closeout`].
+///
+/// In particular, this does not call the controller's reactive settlement RPC:
+/// that endpoint refreshes the durable projection and may migrate/prune the
+/// state store before returning its verdict.
+pub fn retained_write_blocks_session_closeout_read_only(file: &Path, source: &str) -> bool {
+    let verdict = observe_retained_write_settlement_read_only(file, source).verdict();
+    if select_session_closeout_holder(&verdict, None).is_some() {
+        return true;
+    }
+    let compact = pending_compact_projection_read_only(file);
+    select_session_closeout_holder(&verdict, compact.as_ref()).is_some()
+}
+
 /// The concrete durable holder that keeps a session closeout (and the Codex
 /// auto-queue continuation) from completing, named by the same single read
 /// that decides it blocks (`#sdkretained`).
@@ -11493,6 +11558,19 @@ pub fn pending_compact_projection(
             None
         }
     }
+}
+
+fn pending_compact_projection_read_only(
+    file: &Path,
+) -> Option<agent_doc_state_backbone::DocumentCompactProjectionContinuation> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)?;
+    agent_doc_controller_io::project_controller::document_state_projection_existing(
+        &project_root,
+        file,
+    )
+    .ok()
+    .flatten()
+    .and_then(|projection| projection.document.pending_compact_projection)
 }
 
 fn retained_compact_projection_blocks(

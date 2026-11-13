@@ -466,6 +466,20 @@ fn open_conn(file: &Path) -> Result<Option<agent_doc_sqlite::state_store::Connec
     Ok(Some(agent_doc_sqlite::state_store::open_state_db(&root)?))
 }
 
+fn open_conn_read_only(file: &Path) -> Result<Option<agent_doc_sqlite::state_store::Connection>> {
+    let Some(root) = agent_doc_fs::find_project_root(file) else {
+        return Ok(None);
+    };
+    if !agent_doc_sqlite::state_store::state_db_path(&root).exists() {
+        return Ok(None);
+    }
+    let conn = agent_doc_sqlite::state_store::open_state_db_read_only(&root)?;
+    if !agent_doc_sqlite::state_store::state_table_exists(&conn, "project_runtime_state")? {
+        return Ok(None);
+    }
+    Ok(Some(conn))
+}
+
 fn load(
     conn: &agent_doc_sqlite::state_store::Connection,
     file: &Path,
@@ -625,7 +639,7 @@ pub fn drop_consumed_read_only(file: &Path, items: &mut Vec<SteeringItem>) {
     if !items.iter().any(is_absorbable) {
         return;
     }
-    let Ok(Some(conn)) = open_conn(file) else {
+    let Ok(Some(conn)) = open_conn_read_only(file) else {
         return;
     };
     let Ok(ledger) = load(&conn, file) else {

@@ -84,6 +84,19 @@ pub(crate) fn with_status_only_pass<T>(f: impl FnOnce() -> T) -> T {
     })
 }
 
+/// Run a complete status-only transaction behind all three purity barriers:
+/// domain helpers classify rather than apply, state-store opens are physically
+/// read-only (so they cannot initialize/migrate/repair/prune), and diagnostics
+/// cannot append to the ops ledger. Public status entrypoints use this wrapper
+/// around their whole call graph, including post-status steering projection.
+pub fn with_status_only_transaction<T>(f: impl FnOnce() -> T) -> T {
+    with_status_only_pass(|| {
+        agent_doc_sqlite::state_store::with_state_db_read_only(|| {
+            agent_doc_ops_log_io::with_ops_log_suppressed(f)
+        })
+    })
+}
+
 pub(crate) fn status_only_pass_active() -> bool {
     STATUS_ONLY_PASS.with(Cell::get)
 }

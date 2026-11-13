@@ -383,6 +383,18 @@ pub fn load_ledger_following(file: &Path, content: &str) -> Result<QueueClaimLed
     Ok(ledger)
 }
 
+/// Status-only counterpart that never initializes, migrates, repairs, or
+/// retention-prunes the project state database.
+pub fn load_ledger_following_read_only(file: &Path, content: &str) -> Result<QueueClaimLedger> {
+    let mut ledger = load_ledger_read_only(file)?;
+    if !ledger.claims.is_empty()
+        && let Some(view) = ClaimQueueView::from_content(content)
+    {
+        ledger.follow_edits_in_view(now_secs(), &view);
+    }
+    Ok(ledger)
+}
+
 /// Compatibility baselines for an older folded `#nestedclaimsteer` entry.
 /// Canonical parsed trees are already leaf-only.
 pub fn nested_claim_steer_snapshots(
@@ -473,6 +485,20 @@ pub fn load_ledger(file: &Path) -> Result<QueueClaimLedger> {
         return Ok(QueueClaimLedger::default());
     };
     let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    load_from_conn(&conn, &document_hash)
+}
+
+pub fn load_ledger_read_only(file: &Path) -> Result<QueueClaimLedger> {
+    let Some((root, document_hash, _)) = state_identity(file)? else {
+        return Ok(QueueClaimLedger::default());
+    };
+    if !agent_doc_sqlite::state_store::state_db_path(&root).exists() {
+        return Ok(QueueClaimLedger::default());
+    }
+    let conn = agent_doc_sqlite::state_store::open_state_db_read_only(&root)?;
+    if !agent_doc_sqlite::state_store::state_table_exists(&conn, "queue_document_state")? {
+        return Ok(QueueClaimLedger::default());
+    }
     load_from_conn(&conn, &document_hash)
 }
 

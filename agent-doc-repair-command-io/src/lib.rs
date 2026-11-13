@@ -1177,24 +1177,26 @@ fn resume_materialized_captured_finalize(
 /// `HEAD`, or a submodule pointer either — each self-heal it finds is reported
 /// with `agent-doc repair <FILE> --session-check-heal`.
 pub fn run_session_check(file: &Path, codex_final_gate: bool) -> Result<()> {
-    // `#scsettlewindow` (GH #60): the harness runs this exactly once after a
-    // deferred closeout, so it waits out a self-converging state rather than
-    // reporting whatever it sampled at entry.
-    agent_doc_session_check_io::run_read_only_settling(
-        file,
-        codex_final_gate,
-        &agent_doc_closeout_runtime_io::session_check_effects(),
-        agent_doc_session_check_io::session_check_settle_window(),
-    )?;
-    // `#closeout-steering`: the post-commit check also carries operator
-    // steering the closeout report has not surfaced yet (same agent-channel
-    // watermark, so nothing repeats). `#sessioncheckread`: status-only, so a
-    // claimed-row cancellation is reported, not applied.
-    agent_doc_session_check_io::midturn_steering::emit_closeout_steering_status_only(
-        file,
-        &mut std::io::stdout().lock(),
-    );
-    Ok(())
+    agent_doc_session_check_io::with_status_only_transaction(|| {
+        // `#scsettlewindow` (GH #60): the harness runs this exactly once after a
+        // deferred closeout, so it waits out a self-converging state rather than
+        // reporting whatever it sampled at entry.
+        agent_doc_session_check_io::run_read_only_settling(
+            file,
+            codex_final_gate,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+            agent_doc_session_check_io::session_check_settle_window(),
+        )?;
+        // `#closeout-steering`: the post-commit check also carries operator
+        // steering the closeout report has not surfaced yet (same agent-channel
+        // watermark, so nothing repeats). `#sessioncheckread`: status-only, so a
+        // claimed-row cancellation is reported, not applied.
+        agent_doc_session_check_io::midturn_steering::emit_closeout_steering_status_only(
+            file,
+            &mut std::io::stdout().lock(),
+        );
+        Ok(())
+    })
 }
 
 /// `agent-doc repair <FILE> --session-check-heal` (`#sessioncheckread`): apply

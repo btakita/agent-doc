@@ -766,7 +766,7 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeReadOnlySessionC
     }
 
     fn retained_document_write_blocks(&self, file: &Path) -> bool {
-        agent_doc_document_realtime_io::retained_write_blocks_session_closeout(
+        agent_doc_document_realtime_io::retained_write_blocks_session_closeout_read_only(
             file,
             agent_doc_document_realtime_io::RetainedWriteCycleBoundary::SessionCheck.gate_source(),
         )

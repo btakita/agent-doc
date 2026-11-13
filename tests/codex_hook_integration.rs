@@ -31,8 +31,38 @@ fn agent_doc() -> Command {
     cmd
 }
 
-fn logical_state_rows(root: &Path) -> Vec<String> {
-    let conn = agent_doc_sqlite::state_store::open_state_db(root).unwrap();
+#[derive(Debug, PartialEq, Eq)]
+struct StateDbSnapshot {
+    user_version: i64,
+    schema: Vec<String>,
+    rows: Vec<String>,
+}
+
+fn state_db_snapshot(root: &Path) -> StateDbSnapshot {
+    let conn = agent_doc_sqlite::state_store::open_state_db_read_only(root).unwrap();
+    let user_version = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    let schema = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT type, name, tbl_name, COALESCE(sql, '') FROM sqlite_schema \
+                 ORDER BY type, name, tbl_name",
+            )
+            .unwrap();
+        stmt.query_map([], |row| {
+            Ok(format!(
+                "{}|{}|{}|{}",
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })
+        .unwrap()
+        .map(Result::unwrap)
+        .collect::<Vec<_>>()
+    };
     let tables = {
         let mut stmt = conn
             .prepare(
@@ -79,7 +109,43 @@ fn logical_state_rows(root: &Path) -> Vec<String> {
         );
     }
     rows.sort();
-    rows
+    StateDbSnapshot {
+        user_version,
+        schema,
+        rows,
+    }
+}
+
+/// Make the next ordinary state-store open observably effectful: schema
+/// convergence would recreate the canonical index and document-version/data
+/// retention would rewrite or prune these copied baseline events. A genuine
+/// status-only transaction must leave all of it byte-for-byte logical-state
+/// identical while still classifying the session.
+fn stage_pre_migration_over_retention_state(root: &Path) {
+    let conn = agent_doc_sqlite::state_store::open_state_db(root).unwrap();
+    conn.execute_batch(
+        "DROP INDEX IF EXISTS state_events_document_hash_document_version; \
+         PRAGMA user_version = 73;",
+    )
+    .unwrap();
+    for ordinal in 0..4_i64 {
+        let inserted = conn
+            .execute(
+                "INSERT INTO state_events(\
+                    event_id, document_hash, domain, fact_type, payload_json, timestamp, document_version\
+                 ) \
+                 SELECT ?1, document_hash, domain, fact_type, payload_json, timestamp + ?2, 0 \
+                 FROM state_events \
+                 WHERE fact_type = 'document_baseline_checkpointed' \
+                 ORDER BY id DESC LIMIT 1",
+                (
+                    format!("status-only-retention-probe-{ordinal}"),
+                    ordinal + 1,
+                ),
+            )
+            .unwrap();
+        assert_eq!(inserted, 1, "fixture needs a baseline event to duplicate");
+    }
 }
 
 fn await_authority_handoff_drain(root: &Path, doc: &Path) {
@@ -188,9 +254,15 @@ fn session_check_terminal_gate_leaves_active_auto_queue_to_background() {
         }
         cmd.assert()
             .success()
-            .stdout(predicate::str::contains("[session-check] ok"))
+            .stdout(predicate::str::contains(
+                "[session-check] no cycle state or ops.log — ok",
+            ))
             .stdout(predicate::str::contains("queue_continuation_required").not());
     }
+    assert!(
+        !agent_doc_sqlite::state_store::state_db_path(tmp.path()).exists(),
+        "status-only cold inspection must not initialize state.db"
+    );
 }
 
 /// A committed cycle whose live document carries an operator prompt added
@@ -245,7 +317,25 @@ fn session_check_cli_reports_post_commit_steering_as_pending_with_exit_zero() {
         .success();
     await_authority_handoff_drain(tmp.path(), &doc);
     let before_authority = agent_doc_cycle_state_io::load_latest_document_authority(&doc).unwrap();
-    let before_state = logical_state_rows(tmp.path());
+    stage_pre_migration_over_retention_state(tmp.path());
+    let before_state = state_db_snapshot(tmp.path());
+    assert_eq!(before_state.user_version, 73);
+    assert!(
+        before_state
+            .schema
+            .iter()
+            .all(|entry| !entry.contains("state_events_document_hash_document_version")),
+        "fixture must start with canonical index convergence pending"
+    );
+    assert!(
+        before_state
+            .rows
+            .iter()
+            .filter(|row| row.contains("status-only-retention-probe-"))
+            .count()
+            >= 4,
+        "fixture must start above the per-document baseline retention cap"
+    );
     let ops = tmp.path().join(".agent-doc/logs/ops.log");
     let before_ops = std::fs::read(&ops).unwrap_or_default();
 
@@ -269,20 +359,25 @@ fn session_check_cli_reports_post_commit_steering_as_pending_with_exit_zero() {
         ))
         .stdout(predicate::str::contains("INTERRUPTED").not());
     await_authority_handoff_drain(tmp.path(), &doc);
+    let after_state = state_db_snapshot(tmp.path());
+    assert_eq!(after_state.user_version, before_state.user_version);
     assert_eq!(
-        agent_doc_cycle_state_io::load_latest_document_authority(&doc).unwrap(),
-        before_authority,
-        "status-only CLI must not publish an authority observation"
+        after_state.rows, before_state.rows,
+        "status-only CLI changed logical rows or duplicate row counts",
     );
     assert_eq!(
-        logical_state_rows(tmp.path()),
-        before_state,
-        "status-only CLI must not mutate logical state row payloads"
+        after_state.schema, before_state.schema,
+        "status-only CLI must not initialize/migrate schema or indexes"
     );
     assert_eq!(
         std::fs::read(&ops).unwrap_or_default(),
         before_ops,
         "status-only CLI must not append diagnostics to ops.log"
+    );
+    assert_eq!(
+        agent_doc_cycle_state_io::load_latest_document_authority(&doc).unwrap(),
+        before_authority,
+        "status-only CLI must not publish an authority observation"
     );
     let stdout = String::from_utf8_lossy(&out.get_output().stdout).to_ascii_lowercase();
     assert!(

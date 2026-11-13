@@ -68,6 +68,22 @@ pub fn load(file: &Path) -> Result<ClaimReleaseReceiptLedger> {
     load_from_conn(&conn, &document_hash)
 }
 
+/// Status-only counterpart that never initializes, migrates, repairs, or
+/// retention-prunes the project state database.
+pub fn load_read_only(file: &Path) -> Result<ClaimReleaseReceiptLedger> {
+    let Some((root, document_hash, _)) = state_identity(file)? else {
+        return Ok(ClaimReleaseReceiptLedger::default());
+    };
+    if !agent_doc_sqlite::state_store::state_db_path(&root).exists() {
+        return Ok(ClaimReleaseReceiptLedger::default());
+    }
+    let conn = agent_doc_sqlite::state_store::open_state_db_read_only(&root)?;
+    if !agent_doc_sqlite::state_store::state_table_exists(&conn, "queue_document_state")? {
+        return Ok(ClaimReleaseReceiptLedger::default());
+    }
+    load_from_conn(&conn, &document_hash)
+}
+
 /// One open, exactly attested reported-release receipt whose queue row's
 /// directive id names a tracked item (`#nestedreceiptack`,
 /// `#dupreceiptconsume`).
@@ -534,6 +550,24 @@ fn ledger_or_warn(file: &Path) -> ClaimReleaseReceiptLedger {
     }
 }
 
+/// Silent status-only release projection. Cancellation receipts are applied
+/// from the same read-only ledger cut, so no helper can initialize or maintain
+/// `state.db` while merely classifying a session-check result.
+fn ledger_read_only(file: &Path) -> ClaimReleaseReceiptLedger {
+    let Ok(mut ledger) = load_read_only(file) else {
+        return ClaimReleaseReceiptLedger::default();
+    };
+    if let Ok(claims) = crate::queue_claim::load_ledger_read_only(file) {
+        ledger.receipts.retain(|receipt| {
+            !claims.cancellations.iter().any(|cancelled| {
+                cancelled.claim.identity == receipt.identity
+                    && cancelled.claim.generation == receipt.generation
+            })
+        });
+    }
+    ledger
+}
+
 /// The receipt governing the live queue line `text` of `content`, if its
 /// worker reported and no live claim superseded it.
 pub fn governing_receipt(file: &Path, content: &str, text: &str) -> Option<ClaimReleaseReceipt> {
@@ -615,6 +649,37 @@ pub fn reported_owners_for_content(
     }
     let live = live_queue_head_identities(content);
     let claimed = crate::queue_claim::ledger_claimed_items_for_content(file, content);
+    let now = now_secs();
+    ledger
+        .receipts
+        .iter()
+        .filter(|receipt| {
+            ledger
+                .governing(now, live.as_ref(), &claimed, &receipt.item_text)
+                .is_some_and(|governing| governing == *receipt)
+        })
+        .map(|receipt| {
+            (
+                receipt.identity.clone(),
+                (receipt.owner.clone(), receipt.generation),
+            )
+        })
+        .collect()
+}
+
+/// Read-only counterpart used by status/Stop/idle inspection.
+pub fn reported_owners_for_content_read_only(
+    file: &Path,
+    content: &str,
+) -> std::collections::HashMap<agent_doc_element_queue::QueueItemIdentity, (String, u64)> {
+    let ledger = ledger_read_only(file);
+    if ledger.receipts.is_empty() {
+        return Default::default();
+    }
+    let live = live_queue_head_identities(content);
+    let claimed = crate::queue_claim::load_ledger_following_read_only(file, content)
+        .map(|ledger| ledger.claimed_items(now_secs(), live.as_ref()))
+        .unwrap_or_else(|_| ClaimedQueueItems::none());
     let now = now_secs();
     ledger
         .receipts

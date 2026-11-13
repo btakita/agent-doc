@@ -103,7 +103,19 @@ pub(crate) fn resolve_current_document(
     source: &str,
 ) -> Result<agent_doc_document_realtime_io::CurrentDocument> {
     if force_disk_resolution_enabled() {
+        if status_only_pass_active() {
+            return agent_doc_document_realtime_io::peek_disk_document(
+                file,
+                &format!("session-check:{source}"),
+            );
+        }
         return agent_doc_document_realtime_io::resolve_disk_current_document(
+            file,
+            &format!("session-check:{source}"),
+        );
+    }
+    if status_only_pass_active() {
+        return agent_doc_document_realtime_io::peek_current_document(
             file,
             &format!("session-check:{source}"),
         );

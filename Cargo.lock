@@ -349,6 +349,7 @@ dependencies = [
  "agent-doc-repair-io",
  "agent-doc-session-check-io",
  "agent-doc-snapshot-io",
+ "agent-doc-sqlite",
  "agent-doc-template-io",
  "agent-doc-turn",
  "agent-doc-turn-status-io",

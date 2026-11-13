@@ -647,7 +647,7 @@ fn retained_pending_only_commit_is_pending(
         file,
         "pending_only_commit_pending_authority",
     )?;
-    let disk_content = agent_doc_document_realtime_io::resolve_disk_current_document_content(
+    let disk_content = agent_doc_document_realtime_io::peek_disk_document_content(
         file,
         "pending_only_commit_pending_disk",
     )?;
@@ -2214,6 +2214,66 @@ mod tests {
             }
         ));
         assert_eq!(retries.get(), 1);
+    }
+
+    #[test]
+    fn retained_pending_read_only_probe_keeps_authority_state_and_ops_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let file = dir.path().join("session.md");
+        let content = "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\nPrompt.\n\n### Re: prior\n\nAnswer.\n<!-- /agent:exchange -->\n";
+        std::fs::write(&file, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&file, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &file,
+            "commit_success",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::record_pending_only_commit_target(
+            &file,
+            &agent_doc_hash::content_hash(content),
+        )
+        .unwrap();
+
+        let ops_path = dir.path().join(".agent-doc/logs/ops.log");
+        let before_authority =
+            agent_doc_cycle_state_io::load_latest_document_authority(&file).unwrap();
+        let state_counts = || {
+            let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+            agent_doc_sqlite::state_store::load_control_plane_store_counts(&conn).unwrap()
+        };
+        let before_state = state_counts();
+        let before_ops = std::fs::read(&ops_path).unwrap_or_default();
+
+        assert!(
+            retained_pending_only_commit_is_pending(&RuntimeReadOnlySessionCheckEffects, &file)
+                .unwrap(),
+            "the recorded pending-only target must remain visible to the read-only classifier"
+        );
+
+        assert_eq!(
+            agent_doc_cycle_state_io::load_latest_document_authority(&file).unwrap(),
+            before_authority,
+            "read-only retained-pending classification must not advance the authority ledger"
+        );
+        assert_eq!(
+            state_counts(),
+            before_state,
+            "read-only retained-pending classification must not mutate state.db control-plane rows"
+        );
+        assert_eq!(
+            std::fs::read(&ops_path).unwrap_or_default(),
+            before_ops,
+            "read-only retained-pending classification must not append ops"
+        );
     }
 
     #[test]

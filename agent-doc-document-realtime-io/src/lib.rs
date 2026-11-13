@@ -7319,6 +7319,15 @@ fn query_embedded_relay(
     Ok(Some(current))
 }
 
+fn peek_embedded_relay(
+    file: &std::path::Path,
+) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
+    if !agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file) {
+        return Ok(None);
+    }
+    agent_doc_crdt_relay_io::current_text_for_file_nonblocking(file).map(Some)
+}
+
 fn current_text_status(current: &agent_doc_crdt_relay_io::CurrentText) -> &'static str {
     match current {
         agent_doc_crdt_relay_io::CurrentText::Detached => "detached",
@@ -9111,32 +9120,54 @@ pub fn resolve_disk_current_document_content(
 /// `disk_hash` and never converged, while the guidance said to wait for a
 /// settlement that observation itself kept resetting. A read that claims
 /// authority is not a read (`#retainedsettlereactive`).
-pub fn peek_disk_document_content(file: &std::path::Path, source: &str) -> Result<String> {
+pub fn peek_disk_document(file: &std::path::Path, source: &str) -> Result<CurrentDocument> {
     let content = std::fs::read_to_string(file).with_context(|| {
         format!(
             "{source}: failed to read disk-authoritative document {}",
             file.display()
         )
     })?;
-    Ok(
-        CurrentDocument::new(file.to_path_buf(), reconcile_current_doc(&content, None))
-            .into_content(),
-    )
+    Ok(CurrentDocument::new(
+        file.to_path_buf(),
+        reconcile_current_doc(&content, None),
+    ))
+}
+
+pub fn peek_disk_document_content(file: &std::path::Path, source: &str) -> Result<String> {
+    Ok(peek_disk_document(file, source)?.into_content())
 }
 
 /// Resolve the current editor-or-disk authority without recording an authority
 /// observation, emitting an ops diagnostic, or running controller cleanup.
 /// Stale-effect fences use this so rejecting a transaction is itself a pure
 /// read of durable state.
-pub fn peek_current_document_content(file: &std::path::Path, source: &str) -> Result<String> {
-    let current =
-        agent_doc_controller_io::project_controller::peek_current_text_via_controller_model_read_for_doc(
+pub fn peek_current_document(file: &std::path::Path, source: &str) -> Result<CurrentDocument> {
+    let embedded = peek_embedded_relay(file)?;
+    let current = if embedded
+        .as_ref()
+        .is_some_and(embedded_relay_observation_is_current)
+    {
+        embedded
+    } else {
+        match agent_doc_controller_io::project_controller::peek_current_text_via_controller_model_read_for_doc(
             file, source,
-        )?;
+        ) {
+            Ok(current) => current.or(embedded),
+            Err(_) if embedded.is_some() => embedded,
+            Err(error) => return Err(error),
+        }
+    };
     match current {
-        Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. }) => Ok(text),
+        Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. }) => {
+            let disk = peek_disk_document_content(file, source)?;
+            let buffer = BufferState::new(text, true, 0);
+            Ok(CurrentDocument::new(
+                file.to_path_buf(),
+                reconcile_current_doc(&disk, Some(&buffer)),
+            ))
+        }
         Some(agent_doc_crdt_relay_io::CurrentText::Detached) | None => {
-            peek_disk_document_content(file, source)
+            peek_disk_document(file, source)
         }
         Some(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica) => {
             anyhow::bail!(
@@ -9151,6 +9182,10 @@ pub fn peek_current_document_content(file: &std::path::Path, source: &str) -> Re
             )
         }
     }
+}
+
+pub fn peek_current_document_content(file: &std::path::Path, source: &str) -> Result<String> {
+    Ok(peek_current_document(file, source)?.into_content())
 }
 
 pub fn try_resolve_current_document_content(

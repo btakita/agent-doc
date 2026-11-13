@@ -44,4 +44,5 @@ anyhow = "1"
 
 [dev-dependencies]
 agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.573", features = ["test-support"] }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.573" }
 tempfile = "3"

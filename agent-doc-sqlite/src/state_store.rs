@@ -1150,13 +1150,50 @@ pub fn initialize_state_db(conn: &Connection) -> Result<()> {
 /// This is what the per-process memo may skip — it depends solely on this
 /// binary's declarations, so re-running it against a database this process
 /// already converged is a guaranteed no-op.
+///
+/// `#releasegateflake`: the declarations commit as ONE immediate transaction.
+/// `execute_batch` runs each statement in autocommit, so declaring a fresh
+/// database used to commit every `CREATE TABLE` / `CREATE INDEX` separately,
+/// and under `journal_mode = WAL` with the default `synchronous` each of those
+/// commits is a WAL `fsync`. Preflight admission on a new project paid ~44 of
+/// them on top of its other ~120 commits, and its wall time tracks fsync
+/// latency, not CPU: one sequential debug-build admission took ~0.7s on tmpfs,
+/// ~3s on a busy disk, and 7.2-7.6s while other writers kept that disk
+/// fsyncing, with nothing in it waiting on another process. One transaction makes
+/// the fresh declaration one commit (one `fsync`), and an already-converged
+/// database commits nothing at all. It is also atomic: a process killed
+/// mid-declaration can no longer leave a half-declared schema behind.
 fn declare_canonical_shape(conn: &Connection) -> Result<()> {
-    create_canonical_tables(conn)?;
+    // Connection settings first: `journal_mode` cannot change and
+    // `foreign_keys` is a no-op inside a transaction.
+    apply_canonical_connection_pragmas(conn)?;
+    let shape = crate::write_lock::immediate_transaction_unchecked(conn)
+        .context("begin canonical state.db shape declaration")?;
+    create_canonical_tables(&shape)?;
     // One canonical declaration (`#canonicalschema`): `create_canonical_tables`
     // states the full current shape, and these converge an existing database
     // onto it from the same declarations.
-    converge_added_columns(conn)?;
-    ensure_canonical_indexes(conn)
+    converge_added_columns(&shape)?;
+    ensure_canonical_indexes(&shape)?;
+    shape
+        .commit()
+        .context("commit canonical state.db shape declaration")
+}
+
+/// Per-connection settings every `state.db` opener applies before declaring
+/// the shape. They must run outside a transaction.
+fn apply_canonical_connection_pragmas(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        r#"
+-- NOTE: `synchronous` is deliberately absent here only because nobody has
+-- chosen a value, not because the default was validated. See the unresolved
+-- corruption notes on `open_and_init_state_db` before changing these.
+PRAGMA foreign_keys = ON;
+PRAGMA journal_mode = WAL;
+PRAGMA busy_timeout = 30000;
+"#,
+    )
+    .context("apply state.db connection pragmas")
 }
 
 /// The data half: convergence over *rows*, which other processes keep writing.
@@ -1191,13 +1228,6 @@ fn initialize_state_db_memoizing_shape(conn: &Connection, path: &Path) -> Result
 fn create_canonical_tables(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"
--- NOTE: `synchronous` is deliberately absent here only because nobody has
--- chosen a value, not because the default was validated. See the unresolved
--- corruption notes on `open_and_init_state_db` before changing these.
-PRAGMA foreign_keys = ON;
-PRAGMA journal_mode = WAL;
-PRAGMA busy_timeout = 30000;
-
         CREATE TABLE IF NOT EXISTS documents (
             document_id TEXT PRIMARY KEY,
             canonical_path TEXT NOT NULL,
@@ -10467,6 +10497,60 @@ mod tests {
                  the ALTER convergence path — exactly the drift this list exists to prevent"
             );
         }
+        Ok(())
+    }
+
+    /// `#releasegateflake`: declaring a fresh `state.db` is ONE commit.
+    ///
+    /// Each commit under WAL with the default `synchronous` is an `fsync`, so a
+    /// per-statement autocommit declaration made the first open of every new
+    /// project (and every test fixture) pay one `fsync` per table and index.
+    /// SQLite's commit hook counts commits exactly, independent of disk speed.
+    #[test]
+    fn declaring_a_fresh_state_db_shape_commits_once() -> Result<()> {
+        use std::sync::atomic::AtomicUsize;
+
+        unsafe extern "C" fn count_commit(counter: *mut std::ffi::c_void) -> std::ffi::c_int {
+            // SAFETY: `counter` is the `AtomicUsize` below, which outlives
+            // the connection the hook is installed on.
+            unsafe { (*(counter as *const AtomicUsize)).fetch_add(1, Ordering::SeqCst) };
+            0
+        }
+
+        let dir = tempfile::TempDir::new()?;
+        let commits = AtomicUsize::new(0);
+        let conn = Connection::open(dir.path().join("state.db"))?;
+        // Put the file in WAL first, as every opener does, so the count below
+        // is the shape declaration alone.
+        apply_canonical_connection_pragmas(&conn)?;
+        // SAFETY: the handle is live for the whole test and the hook argument
+        // points at `commits`, which is declared before `conn` and so is
+        // dropped after it.
+        unsafe {
+            rusqlite::ffi::sqlite3_commit_hook(
+                conn.handle(),
+                Some(count_commit),
+                &commits as *const AtomicUsize as *mut std::ffi::c_void,
+            );
+        }
+
+        declare_canonical_shape(&conn)?;
+        assert_eq!(
+            commits.load(Ordering::SeqCst),
+            1,
+            "a fresh state.db shape must be declared in a single transaction; each extra commit is \
+             an extra fsync on the admission path of every new project"
+        );
+        assert!(
+            state_table_exists(&conn, "steering_gate_log")?
+                && state_table_exists(&conn, "documents")?,
+            "the single transaction must still declare the whole canonical shape"
+        );
+
+        // Re-declaring a converged database stays one (empty) commit: no
+        // statement re-creates anything.
+        declare_canonical_shape(&conn)?;
+        assert_eq!(commits.load(Ordering::SeqCst), 2);
         Ok(())
     }
 

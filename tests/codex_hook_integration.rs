@@ -246,6 +246,8 @@ fn session_check_cli_reports_post_commit_steering_as_pending_with_exit_zero() {
     await_authority_handoff_drain(tmp.path(), &doc);
     let before_authority = agent_doc_cycle_state_io::load_latest_document_authority(&doc).unwrap();
     let before_state = logical_state_rows(tmp.path());
+    let ops = tmp.path().join(".agent-doc/logs/ops.log");
+    let before_ops = std::fs::read(&ops).unwrap_or_default();
 
     let out = agent_doc()
         .current_dir(tmp.path())
@@ -276,6 +278,11 @@ fn session_check_cli_reports_post_commit_steering_as_pending_with_exit_zero() {
         logical_state_rows(tmp.path()),
         before_state,
         "status-only CLI must not mutate logical state row payloads"
+    );
+    assert_eq!(
+        std::fs::read(&ops).unwrap_or_default(),
+        before_ops,
+        "status-only CLI must not append diagnostics to ops.log"
     );
     let stdout = String::from_utf8_lossy(&out.get_output().stdout).to_ascii_lowercase();
     assert!(

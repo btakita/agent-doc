@@ -1641,7 +1641,9 @@ pub fn try_run_with_options(
     let started = std::time::Instant::now();
     if !effects.applies_self_heals() {
         let out = crate::with_status_only_pass(|| {
-            try_run_with_options_pass(file, codex_final_gate, effects)
+            agent_doc_ops_log_io::with_ops_log_suppressed(|| {
+                try_run_with_options_pass(file, codex_final_gate, effects)
+            })
         });
         crate::profile::report(file, started.elapsed());
         return out;
@@ -2926,10 +2928,14 @@ fn run_with_options_inner(
     let replay_canonicalization_requires_settlement = effects
         .allows_response_replay_canonicalization()
         && (replay_healed || response_replay_canonicalization_pending_commit(file)?);
-    // Phase E rung 2 (`#adstatechart2`): advisory read-only observability of the
+    // Phase E rung 2 (`#adstatechart2`): advisory observability of the
     // local-process four-region state, logged alongside the existing ops.log
-    // markers. Never gates closeout — emitted regardless of the check outcome.
-    agent_doc_state_observer_io::log_advisory_snapshot(file);
+    // markers. A status-only transaction is intrinsically pure, so its
+    // observability result stays in the returned report instead of appending a
+    // diagnostic to ops.log. Applying checks retain the diagnostic.
+    if !crate::status_only_pass_active() {
+        agent_doc_state_observer_io::log_advisory_snapshot(file);
+    }
     let report = crate::profile::timed("inspect_with_warnings", || {
         inspect_with_warnings(file, effects)
     })?;

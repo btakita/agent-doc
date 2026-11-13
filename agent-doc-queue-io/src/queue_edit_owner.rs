@@ -9,6 +9,15 @@ use anyhow::{Context, Result};
 const QUEUE_EDIT_OWNER_SCOPE: &str = "queue_mutation";
 const DEFAULT_QUEUE_EDIT_OWNER_TTL_SECS: u64 = 15;
 const QUEUE_EDIT_OWNER_TTL_SECS_ENV: &str = "AGENT_DOC_QUEUE_EDIT_OWNER_TTL_SECS";
+/// Detached preflight maintenance reservations are identifiable so an
+/// immediately-following foreground transaction can wait briefly for their
+/// authoritative cut instead of failing the admitted turn or superseding an
+/// active effect family.
+pub const BACKGROUND_QUEUE_EDIT_OWNER_PREFIX: &str = "background-queue-maintenance:";
+const DIRECT_QUEUE_EDIT_OWNER_PREFIX: &str = "direct-";
+const FOREGROUND_BACKGROUND_WAIT: Duration = Duration::from_secs(4);
+const RESPONSE_BACKGROUND_WAIT: Duration = Duration::from_secs(30);
+const FOREGROUND_BACKGROUND_POLL: Duration = Duration::from_millis(10);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueueEditOwnerLease {
@@ -147,13 +156,18 @@ pub fn try_reserve_queue_edit_owner(file: &str, token: &str, pid: u32) -> Result
         }
     };
     if let Some(existing) = read_queue_edit_owner_lease(file)
-        && !pid_is_live(existing.holder_pid)
+        && (existing.holder.starts_with(DIRECT_QUEUE_EDIT_OWNER_PREFIX)
+            || !pid_is_live(existing.holder_pid))
     {
+        // Holding the flock proves that a direct mutation no longer owns its
+        // apply transaction, even when its long-lived controller PID remains
+        // alive. Every non-direct token is a pre-apply reservation and must be
+        // preserved until adoption (including older/custom reservation names).
         clear_queue_edit_owner_lease_if_holder(file, &existing.holder);
     }
     let (project_root, document_hash) = state_location(file)?;
     let now = now_secs();
-    let eligible_at_or_before = now.saturating_sub(queue_edit_owner_ttl().as_secs());
+    let eligible_at_or_before = agent_doc_lease::expiration_cutoff(now, queue_edit_owner_ttl());
     let reserved =
         agent_doc_controller_io::project_controller::claim_coordination_lease_if_expired(
             &project_root,
@@ -293,12 +307,50 @@ impl QueueEditGuard {
     }
 
     pub fn acquire(file: &Path) -> Result<Self> {
-        Self::try_acquire(file)?.with_context(|| {
-            format!(
+        Self::acquire_with_background_wait(file, FOREGROUND_BACKGROUND_WAIT)
+    }
+
+    /// Acquire the apply capability for the response transaction that follows
+    /// an admitted preflight.
+    ///
+    /// Admission deliberately dispatches comprehensive maintenance after it
+    /// emits JSON. On a saturated host that child can take longer than the
+    /// short generic mutation grace period merely to start. A response owns
+    /// the admitted turn, so it waits for that exact background effect family
+    /// instead of failing the turn spuriously. Direct/foreign mutations still
+    /// fail closed immediately after the generic grace period, and a dead
+    /// worker is recovered by `try_acquire` rather than consuming this bound.
+    pub fn acquire_for_response(file: &Path) -> Result<Self> {
+        Self::acquire_with_background_wait(file, RESPONSE_BACKGROUND_WAIT)
+    }
+
+    fn acquire_with_background_wait(file: &Path, wait: Duration) -> Result<Self> {
+        let mut background_deadline = None;
+        loop {
+            if let Some(guard) = Self::try_acquire(file)? {
+                return Ok(guard);
+            }
+            let lease = read_queue_edit_owner_lease(&file.to_string_lossy());
+            if lease
+                .as_ref()
+                .is_some_and(|lease| lease.holder.starts_with(BACKGROUND_QUEUE_EDIT_OWNER_PREFIX))
+            {
+                background_deadline.get_or_insert_with(|| std::time::Instant::now() + wait);
+            }
+            if background_deadline.is_some_and(|deadline| std::time::Instant::now() < deadline) {
+                // A preflight admission's detached maintenance owns no user
+                // response. Let its short apply finish, then admit the
+                // foreground transaction on the resulting authoritative cut.
+                // A missing lease after first observation is the guard Drop
+                // handoff window; keep polling until the flock is released.
+                std::thread::sleep(FOREGROUND_BACKGROUND_POLL);
+                continue;
+            }
+            anyhow::bail!(
                 "queue mutation deferred: another owner is applying maintenance for {}; retry after it completes",
                 file.display()
-            )
-        })
+            );
+        }
     }
 
     pub fn try_acquire(file: &Path) -> Result<Option<Self>> {
@@ -322,9 +374,15 @@ impl QueueEditGuard {
         // A detached worker reserves before it can acquire the flock. Do not
         // overwrite that live reservation in the short lock-before-adoption
         // window: doing so would make the sole worker fail adoption and lose
-        // maintenance. A dead owner is recoverable immediately.
+        // maintenance. A direct holder, however, can only own the transaction
+        // while it owns this same flock. Once we acquired the flock, any direct
+        // token is stale even when its long-lived controller PID is still live
+        // (for example after an RPC task dropped its guard). Keeping that token
+        // would wedge every later mutation behind a nonexistent apply owner.
         if let Some(existing) = read_queue_edit_owner_lease(&file) {
-            if pid_is_live(existing.holder_pid) {
+            if !existing.holder.starts_with(DIRECT_QUEUE_EDIT_OWNER_PREFIX)
+                && pid_is_live(existing.holder_pid)
+            {
                 fs2::FileExt::unlock(&apply_lock)
                     .context("failed to release queue apply lock after live reservation")?;
                 return Ok(None);
@@ -418,7 +476,7 @@ fn new_direct_queue_edit_holder(pid: u32) -> String {
         .unwrap_or_default()
         .as_nanos();
     let sequence = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    format!("direct-{pid}-{nanos}-{sequence}")
+    format!("{DIRECT_QUEUE_EDIT_OWNER_PREFIX}{pid}-{nanos}-{sequence}")
 }
 
 impl Drop for QueueEditGuard {
@@ -447,6 +505,50 @@ mod tests {
             assert!(!dir.path().join(".agent-doc/queue-edit-owner").exists());
         }
         assert!(read_queue_edit_owner_lease(&file_str).is_none());
+    }
+
+    #[test]
+    fn flock_free_direct_token_from_a_live_controller_is_recovered() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        let file_text = file.to_string_lossy();
+
+        publish_queue_edit_owner_lease(
+            &file_text,
+            "direct-live-controller-stale",
+            std::process::id(),
+        )
+        .unwrap();
+        let guard = QueueEditGuard::try_acquire(&file)
+            .unwrap()
+            .expect("the free flock proves the direct token is stale");
+        assert_ne!(
+            read_queue_edit_owner_lease(&file_text).unwrap().holder,
+            "direct-live-controller-stale"
+        );
+        drop(guard);
+
+        publish_queue_edit_owner_lease(
+            &file_text,
+            "direct-live-controller-stale",
+            std::process::id(),
+        )
+        .unwrap();
+        assert!(
+            try_reserve_queue_edit_owner(
+                &file_text,
+                "queue-maintenance-background-successor",
+                std::process::id(),
+            )
+            .unwrap(),
+            "a detached successor must not be lost behind a flock-free direct token",
+        );
+        clear_queue_edit_owner_lease_if_holder(
+            &file_text,
+            "queue-maintenance-background-successor",
+        );
     }
 
     #[test]
@@ -627,6 +729,36 @@ mod tests {
             .unwrap()
             .expect("reserved worker still adopts after the rejected direct edit");
         drop(worker);
+        assert!(read_queue_edit_owner_lease(&file_text).is_none());
+    }
+
+    #[test]
+    fn foreground_guard_waits_for_background_apply_and_uses_its_resulting_cut() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        let file_text = file.to_string_lossy();
+        let token = format!("{BACKGROUND_QUEUE_EDIT_OWNER_PREFIX}reserved-child");
+        assert!(try_reserve_queue_edit_owner(&file_text, &token, std::process::id()).unwrap());
+
+        let background = QueueEditGuard::adopt_reserved(&file, &token)
+            .unwrap()
+            .expect("background worker adopts the reservation");
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            drop(background);
+        });
+
+        let started = std::time::Instant::now();
+        let foreground = QueueEditGuard::acquire(&file)
+            .expect("foreground transaction enters after background apply completes");
+        assert!(
+            started.elapsed() >= Duration::from_millis(40),
+            "foreground must not preempt the active background effect family"
+        );
+        release.join().unwrap();
+        drop(foreground);
         assert!(read_queue_edit_owner_lease(&file_text).is_none());
     }
 

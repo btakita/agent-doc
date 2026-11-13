@@ -2481,21 +2481,23 @@ mod tests {
         let projection = derive_claim_runtime_projection(&doc, &content, None).unwrap();
         assert_eq!(queue_len(&projection.target_content), 3);
         assert!(
-            projection.target_content.contains(&format!("- {parent}\n")),
+            projection
+                .target_content
+                .contains(&format!("- ### {parent}\n")),
             "{}",
             projection.target_content
         );
         assert!(
             !projection
                 .target_content
-                .contains(&format!("- 📥 {parent}\n")),
+                .contains(&format!("- ### 📥 {parent}\n")),
             "{}",
             projection.target_content
         );
         assert!(
             !projection
                 .target_content
-                .contains(&format!("- 🔄 {parent}\n")),
+                .contains(&format!("- ### 🔄 {parent}\n")),
             "{}",
             projection.target_content
         );
@@ -4160,10 +4162,10 @@ mod tests {
         let current = std::fs::read_to_string(&doc).unwrap();
         let projection = derive_claim_runtime_projection(&doc, &current, None).unwrap();
         assert!(projection.target_content.contains(&format!(
-            "- https://github.com/haiven-dev/haiven-cli/pull/10\n  - 🚧 [#{owner10}#1] #adversarial-pr\n"
+            "- ### https://github.com/haiven-dev/haiven-cli/pull/10\n  - 🚧 [#{owner10}#1] #adversarial-pr\n"
         )));
         assert!(projection.target_content.contains(&format!(
-            "- https://github.com/haiven-dev/haiven-cli/pull/11\n  - 🚧 [#{owner11}#1] #adversarial-pr\n"
+            "- ### https://github.com/haiven-dev/haiven-cli/pull/11\n  - 🚧 [#{owner11}#1] #adversarial-pr\n"
         )));
         assert!(
             !projection

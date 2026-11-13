@@ -387,10 +387,15 @@ pub fn repair(file: &Path) -> Result<RepairOutcome> {
     // replayed a GH 90 unlandable capture straight into an append-format
     // document (the template replay guard only covers template documents), and
     // every other retry surface already refuses those bytes.
-    // A missing file keeps repair's own "file not found" refusal.
-    if file.is_file()
-        && let Some(unlandable) = agent_doc_session_check_io::current_unlandable_capture(file)?
-    {
+    // A missing file keeps repair's own "file not found" refusal. This is a
+    // read-only, fail-fast classification and therefore belongs before the
+    // single apply transaction boundary below; acquiring the document guard
+    // first would instead fail on project-root discovery and hide the stable
+    // repair error contract.
+    if !file.is_file() {
+        anyhow::bail!("file not found: {}", file.display());
+    }
+    if let Some(unlandable) = agent_doc_session_check_io::current_unlandable_capture(file)? {
         anyhow::bail!("{}", unlandable.operator_report(file));
     }
     let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;

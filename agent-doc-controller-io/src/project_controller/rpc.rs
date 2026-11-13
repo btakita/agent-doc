@@ -46433,7 +46433,10 @@ mod tests {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         let doc = root.join("tasks/rtt.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
-        std::fs::write(&doc, "---\nagent_doc_session: session-rtt\n---\nBody\n").unwrap();
+        let content = "---\nagent_doc_session: session-rtt\n---\nBody\n";
+        std::fs::write(&doc, content).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         // Warm the in-process controller so the measured calls see a serving one.
         ensure_state_actor_for_tests(root).unwrap();
 
@@ -46441,7 +46444,7 @@ mod tests {
         let outcome = claim_closeout_owner_guard_for_file(
             &doc,
             CloseoutOwnerClaimRequest {
-                expected_cycle_id: None,
+                expected_cycle_id: Some(cycle.cycle_id),
                 owner_id: "rtt-owner".to_string(),
                 owner_pid: std::process::id(),
                 role: CLOSEOUT_OWNER_ROLE_FOREGROUND_FINALIZE.to_string(),

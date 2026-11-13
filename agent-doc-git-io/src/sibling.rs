@@ -248,51 +248,45 @@ fn commit_sibling_with_trailer_fenced(
         "write sibling staged tree",
     )?;
     let commit_message = format!("{message}\n\nSession-Doc: {trailer_url}\n");
-    for attempt in 0..3 {
-        let expected = head_sha(sibling)?;
-        let mut child = Command::new("git")
-            .current_dir(sibling)
-            .args(["commit-tree", &tree, "-p", &expected])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .with_context(|| format!("invoke git commit-tree in {}", sibling.display()))?;
-        child
-            .stdin
-            .take()
-            .context("open sibling git commit-tree stdin")?
-            .write_all(commit_message.as_bytes())?;
-        let commit = child.wait_with_output()?;
-        if !commit.status.success() {
-            bail!(
-                "git commit-tree failed in sibling {}: {}",
-                sibling.display(),
-                String::from_utf8_lossy(&commit.stderr).trim(),
-            );
-        }
-        let commit_oid = String::from_utf8_lossy(&commit.stdout).trim().to_string();
-        fence.ensure(
-            session_doc,
-            crate::transaction::CommitFencePhase::BeforeSiblingRefUpdate,
-        )?;
-        let update = Command::new("git")
-            .current_dir(sibling)
-            .args(["update-ref", "HEAD", &commit_oid, &expected])
-            .output()?;
-        if update.status.success() {
-            fence.ref_updated(session_doc);
-            return Ok(commit_oid.chars().take(12).collect());
-        }
-        if attempt == 2 {
-            bail!(
-                "sibling {} HEAD moved during three fenced ref-CAS attempts: {}",
-                sibling.display(),
-                String::from_utf8_lossy(&update.stderr).trim(),
-            );
-        }
+    let expected = head_sha(sibling)?;
+    let mut child = Command::new("git")
+        .current_dir(sibling)
+        .args(["commit-tree", &tree, "-p", &expected])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("invoke git commit-tree in {}", sibling.display()))?;
+    child
+        .stdin
+        .take()
+        .context("open sibling git commit-tree stdin")?
+        .write_all(commit_message.as_bytes())?;
+    let commit = child.wait_with_output()?;
+    if !commit.status.success() {
+        bail!(
+            "git commit-tree failed in sibling {}: {}",
+            sibling.display(),
+            String::from_utf8_lossy(&commit.stderr).trim(),
+        );
     }
-    unreachable!("bounded sibling ref-CAS loop returns or errors")
+    let commit_oid = String::from_utf8_lossy(&commit.stdout).trim().to_string();
+    fence.ensure(
+        session_doc,
+        crate::transaction::CommitFencePhase::BeforeSiblingRefUpdate,
+    )?;
+    let update = Command::new("git")
+        .current_dir(sibling)
+        .args(["update-ref", "HEAD", &commit_oid, &expected])
+        .output()?;
+    anyhow::ensure!(
+        update.status.success(),
+        "sibling {} HEAD moved during fenced ref-CAS; staged sibling work is retained for a fresh closeout: {}",
+        sibling.display(),
+        String::from_utf8_lossy(&update.stderr).trim(),
+    );
+    fence.ref_updated(session_doc);
+    Ok(commit_oid.chars().take(12).collect())
 }
 
 fn command_stdout(command: &mut Command, action: &str) -> Result<String> {
@@ -424,7 +418,7 @@ pub fn commit_siblings_for_session_doc_with_fence(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     struct RejectAtSiblingRefFence {
         sibling_checks: AtomicUsize,
@@ -441,6 +435,92 @@ mod tests {
                 self.sibling_checks.fetch_add(1, Ordering::SeqCst);
                 bail!("simulated closeout owner takeover at sibling ref CAS");
             }
+            Ok(())
+        }
+
+        fn ref_updated(&self, _target: &Path) {
+            self.ref_updates.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    struct AdvanceSiblingHeadAtRefFence {
+        sibling: PathBuf,
+        fired: AtomicBool,
+        ref_updates: AtomicUsize,
+    }
+
+    impl crate::transaction::CommitTransactionFence for AdvanceSiblingHeadAtRefFence {
+        fn ensure(
+            &self,
+            _target: &Path,
+            phase: crate::transaction::CommitFencePhase,
+        ) -> Result<()> {
+            if phase != crate::transaction::CommitFencePhase::BeforeSiblingRefUpdate
+                || self.fired.swap(true, Ordering::SeqCst)
+            {
+                return Ok(());
+            }
+            let base = head_sha(&self.sibling)?;
+            let winner = self.sibling.join("winner.txt");
+            std::fs::write(&winner, "concurrent winner\n")?;
+            let blob = command_stdout(
+                Command::new("git").current_dir(&self.sibling).args([
+                    "hash-object",
+                    "-w",
+                    "winner.txt",
+                ]),
+                "hash concurrent sibling path",
+            )?;
+            let temp = tempfile::tempdir()?;
+            let index = temp.path().join("winner-index");
+            let read_tree = Command::new("git")
+                .current_dir(&self.sibling)
+                .env("GIT_INDEX_FILE", &index)
+                .args(["read-tree", &base])
+                .output()?;
+            anyhow::ensure!(
+                read_tree.status.success(),
+                "seed winner index: {}",
+                String::from_utf8_lossy(&read_tree.stderr).trim(),
+            );
+            let cache_info = format!("100644,{blob},winner.txt");
+            let stage = Command::new("git")
+                .current_dir(&self.sibling)
+                .env("GIT_INDEX_FILE", &index)
+                .args(["update-index", "--add", "--cacheinfo", &cache_info])
+                .output()?;
+            anyhow::ensure!(
+                stage.status.success(),
+                "stage concurrent winner path: {}",
+                String::from_utf8_lossy(&stage.stderr).trim(),
+            );
+            let tree = command_stdout(
+                Command::new("git")
+                    .current_dir(&self.sibling)
+                    .env("GIT_INDEX_FILE", &index)
+                    .args(["write-tree"]),
+                "write concurrent winner tree",
+            )?;
+            let winner_commit = command_stdout(
+                Command::new("git").current_dir(&self.sibling).args([
+                    "commit-tree",
+                    &tree,
+                    "-p",
+                    &base,
+                    "-m",
+                    "concurrent winner",
+                ]),
+                "create concurrent winner commit",
+            )?;
+            let update = Command::new("git")
+                .current_dir(&self.sibling)
+                .args(["update-ref", "HEAD", &winner_commit, &base])
+                .output()?;
+            anyhow::ensure!(
+                update.status.success(),
+                "advance concurrent sibling HEAD: {}",
+                String::from_utf8_lossy(&update.stderr).trim(),
+            );
             Ok(())
         }
 
@@ -662,6 +742,68 @@ mod tests {
             has_staged_changes(&sibling_root).unwrap(),
             "takeover before sibling update-ref must preserve staged work for retry"
         );
+    }
+
+    #[test]
+    fn fenced_sibling_head_move_fails_closed_and_preserves_concurrent_paths() {
+        let tmp = tempfile::tempdir().unwrap();
+        let session_root = tmp.path().join("s");
+        let sibling_root = tmp.path().join("b");
+        std::fs::create_dir_all(&session_root).unwrap();
+        std::fs::create_dir_all(&sibling_root).unwrap();
+        init_repo_with_origin(&session_root, "https://github.com/foo/bar");
+        init_repo_with_origin(&sibling_root, "https://github.com/foo/baz");
+        commit_file(&session_root, "doc.md", "first\n", "agent-doc(doc): first");
+        commit_file(&sibling_root, "x.md", "x\n", "initial");
+        stage_file(&sibling_root, "scripts/run.sh", "echo intended\n");
+        let before = head_sha(&sibling_root).unwrap();
+        let fence = AdvanceSiblingHeadAtRefFence {
+            sibling: sibling_root.clone(),
+            fired: AtomicBool::new(false),
+            ref_updates: AtomicUsize::new(0),
+        };
+
+        let err = commit_siblings_for_session_doc_with_fence(
+            &session_root.join("doc.md"),
+            &[(sibling_root.clone(), "scripts: run".to_string())],
+            Some(&fence),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("HEAD moved during fenced ref-CAS"),
+            "unexpected error: {err:#}"
+        );
+        assert_ne!(head_sha(&sibling_root).unwrap(), before);
+        assert_eq!(
+            command_stdout(
+                Command::new("git")
+                    .current_dir(&sibling_root)
+                    .args(["show", "HEAD:winner.txt"]),
+                "read concurrent winner path",
+            )
+            .unwrap(),
+            "concurrent winner"
+        );
+        let stale_path = Command::new("git")
+            .current_dir(&sibling_root)
+            .args(["show", "HEAD:scripts/run.sh"])
+            .output()
+            .unwrap();
+        assert!(
+            !stale_path.status.success(),
+            "the failed stale tree must not replace or extend the concurrent winner"
+        );
+        let staged = command_stdout(
+            Command::new("git").current_dir(&sibling_root).args([
+                "diff",
+                "--cached",
+                "--name-only",
+            ]),
+            "list retained staged sibling work",
+        )
+        .unwrap();
+        assert!(staged.lines().any(|path| path == "scripts/run.sh"));
+        assert_eq!(fence.ref_updates.load(Ordering::SeqCst), 0);
     }
 
     #[test]

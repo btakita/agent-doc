@@ -585,6 +585,7 @@ fn finalize_requires_git_repo_before_mutating_document() {
 fn finalize_skips_ignored_untracked_session_doc() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join("scratch")).unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
     fs::write(tmp.path().join(".gitignore"), "scratch/\n.agent-doc/\n").unwrap();
     let doc = tmp.path().join("scratch/session.md");
     fs::write(&doc, session_template_doc_content()).unwrap();
@@ -2956,6 +2957,21 @@ fn finalize_prewrite_guard_failure_leaves_cycle_open_for_retry() {
         read_cycle_phase(tmp.path(), &doc).as_deref(),
         Some("preflight_started")
     );
+    let ops_path = tmp.path().join(".agent-doc/logs/ops.log");
+    let maintenance_deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    loop {
+        if fs::read_to_string(&ops_path)
+            .unwrap_or_default()
+            .contains("queue_maintenance_background_completed")
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < maintenance_deadline,
+            "detached preflight maintenance did not settle before finalize"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
 
     let response = "<!-- patch:exchange -->\n### Re: recommendations — gpt-5\n## Recommendations\n1. Add regression coverage\n2. Update the spec\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n";
 
@@ -3482,6 +3498,10 @@ fn finalize_reports_concurrent_prompt_added_after_baseline_as_pending_steering()
     checkpoint_baseline(tmp.path(), &baseline_content);
     agent_doc()
         .current_dir(tmp.path())
+        .env(
+            "AGENT_DOC_TEST_BACKGROUND_QUEUE_MAINTENANCE_DELAY_MS",
+            "500",
+        )
         .args(["preflight", doc.to_str().unwrap()])
         .assert()
         .success();
@@ -3514,6 +3534,11 @@ fn finalize_reports_concurrent_prompt_added_after_baseline_as_pending_steering()
     let content = fs::read_to_string(&doc).unwrap();
     assert!(content.contains("### Re: Please reply — gpt-5"));
     assert!(content.contains("❯ What remains after this response?"));
+    let ops = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+    assert!(
+        ops.contains("queue_maintenance_background_superseded_authority"),
+        "the delayed worker did not record its stale admitted cut: {ops}",
+    );
 
     let head = head_blob(tmp.path());
     assert!(head.contains("### Re: Please reply — gpt-5"));

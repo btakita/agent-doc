@@ -330,7 +330,7 @@ fn record_preflight_terminal_closeout_proof(file: &Path, did_commit: bool) -> Re
         return Ok(());
     };
     maybe_pause_terminal_proof_after_inspection()?;
-    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let apply_guard = crate::acquire_preflight_apply_guard(file)?;
     agent_doc_controller_io::project_controller::persist_session_actor_closeout(file).and_then(
         |_| {
             agent_doc_closeout_runtime_io::record_terminal_closeout_proof_under_apply_guard(
@@ -815,7 +815,7 @@ fn run_with_options_to_writer_in_pass(
         .as_ref()
         .is_some_and(agent_doc_session_check_io::TurnAdmissionVerdict::requires_clean_closeout)
     {
-        let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+        let apply_guard = crate::acquire_preflight_apply_guard(file)?;
         let session_effects =
             agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(
                 file,
@@ -935,22 +935,37 @@ fn run_with_options_to_writer_in_pass(
         || if options.probe {
             false
         } else {
-            let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
-            let repair_effects =
-                agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &apply_guard)?;
-            match agent_doc_repair_io::run(
-                agent_doc_repair_runtime_io::repair_coordinator_effects(
-                    &repair_effects,
-                    &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
-                ),
-                file,
-            ) {
-                Ok(outcome) => outcome.repaired(),
-                // A failed response recovery is never advisory. Continuing into the
-                // generic commit stage can commit the stale pre-response projection
-                // that caused the recovery attempt, permanently rolling back an
-                // already-committed answer. Abort before any commit or queue mutation.
-                Err(e) => return Err(e.context("preflight response recovery failed closed")),
+            let apply_guard =
+                match agent_doc_queue_io::queue_edit_owner::QueueEditGuard::try_acquire(file)? {
+                    Some(guard) => Some(guard),
+                    None if !crate::preflight_repair_may_mutate(file)? => None,
+                    None => Some(crate::acquire_preflight_apply_guard(file)?),
+                };
+            match apply_guard {
+                None => false,
+                Some(apply_guard) => {
+                    let repair_effects =
+                        agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(
+                            file,
+                            &apply_guard,
+                        )?;
+                    match agent_doc_repair_io::run(
+                        agent_doc_repair_runtime_io::repair_coordinator_effects(
+                            &repair_effects,
+                            &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
+                        ),
+                        file,
+                    ) {
+                        Ok(outcome) => outcome.repaired(),
+                        // A failed response recovery is never advisory. Continuing into the
+                        // generic commit stage can commit the stale pre-response projection
+                        // that caused the recovery attempt, permanently rolling back an
+                        // already-committed answer. Abort before any commit or queue mutation.
+                        Err(e) => {
+                            return Err(e.context("preflight response recovery failed closed"));
+                        }
+                    }
+                }
             }
         };
 
@@ -987,7 +1002,7 @@ fn run_with_options_to_writer_in_pass(
             agent_doc_session_check_io::TurnAdmissionVerdict::continues_with_operator_intent,
         );
         if verdict.requires_clean_closeout() && !operator_intent_at_entry {
-            let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+            let apply_guard = crate::acquire_preflight_apply_guard(file)?;
             let session_effects =
                 agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(
                     file,
@@ -3111,8 +3126,25 @@ fn run_with_options_to_writer_in_pass(
 
     if !options.probe
         && !cfg!(test)
-        && let Err(error) =
-            crate::spawn_background_queue_maintenance(file, no_changes && !committed)
+        && let Err(error) = (|| -> Result<()> {
+            // Bind the child to the settled foreground cut, including any
+            // bounded pre-admission projection performed after the initial
+            // read facts were captured. The child must never reinterpret a
+            // later operator edit as work from this admission.
+            let admitted_content =
+                agent_doc_document_realtime_io::try_resolve_current_document_with_source(
+                    file,
+                    "background_queue_maintenance_dispatch_cut",
+                )?
+                .into_content();
+            let admitted_hash = agent_doc_hash::content_hash(&admitted_content);
+            crate::spawn_background_queue_maintenance(
+                file,
+                no_changes && !committed,
+                &admitted_hash,
+            )?;
+            Ok(())
+        })()
     {
         // Admission is already complete and its exact authoritative cut is in
         // `output`; a launch failure cannot retroactively make that read false.

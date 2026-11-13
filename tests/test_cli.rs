@@ -236,7 +236,11 @@ fn preflight_admits_under_five_seconds_while_slow_queue_maintenance_stays_detach
         "direct queue edit entered during mid-run maintenance",
     );
 
-    let completion_deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
+    // The foreground SLA is asserted above. The deliberately delayed detached
+    // child also initializes a real controller and can share a saturated test
+    // host with thousands of nextest cases, so give eventual durability a
+    // separate, non-admission timeout.
+    let completion_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
         let current_ops = fs::read_to_string(&ops).unwrap_or_default();
         if current_ops.contains("queue_maintenance_background_completed") {
@@ -305,7 +309,7 @@ fn preflight_admits_under_five_seconds_while_slow_pending_maintenance_stays_deta
         "six-second pending maintenance completed before bounded admission returned"
     );
 
-    let completion_deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
+    let completion_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
         let current_ops = fs::read_to_string(&ops).unwrap_or_default();
         if current_ops.contains("pending_maintenance_background_completed") {
@@ -532,6 +536,10 @@ fn superseded_delayed_worker_has_no_advisory_archive_or_worktree_effects() {
     let successor_output = agent_doc_cmd()
         .current_dir(&root)
         .env("AGENT_DOC_BACKGROUND_QUEUE_MAINTENANCE_TOKEN", token)
+        .env(
+            "AGENT_DOC_BACKGROUND_QUEUE_MAINTENANCE_AUTHORITY_HASH",
+            agent_doc_hash::content_hash(&content),
+        )
         .args([
             "preflight",
             doc.to_str().unwrap(),
@@ -592,7 +600,8 @@ fn simultaneous_preflights_coalesce_to_one_background_maintenance_body() {
         let doc = doc.clone();
         contenders.push(std::thread::spawn(move || {
             barrier.wait();
-            agent_doc_process_cmd()
+            let started = std::time::Instant::now();
+            let output = agent_doc_process_cmd()
                 .current_dir(root)
                 .env(
                     "AGENT_DOC_TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS",
@@ -600,21 +609,26 @@ fn simultaneous_preflights_coalesce_to_one_background_maintenance_body() {
                 )
                 .args(["preflight", doc.to_str().unwrap()])
                 .output()
-                .unwrap()
+                .unwrap();
+            (output, started.elapsed())
         }));
     }
     barrier.wait();
     for contender in contenders {
-        let output = contender.join().unwrap();
+        let (output, admitted_elapsed) = contender.join().unwrap();
         assert!(
             output.status.success(),
             "racing preflight failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+        assert!(
+            admitted_elapsed < std::time::Duration::from_secs(5),
+            "racing admission waited for detached maintenance: {admitted_elapsed:?}",
+        );
     }
 
     let ops = tmp.path().join(".agent-doc/logs/ops.log");
-    let completion_deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
+    let completion_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
         let current_ops = fs::read_to_string(&ops).unwrap_or_default();
         if current_ops.contains("pending_maintenance_background_completed") {
@@ -800,6 +814,8 @@ fn panic_after_background_effect_retains_incomplete_attempt_until_successor_comp
         "session-check falsely terminalized a panicked attempt: {check_text}",
     );
 
+    let ops = tmp.path().join(".agent-doc/logs/ops.log");
+    let recovery_ops_len = fs::read_to_string(&ops).unwrap_or_default().len();
     let recovery = agent_doc_cmd()
         .current_dir(tmp.path())
         .args(["preflight", doc.to_str().unwrap()])
@@ -811,11 +827,13 @@ fn panic_after_background_effect_retains_incomplete_attempt_until_successor_comp
         String::from_utf8_lossy(&recovery.stderr),
     );
 
-    let ops = tmp.path().join(".agent-doc/logs/ops.log");
     let completion_deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
     loop {
         let current_ops = fs::read_to_string(&ops).unwrap_or_default();
-        if current_ops.contains("queue_maintenance_background_completed") {
+        if current_ops
+            .get(recovery_ops_len..)
+            .is_some_and(|appended| appended.contains("queue_maintenance_background_completed"))
+        {
             break;
         }
         assert!(
@@ -824,11 +842,15 @@ fn panic_after_background_effect_retains_incomplete_attempt_until_successor_comp
         );
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
-    assert!(
-        agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(&doc.to_string_lossy())
-            .is_none(),
-        "successful successor left stale incomplete ownership",
-    );
+    while agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(&doc.to_string_lossy())
+        .is_some()
+    {
+        assert!(
+            std::time::Instant::now() < completion_deadline,
+            "successful successor left stale incomplete ownership",
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
 }
 
 #[test]
@@ -1020,7 +1042,9 @@ fn every_public_queue_mutation_entrypoint_acquires_apply_exclusion() {
         .find("fn run_command_inner_within_pass")
         .expect("write transaction entry exists")..];
     assert!(
-        transaction.find("QueueEditGuard::acquire(file)?").unwrap()
+        transaction
+            .find("QueueEditGuard::acquire_for_response(file)?")
+            .unwrap()
             < transaction.find("let write_result =").unwrap(),
         "write/finalize must acquire apply exclusion before response publication"
     );
@@ -1085,7 +1109,7 @@ fn every_public_queue_mutation_entrypoint_acquires_apply_exclusion() {
         .expect("preflight proof transaction exists")..];
     assert!(
         proof_transaction
-            .find("QueueEditGuard::acquire(file)?")
+            .find("crate::acquire_preflight_apply_guard(file)?")
             .unwrap()
             < proof_transaction
                 .find("persist_session_actor_closeout(file)")
@@ -2068,6 +2092,22 @@ fn mcp_finalize_close_after_capture_recovers_on_next_preflight_once() {
         agent_doc_capture_io::CaptureState::Committed,
     );
 
+    let ops = root.join(".agent-doc/logs/ops.log");
+    let maintenance_deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    loop {
+        if fs::read_to_string(&ops)
+            .unwrap_or_default()
+            .contains("queue_maintenance_background_completed")
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < maintenance_deadline,
+            "detached maintenance did not settle after close-after-capture recovery"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
     let mut check = agent_doc_cmd();
     check.current_dir(root);
     check.args(["session-check", doc.to_str().unwrap()]);
@@ -2148,6 +2188,21 @@ fn preflight_parks_committed_heading_replay_and_strikes_its_answered_head() {
         String::from_utf8_lossy(&output.stderr)
     );
 
+    let ops = root.join(".agent-doc/logs/ops.log");
+    let maintenance_deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    loop {
+        if fs::read_to_string(&ops)
+            .unwrap_or_default()
+            .contains("queue_maintenance_background_completed")
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < maintenance_deadline,
+            "detached queue projection did not settle"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
     let after = fs::read_to_string(&doc).unwrap();
     assert!(
         after.contains(&format!("~~{head}")),
@@ -3050,7 +3105,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // of orchestration into `agent-doc-session-check-io`. Orchestration keeps
         // visible-write guard adapters and closeout sequencing; the focused
         // session-check IO module owns the pending closeout guard tokens.
-        ("agent-doc-write-runtime-io/src/lib.rs", "guard_") => 28,
+        // 28 -> 34 (#queue-apply-capability, #closeout-owner-capability): the
+        // write transaction now names its compile-time apply/owner capability
+        // boundaries when entering guarded closeout/session-check adapters.
+        // These are typed exclusion/fence handoffs, not new stringly flow
+        // reasons; the owned closeout policy remains in agent-doc-flow-io.
+        ("agent-doc-write-runtime-io/src/lib.rs", "guard_") => 34,
         ("agent-doc-session-check-io/src/write_pending_checks.rs", "guard_") => 6,
         // 3 -> 1 (#template-materialization-policy): raw-response probe
         // construction now lives in `agent-doc-template::response_materialization`,
@@ -3971,7 +4031,7 @@ fn test_preflight_emits_prompt_preset_bodies_with_the_request() {
 }
 
 #[test]
-fn test_queue_sync_materializes_priority_go_backlog_and_session_check_stays_clean_after_commit() {
+fn test_queue_sync_materializes_priority_go_backlog_and_session_check_reports_live_work() {
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path();
     let doc = root.join("session.md");
@@ -4067,11 +4127,13 @@ fn test_queue_sync_materializes_priority_go_backlog_and_session_check_stays_clea
     let mut check = agent_doc_cmd();
     check.current_dir(root);
     check.args(["session-check", doc.to_str().unwrap()]);
-    let check_output = check.assert().success().get_output().stdout.clone();
+    let check_output = check.assert().failure().get_output().stdout.clone();
     let check_stdout = String::from_utf8(check_output).unwrap();
     assert!(
-        check_stdout.contains("[session-check] ok"),
-        "session-check should stay clean after the synced queue is committed:\n{check_stdout}"
+        check_stdout.contains("#transientcloseout")
+            && check_stdout.contains("do [#2qrx]")
+            && check_stdout.contains("advance [#samplefeed-prop]"),
+        "read-only session-check must report the committed live queue rather than mutate it:\n{check_stdout}"
     );
 }
 
@@ -5122,7 +5184,9 @@ fn test_agent_doc_model_tier_owns_context_usage_policy() {
     assert!(
         preflight_source.contains("pub fn spawn_background_queue_maintenance(")
             && preflight_source.contains("pub fn run_background_queue_maintenance(")
-            && preflight_run_source.contains("spawn_background_queue_maintenance(file,"),
+            && preflight_run_source.contains("crate::spawn_background_queue_maintenance(")
+            && preflight_run_source.contains("background_queue_maintenance_dispatch_cut")
+            && preflight_run_source.contains("&admitted_hash"),
         "comprehensive queue maintenance must be dispatched through the detached worker boundary"
     );
     assert!(
@@ -5130,7 +5194,7 @@ fn test_agent_doc_model_tier_owns_context_usage_policy() {
             .find("writeln!(writer, \"{}\", json)?;")
             .expect("serialized admission write")
             < preflight_run_source
-                .find("crate::spawn_background_queue_maintenance(file,")
+                .find("crate::spawn_background_queue_maintenance(")
                 .expect("background maintenance dispatch"),
         "the admission contract must be written before comprehensive maintenance is dispatched"
     );
@@ -6355,9 +6419,11 @@ fn test_agent_doc_queue_owns_queue_convergence_policy() {
         );
     }
     assert!(
-        preflight_run.contains("use agent_doc_queue::queue_convergence::{")
-            && preflight_run.contains("realign_baseline_to_converged_queue")
-            && preflight_run.contains("queue_body_diff_is_non_selected_future_state"),
+        preflight_run.contains(
+            "use agent_doc_queue::queue_convergence::realign_baseline_to_converged_queue;",
+        ) && preflight_run.contains(
+            "use agent_doc_queue::queue_convergence::queue_body_diff_is_non_selected_future_state;",
+        ),
         "preflight/run.rs should call focused queue convergence policy directly"
     );
     let preflight_maintenance =
@@ -15815,7 +15881,8 @@ fn test_agent_doc_preflight_io_owns_baseline_content_graph() {
         "orchestration preflight must not own baseline content IO"
     );
     assert!(
-        orchestration_preflight_run.contains("checkpoint_baseline_content(file,")
+        orchestration_preflight_run
+            .contains("use agent_doc_preflight_io::checkpoint_baseline_content;")
             && orchestration_preflight_run.contains("checkpoint_baseline_content(&doc,"),
         "preflight/run should call focused baseline content IO directly"
     );
@@ -24639,10 +24706,10 @@ fn test_agent_doc_preflight_io_owns_cycle_completion_coordinator() {
         "agent_doc_repair_io::RepairCoordinatorEffects",
         "repair_effects:",
         "session_check_effects: SessionCheckEffects",
-        "impl<RepairIoEffects, ReplayWriteEffects, SessionCheckEffects>",
+        "impl<'a, RepairIoEffects, ReplayWriteEffects, SessionCheckEffects>",
         "agent_doc_repair_io::run(self.repair_effects, file)",
         "agent_doc_commit_io::commit(file)",
-        "agent_doc_session_check_io::inspect(file, &self.session_check_effects)",
+        "agent_doc_session_check_io::inspect_under_apply_guard(",
         "agent_doc_session_check_io::detect_bypassed_response_write(file)",
     ] {
         assert!(
@@ -24691,8 +24758,9 @@ fn test_agent_doc_preflight_io_owns_cycle_completion_coordinator() {
                 .contains("agent_doc_repair_runtime_io::repair_coordinator_effects(")
             && orchestration_preflight
                 .contains("&agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS")
-            && orchestration_preflight
-                .contains("agent_doc_closeout_runtime_io::session_check_effects()"),
+            && orchestration_preflight.contains(
+                "agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard("
+            ),
         "orchestration preflight.rs should only inject the focused repair replay writer and session-check runtime effects"
     );
     assert!(
@@ -29813,7 +29881,7 @@ fn test_agent_doc_commit_io_marks_capture_committed_from_resolved_current_conten
         .expect("commit should resolve initial current document content");
     let stage_commit_idx = initial_current_idx
         + commit_source[initial_current_idx..]
-            .find("match stage_and_commit_exact_paths_once(")
+            .find("match stage_and_commit_exact_paths_once_with_fence(")
             .expect(
                 "normal commit should run a git stage/commit transaction after authority resolve",
             );
@@ -36408,6 +36476,9 @@ fn test_cli_resync_of_a_rootless_document_never_touches_the_cwd_project() {
 
     let mut resync = agent_doc_cmd();
     resync.current_dir(&cwd_project).arg("resync").arg(&doc);
+    // This assertion is about resync's store selection. Keep optional global
+    // debug tracing from creating a cwd-owned log before command dispatch.
+    resync.env_remove("AGENT_DOC_LOG");
     tmux.configure(&mut resync);
     let output = resync.output().unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);

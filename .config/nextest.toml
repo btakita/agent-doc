@@ -34,6 +34,14 @@ store-success-output = false
 filter = 'test(run_auto_queue_starts_fresh_backend_session_after_accretion_threshold)'
 slow-timeout = { period = "120s", terminate-after = 2 }
 
+# Foreground-admission timing regressions deliberately keep their detached
+# maintenance bodies alive for six seconds. Run them with the full runner CPU
+# allotment so wall-clock SLA assertions measure the command rather than
+# scheduler starvation from thousands of unrelated nextest processes.
+[[profile.default.overrides]]
+filter = 'test(preflight_admits_under_five_seconds_while_slow_queue_maintenance_stays_detached) | test(preflight_admits_under_five_seconds_while_slow_pending_maintenance_stays_detached) | test(simultaneous_preflights_coalesce_to_one_background_maintenance_body)'
+threads-required = "num-cpus"
+
 # CI mirrors the default ceiling; kept explicit so a future `--profile ci` run
 # inherits the same deadlock guard.
 [profile.ci]
@@ -45,6 +53,10 @@ path = "junit.xml"
 [[profile.ci.overrides]]
 filter = 'test(run_auto_queue_starts_fresh_backend_session_after_accretion_threshold)'
 slow-timeout = { period = "120s", terminate-after = 2 }
+
+[[profile.ci.overrides]]
+filter = 'test(preflight_admits_under_five_seconds_while_slow_queue_maintenance_stays_detached) | test(preflight_admits_under_five_seconds_while_slow_pending_maintenance_stays_detached) | test(simultaneous_preflights_coalesce_to_one_background_maintenance_body)'
+threads-required = "num-cpus"
 
 # Affected-scope edit-loop runs fail at the first regression. Controller-heavy
 # packages are deliberately batched by Cargo outside nextest, so this profile

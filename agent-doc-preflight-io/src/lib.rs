@@ -4606,6 +4606,19 @@ pub fn inspect_queue_state_from_content(
         queue_drainable_head_count,
         &claimed_queue_heads,
     );
+    // Admission must preserve warning facts even though comprehensive queue
+    // convergence now runs after the JSON response.  This classification is a
+    // pure comparison against the admitted cut and cycle-start snapshot; the
+    // detached worker remains solely responsible for any projection write.
+    let warnings = inactive_queue_residue_warning(
+        file,
+        &activation.entries_after,
+        activation.active,
+        activation.deferred,
+        has_auto,
+    )
+    .into_iter()
+    .collect();
 
     Ok(QueueState {
         authoritative_content: Some(content),
@@ -4638,7 +4651,44 @@ pub fn inspect_queue_state_from_content(
         synced_queue_ids: vec![],
         mirrored_queue_ids: vec![],
         free_text_promotions: vec![],
-        warnings: vec![],
+        warnings,
+    })
+}
+
+fn inactive_queue_residue_warning(
+    file: &Path,
+    entries: &[agent_doc_queue::document_queue::QueueEntry],
+    active: bool,
+    deferred: bool,
+    has_immediate_activation: bool,
+) -> Option<PreflightWarning> {
+    let queue_has_prompts = !agent_doc_queue::document_queue::prompts(entries).is_empty();
+    let drained_residue = queue_entries_are_drained_residue(entries);
+    let need_strip_activation = has_immediate_activation && !queue_has_prompts;
+    let need_clear_non_auto_residue =
+        !has_immediate_activation && !active && !deferred && drained_residue;
+    let drained_body_clearable = (need_strip_activation || need_clear_non_auto_residue)
+        && !deferred
+        && queue_body_clear_is_lossless(entries);
+    if active || deferred || entries.is_empty() || drained_body_clearable {
+        return None;
+    }
+
+    // This is a per-edit signal, not a steady-state nag. A detached worker may
+    // later converge the queue, but admission compares the operator's exact cut
+    // to the cycle-start snapshot so the warning cannot disappear merely
+    // because persistence moved off the foreground lane.
+    let inactive_queue_changed = match agent_doc_snapshot_io::load_document_baseline(file) {
+        Ok(Some(snapshot_content)) => {
+            inactive_queue_changed_vs_snapshot(&snapshot_content, entries)
+        }
+        _ => true,
+    };
+    inactive_queue_changed.then(|| PreflightWarning {
+        code: "inactive_queue_residue".to_string(),
+        message: "agent:queue is inactive but still contains directive/item residue; only active queue state is executable priority context".to_string(),
+        document_agent: None,
+        active_harness: None,
     })
 }
 
@@ -5670,6 +5720,7 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         coin_gate,
         admission_snapshot,
         &apply_guard,
+        None,
     )
 }
 
@@ -5687,8 +5738,46 @@ pub fn run_queue_maintenance_under_apply_guard(
         &FreeTextCoinGate::structural_only(),
         None,
         apply_guard,
+        None,
     )
 }
+
+/// Queue maintenance bound to the exact authority cut admitted by foreground
+/// preflight. A detached worker must not reinterpret later operator steering as
+/// work owned by the older admission.
+pub fn run_queue_maintenance_for_admitted_authority_under_apply_guard(
+    file: &Path,
+    diff: Option<&str>,
+    admitted_authority_hash: &str,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+) -> Result<QueueState> {
+    run_queue_maintenance_with_options_under_apply_guard(
+        file,
+        diff,
+        &FreeTextCoinGate::structural_only(),
+        None,
+        apply_guard,
+        Some(admitted_authority_hash),
+    )
+}
+
+#[derive(Debug)]
+pub struct QueueMaintenanceAuthoritySuperseded {
+    expected: String,
+    observed: String,
+}
+
+impl std::fmt::Display for QueueMaintenanceAuthoritySuperseded {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "queue maintenance admitted authority was superseded (expected={}, observed={})",
+            self.expected, self.observed
+        )
+    }
+}
+
+impl std::error::Error for QueueMaintenanceAuthoritySuperseded {}
 
 fn run_queue_maintenance_with_options_under_apply_guard(
     file: &Path,
@@ -5696,6 +5785,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
     coin_gate: &FreeTextCoinGate,
     admission_snapshot: Option<&str>,
     apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    admitted_authority_hash: Option<&str>,
 ) -> Result<QueueState> {
     apply_guard.ensure_protects(file)?;
     // #sqedit-race Phase 2: defer ALL queue maintenance mutation while a different,
@@ -5777,6 +5867,16 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                 .into());
             }
         };
+    if let Some(expected) = admitted_authority_hash {
+        let observed = agent_doc_hash::content_hash(&content);
+        if observed != expected {
+            return Err(QueueMaintenanceAuthoritySuperseded {
+                expected: expected.to_string(),
+                observed,
+            }
+            .into());
+        }
+    }
     // `content` already came from the CP/editor authority above. Do not reread
     // disk or run a second queue-only merge here: that used to compare the live
     // frontier with itself, making the supposed deletion-adoption branch dead
@@ -7787,12 +7887,13 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             current_content = frontmatter::merge_queue_hold(&current_content)?;
             // Persist to file + snapshot (skip the raw disk write behind a live
             // editor; #fccqueue routes the queue shape through IPC convergence).
-            current_content = persist_queue_maintenance_doc(
+            current_content = persist_queue_maintenance_doc_with_admitted_authority(
                 file,
                 &current_content,
                 &authority_baseline,
                 project_root.as_deref(),
                 "queue_halt",
+                admitted_authority_hash,
             )?;
             agent_doc_queue_io::claim_release_receipt::retire_struck_or_warn(
                 file,
@@ -7866,12 +7967,13 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         {
             eprintln!("[preflight] queue: deferred — time gate at head: {}", dt);
             if prompt_identity_admitted {
-                current_content = persist_queue_maintenance_doc(
+                current_content = persist_queue_maintenance_doc_with_admitted_authority(
                     file,
                     &current_content,
                     &authority_baseline,
                     project_root.as_deref(),
                     "queue_prompt_identity_deferred",
+                    admitted_authority_hash,
                 )?;
             }
             record_queue_worklist_state(file, &current_content, &activation.entries_after, false)?;
@@ -8088,37 +8190,22 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         }
     }
 
-    if !activation.active
+    if let Some(warning) = inactive_queue_residue_warning(
+        file,
+        &activation.entries_after,
+        activation.active,
+        activation.deferred,
+        has_immediate_activation,
+    ) {
+        queue_warnings.push(warning);
+    } else if !activation.active
         && !activation.deferred
         && !activation.entries_after.is_empty()
         && !drained_body_clearable
     {
-        // `inactive_queue_residue` is a per-*edit* signal, not a per-preflight
-        // nag. It is useful when the operator just added/changed content in an
-        // inactive queue (so a `do [#id]` they expected to run silently will
-        // not). It is pure noise when the inactive queue is unchanged from the
-        // committed snapshot — exactly the steady state an `item_modified` halt
-        // leaves behind, where re-warning on every preflight with no user edit
-        // drives the #adoc-queue-ipc-drift loop. Only warn when the inactive
-        // queue body actually changed since the snapshot this cycle.
-        let inactive_queue_changed = match agent_doc_snapshot_io::load_document_baseline(file) {
-            Ok(Some(snapshot_content)) => {
-                inactive_queue_changed_vs_snapshot(&snapshot_content, &activation.entries_after)
-            }
-            _ => true,
-        };
-        if inactive_queue_changed {
-            queue_warnings.push(PreflightWarning {
-                code: "inactive_queue_residue".to_string(),
-                message: "agent:queue is inactive but still contains directive/item residue; only active queue state is executable priority context".to_string(),
-                document_agent: None,
-                active_harness: None,
-            });
-        } else {
-            eprintln!(
-                "[preflight] queue: inactive with retained entries unchanged from snapshot — stable, not re-flagged as residue"
-            );
-        }
+        eprintln!(
+            "[preflight] queue: inactive with retained entries unchanged from snapshot — stable, not re-flagged as residue"
+        );
     }
 
     // Strip auto attribute from opening tag when queue drains
@@ -8800,12 +8887,13 @@ fn run_queue_maintenance_with_options_under_apply_guard(
 
     // Persist file mutations.
     if mutated {
-        current_content = persist_queue_maintenance_doc(
+        current_content = persist_queue_maintenance_doc_with_admitted_authority(
             file,
             &current_content,
             &authority_baseline,
             project_root.as_deref(),
             "queue_maintenance",
+            admitted_authority_hash,
         )?;
         agent_doc_queue_io::claim_release_receipt::retire_struck_or_warn(
             file,
@@ -10026,6 +10114,24 @@ pub(crate) fn persist_queue_maintenance_doc(
     project_root: Option<&Path>,
     source: &str,
 ) -> Result<String> {
+    persist_queue_maintenance_doc_with_admitted_authority(
+        file,
+        content,
+        expected_current,
+        project_root,
+        source,
+        None,
+    )
+}
+
+fn persist_queue_maintenance_doc_with_admitted_authority(
+    file: &Path,
+    content: &str,
+    expected_current: &str,
+    project_root: Option<&Path>,
+    source: &str,
+    admitted_authority_hash: Option<&str>,
+) -> Result<String> {
     let _ = project_root;
     // `#qdonestrike-durable`: a not-ready editor head must not silently discard the
     // maintenance plan. Queue maintenance is idempotent and recomputed every
@@ -10090,6 +10196,38 @@ pub(crate) fn persist_queue_maintenance_doc(
     }
     match current {
         agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => {
+            if let Some(expected_hash) = admitted_authority_hash {
+                let observed_hash = agent_doc_hash::content_hash(&text);
+                if observed_hash != expected_hash
+                    || agent_doc_hash::content_hash(expected_current) != expected_hash
+                {
+                    return Err(QueueMaintenanceAuthoritySuperseded {
+                        expected: expected_hash.to_string(),
+                        observed: observed_hash,
+                    }
+                    .into());
+                }
+                let embedded = agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file);
+                let write = if embedded {
+                    agent_doc_crdt_relay_io::apply_cp_write_for_file(file, &text, content, source)?
+                } else {
+                    agent_doc_controller_io::project_controller::apply_cp_write_via_controller_model_for_doc(
+                        file, &text, content, source,
+                    )?
+                };
+                anyhow::ensure!(
+                    write.is_some(),
+                    "{source}: admitted queue-maintenance compare-and-swap was not applied"
+                );
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "write_authority action=compare_and_swap authority=lazily surface=queue_maintenance source={source} admitted_hash={expected_hash} len={}",
+                        content.len()
+                    ),
+                );
+                return Ok(content.to_string());
+            }
             // `#qtypeclobber`: queue maintenance is a structural successor, not
             // a whole-document replacement. The editor may publish even a few
             // bytes after preflight captured `expected_current`; rebase the
@@ -10158,6 +10296,18 @@ pub(crate) fn persist_queue_maintenance_doc(
                 "{source}: refusing detached queue-maintenance disk write while durable editor liveness remains"
             );
             let disk = std::fs::read_to_string(file)?;
+            if let Some(expected_hash) = admitted_authority_hash {
+                let observed_hash = agent_doc_hash::content_hash(&disk);
+                if observed_hash != expected_hash
+                    || agent_doc_hash::content_hash(expected_current) != expected_hash
+                {
+                    return Err(QueueMaintenanceAuthoritySuperseded {
+                        expected: expected_hash.to_string(),
+                        observed: observed_hash,
+                    }
+                    .into());
+                }
+            }
             anyhow::ensure!(
                 disk == expected_current || disk == content,
                 "{source}: disk head advanced during detached queue maintenance"

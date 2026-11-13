@@ -3090,6 +3090,102 @@ mod tests {
     }
 
     #[test]
+    fn foreground_finalize_aborts_on_owner_loss_inside_git_ref_update_interval() {
+        let _env = agent_doc_test_support::env_lock();
+        let dir = setup_project();
+        let doc = dir.path().join("foreground-write-lease-loss.md");
+        let content = "---\nsession: test\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n## User\n\nHello\n";
+        let response = "Foreground ownership is fenced through the exact Git CAS.";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let marker = dir.path().join("foreground-inner-commit.marker");
+        let release = dir.path().join("foreground-inner-commit.release");
+        unsafe {
+            std::env::set_var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_FILE", &doc);
+            std::env::set_var(
+                "AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_READY",
+                &marker,
+            );
+            std::env::set_var(
+                "AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_RELEASE",
+                &release,
+            );
+        }
+        let write_doc = doc.clone();
+        let writer = std::thread::spawn(move || {
+            agent_doc_write_runtime_io::run_command_with_response(
+                agent_doc_write_command_io::CommandOptions::repair_replay(
+                    &write_doc,
+                    false,
+                    false,
+                    false,
+                    &[],
+                ),
+                agent_doc_write_command_io::CommitMode::Required,
+                response.to_string(),
+            )
+        });
+        wait_for_resume_commit_barrier(&marker);
+        unsafe {
+            std::env::set_var(
+                "AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_HELD_BY_OTHER_FILE",
+                &doc,
+            );
+        }
+        std::fs::write(&release, b"release").unwrap();
+        let interrupted = writer.join().unwrap();
+        assert!(
+            interrupted.is_err(),
+            "ordinary foreground finalize must carry its owner capability into the inner Git CAS"
+        );
+        assert_ne!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+                .unwrap()
+                .expect("retained foreground cycle")
+                .phase,
+            agent_doc_turn::CyclePhase::Committed
+        );
+        assert!(
+            !agent_doc_git_io::revision::show_head(&doc)
+                .unwrap()
+                .expect("initial HEAD")
+                .contains(response),
+            "owner loss before update-ref must leave foreground response out of HEAD"
+        );
+        unsafe {
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_FILE");
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_READY");
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_BARRIER_RELEASE");
+            std::env::remove_var("AGENT_DOC_TEST_CLOSEOUT_INNER_COMMIT_HELD_BY_OTHER_FILE");
+        }
+        let retry_guard =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        let retry_effects = agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(
+            &doc,
+            &retry_guard,
+        )
+        .unwrap();
+        use agent_doc_session_check_io::SessionCheckEffects;
+        let recovered = retry_effects
+            .resume_captured_finalize(&doc)
+            .expect("guarded recovery must finish the retained foreground capture");
+        assert!(
+            matches!(
+                recovered,
+                agent_doc_session_check_io::CapturedFinalizeResumeOutcome::Committed
+            ),
+            "{recovered:?}"
+        );
+    }
+
+    #[test]
     fn captured_resume_rejects_cycle_superseded_after_ref_before_terminal_promotion() {
         let _env = agent_doc_test_support::env_lock();
         let dir = setup_project();

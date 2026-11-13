@@ -297,15 +297,17 @@ fn report_complete_with_lock_wait(
     response: &str,
     lock_wait: ProgressLockWait,
 ) -> Result<CompletionFeedbackOutcome> {
-    // One apply capability spans the response receipt, lineage facts, reported
-    // claim transition, completion-cell document successor, and projection
-    // ledgers. Contention is therefore rejected before the first durable
-    // transaction effect instead of surfacing halfway through completion.
-    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
     // `#subagentcompletionfeedback`: unlike SESSION_ACTOR_WRITE_QUEUE, this
     // lock serializes independent CLI processes. Re-resolve and rebuild inside
     // the owner so stale full-document successors cannot lose sibling notices.
     let _lock = acquire_completion_lock(file, "publish subagent completion feedback", lock_wait)?;
+    // One apply capability spans the response receipt, lineage facts, reported
+    // claim transition, completion-cell document successor, and projection
+    // ledgers. Acquire it after the completion lock: concurrent reporters must
+    // serialize here instead of racing two apply acquisitions and refusing the
+    // loser before the completion handoff can make progress. No durable effect
+    // occurs before both capabilities are held.
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let resolved =
         agent_doc_document_realtime_io::try_resolve_current_document_content(file, SOURCE)?;
     // A retained successor is the latest complete desired cut even while the

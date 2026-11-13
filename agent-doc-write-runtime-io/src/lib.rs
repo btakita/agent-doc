@@ -1974,6 +1974,7 @@ fn apply_pending_and_status_mutations(
         has_pending_ops,
         reap_done_in_same_write,
         TrackedWorkMutationMode::Apply,
+        apply_guard,
     )?;
     if has_pending_ops {
         // `#queueblocked-closeout-refresh`: blocker state is a projection of
@@ -2076,7 +2077,9 @@ fn validate_tracked_work_mutations(
     pending_kept_open_ids: &[String],
     has_pending_ops: bool,
     reap_done_in_same_write: bool,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> Result<()> {
+    apply_guard.ensure_protects(file)?;
     apply_pending_and_status_mutations_with_mode(
         file,
         options,
@@ -2084,6 +2087,7 @@ fn validate_tracked_work_mutations(
         has_pending_ops,
         reap_done_in_same_write,
         TrackedWorkMutationMode::Validate,
+        apply_guard,
     )
     .map(|_| ())
 }
@@ -2322,7 +2326,9 @@ fn apply_pending_and_status_mutations_with_mode(
     has_pending_ops: bool,
     reap_done_in_same_write: bool,
     mode: TrackedWorkMutationMode,
+    apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> Result<PendingStatusMutationOutcome> {
+    apply_guard.ensure_protects(file)?;
     let validate_only = mode.is_validate();
     let queue_completion_projected = std::cell::Cell::new(false);
     // `#atomicstrikeresponse`: a response closeout's tracked-work strike links
@@ -2880,10 +2886,11 @@ fn apply_pending_and_status_mutations_with_mode(
                     if let Some((plan, completed_count)) = composed_queue_completion.into_inner() {
                         queue_completion_projected.set(true);
                         if let Some(plan) = plan {
-                            queue_consume::record_queue_consumption_proofs(
+                            queue_consume::record_queue_consumption_proofs_under_apply_guard(
                                 file,
                                 &plan,
                                 agent_doc_queue_io::queue_consumption_proof::QueueConsumptionProofStage::AfterMutation,
+                                apply_guard,
                             )?;
                             eprintln!(
                                 "[queue] consumed {} item(s): {:?} (remaining: {})",
@@ -3656,7 +3663,8 @@ fn run_command_inner_within_pass(
         apply_guard.ensure_protects(file)?;
         apply_guard
     } else {
-        owned_apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+        owned_apply_guard =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire_for_response(file)?;
         &owned_apply_guard
     };
 
@@ -3768,12 +3776,17 @@ fn run_command_inner_within_pass(
         }
         maybe_pause_captured_resume_before_write_commit(file, outer_closeout_fence)?;
         ensure_active_closeout_fence(file, _closeout_owner.as_ref(), outer_closeout_fence)?;
+        let effective_closeout_fence = outer_closeout_fence.or_else(|| {
+            _closeout_owner
+                .as_ref()
+                .map(|owner| owner.claimed.capability())
+        });
         return finalize_commit(
             file,
             commit_mode,
             options.force_disk,
             queue_apply_guard,
-            outer_closeout_fence,
+            effective_closeout_fence,
         );
     }
 
@@ -3857,6 +3870,7 @@ fn run_command_inner_within_pass(
             &pending_kept_open_ids,
             has_pending_ops,
             commit_mode != CommitMode::None,
+            queue_apply_guard,
         )
         .with_context(|| {
             format!(
@@ -4694,6 +4708,11 @@ fn run_command_inner_within_pass(
 
     let commit_result = if write_result.is_ok() {
         maybe_pause_captured_resume_before_write_commit(file, outer_closeout_fence)?;
+        let effective_closeout_fence = outer_closeout_fence.or_else(|| {
+            _closeout_owner
+                .as_ref()
+                .map(|owner| owner.claimed.capability())
+        });
         let primary =
             ensure_active_closeout_fence(file, _closeout_owner.as_ref(), outer_closeout_fence)
                 .and_then(|()| {
@@ -4702,7 +4721,7 @@ fn run_command_inner_within_pass(
                         commit_mode,
                         options.force_disk,
                         queue_apply_guard,
-                        outer_closeout_fence,
+                        effective_closeout_fence,
                     )
                 });
         if primary.is_ok() && !options.commit_sibling.is_empty() {
@@ -4714,7 +4733,7 @@ fn run_command_inner_within_pass(
                 .collect();
             ensure_active_closeout_fence(file, _closeout_owner.as_ref(), outer_closeout_fence)?;
             let sibling_fence =
-                outer_closeout_fence.map(|capability| SiblingCloseoutFence { capability });
+                effective_closeout_fence.map(|capability| SiblingCloseoutFence { capability });
             agent_doc_git_io::sibling::commit_siblings_for_session_doc_with_fence(
                 file,
                 &pairs,

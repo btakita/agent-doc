@@ -3827,6 +3827,9 @@ fn refuse_transient_queue_closeout(
     }
     if let Some(attempt) =
         agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(&file.to_string_lossy())
+        && attempt
+            .holder
+            .starts_with(agent_doc_queue_io::queue_edit_owner::BACKGROUND_QUEUE_EDIT_OWNER_PREFIX)
     {
         return Ok(SessionCheckStatus::Interrupted(format!(
             "[session-check] INTERRUPTED: queue maintenance attempt is incomplete for {} (holder_pid={}, holder={}); terminal closeout is withheld. The next admission will recover a dead owner or coalesce with a live one (#transientcloseout)",
@@ -4509,10 +4512,15 @@ pub fn detect_uncommitted_closeout_drift_with_context(
             return Ok(None);
         }
     }
-    if effects
-        .repair_committed_historical_snapshot_drift(file)?
-        .is_some()
-    {
+    let historical_snapshot_drift = if effects.applies_self_heals() {
+        effects.repair_committed_historical_snapshot_drift(file)?
+    } else {
+        // Drift admission is a classifier, not a repair boundary. A read-only
+        // adapter must make the same decision from the pure pending probe and
+        // leave the snapshot untouched for the guarded heal transaction.
+        effects.pending_committed_historical_snapshot_drift(file)?
+    };
+    if historical_snapshot_drift.is_some() {
         return Ok(None);
     }
     if let Some(drift) = agent_doc_git_io::submodule::submodule_pointer_drift(file)? {
@@ -5800,6 +5808,7 @@ mod terminal_convergence_tests {
     #[test]
     fn transient_queue_rows_refuse_a_successful_closeout() {
         let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("task.md");
         std::fs::write(
             &file,
@@ -5870,10 +5879,14 @@ mod terminal_convergence_tests {
         )
         .unwrap();
         let file_text = file.to_string_lossy();
+        let crashed_token = format!(
+            "{}crashed-attempt",
+            agent_doc_queue_io::queue_edit_owner::BACKGROUND_QUEUE_EDIT_OWNER_PREFIX
+        );
         assert!(
             agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
                 &file_text,
-                "crashed-attempt",
+                &crashed_token,
                 4_000_000,
             )
             .unwrap()
@@ -5890,23 +5903,26 @@ mod terminal_convergence_tests {
                     message.contains("maintenance attempt is incomplete"),
                     "{message}"
                 );
-                assert!(message.contains("crashed-attempt"), "{message}");
+                assert!(message.contains(&crashed_token), "{message}");
             }
             other => panic!("dead maintenance owner falsely reported terminal: {other:?}"),
         }
 
-        let recovery = "recovery-attempt";
+        let recovery = format!(
+            "{}recovery-attempt",
+            agent_doc_queue_io::queue_edit_owner::BACKGROUND_QUEUE_EDIT_OWNER_PREFIX
+        );
         assert!(
             agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
                 &file_text,
-                recovery,
+                &recovery,
                 std::process::id(),
             )
             .unwrap(),
             "a dead attempt must be recoverable immediately, without waiting for the TTL"
         );
         let guard =
-            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::adopt_reserved(&file, recovery)
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::adopt_reserved(&file, &recovery)
                 .unwrap()
                 .expect("the recovery worker adopts its durable reservation");
         drop(guard);

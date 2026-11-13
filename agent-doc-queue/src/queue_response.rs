@@ -2218,6 +2218,30 @@ pub fn latest_free_text_head_echo_is_deferral(text: &str, head_text: &str) -> bo
 /// A vector quote is that leaf's echo. Deferral beside it keeps the leaf queued.
 /// The bare leaf line remains a deferral too.
 pub fn response_defers_queue_head(content: &str, response_body: &str, head_text: &str) -> bool {
+    // A goal preset's declared final state is stronger than generic review or
+    // waiting prose. In particular, a valid `BLOCKED <operator action> ...`
+    // hand-back necessarily names work that remains for the operator; treating
+    // those words as an ordinary deferral made the preset's terminal contract
+    // impossible to satisfy. Require an actual latest echo cell before this
+    // override so an absent answer never becomes terminal by negation.
+    let goal_states = crate::goal_preset_terminal::head_final_states(content, head_text);
+    let goal_cell = latest_echo_cell(content, response_body, head_text);
+    let explicitly_deferred = goal_cell.as_ref().is_some_and(|cell| {
+        cell.lines()
+            .filter(|line| !line.trim_start().starts_with('>'))
+            .any(|line| {
+                deferral_scan_text(line)
+                    .to_ascii_lowercase()
+                    .contains(STRUCTURED_DEFERRAL_MARKER)
+            })
+    });
+    if !goal_states.is_empty()
+        && goal_cell.is_some()
+        && !explicitly_deferred
+        && !latest_echo_cell_lacks_goal_final_state(content, response_body, head_text)
+    {
+        return false;
+    }
     if response_defers_free_text_head(response_body, head_text) {
         return true;
     }

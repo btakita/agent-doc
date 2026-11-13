@@ -367,11 +367,11 @@ mod tests {
         );
     }
 
-    /// A frozen worker frees its slot but keeps its claim: the next head is
-    /// handed out, the frozen row is never redispatched, and a refresh
-    /// heartbeat clears the freeze (`#subagentworkpool`).
+    /// A frozen worker frees its slot: failed-continue recovery offers that
+    /// same head first, and its fresh replacement attempt consumes the slot
+    /// (`#subagentworkpool`).
     #[test]
-    fn freezing_a_worker_refills_its_slot_and_keeps_the_claim() {
+    fn freezing_a_worker_requeues_its_head_and_frees_the_slot() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("task.md");
@@ -401,14 +401,16 @@ mod tests {
                 .iter()
                 .map(|head| head.item.as_str())
                 .collect::<Vec<_>>(),
-            ["do [#c]"],
+            ["do [#a]"],
             "{refill:#?}"
         );
-        assert_eq!(refill.frozen.len(), 1);
-        assert_eq!(refill.frozen[0].item, "do [#a]");
         assert!(
-            crate::queue_claim::claimed_items_for_content(&file, &content).claims("do [#a]"),
-            "the frozen attempt keeps its claim"
+            refill.frozen.is_empty(),
+            "failed-continue recovery exposes the same head as retry work: {refill:#?}"
+        );
+        assert!(
+            !crate::queue_claim::claimed_items_for_content(&file, &content).claims("do [#a]"),
+            "failed-continue recovery releases the frozen claim before retry"
         );
         let text = refill.render().unwrap();
         assert!(text.contains("trigger=frozen"), "{text}");
@@ -416,7 +418,7 @@ mod tests {
         assert!(text.contains("queue brief"), "{text}");
         assert!(text.contains("queue start"), "{text}");
 
-        crate::queue_claim::refresh_attempt(&file, "do [#a]", "subagent:a", 7200, Some(1)).unwrap();
+        start(&file, "do [#a]", "subagent:a-retry");
         let resumed = pool_refill_for_content(&file, &content, PoolRefillTrigger::Plan).unwrap();
         assert!(resumed.frozen.is_empty(), "{resumed:#?}");
         assert!(

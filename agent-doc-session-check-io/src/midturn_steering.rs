@@ -3014,8 +3014,16 @@ mod tests {
             "{}",
             second_payload
         );
+        // The live-turn coalescer intentionally retains earlier steering in
+        // the aggregate payload when a consumed compact reference is replaced.
+        // The newest route-sync segment itself must still be based on the last
+        // delivered document rather than the cycle-admission baseline.
+        let newest_route_sync = second_payload
+            .rsplit("[agent-doc] operator steering arrived mid-turn in ")
+            .next()
+            .unwrap_or(&second_payload);
         assert!(
-            !second_payload
+            !newest_route_sync
                 .lines()
                 .any(|line| line.starts_with('+') && line.contains("ship the diff")),
             "the previous send is the baseline, not the cycle admission text: {}",

@@ -2366,7 +2366,13 @@ fn apply_bound_stop(
                 // newer typed edit outside the committed snapshot. That edit is
                 // still next-cycle work: do not immediately select it using the
                 // predecessor's recursive Stop invocation.
-                if answered_residue_has_post_commit_drift && closeout_result.is_ok() {
+                if answered_residue_has_post_commit_drift
+                    && (closeout_result.is_ok()
+                        || closeout_result
+                            .as_ref()
+                            .err()
+                            .is_some_and(transient_queue_closeout_refusal))
+                {
                     invalidate_stop_document_cache();
                     agent_doc_ops_log_io::log_op(
                         file,
@@ -4919,6 +4925,12 @@ fn attempt_stop_closeout(
 fn unanswered_edit_pending_commit_refusal(error: &anyhow::Error) -> bool {
     agent_doc_commit_io::retained_write_commit_refusal_verdict(error)
         == Some(agent_doc_turn::write_ownership::RetainedWriteVerdict::UnansweredEditPending)
+}
+
+fn transient_queue_closeout_refusal(error: &anyhow::Error) -> bool {
+    format!("{error:#}").contains(
+        "normal closeout refused while live queue rows are still transient (#transientcloseout)",
+    )
 }
 
 /// Whether a failed commit boundary is a deferral the binary already owns.

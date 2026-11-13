@@ -19,6 +19,32 @@ fn wait_for_path(path: &std::path::Path) {
     }
 }
 
+fn ops_log_len(doc: &std::path::Path) -> u64 {
+    let ops = doc.parent().unwrap().join(".agent-doc/logs/ops.log");
+    fs::metadata(ops)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0)
+}
+
+fn wait_for_background_queue_maintenance(doc: &std::path::Path, previous_ops_len: u64) {
+    let ops = doc.parent().unwrap().join(".agent-doc/logs/ops.log");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let current = fs::read_to_string(&ops).unwrap_or_default();
+        let appended = current.get(previous_ops_len as usize..).unwrap_or(&current);
+        if appended.lines().any(|line| {
+            line.contains("queue_maintenance_background_completed") && line.contains("mutated=")
+        }) {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "detached queue maintenance did not complete: {appended}"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
 #[test]
 fn report_complete_holds_queue_apply_exclusion_across_the_whole_transaction() {
     let dir = tempfile::tempdir().unwrap();
@@ -901,6 +927,7 @@ fn assert_session_check_does_not_accuse_patchback(dir: &std::path::Path, doc: &s
 }
 
 fn assert_preflight_admits(dir: &std::path::Path, doc: &std::path::Path, expected_cells: usize) {
+    let previous_ops_len = ops_log_len(doc);
     let output = run_agent_doc(dir, &["preflight", doc.to_str().unwrap()]);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -909,6 +936,7 @@ fn assert_preflight_admits(dir: &std::path::Path, doc: &std::path::Path, expecte
     );
     assert!(!stderr.contains("failed closed"), "stderr={stderr}");
     assert!(!stderr.contains("refused to replay"), "stderr={stderr}");
+    wait_for_background_queue_maintenance(doc, previous_ops_len);
     assert!(
         !dir.join(".agent-doc/repair-blocked").exists()
             || fs::read_dir(dir.join(".agent-doc/repair-blocked"))
@@ -1366,12 +1394,19 @@ fn assert_ok(output: &std::process::Output, what: &str) {
 }
 
 fn preflight_json(dir: &std::path::Path, doc: &std::path::Path) -> serde_json::Value {
+    let previous_ops_len = ops_log_len(doc);
     let output = run_agent_doc(dir, &["preflight", doc.to_str().unwrap()]);
     assert_ok(&output, "preflight");
-    serde_json::from_slice(&output.stdout).unwrap_or_else(|err| {
+    wait_for_background_queue_maintenance(doc, previous_ops_len);
+    // The production admission result intentionally precedes comprehensive
+    // projection. These assertions inspect the settled tree, so take a pure
+    // probe after the detached receipt rather than opening another cycle.
+    let settled = run_agent_doc(dir, &["preflight", "--probe", doc.to_str().unwrap()]);
+    assert_ok(&settled, "settled preflight probe");
+    serde_json::from_slice(&settled.stdout).unwrap_or_else(|err| {
         panic!(
             "preflight stdout is not JSON ({err}): {}",
-            String::from_utf8_lossy(&output.stdout)
+            String::from_utf8_lossy(&settled.stdout)
         )
     })
 }
@@ -2100,8 +2135,9 @@ fn report_complete_without_a_matching_subagent_claim_fails_and_names_candidates(
 
 /// `#subagentworkpool`, end to end through the CLI: `report-complete` prints
 /// the pool refill with the unstarted claim's spawn first and the next head's
-/// exact claim / brief / start commands; `queue freeze` frees a slot while
-/// keeping the claim; `queue pool --json` reports the same projection.
+/// exact claim / brief / start commands; `queue freeze` records the stopped
+/// worker, failed continuation authorizes the same head's replacement first,
+/// and `queue pool --json` reports the same projection.
 #[test]
 fn report_complete_and_freeze_print_the_work_pool_refill() {
     let dir = tempfile::tempdir().unwrap();
@@ -2305,7 +2341,7 @@ fn report_complete_and_freeze_print_the_work_pool_refill() {
         "freeze two",
     );
     assert!(freeze.contains("trigger=frozen"), "{freeze}");
-    assert!(freeze.contains("\"task four\""), "{freeze}");
+    assert!(freeze.contains("\"task two\""), "{freeze}");
 
     let pool = run(later, &["queue", "pool", &path, "--json"]);
     assert!(pool.status.success());
@@ -2315,10 +2351,15 @@ fn report_complete_and_freeze_print_the_work_pool_refill() {
         pool["pools"][0]["occupancy"]["source"], "queue_cap",
         "{pool}"
     );
-    assert_eq!(pool["pools"][0]["occupancy"]["frozen"], 1, "{pool}");
+    assert_eq!(pool["pools"][0]["occupancy"]["frozen"], 0, "{pool}");
     assert_eq!(pool["pools"][0]["occupancy"]["free"], 1, "{pool}");
-    assert_eq!(pool["frozen"][0]["item"], "task two", "{pool}");
-    assert_eq!(pool["next_heads"][0]["item"], "task four", "{pool}");
+    assert!(
+        pool.get("frozen")
+            .and_then(serde_json::Value::as_array)
+            .is_none_or(Vec::is_empty),
+        "{pool}"
+    );
+    assert_eq!(pool["next_heads"][0]["item"], "task two", "{pool}");
 }
 
 /// `#workerresponsestructure` (agent-doc-bugs.md, 2026-11-05): the

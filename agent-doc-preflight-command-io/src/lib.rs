@@ -136,6 +136,8 @@ const TEST_BACKGROUND_MAINTENANCE_CRASH_AFTER_LOCK_ENV: &str =
 const TEST_BACKGROUND_MAINTENANCE_PANIC_AFTER_EFFECT_ENV: &str =
     "AGENT_DOC_TEST_BACKGROUND_MAINTENANCE_PANIC_AFTER_EFFECT";
 const BACKGROUND_QUEUE_MAINTENANCE_TOKEN_ENV: &str = "AGENT_DOC_BACKGROUND_QUEUE_MAINTENANCE_TOKEN";
+const BACKGROUND_QUEUE_MAINTENANCE_AUTHORITY_HASH_ENV: &str =
+    "AGENT_DOC_BACKGROUND_QUEUE_MAINTENANCE_AUTHORITY_HASH";
 
 fn new_background_queue_maintenance_token() -> String {
     static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -144,7 +146,11 @@ fn new_background_queue_maintenance_token() -> String {
         .unwrap_or_default()
         .as_nanos();
     let sequence = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    format!("{}-{nanos}-{sequence}", std::process::id())
+    format!(
+        "{}{}-{nanos}-{sequence}",
+        agent_doc_queue_io::queue_edit_owner::BACKGROUND_QUEUE_EDIT_OWNER_PREFIX,
+        std::process::id()
+    )
 }
 
 /// Dispatch comprehensive queue reconciliation outside the admission process.
@@ -154,7 +160,11 @@ fn new_background_queue_maintenance_token() -> String {
 /// editor-native save, or disk convergence. Using the binary selected by the
 /// controller's launch policy also keeps embedded/plugin callers from trying to
 /// execute their host process as `agent-doc`.
-pub fn spawn_background_queue_maintenance(file: &Path, commit_if_mutated: bool) -> Result<u32> {
+pub fn spawn_background_queue_maintenance(
+    file: &Path,
+    commit_if_mutated: bool,
+    admitted_authority_hash: &str,
+) -> Result<u32> {
     let binary = agent_doc_controller_io::project_controller::current_binary_identity()?.path;
     let token = new_background_queue_maintenance_token();
     // Claim before process creation. Concurrent admissions race in one SQLite
@@ -186,7 +196,11 @@ pub fn spawn_background_queue_maintenance(file: &Path, commit_if_mutated: bool) 
         .arg("preflight")
         .arg(file)
         .arg("--queue-maintenance-only")
-        .env(BACKGROUND_QUEUE_MAINTENANCE_TOKEN_ENV, &token);
+        .env(BACKGROUND_QUEUE_MAINTENANCE_TOKEN_ENV, &token)
+        .env(
+            BACKGROUND_QUEUE_MAINTENANCE_AUTHORITY_HASH_ENV,
+            admitted_authority_hash,
+        );
     if commit_if_mutated {
         command.arg("--commit-queue-maintenance");
     }
@@ -418,6 +432,14 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
         std::env::var(BACKGROUND_QUEUE_MAINTENANCE_TOKEN_ENV)
             .context("background queue maintenance reservation token is missing")?
     };
+    let admitted_authority_hash = if cfg!(test) {
+        None
+    } else {
+        Some(
+            std::env::var(BACKGROUND_QUEUE_MAINTENANCE_AUTHORITY_HASH_ENV)
+                .context("background queue maintenance admitted authority hash is missing")?,
+        )
+    };
     let Some(mut queue_mutation) = BackgroundQueueMaintenanceLease::adopt_reserved(file, &token)?
     else {
         eprintln!(
@@ -456,6 +478,29 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
             );
             return Ok(());
         }
+        let admitted_content = if let Some(expected) = admitted_authority_hash.as_deref() {
+            let observed =
+                agent_doc_document_realtime_io::try_resolve_current_document_with_source(
+                    file,
+                    "background_queue_maintenance_admitted_cut",
+                )?
+                .into_content();
+            let observed_hash = agent_doc_hash::content_hash(&observed);
+            if observed_hash != expected {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_maintenance_background_superseded_authority file={} expected={} observed={observed_hash}",
+                        file.display(),
+                        expected,
+                    ),
+                );
+                return Ok(());
+            }
+            Some(observed)
+        } else {
+            None
+        };
         let pending_report = match agent_doc_preflight_io::run_pending_maintenance_fenced(
             file,
             &PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
@@ -488,11 +533,43 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
             panic!("injected background maintenance panic after pending effect");
         }
         queue_mutation.fence_effect(file)?;
-        let outcome = agent_doc_preflight_io::run_queue_maintenance_under_apply_guard(
-            file,
-            None,
-            queue_mutation.apply_guard(),
-        );
+        let queue_authority_hash = if let Some(admitted_content) = admitted_content.as_deref() {
+            let current = agent_doc_document_realtime_io::try_resolve_current_document_with_source(
+                file,
+                "background_queue_maintenance_after_pending",
+            )?
+            .into_content();
+            if agent_doc_queue::queue_head_entry::exchange_component_text(admitted_content)
+                != agent_doc_queue::queue_head_entry::exchange_component_text(&current)
+            {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_maintenance_background_superseded_authority file={} reason=exchange_advanced_during_pending",
+                        file.display(),
+                    ),
+                );
+                return Ok(());
+            }
+            Some(agent_doc_hash::content_hash(&current))
+        } else {
+            None
+        };
+        let outcome = match queue_authority_hash.as_deref() {
+            Some(expected) => {
+                agent_doc_preflight_io::run_queue_maintenance_for_admitted_authority_under_apply_guard(
+                    file,
+                    None,
+                    expected,
+                    queue_mutation.apply_guard(),
+                )
+            }
+            None => agent_doc_preflight_io::run_queue_maintenance_under_apply_guard(
+                file,
+                None,
+                queue_mutation.apply_guard(),
+            ),
+        };
         match outcome {
             Ok(state) => {
                 queue_mutation.fence_effect(file)?;
@@ -535,6 +612,22 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
                 );
                 Ok(())
             }
+            Err(error)
+                if error
+                    .downcast_ref::<agent_doc_preflight_io::QueueMaintenanceAuthoritySuperseded>()
+                    .is_some() =>
+            {
+                queue_mutation.fence_effect(file)?;
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_maintenance_background_superseded_authority file={} error={}",
+                        file.display(),
+                        format!("{error:#}").replace('\n', " | "),
+                    ),
+                );
+                Ok(())
+            }
             Err(error) => {
                 queue_mutation.fence_effect(file)?;
                 agent_doc_ops_log_io::log_op(
@@ -570,7 +663,12 @@ fn enforce_cycle_completion(
     file: &Path,
     preserve_fresh_owned_pane_reentry: bool,
 ) -> Result<(bool, bool)> {
-    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let apply_guard = match agent_doc_queue_io::queue_edit_owner::QueueEditGuard::try_acquire(file)?
+    {
+        Some(guard) => guard,
+        None if !preflight_cycle_completion_may_mutate(file)? => return Ok((false, false)),
+        None => acquire_preflight_apply_guard(file)?,
+    };
     let repair_effects =
         agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &apply_guard)?;
     let session_check_effects =
@@ -591,6 +689,51 @@ fn enforce_cycle_completion(
         ),
         mode,
     )
+}
+
+fn preflight_cycle_completion_may_mutate(file: &Path) -> Result<bool> {
+    if agent_doc_document_realtime_io::pending_document_write(file).is_some() {
+        return Ok(true);
+    }
+    if agent_doc_cycle_state_io::load_with_closeout_projection(file)?
+        .is_some_and(|state| state.is_open())
+    {
+        return Ok(true);
+    }
+    Ok(agent_doc_ops_log_io::detect_write_completed_commit_missing(file)?.is_some())
+}
+
+pub(crate) fn preflight_repair_may_mutate(file: &Path) -> Result<bool> {
+    Ok(
+        agent_doc_repair_io::pending::load_active_pending_response(file)?.is_some()
+            || agent_doc_capture_io::load_active(file)?.is_some()
+            || agent_doc_cycle_state_io::load_with_closeout_projection(file)?
+                .is_some_and(|state| state.is_open()),
+    )
+}
+
+/// Serialize the short foreground admission transactions without turning a
+/// simultaneous preflight into a spurious failed turn. Comprehensive
+/// maintenance remains detached; this bounded wait is only for another
+/// foreground holder already inside one of the admission's atomic effects.
+pub(crate) fn acquire_preflight_apply_guard(
+    file: &Path,
+) -> Result<agent_doc_queue_io::queue_edit_owner::QueueEditGuard> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1_250);
+    loop {
+        if let Some(guard) =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::try_acquire(file)?
+        {
+            return Ok(guard);
+        }
+        if std::time::Instant::now() >= deadline {
+            anyhow::bail!(
+                "queue mutation deferred: another owner is applying maintenance for {}; retry after it completes",
+                file.display()
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
 }
 
 pub mod progress;

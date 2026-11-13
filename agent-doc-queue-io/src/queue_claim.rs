@@ -2902,13 +2902,24 @@ pub fn worker_owned_items_for_content(file: &Path, content: &str) -> ClaimedQueu
         content,
         &agent_doc_hash::document_id_for_path(file),
     );
-    let claims = claim_states_for_content(file, &projected.content).unwrap_or_else(|err| {
+    let claims_for_cut = |cut: &str| {
+        claim_states_for_content(file, cut).unwrap_or_else(|err| {
         eprintln!(
             "[queue-claim] WARNING: could not read queue claims for {}; treating every head as unowned: {err:#}",
             file.display()
         );
         Vec::new()
-    });
+    })
+    };
+    // Keep both identity cuts. Pure prompt-id projection can mint a stable q-id
+    // before the background reconciler persists it, but an already-running or
+    // Reported plain-text claim is still authoritative during that window. If
+    // we classify only the projected cut, the newly minted id hides that claim
+    // and incorrectly admits its coordinator debt into the inline drain.
+    let mut claims = claims_for_cut(content);
+    if projected.content != content {
+        claims.extend(claims_for_cut(&projected.content));
+    }
     ClaimedQueueItems::from_identities(
         claims
             .into_iter()

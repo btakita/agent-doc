@@ -2248,10 +2248,11 @@ pub(crate) fn run_stream(
         )?
     };
     if let Some(plan) = integrated_queue_plan.as_ref() {
-        queue_consume::record_queue_consumption_proofs(
+        queue_consume::record_queue_consumption_proofs_under_apply_guard(
             file,
             plan,
             QueueConsumptionProofStage::BeforeMutation,
+            apply_guard,
         )?;
         final_content = plan.new_document.clone();
         snapshot_content = plan.new_snapshot.clone();
@@ -2305,10 +2306,11 @@ pub(crate) fn run_stream(
         }
     }
     if let Some(plan) = integrated_queue_plan.as_ref() {
-        queue_consume::record_queue_consumption_proofs(
+        queue_consume::record_queue_consumption_proofs_under_apply_guard(
             file,
             plan,
             QueueConsumptionProofStage::AfterMutation,
+            apply_guard,
         )?;
         if plan.consumed_texts.len() == 1 {
             eprintln!(

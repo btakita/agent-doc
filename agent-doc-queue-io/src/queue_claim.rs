@@ -1695,6 +1695,60 @@ pub fn report_attempt_with_publication_state(
     Ok(claim)
 }
 
+/// `#inlinegatefalsereject`: reopen the exact attempt a goal-loop gate
+/// requeued, so a corrected hand-back from that same generation and worker can
+/// be reported. See
+/// [`agent_doc_queue::queue_claim::QueueClaimLedger::reopen_gate_requeued_attempt`].
+pub fn reopen_gate_requeued_attempt(
+    file: &Path,
+    item: &str,
+    generation: u64,
+    worker_id: &str,
+) -> Result<Option<QueueClaim>> {
+    let resolved = resolve_live_claim_target(file, item, "queue_claim_reopen_gate_requeue").ok();
+    let target = resolved
+        .as_ref()
+        .map(|(target, _)| target.clone())
+        .unwrap_or_else(|| item.to_string());
+    let heads = resolved.map(|(_, heads)| heads);
+    let now = now_secs();
+    let reopened = mutate_ledger(file, |ledger| {
+        if let Some(heads) = heads.as_ref() {
+            log_followed(file, &ledger.follow_edits_in_view(now, heads));
+        }
+        Ok(ledger
+            .reopen_gate_requeued_attempt(
+                &target,
+                generation,
+                worker_id,
+                now,
+                agent_doc_queue::queue_claim::DEFAULT_QUEUE_CLAIM_TTL_SECS,
+            )
+            .or_else(|| {
+                ledger.reopen_gate_requeued_attempt(
+                    item,
+                    generation,
+                    worker_id,
+                    now,
+                    agent_doc_queue::queue_claim::DEFAULT_QUEUE_CLAIM_TTL_SECS,
+                )
+            }))
+    })?;
+    if let Some(claim) = reopened.as_ref() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_claim_state state=running owner={} worker={} generation={} item_bytes={} reopened=gate_requeue (#inlinegatefalsereject)",
+                claim.owner,
+                worker_id,
+                claim.generation,
+                claim.item_text.len(),
+            ),
+        );
+    }
+    Ok(reopened)
+}
+
 /// Generation-and-worker fenced report transition used after the response
 /// receipt has already been captured durably.
 pub fn report_exact_worker_attempt_with_publication_state(

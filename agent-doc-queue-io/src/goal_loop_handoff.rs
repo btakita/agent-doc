@@ -217,6 +217,7 @@ pub fn requeue_nonterminal_hand_back(
         && (ordinary_empty || settled_inline_without_states || completes_order || address_lands)
     {
         if completes_order || address_lands || settled_inline_without_states {
+            reopen_if_gate_requeued(file, &claim, generation)?;
             let identity = claim.identity.clone();
             let live = agent_doc_queue::queue_continuation::live_queue_head_identities(content);
             mutate(file, |ledger| {
@@ -297,6 +298,47 @@ pub fn requeue_nonterminal_hand_back(
         address_fix_pending: address_pending,
         inline_threads_pending: inline_pending,
     }))
+}
+
+/// `#inlinegatefalsereject`: a gate (`#goalpresetterminal`, `#reviewfixonhead`,
+/// `#addressinline`) requeued this exact generation and worker, marking it
+/// `Lost` and abandoned. Its corrected hand-back now completes the row, so
+/// reopen that attempt for the ordinary report. Without this the report is
+/// refused as terminal and the row waits for a new generation to redo
+/// finished work. A quota or prompt-pressure requeue is not a gate verdict
+/// and stays abandoned; a reclaim moved the generation and is not reopened.
+fn reopen_if_gate_requeued(file: &Path, claim: &QueueClaim, generation: Option<u64>) -> Result<()> {
+    if claim.state != agent_doc_queue::queue_claim::QueueClaimState::Lost {
+        return Ok(());
+    }
+    let Some(worker_id) = claim
+        .worker
+        .as_ref()
+        .map(|worker| worker.worker_id.as_str())
+    else {
+        return Ok(());
+    };
+    let generation = generation.unwrap_or(claim.generation);
+    if generation != claim.generation {
+        return Ok(());
+    }
+    let ledger = load(file)?;
+    let gate_requeued = ledger.handoffs.iter().any(|handoff| {
+        handoff.identity == claim.identity
+            && handoff.generation == claim.generation
+            && handoff.worker_id.as_deref() == Some(worker_id)
+            && handoff.quota_block.is_none()
+            && handoff.prompt_pressure.is_none()
+    });
+    if gate_requeued {
+        crate::queue_claim::reopen_gate_requeued_attempt(
+            file,
+            &claim.item_text,
+            claim.generation,
+            worker_id,
+        )?;
+    }
+    Ok(())
 }
 
 /// `#promptpressure`: record an unfinished prompt hand-back and requeue the

@@ -2248,6 +2248,119 @@ mod tests {
         );
     }
 
+    /// `#inlinegatefalsereject`: the PR 412 `#adversarial-pr` hand-back, as a
+    /// nested child under its `### <PR url>` heading. The gate once refused it
+    /// because the hand-back cited the reply comment `discussion_r4568355508`
+    /// beside the receipted root thread `discussion_r4568099735`. That refusal
+    /// requeued generation 1 as an abandoned `Lost` attempt, and the
+    /// coordinator then ran `queue release --requeue` too. The same hand-back
+    /// must now report from that generation, so the row can close, instead of
+    /// the row waiting forever on `⚠️🚧` for a new generation.
+    #[test]
+    fn inlinegatefalsereject_pr412_hand_back_reports_after_the_false_requeue() {
+        const HAND_BACK: &str =
+            include_str!("../agent-doc-queue/tests/fixtures/pr412_adversarial_handback.md");
+        const ROW: &str =
+            "https://github.com/btakita/agent-doc/pull/412: #adversarial-pr [#q-23c8d4f70342]";
+        let dir = tempfile::tempdir().unwrap();
+        inline_project(dir.path());
+        let doc = dir.path().join("prs.md");
+        fs::write(
+            &doc,
+            "---\nagent_doc_session: sample-prs\nagent_doc_format: template\n---\n\n\
+             <!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n\
+             <!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n\n\
+             <!-- agent:queue subagents -->\n\
+             - ### https://github.com/btakita/agent-doc/pull/412\n\
+             \x20 - #adversarial-pr [#q-23c8d4f70342]\n\
+             <!-- /agent:queue -->\n",
+        )
+        .unwrap();
+        start_subagent(&doc, ROW, "subagent:adv412");
+
+        // The verdict the old gate reached on this hand-back: the reply citation
+        // counted as a second root thread. Reproduce that requeue with the
+        // receipt removed, which still fails the gate.
+        let unreceipted = HAND_BACK
+            .lines()
+            .filter(|line| !line.starts_with("THREAD-FIX-ON-HEAD"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let requeue = requeue_nonterminal_goal_hand_back(&doc, ROW, Some(1), &unreceipted)
+            .unwrap()
+            .expect("without its receipt the root thread is still unsettled");
+        assert!(requeue.inline_threads_pending);
+        let lost = |doc: &Path| {
+            agent_doc_queue_io::queue_claim::load_ledger(doc)
+                .unwrap()
+                .claims
+                .into_iter()
+                .find(|claim| claim.owner == "subagent:adv412")
+                .unwrap()
+        };
+        assert_eq!(
+            lost(&doc).state,
+            agent_doc_queue::queue_claim::QueueClaimState::Lost
+        );
+        agent_doc_queue_io::claim_release_receipt::release_attempt(
+            &doc,
+            ROW,
+            agent_doc_queue_io::claim_release_receipt::ReleaseKind::Requeue,
+            Some(1),
+        )
+        .unwrap();
+
+        assert!(
+            requeue_nonterminal_goal_hand_back(&doc, ROW, Some(1), HAND_BACK)
+                .unwrap()
+                .is_none(),
+            "a cited reply comment is not a second root thread"
+        );
+        let outcome = report_complete(&doc, ROW, Some(1), None, None, HAND_BACK)
+            .expect("the gate-requeued generation reports its corrected hand-back");
+        assert_eq!(
+            outcome.claim.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Reported
+        );
+        assert_eq!(outcome.claim.generation, 1);
+        assert!(
+            outcome.claim.completion_recovered_after_loss,
+            "the report keeps the loss boundary visible"
+        );
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("### Re: Subagent completed"), "{content}");
+    }
+
+    /// `#inlinegatefalsereject`: only a gate's own requeue reopens. A plain
+    /// `queue release --requeue` with no gate hand-off, or a reclaimed
+    /// generation, stays refused.
+    #[test]
+    fn inlinegatefalsereject_a_plain_requeue_does_not_reopen_the_attempt() {
+        const ROW: &str = "https://github.com/btakita/agent-doc/pull/412: #adversarial-pr";
+        const HAND_BACK: &str =
+            include_str!("../agent-doc-queue/tests/fixtures/pr412_adversarial_handback.md");
+        let dir = tempfile::tempdir().unwrap();
+        inline_project(dir.path());
+        let doc = inline_doc(dir.path(), ROW);
+        start_subagent(&doc, ROW, "subagent:plain");
+        agent_doc_queue_io::claim_release_receipt::release_attempt(
+            &doc,
+            ROW,
+            agent_doc_queue_io::claim_release_receipt::ReleaseKind::Requeue,
+            Some(1),
+        )
+        .unwrap();
+        assert!(
+            requeue_nonterminal_goal_hand_back(&doc, ROW, Some(1), HAND_BACK)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            report_complete(&doc, ROW, Some(1), None, None, HAND_BACK).is_err(),
+            "an explicit requeue without a gate verdict stays abandoned"
+        );
+    }
+
     fn start_subagent(doc: &Path, row: &str, owner: &str) {
         agent_doc_queue_io::queue_claim::claim(doc, row, owner, 600).unwrap();
         agent_doc_queue_io::queue_claim::start_attempt(

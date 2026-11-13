@@ -21,7 +21,7 @@
 use agent_doc_document::queue_projection::strip_priority_markers;
 
 /// Binding closeout for `#address` and `#adversarial-pr` (`#addressinline`).
-pub const INLINE_DISCUSSION_RULE: &str = "Inline discussion comments (#addressinline): #address and #adversarial-pr load every inline pull-request discussion comment, not only the review body. Before review or address, query `gh api repos/<owner>/<repo>/pulls/<number>/comments`. A root comment is one with no in_reply_to_id; its html_url contains `#discussion_r`. A `#pullrequestreview` body, an issue comment, and a later reply are not that root comment. Do not dismiss a thread. The run is not complete until every root thread's written fix is the code on the exact current head and that thread is addressed and resolved. The hand-back names each root thread on its own line: `THREAD-FIX-ON-HEAD <discussion-url> head=<sha> resolved`. Emit that line only when that head's code is the written fix and the thread was loaded, addressed, and resolved. When the comments query returns no root comments, the hand-back says `INLINE-THREADS-LOADED 0 head=<sha>` and names the query. A later reply on a thread does not stand in for loading the root comment.";
+pub const INLINE_DISCUSSION_RULE: &str = "Inline discussion comments (#addressinline): #address and #adversarial-pr load every inline pull-request discussion comment, not only the review body. Before review or address, query `gh api repos/<owner>/<repo>/pulls/<number>/comments`. A root comment is one with no in_reply_to_id; its html_url contains `#discussion_r`. A `#pullrequestreview` body, an issue comment, and a later reply are not that root comment. Do not dismiss a thread. The run is not complete until every root thread's written fix is the code on the exact current head and that thread is addressed and resolved. The hand-back names each root thread on its own line: `THREAD-FIX-ON-HEAD <discussion-url> head=<sha> resolved`. Emit that line only when that head's code is the written fix and the thread was loaded, addressed, and resolved. When the comments query returns no root comments, the hand-back says `INLINE-THREADS-LOADED 0 head=<sha>` and names the query. A later reply on a thread does not stand in for loading the root comment. A line that cites a reply comment's own `#discussion_r` URL opens with `Reply`, `Replies`, or `Replied`; that reply id needs no receipt, and its root thread still does.";
 
 const GOAL_NAMES: &[&str] = &["#address", "#adversarial-pr"];
 
@@ -137,7 +137,7 @@ pub fn inline_threads_settled(response: &str) -> bool {
         return false;
     }
     let receipts = thread_fix_receipts(response);
-    let mentioned = discussion_ids(response);
+    let mentioned = root_discussion_ids(response);
     if inline_threads_loaded_zero(response) {
         return receipts.is_empty() && mentioned.is_empty();
     }
@@ -147,6 +147,36 @@ pub fn inline_threads_settled(response: &str) -> bool {
     mentioned
         .iter()
         .all(|id| receipts.iter().any(|receipt| &receipt.id == id))
+}
+
+/// Discussion ids the hand-back names as root threads.
+///
+/// A line that opens with `Reply`, `Replies`, or `Replied` cites reply
+/// comments (`in_reply_to_id` set), not root threads, so its ids need no
+/// receipt of their own (`#inlinegatefalsereject`). Every other mention does.
+fn root_discussion_ids(response: &str) -> Vec<String> {
+    let mut ids = Vec::new();
+    for line in response.lines() {
+        if line_cites_replies(line) {
+            continue;
+        }
+        for id in discussion_ids(line) {
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+    }
+    ids
+}
+
+fn line_cites_replies(line: &str) -> bool {
+    let label = line_payload(line).trim_start_matches('[');
+    let word: String = label
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphabetic())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    matches!(word.as_str(), "reply" | "replies" | "replied")
 }
 
 fn admits_unloaded_or_absent(response: &str) -> bool {
@@ -388,6 +418,54 @@ mod tests {
             both_receipts()
         );
         assert!(!inline_threads_settled(&absent));
+    }
+
+    /// `#inlinegatefalsereject`: the PR 412 `#adversarial-pr` hand-back
+    /// (owner subagent:adv412 generation 1), verbatim except its local
+    /// delivery-worktree path. Its one root thread `discussion_r4568099735`
+    /// has a receipt; the cycle-1 line also cites the reply comment
+    /// `discussion_r4568355508` (`in_reply_to_id` = 4568099735).
+    const PR412_HAND_BACK: &str = include_str!("../tests/fixtures/pr412_adversarial_handback.md");
+
+    #[test]
+    fn inlinegatefalsereject_a_cited_reply_is_not_a_second_root_thread() {
+        assert!(
+            PR412_HAND_BACK.contains("Reply on the thread (now resolved): https://github.com/btakita/agent-doc/pull/412#discussion_r4568355508"),
+            "the fixture keeps the reply citation that tripped the gate"
+        );
+        assert!(inline_threads_settled(PR412_HAND_BACK));
+        assert!(head_requires_inline_discussions(
+            "https://github.com/btakita/agent-doc/pull/412: #adversarial-pr [#q-23c8d4f70342]",
+            &presets(),
+        ));
+        assert_eq!(
+            root_discussion_ids(PR412_HAND_BACK),
+            vec!["discussion_r4568099735".to_string()]
+        );
+
+        let without_receipt = PR412_HAND_BACK
+            .lines()
+            .filter(|line| !line.starts_with("THREAD-FIX-ON-HEAD"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !inline_threads_settled(&without_receipt),
+            "citing only the reply does not load or settle the root thread"
+        );
+
+        for label in ["Replies", "Replied on", "[Reply]("] {
+            let cited = format!(
+                "THREAD-FIX-ON-HEAD {MUST} head={HEAD} resolved\n- {label} https://github.com/btakita/agent-doc/pull/412#discussion_r4568355508\n"
+            );
+            assert!(inline_threads_settled(&cited), "{label}");
+        }
+        let root_named_later = format!(
+            "THREAD-FIX-ON-HEAD {MUST} head={HEAD} resolved\nThe reply on {SHOULD} is resolved.\n"
+        );
+        assert!(
+            !inline_threads_settled(&root_named_later),
+            "a line that does not open with a reply label still names a root thread"
+        );
     }
 
     #[test]

@@ -679,15 +679,26 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   `**Deferred:** no subagent available`; never silently change delegated work
   into inline work. Only after the project-wide sync view shows no eligible
   pending, claimed-but-unstarted, lost, reported, or unknown row, and no live
-  transient queue row (`📥` `🟡` `🚧` `☑️` `⚠️` `⚠️🟡` `⚠️🚧` `⚠️☑️` `🔄` `❔`),
-  end the turn quietly. A visible `🚧` or `⚠️🚧` row is not a quiet wait: finish
-  the running worker, or continue the lost generation and retry it in this turn
-  if continue fails. A frozen `🚧` whose continue already failed authorizes a
-  new generation in the same turn (`#transientcloseout`). The Stop hook blocks
-  a genuine turn end until those rows leave the transient set. Explicitly
-  dependency/cap-held rows that are not in that set may wait, and subagent
-  completion notifications resume the loop without polling or a scheduled
-  re-entry.
+  transient queue row (`📥` `🟡` `🚧` `☑️` `⚠️` `⚠️🟡` `⚠️🚧` `⚠️☑️` `🔄` `❔`)
+  that is agent-actionable now, end the turn quietly. Two kinds of transient
+  row are quiescent and do not hold the turn (`#stopquiescentrows`): an
+  operator-owned `🙋` row (`🙋📥`, `🙋☑️`, the `🙋` part of `🙋🚧`) once its
+  operator-request packet is in `agent:exchange` and its `agent:todo` action
+  is open, and a `🟡`/`🚧` row whose claim is heartbeat-fresh (a dispatch
+  inside its acknowledgement grace, or a running worker whose last start or
+  `queue claim --refresh` is inside the bound). The Stop hook then ends the
+  turn and logs `state=waiting_on_claims` (or `waiting_on_operator`). Those
+  rows stay live: never strike, prune, or clear them; the operator's answer
+  or the worker's report re-enters them. A `🚧` with no fresh claim, an
+  unacknowledged `🟡`, and `⚠️🚧` are not quiet waits: refresh a live worker's
+  heartbeat, finish it, or continue the lost generation and retry it in this
+  turn if continue fails. A frozen `🚧` whose continue already failed
+  authorizes a new generation in the same turn (`#transientcloseout`). A
+  drainable `📥`, a `☑️` awaiting integration, `🔄`, and `❔` keep blocking a
+  genuine turn end; a `📥` that a closed `agent:loop` window holds back is not
+  due and does not. Explicitly dependency/cap-held rows that are not in that
+  set may wait, and subagent completion notifications resume the loop without
+  polling or a scheduled re-entry.
 - If session-accretion supplies bounded context, use the included `### Re:`
   blocks as prompt-position anchors, not proof that older turns are absent.
 - Execute from the planning record. If `execution_scope=plan_backlog_only`, stay

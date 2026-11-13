@@ -458,11 +458,10 @@ impl agent_doc_preflight_io::PendingMaintenanceEffectFence for BackgroundRequest
             self.current_request_is_exact(file)?,
             "background queue maintenance request was superseded"
         );
-        let observed = agent_doc_document_realtime_io::try_resolve_current_document_with_source(
+        let observed = agent_doc_document_realtime_io::peek_current_document_content(
             file,
             "background_queue_maintenance_effect_fence",
-        )?
-        .into_content();
+        )?;
         let observed_hash = agent_doc_hash::content_hash(&observed);
         let expected = self.expected_authority_hash.lock().unwrap().clone();
         anyhow::ensure!(
@@ -479,11 +478,10 @@ impl agent_doc_preflight_io::PendingMaintenanceEffectFence for BackgroundRequest
             "background queue maintenance request was superseded"
         );
         let target_hash = agent_doc_hash::content_hash(content);
-        let observed = agent_doc_document_realtime_io::try_resolve_current_document_with_source(
+        let observed = agent_doc_document_realtime_io::peek_current_document_content(
             file,
             "background_queue_maintenance_applied_cut",
-        )?
-        .into_content();
+        )?;
         anyhow::ensure!(
             agent_doc_hash::content_hash(&observed) == target_hash,
             "background queue maintenance applied cut was superseded before receipt"
@@ -615,6 +613,7 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
                 file,
                 None,
                 &queue_authority_hash,
+                &effect_fence,
                 queue_mutation.apply_guard(),
             );
             match outcome {

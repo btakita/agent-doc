@@ -4095,6 +4095,7 @@ fn record_selected_queue_head_state(
     content: &str,
     head_text: &str,
     drainable: bool,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
 ) -> Result<()> {
     let canonical = file.canonicalize().with_context(|| {
         format!(
@@ -4128,9 +4129,11 @@ fn record_selected_queue_head_state(
             hosting_epoch: None,
         },
     );
+    fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Controller)?;
     let inserted = publish_reactive_state_event(&project_root, &event)?;
-    agent_doc_ops_log_io::log_op(
+    queue_maintenance_log_op(
         file,
+        effect_fence,
         &format!(
             "queue_selected_state_event_recorded file={} event_id={} inserted={} document_hash={} node_id={} drainable={}",
             file.display(),
@@ -4140,7 +4143,7 @@ fn record_selected_queue_head_state(
             node_key,
             drainable
         ),
-    );
+    )?;
     Ok(())
 }
 
@@ -4149,6 +4152,7 @@ fn record_deferred_queue_head_state(
     content: &str,
     head_text: &str,
     reason: &str,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
 ) -> Result<()> {
     let canonical = file.canonicalize().with_context(|| {
         format!(
@@ -4182,6 +4186,7 @@ fn record_deferred_queue_head_state(
             hosting_epoch: None,
         },
     );
+    fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Controller)?;
     let selected_inserted = publish_reactive_state_event(&project_root, &selected_event)?;
     let reason_hash = agent_doc_hash::content_hash(reason);
     let deferred_event = agent_doc_state_backbone::StateEvent::new(
@@ -4195,9 +4200,11 @@ fn record_deferred_queue_head_state(
             hosting_epoch: None,
         },
     );
+    fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Controller)?;
     let deferred_inserted = publish_reactive_state_event(&project_root, &deferred_event)?;
-    agent_doc_ops_log_io::log_op(
+    queue_maintenance_log_op(
         file,
+        effect_fence,
         &format!(
             "queue_deferred_state_event_recorded file={} selected_event_id={} selected_inserted={} deferred_event_id={} deferred_inserted={} document_hash={} node_id={} reason={}",
             file.display(),
@@ -4209,7 +4216,7 @@ fn record_deferred_queue_head_state(
             node_key,
             reason
         ),
-    );
+    )?;
     Ok(())
 }
 
@@ -4218,6 +4225,7 @@ fn record_queue_worklist_state(
     content: &str,
     entries: &[agent_doc_queue::document_queue::QueueEntry],
     active: bool,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
 ) -> Result<()> {
     let canonical = file.canonicalize().with_context(|| {
         format!(
@@ -4264,9 +4272,11 @@ fn record_queue_worklist_state(
             hosting_epoch: None,
         },
     );
+    fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Controller)?;
     let inserted = publish_reactive_state_event(&project_root, &event)?;
-    agent_doc_ops_log_io::log_op(
+    queue_maintenance_log_op(
         file,
+        effect_fence,
         &format!(
             "queue_worklist_state_event_recorded file={} event_id={} inserted={} document_hash={} queue_hash={} active={}",
             file.display(),
@@ -4276,7 +4286,7 @@ fn record_queue_worklist_state(
             queue_hash,
             active
         ),
-    );
+    )?;
     Ok(())
 }
 
@@ -5690,9 +5700,14 @@ fn queue_maintenance_skipped(
     file: &Path,
     skip: agent_doc_queue::backlog_sync::QueueMaintenanceSkip,
     detail: Option<&str>,
-) -> QueueState {
-    agent_doc_ops_log_io::log_op(file, &skip.log_line(&file.display().to_string(), detail));
-    QueueState::default()
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
+) -> Result<QueueState> {
+    queue_maintenance_log_op(
+        file,
+        effect_fence,
+        &skip.log_line(&file.display().to_string(), detail),
+    )?;
+    Ok(QueueState::default())
 }
 
 pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> {
@@ -5744,6 +5759,7 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         admission_snapshot,
         &apply_guard,
         None,
+        None,
     )
 }
 
@@ -5762,6 +5778,7 @@ pub fn run_queue_maintenance_under_apply_guard(
         None,
         apply_guard,
         None,
+        None,
     )
 }
 
@@ -5772,6 +5789,7 @@ pub fn run_queue_maintenance_for_admitted_authority_under_apply_guard(
     file: &Path,
     diff: Option<&str>,
     admitted_authority_hash: &str,
+    effect_fence: &dyn PendingMaintenanceEffectFence,
     apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
 ) -> Result<QueueState> {
     run_queue_maintenance_with_options_under_apply_guard(
@@ -5781,6 +5799,7 @@ pub fn run_queue_maintenance_for_admitted_authority_under_apply_guard(
         None,
         apply_guard,
         Some(admitted_authority_hash),
+        Some(effect_fence),
     )
 }
 
@@ -5802,6 +5821,68 @@ impl std::fmt::Display for QueueMaintenanceAuthoritySuperseded {
 
 impl std::error::Error for QueueMaintenanceAuthoritySuperseded {}
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum QueueMaintenanceEffectFamily {
+    Ops,
+    Controller,
+    Document,
+    Ledger,
+    Snapshot,
+    Worktree,
+}
+
+impl QueueMaintenanceEffectFamily {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Ops => "ops",
+            Self::Controller => "controller",
+            Self::Document => "document",
+            Self::Ledger => "ledger",
+            Self::Snapshot => "snapshot",
+            Self::Worktree => "worktree",
+        }
+    }
+}
+
+fn fence_queue_maintenance_effect(
+    file: &Path,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
+    family: QueueMaintenanceEffectFamily,
+) -> Result<()> {
+    let Some(effect_fence) = effect_fence else {
+        return Ok(());
+    };
+    effect_fence.check(file)?;
+    let delayed_family = std::env::var("AGENT_DOC_TEST_QUEUE_MAINTENANCE_EFFECT_DELAY_FAMILY").ok();
+    if delayed_family.as_deref() == Some(family.label()) {
+        let delay_ms = std::env::var("AGENT_DOC_TEST_QUEUE_MAINTENANCE_EFFECT_DELAY_MS")
+            .ok()
+            .and_then(|raw| raw.trim().parse::<u64>().ok())
+            .unwrap_or(750);
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_maintenance_internal_effect_test_delay file={} family={} delay_ms={delay_ms}",
+                file.display(),
+                family.label(),
+            ),
+        );
+        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        effect_fence.check(file)?;
+    }
+    Ok(())
+}
+
+fn queue_maintenance_log_op(
+    file: &Path,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
+    message: &str,
+) -> Result<()> {
+    fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Ops)?;
+    agent_doc_ops_log_io::log_op(file, message);
+    Ok(())
+}
+
 fn run_queue_maintenance_with_options_under_apply_guard(
     file: &Path,
     diff: Option<&str>,
@@ -5809,6 +5890,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
     admission_snapshot: Option<&str>,
     apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
     admitted_authority_hash: Option<&str>,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
 ) -> Result<QueueState> {
     apply_guard.ensure_protects(file)?;
     // #sqedit-race Phase 2: defer ALL queue maintenance mutation while a different,
@@ -5821,12 +5903,13 @@ fn run_queue_maintenance_with_options_under_apply_guard(
     if let Some(holder_pid) =
         agent_doc_queue_io::queue_edit_owner::foreign_queue_edit_in_flight(&file.to_string_lossy())
     {
-        agent_doc_ops_log_io::log_op(
+        queue_maintenance_log_op(
             file,
+            effect_fence,
             &format!(
                 "queue_maintenance_deferred reason=queue_edit_lease holder_pid={holder_pid} (#sqedit-race)"
             ),
-        );
+        )?;
         eprintln!(
             "[preflight] queue: deferring maintenance — direct queue edit in flight (pid {holder_pid}; #sqedit-race)"
         );
@@ -5851,11 +5934,12 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                 match std::fs::read_to_string(file) {
                     Ok(content) => (content, None),
                     Err(err) => {
-                        return Ok(queue_maintenance_skipped(
+                        return queue_maintenance_skipped(
                             file,
                             agent_doc_queue::backlog_sync::QueueMaintenanceSkip::DocumentUnreadable,
                             Some(&err.to_string()),
-                        ));
+                            effect_fence,
+                        );
                     }
                 }
             }
@@ -5863,27 +5947,29 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                 agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
                 | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending,
             )) => {
-                agent_doc_ops_log_io::log_op(
+                queue_maintenance_log_op(
                     file,
+                    effect_fence,
                     &format!(
                         "queue_maintenance_deferred file={} reason=editor_authority_not_current",
                         file.display()
                     ),
-                );
+                )?;
                 return Err(QueueAuthorityUnavailable::new(
                     "editor authority is attached but its current replica cut is unavailable after bounded recovery",
                 )
                 .into());
             }
             Err(err) => {
-                agent_doc_ops_log_io::log_op(
+                queue_maintenance_log_op(
                     file,
+                    effect_fence,
                     &format!(
                         "queue_maintenance_deferred file={} reason=current_text_unavailable error={}",
                         file.display(),
                         err
                     ),
-                );
+                )?;
                 return Err(QueueAuthorityUnavailable::new(format!(
                     "current queue authority is unavailable after bounded recovery: {err:#}"
                 ))
@@ -5913,13 +5999,14 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         .and_then(|raw| raw.trim().parse::<u64>().ok())
         .filter(|delay| *delay > 0)
     {
-        agent_doc_ops_log_io::log_op(
+        queue_maintenance_log_op(
             file,
+            effect_fence,
             &format!(
                 "queue_maintenance_background_test_delay file={} delay_ms={delay}",
                 file.display(),
             ),
-        );
+        )?;
         std::thread::sleep(std::time::Duration::from_millis(delay));
     }
     let normalized_generated_responses =
@@ -5943,11 +6030,12 @@ fn run_queue_maintenance_with_options_under_apply_guard(
     let mut components = match agent_doc_element::element::parse(&current_content) {
         Ok(cs) => cs,
         Err(err) => {
-            return Ok(queue_maintenance_skipped(
+            return queue_maintenance_skipped(
                 file,
                 agent_doc_queue::backlog_sync::QueueMaintenanceSkip::ComponentParseFailed,
                 Some(&err.to_string()),
-            ));
+                effect_fence,
+            );
         }
     };
     let exchange_prompt =
@@ -5965,11 +6053,12 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         components = match agent_doc_element::element::parse(&current_content) {
             Ok(cs) => cs,
             Err(err) => {
-                return Ok(queue_maintenance_skipped(
+                return queue_maintenance_skipped(
                     file,
                     agent_doc_queue::backlog_sync::QueueMaintenanceSkip::ComponentParseFailed,
                     Some(&err.to_string()),
-                ));
+                    effect_fence,
+                );
             }
         };
         mutated = true;
@@ -5993,11 +6082,12 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         Ok(None) => {}
         Err(err) => {
             eprintln!("[preflight] queue topology warning: {err}");
-            return Ok(queue_maintenance_skipped(
+            return queue_maintenance_skipped(
                 file,
                 agent_doc_queue::backlog_sync::QueueMaintenanceSkip::QueueTopologyInvalid,
                 Some(&err.to_string()),
-            ));
+                effect_fence,
+            );
         }
     }
     // A valued backlog `queue=<id>` is durable ownership, not a hint to the
@@ -6043,20 +6133,22 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             {
                 Some(queue) => queue.id.clone(),
                 None => {
-                    return Ok(queue_maintenance_skipped(
+                    return queue_maintenance_skipped(
                         file,
                         agent_doc_queue::backlog_sync::QueueMaintenanceSkip::NoQueueComponent,
                         None,
-                    ));
+                        effect_fence,
+                    );
                 }
             },
             Err(err) => {
                 eprintln!("[preflight] queue topology warning: {err}");
-                return Ok(queue_maintenance_skipped(
+                return queue_maintenance_skipped(
                     file,
                     agent_doc_queue::backlog_sync::QueueMaintenanceSkip::QueueTopologyInvalid,
                     Some(&err.to_string()),
-                ));
+                    effect_fence,
+                );
             }
         };
     let mut comp = agent_doc_queue::queue_set::component_for_id(
@@ -6203,16 +6295,18 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         Ok(e) => e,
         Err(e) => {
             eprintln!("[preflight] queue parse warning: {}", e);
-            return Ok(queue_maintenance_skipped(
+            return queue_maintenance_skipped(
                 file,
                 agent_doc_queue::backlog_sync::QueueMaintenanceSkip::QueueBodyParseFailed,
                 Some(&e.to_string()),
-            ));
+                effect_fence,
+            );
         }
     };
     // Publish authoritative markdown before any worklist projection. The
     // controller's document-scoped Computed persists terminal lifecycle facts
     // and returns only after its durable receipt feeds back into projection.
+    fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Controller)?;
     agent_doc_queue_io::queue_consume::observe_authoritative_queue_state_under_apply_guard(
         file,
         &current_content,
@@ -6349,10 +6443,11 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         .clone();
         mutated = true;
         eprintln!("[preflight] queue: operator queue edit armed `queue: go` (#queueeditgo)");
-        agent_doc_ops_log_io::log_op(
+        queue_maintenance_log_op(
             file,
+            effect_fence,
             &format!("queue_edit_go_inferred file={}", file.display()),
-        );
+        )?;
     }
 
     let project_root = file.canonicalize().ok().and_then(|canonical| {
@@ -6378,15 +6473,16 @@ fn run_queue_maintenance_with_options_under_apply_guard(
     let (queue_free_text_scope, held_free_text) =
         gate_free_text_admission_scope(queue_free_text_scope, &entries, coin_gate);
     if !held_free_text.is_empty() {
-        agent_doc_ops_log_io::log_op(
+        queue_maintenance_log_op(
             file,
+            effect_fence,
             &format!(
                 "free_text_coin_held file={} held={} observed_typing={} (#halftypedcoin)",
                 file.display(),
                 held_free_text.len(),
                 coin_gate.observed.is_some(),
             ),
-        );
+        )?;
         eprintln!(
             "[preflight] queue: held {} free-text line(s) from backlog coining; still being typed (#halftypedcoin)",
             held_free_text.len()
@@ -6456,6 +6552,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         // keeps its owner — the claim follows the exact promotion receipt, so
         // the new id head never resurfaces as unclaimed dispatch work.
         // Best-effort: a claim-store failure must not abort maintenance.
+        fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Ledger)?;
         if let Err(err) =
             agent_doc_queue_io::queue_claim::transfer_promoted_claims(file, &promotions)
         {
@@ -6612,6 +6709,11 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                 .filter(|e| matches!(e, agent_doc_queue::document_queue::QueueEntry::Prompt(_)))
                 .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
                 .collect();
+            fence_queue_maintenance_effect(
+                file,
+                effect_fence,
+                QueueMaintenanceEffectFamily::Ledger,
+            )?;
             agent_doc_queue_io::queue_tombstone::reconcile_for_file(
                 file,
                 &snapshot_active_ids,
@@ -6676,14 +6778,15 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                  from backlog→queue mirror (#provauth2 tombstone)",
                 sync_plan.tombstone_suppressed_count
             );
-            agent_doc_ops_log_io::log_op(
+            queue_maintenance_log_op(
                 file,
+                effect_fence,
                 &format!(
                     "queue_mirror_tombstone_suppressed file={} count={} (#provauth2)",
                     file.display(),
                     sync_plan.tombstone_suppressed_count
                 ),
-            );
+            )?;
         }
         match sync_plan.active_policy {
             AutoBacklogQueueSyncPolicy::ExplicitlyStopped if sync_plan.active_held_count > 0 => {
@@ -6732,13 +6835,14 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                 if !skipped.is_empty() {
                     let session_label = if live_ipc { "live_ipc" } else { "clean" };
                     for skip in &skipped {
-                        agent_doc_ops_log_io::log_op(
+                        queue_maintenance_log_op(
                             file,
+                            effect_fence,
                             &format!(
                                 "go_queue_mirror_deferred id=#{} reason={} session={} (#mirrorall)",
                                 skip.id, skip.reason, session_label
                             ),
-                        );
+                        )?;
                     }
                     // #mirrorall (operator directive 2026-06-18): mirror ALL open
                     // `queue`-attr backlog ids into the queue, INCLUDING `[operator-verify]`
@@ -6851,6 +6955,13 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             .collect::<std::collections::HashSet<String>>()
             .into_iter()
             .collect();
+        if !mirror_owned.is_empty() {
+            fence_queue_maintenance_effect(
+                file,
+                effect_fence,
+                QueueMaintenanceEffectFamily::Ledger,
+            )?;
+        }
         if !mirror_owned.is_empty()
             && let Err(err) = agent_doc_project_root_io::project_root_containing(file)
                 .context("queue head provenance: no project root for state.db")
@@ -7069,13 +7180,14 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         eprintln!(
             "[preflight] queue: removed displaced struck queue item(s) below the closing marker"
         );
-        agent_doc_ops_log_io::log_op(
+        queue_maintenance_log_op(
             file,
+            effect_fence,
             &format!(
                 "queue_escape_repair file={} reason=struck_items_below_close_marker",
                 file.display()
             ),
-        );
+        )?;
     }
 
     if let Some((deduped_content, dropped)) =
@@ -7569,17 +7681,19 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             })
             .collect();
         if predating_echo_heads > 0 {
-            agent_doc_ops_log_io::log_op(
+            queue_maintenance_log_op(
                 file,
+                effect_fence,
                 &format!(
                     "preflight_freetext_residue_strike_skipped_echo_predates_head_entry file={} heads={predating_echo_heads} (#qheadresiduescope)",
                     file.display(),
                 ),
-            );
+            )?;
         }
         if !loop_scope_skips.is_empty() {
-            agent_doc_ops_log_io::log_op(
+            queue_maintenance_log_op(
                 file,
+                effect_fence,
                 &format!(
                     "preflight_freetext_residue_strike_skipped_loop_echo_outside_pass file={} queue_id={} heads={} anchors={} (GH #327)",
                     file.display(),
@@ -7587,7 +7701,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                     loop_scope_skips.len(),
                     loop_scope_skips.join(","),
                 ),
-            );
+            )?;
         }
         if struck_count > 0 {
             let new_body = agent_doc_queue::document_queue::render(&new_entries);
@@ -7608,17 +7722,23 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             eprintln!(
                 "[preflight] queue: auto-struck {struck_count} answered free-text head(s) by committed exchange match (#qheadresidue)"
             );
-            agent_doc_ops_log_io::log_op(
+            queue_maintenance_log_op(
                 file,
+                effect_fence,
                 &format!(
                     "preflight_freetext_residue_strike file={} struck={struck_count}",
                     file.display(),
                 ),
-            );
+            )?;
             // `#claimstrike`: the answered head's claim ends with its strike.
             // Never fatal: a claim on a closed head is inert, and closeout
             // reconciliation prunes it.
             for head in &struck_claimed_heads {
+                fence_queue_maintenance_effect(
+                    file,
+                    effect_fence,
+                    QueueMaintenanceEffectFamily::Ledger,
+                )?;
                 if let Err(err) = agent_doc_queue_io::queue_claim::release_closed_head(file, head) {
                     eprintln!(
                         "[preflight] WARNING: could not release the claim on a struck free-text head in {}: {err:#}",
@@ -7786,14 +7906,15 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                             display,
                         );
                     }
-                    agent_doc_ops_log_io::log_op(
+                    queue_maintenance_log_op(
                         file,
+                        effect_fence,
                         &format!(
                             "preflight_freetext_backlog_done_strike file={} struck={}",
                             file.display(),
                             struck.len(),
                         ),
-                    );
+                    )?;
                     if agent_doc_queue::document_queue::prompts(&activation.entries_after)
                         .is_empty()
                     {
@@ -7826,15 +7947,16 @@ fn run_queue_maintenance_with_options_under_apply_guard(
     if struck_retirement.content != current_content {
         current_content = struck_retirement.content;
         mutated = true;
-        agent_doc_ops_log_io::log_op(
+        queue_maintenance_log_op(
             file,
+            effect_fence,
             &format!(
                 "preflight_struck_completion_cells_retired file={} heads={} cells={} (#strikeretires)",
                 file.display(),
                 struck_retirement.struck_heads.len(),
                 struck_retirement.retired_keys.len(),
             ),
-        );
+        )?;
     }
     let struck_heads_this_pass = struck_retirement.struck_heads;
 
@@ -7858,6 +7980,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                 )
             })
             .collect::<Vec<_>>();
+        fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Ledger)?;
         if let Err(err) = agent_doc_queue_io::queue_claim::transfer_prompt_identity_admissions(
             file,
             &claim_admissions,
@@ -7910,6 +8033,11 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             current_content = frontmatter::merge_queue_hold(&current_content)?;
             // Persist to file + snapshot (skip the raw disk write behind a live
             // editor; #fccqueue routes the queue shape through IPC convergence).
+            fence_queue_maintenance_effect(
+                file,
+                effect_fence,
+                QueueMaintenanceEffectFamily::Document,
+            )?;
             current_content = persist_queue_maintenance_doc_with_admitted_authority(
                 file,
                 &current_content,
@@ -7917,6 +8045,12 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                 project_root.as_deref(),
                 "queue_halt",
                 admitted_authority_hash,
+                effect_fence,
+            )?;
+            fence_queue_maintenance_effect(
+                file,
+                effect_fence,
+                QueueMaintenanceEffectFamily::Ledger,
             )?;
             agent_doc_queue_io::claim_release_receipt::retire_struck_or_warn(
                 file,
@@ -7943,21 +8077,32 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                     if let Ok(m) = frontmatter::merge_queue_hold(&new_snap) {
                         new_snap = m;
                     }
-                    if new_snap != snap
-                        && let Err(e) = agent_doc_snapshot_io::checkpoint_document_baseline(
+                    if new_snap != snap {
+                        fence_queue_maintenance_effect(
+                            file,
+                            effect_fence,
+                            QueueMaintenanceEffectFamily::Snapshot,
+                        )?;
+                        if let Err(e) = agent_doc_snapshot_io::checkpoint_document_baseline(
                             file,
                             &new_snap,
                             agent_doc_ops_log_io::log_op,
-                        )
-                    {
-                        eprintln!("[preflight] queue halt: snapshot sync warning: {}", e);
+                        ) {
+                            eprintln!("[preflight] queue halt: snapshot sync warning: {}", e);
+                        }
                     }
                 }
             }
-            record_queue_worklist_state(file, &current_content, &after_stop, false)?;
+            record_queue_worklist_state(file, &current_content, &after_stop, false, effect_fence)?;
             if let Some(head) = agent_doc_queue::document_queue::first_prompt(&after_stop) {
                 let head_text = strip_in_progress_marker(&head.text);
-                record_deferred_queue_head_state(file, &current_content, &head_text, "stop_fence")?;
+                record_deferred_queue_head_state(
+                    file,
+                    &current_content,
+                    &head_text,
+                    "stop_fence",
+                    effect_fence,
+                )?;
             }
             return Ok(QueueState {
                 authoritative_content: Some(current_content),
@@ -7997,15 +8142,28 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                     project_root.as_deref(),
                     "queue_prompt_identity_deferred",
                     admitted_authority_hash,
+                    effect_fence,
                 )?;
             }
-            record_queue_worklist_state(file, &current_content, &activation.entries_after, false)?;
+            record_queue_worklist_state(
+                file,
+                &current_content,
+                &activation.entries_after,
+                false,
+                effect_fence,
+            )?;
             if let Some(head) =
                 agent_doc_queue::document_queue::first_prompt(&activation.entries_after)
             {
                 let head_text = strip_in_progress_marker(&head.text);
                 let reason = format!("time_gate:{dt}");
-                record_deferred_queue_head_state(file, &current_content, &head_text, &reason)?;
+                record_deferred_queue_head_state(
+                    file,
+                    &current_content,
+                    &head_text,
+                    &reason,
+                    effect_fence,
+                )?;
             }
             return Ok(QueueState {
                 authoritative_content: Some(current_content),
@@ -8373,14 +8531,15 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         .collect::<Vec<_>>();
     claims_held_after_report.sort();
     if !claims_held_after_report.is_empty() {
-        agent_doc_ops_log_io::log_op(
+        queue_maintenance_log_op(
             file,
+            effect_fence,
             &format!(
                 "preflight_queue_claim_held_after_report file={} ids={} (#queueawaitop)",
                 file.display(),
                 claims_held_after_report.join(","),
             ),
-        );
+        )?;
         queue_warnings.push(PreflightWarning {
             code: "queue_claim_held_after_report".to_string(),
             message: format!(
@@ -8456,14 +8615,15 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         if !operator_unskipped.is_empty() {
             let mut ids = operator_unskipped.iter().cloned().collect::<Vec<_>>();
             ids.sort();
-            agent_doc_ops_log_io::log_op(
+            queue_maintenance_log_op(
                 file,
+                effect_fence,
                 &format!(
                     "preflight_queue_operator_unskip file={} ids={} (#releaseskipcarried)",
                     file.display(),
                     ids.join(","),
                 ),
-            );
+            )?;
         }
         let mut fresh = advance_skipped_queue_head_ids(
             carried,
@@ -8477,6 +8637,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
     } else {
         std::collections::HashSet::new()
     };
+    fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Ledger)?;
     if let Err(err) = agent_doc_cycle_state_io::set_skipped_queue_head_ids(
         file,
         &skipped_queue_head_ids.iter().cloned().collect::<Vec<_>>(),
@@ -8538,14 +8699,15 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         agent_doc_document::queue_projection::ActiveQueuePromptProjection::default()
     };
     if !skipped_queue_head_ids.is_empty() {
-        agent_doc_ops_log_io::log_op(
+        queue_maintenance_log_op(
             file,
+            effect_fence,
             &format!(
                 "preflight_queue_skip file={} skipped={} (#queueskip)",
                 file.display(),
                 skipped_queue_head_ids.len(),
             ),
-        );
+        )?;
     }
     if active_queue_projection.retargeted {
         eprintln!(
@@ -8581,11 +8743,13 @@ fn run_queue_maintenance_with_options_under_apply_guard(
     // visible queue projection derives every attempt state from the ledger.
     // Durable completion cells can restore a matching attempt to Reported
     // after restart; unmatched/older-generation evidence never creates state.
-    if activation.active
-        && let Err(err) =
+    if activation.active {
+        fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Ledger)?;
+        if let Err(err) =
             agent_doc_queue_io::queue_claim::reconcile_completion_evidence(file, &current_content)
-    {
-        eprintln!("[preflight] queue: completion evidence recovery failed ({err:#})");
+        {
+            eprintln!("[preflight] queue: completion evidence recovery failed ({err:#})");
+        }
     }
     let claim_ledger = activation
         .active
@@ -8630,16 +8794,17 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             .filter(|claim| claim.state.blocks_dispatch())
             .map(|claim| claim.item_text.clone()),
     );
-    if activation.active
-        && let Err(err) = agent_doc_cycle_state_io::set_projected_in_progress_queue_heads(
+    if activation.active {
+        fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Ledger)?;
+        if let Err(err) = agent_doc_cycle_state_io::set_projected_in_progress_queue_heads(
             file,
             &in_progress_queue_prompt_texts
                 .iter()
                 .map(|text| strip_priority_markers(text))
                 .collect::<Vec<_>>(),
-        )
-    {
-        eprintln!("[preflight] queue: failed to persist projected in-progress heads ({err:#})");
+        ) {
+            eprintln!("[preflight] queue: failed to persist projected in-progress heads ({err:#})");
+        }
     }
     let marker_components = agent_doc_element::element::parse(&current_content)?;
     let marker_body = agent_doc_queue::queue_set::component_for_id(
@@ -8896,6 +9061,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         mutated = true;
         eprintln!("[preflight] active: reconciled after queue lifecycle projection");
     }
+    fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Worktree)?;
     if let Some(reconciled) =
         agent_doc_queue_io::worktree_inventory::reconcile_maintained_under_apply_guard(
             file,
@@ -8910,6 +9076,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
 
     // Persist file mutations.
     if mutated {
+        fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Document)?;
         current_content = persist_queue_maintenance_doc_with_admitted_authority(
             file,
             &current_content,
@@ -8917,7 +9084,9 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             project_root.as_deref(),
             "queue_maintenance",
             admitted_authority_hash,
+            effect_fence,
         )?;
+        fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Ledger)?;
         agent_doc_queue_io::claim_release_receipt::retire_struck_or_warn(
             file,
             &struck_heads_this_pass,
@@ -9071,20 +9240,26 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         {
             new_snap = reconciled;
         }
+        fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Worktree)?;
         if let Some(reconciled) =
             agent_doc_queue_io::worktree_inventory::reconcile(file, &new_snap)?
         {
             new_snap = reconciled;
         }
 
-        if new_snap != snap_content
-            && let Err(e) = agent_doc_snapshot_io::checkpoint_document_baseline(
+        if new_snap != snap_content {
+            fence_queue_maintenance_effect(
+                file,
+                effect_fence,
+                QueueMaintenanceEffectFamily::Snapshot,
+            )?;
+            if let Err(e) = agent_doc_snapshot_io::checkpoint_document_baseline(
                 file,
                 &new_snap,
                 agent_doc_ops_log_io::log_op,
-            )
-        {
-            eprintln!("[preflight] queue: snapshot sync warning: {}", e);
+            ) {
+                eprintln!("[preflight] queue: snapshot sync warning: {}", e);
+            }
         }
     }
 
@@ -9104,6 +9279,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         })
         .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
         .collect();
+    fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Ledger)?;
     agent_doc_queue_io::queue_tombstone::record_observed_active_ids(
         file,
         &observed_active_queue_ids,
@@ -9198,6 +9374,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
     // Publish the final authority frontier before worklist/selection facts.
     // Lifecycle persistence remains a projection Effect, not a maintenance
     // companion write.
+    fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Controller)?;
     agent_doc_queue_io::queue_consume::observe_authoritative_queue_state_under_apply_guard(
         file,
         &current_content,
@@ -9208,10 +9385,17 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         &current_content,
         &activation.entries_after,
         activation.active,
+        effect_fence,
     )?;
     if activation.active && !active_queue_prompt_texts.is_empty() {
         for head_text in &active_queue_prompt_texts {
-            record_selected_queue_head_state(file, &current_content, head_text, true)?;
+            record_selected_queue_head_state(
+                file,
+                &current_content,
+                head_text,
+                true,
+                effect_fence,
+            )?;
         }
     } else if activation.deferred
         && let Some(head) = agent_doc_queue::document_queue::first_prompt(&activation.entries_after)
@@ -9222,7 +9406,13 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             .as_deref()
             .map(|start_at| format!("time_gate:{start_at}"))
             .unwrap_or_else(|| "deferred".to_string());
-        record_deferred_queue_head_state(file, &current_content, &head_text, &reason)?;
+        record_deferred_queue_head_state(
+            file,
+            &current_content,
+            &head_text,
+            &reason,
+            effect_fence,
+        )?;
     }
 
     Ok(QueueState {
@@ -10144,6 +10334,7 @@ pub(crate) fn persist_queue_maintenance_doc(
         project_root,
         source,
         None,
+        None,
     )
 }
 
@@ -10154,8 +10345,10 @@ fn persist_queue_maintenance_doc_with_admitted_authority(
     project_root: Option<&Path>,
     source: &str,
     admitted_authority_hash: Option<&str>,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
 ) -> Result<String> {
     let _ = project_root;
+    fence_queue_maintenance_effect(file, effect_fence, QueueMaintenanceEffectFamily::Document)?;
     // `#qdonestrike-durable`: a not-ready editor head must not silently discard the
     // maintenance plan. Queue maintenance is idempotent and recomputed every
     // preflight, so a missing/pending replica used to mean the auto-strike of
@@ -10178,16 +10371,18 @@ fn persist_queue_maintenance_doc_with_admitted_authority(
             // context.
             let ensured = ensure_document_model_via_authority(file, source);
             match &ensured {
-                Ok(ensured) => agent_doc_ops_log_io::log_op(
+                Ok(ensured) => queue_maintenance_log_op(
                     file,
+                    effect_fence,
                     &format!(
                         "queue_maintenance_model_ensure source={source} before={} after={} outcome=ready",
                         queue_maintenance_head_label(&observed),
                         queue_maintenance_head_label(ensured),
                     ),
-                ),
-                Err(err) => agent_doc_ops_log_io::log_op(
+                )?,
+                Err(err) => queue_maintenance_log_op(
                     file,
+                    effect_fence,
                     &format!(
                         "queue_maintenance_model_ensure source={source} before={} outcome=failed error={}",
                         queue_maintenance_head_label(&observed),
@@ -10197,7 +10392,7 @@ fn persist_queue_maintenance_doc_with_admitted_authority(
                             .take(240)
                             .collect::<String>(),
                     ),
-                ),
+                )?,
             }
             // `#px82`: a FAILED ensure used to `?` straight out of here, which
             // discarded the whole recomputed queue on the FIRST failure. The
@@ -10231,6 +10426,11 @@ fn persist_queue_maintenance_doc_with_admitted_authority(
                     .into());
                 }
                 let embedded = agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file);
+                fence_queue_maintenance_effect(
+                    file,
+                    effect_fence,
+                    QueueMaintenanceEffectFamily::Document,
+                )?;
                 let write = if embedded {
                     agent_doc_crdt_relay_io::apply_cp_write_for_file(file, &text, content, source)?
                 } else {
@@ -10242,13 +10442,17 @@ fn persist_queue_maintenance_doc_with_admitted_authority(
                     write.is_some(),
                     "{source}: admitted queue-maintenance compare-and-swap was not applied"
                 );
-                agent_doc_ops_log_io::log_op(
+                if let Some(effect_fence) = effect_fence {
+                    effect_fence.record_applied_content(file, content)?;
+                }
+                queue_maintenance_log_op(
                     file,
+                    effect_fence,
                     &format!(
                         "write_authority action=compare_and_swap authority=lazily surface=queue_maintenance source={source} admitted_hash={expected_hash} len={}",
                         content.len()
                     ),
-                );
+                )?;
                 return Ok(content.to_string());
             }
             // `#qtypeclobber`: queue maintenance is a structural successor, not
@@ -10273,6 +10477,11 @@ fn persist_queue_maintenance_doc_with_admitted_authority(
                 source,
                 text,
                 |expected, target| {
+                    fence_queue_maintenance_effect(
+                        file,
+                        effect_fence,
+                        QueueMaintenanceEffectFamily::Document,
+                    )?;
                     let write = if embedded {
                         agent_doc_crdt_relay_io::apply_cp_write_for_file(
                             file, expected, target, source,
@@ -10298,13 +10507,17 @@ fn persist_queue_maintenance_doc_with_admitted_authority(
                     }
                 },
             )?;
-            agent_doc_ops_log_io::log_op(
+            if let Some(effect_fence) = effect_fence {
+                effect_fence.record_applied_content(file, &rebased)?;
+            }
+            queue_maintenance_log_op(
                 file,
+                effect_fence,
                 &format!(
                     "write_authority action=compare_and_swap authority=lazily surface=queue_maintenance source={source} len={}",
                     rebased.len()
                 ),
-            );
+            )?;
             Ok(rebased)
         }
         agent_doc_crdt_relay_io::CurrentText::Detached => {
@@ -10335,17 +10548,26 @@ fn persist_queue_maintenance_doc_with_admitted_authority(
                 disk == expected_current || disk == content,
                 "{source}: disk head advanced during detached queue maintenance"
             );
+            fence_queue_maintenance_effect(
+                file,
+                effect_fence,
+                QueueMaintenanceEffectFamily::Document,
+            )?;
             if disk != content {
                 std::fs::write(file, content)
                     .with_context(|| format!("{source}: failed to write {}", file.display()))?;
             }
-            agent_doc_ops_log_io::log_op(
+            if let Some(effect_fence) = effect_fence {
+                effect_fence.record_applied_content(file, content)?;
+            }
+            queue_maintenance_log_op(
                 file,
+                effect_fence,
                 &format!(
                     "write_authority action=compare_and_swap authority=lazily surface=queue_maintenance source={source} len={}",
                     content.len()
                 ),
-            );
+            )?;
             Ok(content.to_string())
         }
         agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
@@ -18064,7 +18286,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert_eq!(head.defer_reason.as_deref(), Some("stop_fence"));
         assert!(!head.drainable);
 
-        record_selected_queue_head_state(&doc, &updated, "do [#alpha]", true).unwrap();
+        record_selected_queue_head_state(&doc, &updated, "do [#alpha]", true, None).unwrap();
         let ledger =
             agent_doc_controller_io::project_controller::load_state_event_ledger(dir.path())
                 .unwrap();

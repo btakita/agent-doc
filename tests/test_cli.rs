@@ -151,6 +151,56 @@ fn seed_snapshot(root: &Path, doc: &Path, content: &str) {
     agent_doc_snapshot_io::checkpoint_document_baseline(doc, content, |_, _| {}).unwrap();
 }
 
+/// Durable queue/controller state excluding the background owner's request and
+/// lease bookkeeping. Those coordination rows are expected to disappear when
+/// a superseded worker exits; every row below is an externally visible effect
+/// that the stale admitted cut must leave untouched.
+fn queue_maintenance_effect_digest(root: &Path) -> Vec<String> {
+    let conn = agent_doc_sqlite::state_store::open_state_db(root).unwrap();
+    let mut statement = conn
+        .prepare(
+            "SELECT row_value FROM (\
+             SELECT 'project_runtime_state|' || quote(state_key) || '|' || quote(payload) || '|' || updated_at_ms AS row_value \
+               FROM project_runtime_state WHERE state_key NOT LIKE 'queue_maintenance_request:%' \
+             UNION ALL \
+             SELECT 'document_runtime_state|' || quote(document_hash) || '|' || quote(state_kind) || '|' || quote(canonical_path) || '|' || quote(payload_json) || '|' || updated_at_ms \
+               FROM document_runtime_state \
+             UNION ALL \
+             SELECT 'state_events|' || id || '|' || quote(event_id) || '|' || quote(document_hash) || '|' || quote(domain) || '|' || quote(fact_type) || '|' || quote(payload_json) || '|' || timestamp || '|' || document_version \
+               FROM state_events \
+             UNION ALL \
+             SELECT 'queue_heads|' || quote(document_id) || '|' || quote(queue_name) || '|' || quote(generation) || '|' || quote(head_id) || '|' || quote(prompt) || '|' || quote(state) || '|' || priority || '|' || selected_at || '|' || updated_at \
+               FROM queue_heads \
+             UNION ALL \
+             SELECT 'queue_head_provenance|' || quote(document_id) || '|' || quote(head_identity) || '|' || quote(source) || '|' || recorded_at \
+               FROM queue_head_provenance \
+             UNION ALL \
+             SELECT 'queue_document_state|' || quote(document_hash) || '|' || quote(state_kind) || '|' || quote(canonical_path) || '|' || quote(payload_json) || '|' || updated_at_secs \
+               FROM queue_document_state \
+             UNION ALL \
+             SELECT 'document_cycles|' || quote(document_id) || '|' || quote(cycle_id) || '|' || quote(state) || '|' || quote(queue_head_id) || '|' || quote(response_commit) || '|' || updated_at \
+               FROM document_cycles\
+             ) ORDER BY row_value",
+        )
+        .unwrap();
+    statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .map(|row| row.unwrap())
+        .collect()
+}
+
+fn queue_effect_ops(lines: &str) -> Vec<&str> {
+    lines
+        .lines()
+        .filter(|line| {
+            !line.contains("queue_maintenance_internal_effect_test_delay")
+                && !line.contains("queue_maintenance_background_")
+                && !line.contains("pending_maintenance_background_")
+        })
+        .collect()
+}
+
 #[test]
 fn preflight_admits_under_five_seconds_while_slow_queue_maintenance_stays_detached() {
     let tmp = tempfile::TempDir::new().unwrap();
@@ -807,6 +857,126 @@ fn non_exchange_authority_drift_supersedes_stale_pending_effects() {
         0,
         "a stale generation published completion: {final_ops}",
     );
+}
+
+#[test]
+fn authority_drift_fences_every_internal_queue_maintenance_effect_family() {
+    for family in [
+        "ops",
+        "controller",
+        "ledger",
+        "worktree",
+        "document",
+        "snapshot",
+    ] {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = tmp.path().join("session.md");
+        let admitted = concat!(
+            "---\n",
+            "agent_doc_session: internal-effect-fence-test\n",
+            "agent_doc_format: template\n",
+            "agent: codex\n",
+            "model: gpt-5\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- agent:boundary:1234abcd -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- do [#fenced]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#fenced] stale admitted maintenance\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        fs::write(&doc, admitted).unwrap();
+        init_git_repo(tmp.path(), &doc);
+        seed_snapshot(tmp.path(), &doc, admitted);
+
+        let output = agent_doc_cmd()
+            .current_dir(tmp.path())
+            // Guarantee an ops-family call even when this fixture needs no
+            // diagnostic logging before its controller projection.
+            .env("AGENT_DOC_TEST_BACKGROUND_QUEUE_MAINTENANCE_DELAY_MS", "1")
+            .env(
+                "AGENT_DOC_TEST_QUEUE_MAINTENANCE_EFFECT_DELAY_FAMILY",
+                family,
+            )
+            .env("AGENT_DOC_TEST_QUEUE_MAINTENANCE_EFFECT_DELAY_MS", "1500")
+            .args(["preflight", doc.to_str().unwrap()])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{family}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let ops_path = tmp.path().join(".agent-doc/logs/ops.log");
+        let marker = format!(
+            "queue_maintenance_internal_effect_test_delay file={} family={family}",
+            doc.display()
+        );
+        let marker_deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
+        loop {
+            let ops = fs::read_to_string(&ops_path).unwrap_or_default();
+            if ops.contains(&marker) {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < marker_deadline,
+                "{family}: internal effect barrier was never reached; ops={ops}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        let before_doc = fs::read_to_string(&doc).unwrap();
+        let edited = before_doc.replace(
+            "stale admitted maintenance",
+            "operator-authored post-admission maintenance",
+        );
+        assert_ne!(before_doc, edited, "{family}: fixture edit did not apply");
+        let before_state = queue_maintenance_effect_digest(tmp.path());
+        let before_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc).unwrap();
+        let before_ops = fs::read_to_string(&ops_path).unwrap_or_default();
+        fs::write(&doc, &edited).unwrap();
+
+        let settle_deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
+        while agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_pending(&doc) {
+            assert!(
+                std::time::Instant::now() < settle_deadline,
+                "{family}: superseded background request did not settle"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(30));
+        }
+
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            edited,
+            "{family}: stale worker rewrote the operator authority"
+        );
+        assert_eq!(
+            queue_maintenance_effect_digest(tmp.path()),
+            before_state,
+            "{family}: stale worker mutated controller/ledger state after authority drift"
+        );
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc).unwrap(),
+            before_snapshot,
+            "{family}: stale worker advanced the recovery baseline"
+        );
+        let final_ops = fs::read_to_string(&ops_path).unwrap_or_default();
+        assert_eq!(
+            queue_effect_ops(&final_ops),
+            queue_effect_ops(&before_ops),
+            "{family}: stale worker emitted an unfenced durable operation"
+        );
+        assert!(
+            !final_ops.contains("queue_maintenance_background_completed"),
+            "{family}: stale worker published completion: {final_ops}"
+        );
+    }
 }
 
 #[test]

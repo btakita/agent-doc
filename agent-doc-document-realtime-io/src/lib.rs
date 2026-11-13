@@ -9124,6 +9124,35 @@ pub fn peek_disk_document_content(file: &std::path::Path, source: &str) -> Resul
     )
 }
 
+/// Resolve the current editor-or-disk authority without recording an authority
+/// observation, emitting an ops diagnostic, or running controller cleanup.
+/// Stale-effect fences use this so rejecting a transaction is itself a pure
+/// read of durable state.
+pub fn peek_current_document_content(file: &std::path::Path, source: &str) -> Result<String> {
+    let current =
+        agent_doc_controller_io::project_controller::peek_current_text_via_controller_model_read_for_doc(
+            file, source,
+        )?;
+    match current {
+        Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. }) => Ok(text),
+        Some(agent_doc_crdt_relay_io::CurrentText::Detached) | None => {
+            peek_disk_document_content(file, source)
+        }
+        Some(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica) => {
+            anyhow::bail!(
+                "{source}: editor authority is attached but its current replica is missing for {}",
+                file.display()
+            )
+        }
+        Some(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => {
+            anyhow::bail!(
+                "{source}: editor authority is attached but synchronization is pending for {}",
+                file.display()
+            )
+        }
+    }
+}
+
 pub fn try_resolve_current_document_content(
     file: &std::path::Path,
     source: &str,

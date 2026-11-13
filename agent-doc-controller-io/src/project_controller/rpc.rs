@@ -10300,6 +10300,26 @@ pub fn current_text_via_controller_model_read_for_doc(
     }
 }
 
+/// Read the controller-owned current text without publishing diagnostics or
+/// performing pressure/lease cleanup. This is the authority probe for fences
+/// that must be observationally pure when they reject a stale transaction.
+pub fn peek_current_text_via_controller_model_read_for_doc(
+    doc: &Path,
+    source: &str,
+) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let file_arg = canonical.to_string_lossy().to_string();
+    let authority = crdt_authority_for_file(&file_arg);
+    if !authority.editor_attached() {
+        return Ok(Some(agent_doc_crdt_relay_io::CurrentText::Detached));
+    }
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
+        return Ok(None);
+    };
+    request_existing_controller_crdt_current_text_read_quiet(&project_root, &canonical, source)
+        .map(Some)
+}
+
 /// Read the compact CRDT revision from an already-running controller.
 ///
 /// This intentionally does not materialize canonical markdown or emit the
@@ -10496,6 +10516,33 @@ fn request_existing_controller_crdt_current_text_read(
     canonical: &Path,
     source: &str,
 ) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    request_existing_controller_crdt_current_text_read_with_diagnostics(
+        project_root,
+        canonical,
+        source,
+        true,
+    )
+}
+
+fn request_existing_controller_crdt_current_text_read_quiet(
+    project_root: &Path,
+    canonical: &Path,
+    source: &str,
+) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    request_existing_controller_crdt_current_text_read_with_diagnostics(
+        project_root,
+        canonical,
+        source,
+        false,
+    )
+}
+
+fn request_existing_controller_crdt_current_text_read_with_diagnostics(
+    project_root: &Path,
+    canonical: &Path,
+    source: &str,
+    publish_diagnostic: bool,
+) -> Result<agent_doc_crdt_relay_io::CurrentText> {
     let data: serde_json::Value = request_existing_controller_with_timeout(
         project_root,
         ControllerRequest {
@@ -10524,7 +10571,9 @@ fn request_existing_controller_crdt_current_text_read(
         CONTROLLER_CRDT_CURRENT_TEXT_READ_TIMEOUT,
     )?;
     let current = controller_current_text_from_data(&data)?;
-    log_controller_current_text_result(canonical, source, &current);
+    if publish_diagnostic {
+        log_controller_current_text_result(canonical, source, &current);
+    }
     Ok(current)
 }
 

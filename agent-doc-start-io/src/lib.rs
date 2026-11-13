@@ -553,11 +553,26 @@ pub fn start_in_tmux_pane_for_client(
         harness_override,
     )?;
     dispatch_start_into_pane(&tmux, &target.pane_id, &command)?;
-    eprintln!(
-        "[start] dispatched into tmux session '{}' pane {}; attach with: {}",
-        target.outcome.session_name, target.pane_id, target.outcome.attach_command,
-    );
+    eprintln!("{}", start_dispatch_notice(&target));
     Ok(target.outcome)
+}
+
+/// The operator-facing line for a dispatched outside-tmux start. A start pane
+/// staged in a detached `stash` window is not on the window that attaching
+/// shows, so the line says where it waits and how to show it before the
+/// layout sync places it (GH #412 review).
+fn start_dispatch_notice(target: &StartBootstrapTarget) -> String {
+    let outcome = &target.outcome;
+    match &target.stash_reveal_command {
+        None => format!(
+            "[start] dispatched into tmux session '{}' pane {}; attach with: {}",
+            outcome.session_name, target.pane_id, outcome.attach_command,
+        ),
+        Some(reveal) => format!(
+            "[start] dispatched into tmux session '{}' pane {}, staged in the session's detached `stash` window until the layout sync places it; attach with: {}; show the staged pane with: {}",
+            outcome.session_name, target.pane_id, outcome.attach_command, reveal,
+        ),
+    }
 }
 
 /// Run the re-exec'd start in its freshly provisioned pane.
@@ -589,6 +604,9 @@ enum StartBootstrap {
 struct StartBootstrapTarget {
     outcome: TmuxEnsureOutcome,
     pane_id: String,
+    /// The command that shows `pane_id` when it was staged in a detached
+    /// `stash` window; `None` when it took over a new session's own pane.
+    stash_reveal_command: Option<String>,
 }
 
 /// Resolve where an outside-tmux start runs. A document that already has a
@@ -664,9 +682,17 @@ fn start_bootstrap_target(
             ),
         );
     }
+    let stash_reveal_command = (!outcome.created).then(|| {
+        format!(
+            "{} select-window -t {}",
+            tmux_cli_prefix(tmux),
+            shell_escape(&pane_id)
+        )
+    });
     Ok(StartBootstrap::Start(StartBootstrapTarget {
         outcome,
         pane_id,
+        stash_reveal_command,
     }))
 }
 
@@ -862,6 +888,15 @@ fn first_session_pane(tmux: &tmux_router::Tmux, session_name: &str) -> Result<St
         .with_context(|| format!("tmux session {session_name} exists but has no live pane"))
 }
 
+/// `tmux`, or the isolated-server invocation when agent-doc talks to one, as
+/// a shell command prefix for the commands it prints.
+fn tmux_cli_prefix(tmux: &tmux_router::Tmux) -> String {
+    tmux.server_socket.as_deref().map_or_else(
+        || "tmux".to_string(),
+        |socket| format!("tmux -L {} -f /dev/null", shell_escape(socket)),
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 fn tmux_ensure_outcome(
     tmux: &tmux_router::Tmux,
@@ -873,10 +908,7 @@ fn tmux_ensure_outcome(
     policy: &ResolvedTerminalPolicy,
     known_attachment: Option<&KnownAttachment>,
 ) -> TmuxEnsureOutcome {
-    let tmux_prefix = tmux.server_socket.as_deref().map_or_else(
-        || "tmux".to_string(),
-        |socket| format!("tmux -L {} -f /dev/null", shell_escape(socket)),
-    );
+    let tmux_prefix = tmux_cli_prefix(tmux);
     let attached = KnownAttachment::for_session(known_attachment, &session_name)
         .unwrap_or_else(|| is_session_attached(tmux, &session_name));
     let default_attach_command = format!(
@@ -3850,6 +3882,70 @@ mod tests {
         let mut names = tmux.list_window_names("proj");
         names.sort();
         assert_eq!(names, vec!["agent-doc", "stash"]);
+
+        // Attaching shows `agent-doc`, so the dispatch line names the staging
+        // and a reveal command that really shows the staged pane.
+        let reveal = format!(
+            "{} select-window -t {}",
+            tmux_cli_prefix(&tmux),
+            target.pane_id
+        );
+        assert_eq!(
+            target.stash_reveal_command.as_deref(),
+            Some(reveal.as_str())
+        );
+        let notice = start_dispatch_notice(&target);
+        assert!(
+            notice.contains("dispatched into tmux session 'proj'"),
+            "{notice}"
+        );
+        assert!(
+            notice.contains("staged in the session's detached `stash` window"),
+            "{notice}"
+        );
+        assert!(notice.contains(&target.outcome.attach_command), "{notice}");
+        assert!(
+            notice.ends_with(&format!("show the staged pane with: {reveal}")),
+            "{notice}"
+        );
+        tmux.raw_cmd(&["select-window", "-t", &target.pane_id])
+            .unwrap();
+        assert_eq!(
+            current_window(),
+            staged,
+            "the reveal command shows the pane"
+        );
+    }
+
+    /// A start into a session it just created takes over that session's own
+    /// pane, which attaching shows, so the dispatch line stays the plain one.
+    #[test]
+    fn start_bootstrap_into_a_new_session_prints_no_stash_reveal() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, "---\nagent_doc_session: tmux-new-session\n---\n").unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"fresh\"\n",
+        )
+        .unwrap();
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("agent-doc-start-new-session");
+
+        let target = match start_bootstrap_target(&tmux, &file, false, None).unwrap() {
+            StartBootstrap::Start(target) => target,
+            StartBootstrap::Reuse(outcome) => panic!("unexpected reuse of {outcome:?}"),
+        };
+
+        assert!(target.outcome.created);
+        assert_eq!(target.stash_reveal_command, None);
+        assert_eq!(
+            start_dispatch_notice(&target),
+            format!(
+                "[start] dispatched into tmux session 'fresh' pane {}; attach with: {}",
+                target.pane_id, target.outcome.attach_command
+            )
+        );
     }
 
     /// `#ideriderindependentnav` P6: an outside-tmux `agent-doc start

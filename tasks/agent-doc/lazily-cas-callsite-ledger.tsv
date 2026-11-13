@@ -1,0 +1,576 @@
+path	kind	symbol	occurrence	authority_backend	lazily_adapter	parity_test	status	deletion_proof
+agent-doc-answer-ledger/src/graph/registry.rs	fn	superseded_decisions	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-answer-ledger/src/graph/registry.rs	fn	superseding_decisions	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-answer-ledger/src/graph/registry.rs	fn	decision_supersede_source	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-answer-ledger/src/graph/registry.rs	fn	why_supersedes	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-answer-ledger/src/stale/graph_kinds.rs	fn	last_supersede	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-answer-ledger/src/stale/graph_kinds.rs	struct	SupersededDependent	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-answer-ledger/src/stale/graph_kinds.rs	fn	built_on_superseded	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-closeout-runtime-io/src/lib.rs	fn	preflight_turn_fence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-closeout-runtime-io/src/lib.rs	fn	mark_committed_frontmatter_if_turn_fence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-closeout-runtime-io/src/lib.rs	fn	mark_abandoned_frontmatter_if_turn_fence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-closeout-runtime-io/src/lib.rs	fn	ensure_outer_closeout_fence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-closeout-runtime-io/src/lib.rs	fn	ensure_outer_closeout_fence	2	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-codex-stop-io/src/lib.rs	const	MAX_ATTEMPTS	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-codex-stop-io/src/lib.rs	fn	materialized_cycle_capture_supersedes	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-commit-io/src/lib.rs	fn	retry_rebase_until_owned_delivery	1	git-ref	GitUpdateRefAdapter (planned)	pending	triage	none
+agent-doc-commit-io/src/lib.rs	struct	RuntimeCommitTransactionFence	1	git-ref	GitUpdateRefAdapter (planned)	pending	triage	none
+agent-doc-commit-io/src/lib.rs	const	CONTROLLER_PROJECTION_CONVERGED_BACKOFF	1	git-ref	GitUpdateRefAdapter (planned)	pending	triage	none
+agent-doc-commit-io/src/lib.rs	fn	retry_controller_commit_awaiting_projection	1	git-ref	GitUpdateRefAdapter (planned)	pending	triage	none
+agent-doc-commit-io/src/lib.rs	fn	commit_with_outcome_scoped_with_fence	1	git-ref	GitUpdateRefAdapter (planned)	pending	triage	none
+agent-doc-compact-io/src/lib.rs	const	COMPACT_COMMIT_OBSERVE_ATTEMPTS	1	git-ref	GitUpdateRefAdapter (planned)	pending	triage	none
+agent-doc-compact-io/src/lib.rs	const	COMPACT_COMMIT_OBSERVE_BACKOFF	1	git-ref	GitUpdateRefAdapter (planned)	pending	triage	none
+agent-doc-compact-io/src/lib.rs	fn	fence_compacted_crdt_epoch	1	git-ref	GitUpdateRefAdapter (planned)	pending	triage	none
+agent-doc-compact-io/src/lib.rs	const	COMPACT_CONVERGE_MAX_ATTEMPTS	1	git-ref	GitUpdateRefAdapter (planned)	pending	triage	none
+agent-doc-compact-io/src/lib.rs	fn	is_retryable_crdt_merge_error	1	git-ref	GitUpdateRefAdapter (planned)	pending	triage	none
+agent-doc-compact-io/src/lib.rs	fn	converge_compacted_with_retry	1	git-ref	GitUpdateRefAdapter (planned)	pending	triage	none
+agent-doc-compact-io/src/lib.rs	fn	converge_compact_targets_with_retry	1	git-ref	GitUpdateRefAdapter (planned)	pending	triage	none
+agent-doc-controller/src/claim.rs	fn	cross_session_decision_with_lease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/dispatch.rs	const	DISPATCH_RETRY_DISPATCH_NEXT_ACTION	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/dispatch.rs	const	DISPATCH_RECOVERABLE_RETRY_BACKOFF	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/dispatch.rs	fn	dispatch_only_route_superseded_by_new_cycle	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/dispatch.rs	fn	startup_miss_superseded_by_later_open_start	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/dispatch.rs	const	RECYCLE_SUPERSEDED_OWNER_REPLACEMENT_WAIT_SECS	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/dispatch.rs	const	RECYCLE_SUPERSEDED_OWNER_REPLACEMENT_WAIT_SECS_ENV	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/dispatch.rs	const	RECYCLE_SUPERSEDED_OWNER_UNBLOCKER	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/dispatch.rs	enum	SupersededOwnerReplacementStep	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/dispatch.rs	fn	superseded_owner_replacement_step	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/dispatch.rs	fn	recycle_settle_unreachable_backoff	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/dispatch.rs	struct	DispatchOnlyRecycleSupersededOwnerMessageFacts	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/dispatch.rs	fn	dispatch_only_recycle_superseded_owner_message	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/dispatch.rs	struct	RetryBudget	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/dispatch.rs	fn	authoritative_actor_ready_retry_budget	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/dispatch.rs	fn	dispatch_only_starting_pane_ready_retry_budget	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/dispatch.rs	fn	dispatch_only_starting_pane_recovery_retry_budget	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/dispatch.rs	fn	dispatch_error_is_recoverable_retry	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/pane_layout.rs	fn	is_superseded	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/pane_layout.rs	const	TMUX_EFFECT_RETRY_ATTEMPT_LIMIT	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/pane_layout.rs	fn	retry_budget_spent	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/recycle.rs	const	HANDOFF_RETRY_BASE	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/recycle.rs	const	HANDOFF_RETRY_CAP	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/recycle.rs	struct	HandoffRetryBackoff	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/recycle.rs	const	STALE_RESTART_ATTEMPT_BACKOFF	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/recycle.rs	struct	PredecessorDrainLease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/recycle.rs	fn	predecessor_drain_lease_protects	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/status.rs	fn	record_supervisor_lease_reconcile	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/status.rs	fn	supervisor_lease_reconcile_payload	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/status.rs	fn	supervisor_lease_is_fresh_and_alive	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/status.rs	fn	supervisor_lease_holds_against_takeover	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller/src/status.rs	fn	supervisor_lease_pid_is_foreign	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	const	CONTROLLER_DISPATCH_PANE_CAPTURE_ATTEMPTS	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	const	TMUX_LAYOUT_EFFECT_RETRY_MIN	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	const	TMUX_LAYOUT_EFFECT_RETRY_MAX	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	retry_state_event_deadline	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	controller_transport_drop_is_retryable	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	retry_controller_transport_drop	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	const	CONTROLLER_HANDOFF_SETTLE_ATTEMPTS	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	controller_handoff_refusal_is_retryable	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	controller_handoff_retry_delay	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	retry_controller_handoff_refusal	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	request_controller_with_transport_retry	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	refresh_supervisor_lease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	retry_once_after_recoverable_dispatch_refusal	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	const	AUTO_INSTALL_MAX_ATTEMPTS	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	const	AUTO_INSTALL_RETRY_BACKOFF_SECS	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	run_supervisor_auto_install_with_retry	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	clear_superseded_stale_supervisor_pause	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	const	CLOSEOUT_OWNER_LEASE_SECS	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	const	CLOSEOUT_RECOVERY_LEASE_SECS	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	lease_lost	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	mark_lease_lost	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	call	compare_exchange	1	git-ref	Lazily keyed single-flight for terminal closeout commit (planned: GitUpdateRefAdapter)	pending	pending-migration	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	closeout_owner_lease_secs	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	retire_superseded_queue_context_clear_deferred_for_file	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	call	compare_exchange	2	in-memory	none: pure in-memory monotone revision counter	n/a	excluded	none
+agent-doc-controller-io/src/project_controller/rpc.rs	const	RECYCLE_FANOUT_RETRY_PAUSE	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	recycle_fanout_root_with_retry	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	apply_cp_write_via_controller_model_for_doc_with_detach_fence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	const	LAUNCH_ENOENT_BACKOFF_INITIAL	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	const	LAUNCH_ENOENT_BACKOFF_MAX	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	struct	DelegatedEditorRouteLayoutLease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	enum	EditorRouteLayoutLease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	admit_async_editor_focus_fence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	enum	SupersededEditorRouteVerdict	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	superseded_editor_route_verdict	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	superseded_editor_route_advisory_message	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	superseded_editor_route_refusal_message	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	append_superseded_editor_advisory	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	refuse_editor_route_to_superseded_editor	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	editor_route_superseded_admission	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	const	CONTROLLER_BUSY_RETRY_LATER	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	spawn_detached_controller_with_launch_enoent_retry	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	call	compare_exchange	3	controller-ledger-sqlite	single-flight recycle handoff guard (review against Lazily single-flight)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	const	ORPHAN_DRAIN_BACKOFF_SCOPE	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	const	ORPHAN_DRAIN_BACKOFF_HOLDER	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	public_controller_superseded	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	struct	DocumentTurnAuthorityStreamLease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	call	compare_exchange	4	controller-ledger-sqlite	single-flight liveness-journal compaction guard (review against Lazily single-flight)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	supervisor_report_matches_existing_lease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	capture_dispatch_pane_retrying_timeouts	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	controller_harness_turn_lease_active	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	struct	EditorSurfaceRetry	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	static	EDITOR_SURFACE_RETRY	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	pending_editor_surface_retry	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	tmux_layout_effect_state_retry_delay	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	pane_layout_effect_worker_wait_for_retry	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	struct	PaneLayoutRouteLeaseGuard	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	const	PANE_LAYOUT_SUPERSEDED_REASON	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	queue_projection_active_write_fence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	superseded_lines	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	gh130_claim_full_lease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	write_test_turn_lease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	fn	clear_test_turn_lease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller/surface_retire_conformance.rs	const	FENCE_FIELDS	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	struct	PaneLayoutRouteLease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	release_route_lease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	expire_route_lease_after	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	tmux_effect_retry_budget_spent	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	struct	AsyncEditorFocusFence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	enum	AsyncEditorFocusFenceDecision	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	publish_focus_fence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	focus_fence_decision	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	require_focus_fence_current	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	release_focus_fence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	deferred_clear_superseded_projection	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	const	RETAINED_PERSISTENCE_MAX_REFUSED_RETRIES	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	struct	RetainedPersistenceRetryDecision	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	retained_persistence_retry_delay	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	retained_persistence_retry_step_for_outcome	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	schedule_refused_retained_persistence_retry	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	claim_superseding_retained_persistence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	retry_refused_retained_persistence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	retained_intent_semantic_fence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	document_maintenance_fence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	reconcile_supervisor_leases_after_restart	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	struct	LifecycleFencePayload	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	const	PREDECESSOR_DRAIN_LEASE_SCOPE	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	read_predecessor_drain_lease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	read_foreign_predecessor_drain_lease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	record_predecessor_drain_lease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	upsert_supervisor_lease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	upsert_coordination_lease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	claim_coordination_lease_if_expired	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	refresh_coordination_lease_if_holder	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	clear_coordination_lease_if_holder	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	load_coordination_lease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	clear_coordination_lease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	const	ACTOR_CLOSE_FENCE_ATTEMPTS	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	store_actor_record_fenced	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	const	SUPERVISOR_LEASE_GUARD_STALE_AFTER	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-controller-io/src/project_controller.rs	fn	fresh_foreign_supervisor_lease_holds_document	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-crdt-relay-io/src/lib.rs	fn	superseded_logical_replica_ids	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-crdt-relay-io/src/lib.rs	fn	superseded_editor_process_replica_ids	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-crdt-relay-io/src/lib.rs	fn	reconcile_durable_queue_attempts_on_hub	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-crdt-relay-io/src/lib.rs	const	DISK_STRUCTURE_FENCED_EVENT	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-crdt-relay-io/src/lib.rs	struct	DiskStructureFence	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-crdt-relay-io/src/lib.rs	fn	superseded_endpoint_members_elsewhere	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-crdt-relay-io/src/lib.rs	fn	retire_superseded_editor_endpoint_elsewhere	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-crdt-relay-io/src/lib.rs	fn	apply_cp_write_for_file_scoped_with_detach_fence	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-crdt-relay-io/src/lib.rs	const	LIVE_STRUCTURE_FENCED_EVENT	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-crdt-relay-io/src/lib.rs	fn	generation_fenced_native_save_routes	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-cycle-state-io/src/command_plane.rs	struct	TerminalTurnFence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-cycle-state-io/src/lib.rs	fn	mark_committed_if_cycle_and_turn_fence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-cycle-state-io/src/lib.rs	fn	mark_committed_inner_with_turn_fence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-cycle-state-io/src/lib.rs	fn	mark_abandoned_if_cycle_and_turn_fence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-cycle-state-io/src/lib.rs	fn	mark_abandoned_inner_with_turn_fence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-cycle-state-io/src/pipeline_frontmatter.rs	fn	mark_committed_if_cycle_and_turn_fence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-cycle-state-io/src/pipeline_frontmatter.rs	fn	mark_abandoned_if_cycle_and_turn_fence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-debounce/src/lib.rs	const	URGENT_DRAIN_RETRY_INTERVAL	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-diff/src/lib.rs	fn	fence_open	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-diff/src/lib.rs	fn	fence_close	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-diff/src/lib.rs	fn	fence_open	2	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-diff/src/lib.rs	fn	fence_close	2	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-diff/src/lib.rs	fn	fence_open	3	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-diff/src/lib.rs	fn	fence_close	3	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-diff/src/lib.rs	fn	fence_open	4	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-diff/src/lib.rs	fn	fence_close	4	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-document/src/commit_normalization.rs	fn	fence_open	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document/src/commit_normalization.rs	fn	fence_close	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document/src/compact_projection.rs	fn	newer_compacted_exchange_supersedes	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document/src/status_projection.rs	fn	fence_opener	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document/src/status_projection.rs	fn	closes_fence	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document/src/status_projection.rs	fn	is_terminated_open_items_fence	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document/src/status_sync_tree.rs	fn	is_terminated_fence	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document/src/worker_handback.rs	fn	fence_marker	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document/src/write_normalization.rs	fn	count_code_fence_openings	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime/src/convergence_gate.rs	struct	CrdtWriteBackoff	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime/src/crdt_relay.rs	struct	RecoveryRetryBackoff	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime/src/crdt_relay.rs	const	INITIAL_RECOVERY_RETRY_SKIP	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime/src/crdt_relay.rs	const	MAX_RECOVERY_RETRY_SKIP	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime/src/crdt_relay.rs	struct	DocumentOpOriginFence	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime/src/crdt_relay.rs	fn	fence_replica_generation	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime/src/crdt_relay.rs	fn	replica_updates_fenced	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime/src/crdt_relay.rs	fn	fence_registered_document_op_origins	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime/src/crdt_relay.rs	fn	fence_component_structure	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime/src/crdt_relay.rs	fn	component_structure_fenced	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime/src/crdt_relay.rs	fn	release_repaired_component_structure_fence	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime/src/midturn_steering.rs	fn	apply_claim_attempts	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime/src/read_authority.rs	fn	buffer_supersedes	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime/src/write_policy.rs	enum	CrdtRetryAdmission	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime/src/write_policy.rs	fn	decide_crdt_retry_admission	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime-io/src/lib.rs	const	RETAINED_FOR_RETRY_MARKER	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime-io/src/lib.rs	const	CRDT_WRITE_BACKOFF_INITIAL_MS	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime-io/src/lib.rs	const	CRDT_WRITE_BACKOFF_MAX_MS	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime-io/src/lib.rs	const	CRDT_WRITE_BACKOFF_POLICY	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime-io/src/lib.rs	const	CRDT_PROJECTION_FALLBACK_BACKOFF_INITIAL_MS	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime-io/src/lib.rs	const	CRDT_PROJECTION_FALLBACK_BACKOFF_MAX_MS	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime-io/src/lib.rs	const	CRDT_PROJECTION_FALLBACK_BACKOFF_POLICY	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime-io/src/lib.rs	enum	ForceDiskMutationFence	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime-io/src/lib.rs	fn	force_disk_mutation_fence	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime-io/src/lib.rs	fn	retire_retained_projection_superseded_by_authority	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime-io/src/lib.rs	fn	retire_superseded_compact_projection_intents	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime-io/src/lib.rs	fn	retained_prewrite_base_can_be_superseded	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime-io/src/lib.rs	const	OPERATOR_REARM_EVIDENCE_ATTEMPTS	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime-io/src/lib.rs	const	OPERATOR_REARM_EVIDENCE_RETRY_BACKOFF	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime-io/src/lib.rs	fn	log_fence_count_drop_if_any	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime-io/src/lib.rs	call	compare_exchange	1	in-memory	none: pure in-memory monotone counter	n/a	excluded	none
+agent-doc-document-realtime-io/src/lib.rs	fn	superseding_closeout_stage	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime-io/src/lib.rs	const	VISIBLE_WRITE_RECONCILE_MAX_ATTEMPTS	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime-io/src/lib.rs	const	DEFAULT_EDITOR_REPLICA_REOBSERVE_ATTEMPTS	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime-io/src/lib.rs	const	EDITOR_REPLICA_REOBSERVE_ATTEMPTS_ENV	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime-io/src/lib.rs	const	EDITOR_REPLICA_REOBSERVE_BACKOFF	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-document-realtime-io/src/lib.rs	fn	editor_replica_reobserve_attempts	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-editor-surface/src/attach_failure.rs	enum	AttachFailureRetryDisposition	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-editor-surface/src/route_outcome.rs	const	UI_OUTCOME_RECOVERED_AND_RETRIED	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-element/src/element.rs	fn	fenced_code_block_is_balanced	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-element/src/rules.rs	fn	fence_open	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-element/src/rules.rs	fn	is_fence_closer	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-element-backlog/src/backlog.rs	fn	fenced_agent_doc_log_splice_end	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-element-backlog/src/backlog.rs	const	RETRIES_PER_WIDTH	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-element-backlog/src/backlog.rs	const	RETRIES_PER_WIDTH	2	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-element-exchange/src/lib.rs	fn	live_exchange_without_visible_write_retry_required	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-element-exchange/src/lib.rs	fn	is_code_fence_delimiter	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-element-exchange/src/lib.rs	fn	fence_open	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-element-exchange/src/lib.rs	fn	fence_close	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-flow-io/src/closeout.rs	struct	RetrySnapshotHeadDriftOptions	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-flow-io/src/closeout.rs	fn	retry_snapshot_head_content_hash_drift	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-frontmatter/src/frontmatter.rs	fn	repair_single_char_prefixed_closing_fence	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-frontmatter/src/frontmatter.rs	fn	fence_safe_yaml	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-fs/src/plugin_jar.rs	fn	is_superseded	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-fs/src/plugin_jar.rs	fn	superseded_path	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-fs/src/plugin_jar.rs	fn	superseded_mapping_detail	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-fs/src/plugin_jar.rs	fn	superseded_editor_remedy	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-fs/src/plugin_jar.rs	struct	SupersededEditor	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-fs/src/plugin_jar.rs	fn	probe_superseded_editors	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-fs/src/plugin_jar.rs	fn	probe_superseded_editors_at	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-gc-io/src/lib.rs	fn	sweep_expired_turn_active_leases	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-git/src/lib.rs	fn	commit_retry_backoff	1	git-ref	GitUpdateRefAdapter (planned)	pending	triage	none
+agent-doc-git-io/src/sibling.rs	fn	commit_sibling_with_trailer_fenced	1	git-ref	GitUpdateRefAdapter (planned)	pending	triage	none
+agent-doc-git-io/src/sibling.rs	call	update-ref	1	git-ref	GitUpdateRefAdapter (planned): this update-ref is its atomic comparator; surrounding fence/retry orchestration migrates	pending	pending-migration	none
+agent-doc-git-io/src/sibling.rs	fn	commit_siblings_for_session_doc_with_fence	1	git-ref	GitUpdateRefAdapter (planned)	pending	triage	none
+agent-doc-git-io/src/transaction.rs	fn	update_parent_submodule_pointer_with_fence	1	git-ref	GitUpdateRefAdapter (planned)	pending	triage	none
+agent-doc-git-io/src/transaction.rs	call	update-ref	1	git-ref	GitUpdateRefAdapter (planned): this update-ref is its atomic comparator; surrounding fence/retry orchestration migrates	pending	pending-migration	none
+agent-doc-git-io/src/transaction.rs	enum	CommitFencePhase	1	git-ref	GitUpdateRefAdapter (planned)	pending	triage	none
+agent-doc-git-io/src/transaction.rs	trait	CommitTransactionFence	1	git-ref	GitUpdateRefAdapter (planned)	pending	triage	none
+agent-doc-git-io/src/transaction.rs	fn	stage_and_commit_exact_paths_once_with_fence	1	git-ref	GitUpdateRefAdapter (planned)	pending	triage	none
+agent-doc-git-io/src/transaction.rs	call	update-ref	2	git-ref	GitUpdateRefAdapter (planned): this update-ref is its atomic comparator; surrounding fence/retry orchestration migrates	pending	pending-migration	none
+agent-doc-git-io/src/transaction.rs	call	update-ref	3	git-ref	GitUpdateRefAdapter (planned): this update-ref is its atomic comparator; surrounding fence/retry orchestration migrates	pending	pending-migration	none
+agent-doc-hooks-io/src/coined_id_pretooluse.rs	const	LEDGER_READ_ATTEMPTS	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-hooks-io/src/coined_id_pretooluse.rs	const	LEDGER_RETRY_BACKOFF	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-hooks-io/src/lib.rs	fn	reap_local_model_leases	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-hooks-io/src/lib.rs	fn	reap_local_model_leases	2	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-hooks-io/src/lib.rs	fn	reap_local_model_leases_for_hooks	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-ipc-io/src/lib.rs	const	IPC_LISTENER_RESOURCE_BACKOFF	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-ipc-io/src/lib.rs	fn	send_terminal_protocol_stable_message_with_listener_build_retry	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-lease/src/lib.rs	const	DEFAULT_LOCAL_MODEL_LEASE_REGISTRY_RELATIVE	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-lease-io/src/local_model.rs	fn	reap_local_model_leases	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-markdown-ast/src/overlay.rs	struct	QueueFencedTitleBlock	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-markdown-ast/src/overlay.rs	fn	queue_code_fence_run	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-markdown-ast/src/overlay.rs	fn	queue_code_fence_closes	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-markdown-ast/src/overlay.rs	fn	queue_code_fence_close	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-markdown-ast/src/overlay.rs	fn	queue_bare_fence_close	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-markdown-ast/src/overlay.rs	fn	queue_fenced_title_block	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-merge/src/document_cell.rs	fn	suppress_superseded_disk_queue_revisions	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-merge/src/response_cell.rs	struct	MarkdownFence	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-merge/src/response_cell.rs	fn	supersede_response_tail_after_anchor	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-merge/src/response_cell.rs	fn	supersede_uncommitted_response_tail	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-merge/src/response_cell.rs	fn	reconcile_superseded_response_targets	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-op-capture-io/src/lib.rs	const	EDITOR_PROJECTION_FENCE_TIMEOUT	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-op-capture-io/src/lib.rs	const	RETAINED_EDITOR_OPS_RETRY_TIMEOUT	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-op-capture-io/src/lib.rs	const	RETAINED_EDITOR_OPS_BACKOFF_MIN	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-op-capture-io/src/lib.rs	const	RETAINED_EDITOR_OPS_BACKOFF_MAX	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-op-capture-io/src/lib.rs	fn	retry_backoff	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-op-capture-io/src/lib.rs	const	REPLAYED_EPOCH_CLEAR_ATTEMPTS	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-preflight-command-io/src/lib.rs	struct	BackgroundQueueMaintenanceLease	1	queue-edit-owner-lease (SQLite)	Lazily keyed single-flight claim with persisted retained intent (planned; needs cross-process EffectCasCore persistence)	test_cli::simultaneous_preflights_coalesce_to_one_background_maintenance_body,test_cli::crashed_worker_is_visible_and_promptly_redispatched_without_ttl_wait,test_cli::panic_after_background_effect_retains_incomplete_attempt_until_successor_completes	pending-migration	none
+agent-doc-preflight-command-io/src/lib.rs	fn	fence_effect	1	queue-edit-owner-lease (SQLite)	backend lock behind the planned Lazily claim	test_cli::superseded_delayed_worker_has_no_advisory_archive_or_worktree_effects	pending-migration	none
+agent-doc-preflight-command-io/src/lib.rs	struct	BackgroundRequestEffectFence	1	queue-maintenance	queue_maintenance_effect_cas::AdmittedAuthorityLineage (lease + exact-request checks retained)	test_cli::authority_drift_fences_every_internal_queue_maintenance_effect_family,test_cli::non_exchange_authority_drift_supersedes_stale_pending_effects,test_cli::newer_admission_coalesces_durably_and_incumbent_applies_latest_cut_once,queue_maintenance_effect_cas::tests::lineage_*	migrated	absent:expected_authority_hash: std::sync::Mutex<String>
+agent-doc-preflight-command-io/src/lib.rs	fn	fence_effect	2	queue-maintenance	AdmittedAuthorityLineage::compare_observed	test_cli::authority_drift_fences_every_internal_queue_maintenance_effect_family,test_cli::non_exchange_authority_drift_supersedes_stale_pending_effects,test_cli::newer_admission_coalesces_durably_and_incumbent_applies_latest_cut_once,queue_maintenance_effect_cas::tests::lineage_*	migrated	absent:*self.expected_authority_hash.lock()
+agent-doc-preflight-command-io/src/lib.rs	fn	expected_authority_hash	1	queue-maintenance	AdmittedAuthorityLineage::expected_authority_hash	test_cli::authority_drift_fences_every_internal_queue_maintenance_effect_family,test_cli::non_exchange_authority_drift_supersedes_stale_pending_effects,test_cli::newer_admission_coalesces_durably_and_incumbent_applies_latest_cut_once,queue_maintenance_effect_cas::tests::lineage_*	migrated	absent:self.expected_authority_hash.lock().unwrap().clone()
+agent-doc-preflight-io/src/layout.rs	fn	close_superseded_drift_sessions	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-preflight-io/src/lib.rs	const	DEFAULT_QUEUE_AUTHORITY_ATTEMPTS	1	document-editor-authority	Lazily retry eligibility/backoff inputs for authority observation (planned: DocumentAuthorityAdapter::observe)	preflight_io::tests::queue_maintenance_model_reregister_is_fenced_before_signal,test_cli::authority_drift_before_queue_authority_acquisition_skips_recovery_effects	pending-migration	none
+agent-doc-preflight-io/src/lib.rs	const	QUEUE_AUTHORITY_ATTEMPTS_ENV	1	document-editor-authority	Lazily retry eligibility/backoff inputs for authority observation (planned: DocumentAuthorityAdapter::observe)	preflight_io::tests::queue_maintenance_model_reregister_is_fenced_before_signal,test_cli::authority_drift_before_queue_authority_acquisition_skips_recovery_effects	pending-migration	none
+agent-doc-preflight-io/src/lib.rs	const	QUEUE_AUTHORITY_RETRY_BACKOFF	1	document-editor-authority	Lazily retry eligibility/backoff inputs for authority observation (planned: DocumentAuthorityAdapter::observe)	preflight_io::tests::queue_maintenance_model_reregister_is_fenced_before_signal,test_cli::authority_drift_before_queue_authority_acquisition_skips_recovery_effects	pending-migration	none
+agent-doc-preflight-io/src/lib.rs	fn	queue_authority_attempts	1	document-editor-authority	Lazily retry eligibility/backoff inputs for authority observation (planned: DocumentAuthorityAdapter::observe)	preflight_io::tests::queue_maintenance_model_reregister_is_fenced_before_signal,test_cli::authority_drift_before_queue_authority_acquisition_skips_recovery_effects	pending-migration	none
+agent-doc-preflight-io/src/lib.rs	fn	current_text_via_preflight_authority_retrying	1	document-editor-authority	Lazily retry eligibility/backoff inputs for authority observation (planned: DocumentAuthorityAdapter::observe)	preflight_io::tests::queue_maintenance_model_reregister_is_fenced_before_signal,test_cli::authority_drift_before_queue_authority_acquisition_skips_recovery_effects	pending-migration	none
+agent-doc-preflight-io/src/lib.rs	fn	current_text_via_preflight_authority_retrying_with_fence	1	document-editor-authority	Lazily retry eligibility/backoff inputs for authority observation (planned: DocumentAuthorityAdapter::observe)	preflight_io::tests::queue_maintenance_model_reregister_is_fenced_before_signal,test_cli::authority_drift_before_queue_authority_acquisition_skips_recovery_effects	pending-migration	none
+agent-doc-preflight-io/src/lib.rs	fn	observe_current_text_with_bounded_retry_fenced	1	document-editor-authority	Lazily retry eligibility/backoff inputs for authority observation (planned: DocumentAuthorityAdapter::observe)	preflight_io::tests::queue_maintenance_model_reregister_is_fenced_before_signal,test_cli::authority_drift_before_queue_authority_acquisition_skips_recovery_effects	pending-migration	none
+agent-doc-preflight-io/src/lib.rs	trait	PendingMaintenanceEffectFence	1	queue-maintenance	QueueMaintenance EffectPlan steps (Document first; Controller/Ledger/Snapshot/Worktree/Ops consume its receipt) (planned)	test_cli::authority_drift_fences_every_internal_queue_maintenance_effect_family,test_cli::non_exchange_authority_drift_supersedes_stale_pending_effects,test_cli::newer_admission_coalesces_durably_and_incumbent_applies_latest_cut_once,test_cli::authority_drift_before_queue_authority_acquisition_skips_recovery_effects	pending-migration	none
+agent-doc-preflight-io/src/lib.rs	fn	expected_authority_hash	1	queue-maintenance	PendingMaintenanceEffectFence default (detached owner overrides via AdmittedAuthorityLineage)	test_cli::authority_drift_fences_every_internal_queue_maintenance_effect_family,test_cli::non_exchange_authority_drift_supersedes_stale_pending_effects,test_cli::newer_admission_coalesces_durably_and_incumbent_applies_latest_cut_once,queue_maintenance_effect_cas::tests::lineage_*	pending-migration	none
+agent-doc-preflight-io/src/lib.rs	fn	run_pending_maintenance_fenced	1	queue-maintenance	QueueMaintenance EffectPlan steps (Document first; Controller/Ledger/Snapshot/Worktree/Ops consume its receipt) (planned)	test_cli::authority_drift_fences_every_internal_queue_maintenance_effect_family,test_cli::non_exchange_authority_drift_supersedes_stale_pending_effects,test_cli::newer_admission_coalesces_durably_and_incumbent_applies_latest_cut_once,test_cli::authority_drift_before_queue_authority_acquisition_skips_recovery_effects	pending-migration	none
+agent-doc-preflight-io/src/lib.rs	fn	fence_pending_maintenance_effect	1	queue-maintenance	QueueMaintenance EffectPlan steps (Document first; Controller/Ledger/Snapshot/Worktree/Ops consume its receipt) (planned)	test_cli::authority_drift_fences_every_internal_queue_maintenance_effect_family,test_cli::non_exchange_authority_drift_supersedes_stale_pending_effects,test_cli::newer_admission_coalesces_durably_and_incumbent_applies_latest_cut_once,test_cli::authority_drift_before_queue_authority_acquisition_skips_recovery_effects	pending-migration	none
+agent-doc-preflight-io/src/lib.rs	fn	observe_queue_authority_after_native_save_with_bounded_retry_fenced	1	document-editor-authority	Lazily retry eligibility/backoff inputs for authority observation (planned: DocumentAuthorityAdapter::observe)	preflight_io::tests::queue_maintenance_model_reregister_is_fenced_before_signal,test_cli::authority_drift_before_queue_authority_acquisition_skips_recovery_effects	pending-migration	none
+agent-doc-preflight-io/src/lib.rs	fn	observe_queue_authority_after_native_save_with_bounded_retry_and_adopt	1	document-editor-authority	Lazily retry eligibility/backoff inputs for authority observation (planned: DocumentAuthorityAdapter::observe)	preflight_io::tests::queue_maintenance_model_reregister_is_fenced_before_signal,test_cli::authority_drift_before_queue_authority_acquisition_skips_recovery_effects	pending-migration	none
+agent-doc-preflight-io/src/lib.rs	struct	QueueMaintenanceAuthoritySuperseded	1	document-editor-authority	typed Superseded outcome of the admitted document CAS precheck (planned: DocumentAuthorityAdapter)	test_cli::authority_drift_fences_every_internal_queue_maintenance_effect_family,test_cli::non_exchange_authority_drift_supersedes_stale_pending_effects,test_cli::newer_admission_coalesces_durably_and_incumbent_applies_latest_cut_once	pending-migration	none
+agent-doc-preflight-io/src/lib.rs	enum	QueueMaintenanceEffectFamily	1	queue-maintenance	QueueMaintenance EffectPlan steps (Document first; Controller/Ledger/Snapshot/Worktree/Ops consume its receipt) (planned)	test_cli::authority_drift_fences_every_internal_queue_maintenance_effect_family,test_cli::non_exchange_authority_drift_supersedes_stale_pending_effects,test_cli::newer_admission_coalesces_durably_and_incumbent_applies_latest_cut_once,test_cli::authority_drift_before_queue_authority_acquisition_skips_recovery_effects	pending-migration	none
+agent-doc-preflight-io/src/lib.rs	fn	fence_queue_maintenance_effect	1	queue-maintenance	QueueMaintenance EffectPlan steps (Document first; Controller/Ledger/Snapshot/Worktree/Ops consume its receipt) (planned)	test_cli::authority_drift_fences_every_internal_queue_maintenance_effect_family,test_cli::non_exchange_authority_drift_supersedes_stale_pending_effects,test_cli::newer_admission_coalesces_durably_and_incumbent_applies_latest_cut_once,test_cli::authority_drift_before_queue_authority_acquisition_skips_recovery_effects	pending-migration	none
+agent-doc-preflight-io/src/lib.rs	fn	fence_queue_maintenance_authority_acquisition	1	queue-maintenance	QueueMaintenance EffectPlan steps (Document first; Controller/Ledger/Snapshot/Worktree/Ops consume its receipt) (planned)	test_cli::authority_drift_fences_every_internal_queue_maintenance_effect_family,test_cli::non_exchange_authority_drift_supersedes_stale_pending_effects,test_cli::newer_admission_coalesces_durably_and_incumbent_applies_latest_cut_once,test_cli::authority_drift_before_queue_authority_acquisition_skips_recovery_effects	pending-migration	none
+agent-doc-preflight-io/src/lib.rs	const	QUEUE_MAINTENANCE_CAS_ATTEMPTS	1	document-editor-authority	queue_maintenance_effect_cas::persist_document_cut (max desired epochs)	preflight_io::tests::queue_maintenance_cas_refusal_reobserves_rebases_and_retries,preflight_io::tests::queue_maintenance_cas_drift_is_fenced_before_retry_diagnostics_or_reobserve,queue_maintenance_effect_cas::tests::*	migrated	absent:attempt < QUEUE_MAINTENANCE_CAS_ATTEMPTS
+agent-doc-preflight-io/src/lib.rs	fn	queue_maintenance_cas_is_retryable	1	document-editor-authority	DocumentCasBackend::is_authority_mismatch (string-matched refusal; typed controller refusal pending)	preflight_io::tests::queue_maintenance_cas_refusal_reobserves_rebases_and_retries,preflight_io::tests::queue_maintenance_cas_drift_is_fenced_before_retry_diagnostics_or_reobserve,queue_maintenance_effect_cas::tests::*	lazily-adapter	none
+agent-doc-preflight-io/src/lib.rs	struct	AttachedQueueMaintenanceCasBackend	1	document-editor-authority	DocumentCasBackend (attached editor CAS)	preflight_io::tests::queue_maintenance_cas_refusal_reobserves_rebases_and_retries,preflight_io::tests::queue_maintenance_cas_drift_is_fenced_before_retry_diagnostics_or_reobserve,queue_maintenance_effect_cas::tests::*	lazily-adapter	none
+agent-doc-preflight-io/src/lib.rs	fn	compare_and_swap	1	document-editor-authority	DocumentCasBackend::compare_and_swap (apply_cp_write CAS)	preflight_io::tests::queue_maintenance_cas_refusal_reobserves_rebases_and_retries,preflight_io::tests::queue_maintenance_cas_drift_is_fenced_before_retry_diagnostics_or_reobserve,queue_maintenance_effect_cas::tests::*	lazily-adapter	none
+agent-doc-preflight-io/src/lib.rs	fn	persist_attached_queue_maintenance_with_retry	1	document-editor-authority	queue_maintenance_effect_cas::persist_document_cut + DocumentCas	preflight_io::tests::queue_maintenance_cas_refusal_reobserves_rebases_and_retries,preflight_io::tests::queue_maintenance_cas_drift_is_fenced_before_retry_diagnostics_or_reobserve,queue_maintenance_effect_cas::tests::*	migrated	absent:for attempt in 1..=QUEUE_MAINTENANCE_CAS_ATTEMPTS
+agent-doc-preflight-io/src/queue_maintenance_effect_cas.rs	struct	QueueMaintenanceEffectSuperseded	1	document-editor-authority	queue_maintenance_effect_cas (QueueMaintenanceEffectSuperseded)	queue_maintenance_effect_cas::tests::*	lazily-adapter	none
+agent-doc-preflight-io/src/queue_maintenance_effect_cas.rs	fn	expected_authority_hash	1	document-editor-authority	queue_maintenance_effect_cas (expected_authority_hash)	queue_maintenance_effect_cas::tests::*	lazily-adapter	none
+agent-doc-preflight-io/src/queue_maintenance_effect_cas.rs	fn	compare_and_apply	1	document-editor-authority	queue_maintenance_effect_cas (compare_and_apply)	queue_maintenance_effect_cas::tests::*	lazily-adapter	none
+agent-doc-preflight-io/src/queue_maintenance_effect_cas.rs	type	DocumentCasCore	1	document-editor-authority	queue_maintenance_effect_cas (DocumentCasCore)	queue_maintenance_effect_cas::tests::*	lazily-adapter	none
+agent-doc-preflight-io/src/queue_maintenance_effect_cas.rs	trait	DocumentCasBackend	1	document-editor-authority	queue_maintenance_effect_cas (DocumentCasBackend)	queue_maintenance_effect_cas::tests::*	lazily-adapter	none
+agent-doc-preflight-io/src/queue_maintenance_effect_cas.rs	fn	compare_and_swap	1	document-editor-authority	queue_maintenance_effect_cas (compare_and_swap)	queue_maintenance_effect_cas::tests::*	lazily-adapter	none
+agent-doc-preflight-io/src/queue_maintenance_effect_cas.rs	struct	DocumentCas	1	document-editor-authority	queue_maintenance_effect_cas (DocumentCas)	queue_maintenance_effect_cas::tests::*	lazily-adapter	none
+agent-doc-preflight-io/src/queue_maintenance_effect_cas.rs	fn	compare_and_apply	2	document-editor-authority	queue_maintenance_effect_cas (compare_and_apply)	queue_maintenance_effect_cas::tests::*	lazily-adapter	none
+agent-doc-process-owner-io/src/lib.rs	fn	structural_effect_superseded	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-queue/src/blocker_disregard.rs	fn	is_fence	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue/src/document_queue.rs	fn	recover_unwrapped_fenced_prompt	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue/src/document_queue.rs	fn	markdown_code_fence_marker	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue/src/document_queue.rs	fn	is_start_fence	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue/src/document_queue.rs	fn	is_stop_fence	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue/src/document_queue.rs	fn	is_prompt_fence_open	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue/src/document_queue.rs	fn	is_completed_fence_open	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue/src/document_queue.rs	fn	fence_closer	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue/src/document_queue.rs	fn	is_bare_fence_open	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue/src/document_queue.rs	fn	has_stop_fence_at_head	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue/src/free_text_admission.rs	fn	retire_superseded_promotion_rows	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue/src/lost_running_recovery.rs	fn	is_continue_retry_candidate	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue/src/lost_running_recovery.rs	fn	retry_authorized	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue/src/moot_decision.rs	fn	opens_fence	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue/src/moot_decision.rs	fn	closes_fence	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue/src/operator_request_packet.rs	fn	opening_fence	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue/src/operator_request_packet.rs	fn	is_closing_fence	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue/src/queue_claim.rs	fn	rekey_claim_supersedes	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue/src/queue_claim.rs	fn	refresh_fenced_in_session	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue/src/queue_claim.rs	fn	release_fenced	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue/src/queue_consume.rs	fn	reconcile_superseded_response_blockers	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue/src/queue_schedule.rs	const	BASE_SCHEDULE_BACKOFF_SECS	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue/src/queue_schedule.rs	const	MAX_SCHEDULE_BACKOFF_SECS	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue/src/waiting_subtree.rs	fn	count_attempts	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue/src/worker_quota.rs	fn	quota_blocked_attempts	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/claim_release_receipt.rs	fn	reported_receipt_attempts_for_parent_id	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/drain_owner.rs	struct	DrainOwnerLease	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/drain_owner.rs	fn	refresh_drain_owner_lease	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/drain_owner.rs	fn	read_drain_owner_lease	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/drain_owner.rs	fn	fresh_drain_owner_lease	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/drain_owner.rs	fn	fresh_loop_drain_owner_lease	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/drain_owner.rs	fn	loop_drain_owner_lease_within_stall_grace	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/drain_owner.rs	fn	clear_drain_owner_lease	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/queue_cmd.rs	fn	settle_before_projection_retry	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/queue_cmd.rs	fn	settle_before_projection_retry	2	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/queue_cmd.rs	fn	settle_before_projection_retry	3	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/queue_cmd.rs	const	CLAIM_RUNTIME_PROJECTION_MAX_ATTEMPTS	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/queue_cmd.rs	fn	is_retryable_projection_cas_refusal	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/queue_cmd.rs	struct	QueueRuntimeProjectionSuperseded	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/queue_consume.rs	fn	consume_queue_prompts_with_options_fenced	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/queue_consume.rs	const	QUEUE_AUTHORITY_PROJECTION_LAG_BACKOFF	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/queue_consume.rs	fn	retry_queue_authority_awaiting_projection	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/queue_consume.rs	fn	visible_reported_receipt_attempts	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/queue_edit_owner.rs	struct	QueueEditOwnerLease	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/queue_edit_owner.rs	fn	publish_queue_edit_owner_lease	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/queue_edit_owner.rs	fn	refresh_queue_edit_owner_lease_if_holder	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/queue_edit_owner.rs	fn	read_queue_edit_owner_lease	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/queue_edit_owner.rs	fn	clear_queue_edit_owner_lease	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/queue_edit_owner.rs	fn	clear_queue_edit_owner_lease_if_holder	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/queue_edit_owner.rs	fn	clear_queue_edit_owner_lease_if_holder_result	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/queue_lineage.rs	fn	fold_norepo_attempts	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-queue-io/src/queue_lineage.rs	fn	fence_indexes	1	queue-maintenance	QueueMaintenance EffectPlan (planned)	pending	triage	none
+agent-doc-reliable-sync-io/src/liveness.rs	fn	superseded_liveness_batches	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-repair-command-io/src/lib.rs	fn	captured_finalize_retry_at	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-repair-io/src/lib.rs	struct	PreflightTurnFence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-repair-io/src/lib.rs	fn	preflight_turn_fence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-repair-io/src/lib.rs	fn	mark_committed_frontmatter_if_turn_fence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-repair-io/src/lib.rs	fn	mark_abandoned_frontmatter_if_turn_fence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-response-replay-io/src/lib.rs	const	DEDUPE_CONVERGENCE_ATTEMPTS	1	git-ref	GitUpdateRefAdapter (planned)	pending	triage	none
+agent-doc-route-io/src/admission_projection.rs	fn	retry_routed_admission_after_fresh_restart	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-route-io/src/authoritative_actor.rs	fn	mark_route_lifecycle_fenced	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-route-io/src/authoritative_actor.rs	fn	mark_route_lifecycle_fenced_with_hook	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-route-io/src/authoritative_actor.rs	fn	log_route_lifecycle_superseded	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-route-io/src/authoritative_dispatch.rs	fn	lease_live_owner_route_outcome	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-route-io/src/authoritative_dispatch.rs	const	ROUTE_SYNC_SUBMIT_ATTEMPTS	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-route-io/src/direct_pane_dispatch.rs	static	DISPATCH_INJECT_ATTEMPTS	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-route-io/src/dispatch_only/proof.rs	fn	recycle_superseded_owner_refusal	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-route-io/src/dispatch_only/proof.rs	fn	recycle_superseded_owner_wait_secs	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-route-io/src/dispatch_only.rs	fn	retry_dispatch_only_after_busy_pane	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-route-io/src/pane_resolution.rs	fn	resolve_or_create_pane_with_auto_fix_retry	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-route-io/src/pane_resolution.rs	struct	RouteBusyPaneRetryEffects	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-route-io/src/pane_resolution.rs	fn	retry_route_after_busy_pane_auto_fix	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-route-io/src/queue_dispatch.rs	const	ROUTE_QUEUE_MAX_WRITE_ATTEMPTS	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-route-io/src/queue_dispatch.rs	const	ROUTE_QUEUE_MAX_RESOLVE_ATTEMPTS	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-route-io/src/queue_dispatch.rs	fn	is_retryable_crdt_merge_error	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-route-io/src/queue_dispatch.rs	fn	is_retryable_editor_authority_recovery_error	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-route-io/src/queue_dispatch.rs	fn	log_route_queue_write_retry	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-route-io/src/runtime_effects.rs	fn	route_busy_pane_retry_effects	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-session-actor-io/src/lib.rs	struct	BindingFence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-session-actor-io/src/lib.rs	fn	project_binding_fenced_in	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-session-actor-io/src/lib.rs	fn	binding_fence_lost	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-session-actor-io/src/lib.rs	fn	correct_binding_window_fenced_in	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-session-check-io/src/command.rs	enum	ReadOnlyRetainedProjectionFence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-session-registry-io/src/registration.rs	fn	generation_cas_failed	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-session-registry-io/src/registration.rs	fn	register_full_internal_fenced	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	const	STATE_DB_SCHEMA_RETRY_INTERVAL	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	struct	SupervisorLeaseStatus	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	struct	TerminalTurnFenceCheck	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	enum	FencedStateEventInsert	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	fn	prune_superseding_fact_to	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	fn	prune_superseded_visible_write_commit_candidates	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	struct	CoordinationLeaseRecord	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	fn	upsert_coordination_lease_in_db	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	fn	claim_coordination_lease_if_expired_in_db	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	fn	refresh_coordination_lease_if_holder_in_db	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	fn	load_coordination_lease_from_db	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	fn	load_coordination_leases_for_scope_kind_from_db	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	fn	clear_coordination_lease_in_db	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	fn	clear_coordination_leases_heartbeat_at_or_before_in_db	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	fn	clear_coordination_lease_if_heartbeat_at_or_before_in_db	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	fn	clear_coordination_lease_if_holder_in_db	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	fn	consume_runtime_request_and_coordination_lease_in_db	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	fn	load_supervisor_lease_from_db	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	fn	load_dispatch_attempts_from_db	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	const	DEFAULT_QUEUE_DRAIN_LEASE_SECS	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	fn	upsert_supervisor_lease_in_db	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	fn	insert_state_events_if_terminal_turn_fence_in_db	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	fn	compact_reconciled_dispatch_attempts_in_db	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	fn	store_actor_record_fenced_tx	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	fn	store_actor_lifecycle_record_fenced_tx	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/state_store.rs	fn	delete_actor_document_fenced_tx	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sqlite/src/write_lock.rs	fn	report_wait_then_retry	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-start-io/src/lib.rs	fn	clear_superseded_startup_miss	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-start-io/src/lib.rs	fn	retry_start_supervisor_registry	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-start-io/src/lib.rs	const	MAX_START_SESSION_RECYCLE_RETRIES	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-start-io/src/lib.rs	const	MAX_START_SESSION_GENERATION_RACE_RETRIES	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-start-io/src/lib.rs	fn	start_session_generation_race_retry_generation	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-start-io/src/lib.rs	fn	start_session_generation_cas_failed	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-start-io/src/lib.rs	const	GENERATION_CAS_MARKER	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-start-runtime-io/src/idle_watch.rs	const	DEFERRED_CLEAR_SUPERSEDED_REASON_NEWER_PROMPT	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-start-runtime-io/src/idle_watch.rs	const	ZERO_REPLICA_IDLE_WATCH_BACKOFF	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-start-runtime-io/src/idle_watch.rs	const	REEXEC_DOCUMENT_VALIDATION_RETRY	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-start-runtime-io/src/idle_watch.rs	const	CAPTURED_FINALIZE_CONTROLLER_PRESSURE_RETRY	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-start-runtime-io/src/idle_watch.rs	fn	captured_finalize_effect_retry_delay	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-start-runtime-io/src/idle_watch.rs	const	IDLE_WATCH_CONTROLLER_BACKOFF	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-start-runtime-io/src/idle_watch.rs	struct	CapturedFinalizeResumeRetry	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-start-runtime-io/src/idle_watch.rs	struct	QueueProjectionSupersededRetry	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-start-runtime-io/src/idle_watch.rs	fn	queue_projection_superseded_retry	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-start-runtime-io/src/lib.rs	fn	log_interrupted_turn_lease_retired	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-start-runtime-io/src/lib.rs	fn	arm_registry_publication_retry	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-start-runtime-io/src/lib.rs	fn	registry_publication_retry_target	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-start-runtime-io/src/lib.rs	fn	clear_matching_prompt_dispatch_projection_for_retry	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-start-runtime-io/src/run.rs	enum	RestartBackoffOutcome	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-start-runtime-io/src/run.rs	fn	restart_backoff_input_requests_interrupt	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-start-runtime-io/src/run.rs	fn	wait_for_restart_backoff	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-state-backbone/src/lib.rs	fn	superseding_closeout_stage	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-state-backbone/src/lib.rs	const	CLOSEOUT_OWNER_LEASE_SECS	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-state-backbone/src/lib.rs	const	CLOSEOUT_RECOVERY_LEASE_SECS	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-state-backbone/src/lib.rs	fn	closeout_owner_lease_secs	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-state-backbone/src/write_source.rs	fn	superseded_by	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor/src/actor_generation.rs	const	GENERATION_CAS_RETIRED_MARKER	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor/src/actor_generation.rs	struct	ActorGenerationLease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor/src/config.rs	fn	auto_install_should_retry	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor/src/detection.rs	const	CODEX_MODEL_CAPACITY_RECOVERY_MAX_ATTEMPTS	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor/src/handoff.rs	fn	lease_promoted	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor/src/idle_revision.rs	const	SUPPRESSED_OBSERVATIONS_BEFORE_RETRY	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor/src/idle_watch.rs	fn	observe_effect_retry_due	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor/src/idle_watch.rs	fn	captured_finalize_resume_retry_delay	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor/src/idle_watch.rs	fn	captured_finalize_resume_retry_at_delay	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor/src/idle_watch.rs	const	INITIAL_BACKOFF	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor/src/idle_watch.rs	const	MAX_BACKOFF	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor/src/lifecycle.rs	fn	start_session_retryable_during_recycle	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor/src/registry_publication.rs	const	MAX_RETRY_DELAY_TICKS	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor/src/registry_publication.rs	struct	RegistryPublicationRetryState	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor/src/registry_publication.rs	fn	request_retry	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor/src/registry_publication.rs	fn	retry_delay_ticks	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor/src/route_owned.rs	const	ROUTE_OWNED_SUPERSEDED_BINDING_ORPHAN	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor/src/route_owned.rs	fn	route_owned_superseded_orphan_decision	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor/src/session_owner.rs	enum	SupersededOwnerAction	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor/src/session_owner.rs	struct	SupersededOwnerProtection	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor/src/session_owner.rs	struct	SupersededOwnerFacts	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor/src/session_owner.rs	fn	superseded_owner_action	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor/src/startup_miss.rs	fn	registered_start_supersedes_miss	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor-io/src/ipc.rs	const	SUPERVISOR_IPC_RESOURCE_BACKOFF	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor-io/src/startup_miss.rs	fn	superseded_by_newer_registered_start	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor-io/src/startup_miss.rs	fn	take_superseded_startup_miss	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-supervisor-process/src/reexec_bridge.rs	fn	retryable	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-sync/src/lib.rs	const	SYNC_LOCK_CONTENDED_RETRY_MARKER	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-sync/src/lib.rs	fn	superseded_candidates	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-sync-io/src/resync.rs	fn	close_superseded_session	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-sync-io/src/resync.rs	fn	close_superseded_drift_sessions	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-sync-io/src/superseded_owner.rs	const	SUPERSEDED_OWNER_EXIT_GRACE	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-sync-io/src/superseded_owner.rs	fn	superseded_owner_facts	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-sync-io/src/superseded_owner.rs	fn	superseded_owner_decision	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-sync-io/src/superseded_owner.rs	fn	retire_superseded_owner_pane	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-sync-io/src/sync.rs	fn	interaction_actor_lease_is_live	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-sync-io/src/sync.rs	fn	interaction_actor_lease_is_live_at	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-template/src/response_materialization.rs	fn	markdown_fence_marker	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-template/src/template/prompt_comment_repair.rs	fn	is_fence_delimiter	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-template/src/template/tail_repair.rs	fn	fence_open	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-template/src/template/tail_repair.rs	fn	fence_close	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-template/src/template.rs	fn	fence_open	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-template/src/template.rs	fn	fence_close	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-template/src/template.rs	fn	is_code_fence_delimiter	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-template-io/src/response_materialization_io.rs	fn	log_partial_response_materialization_for_retry	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-turn/src/cp_projection.rs	struct	DeferredClearSupersededProjection	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-turn/src/cp_projection.rs	fn	with_deferred_clear_superseded	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-turn/src/repair.rs	fn	requires_turn_fence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-turn/src/response_text.rs	fn	opening_fence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-turn/src/response_text.rs	fn	is_closing_fence	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-turn/src/salient_response.rs	fn	fence_delimiter	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-turn/src/salient_response.rs	fn	fences_balanced	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-turn/src/turn_status.rs	fn	turn_lease_ended_by_interrupt	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-turn/src/turn_status.rs	fn	turn_lease_ended_by_withdrawn_prompt	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-turn-executor/src/capability_proof.rs	const	DEFAULT_MANAGED_PROOF_MAX_ATTEMPTS	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-turn-executor/src/capability_proof.rs	const	DEFAULT_MANAGED_PROOF_RETRY_BACKOFF	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-turn-executor/src/capability_proof.rs	const	MAX_MANAGED_PROOF_BACKOFF	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-turn-executor/src/capability_proof.rs	enum	ProofRetryDecision	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-turn-executor/src/capability_proof.rs	fn	proof_retry_decision	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-turn-executor/src/codex_launch.rs	const	CODEX_TEXT_FILE_BUSY_RETRIES	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-turn-executor/src/codex_launch.rs	fn	codex_text_file_busy_launch_retry_delay	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-turn-executor-tmux/src/context_clear.rs	struct	ContextClearSubmitRetryFacts	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-turn-executor-tmux/src/context_clear.rs	enum	ContextClearSubmitRetryAction	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-turn-executor-tmux/src/context_clear.rs	struct	ContextClearSubmitRetryProofFacts	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-turn-executor-tmux/src/context_clear.rs	fn	context_clear_submit_retry_action	1	tmux-layout-projection	LayoutProjectionAdapter (planned)	pending	triage	none
+agent-doc-turn-status-io/src/lib.rs	fn	marker_from_lease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-turn-status-io/src/lib.rs	fn	marker_from_lease_with_transcript	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-turn-status-io/src/lib.rs	fn	sweep_expired_turn_active_leases_in_db	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-turn-status-io/src/lib.rs	struct	InterruptedTurnLease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-turn-status-io/src/lib.rs	fn	interrupted_turn_lease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-turn-status-io/src/lib.rs	fn	harness_ended_turn_lease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-turn-status-io/src/lib.rs	fn	retire_interrupted_turn_lease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-turn-status-io/src/lib.rs	fn	retire_harness_ended_turn_lease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-turn-status-io/src/lib.rs	fn	reclaim_expired_turn_active_leases_on_read	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-turn-status-io/src/lib.rs	fn	pane_turn_active_lease_heartbeat	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
+agent-doc-workflow/src/orchestrate_tasks.rs	fn	collect_fenced_task_blocks	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-workflow/src/orchestrate_tasks.rs	fn	fence_open	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-workflow/src/orchestrate_tasks.rs	fn	fence_close	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-workflow-io/src/convergence_playback.rs	fn	with_attempts	1	process-ipc-transport	none (transport, review)	pending	triage	none
+agent-doc-write-converge-io/src/lib.rs	fn	visible_content_supersedes_visible_write_snapshot	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-write-ipc-io/src/transport.rs	fn	log_partial_response_materialization_for_retry	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-write-runtime-io/src/lib.rs	fn	lease_lost	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-write-runtime-io/src/lib.rs	fn	ensure_closeout_lease_still_held	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-write-runtime-io/src/lib.rs	fn	ensure_active_closeout_fence	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-write-runtime-io/src/lib.rs	struct	SiblingCloseoutFence	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-write-runtime-io/src/lib.rs	const	CLOSEOUT_OWNER_CLAIM_ATTEMPTS	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-write-runtime-io/src/lib.rs	const	CLOSEOUT_OWNER_RETRY_AT_MARKER	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-write-runtime-io/src/lib.rs	struct	CapturedFinalizeResumeCloseoutLease	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-write-runtime-io/src/lib.rs	fn	fence	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-write-runtime-io/src/lib.rs	enum	CapturedFinalizeResumeLeaseClaim	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-write-runtime-io/src/lib.rs	fn	claim_captured_finalize_resume_closeout_lease	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-write-runtime-io/src/lib.rs	fn	run_command_inner_under_apply_guard_and_closeout_fence	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-write-runtime-io/src/run_entry.rs	fn	retain_ipc_patch_for_retry_error	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-write-runtime-io/src/run_entry.rs	fn	error_requests_retry_without_disk	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+agent-doc-write-runtime-io/src/run_entry.rs	fn	retain_ipc_patch_for_editor_authority_retry	1	document-editor-authority	DocumentAuthorityAdapter (planned)	pending	triage	none
+src/cancelled_trigger.rs	const	UNSUBMITTED_LEASE_WINDOW	1	process-ipc-transport	none (transport, review)	pending	triage	none
+src/ffi.rs	call	compare_exchange	1	in-memory	none: FFI sync lock (backend lock)	n/a	excluded	none
+src/ffi.rs	call	compare_exchange	2	in-memory	none: FFI sync lock (backend lock)	n/a	excluded	none
+src/main.rs	fn	settle_before_projection_retry	1	process-ipc-transport	none (transport, review)	pending	triage	none
+src/preflight_hook.rs	const	ADMISSION_RETRY_MIN_REMAINING	1	process-ipc-transport	none (transport, review)	pending	triage	none
+src/preflight_hook.rs	enum	AdmissionRetry	1	process-ipc-transport	none (transport, review)	pending	triage	none
+src/session_actor_cmd.rs	fn	retry_after_editor_replica_reload_once	1	process-ipc-transport	none (transport, review)	pending	triage	none
+src/session_actor_cmd.rs	fn	reconcile_controller_lease_with_supervisor_runtime	1	process-ipc-transport	none (transport, review)	pending	triage	none
+src/session_actor_cmd.rs	fn	blocker_supersedes_ready_busy_recovery_hint	1	process-ipc-transport	none (transport, review)	pending	triage	none
+src/sim_world/fuzz.rs	fn	generation_fenced	1	process-ipc-transport	none (transport, review)	pending	triage	none
+src/sim_world.rs	fn	bump_lease	1	process-ipc-transport	none (transport, review)	pending	triage	none

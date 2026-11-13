@@ -363,6 +363,13 @@ pub fn reliable_sync_editor_live_for_file(file: &Path) -> bool {
     if let Some(live) = agent_doc_reliable_sync_io::plane_editor_live_for_path(&file_string) {
         return live;
     }
+    // Status-only inspection must not initialize the reliable-sync inbox or
+    // Lazily outbox schemas inside the shared state.db. The in-process plane is
+    // still a valid positive observation; an unhydrated cold plane is simply
+    // not evidence of a live editor.
+    if agent_doc_sqlite::state_store::state_db_read_only_scope_active() {
+        return false;
+    }
     let document_hash = agent_doc_hash::document_id_for_path(file);
     if let Err(error) = restore_durable_liveness(file, &document_hash) {
         eprintln!(

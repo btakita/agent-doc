@@ -394,7 +394,10 @@ pub fn with_state_db_read_only<T>(operation: impl FnOnce() -> T) -> T {
     })
 }
 
-fn state_db_read_only_scope_active() -> bool {
+/// Whether the current thread is inside an intrinsically read-only state-store
+/// transaction. Adjacent durable adapters (for example reliable-sync journal
+/// hydration) use this to avoid opening their own schema-applying connections.
+pub fn state_db_read_only_scope_active() -> bool {
     STATE_DB_READ_ONLY_SCOPE.with(Cell::get)
 }
 

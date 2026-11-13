@@ -4483,9 +4483,10 @@ Body\n\
         )
         .unwrap();
 
-        let report = inspect_with_warnings(&doc).unwrap();
-        assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
-        assert!(report.warnings.is_empty());
+        assert!(matches!(
+            inspect_applying(&doc).unwrap(),
+            SessionCheckStatus::Ok(_)
+        ));
         assert!(
             agent_doc_supervisor_io::startup_miss::load_startup_miss(&doc)
                 .unwrap()
@@ -6464,7 +6465,7 @@ Body\n\
             .unwrap();
 
         assert!(
-            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            matches!(inspect_applying(&doc).unwrap(), SessionCheckStatus::Ok(_)),
             "guard should clear when the dropped prompt is present in HEAD"
         );
         assert!(
@@ -6525,7 +6526,7 @@ Body\n\
         .unwrap();
 
         assert!(
-            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            matches!(inspect_applying(&doc).unwrap(), SessionCheckStatus::Ok(_)),
             "guard should clear when the dropped queue edit is preserved in HEAD"
         );
         assert!(
@@ -6559,7 +6560,7 @@ Body\n\
             .unwrap();
 
         assert!(
-            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            matches!(inspect_applying(&doc).unwrap(), SessionCheckStatus::Ok(_)),
             "guard should self-clear when the dropped [#id] is preserved as a struck do [#id] head"
         );
         assert!(
@@ -6592,7 +6593,7 @@ Body\n\
             .unwrap();
 
         assert!(
-            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            matches!(inspect_applying(&doc).unwrap(), SessionCheckStatus::Ok(_)),
             "guard should clear when the dropped queue head was consumed this cycle"
         );
     }
@@ -6617,7 +6618,7 @@ Body\n\
         .unwrap();
 
         assert!(
-            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            matches!(inspect_applying(&doc).unwrap(), SessionCheckStatus::Ok(_)),
             "guard should clear when the dropped queue head is struck in place"
         );
         assert!(

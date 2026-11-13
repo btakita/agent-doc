@@ -3702,10 +3702,12 @@ pub fn inspect_read_only_with_warnings(
     effects: &impl SessionCheckEffects,
 ) -> Result<SessionCheckReport> {
     let status_only = StatusOnlySessionCheckEffects { inner: effects };
-    agent_doc_ops_log_io::with_ops_log_suppressed(|| {
-        crate::with_status_only_pass(|| {
-            crate::with_current_document_pass(|| inspect_with_warnings_inner(file, &status_only))
-        })
+    // This public entrypoint is used directly by preflight proof, Stop, route,
+    // sync, and MCP callers that never pass through the CLI wrapper. Its whole
+    // call graph therefore needs the same durable-state and diagnostic purity
+    // boundary as `run_read_only_settling`.
+    crate::with_status_only_transaction(|| {
+        crate::with_current_document_pass(|| inspect_with_warnings_inner(file, &status_only))
     })
 }
 

@@ -398,6 +398,62 @@ fn session_check_cli_reports_post_commit_steering_as_pending_with_exit_zero() {
         ));
 }
 
+#[test]
+fn direct_read_only_inspect_preserves_stale_schema_retention_and_ops() {
+    let (tmp, doc) = committed_cycle_with_post_commit_steering();
+    let before_authority = agent_doc_cycle_state_io::load_latest_document_authority(&doc).unwrap();
+    stage_pre_migration_over_retention_state(tmp.path());
+    let before_state = state_db_snapshot(tmp.path());
+    assert_eq!(before_state.user_version, 73);
+    assert!(
+        before_state
+            .schema
+            .iter()
+            .all(|entry| !entry.contains("state_events_document_hash_document_version")),
+        "fixture must retain a missing canonical index"
+    );
+    assert_eq!(
+        before_state
+            .rows
+            .iter()
+            .filter(|row| row.contains("status-only-retention-probe-"))
+            .count(),
+        4,
+        "fixture must retain every unversioned over-retention row"
+    );
+    let ops = tmp.path().join(".agent-doc/logs/ops.log");
+    let before_ops = std::fs::read(&ops).unwrap_or_default();
+
+    let report = agent_doc_session_check_io::inspect_read_only_with_warnings(
+        &doc,
+        &agent_doc_closeout_runtime_io::session_check_effects(),
+    )
+    .unwrap();
+    assert!(matches!(
+        report.status,
+        agent_doc_session_check_io::SessionCheckStatus::SteeringPending(_)
+    ));
+
+    let after_state = state_db_snapshot(tmp.path());
+    assert_eq!(after_state.user_version, before_state.user_version);
+    let before_schema = before_state.schema.iter().collect::<BTreeSet<_>>();
+    let after_schema = after_state.schema.iter().collect::<BTreeSet<_>>();
+    assert_eq!(
+        after_state.schema,
+        before_state.schema,
+        "direct inspect changed schema; added={:?}; removed={:?}",
+        after_schema.difference(&before_schema).collect::<Vec<_>>(),
+        before_schema.difference(&after_schema).collect::<Vec<_>>()
+    );
+    assert_eq!(after_state.rows, before_state.rows);
+    assert_eq!(std::fs::read(&ops).unwrap_or_default(), before_ops);
+    assert_eq!(
+        agent_doc_cycle_state_io::load_latest_document_authority(&doc).unwrap(),
+        before_authority,
+        "direct read-only inspect must not publish authority"
+    );
+}
+
 /// `#codexsteerinterrupt`: the `#steerinterruptexit` fixture inside a bound
 /// Codex session. `steering` is written to disk after the commit; when
 /// `editor_typed` is set it is also captured as the operator's editor op

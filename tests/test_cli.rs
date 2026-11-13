@@ -14850,16 +14850,27 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
     );
     let session_check_command =
         fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs")).unwrap();
+    let session_check_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/lib.rs")).unwrap();
     for required in [
         "fn read_only_inspection(&self) -> bool",
         "pub fn inspect_read_only_with_warnings(",
         "if effects.read_only_inspection()",
-        "agent_doc_ops_log_io::with_ops_log_suppressed",
-        "crate::with_status_only_pass",
+        "crate::with_status_only_transaction",
     ] {
         assert!(
             session_check_command.contains(required),
             "read-only effects must intrinsically fence the complete inspection, including direct removed-claim cancellation: {required}"
+        );
+    }
+    for required in [
+        "with_status_only_pass",
+        "agent_doc_sqlite::state_store::with_state_db_read_only",
+        "agent_doc_ops_log_io::with_ops_log_suppressed",
+    ] {
+        assert!(
+            session_check_lib.contains(required),
+            "the shared status-only transaction must suppress every durable inspection effect: {required}"
         );
     }
     for (production_source, required) in [

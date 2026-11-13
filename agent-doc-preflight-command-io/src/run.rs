@@ -4314,9 +4314,38 @@ mod tests {
     );
 
     fn claimed_head_preflight(doc: &Path) -> serde_json::Value {
-        let mut output = Vec::new();
-        run_with_options_to_writer(doc, PreflightOptions::default(), &mut output).unwrap();
-        serde_json::from_slice(&output).unwrap()
+        // These claim-shape tests do not exercise detached queue maintenance.
+        // Serialize their observations after any fixture-triggered worker
+        // releases its durable edit-owner lease so expected apply-lock
+        // contention cannot leak into the assertion.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            while agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(
+                &doc.to_string_lossy(),
+            )
+            .is_some()
+            {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "timed out waiting for detached queue maintenance before claim preflight"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            let mut output = Vec::new();
+            match run_with_options_to_writer(doc, PreflightOptions::default(), &mut output) {
+                Ok(()) => return serde_json::from_slice(&output).unwrap(),
+                Err(error)
+                    if error.to_string().contains("queue mutation deferred")
+                        && std::time::Instant::now() < deadline =>
+                {
+                    // A controller projection can begin after the lease probe.
+                    // Retrying the read-only claim observation is the public
+                    // preflight contract for this transient owner handoff.
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(error) => panic!("claim preflight failed: {error:#}"),
+            }
+        }
     }
 
     fn seed_claimed_head_doc(dir: &tempfile::TempDir) -> std::path::PathBuf {

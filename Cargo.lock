@@ -1607,6 +1607,7 @@ dependencies = [
  "agent-doc-workflow-io",
  "agent-doc-write-runtime-io",
  "anyhow",
+ "fs2",
  "lazily 0.61.1",
  "libc",
  "parking_lot",

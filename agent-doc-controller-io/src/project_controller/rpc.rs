@@ -20232,6 +20232,7 @@ pub(crate) mod background_maintenance_test_gate {
 pub struct StateActorTestHandle {
     should_stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
+    runtime: Arc<ControllerRuntime>,
     /// Registered in `warm_test_actor_sockets` while the actor serves it.
     warm_socket: PathBuf,
 }
@@ -20265,6 +20266,32 @@ pub fn ensure_state_actor_for_tests(project_root: &Path) -> Result<()> {
     shutdown_stale_controller(&canonical);
     let actor = start_state_actor_for_tests(&canonical)?;
     actors.insert(canonical, actor);
+    Ok(())
+}
+
+/// Drain the in-process actor's document-authority handoff lane to an exact
+/// empty receipt. Purity regressions call this after the operation under test
+/// so an asynchronously folded authority observation cannot escape the state
+/// comparison merely because its worker had not run yet.
+#[cfg(feature = "test-support")]
+pub fn drain_state_actor_document_authority_handoffs_for_tests(project_root: &Path) -> Result<()> {
+    let canonical = project_root
+        .canonicalize()
+        .unwrap_or_else(|_| project_root.to_path_buf());
+    ensure_state_actor_for_tests(&canonical)?;
+    let runtime = state_actors_for_tests()
+        .lock()
+        .get(&canonical)
+        .map(|actor| Arc::clone(&actor.runtime))
+        .context("test state actor disappeared before authority drain")?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while runtime.drain_document_authority_handoffs(&canonical)? {
+        anyhow::ensure!(
+            Instant::now() < deadline,
+            "timed out draining test state actor document-authority handoffs"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
     Ok(())
 }
 
@@ -20386,8 +20413,9 @@ pub fn start_state_actor_for_tests(project_root: &Path) -> Result<StateActorTest
     // The listener is bound, so the socket path canonicalizes to the key the
     // clients' lookups will compute.
     let warm_socket = warm_test_actor_sockets::register(&sock);
+    let thread_runtime = Arc::clone(&runtime);
     let thread = std::thread::spawn(move || {
-        install_controller_request_thread_context(&runtime);
+        install_controller_request_thread_context(&thread_runtime);
         // `#visiblewriteloadflake`: serve each client on its own thread, as
         // `serve_with_options` does. Serving inline let one long-poll (a
         // `visible_write_commit_candidate_patch_await` chunk) hold the only
@@ -20398,7 +20426,7 @@ pub fn start_state_actor_for_tests(project_root: &Path) -> Result<StateActorTest
         while !thread_stop.load(Ordering::SeqCst) && actor_root.is_dir() {
             match listener.accept() {
                 Ok(stream) => {
-                    let runtime = Arc::clone(&runtime);
+                    let runtime = Arc::clone(&thread_runtime);
                     let client_stop = Arc::clone(&thread_stop);
                     let sock = sock.clone();
                     clients.retain(|client: &std::thread::JoinHandle<()>| !client.is_finished());
@@ -20431,6 +20459,7 @@ pub fn start_state_actor_for_tests(project_root: &Path) -> Result<StateActorTest
     Ok(StateActorTestHandle {
         should_stop,
         thread: Some(thread),
+        runtime,
         warm_socket,
     })
 }

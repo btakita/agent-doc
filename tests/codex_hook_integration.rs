@@ -31,6 +31,75 @@ fn agent_doc() -> Command {
     cmd
 }
 
+fn logical_state_rows(root: &Path) -> Vec<String> {
+    let conn = agent_doc_sqlite::state_store::open_state_db(root).unwrap();
+    let tables = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT name FROM sqlite_schema \
+                 WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+            )
+            .unwrap();
+        stmt.query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect::<Vec<_>>()
+    };
+    let mut rows = Vec::new();
+    for table in tables {
+        let quoted_table = format!("\"{}\"", table.replace('"', "\"\""));
+        let columns = {
+            let mut stmt = conn
+                .prepare(&format!("PRAGMA table_info({quoted_table})"))
+                .unwrap();
+            stmt.query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect::<Vec<_>>()
+        };
+        if columns.is_empty() {
+            continue;
+        }
+        let encoded_columns = columns
+            .iter()
+            .map(|column| {
+                let quoted = format!("\"{}\"", column.replace('"', "\"\""));
+                format!("typeof({quoted}) || ':' || quote({quoted})")
+            })
+            .collect::<Vec<_>>()
+            .join(" || '|' || ");
+        let mut stmt = conn
+            .prepare(&format!("SELECT {encoded_columns} FROM {quoted_table}"))
+            .unwrap();
+        rows.extend(
+            stmt.query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .map(|row| format!("{table}|{row}")),
+        );
+    }
+    rows.sort();
+    rows
+}
+
+fn await_authority_handoff_drain(root: &Path, doc: &Path) {
+    let document_hash = agent_doc_fs::document_state_hash(doc).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        if agent_doc_sqlite::state_store::load_document_authority_handoff(root, &document_hash)
+            .unwrap()
+            .is_none()
+        {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "controller authority-handoff worker did not reach its empty receipt"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
 fn template_doc_content() -> String {
     "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n❯ Please reply\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n".to_string()
 }
@@ -166,6 +235,18 @@ fn session_check_cli_reports_post_commit_steering_as_pending_with_exit_zero() {
     // The CLI exits 0, names it `steering pending`, lists the item verbatim
     // with its dispatch, and defers queue continuation behind it.
     let (tmp, doc) = committed_cycle_with_post_commit_steering();
+    // Warm the real CLI/controller path and wait for its asynchronous authority
+    // lane to reach an exact empty receipt before taking the purity cut.
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("AGENT_DOC_SESSION_CHECK_SETTLE_SECS", "0")
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .success();
+    await_authority_handoff_drain(tmp.path(), &doc);
+    let before_authority = agent_doc_cycle_state_io::load_latest_document_authority(&doc).unwrap();
+    let before_state = logical_state_rows(tmp.path());
+
     let out = agent_doc()
         .current_dir(tmp.path())
         .env("AGENT_DOC_SESSION_CHECK_SETTLE_SECS", "0")
@@ -185,6 +266,17 @@ fn session_check_cli_reports_post_commit_steering_as_pending_with_exit_zero() {
             "queue_continuation_required=false steering_pending=true",
         ))
         .stdout(predicate::str::contains("INTERRUPTED").not());
+    await_authority_handoff_drain(tmp.path(), &doc);
+    assert_eq!(
+        agent_doc_cycle_state_io::load_latest_document_authority(&doc).unwrap(),
+        before_authority,
+        "status-only CLI must not publish an authority observation"
+    );
+    assert_eq!(
+        logical_state_rows(tmp.path()),
+        before_state,
+        "status-only CLI must not mutate logical state row payloads"
+    );
     let stdout = String::from_utf8_lossy(&out.get_output().stdout).to_ascii_lowercase();
     assert!(
         !stdout.contains("current turn"),

@@ -3694,7 +3694,11 @@ fn cycle_has_captured_response_projection(
 }
 
 pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<&'static str>> {
-    let Some(plan) = plan_committed_historical_snapshot_drift_repair(file, false)? else {
+    let Some(plan) = plan_committed_historical_snapshot_drift_repair(
+        file,
+        SnapshotDriftPlanObservation::Applying,
+    )?
+    else {
         return Ok(None);
     };
     agent_doc_snapshot_io::checkpoint_document_baseline(
@@ -3756,32 +3760,88 @@ struct SnapshotDriftRepairPlan {
     head_doc: String,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SnapshotDriftPlanObservation {
+    Applying,
+    ReadOnly,
+}
+
+#[derive(Clone, Copy)]
+enum SnapshotDriftCaptureWarning {
+    Projection,
+    Snapshot,
+}
+
+impl SnapshotDriftPlanObservation {
+    fn current_document(self, file: &Path) -> Result<String> {
+        match self {
+            Self::Applying => agent_doc_document_realtime_io::try_resolve_current_document_content(
+                file,
+                "committed_historical_snapshot_drift",
+            ),
+            Self::ReadOnly => agent_doc_document_realtime_io::peek_current_document_content(
+                file,
+                "committed_historical_snapshot_drift",
+            ),
+        }
+    }
+
+    fn turn_scope(self, file: &Path) -> Option<agent_doc_turn::turn_scope::TurnScope> {
+        match self {
+            Self::Applying => agent_doc_turn_scope_io::load(file),
+            Self::ReadOnly => agent_doc_turn_scope_io::try_load_read_only(file)
+                .ok()
+                .flatten(),
+        }
+    }
+
+    fn report_capture_warning(
+        self,
+        file: &Path,
+        kind: SnapshotDriftCaptureWarning,
+        error: &anyhow::Error,
+    ) {
+        if self == Self::ReadOnly {
+            return;
+        }
+        let (message_kind, op) = match kind {
+            SnapshotDriftCaptureWarning::Projection => (
+                "projection",
+                "snapshot_repair_committed_capture_projection_warning",
+            ),
+            SnapshotDriftCaptureWarning::Snapshot => (
+                "snapshot repair",
+                "snapshot_repair_committed_capture_warning",
+            ),
+        };
+        eprintln!(
+            "[repair] committed-capture {message_kind} warning for {}: {error}",
+            file.display(),
+        );
+        agent_doc_ops_log_io::log_op(file, &format!("{op} file={} err={error}", file.display()));
+    }
+}
+
 /// Read-only half of [`repair_committed_historical_snapshot_drift`]: the drift
 /// reason that repair WOULD rebase the snapshot for, without checkpointing the
 /// baseline or converging the CRDT canonical (`#sessioncheckread`). A
 /// status-only `session-check` reports it and names the explicit repair.
 pub fn pending_committed_historical_snapshot_drift(file: &Path) -> Result<Option<&'static str>> {
-    Ok(plan_committed_historical_snapshot_drift_repair(file, true)?.map(|plan| plan.reason))
+    Ok(plan_committed_historical_snapshot_drift_repair(
+        file,
+        SnapshotDriftPlanObservation::ReadOnly,
+    )?
+    .map(|plan| plan.reason))
 }
 
 fn plan_committed_historical_snapshot_drift_repair(
     file: &Path,
-    read_only: bool,
+    observation: SnapshotDriftPlanObservation,
 ) -> Result<Option<SnapshotDriftRepairPlan>> {
     let Some(snapshot_doc) = agent_doc_snapshot_io::load_document_baseline(file)? else {
         return Ok(None);
     };
-    let current_doc = match if read_only {
-        agent_doc_document_realtime_io::peek_current_document_content(
-            file,
-            "committed_historical_snapshot_drift",
-        )
-    } else {
-        agent_doc_document_realtime_io::try_resolve_current_document_content(
-            file,
-            "committed_historical_snapshot_drift",
-        )
-    } {
+    let current_doc = match observation.current_document(file) {
         Ok(content) => content,
         Err(_) => return Ok(None),
     };
@@ -3801,7 +3861,7 @@ fn plan_committed_historical_snapshot_drift_repair(
         &snapshot_doc,
         &current_doc,
     ) {
-        if !read_only {
+        if observation == SnapshotDriftPlanObservation::Applying {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -3817,9 +3877,9 @@ fn plan_committed_historical_snapshot_drift_repair(
         return Ok(None);
     };
     let committed_capture_materialized_in_head =
-        committed_capture_response_materialized_in_content(file, &head_doc);
+        committed_capture_response_materialized_in_content(file, &head_doc, observation);
     let committed_capture_materialized_in_snapshot =
-        committed_capture_response_materialized_in_content(file, &snapshot_doc);
+        committed_capture_response_materialized_in_content(file, &snapshot_doc, observation);
     let historical_mutation =
         agent_doc_document_realtime::write_policy::classify_committed_historical_agent_doc_mutation(
             &snapshot_doc,
@@ -3828,7 +3888,7 @@ fn plan_committed_historical_snapshot_drift_repair(
     // #nm1x: intersect the drift against the current turn scope so independent
     // out-of-scope edits (e.g. a queue item added beside the running one) do not
     // block the historical snapshot repair.
-    let turn_scope = agent_doc_turn_scope_io::load(file);
+    let turn_scope = observation.turn_scope(file);
     let non_exchange_component_drift = agent_doc_git::has_blocking_non_exchange_component_drift(
         &snapshot_doc,
         &head_doc,
@@ -3933,7 +3993,11 @@ fn converge_crdt_canonical_to_head(file: &Path, head_doc: &str) {
     }
 }
 
-fn committed_capture_response_materialized_in_content(file: &Path, content: &str) -> bool {
+fn committed_capture_response_materialized_in_content(
+    file: &Path,
+    content: &str,
+    observation: SnapshotDriftPlanObservation,
+) -> bool {
     match projected_committed_capture_response_body(file) {
         Ok(Some(response_body)) => {
             return !response_body.trim().is_empty()
@@ -3943,40 +4007,18 @@ fn committed_capture_response_materialized_in_content(file: &Path, content: &str
                 );
         }
         Ok(None) => {}
-        Err(e) => {
-            eprintln!(
-                "[repair] committed-capture projection warning for {}: {}",
-                file.display(),
-                e
-            );
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "snapshot_repair_committed_capture_projection_warning file={} err={}",
-                    file.display(),
-                    e
-                ),
-            );
-        }
+        Err(error) => observation.report_capture_warning(
+            file,
+            SnapshotDriftCaptureWarning::Projection,
+            &error,
+        ),
     }
 
     let capture = match agent_doc_capture_io::latest_committed(file) {
         Ok(Some(capture)) => capture,
         Ok(None) => return false,
-        Err(e) => {
-            eprintln!(
-                "[repair] committed-capture snapshot repair warning for {}: {}",
-                file.display(),
-                e
-            );
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "snapshot_repair_committed_capture_warning file={} err={}",
-                    file.display(),
-                    e
-                ),
-            );
+        Err(error) => {
+            observation.report_capture_warning(file, SnapshotDriftCaptureWarning::Snapshot, &error);
             return false;
         }
     };
@@ -4365,6 +4407,29 @@ mod tests {
     use super::*;
     use std::cell::Cell;
     use std::process::Command as ProcessCommand;
+
+    #[test]
+    fn read_only_snapshot_drift_error_policy_emits_no_ops() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, "# Session\n").unwrap();
+        let ops = dir.path().join(".agent-doc/logs/ops.log");
+        let before = std::fs::read(&ops).unwrap_or_default();
+
+        SnapshotDriftPlanObservation::ReadOnly.report_capture_warning(
+            &file,
+            SnapshotDriftCaptureWarning::Projection,
+            &anyhow::anyhow!("malformed projection"),
+        );
+        SnapshotDriftPlanObservation::ReadOnly.report_capture_warning(
+            &file,
+            SnapshotDriftCaptureWarning::Snapshot,
+            &anyhow::anyhow!("malformed capture"),
+        );
+
+        assert_eq!(std::fs::read(&ops).unwrap_or_default(), before);
+    }
 
     #[test]
     fn missing_replica_adopts_an_exact_disk_visible_response() {
@@ -5695,7 +5760,11 @@ mod tests {
 
         let head_doc = format!("{content}\n{response}");
         assert!(
-            committed_capture_response_materialized_in_content(&doc, &head_doc),
+            committed_capture_response_materialized_in_content(
+                &doc,
+                &head_doc,
+                SnapshotDriftPlanObservation::Applying,
+            ),
             "committed captured-response projection must prove materialization without capture JSON"
         );
     }

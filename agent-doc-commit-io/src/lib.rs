@@ -2009,19 +2009,28 @@ fn commit_proven_response_replay_canonicalization_scoped(file: &Path) -> Result<
 /// response index/archive, and bounded Git history; writes nothing.
 pub fn pending_committed_response_evidence_repair(file: &Path) -> Result<Option<String>> {
     agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
-        if let Some(ids) = duplicate_queue_response_projection_plan(file)? {
+        if let Some(ids) = duplicate_queue_response_projection_plan(
+            file,
+            ResponseEvidencePlanObservation::ReadOnly,
+        )? {
             return Ok(Some(format!(
                 "duplicate queue response projections in HEAD would be canonicalized and committed (ids={})",
                 ids.into_iter().collect::<Vec<_>>().join(",")
             )));
         }
-        if let Some(ids) = historical_response_evidence_restore_plan(file)? {
+        if let Some(ids) = historical_response_evidence_restore_plan(
+            file,
+            ResponseEvidencePlanObservation::ReadOnly,
+        )? {
             return Ok(Some(format!(
                 "committed response evidence would be restored into the tracked response archive/index and committed (ids={})",
                 ids.into_iter().collect::<Vec<_>>().join(",")
             )));
         }
-        if let Some(ids) = orphaned_queue_response_projection_plan(file)? {
+        if let Some(ids) = orphaned_queue_response_projection_plan(
+            file,
+            ResponseEvidencePlanObservation::ReadOnly,
+        )? {
             return Ok(Some(format!(
                 "orphaned queue response projections would be detached and committed (ids={})",
                 ids.into_iter().collect::<Vec<_>>().join(",")
@@ -2031,11 +2040,41 @@ pub fn pending_committed_response_evidence_repair(file: &Path) -> Result<Option<
     })
 }
 
+#[derive(Clone, Copy)]
+enum ResponseEvidencePlanObservation {
+    Applying,
+    ReadOnly,
+}
+
+impl ResponseEvidencePlanObservation {
+    fn authority(self, file: &Path, source: &str) -> Result<String> {
+        match self {
+            Self::Applying => commit_current_document_content(file, source),
+            Self::ReadOnly => {
+                agent_doc_document_realtime_io::peek_current_document_content(file, source)
+            }
+        }
+    }
+
+    fn disk(self, file: &Path, source: &str) -> Result<String> {
+        match self {
+            Self::Applying => {
+                agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)
+            }
+            Self::ReadOnly => {
+                agent_doc_document_realtime_io::peek_disk_document_content(file, source)
+            }
+        }
+    }
+}
+
 /// Read-only plan for [`restore_and_commit_historical_response_evidence`]: the
 /// response ids it would restore/index, or `None` when it would do nothing.
-fn historical_response_evidence_restore_plan(file: &Path) -> Result<Option<BTreeSet<String>>> {
-    let authority =
-        commit_current_document_content(file, "plan_historical_response_evidence_authority")?;
+fn historical_response_evidence_restore_plan(
+    file: &Path,
+    observation: ResponseEvidencePlanObservation,
+) -> Result<Option<BTreeSet<String>>> {
+    let authority = observation.authority(file, "plan_historical_response_evidence_authority")?;
     let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
         return Ok(None);
     };
@@ -2062,15 +2101,13 @@ fn historical_response_evidence_restore_plan(file: &Path) -> Result<Option<BTree
 
 /// Read-only plan for
 /// [`canonicalize_and_commit_duplicate_queue_response_projections`].
-fn duplicate_queue_response_projection_plan(file: &Path) -> Result<Option<BTreeSet<String>>> {
-    let authority = commit_current_document_content(
-        file,
-        "plan_duplicate_queue_response_projection_authority",
-    )?;
-    let disk = agent_doc_document_realtime_io::resolve_disk_current_document_content(
-        file,
-        "plan_duplicate_queue_response_projection_disk",
-    )?;
+fn duplicate_queue_response_projection_plan(
+    file: &Path,
+    observation: ResponseEvidencePlanObservation,
+) -> Result<Option<BTreeSet<String>>> {
+    let authority =
+        observation.authority(file, "plan_duplicate_queue_response_projection_authority")?;
+    let disk = observation.disk(file, "plan_duplicate_queue_response_projection_disk")?;
     if authority != disk {
         return Ok(None);
     }
@@ -2084,13 +2121,13 @@ fn duplicate_queue_response_projection_plan(file: &Path) -> Result<Option<BTreeS
 
 /// Read-only plan for [`detach_and_commit_orphaned_queue_response_projections`]:
 /// the response ids whose struck queue projection it would detach.
-fn orphaned_queue_response_projection_plan(file: &Path) -> Result<Option<BTreeSet<String>>> {
+fn orphaned_queue_response_projection_plan(
+    file: &Path,
+    observation: ResponseEvidencePlanObservation,
+) -> Result<Option<BTreeSet<String>>> {
     let authority =
-        commit_current_document_content(file, "plan_orphaned_queue_response_projection_authority")?;
-    let disk = agent_doc_document_realtime_io::resolve_disk_current_document_content(
-        file,
-        "plan_orphaned_queue_response_projection_disk",
-    )?;
+        observation.authority(file, "plan_orphaned_queue_response_projection_authority")?;
+    let disk = observation.disk(file, "plan_orphaned_queue_response_projection_disk")?;
     if authority != disk {
         return Ok(None);
     }
@@ -2142,7 +2179,12 @@ pub fn restore_and_commit_historical_response_evidence(file: &Path) -> Result<bo
         // `#sessioncheckread`: the read-only plan is the gate, so the status
         // check's report and this repair can never disagree about whether a
         // restoration is pending.
-        if historical_response_evidence_restore_plan(file)?.is_none() {
+        if historical_response_evidence_restore_plan(
+            file,
+            ResponseEvidencePlanObservation::Applying,
+        )?
+        .is_none()
+        {
             return Ok(false);
         }
         let authority =
@@ -2297,7 +2339,11 @@ pub fn canonicalize_and_commit_duplicate_queue_response_projections(file: &Path)
         if authority != disk {
             return Ok(false);
         }
-        let Some(response_ids) = duplicate_queue_response_projection_plan(file)? else {
+        let Some(response_ids) = duplicate_queue_response_projection_plan(
+            file,
+            ResponseEvidencePlanObservation::Applying,
+        )?
+        else {
             return Ok(false);
         };
         let target =
@@ -2441,7 +2487,11 @@ pub fn detach_and_commit_orphaned_queue_response_projections(file: &Path) -> Res
         if authority != disk {
             return Ok(false);
         }
-        let Some(detached) = orphaned_queue_response_projection_plan(file)? else {
+        let Some(detached) = orphaned_queue_response_projection_plan(
+            file,
+            ResponseEvidencePlanObservation::Applying,
+        )?
+        else {
             return Ok(false);
         };
         let mut target = authority.clone();

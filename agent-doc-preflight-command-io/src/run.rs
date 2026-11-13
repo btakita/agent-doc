@@ -3897,6 +3897,11 @@ mod tests {
         assert!(message.contains("dispatch=cancel_claimed"), "{message}");
         assert!(message.contains(claimed), "{message}");
 
+        agent_doc_controller_io::project_controller::drain_state_actor_document_authority_handoffs_for_tests(
+            temp.path(),
+        )
+        .unwrap();
+
         assert_eq!(
             agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap(),
             before_claims,

@@ -2902,6 +2902,38 @@ pub fn load_document_runtime_state_from_db(
     .context("load document runtime state")
 }
 
+/// Read one document-runtime row without initializing, migrating, or pruning
+/// the controller database. Status-only projections use this path so a missing
+/// or older ledger remains a pure absence instead of becoming a write.
+pub fn load_document_runtime_state_read_only(
+    project_root: &Path,
+    document_hash: &str,
+    state_kind: &str,
+) -> Result<Option<DocumentRuntimeStateRecord>> {
+    anyhow::ensure!(
+        !state_db_connections_forbidden_for_process(),
+        "SQLite state connections are forbidden in this process; use the Project Controller projection/command plane"
+    );
+    let path = state_db_path(project_root);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let conn = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .with_context(|| format!("failed to open {} read-only", path.display()))?;
+    conn.busy_timeout(STATE_DB_BUSY_TIMEOUT)?;
+    let has_table: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'document_runtime_state')",
+            [],
+            |row| row.get(0),
+        )
+        .context("probe document_runtime_state table")?;
+    if !has_table {
+        return Ok(None);
+    }
+    load_document_runtime_state_from_db(&conn, document_hash, state_kind)
+}
+
 /// Read-modify-write one `document_runtime_state` row: `modify` receives the
 /// stored row (if any) and returns the replacement row plus a value to hand
 /// back.

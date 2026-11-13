@@ -1012,6 +1012,62 @@ pub fn planned_stash_window_indices(
         .collect()
 }
 
+/// One session window's name evidence: `(window_index, window_id,
+/// automatic-rename, window_name)`. `automatic_rename` is the window's
+/// effective tmux `automatic-rename` option.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowNameEvidence {
+    pub index: String,
+    pub id: String,
+    pub automatic_rename: bool,
+    pub name: String,
+}
+
+/// GH #410 `#autonamedtarget`: the windows that carry the target name only
+/// because tmux's `automatic-rename` named them after their foreground
+/// `agent-doc` process. Each one is a stray agent-doc pane's window, not a
+/// layout target, and must be treated as stash.
+///
+/// A window that agent-doc named itself (`new-window -n`, `rename-window`) has
+/// `automatic-rename` off. A window that only holds a pane whose foreground
+/// process is `agent-doc` (an outside-tmux start's pane, or a pane broken out
+/// of the target window) keeps it on, so tmux names it `agent-doc` too. The
+/// layout doctor counted every such window as a duplicate target, pinned the
+/// name, and joined its pane into the visible target window, where the next
+/// sync stashed it again: the visible window cycled through panes while extra
+/// `N:agent-doc` windows kept appearing.
+///
+/// The canonical target is the first target-named window by (explicitly named
+/// first, then window index). A duplicate that was named explicitly stays a
+/// duplicate target for consolidation. When every target-named window is
+/// auto-named, the lowest index stays canonical, so the first window a new
+/// session auto-names is still adopted as the target.
+pub fn auto_named_target_windows(
+    windows: &[WindowNameEvidence],
+    target_window_name: &str,
+) -> Vec<String> {
+    let mut targets: Vec<&WindowNameEvidence> = windows
+        .iter()
+        .filter(|window| window.name == target_window_name)
+        .collect();
+    if targets.len() <= 1 {
+        return Vec::new();
+    }
+    targets.sort_by_key(|window| {
+        (
+            window.automatic_rename,
+            window.index.parse::<usize>().unwrap_or(usize::MAX),
+            window.id.clone(),
+        )
+    });
+    targets
+        .into_iter()
+        .skip(1)
+        .filter(|window| window.automatic_rename)
+        .map(|window| window.id.clone())
+        .collect()
+}
+
 /// True when one observed session window list already satisfies the invariant
 /// that `repair_layout`'s always-run consolidation and index-normalization
 /// phases would produce, so those phases can be skipped without issuing a
@@ -1217,6 +1273,73 @@ fn resolve_absolute_file_path(file: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn name_evidence(
+        index: &str,
+        id: &str,
+        automatic_rename: bool,
+        name: &str,
+    ) -> WindowNameEvidence {
+        WindowNameEvidence {
+            index: index.to_string(),
+            id: id.to_string(),
+            automatic_rename,
+            name: name.to_string(),
+        }
+    }
+
+    /// GH #410 `#autonamedtarget`: the live shape. `0:agent-doc` was named by
+    /// agent-doc; `3:agent-doc` and `5:agent-doc` were named by tmux after the
+    /// `agent-doc start` running in them. Only the auto-named ones are stray.
+    #[test]
+    fn auto_named_target_windows_are_stray_beside_an_explicit_target() {
+        let windows = [
+            name_evidence("0", "@2", false, "agent-doc"),
+            name_evidence("1", "@18", false, "stash"),
+            name_evidence("2", "@0", true, "grok"),
+            name_evidence("3", "@27", true, "agent-doc"),
+            name_evidence("5", "@45", true, "agent-doc"),
+        ];
+        assert_eq!(
+            auto_named_target_windows(&windows, "agent-doc"),
+            vec!["@27".to_string(), "@45".to_string()]
+        );
+    }
+
+    /// An auto-named window at a lower index never displaces the explicitly
+    /// named target, and an explicitly named duplicate stays a duplicate for
+    /// consolidation rather than becoming stash.
+    #[test]
+    fn auto_named_target_windows_prefer_the_explicit_target_over_index() {
+        let windows = [
+            name_evidence("0", "@9", true, "agent-doc"),
+            name_evidence("1", "@3", false, "agent-doc"),
+            name_evidence("2", "@4", false, "agent-doc"),
+        ];
+        assert_eq!(
+            auto_named_target_windows(&windows, "agent-doc"),
+            vec!["@9".to_string()]
+        );
+    }
+
+    /// A single target, auto-named or not, is the target: a fresh session's
+    /// first window is adopted by its automatic name. With only auto-named
+    /// targets the lowest index stays canonical.
+    #[test]
+    fn auto_named_target_windows_keep_the_only_or_first_auto_named_target() {
+        assert!(
+            auto_named_target_windows(&[name_evidence("0", "@1", true, "agent-doc")], "agent-doc")
+                .is_empty()
+        );
+        let windows = [
+            name_evidence("4", "@7", true, "agent-doc"),
+            name_evidence("2", "@5", true, "agent-doc"),
+        ];
+        assert_eq!(
+            auto_named_target_windows(&windows, "agent-doc"),
+            vec!["@7".to_string()]
+        );
+    }
 
     /// `#syncrelativecolpaths`: the 2026-11-05 incident shape. The enclosing
     /// workspace's relative column must reach the nested controller as the

@@ -1771,6 +1771,11 @@ pub fn repair_layout(
         target_window_name,
         "sync::repair_layout start"
     );
+    // GH #410 `#autonamedtarget`: before any phase reads window names, a window
+    // tmux auto-named after its foreground `agent-doc` process stops posing as
+    // a duplicate target. The pin pass below would otherwise freeze the false
+    // name and Phase 3 would join its pane into the visible window.
+    let mut mutated = stash_auto_named_target_windows(tmux, session_name, target_window_name)?;
     // List all windows in the session. Put the name last so names containing
     // spaces remain parseable via splitn.
     let output = agent_doc_tmux_io::list_windows(
@@ -1788,7 +1793,6 @@ pub fn repair_layout(
             return Ok(LayoutRepairOutcome::AlreadyConverged);
         }
     };
-    let mut mutated = false;
 
     // Parse window identity, sizing, and effective role-name options.
     struct WinInfo {
@@ -2279,6 +2283,48 @@ fn consolidate_duplicate_target_windows(tmux: &Tmux, session_name: &str, target_
             let _ = agent_doc_tmux_io::kill_window(tmux, &duplicate_window);
         }
     }
+}
+
+/// GH #410 `#autonamedtarget`: rename every window that carries the target
+/// name only through tmux's `automatic-rename` to `stash`
+/// ([`agent_doc_sync::auto_named_target_windows`]). `rename-window` also turns
+/// `automatic-rename` off, so the role cannot drift back. Phase 1 then folds
+/// the window into the primary stash instead of Phase 3 joining its pane into
+/// the visible target window. Returns whether any window was renamed.
+fn stash_auto_named_target_windows(
+    tmux: &Tmux,
+    session_name: &str,
+    target_window_name: &str,
+) -> Result<bool> {
+    let Ok(output) = agent_doc_tmux_io::list_windows(
+        tmux,
+        Some(&format!("{}:", session_name)),
+        "#{window_index} #{window_id} #{automatic-rename} #{window_name}",
+    ) else {
+        return Ok(false);
+    };
+    let windows: Vec<agent_doc_sync::WindowNameEvidence> = output
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.splitn(4, ' ');
+            Some(agent_doc_sync::WindowNameEvidence {
+                index: parts.next()?.to_string(),
+                id: parts.next()?.to_string(),
+                automatic_rename: parts.next()? == "1",
+                name: parts.next()?.to_string(),
+            })
+        })
+        .collect();
+    let stray = agent_doc_sync::auto_named_target_windows(&windows, target_window_name);
+    for window_id in &stray {
+        agent_doc_tmux_io::rename_window(tmux, window_id, "stash").with_context(|| {
+            format!("failed to stash auto-named {target_window_name} window {window_id}")
+        })?;
+        sync_log(&format!(
+            "layout_repair_auto_named_target_stashed session={session_name} window={window_id} name={target_window_name} #autonamedtarget"
+        ));
+    }
+    Ok(!stray.is_empty())
 }
 
 fn normalize_stash_window_name(tmux: &Tmux, window_id: &str) {
@@ -10415,6 +10461,114 @@ mod tests {
             "both panes should remain alive in the same agent-doc window"
         );
     }
+    /// GH #410 `#autonamedtarget`: a window that tmux auto-named `agent-doc`
+    /// after the `agent-doc start` running in it is not a second target. The
+    /// doctor used to pin that name and join the stray pane into the visible
+    /// window (the next sync stashed it again), so `0:agent-doc` cycled
+    /// through panes while extra `N:agent-doc` windows kept appearing. It now
+    /// becomes stash: one target remains and the visible window keeps exactly
+    /// its own pane.
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn repair_layout_stashes_a_window_tmux_auto_named_agent_doc() {
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-repair-auto-named-target");
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        let target_pane = iso.new_session("test", tmp.path()).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"])
+            .unwrap();
+        let target_window = iso.pane_window(&target_pane).unwrap();
+        iso.raw_cmd(&["new-window", "-d", "-t", "test:", "-n", "stash"])
+            .unwrap();
+
+        // The stray: a supervisor-like process whose command name is
+        // `agent-doc`, in a window agent-doc never named. tmux evaluates
+        // automatic names only for windows a client is viewing, so set the
+        // name it would choose and leave `automatic-rename` on, exactly the
+        // state of the live `N:agent-doc` windows.
+        let program = tmp.path().join("agent-doc");
+        std::os::unix::fs::symlink("/bin/sleep", &program).unwrap();
+        let stray_pane = iso
+            .raw_cmd(&[
+                "new-window",
+                "-d",
+                "-t",
+                "test:",
+                "-P",
+                "-F",
+                "#{pane_id}",
+                &format!("{} 600", program.display()),
+            ])
+            .unwrap()
+            .trim()
+            .to_string();
+        let stray_window = iso.pane_window(&stray_pane).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", &stray_window, "agent-doc"])
+            .unwrap();
+        iso.raw_cmd(&[
+            "set-window-option",
+            "-t",
+            &stray_window,
+            "automatic-rename",
+            "on",
+        ])
+        .unwrap();
+        assert_eq!(
+            list_windows(&iso, "test")
+                .iter()
+                .filter(|(_, name)| name == "agent-doc")
+                .count(),
+            2,
+            "setup: an explicit target plus one auto-named agent-doc window"
+        );
+
+        repair_layout(&iso, "test", "agent-doc").unwrap();
+
+        let windows = list_windows(&iso, "test");
+        assert_eq!(
+            windows
+                .iter()
+                .filter(|(_, name)| name == "agent-doc")
+                .count(),
+            1,
+            "only the explicit target keeps the name: {windows:?}"
+        );
+        assert_eq!(
+            iso.list_window_panes(&target_window).unwrap(),
+            vec![target_pane.clone()],
+            "the stray pane never joins the visible target window"
+        );
+        assert!(iso.pane_alive(&stray_pane), "the stray pane survives");
+        let stray_home = iso.pane_window(&stray_pane).unwrap();
+        assert_ne!(stray_home, target_window);
+        assert_eq!(
+            window_name_for_window_id(&iso, &stray_home).as_deref(),
+            Some("stash"),
+            "the stray pane is held in stash: {windows:?}"
+        );
+        assert_eq!(
+            iso.raw_cmd(&[
+                "show-window-options",
+                "-v",
+                "-t",
+                &stray_home,
+                "automatic-rename"
+            ])
+            .unwrap()
+            .trim(),
+            "off",
+            "the stash role is pinned against a later automatic rename"
+        );
+
+        // A second pass is a no-op: the stray stays stashed.
+        repair_layout(&iso, "test", "agent-doc").unwrap();
+        assert_eq!(
+            iso.list_window_panes(&target_window).unwrap(),
+            vec![target_pane]
+        );
+    }
+
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn repair_layout_moves_stash_directly_after_agent_doc() {

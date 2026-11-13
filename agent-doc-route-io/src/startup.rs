@@ -515,20 +515,7 @@ fn stage_startup_pane(tmux: &Tmux, session_name: &str, cwd: &Path) -> Result<Str
     // Only the current layout effect may place this binding in the visible
     // window. `new_window` selects its window, so use an explicitly detached
     // creation here and publish the same mutation observation as other creates.
-    tmux_router::tmux::invalidate_pane_snapshot();
-    tmux.raw_cmd(&[
-        "new-window",
-        "-d",
-        "-t",
-        &format!("{session_name}:"),
-        "-n",
-        "stash",
-        "-c",
-        &cwd.to_string_lossy(),
-        "-P",
-        "-F",
-        "#{pane_id}",
-    ])
+    agent_doc_tmux_io::stage_pane_in_detached_stash_window(tmux, session_name, cwd)
 }
 
 /// Auto-start a new agent session in a specific tmux session.

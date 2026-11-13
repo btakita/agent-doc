@@ -20,6 +20,10 @@ const DIRECT_QUEUE_EDIT_OWNER_PREFIX: &str = "direct-";
 const FOREGROUND_BACKGROUND_WAIT: Duration = Duration::from_secs(4);
 const RESPONSE_BACKGROUND_WAIT: Duration = Duration::from_secs(30);
 const FOREGROUND_BACKGROUND_POLL: Duration = Duration::from_millis(10);
+/// The longest a foreground acquirer waits on a held apply flock that names no
+/// lease holder: an owner's clear-then-unlock (whose own clear retries for up
+/// to 500 ms) or lock-then-publish step, not an apply body.
+const QUEUE_APPLY_HANDOFF_GRACE: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueueEditOwnerLease {
@@ -399,19 +403,47 @@ impl QueueEditGuard {
     }
 
     fn acquire_with_background_wait(file: &Path, wait: Duration) -> Result<Self> {
+        Self::acquire_with_background_wait_observed(file, wait, QUEUE_APPLY_HANDOFF_GRACE, |_| {})
+    }
+
+    /// `after_contended_observation` sees the lease read after each contended
+    /// attempt, before the wait-or-fail decision. Tests use it to hold the
+    /// flock until the acquirer has provably observed a given state.
+    fn acquire_with_background_wait_observed(
+        file: &Path,
+        wait: Duration,
+        handoff_grace: Duration,
+        mut after_contended_observation: impl FnMut(Option<&QueueEditOwnerLease>),
+    ) -> Result<Self> {
         let mut background_deadline = None;
+        let mut handoff_deadline = None;
         loop {
             if let Some(guard) = Self::try_acquire(file)? {
                 return Ok(guard);
             }
             let lease = read_queue_edit_owner_lease(&file.to_string_lossy());
+            after_contended_observation(lease.as_ref());
             if lease
                 .as_ref()
                 .is_some_and(|lease| lease.holder.starts_with(BACKGROUND_QUEUE_EDIT_OWNER_PREFIX))
             {
                 background_deadline.get_or_insert_with(|| std::time::Instant::now() + wait);
             }
-            if background_deadline.is_some_and(|deadline| std::time::Instant::now() < deadline) {
+            // GH #412: a held flock with no lease row is
+            // an owner between its lease and its unlock. Drop clears the token
+            // before unlocking, completing a maintenance request consumes the
+            // lease before the guard drops, and a reservation probe or direct
+            // acquirer locks before it publishes. Bailing on the first such
+            // observation failed the admitted Stop-hook commit right after the
+            // detached worker finished. Wait through it, bounded by one grace
+            // that never re-arms: a lease that appears meanwhile decides as
+            // before (background waits, a foreign direct owner fails closed).
+            if lease.is_none() {
+                handoff_deadline.get_or_insert_with(|| std::time::Instant::now() + handoff_grace);
+            }
+            let now = std::time::Instant::now();
+            let in_handoff = lease.is_none() && handoff_deadline.is_some_and(|end| now < end);
+            if in_handoff || background_deadline.is_some_and(|deadline| now < deadline) {
                 // A preflight admission's detached maintenance owns no user
                 // response. Let its short apply finish, then admit the
                 // foreground transaction on the resulting authoritative cut.
@@ -845,6 +877,110 @@ mod tests {
         );
         release.join().unwrap();
         drop(foreground);
+        assert!(read_queue_edit_owner_lease(&file_text).is_none());
+    }
+
+    /// GH #412: the Stop hook's commit failed with "queue mutation deferred"
+    /// because it first observed the apply flock in an owner's handoff window,
+    /// lease row already gone and flock not yet released, and bailed at once.
+    /// The owner here holds that exact state until the acquirer has observed
+    /// it, so the outcome does not depend on timing.
+    #[test]
+    fn foreground_guard_waits_through_a_locked_no_lease_handoff_window() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        let file_text = file.to_string_lossy().to_string();
+        let mut owner = QueueEditGuard::acquire(&file).unwrap();
+        let (observed_tx, observed_rx) = std::sync::mpsc::channel();
+        let mut foreground = None;
+
+        owner.release_with_handoff_hook(|| {
+            assert!(
+                read_queue_edit_owner_lease(&file_text).is_none(),
+                "the owner is in its clear-then-unlock handoff window"
+            );
+            let foreground_file = file.clone();
+            foreground = Some(std::thread::spawn(move || {
+                QueueEditGuard::acquire_with_background_wait_observed(
+                    &foreground_file,
+                    FOREGROUND_BACKGROUND_WAIT,
+                    QUEUE_APPLY_HANDOFF_GRACE,
+                    |lease| {
+                        let _ = observed_tx.send(lease.cloned());
+                    },
+                )
+            }));
+            assert_eq!(
+                observed_rx.recv().unwrap(),
+                None,
+                "the acquirer first sees the held flock with no lease"
+            );
+        });
+
+        let foreground = foreground
+            .unwrap()
+            .join()
+            .unwrap()
+            .expect("a no-lease handoff window must not fail the foreground transaction");
+        assert!(
+            read_queue_edit_owner_lease(&file_text)
+                .unwrap()
+                .holder
+                .starts_with(DIRECT_QUEUE_EDIT_OWNER_PREFIX)
+        );
+        drop(foreground);
+        assert!(read_queue_edit_owner_lease(&file_text).is_none());
+    }
+
+    /// The handoff grace only covers a flock that names no holder: a live
+    /// direct owner still fails a foreground acquirer on its first
+    /// observation, and a no-lease flock that outlives the grace fails it too.
+    #[test]
+    fn handoff_grace_never_waits_on_a_direct_owner_or_past_its_bound() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        let file_text = file.to_string_lossy().to_string();
+
+        let direct = QueueEditGuard::acquire(&file).unwrap();
+        let mut observations = Vec::new();
+        let refused = QueueEditGuard::acquire_with_background_wait_observed(
+            &file,
+            FOREGROUND_BACKGROUND_WAIT,
+            QUEUE_APPLY_HANDOFF_GRACE,
+            |lease| observations.push(lease.cloned()),
+        )
+        .unwrap_err();
+        assert!(refused.to_string().contains("queue mutation deferred"));
+        assert_eq!(observations.len(), 1, "a direct owner fails closed at once");
+        assert!(
+            observations[0]
+                .as_ref()
+                .is_some_and(|lease| lease.holder.starts_with(DIRECT_QUEUE_EDIT_OWNER_PREFIX))
+        );
+
+        let mut direct = direct;
+        direct.release_with_handoff_hook(|| {
+            let mut stuck_observations = 0;
+            let refused = QueueEditGuard::acquire_with_background_wait_observed(
+                &file,
+                FOREGROUND_BACKGROUND_WAIT,
+                Duration::from_millis(30),
+                |lease| {
+                    assert!(lease.is_none());
+                    stuck_observations += 1;
+                },
+            )
+            .unwrap_err();
+            assert!(refused.to_string().contains("queue mutation deferred"));
+            assert!(
+                stuck_observations > 1,
+                "the handoff window is polled before the bound fails it"
+            );
+        });
         assert!(read_queue_edit_owner_lease(&file_text).is_none());
     }
 

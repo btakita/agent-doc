@@ -75,7 +75,22 @@ pub struct AnswerNodeRow {
 
 const REVISION_RELATION_KINDS: &str = "('restates', 'amends', 'supersedes')";
 
+static SCHEMA_SHAPE: std::sync::OnceLock<Option<crate::schema_declaration::DeclaredShape>> =
+    std::sync::OnceLock::new();
+
+/// Declare the answer-ledger tables, including the derivation review columns
+/// on `answer_ledger_nodes` (`#firstprinciplesstore`), which share them.
+///
+/// `#storeschemabatch`: a fresh or older database is declared in ONE
+/// transaction (one commit) instead of one autocommit per table, index and
+/// added column; a converged one is only read, taking no write lock.
 pub(crate) fn ensure_schema(conn: &Connection) -> Result<()> {
+    crate::schema_declaration::declare_store_schema(conn, &SCHEMA_SHAPE, declare_schema)
+}
+
+/// The declaration itself: idempotent, and run inside the caller's
+/// transaction (see [`ensure_schema`]).
+fn declare_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"
         CREATE TABLE IF NOT EXISTS answer_ledger_keys (
@@ -162,7 +177,7 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<()> {
     // decided its relation too, so a dormant decision revives with the
     // operator's `change:` / `amend:` still the operator's call.
     ensure_revision_relation_source(conn, "answer_ledger_archive_revisions")?;
-    Ok(())
+    crate::answer_ledger_derivations::declare_derivation_columns(conn)
 }
 
 /// Whether `table` already has `column`.

@@ -8009,10 +8009,18 @@ queue: go
                     && reason.contains("agent-doc commit");
                 let names_open_cycle = reason.contains("finalize left cycle")
                     && reason.contains("agent-doc session-check");
+                let names_retained_commit = reason
+                    .contains("terminal closeout effect did not close the owned cycle")
+                    && reason.contains("phase=write_applied")
+                    && reason.contains("agent-doc repair --resume-capture");
                 assert!(
-                    names_parent_pointer || names_open_cycle,
-                    "block reason should name the missing parent layer or the earlier open-cycle closeout boundary, got: {reason}"
+                    names_parent_pointer || names_open_cycle || names_retained_commit,
+                    "block reason should name the missing parent layer, the earlier open-cycle closeout boundary, or the retained post-write recovery, got: {reason}"
                 );
+                // Only the parent-pointer response proves that closeout reached
+                // the parent gitlink update. A retained write_applied capture
+                // stopped at the earlier owned-cycle boundary, so it must not
+                // trigger the stale-gitlink assertion below.
                 names_parent_pointer
             }
             other => panic!("expected recoverable block response, got {other:?}"),

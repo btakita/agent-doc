@@ -8008,11 +8008,15 @@ queue: go
                     && reason.contains("agent-doc commit");
                 let names_open_cycle = reason.contains("finalize left cycle")
                     && reason.contains("agent-doc session-check");
+                let names_retained_commit = reason
+                    .contains("terminal closeout effect did not close the owned cycle")
+                    && reason.contains("phase=write_applied")
+                    && reason.contains("agent-doc repair --resume-capture");
                 assert!(
-                    names_parent_pointer || names_open_cycle,
-                    "block reason should name the missing parent layer or the earlier open-cycle closeout boundary, got: {reason}"
+                    names_parent_pointer || names_open_cycle || names_retained_commit,
+                    "block reason should name the missing parent layer, the earlier open-cycle closeout boundary, or the retained post-commit recovery, got: {reason}"
                 );
-                names_parent_pointer
+                names_parent_pointer || names_retained_commit
             }
             other => panic!("expected recoverable block response, got {other:?}"),
         };

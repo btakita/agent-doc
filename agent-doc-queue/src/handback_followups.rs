@@ -351,6 +351,42 @@ mod tests {
         }
     }
 
+    /// `#followuporiginmarkers`: on `agent-doc-bugs.md` the dispatched row was
+    /// `- ### ☑️ [#subagent:x#1] do [#id] ⟦published⟧`. Placement refused it,
+    /// so `report-complete` printed a `queue follow-up` command that refused
+    /// the same origin. Heading and list rows place directly, by the claim
+    /// text and by the plain id form.
+    #[test]
+    fn action_items_place_after_a_decorated_heading_or_list_row() {
+        for row in [
+            "### ☑️ [#subagent:x#1] do [#decisionidstamp] ⟦published⟧",
+            "### 🚧 [#subagent:x#1] do [#decisionidstamp]",
+            "☑️ [#subagent:x#1] do [#decisionidstamp] ⟦published⟧",
+        ] {
+            let content = doc(&format!(
+                "- ### ~~do [#done]~~\n- {row}\n  - push\n- ### later\n"
+            ));
+            for origin in ["do [#decisionidstamp]", "[#decisionidstamp]"] {
+                let (updated, outcome) = plan_handback_followups(&content, origin, HANDBACK);
+                assert_eq!(outcome.refused, None, "row {row:?} origin {origin:?}");
+                assert_eq!(outcome.refused_origin, None);
+                assert_eq!(outcome.inserted.len(), 2, "row {row:?} origin {origin:?}");
+                assert!(
+                    updated.contains(&format!(
+                        "- {row}\n  - push\n\
+                         - follow up on an action item from `decisionidstamp`: >512-commit documents can miss answers\n\
+                         - follow up on an action item from `decisionidstamp`: the gutter does not show the stamp\n\
+                         - ### later\n"
+                    )),
+                    "row {row:?} origin {origin:?}:\n{updated}"
+                );
+                let (again, repeat) = plan_handback_followups(&updated, origin, HANDBACK);
+                assert_eq!(again, updated);
+                assert_eq!(repeat.already_present, 2);
+            }
+        }
+    }
+
     #[test]
     fn a_repeated_report_or_a_struck_followup_adds_nothing() {
         let content = doc("- do [#decisionidstamp]\n");

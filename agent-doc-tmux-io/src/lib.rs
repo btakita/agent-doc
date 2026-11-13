@@ -540,6 +540,38 @@ pub fn has_window_named(
     output.lines().any(|line| line.trim() == window_name)
 }
 
+/// Create a pane in a new detached window named `stash` in `session_name` and
+/// return its pane id, for the layout to place.
+///
+/// A provisioned agent-doc pane must never live in an unnamed window: tmux's
+/// `automatic-rename` names that window after the pane's foreground process,
+/// `agent-doc`, so the session grows extra `N:agent-doc` windows that the
+/// layout doctor mistakes for duplicate targets (GH #410 `#autonamedtarget`).
+/// `-n` names the window and turns `automatic-rename` off for it in the same
+/// command, and `-d` leaves the attached client's current window alone.
+pub fn stage_pane_in_detached_stash_window(
+    tmux: &tmux_router::Tmux,
+    session_name: &str,
+    cwd: &Path,
+) -> anyhow::Result<String> {
+    // `#syncobscache`: this changes the pane set, so any cached liveness
+    // snapshot is stale from here on.
+    tmux_router::tmux::invalidate_pane_snapshot();
+    tmux.raw_cmd(&[
+        "new-window",
+        "-d",
+        "-t",
+        &format!("{session_name}:"),
+        "-n",
+        "stash",
+        "-c",
+        &cwd.to_string_lossy(),
+        "-P",
+        "-F",
+        "#{pane_id}",
+    ])
+}
+
 pub fn list_windows_all(
     runner: &(impl TmuxCommandRunner + ?Sized),
     format: &str,

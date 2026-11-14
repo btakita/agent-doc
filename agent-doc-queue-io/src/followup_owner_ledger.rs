@@ -1,4 +1,4 @@
-//! `#humanfollowupowner`: the follow-up rows preflight has already classified.
+//! `#humanfollowupowner`: the follow-up rows preflight has already tagged.
 //!
 //! Preflight queue maintenance tags an unstarted human-owned
 //! `follow up on an action item` row with `[operator-verify]`
@@ -7,10 +7,13 @@
 //! deleted it to hand the row back to an agent". So, as with the backlog
 //! mirror's operator-delete tombstones ([`crate::queue_tombstone`]), the
 //! operator's edit must stick: this ledger records the
-//! [`agent_doc_queue::followup_owner::followup_owner_key`] of every row whose
-//! owner has been decided, and preflight classifies only rows it has not
-//! recorded. A key leaves the ledger once its row is no longer live (struck or
-//! removed), so the ledger stays the size of the live queue.
+//! [`agent_doc_queue::followup_owner::followup_owner_key`] of every row that
+//! carries the tag, and preflight classifies only rows it has not recorded. A
+//! row classified as agent work never carries the tag, so it is never
+//! recorded: preflight classifies it again on every cycle, and a later
+//! vocabulary fix still reaches it. A key leaves the ledger once its row is no
+//! longer live (struck or removed), so the ledger stays the size of the live
+//! queue.
 //!
 //! The ledger is best-effort: when the project `state.db` cannot be read,
 //! every row is unseen and preflight falls back to tagging every untagged
@@ -37,8 +40,8 @@ fn state_identity(doc: &Path) -> Option<(PathBuf, String, String)> {
     Some((project_root, hash, canonical.to_string_lossy().into_owned()))
 }
 
-/// The follow-up row keys preflight has classified for `doc`. Empty when the
-/// ledger row is absent or unreadable.
+/// The follow-up row keys preflight has recorded as tagged for `doc`. Empty
+/// when the ledger row is absent or unreadable.
 pub fn classified_followup_keys(doc: &Path) -> HashSet<String> {
     let Some((project_root, document_hash, _)) = state_identity(doc) else {
         return HashSet::new();
@@ -64,8 +67,8 @@ pub fn classified_followup_keys(doc: &Path) -> HashSet<String> {
     }
 }
 
-/// Record the follow-up rows of `content` (the document as written) whose
-/// owner is now decided, and drop recorded keys whose row is no longer live.
+/// Record the follow-up rows of `content` (the document as written) that
+/// carry the tag, and drop recorded keys whose row is no longer live.
 /// Call after the document write, so a pass that never wrote its tags leaves
 /// those rows unseen. Best-effort: a write failure is logged, never fatal.
 pub fn record_classified_followups(doc: &Path, content: &str) {
@@ -132,8 +135,9 @@ fn save(doc: &Path, classified: &HashSet<String>) {
 mod tests {
     use super::*;
 
-    /// The ledger round-trips through `state.db`, keeps a key while its row is
-    /// live in any lifecycle, and drops it once the row is struck.
+    /// The ledger round-trips through `state.db`, records only tagged rows,
+    /// keeps a key while its row is live in any lifecycle, and drops it once
+    /// the row is struck.
     #[test]
     fn ledger_records_classified_rows_and_drops_struck_ones() {
         let dir = tempfile::tempdir().unwrap();
@@ -145,7 +149,13 @@ mod tests {
         let key = agent_doc_queue::followup_owner::followup_owner_key(row).unwrap();
 
         assert!(classified_followup_keys(&doc).is_empty());
-        record_classified_followups(&doc, &queue(&format!("- ⏳ {row}\n")));
+        // An untagged (agent-classified) row is not recorded, so a later
+        // vocabulary fix can still tag it.
+        let agent_row =
+            "follow up on an action item from `x`: Fix the typo in README.md [#q-0123456789ac]";
+        record_classified_followups(&doc, &queue(&format!("- 📥 {agent_row}\n")));
+        assert!(classified_followup_keys(&doc).is_empty());
+        record_classified_followups(&doc, &queue(&format!("- ⏳ {row}\n- 📥 {agent_row}\n")));
         assert_eq!(classified_followup_keys(&doc), HashSet::from([key.clone()]));
 
         // The operator deletes the tag and a worker claims the row: still live,

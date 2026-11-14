@@ -27,7 +27,8 @@
 //! A word that is often the agent's own subject matter (`confirm`,
 //! `authorization`, `approval`, `login`, `password`) counts only in a
 //! human-action position (`Approve …` as an instruction, `an approval`,
-//! `not authorized`, `account login`, `password prompt`).
+//! `not authorized`, `operator authorization`, `approval required`, `must
+//! authorize`, `account login`, `password prompt`).
 //!
 //! # Representation
 //!
@@ -48,11 +49,14 @@
 //! [`reclassify_human_followup_rows`] tags the live, unstarted
 //! `follow up on an action item` rows whose item is human-owned, in place and
 //! idempotently. `agent-doc queue reclassify-followups <FILE>` runs it on
-//! demand. Preflight queue maintenance runs it on every cycle, but classifies
-//! each row once: [`reclassify_unseen_human_followup_rows`] skips a row whose
-//! [`followup_owner_key`] it has already recorded ([`followup_row_keys`]), so
-//! an operator who deletes `[operator-verify]` to hand a row back to an agent
-//! is not overruled on the next cycle.
+//! demand. Preflight queue maintenance runs it on every cycle, but tags each
+//! row at most once: it records the [`followup_owner_key`] of every row that
+//! carries the tag ([`followup_row_keys`]), and
+//! [`reclassify_unseen_human_followup_rows`] skips a recorded row, so an
+//! operator who deletes `[operator-verify]` to hand a row back to an agent is
+//! not overruled on the next cycle. A row classified as agent work is never
+//! recorded, so each cycle classifies it again and a later vocabulary fix
+//! still reaches it.
 
 use std::collections::HashSet;
 
@@ -196,12 +200,24 @@ const HUMAN_PHRASES: &[&str] = &[
     "confirm with the operator",
     "operator decides",
     "operator to decide",
-    // Authority the agent does not hold.
+    // Authority the agent does not hold: missing, named as the operator's,
+    // or required (`[operator authorization required] Create the repo`,
+    // `this item did not authorize the push`). `authorization` and `approval`
+    // alone stay the agent's subject matter (`Fix the authorization header`).
     "not authorized",
     "needs authorization",
     "need authorization",
     "requires authorization",
     "authorization from",
+    "did not authorize",
+    "didn t authorize",
+    "operator authorization",
+    "human authorization",
+    "operator approval",
+    "authorization required",
+    "authorization needed",
+    "approval required",
+    "approval needed",
     // Signing in, or a credential check only a person can pass.
     "sign in",
     "signed in",
@@ -248,8 +264,9 @@ struct DependentApproval {
     signal: &'static str,
 }
 
-/// The modal and helper words after which `approve` is someone's act, not
-/// the agent's subject matter (`the operator should approve`).
+/// The modal and helper words after which `approve` or `authorize` is
+/// someone's act, not the agent's subject matter (`the operator should
+/// approve`, `the operator must authorize the force-push`).
 const APPROVE_MODALS: &[&str] = &[
     "should", "must", "will", "would", "can", "could", "may", "might", "shall",
 ];
@@ -263,8 +280,9 @@ const APPROVE_QUESTION_WORDS: &[&str] = &["how", "when", "where", "whether", "wh
 /// approval a change is waiting on.
 const GATE_CAUSATIVES: &[&str] = &["make", "makes", "made", "making"];
 
-/// Dependent approval forms (`#humanfollowupowner`). A word joined by a
-/// hyphen stays one word, so `approval-flow` matches none of them.
+/// Dependent approval forms, and the modal form of `authorize`
+/// (`#humanfollowupowner`). A word joined by a hyphen stays one word, so
+/// `approval-flow` matches none of them.
 const DEPENDENT_APPROVALS: &[DependentApproval] = &[
     DependentApproval {
         targets: &["approve"],
@@ -283,6 +301,15 @@ const DEPENDENT_APPROVALS: &[DependentApproval] = &[
         unless: &[],
         unless_reach: 0,
         signal: "<modal> approve",
+    },
+    DependentApproval {
+        targets: &["authorize"],
+        leads: APPROVE_MODALS,
+        reach: 1,
+        follows: &[],
+        unless: &[],
+        unless_reach: 0,
+        signal: "<modal> authorize",
     },
     DependentApproval {
         targets: &["approve"],
@@ -455,14 +482,17 @@ fn lead_is_cancelled(words: &[(&str, bool)], lead_index: usize, form: &Dependent
 /// `X approves`, `Approve …` as an instruction, `an approval`, `approval
 /// from`, `cannot approve`, `someone other than`, `another reviewer`, and the
 /// dependent forms of [`DEPENDENT_APPROVALS`]: `to approve`, `should
-/// approve`, `have someone approve`, `needs/requires/awaiting … approval`,
-/// `'s approval`, `approved by`, `has approved`, `get … approved`, except
-/// in a purpose clause such as `so the PR can be approved`), a setting only an owner or admin can change (`org owner`, `repo owner`,
-/// `admin`), an operator decision (`decide`, `ask the operator`, `operator
-/// confirms`), authority the agent does not hold (`not authorized`,
-/// `Authorize …`), and a sign-in or credential check (`sign in`, `log into`,
-/// `account login`, `SSO`, `2FA`, `OTP`, `passkey`, `security key`, `device
-/// confirmation`, `password prompt`). A word that is often the agent's own
+/// approve`, `must authorize`, `have someone approve`,
+/// `needs/requires/awaiting … approval`, `'s approval`, `approved by`, `has
+/// approved`, `get … approved`, except in a purpose clause such as `so the PR
+/// can be approved`), a setting only an owner or admin can change (`org
+/// owner`, `repo owner`, `admin`), an operator decision (`decide`, `ask the
+/// operator`, `operator confirms`), authority the agent does not hold (`not
+/// authorized`, `did not authorize`, `operator authorization`/`approval`,
+/// `authorization`/`approval required`, `Authorize …`), and a sign-in or
+/// credential check (`sign in`, `log into`, `account login`, `SSO`, `2FA`,
+/// `OTP`, `passkey`, `security key`, `device confirmation`, `password
+/// prompt`). A word that is often the agent's own
 /// subject matter is a signal only in a human-action position: `confirm`,
 /// `authorization`, `approval`, `login`, and `password` alone are not
 /// (`Confirm hosted CI is green`, `Fix the authorization header`, `Update
@@ -665,10 +695,11 @@ pub fn reclassify_human_followup_rows(
 /// [`reclassify_human_followup_rows`], skipping every row whose
 /// [`followup_owner_key`] is in `seen`.
 ///
-/// Preflight classifies a follow-up row once, the first time it sees the row
-/// unstarted ([`followup_row_keys`] records it). A row the operator hands back
-/// to an agent by deleting its `[operator-verify]` tag keeps its key, so the
-/// next cycle leaves it alone instead of re-adding the tag.
+/// Preflight records every follow-up row that carries the tag
+/// ([`followup_row_keys`]). A row the operator hands back to an agent by
+/// deleting its `[operator-verify]` tag keeps its key, so the next cycle
+/// leaves it alone instead of re-adding the tag. A row that was never tagged
+/// is never recorded, so it is classified again on every cycle.
 pub fn reclassify_unseen_human_followup_rows(
     content: &str,
     seen: &HashSet<String>,
@@ -720,8 +751,9 @@ pub fn followup_owner_key(text: &str) -> Option<String> {
 /// The follow-up rows of `content` by [`followup_owner_key`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FollowupRowKeys {
-    /// Rows whose owner has been decided: unstarted rows (bare, `📥`, or `⏳`,
-    /// no `🙋`) and every row that carries the tag.
+    /// Rows that carry the tag, in any lifecycle: the only rows where an
+    /// operator's later deletion of the tag must stick. An untagged row is
+    /// not here, so preflight classifies it again on every cycle.
     pub classified: HashSet<String>,
     /// Every live (unstruck) follow-up row, in any lifecycle.
     pub live: HashSet<String>,
@@ -740,11 +772,7 @@ pub fn followup_row_keys(content: &str) -> Result<FollowupRowKeys> {
             continue;
         };
         let rest = text.strip_prefix("### ").unwrap_or(text);
-        let unstarted = matches!(
-            queue_projection::lifecycle_marker(rest),
-            None | Some(QueueLifecycleMarker::Pending | QueueLifecycleMarker::AwaitingOperator)
-        ) && !queue_projection::operator_action_marked(rest);
-        if unstarted || carries_operator_owned_tag(rest) {
+        if carries_operator_owned_tag(rest) {
             keys.classified.insert(key.clone());
         }
         keys.live.insert(key);

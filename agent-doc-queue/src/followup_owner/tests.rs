@@ -114,6 +114,14 @@ fn line_containing<'a>(content: &'a str, needle: &str) -> &'a str {
     line
 }
 
+/// The row text (after its `- ` bullet) of the one line containing `needle`.
+fn item_row<'a>(content: &'a str, needle: &str) -> &'a str {
+    line_containing(content, needle)
+        .trim_start()
+        .strip_prefix("- ")
+        .unwrap_or_else(|| panic!("{needle:?} is not a list row"))
+}
+
 /// The action item a fixture line quotes.
 fn item_of(line: &str) -> String {
     let text = line.trim_start().strip_prefix("- ").unwrap();
@@ -491,6 +499,12 @@ fn agent_phrasing_with_review_or_auth_words_stays_agent_work() {
         "Fix the approve button handler",
         "Document how the client authorizes requests",
         "After the first release, confirm that the release workflow attached both zips",
+        // Review of b20f54406d: `authorization` and `approval` as the agent's
+        // subject matter stay agent work next to the narrower phrases.
+        "Fix the authorization header",
+        "Add an authorization check to the API",
+        "Fix the middleware so it does not authorize anonymous requests",
+        "Fix the token refresh so the client can authorize again",
     ] {
         assert_eq!(
             classify_action_item(item),
@@ -535,6 +549,54 @@ fn credential_and_sign_in_checkpoints_are_human_work() {
         ("btakita cannot approve PR 9 (author)", "cannot approve"),
         ("Merge #240 once tmstorm approves", "approves"),
         ("Needs authorization from the repo owner", "repo owner"),
+    ] {
+        assert_eq!(
+            classify_action_item(item),
+            (ActionItemOwner::Human, OwnerEvidence::Signal(signal)),
+            "{item}"
+        );
+    }
+}
+
+/// Re-review of #426 (review of b20f54406d), finding 1: an unlabelled item
+/// that gates its work on the operator's authorization or approval is human
+/// work. Each was human at fa3260ae4e and agent work after 41dd0a1ced
+/// narrowed `authorization`; the first two are the shape of real hand-back
+/// items that looped in a session.
+#[test]
+fn operator_authorization_gates_are_human_work() {
+    for (item, signal) in [
+        (
+            "[operator authorization required] Create public example-org/example-repo with the normal license, security policy, branch protection, and Actions permissions",
+            "operator authorization",
+        ),
+        (
+            "Merge example-org/example-repo PR #1, then close example-org/other-repo PR #31 with a superseded-by link; this queue item did not authorize either outward action.",
+            "did not authorize",
+        ),
+        (
+            "Requires operator authorization: create the public repo",
+            "operator authorization",
+        ),
+        (
+            "Operator authorization required before creating the public repo",
+            "operator authorization",
+        ),
+        (
+            "The operator must authorize the force-push",
+            "<modal> authorize",
+        ),
+        (
+            "[operator approval required] Publish 0.2.0 to PyPI",
+            "operator approval",
+        ),
+        // The remaining narrow forms.
+        (
+            "Authorization required before publishing the crate",
+            "authorization required",
+        ),
+        ("Approval needed before the deploy", "approval needed"),
+        ("This item didn't authorize the release", "didn t authorize"),
     ] {
         assert_eq!(
             classify_action_item(item),
@@ -636,9 +698,13 @@ fn dependent_approval_forms_stay_inside_their_clause() {
     }
 }
 
-/// Review of #426, finding 2: preflight classifies a row once. An operator who
+/// Review of #426, finding 2: preflight tags a row once. An operator who
 /// deletes `[operator-verify]` to hand a row back to an agent is not overruled
 /// on the next cycle; a row preflight has never seen is still tagged.
+///
+/// Re-review of #426 (review of b20f54406d): only tagged rows are recorded,
+/// so an agent-classified row is classified again on every cycle and a later
+/// vocabulary fix still reaches it.
 #[test]
 fn an_operator_removed_tag_stays_removed() {
     let doc = |rows: &str| format!("<!-- agent:queue go -->\n{rows}<!-- /agent:queue -->\n");
@@ -654,8 +720,11 @@ fn an_operator_removed_tag_stays_removed() {
         .unwrap();
     assert_eq!(rows.len(), 1);
     let seen = followup_row_keys(&tagged).unwrap();
-    assert_eq!(seen.classified.len(), 2);
-    assert_eq!(seen.classified, seen.live);
+    assert_eq!(seen.live.len(), 2);
+    let tagged_key = followup_owner_key(item_row(&tagged, "PR 9")).unwrap();
+    let agent_key = followup_owner_key(item_row(&tagged, "README.md")).unwrap();
+    assert_eq!(seen.classified, HashSet::from([tagged_key.clone()]));
+    assert!(seen.live.contains(&agent_key));
 
     // The operator deletes the tag; `⏳` may linger or be repainted `📥`.
     let tagged_line = tagged
@@ -669,10 +738,15 @@ fn an_operator_removed_tag_stays_removed() {
             .replace('⏳', "📥"),
     ] {
         let edited = tagged.replace(tagged_line, &handed_back);
+        let edited_keys = followup_row_keys(&edited).unwrap();
         assert_eq!(
-            followup_row_keys(&edited).unwrap().classified,
-            seen.classified,
+            followup_owner_key(item_row(&edited, "PR 9")).as_ref(),
+            Some(&tagged_key),
             "deleting the tag keeps the row's key"
+        );
+        assert!(
+            edited_keys.live.contains(&tagged_key),
+            "the handed-back row stays live, so the ledger keeps its key"
         );
         assert!(
             reclassify_unseen_human_followup_rows(&edited, &seen.classified)
@@ -696,6 +770,21 @@ fn an_operator_removed_tag_stays_removed() {
         .unwrap();
     assert_eq!(rows.len(), 1);
     assert!(rows[0].before.contains("PR 10"), "{:?}", rows[0]);
+
+    // A row an earlier cycle saw untagged was never recorded, so a later cycle
+    // still tags it once the classifier reads it as human work (here a
+    // phrasing the vocabulary of b20f54406d read as agent work).
+    let late = "- 📥 follow up on an action item from `z`: [operator authorization required] Create the public repo [#q-0123456789af]\n";
+    let earlier = doc(late);
+    let earlier_keys = followup_row_keys(&earlier).unwrap();
+    assert!(earlier_keys.classified.is_empty());
+    assert_eq!(earlier_keys.live.len(), 1);
+    let (retagged, rows) =
+        reclassify_unseen_human_followup_rows(&earlier, &earlier_keys.classified)
+            .unwrap()
+            .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(retagged.contains("[operator-verify]"), "{retagged}");
 
     // A row with an attempt in flight is live but not yet classified, so it
     // is classified once it is unstarted again.

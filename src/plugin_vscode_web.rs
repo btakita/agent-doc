@@ -705,24 +705,59 @@ mod tests {
         assert!(running_vscode_web_serves(&root.path().join("missing")).is_empty());
     }
 
+    /// A real `/bin/sh` running `cli` as `env sh` does, returned only once the
+    /// script prints `ready` from its own userspace. `spawn` returning is not
+    /// that point: it resumes the parent when `execve` releases the old
+    /// address space (vfork completion, or the close-on-exec status pipe),
+    /// before the kernel has written the new argv and environment
+    /// (`mm->arg_start`/`env_start`) or marked the task dumpable again, so a
+    /// scan in that window reads an empty `cmdline` or a root-owned
+    /// `/proc/<pid>` and drops the server. A line the script wrote itself is
+    /// past the end of `execve`.
+    #[cfg(target_os = "linux")]
+    fn running_server(cli: &Path, args: &[String], env: &[(&str, &str)]) -> std::process::Child {
+        use std::io::BufRead as _;
+
+        let mut child = std::process::Command::new("/bin/sh")
+            .arg(cli)
+            .args(args)
+            .envs(env.iter().copied())
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut line = String::new();
+        std::io::BufReader::new(child.stdout.as_mut().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        assert_eq!(line, "ready\n", "the script exited before it was ready");
+        child
+    }
+
+    /// A `bin/code-server` under `<root>/custom prefix` that reports ready and
+    /// then waits on stdin.
+    #[cfg(target_os = "linux")]
+    fn server_cli(root: &Path) -> (PathBuf, PathBuf) {
+        let prefix = root.join("custom prefix");
+        let cli = prefix.join("bin/code-server");
+        fs::create_dir_all(cli.parent().unwrap()).unwrap();
+        fs::write(&cli, "echo ready\nread line\n").unwrap();
+        (prefix, cli)
+    }
+
     /// The real `/proc`, with a real process in the wrapper's shape: `/bin/sh`
     /// runs the script as `env sh` does, so no fixture stands in for what the
-    /// kernel reports. `spawn` returns after exec, so the argv is already set.
+    /// kernel reports.
     #[cfg(target_os = "linux")]
     #[test]
     fn the_real_proc_reports_a_running_server() {
         let root = tempfile::tempdir().unwrap();
-        let prefix = root.path().join("custom prefix");
-        let cli = prefix.join("bin/code-server");
-        fs::create_dir_all(cli.parent().unwrap()).unwrap();
-        fs::write(&cli, "read line\n").unwrap();
-        let mut child = std::process::Command::new("/bin/sh")
-            .arg(&cli)
-            .arg("serve-local")
-            .arg("--extensions-dir=/srv/ext")
-            .stdin(std::process::Stdio::piped())
-            .spawn()
-            .unwrap();
+        let (prefix, cli) = server_cli(root.path());
+        let mut child = running_server(
+            &cli,
+            &argv(&["serve-local", "--extensions-dir=/srv/ext"]),
+            &[],
+        );
 
         let serves = running_vscode_web_serves(Path::new("/proc"));
 
@@ -744,24 +779,17 @@ mod tests {
     #[test]
     fn the_real_proc_reports_server_data_dir_and_the_servers_agent_folder() {
         let root = tempfile::tempdir().unwrap();
-        let prefix = root.path().join("custom prefix");
-        let cli = prefix.join("bin/code-server");
-        fs::create_dir_all(cli.parent().unwrap()).unwrap();
-        fs::write(&cli, "read line\n").unwrap();
-        let spawn = |data_dir: Option<&str>, agent: &str| {
-            let mut command = std::process::Command::new("/bin/sh");
-            command
-                .arg(&cli)
-                .arg("serve-local")
-                .env("VSCODE_AGENT_FOLDER", agent)
-                .stdin(std::process::Stdio::piped());
-            if let Some(data_dir) = data_dir {
-                command.arg(format!("--server-data-dir={data_dir}"));
-            }
-            command.spawn().unwrap()
-        };
-        let mut with_data_dir = spawn(Some("/srv/data"), "/srv/ignored");
-        let mut with_agent = spawn(None, "/srv/agent");
+        let (prefix, cli) = server_cli(root.path());
+        let mut with_data_dir = running_server(
+            &cli,
+            &argv(&["serve-local", "--server-data-dir=/srv/data"]),
+            &[("VSCODE_AGENT_FOLDER", "/srv/ignored")],
+        );
+        let mut with_agent = running_server(
+            &cli,
+            &argv(&["serve-local"]),
+            &[("VSCODE_AGENT_FOLDER", "/srv/agent")],
+        );
 
         let serves = running_vscode_web_serves(Path::new("/proc"));
 

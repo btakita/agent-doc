@@ -419,9 +419,66 @@ pub fn run_with_options_to_writer(
     // from preflight resolving with `pass=uninstalled`. Nested passes reuse
     // this graph, which is keyed by the live CRDT revision (or the detached
     // disk hash), so an operator or agent edit mid-run still invalidates it.
-    agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
+    let state_db_io_before = agent_doc_sqlite::state_store::state_db_io_counters();
+    let probe = options.probe;
+    let result = agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
         run_with_options_to_writer_in_pass(file, options, writer)
-    })
+    });
+    if !probe {
+        log_admission_state_db_io(file, state_db_io_before, result.is_ok());
+    }
+    result
+}
+
+/// `#admissionleasechurn`: record how many state.db round trips this
+/// admission made, so a slow-disk SLA miss can be read against its IO count
+/// (`#releasegateflake` found admission wall time tracks fsync latency) and a
+/// regression in lease churn shows up as a number instead of a timing flake.
+fn log_admission_state_db_io(
+    file: &Path,
+    before: agent_doc_sqlite::state_store::StateDbIoCounters,
+    admitted: bool,
+) {
+    let io = agent_doc_sqlite::state_store::state_db_io_counters().since(before);
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "preflight_admission_state_db_io file={} admitted={admitted} writable_opens={} lease_writes={}",
+            file.display(),
+            io.writable_opens,
+            io.lease_writes,
+        ),
+    );
+}
+
+/// Hold `state.db` open for the rest of this admission so the many
+/// short-lived connections it opens and closes never pay SQLite's
+/// last-connection checkpoint (`#admissionleasechurn`). Best effort: a failure
+/// only forgoes the optimization.
+fn defer_admission_state_db_close_checkpoints(
+    file: &Path,
+) -> Option<agent_doc_sqlite::state_store::StateDbCloseCheckpointDeferral> {
+    let project_root = agent_doc_fs::find_project_root_canonical(file)?;
+    match agent_doc_sqlite::state_store::defer_state_db_close_checkpoints(&project_root) {
+        Ok(Some(deferral)) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "preflight_state_db_close_checkpoints_deferred file={}",
+                    file.display()
+                ),
+            );
+            Some(deferral)
+        }
+        Ok(None) => None,
+        Err(error) => {
+            eprintln!(
+                "[preflight] warning: state.db close checkpoints not deferred for {}: {error:#}",
+                file.display()
+            );
+            None
+        }
+    }
 }
 
 fn run_with_options_to_writer_in_pass(
@@ -447,6 +504,13 @@ fn run_with_options_to_writer_in_pass(
         )?
     } else {
         require_pane_authority_in(&preflight_scope, file)?
+    };
+    // Admitted (or about to report a rejection) with state.db already
+    // initialized by the authority read. Held until this function returns.
+    let _state_db_close_checkpoint_deferral = if options.probe {
+        None
+    } else {
+        defer_admission_state_db_close_checkpoints(file)
     };
     preflight_effects.observe_execution_authority_admitted(pane_authority.permits());
     preflight_effects.observe_authority_current(true);

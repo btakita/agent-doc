@@ -131,6 +131,7 @@ fn state_location(file: &str) -> Result<(std::path::PathBuf, String)> {
     Ok((root, document_hash))
 }
 
+#[cfg(test)]
 fn publish_queue_edit_owner_lease(file: &str, holder: &str, pid: u32) -> Result<()> {
     let (project_root, document_hash) = state_location(file)?;
     agent_doc_controller_io::project_controller::upsert_coordination_lease(
@@ -142,6 +143,28 @@ fn publish_queue_edit_owner_lease(file: &str, holder: &str, pid: u32) -> Result<
             holder_pid: Some(pid),
             heartbeat_secs: now_secs(),
         },
+    )
+}
+
+/// Publish `holder` unless `keep_existing` accepts the current row, in one
+/// state.db round trip. Returns the kept row, if any.
+fn publish_queue_edit_owner_lease_unless(
+    file: &str,
+    holder: &str,
+    pid: u32,
+    keep_existing: impl FnOnce(&agent_doc_sqlite::state_store::CoordinationLeaseRecord) -> bool,
+) -> Result<Option<agent_doc_sqlite::state_store::CoordinationLeaseRecord>> {
+    let (project_root, document_hash) = state_location(file)?;
+    agent_doc_controller_io::project_controller::publish_coordination_lease_unless(
+        &project_root,
+        &agent_doc_sqlite::state_store::CoordinationLeaseRecord {
+            scope_kind: QUEUE_EDIT_OWNER_SCOPE.to_string(),
+            scope_id: document_hash,
+            holder: holder.to_string(),
+            holder_pid: Some(pid),
+            heartbeat_secs: now_secs(),
+        },
+        keep_existing,
     )
 }
 
@@ -485,19 +508,22 @@ impl QueueEditGuard {
         // token is stale even when its long-lived controller PID is still live
         // (for example after an RPC task dropped its guard). Keeping that token
         // would wedge every later mutation behind a nonexistent apply owner.
-        if let Some(existing) = read_queue_edit_owner_lease(&file) {
-            if !existing.holder.starts_with(DIRECT_QUEUE_EDIT_OWNER_PREFIX)
-                && pid_is_live(existing.holder_pid)
-            {
-                fs2::FileExt::unlock(&apply_lock)
-                    .context("failed to release queue apply lock after live reservation")?;
-                return Ok(None);
-            }
-            clear_queue_edit_owner_lease_if_holder(&file, &existing.holder);
-        }
+        //
+        // `#admissionleasechurn`: observe, decide, and replace in one state.db
+        // transaction. Replacing a stale row is the same upsert as publishing
+        // over an empty one, so the separate read and clear round trips bought
+        // nothing but connections and an extra commit.
         let holder_pid = std::process::id();
         let holder = new_direct_queue_edit_holder(holder_pid);
-        publish_queue_edit_owner_lease(&file, &holder, holder_pid)?;
+        let kept = publish_queue_edit_owner_lease_unless(&file, &holder, holder_pid, |existing| {
+            !existing.holder.starts_with(DIRECT_QUEUE_EDIT_OWNER_PREFIX)
+                && existing.holder_pid.is_some_and(pid_is_live)
+        })?;
+        if kept.is_some() {
+            fs2::FileExt::unlock(&apply_lock)
+                .context("failed to release queue apply lock after live reservation")?;
+            return Ok(None);
+        }
         Ok(Some(Self {
             file,
             holder,
@@ -562,24 +588,15 @@ impl QueueEditGuard {
         if !self.holder.is_empty() {
             let deadline = std::time::Instant::now() + Duration::from_millis(500);
             loop {
-                let cleared =
-                    clear_queue_edit_owner_lease_if_holder_result(&self.file, &self.holder).map(
-                        |_| {
-                            read_queue_edit_owner_lease(&self.file)
-                                .is_none_or(|lease| lease.holder != self.holder)
-                        },
-                    );
-                match cleared {
-                    Ok(true) => break,
-                    Ok(false) | Err(_) if std::time::Instant::now() < deadline => {
+                // One conditional DELETE is the whole release. Once it
+                // commits, the row is not this guard's whether or not it
+                // matched (tokens are unique, so nobody republishes ours), so
+                // the re-read that used to follow it cost a connection and
+                // proved nothing (`#admissionleasechurn`).
+                match clear_queue_edit_owner_lease_if_holder_result(&self.file, &self.holder) {
+                    Ok(_) => break,
+                    Err(_) if std::time::Instant::now() < deadline => {
                         std::thread::sleep(Duration::from_millis(2));
-                    }
-                    Ok(false) => {
-                        eprintln!(
-                            "[agent-doc] warning: owned queue-mutation lease remained after conditional clear for {}",
-                            self.file
-                        );
-                        break;
                     }
                     Err(error) => {
                         eprintln!(
@@ -632,6 +649,78 @@ mod tests {
             assert!(!dir.path().join(".agent-doc/queue-edit-owner").exists());
         }
         assert!(read_queue_edit_owner_lease(&file_str).is_none());
+    }
+
+    /// `#admissionleasechurn`: one guard acquire/release is exactly one
+    /// publish round trip and one clear round trip. Preflight admission runs
+    /// several guard cycles, and each extra state.db connection cost a
+    /// directory sync and (as the last connection) a WAL checkpoint. The
+    /// previous protocol read the lease, published it, cleared it, then re-read
+    /// it: 4 connections per cycle, 5 with 3 lease writes when a stale direct
+    /// token had to be cleared first.
+    #[test]
+    fn a_guard_cycle_is_one_publish_and_one_clear_round_trip() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        let file_text = file.to_string_lossy();
+        // Converge the schema outside the measured window.
+        assert!(read_queue_edit_owner_lease(&file_text).is_none());
+
+        for stale_direct_token in [false, true] {
+            if stale_direct_token {
+                publish_queue_edit_owner_lease(
+                    &file_text,
+                    "direct-stale-after-dropped-guard",
+                    std::process::id(),
+                )
+                .unwrap();
+            }
+            let before = agent_doc_sqlite::state_store::state_db_io_counters();
+            let guard = QueueEditGuard::try_acquire(&file)
+                .unwrap()
+                .expect("an uncontended flock admits the guard");
+            let acquired = agent_doc_sqlite::state_store::state_db_io_counters().since(before);
+            drop(guard);
+            let cycle = agent_doc_sqlite::state_store::state_db_io_counters().since(before);
+            assert_eq!(
+                (acquired.writable_opens, acquired.lease_writes),
+                (1, 1),
+                "acquire must observe, decide, and publish in one round trip \
+                 (stale direct token present: {stale_direct_token})"
+            );
+            assert_eq!(
+                (cycle.writable_opens, cycle.lease_writes),
+                (2, 2),
+                "a guard cycle is one publish and one clear round trip \
+                 (stale direct token present: {stale_direct_token})"
+            );
+            assert!(read_queue_edit_owner_lease(&file_text).is_none());
+        }
+    }
+
+    #[test]
+    fn a_live_reservation_is_kept_without_a_lease_write() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        let file_text = file.to_string_lossy();
+        let reservation = format!("{BACKGROUND_QUEUE_EDIT_OWNER_PREFIX}live-reservation");
+        publish_queue_edit_owner_lease(&file_text, &reservation, std::process::id()).unwrap();
+
+        let before = agent_doc_sqlite::state_store::state_db_io_counters();
+        assert!(
+            QueueEditGuard::try_acquire(&file).unwrap().is_none(),
+            "a live pre-apply reservation keeps the apply slot"
+        );
+        let io = agent_doc_sqlite::state_store::state_db_io_counters().since(before);
+        assert_eq!((io.writable_opens, io.lease_writes), (1, 0));
+        assert_eq!(
+            read_queue_edit_owner_lease(&file_text).unwrap().holder,
+            reservation
+        );
     }
 
     #[test]

@@ -234,6 +234,39 @@ pub fn add_followups_with_effects(
     Ok(followups.len())
 }
 
+/// `#humanfollowupowner`: tag every unstarted human-owned `follow up on an
+/// action item` row with `[operator-verify]` through the binary-owned queue
+/// write path ([`agent_doc_queue::followup_owner::reclassify_human_followup_rows`]).
+/// Returns the rows that changed (or would change, with `dry_run`). A document
+/// with nothing to tag is not written.
+pub fn reclassify_followups_with_effects(
+    effects: &impl QueueCommandEffects,
+    file: &Path,
+    dry_run: bool,
+) -> Result<Vec<agent_doc_queue::followup_owner::ReclassifiedFollowup>> {
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let current = effects.current_document_content(file, "queue_reclassify_followups")?;
+    let Some((updated, rows)) =
+        agent_doc_queue::followup_owner::reclassify_human_followup_rows(&current)
+            .with_context(|| format!("queue reclassify-followups: {}", file.display()))?
+    else {
+        return Ok(Vec::new());
+    };
+    if dry_run {
+        return Ok(rows);
+    }
+    effects.converge_document_or_disk(file, &updated, &current, "queue_reclassify_followups")?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_human_followup_reclassified file={} rows={} source=cli (#humanfollowupowner)",
+            file.display(),
+            rows.len()
+        ),
+    );
+    Ok(rows)
+}
+
 /// CLI entry: run [`add_with_effects`] and print the outcome.
 pub fn add(
     effects: &impl QueueCommandEffects,
@@ -348,6 +381,41 @@ mod tests {
     // Assembled at runtime so the source never carries a token-shaped literal.
     fn fake_github_token() -> String {
         format!("ghp_{}", "A".repeat(36))
+    }
+
+    /// `#humanfollowupowner`: the explicit repair tags human-owned follow-up
+    /// rows through the queue write path; a dry run writes nothing and a
+    /// second run finds nothing left to tag.
+    #[test]
+    fn reclassify_followups_tags_human_rows_once() {
+        let content = concat!(
+            "---\nqueue: go\n---\n\n",
+            "<!-- agent:queue id=main go -->\n",
+            "- ~~do [#origin]~~\n",
+            "- 📥 follow up on an action item from `origin`: A non-author approves PR 9 at head `abc1234`. [#q-0123456789ab]\n",
+            "- 📥 follow up on an action item from `origin`: Fix the typo in README.md. [#q-0123456789ac]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let (_dir, doc) = project(content);
+        let preview = reclassify_followups_with_effects(&DiskEffects, &doc, true).unwrap();
+        assert_eq!(preview.len(), 1);
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+
+        let rows = reclassify_followups_with_effects(&DiskEffects, &doc, false).unwrap();
+        assert_eq!(rows, preview);
+        let after = std::fs::read_to_string(&doc).unwrap();
+        assert!(after.contains(
+            "- ⏳ follow up on an action item from `origin`: A non-author approves PR 9 at head `abc1234`. [operator-verify] [#q-0123456789ab]\n"
+        ), "{after}");
+        assert!(after.contains(
+            "- 📥 follow up on an action item from `origin`: Fix the typo in README.md. [#q-0123456789ac]\n"
+        ), "{after}");
+        assert!(
+            reclassify_followups_with_effects(&DiskEffects, &doc, false)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), after);
     }
 
     #[test]

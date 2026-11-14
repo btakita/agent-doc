@@ -1213,6 +1213,9 @@ pub fn dispatchable_head_prompt_text_excluding_claimed_with_presets(
             return None;
         }
     }
+    if head_awaits_operator_inline(&head) {
+        return None;
+    }
     let deferred = deferred_backlog_ids_split(content, scope);
     match extract_head_id(&head) {
         Some(id) if deferred.defers(&id, false) => None,
@@ -1265,6 +1268,9 @@ pub fn dispatchable_head_prompt_text_for_owner(
             _ => None,
         })
         .next()?;
+    if head_awaits_operator_inline(&head) {
+        return None;
+    }
     let deferred = deferred_backlog_ids_split(content, scope);
     match extract_head_id(&head) {
         Some(id) if deferred.defers(&id, false) => None,
@@ -2326,6 +2332,18 @@ pub fn extract_head_id(prompt: &str) -> Option<String> {
             })
         })
         .filter(|id| !id.is_empty())
+}
+
+/// `#humanfollowupowner`: whether a row waits on the operator by its own
+/// text: it carries the inline `[operator-verify]` execution tag and no inline
+/// operator verdict (`#opverifyanswered`). No agent drain scope runs such a row
+/// ([`head_is_drainable`] reads the same tag), so the `#transientcloseout`
+/// gate treats it as awaiting the operator and preflight projects `⏳` onto it.
+/// `queue report-complete` writes a human-owned action item's follow-up row
+/// this way ([`crate::followup_owner`]).
+pub fn head_awaits_operator_inline(text: &str) -> bool {
+    let text = agent_doc_element_queue::strip_queue_prompt_stable_id_annotation(text);
+    backlog::item_operator_verify_required(&text) && !head_carries_operator_verdict(&text)
 }
 
 /// True when a queue head carries the operator's inline verdict on its own id

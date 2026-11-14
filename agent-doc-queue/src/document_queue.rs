@@ -3248,7 +3248,8 @@ pub fn set_prompts_skipped(
 }
 
 /// Reconcile the id-backed lifecycle projections that follow the `🚧` pass:
-/// `⏳` on heads in `awaiting_ids` (`#queueawaitop`) and `⏭️` on heads in
+/// `⏳` on heads in `awaiting_ids` (`#queueawaitop`) or whose own text carries
+/// `[operator-verify]` with no inline verdict (`#humanfollowupowner`), and `⏭️` on heads in
 /// `skipped_ids` (`#queueskip`), clearing either marker from every other head.
 ///
 /// A head that already carries `🚧` is left untouched (`#claimskipmarker`):
@@ -3285,7 +3286,12 @@ pub fn set_prompts_lifecycle_markers(
             {
                 let mut next = prompt.clone();
                 let id = do_prompt_id(&next.text);
-                let awaiting = id.as_ref().is_some_and(|id| awaiting_ids.contains(id));
+                // `#humanfollowupowner`: a row whose own text gates it on the
+                // operator (`[operator-verify]`, no inline verdict) awaits the
+                // operator whatever id the scan finds; a free-text follow-up
+                // row's first `#` may be a pull request number.
+                let awaiting = id.as_ref().is_some_and(|id| awaiting_ids.contains(id))
+                    || crate::queue_continuation::head_awaits_operator_inline(&next.text);
                 let skipped = !awaiting && id.as_ref().is_some_and(|id| skipped_ids.contains(id));
                 let has_awaiting = qp::has_awaiting_operator_marker(&next.text);
                 let has_skip = qp::has_skip_marker(&next.text);

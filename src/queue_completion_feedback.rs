@@ -490,6 +490,13 @@ pub(crate) fn describe_handback_followups(
             " Queued {} action item(s) as follow-up row(s) after {origin:?} in queue id `{queue}`; do not add them again.",
             followups.inserted.len(),
         ));
+        // `#humanfollowupowner`: say which rows no agent will dispatch.
+        if followups.operator_owned > 0 {
+            text.push_str(&format!(
+                " {} of them are human-owned: they carry `[operator-verify]` and wait on the operator (⏳), so no agent dispatches them; the operator strikes each once done or answers it inline to hand the rest back.",
+                followups.operator_owned,
+            ));
+        }
     }
     if followups.already_present > 0 {
         text.push_str(&format!(
@@ -2938,6 +2945,35 @@ The setup pull request is the merged https://github.com/haiven-dev/haiven-sdk/pu
                 .contains("review #prompt-blocker-widget")
         );
         assert!(!brief.subagent_prompt_preamble.contains("signing key"));
+    }
+
+    /// `#humanfollowupowner`: the report line names how many queued rows wait
+    /// on the operator, so the coordinator does not dispatch them.
+    #[test]
+    fn report_line_names_human_owned_followups() {
+        let followups = agent_doc_queue::handback_followups::HandbackFollowups {
+            queue_id: Some("main".to_string()),
+            inserted: vec![
+                "follow up on an action item from `alpha`: agent: fix the typo".to_string(),
+                "follow up on an action item from `alpha`: human (tmstorm): approve PR 9 [operator-verify]"
+                    .to_string(),
+            ],
+            operator_owned: 1,
+            ..agent_doc_queue::handback_followups::HandbackFollowups::default()
+        };
+        let text =
+            describe_handback_followups(Path::new("tasks/bugs.md"), "do [#alpha]", &followups);
+        assert!(text.contains("Queued 2 action item(s)"), "{text}");
+        assert!(
+            text.contains("1 of them are human-owned: they carry `[operator-verify]`"),
+            "{text}"
+        );
+        let none = agent_doc_queue::handback_followups::HandbackFollowups {
+            operator_owned: 0,
+            ..followups
+        };
+        let text = describe_handback_followups(Path::new("tasks/bugs.md"), "do [#alpha]", &none);
+        assert!(!text.contains("human-owned"), "{text}");
     }
 
     /// `#handbackrefusedcommandexact`: the report line's refused-placement

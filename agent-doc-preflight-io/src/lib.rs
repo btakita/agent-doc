@@ -7398,6 +7398,34 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         );
     }
 
+    // `#humanfollowupowner`: a `follow up on an action item` row only a person
+    // can close (another reviewer's approval, an org owner's setting, an
+    // operator decision) waits on the operator. Tag every such unstarted row
+    // in every run block, in place and idempotently, so no drain dispatches it
+    // and the Stop hook's `#transientcloseout` gate does not refuse every turn
+    // end over it. Rows written before the owner label existed are classified
+    // by the same conservative vocabulary `queue report-complete` uses.
+    if let Some((reclassified, rows)) =
+        agent_doc_queue::followup_owner::reclassify_human_followup_rows(&current_content)?
+    {
+        current_content = reclassified;
+        activation.entries_after = queue_entries_for_id(&current_content, &selected_queue_id);
+        mutated = true;
+        eprintln!(
+            "[preflight] queue: {} human-owned follow-up row(s) now wait on the operator ([operator-verify], #humanfollowupowner)",
+            rows.len()
+        );
+        queue_maintenance_log_op(
+            file,
+            effect_fence,
+            &format!(
+                "queue_human_followup_reclassified file={} rows={} (#humanfollowupowner)",
+                file.display(),
+                rows.len()
+            ),
+        )?;
+    }
+
     // Consume start fence if needed
     if activation.consumed_start_fence {
         let new_body = agent_doc_queue::document_queue::render(&activation.entries_after);

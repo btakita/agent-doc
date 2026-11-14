@@ -26,7 +26,16 @@ pub struct PremiseStatementRow {
     pub source: String,
 }
 
+static SCHEMA_SHAPE: std::sync::OnceLock<Option<crate::schema_declaration::DeclaredShape>> =
+    std::sync::OnceLock::new();
+
+/// `#storeschemabatch`: a fresh database gets both tables in ONE transaction;
+/// a converged one is only read, taking no write lock.
 fn ensure_schema(conn: &Connection) -> Result<()> {
+    crate::schema_declaration::declare_store_schema(conn, &SCHEMA_SHAPE, declare_schema)
+}
+
+fn declare_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"
         CREATE TABLE IF NOT EXISTS premise_statement_hashes (

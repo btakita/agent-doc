@@ -56,8 +56,21 @@ fn open(path: &Path) -> Result<Connection> {
     let connection = Connection::open(path)
         .with_context(|| format!("open reliable-sync inbox {}", path.display()))?;
     connection.busy_timeout(BUSY_TIMEOUT)?;
-    connection.execute_batch(INBOX_SCHEMA)?;
+    ensure_schema(&connection)?;
     Ok(connection)
+}
+
+static SCHEMA_SHAPE: std::sync::OnceLock<Option<crate::schema_declaration::DeclaredShape>> =
+    std::sync::OnceLock::new();
+
+/// `#storeschemabatch`: every operation opens the inbox, so a fresh inbox gets
+/// both tables in ONE transaction and a converged one is only read, taking no
+/// write lock.
+pub(crate) fn ensure_schema(connection: &Connection) -> Result<()> {
+    crate::schema_declaration::declare_store_schema(connection, &SCHEMA_SHAPE, |connection| {
+        connection.execute_batch(INBOX_SCHEMA)?;
+        Ok(())
+    })
 }
 
 fn sqlite_epoch(epoch: u64) -> Result<i64> {

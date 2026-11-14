@@ -24,6 +24,8 @@
 //! - `state_store` — project-controller actor/lease/dispatch/queue/cycle/
 //!   diagnostic/admin/recovery/layout SQLite state plus storage-specific status
 //!   records. Actor domain types live in `agent-doc-controller`.
+//! - `schema_declaration` — one-transaction schema declaration for the
+//!   co-tenant stores (`#storeschemabatch`); a converged schema is only read.
 //! - `write_lock` — `BEGIN IMMEDIATE` write transactions and busy-timeout
 //!   openers (`#sqlitebusyupgrade`); every transaction that may write uses it.
 
@@ -34,6 +36,7 @@ pub mod context_injection_ledger;
 pub mod op_log;
 pub mod premise_statement_index;
 pub mod reliable_sync_inbox;
+pub(crate) mod schema_declaration;
 pub mod state_store;
 pub mod steering_gate_log;
 pub mod write_lock;

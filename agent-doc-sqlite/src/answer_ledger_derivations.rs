@@ -81,10 +81,18 @@ pub enum StoreOutcome {
     Existing(Box<DerivationRow>),
 }
 
-/// The `#firstprinciplesstore` migration: review-status columns on
-/// `answer_ledger_nodes`, added in place to older databases.
+/// The answer-ledger schema together with the `#firstprinciplesstore`
+/// review-status columns on `answer_ledger_nodes`, declared in one
+/// transaction when anything is missing and only read otherwise
+/// (`#storeschemabatch`).
 pub fn ensure_derivation_schema(conn: &Connection) -> Result<()> {
-    ensure_schema(conn)?;
+    ensure_schema(conn)
+}
+
+/// The `#firstprinciplesstore` migration: review-status columns on
+/// `answer_ledger_nodes`, added in place to older databases. Part of the
+/// answer-ledger declaration, so it runs in that declaration's transaction.
+pub(crate) fn declare_derivation_columns(conn: &Connection) -> Result<()> {
     let columns: Vec<String> = conn
         .prepare("PRAGMA table_info(answer_ledger_nodes)")?
         .query_map([], |row| row.get::<_, String>(1))?

@@ -571,6 +571,9 @@ pub fn handle_claude_stop() -> Result<Option<SubagentQuotaBlockApplied>> {
 ///
 /// * the continuation guard is bounded by the run-keyed request ledger
 ///   (`apply_claude_stop`);
+/// * the `#transientcloseout` gate is bounded by `stop_hook_active` plus the
+///   durable record of its previous refusal (`#stophookactiveguard`): a
+///   recursive Stop over the unchanged debt set ends the turn;
 /// * a hook error is bounded by `stop_hook_active` — errors here are
 ///   overwhelmingly persistent (an unreadable document, a refused authority
 ///   resolve, a state ledger that will not open), so re-blocking re-runs the
@@ -1379,7 +1382,7 @@ fn apply_claude_stop_with_drain_readiness(
         if cycle
             .as_ref()
             .is_some_and(|cycle| cycle.phase == agent_doc_turn::CyclePhase::PreflightStarted)
-            && let Some(continuation) = transient_turn_end_continuation(&file)?
+            && let Some(continuation) = transient_turn_end_continuation(input, &file)?
         {
             return Ok(Some(continuation));
         }
@@ -1440,16 +1443,40 @@ fn apply_claude_stop_with_drain_readiness(
     // `waiting_on_operator` (`#stopquiescentrows`, agent-doc-bugs.md
     // 2026-11-13: six refused stops over two running workers). Observe-only
     // stops return above and do not consult this gate.
-    transient_turn_end_continuation(&file)
+    transient_turn_end_continuation(input, &file)
 }
 
 /// Refusal for a genuine turn end while live queue rows are still transient.
 ///
 /// `None` when every live row is resting, struck, or unmarked. An unreadable
 /// document is not proof that the rows are resting, so the turn stays open.
-fn transient_turn_end_continuation(file: &Path) -> Result<Option<ClaudeStopContinuation>> {
+///
+/// `#stophookactiveguard`: bounded by `stop_hook_active` plus the durable
+/// record of the previous refusal. A recursive Stop that finds exactly the
+/// debt set this gate last refused for the same harness session allows the
+/// final answer (`state=unchanged_debts`) and leaves the rows live; the agent
+/// was told once and nothing it did moved them. A changed debt set refuses
+/// again, and a first Stop (`stop_hook_active = false`) always refuses, so
+/// every distinct debt set is reported at least once. Claude Code's
+/// consecutive-block cap is never the only guard.
+fn transient_turn_end_continuation(
+    input: &ClaudeStopInput,
+    file: &Path,
+) -> Result<Option<ClaudeStopContinuation>> {
     let content = match current_document_content(file, "claude_stop_transient_closeout") {
         Ok(content) => content,
+        // `#stophookactiveguard`: an unreadable document is bounded the way
+        // a hook error is. Re-refusing a recursive Stop re-reads the same
+        // unreadable document; it cannot make it readable.
+        Err(err) if input.stop_hook_active => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "claude_stop_transient_closeout_unreadable error={err:#} action=allow_final_answer state=recursive_stop (#stophookactiveguard)"
+                ),
+            );
+            return Ok(None);
+        }
         Err(err) => {
             agent_doc_ops_log_io::log_op(
                 file,
@@ -1487,12 +1514,60 @@ fn transient_turn_end_continuation(file: &Path) -> Result<Option<ClaudeStopConti
     else {
         return Ok(None);
     };
+    let fingerprint = agent_doc_queue_io::transient_closeout_refusal::debts_fingerprint(
+        assessment
+            .debts
+            .iter()
+            .map(|debt| (debt.row.as_str(), debt.owed)),
+    );
+    // A load failure on a recursive Stop propagates: the hook-error path
+    // allows the final answer while `stop_hook_active` is true.
+    if input.stop_hook_active
+        && agent_doc_queue_io::transient_closeout_refusal::repeats_previous_refusal(
+            file,
+            &input.session_id,
+            &fingerprint,
+        )?
+    {
+        let rows = assessment
+            .debts
+            .iter()
+            .map(|debt| debt.row.as_str())
+            .collect::<Vec<_>>();
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "claude_stop_transient_closeout_unchanged_debts debts={} {} fingerprint={} rows={rows:?} action=allow_final_answer state=unchanged_debts (#stophookactiveguard)",
+                assessment.debts.len(),
+                assessment.quiescent_log_fields(),
+                fingerprint,
+            ),
+        );
+        return Ok(None);
+    }
+    // Arm the bound BEFORE refusing, and propagate a failure: a refusal the
+    // next recursive Stop cannot recognise is unbounded. The hook-error path
+    // reports the failure once and allows the recursive Stop.
+    agent_doc_queue_io::transient_closeout_refusal::record(
+        file,
+        &input.session_id,
+        &fingerprint,
+        assessment.debts.len(),
+    )
+    .with_context(|| {
+        format!(
+            "record the transient-closeout refusal for {} (#stophookactiveguard)",
+            file.display()
+        )
+    })?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "claude_stop_transient_closeout debts={} {} action=block_final_answer (#transientcloseout)",
+            "claude_stop_transient_closeout debts={} {} fingerprint={} stop_hook_active={} action=block_final_answer (#transientcloseout)",
             assessment.debts.len(),
             assessment.quiescent_log_fields(),
+            fingerprint,
+            input.stop_hook_active,
         ),
     );
     Ok(Some(ClaudeStopContinuation {
@@ -9931,6 +10006,119 @@ agent: grok
             observed,
             serde_json::json!({}),
             "an observe-only session end does not consult transient rows: {observed}"
+        );
+    }
+
+    /// `#stophookactiveguard` (agent-doc-bugs.md, 2026-11-13): Claude Code
+    /// printed "A hook blocked the turn from ending 9 consecutive times" over
+    /// an unchanged set of transient rows the agent could not move. The first
+    /// Stop still refuses; a recursive Stop over exactly the debt set it
+    /// refused ends the turn with `state=unchanged_debts` and leaves the rows
+    /// live; a changed debt set or a fresh (non-recursive) Stop refuses again.
+    #[test]
+    fn claude_stop_allows_a_recursive_stop_over_an_unchanged_transient_debt_set() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        let queue = |rows: &str| {
+            format!(
+                "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+## Queue\n\n\
+<!-- agent:queue -->\n\
+{rows}\
+- ⏳ verify the release\n\
+<!-- /agent:queue -->\n\n\
+## Backlog\n\n\
+<!-- agent:backlog -->\n\
+- [ ] [#held] Pin the released gitlinks.\n\
+- [ ] [#other] Retry the flaky publish.\n\
+<!-- /agent:backlog -->\n"
+            )
+        };
+        let one_debt = queue("- 🚧 do [#held]\n");
+        fs::write(&doc, &one_debt).unwrap();
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        complete_run(&doc);
+        let no_supervisor =
+            |_: &Path| agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor;
+        let stop = |stop_hook_active: bool| {
+            apply_claude_stop_with_drain_readiness(
+                &ClaudeStopInput {
+                    session_id: "codex-session".to_string(),
+                    cwd: dir.path().display().to_string(),
+                    stop_hook_active,
+                    transcript_path: None,
+                    reason: None,
+                    subagent_type: None,
+                },
+                no_supervisor,
+            )
+            .unwrap()
+        };
+        let ops = || {
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default()
+        };
+
+        // First stop: refused exactly as before, and the refusal is recorded.
+        let first = stop(false).expect("the first stop must refuse");
+        assert!(
+            first.reason.contains("normal closeout refused"),
+            "{}",
+            first.reason
+        );
+        assert!(first.reason.contains("🚧 do [#held]"), "{}", first.reason);
+        let recorded = agent_doc_queue_io::transient_closeout_refusal::load(&doc)
+            .unwrap()
+            .expect("the refusal is durable, so the next hook process can read it");
+        assert_eq!(recorded.session_id, "codex-session");
+        assert_eq!(recorded.debts, 1);
+
+        // A fresh (non-recursive) Stop over the same set still refuses.
+        assert!(
+            stop(false).is_some(),
+            "stop_hook_active=false must refuse as today"
+        );
+        // Recurse over the unchanged set.
+        assert!(
+            stop(true).is_none(),
+            "a recursive Stop over the unchanged debt set must end the turn"
+        );
+        let log = ops();
+        assert!(
+            log.contains("claude_stop_transient_closeout_unchanged_debts debts=1"),
+            "{log}"
+        );
+        assert!(
+            log.contains("action=allow_final_answer state=unchanged_debts"),
+            "{log}"
+        );
+        assert!(log.contains("🚧 do [#held]"), "the rows are logged: {log}");
+        assert!(
+            fs::read_to_string(&doc)
+                .unwrap()
+                .contains("- 🚧 do [#held]"),
+            "the rows stay live"
+        );
+
+        // A changed debt set (a new owed row) refuses once more, then the
+        // unchanged recursion ends the turn again.
+        fs::write(&doc, queue("- 🚧 do [#held]\n- 🚧 do [#other]\n")).unwrap();
+        complete_run(&doc);
+        // A real hook call is a fresh process with an empty per-call memo.
+        invalidate_stop_document_cache();
+        let changed = stop(true).expect("a changed debt set refuses");
+        assert!(
+            changed.reason.contains("🚧 do [#other]"),
+            "{}",
+            changed.reason
+        );
+        assert!(stop(true).is_none());
+        assert_eq!(
+            agent_doc_queue_io::transient_closeout_refusal::load(&doc)
+                .unwrap()
+                .unwrap()
+                .debts,
+            2
         );
     }
 

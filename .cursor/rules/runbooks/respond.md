@@ -696,7 +696,11 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   authorizes a new generation in the same turn (`#transientcloseout`). A
   drainable `📥`, a `☑️` awaiting integration, `🔄`, and `❔` keep blocking a
   genuine turn end; a `📥` that a closed `agent:loop` window holds back is not
-  due and does not. Explicitly dependency/cap-held rows that are not in that
+  due and does not. The Stop hook refuses each distinct debt set at least
+  once per turn; a recursive Stop over exactly the same refused set ends the
+  turn and logs `state=unchanged_debts` (`#stophookactiveguard`). When no owed
+  row can move in this turn, name each one and why in the final answer rather
+  than ending on the same refusal again; the rows stay live for the next turn. Explicitly dependency/cap-held rows that are not in that
   set may wait, and subagent completion notifications resume the loop without
   polling or a scheduled re-entry.
 - If session-accretion supplies bounded context, use the included `### Re:`

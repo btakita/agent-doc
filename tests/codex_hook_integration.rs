@@ -1790,3 +1790,65 @@ fn pretooluse_hook_refuses_killing_the_inherited_tmux_server() {
         hook().write_stdin(payload(allowed)).assert().success();
     }
 }
+
+/// `#stophookactiveguard`: every `agent-doc hook claude-stop` call is a new
+/// process, so the record that bounds the `#transientcloseout` refusal must
+/// survive between them. The first Stop refuses over a stale `🚧` row; the
+/// recursive Stop that follows (`stop_hook_active = true`) over the unchanged
+/// debt set ends the turn instead of waiting for Claude Code's
+/// consecutive-block cap, and the row stays live.
+#[test]
+fn claude_stop_hook_process_bounds_an_unchanged_transient_refusal() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(
+        &doc,
+        "---\nagent_doc_format: template\nagent: claude\n---\n\n<!-- agent:queue -->\n- 🚧 do [#held]\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n- [ ] [#held] Pin the released gitlinks.\n<!-- /agent:backlog -->\n",
+    )
+    .unwrap();
+    init_git_repo(tmp.path(), &doc);
+    track_codex_session(tmp.path(), &doc);
+    let stop = |stop_hook_active: bool| {
+        let payload = json!({
+            "session_id": "codex-session",
+            "cwd": tmp.path().display().to_string(),
+            "stop_hook_active": stop_hook_active,
+        });
+        let output = agent_doc()
+            .current_dir(tmp.path())
+            .env_remove("TMUX_PANE")
+            .args(["hook", "claude-stop"])
+            .write_stdin(payload.to_string())
+            .assert()
+            .success();
+        serde_json::from_slice::<serde_json::Value>(&output.get_output().stdout).unwrap()
+    };
+
+    let refused = stop(false);
+    let context = refused["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the first stop must refuse: {refused}"));
+    assert!(context.contains("🚧 do [#held]"), "{context}");
+
+    let ended = stop(true);
+    assert_eq!(
+        ended,
+        json!({}),
+        "the recursive stop over the unchanged debt set must end the turn"
+    );
+    let ops = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+    assert!(ops.contains("state=unchanged_debts"), "{ops}");
+    assert!(
+        fs::read_to_string(&doc)
+            .unwrap()
+            .contains("- 🚧 do [#held]")
+    );
+
+    // A fresh (non-recursive) stop still refuses the same set.
+    assert!(
+        stop(false)["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .is_some()
+    );
+}

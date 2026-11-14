@@ -2043,7 +2043,15 @@ pub fn acknowledge_open_id(
     } else {
         effects.acknowledge_open_id_backed_queue_head(file, id, &queue_edit_guard)?
     };
-    if acknowledged {
+    if acknowledged && normalized.to_ascii_lowercase().starts_with("q-") {
+        // Issue 394 / `#orphanreportedrow`: a generated id names one reported
+        // row occurrence, never a backlog or Todo item.
+        println!(
+            "{}: struck the reported queue row carrying generated id [#{}]; no tracked item changed.",
+            file.display(),
+            normalized
+        );
+    } else if acknowledged {
         println!(
             "{}: acknowledged id-backed correction head [#{}] while preserving the open backlog item (#freshqueueauth).",
             file.display(),

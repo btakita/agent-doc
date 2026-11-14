@@ -62,6 +62,7 @@ pub fn closeout_evidence_at(file: &Path, content: &str, now_secs: u64) -> Closeo
         fresh_claims,
         schedule_held_heads,
         reportable_lost,
+        document: Some(file.display().to_string()),
     }
 }
 

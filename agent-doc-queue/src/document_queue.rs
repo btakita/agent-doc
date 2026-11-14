@@ -4534,6 +4534,106 @@ pub fn entry_has_only_comment_children(entries: &[QueueEntry], idx: usize) -> bo
     saw_comment
 }
 
+/// A live `☑️`/`⚠️☑️` row whose generated response tree made it a context
+/// parent (`#orphanreportedrow`).
+///
+/// `report-complete` keeps a worker's response tree under its row while the
+/// response waits on the operator (`**State:** Waiting on operator input.`,
+/// `**Choices:**` with a `**Request**: [#subagent-operator-request-…]` row).
+/// That tree makes the row a group parent, so it is not an executable leaf and
+/// leaf-addressed closeout (`queue consume --ack-id`/`--ack-text`) never saw it.
+/// With no live prompt beneath it there is also nothing to dispatch: the row
+/// is a finished report whose only remaining question belongs to the
+/// operator, and once that request is answered the agent strikes the row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReportedResponseOrigin {
+    /// Reserved operator-request ids the row carries or its response tree
+    /// offers (`**Request**: [#id]`), lowercased, first-seen order.
+    pub request_ids: Vec<String>,
+}
+
+impl ReportedResponseOrigin {
+    /// The request ids whose `agent:todo` action is still open.
+    pub fn open_request_ids(
+        &self,
+        open_todo_ids: &std::collections::HashSet<String>,
+    ) -> Vec<String> {
+        self.request_ids
+            .iter()
+            .filter(|id| open_todo_ids.contains(*id))
+            .cloned()
+            .collect()
+    }
+}
+
+/// [`ReportedResponseOrigin`] for the row at `idx`, or `None` when it is not
+/// a reported context parent whose subtree holds no live prompt.
+///
+/// A live prompt under the row (an operator's `pick`, a follow-up, a worker
+/// attempt on a choice) is work with its own close path, so such a row is not
+/// an origin. Binary-owned Waiting-on-you items and their packets are not
+/// origins either: they mirror open Todo state.
+pub fn reported_response_origin(
+    entries: &[QueueEntry],
+    idx: usize,
+) -> Option<ReportedResponseOrigin> {
+    use agent_doc_document::queue_projection::{
+        QueueLifecycleMarker, is_reserved_operator_action_id, lifecycle_marker,
+        operator_request_annotation_ids,
+    };
+    let QueueEntry::Prompt(prompt) = entries.get(idx)? else {
+        return None;
+    };
+    if !matches!(
+        lifecycle_marker(&prompt.text),
+        Some(QueueLifecycleMarker::Reported | QueueLifecycleMarker::LostReported)
+    ) || prompt
+        .text
+        .contains(crate::queue_consume::WAITING_ON_YOU_ITEM_MARKER)
+        || crate::waiting_packet::waiting_owner(entries, idx).is_some()
+        || !entry_is_group_parent(entries, idx)
+    {
+        return None;
+    }
+    let own_indent = prompt.indent;
+    let mut request_ids = operator_request_annotation_ids(&prompt.text);
+    for later in entries.iter().skip(idx + 1) {
+        match later {
+            QueueEntry::Prompt(child) => {
+                if child.indent <= own_indent {
+                    break;
+                }
+                return None;
+            }
+            QueueEntry::Completed(child) => {
+                if child.indent <= own_indent {
+                    break;
+                }
+            }
+            QueueEntry::Freeform(raw) => {
+                let Some((indent, _, rest)) = raw.lines().next().and_then(split_list_item) else {
+                    continue;
+                };
+                if indent <= own_indent {
+                    break;
+                }
+                if let Some(id) = rest
+                    .trim()
+                    .strip_prefix("**Request**: [#")
+                    .and_then(|tail| tail.split_once(']'))
+                    .map(|(id, _)| id.trim().to_ascii_lowercase())
+                    .filter(|id| is_reserved_operator_action_id(id))
+                    && !request_ids.contains(&id)
+                {
+                    request_ids.push(id);
+                }
+            }
+            _ => {}
+        }
+    }
+    Some(ReportedResponseOrigin { request_ids })
+}
+
 /// A GitHub pull-request URL whose only descendants are list comments
 /// (`#prurlcommentnote`).
 ///
@@ -16404,4 +16504,65 @@ pub(crate) mod multiline_pasted_fixture {
         "- ~~do [#done2]~~\n",
         "- do [#open2]\n",
     );
+}
+
+#[cfg(test)]
+mod orphanreportedrow_tests {
+    use super::*;
+    /// `#orphanreportedrow`: a `☑️` row kept as the context parent of its
+    /// response tree is an origin with the request ids from both the row and
+    /// the tree. A live prompt under it (an operator's pick) is work with its
+    /// own close path, so the row is not an origin.
+    #[test]
+    fn orphanreportedrow_reported_response_origin_reads_row_and_tree_requests() {
+        let body = "\
+- ### ☑️ [#subagent:bossroom-tag#1] bump the tag [#q-5afca7ba8417] [#subagent-operator-request-a]
+  - **Response [#r-5d0ca16f4d91]**
+    - **State:** Waiting on operator input.
+    - **Choices:**
+      - **Request**: [#subagent-operator-request-b]
+      - **close-obsolete**: no change.
+- ### next work
+";
+        let entries = parse(body).unwrap();
+        let origin_index = entries
+            .iter()
+            .position(
+                |entry| matches!(entry, QueueEntry::Prompt(p) if p.text.contains("bump the tag")),
+            )
+            .unwrap();
+        assert!(!executable_prompt_indexes(&entries).contains(&origin_index));
+        let origin = reported_response_origin(&entries, origin_index).expect("origin");
+        assert_eq!(
+            origin.request_ids,
+            vec![
+                "subagent-operator-request-a".to_string(),
+                "subagent-operator-request-b".to_string()
+            ]
+        );
+        let open: std::collections::HashSet<String> = ["subagent-operator-request-b".to_string()]
+            .into_iter()
+            .collect();
+        assert_eq!(
+            origin.open_request_ids(&open),
+            vec!["subagent-operator-request-b".to_string()]
+        );
+        let next = entries
+            .iter()
+            .position(
+                |entry| matches!(entry, QueueEntry::Prompt(p) if p.text.contains("next work")),
+            )
+            .unwrap();
+        assert!(reported_response_origin(&entries, next).is_none());
+
+        let picked = "\
+- ☑️ [#subagent:bossroom-tag#1] bump the tag [#q-5afca7ba8417]
+  - **Response [#r-5d0ca16f4d91]**
+    - **Choices:**
+      - **close-obsolete**: no change.
+        - pick
+";
+        let entries = parse(picked).unwrap();
+        assert!(reported_response_origin(&entries, 0).is_none());
+    }
 }

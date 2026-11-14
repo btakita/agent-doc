@@ -20,6 +20,13 @@
 //!   ids has its packet recorded in `agent:exchange` and an open `agent:todo`
 //!   action. A `🙋` row missing either still refuses: recording them is the
 //!   closeout obligation that remains. `⏳` was already resting.
+//!   `#orphanreportedrow`: a `☑️` row without the `🙋` projection waits on
+//!   the operator the same way when the row carries an open, recorded
+//!   request id or its kept response tree offers one
+//!   (`**Request**: [#subagent-operator-request-…]`). Once every such
+//!   request is answered, a row whose response tree made it a context parent
+//!   owes a strike by its generated id (`queue consume --ack-id <q-…>`), not
+//!   a generic integration.
 //! - **Waiting on a claim.** A `🟡` row whose dispatch claim is still inside
 //!   its acknowledgement grace, or a `🚧` row whose bound worker's heartbeat
 //!   is fresh, is a worker the harness reports back on asynchronously
@@ -59,6 +66,24 @@ pub struct TransientCloseoutDebt {
     pub marker: QueueLifecycleMarker,
     /// The transition a normal turn still owes for this row.
     pub owed: &'static str,
+    /// `#orphanreportedrow`: the exact agent command that performs the owed
+    /// transition, when one command does (a strike by generated id). Every
+    /// refusal renders it beside the owed text, so the agent runs it rather
+    /// than asking the operator to delete the row.
+    pub close_command: Option<String>,
+}
+
+impl TransientCloseoutDebt {
+    /// `- row <row>: <owed>`, plus the exact close command when one exists.
+    pub fn render(&self) -> String {
+        match &self.close_command {
+            Some(command) => format!(
+                "- row {}: {} Close it now with `{command}`.",
+                self.row, self.owed
+            ),
+            None => format!("- row {}: {}", self.row, self.owed),
+        }
+    }
 }
 
 /// Why a live transient row does not hold the turn open (`#stopquiescentrows`).
@@ -126,6 +151,9 @@ pub struct CloseoutEvidence {
     /// [`crate::queue_claim::QueueClaim::lost_end_hand_back`]). The row owes a
     /// report of that hand-back, not a continue or a new generation.
     pub reportable_lost: HashSet<QueueItemIdentity>,
+    /// The session document path owed commands name (`#orphanreportedrow`);
+    /// `None` renders the `<FILE>` placeholder.
+    pub document: Option<String>,
 }
 
 /// Every live transient row, split into the debts that refuse a normal
@@ -249,6 +277,10 @@ const OWED_LOST_REPORTED: &str = "integrate the recovered report: the worker's r
 /// hand-back is recorded and unreported.
 const OWED_LOST_RECORDED_HANDBACK: &str = "report the hand-back its ended worker left: run `agent-doc queue report-complete` for this exact generation with that hand-back (the freeze recorded its opening); do not continue the ended worker or retry a new generation for finished work";
 
+/// `#orphanreportedrow`: what a reported row owes once its kept response
+/// tree's operator request is answered (or when it names none).
+const OWED_REPORTED_RESPONSE_ORIGIN: &str = "the operator answered this reported row's request: act on the answer, then strike the row yourself with `agent-doc queue consume` (by its generated `--ack-id <q-…>`, fenced with `--ack-owner`); its kept response tree makes it a context parent, not an executable leaf, and no worker remains to dispatch. The agent closes this row: never ask the operator to delete it by hand.";
+
 const OWED_OPERATOR_RECORD: &str = "record this row's operator-request packet in agent:exchange and its open agent:todo action, or act on the operator's answer; a 🙋 row waits on the operator only once both are recorded";
 
 /// Whether a `🙋` row's request is recorded: some id on the row has its packet
@@ -347,10 +379,56 @@ pub fn assess_transient_closeout(
                 row: row.clone(),
                 marker,
                 owed,
+                close_command: None,
             };
             if operator == Some(false) {
                 assessment.debts.push(debt(OWED_OPERATOR_RECORD));
                 continue;
+            }
+            // `#orphanreportedrow`: a `☑️` row that carries an operator
+            // request without the `🙋` projection (an unselected `agent:run`
+            // the projection pass did not repaint), or whose kept response
+            // tree offers one, waits on the operator while that request is
+            // open. Once it is answered, the agent owes the strike, by the
+            // generated id, since the response tree keeps the row out of the
+            // executable leaves.
+            if operator.is_none()
+                && matches!(
+                    marker,
+                    QueueLifecycleMarker::Reported | QueueLifecycleMarker::LostReported
+                )
+            {
+                let origin = crate::document_queue::reported_response_origin(&entries, index);
+                let request_ids = origin.as_ref().map_or_else(
+                    || queue_projection::operator_request_annotation_ids(&prompt.text),
+                    |origin| origin.request_ids.clone(),
+                );
+                let open = request_ids
+                    .iter()
+                    .filter(|id| open_todos.contains(*id))
+                    .collect::<Vec<_>>();
+                if !open.is_empty() {
+                    if open
+                        .iter()
+                        .any(|id| exchange_lower.contains(&format!("[#{id}]")))
+                    {
+                        assessment
+                            .quiescent
+                            .push(quiescent(QuiescentReason::OperatorOwned));
+                    } else {
+                        assessment.debts.push(debt(OWED_OPERATOR_RECORD));
+                    }
+                    continue;
+                }
+                if origin.is_some() {
+                    let mut owed = debt(OWED_REPORTED_RESPONSE_ORIGIN);
+                    owed.close_command = reported_origin_close_command(
+                        &prompt.text,
+                        evidence.document.as_deref().unwrap_or("<FILE>"),
+                    );
+                    assessment.debts.push(owed);
+                    continue;
+                }
             }
             match marker {
                 QueueLifecycleMarker::Claimed | QueueLifecycleMarker::Running => {
@@ -423,12 +501,27 @@ fn format_failure(header: &str, debts: &[TransientCloseoutDebt]) -> Option<Strin
     }
     let mut message = header.to_string();
     for debt in debts {
-        message.push_str("\n- row ");
-        message.push_str(&debt.row);
-        message.push_str(": ");
-        message.push_str(debt.owed);
+        message.push('\n');
+        message.push_str(&debt.render());
     }
     Some(message)
+}
+
+/// `#orphanreportedrow`: the exact strike for a reported row kept as its
+/// response's context parent, fenced to the row's visible attempt. It is the
+/// strike every closeout emitter shares
+/// ([`crate::reported_closeout::reported_row_strike`]).
+pub fn reported_origin_close_command(row_text: &str, document: &str) -> Option<String> {
+    let owner = queue_projection::owner_projection(row_text);
+    let strike = crate::reported_closeout::reported_row_strike(
+        row_text,
+        owner
+            .as_ref()
+            .map(|owner| (owner.owner.as_str(), owner.generation)),
+    );
+    strike
+        .argv(document)
+        .map(|argv| crate::reported_closeout::shell_command(&argv))
 }
 
 const NORMAL_CLOSEOUT_HEADER: &str =
@@ -1064,5 +1157,154 @@ mod tests {
                 "{state:?} is not a worker wait"
             );
         }
+    }
+
+    // ---- `#orphanreportedrow` ----------------------------------------------
+
+    const ORPHAN_REQ: &str = "subagent-operator-request-bossroom-tag-obsolete";
+
+    /// The live sdk-dev.md shape (2026-11-14): a heading-bullet `☑️` row in
+    /// `agent:run id=admin` whose kept response tree waits on an operator
+    /// request. The row carries the request id after its generated `[#q-…]`
+    /// but no `🙋`, and nothing under it is a live prompt.
+    fn orphan_reported_doc(todo_open: bool, packet: bool) -> String {
+        let todo_box = if todo_open { " " } else { "x" };
+        let exchange = if packet {
+            format!(
+                "**BOSS_ROOM_TAG [#q-5afca7ba8417]: no change made.**\n\n\
+                 [#{ORPHAN_REQ}] subagent operator request\n- *kind:* question\n"
+            )
+        } else {
+            "No packet here.\n".to_string()
+        };
+        r##"## Admin <!-- agent:run id="admin" subagents preset="#ip" priority -->
+- ### ☑️ [#subagent:bossroom-tag#1] In haiven-sdk, bump `BOSS_ROOM_TAG` in `assemble.py` from `v2.5.0` to `v3.0.0`. [#q-5afca7ba8417] [#REQ]
+  - **Response [#r-5d0ca16f4d91]**
+    - **Timestamp:** 2026-11-14T07:45:39.000Z
+    - **Summary:** **BOSS_ROOM_TAG [#q-5afca7ba8417]: no change made. The row is obsolete.** Close this row as obsolete, or change what it asks for?
+    - **State:** Waiting on operator input.
+    - **Guidance:** More work remains. Keep this tree and answer the operator request below.
+    - **Recommendation:** **close-obsolete** — both halves are settled by merged work.
+    - **Choices:**
+      - **Request**: [#REQ]
+      - **close-obsolete**: no change. Delete or close the row. — **Recommended**
+      - **comment-pr**: a small PR into `sdk-dev` adding one comment line.
+<!-- /agent:run -->
+
+## Todo <!-- agent:todo priority -->
+- [BOX] [#REQ] Answer the blocking subagent question: Close this row as obsolete? (choices: close-obsolete, comment-pr)
+<!-- /agent:todo -->
+
+<!-- agent:exchange -->
+EXCHANGE<!-- /agent:exchange -->
+"##
+        .replace("REQ", ORPHAN_REQ)
+        .replace("BOX", todo_box)
+        .replace("EXCHANGE", &exchange)
+    }
+
+    /// While the response's request is open and recorded, the row waits on
+    /// the operator: the Stop hook ends the turn quietly over it.
+    #[test]
+    fn orphanreportedrow_open_request_response_tree_is_operator_owned() {
+        let content = orphan_reported_doc(true, true);
+        let assessment = assess_transient_closeout(&content, &CloseoutEvidence::default()).unwrap();
+        assert!(assessment.debts.is_empty(), "{assessment:?}");
+        assert_eq!(assessment.quiescent.len(), 1, "{assessment:?}");
+        assert_eq!(
+            assessment.quiescent[0].reason,
+            QuiescentReason::OperatorOwned
+        );
+        assert_eq!(assessment.quiescent_state(), Some("waiting_on_operator"));
+        assert!(normal_closeout_failure(&content).unwrap().is_none());
+    }
+
+    /// An open request whose packet is not recorded still owes the record.
+    #[test]
+    fn orphanreportedrow_open_request_without_packet_owes_the_record() {
+        let content = orphan_reported_doc(true, false);
+        let failure = normal_closeout_failure(&content)
+            .unwrap()
+            .expect("an unrecorded request refuses");
+        assert!(
+            failure.contains("operator-request packet in agent:exchange"),
+            "{failure}"
+        );
+    }
+
+    /// Once the request is answered, the agent owes the strike, and the
+    /// refusal names the command that performs it rather than a generic
+    /// integration no command could finish.
+    #[test]
+    fn orphanreportedrow_answered_request_owes_a_strike_by_generated_id() {
+        let content = orphan_reported_doc(false, true);
+        let assessment = assess_transient_closeout(&content, &CloseoutEvidence::default()).unwrap();
+        assert!(assessment.quiescent.is_empty(), "{assessment:?}");
+        assert_eq!(assessment.debts.len(), 1, "{assessment:?}");
+        assert_eq!(assessment.debts[0].owed, OWED_REPORTED_RESPONSE_ORIGIN);
+        let failure = normal_closeout_failure(&content).unwrap().unwrap();
+        assert!(failure.contains("[#q-5afca7ba8417]"), "{failure}");
+        assert!(
+            failure.contains("never ask the operator to delete it by hand"),
+            "{failure}"
+        );
+
+        // With the document path the turn-end gates supply, the refusal
+        // names the exact agent command that closes this row.
+        let evidence = CloseoutEvidence {
+            document: Some("tasks/sdk/sdk-dev.md".to_string()),
+            ..CloseoutEvidence::default()
+        };
+        let failure = normal_closeout_failure_with(&content, &evidence)
+            .unwrap()
+            .unwrap();
+        assert!(
+            failure.contains(
+                "Close it now with `agent-doc queue consume tasks/sdk/sdk-dev.md --ack-id q-5afca7ba8417 --ack-owner 'subagent:bossroom-tag#1'`."
+            ),
+            "{failure}"
+        );
+        let unfilled = normal_closeout_failure(&content).unwrap().unwrap();
+        assert!(
+            unfilled.contains("agent-doc queue consume '<FILE>' --ack-id q-5afca7ba8417")
+                || unfilled.contains("agent-doc queue consume <FILE> --ack-id q-5afca7ba8417"),
+            "{unfilled}"
+        );
+    }
+
+    /// A row that carries an open, recorded request id after its q-id but
+    /// has no response tree also waits on the operator without `🙋`.
+    #[test]
+    fn orphanreportedrow_trailing_request_annotation_alone_is_operator_owned() {
+        let content = operator_doc(
+            &format!(
+                "- ☑️ [#subagent:review#1] confusion about markers [#q-0123456789ab] [#{REQ}]\n"
+            ),
+            true,
+            true,
+        );
+        let assessment = assess_transient_closeout(&content, &CloseoutEvidence::default()).unwrap();
+        assert!(assessment.debts.is_empty(), "{assessment:?}");
+        assert_eq!(
+            assessment.quiescent[0].reason,
+            QuiescentReason::OperatorOwned
+        );
+    }
+
+    /// A genuine reported leaf (no operator request, no kept response tree)
+    /// still owes integration.
+    #[test]
+    fn orphanreportedrow_genuine_reported_leaf_still_owes_integration() {
+        let content = "\
+<!-- agent:run id=\"admin\" subagents -->
+- ### ☑️ [#subagent:fixit#2] Fix the flaky test [#q-feedfacecafe]
+<!-- /agent:run -->
+";
+        let assessment = assess_transient_closeout(content, &CloseoutEvidence::default()).unwrap();
+        assert_eq!(assessment.debts.len(), 1, "{assessment:?}");
+        assert_eq!(
+            assessment.debts[0].owed,
+            "integrate the report or otherwise leave the reported-but-open state"
+        );
     }
 }

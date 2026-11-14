@@ -719,6 +719,11 @@ struct AddressableExecutableRow {
     node_key: String,
     owner: Option<QueueOwnerProjection>,
     auto: bool,
+    /// `#orphanreportedrow`: set when the row is not an executable leaf but a
+    /// reported context parent whose kept response tree holds no live prompt
+    /// ([`agent_doc_queue::document_queue::ReportedResponseOrigin`]). Only the
+    /// explicit acknowledgements address it; dispatch never does.
+    reported_origin: Option<agent_doc_queue::document_queue::ReportedResponseOrigin>,
 }
 
 /// An operator-supplied discriminator for duplicate canonical `--ack-text`
@@ -738,6 +743,22 @@ pub enum AckTextSelector {
 /// need the exact node key so a repeated leaf such as `#rebase` can be struck
 /// under only the parent named by its nest vector.
 fn addressable_executable_rows(content: &str) -> Result<Vec<AddressableExecutableRow>> {
+    addressable_rows(content, false)
+}
+
+/// [`addressable_executable_rows`] plus the reported context parents an
+/// explicit acknowledgement may strike (`#orphanreportedrow`). A `☑️` row
+/// whose kept response tree made it a group parent is a finished report, not
+/// work: striking it never makes anything dispatchable, and the response tree
+/// leaves it without any other agent-side close path.
+fn acknowledgeable_rows(content: &str) -> Result<Vec<AddressableExecutableRow>> {
+    addressable_rows(content, true)
+}
+
+fn addressable_rows(
+    content: &str,
+    include_reported_origins: bool,
+) -> Result<Vec<AddressableExecutableRow>> {
     let components = element::parse(content)?;
     let queue_set = agent_doc_queue::queue_set::QueueSet::parse(content, &components)?;
     let nodes = agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue")
@@ -772,9 +793,19 @@ fn addressable_executable_rows(content: &str) -> Result<Vec<AddressableExecutabl
                 continue;
             };
             used_nodes[node_index] = true;
-            if !executable.contains(&index) {
+            let reported_origin = if executable.contains(&index) {
+                None
+            } else if include_reported_origins {
+                match agent_doc_queue::document_queue::reported_response_origin(
+                    entries.as_ref(),
+                    index,
+                ) {
+                    Some(origin) => Some(origin),
+                    None => continue,
+                }
+            } else {
                 continue;
-            }
+            };
             let Some(lineage) =
                 agent_doc_queue::document_queue::lineage_claim_text(entries.as_ref(), index)
             else {
@@ -786,6 +817,7 @@ fn addressable_executable_rows(content: &str) -> Result<Vec<AddressableExecutabl
                 node_key: nodes[node_index].node_key.clone(),
                 owner: owner_projection(nodes[node_index].item.text.trim()),
                 auto,
+                reported_origin,
             });
         }
     }
@@ -937,7 +969,7 @@ pub fn acknowledge_paused_free_text_queue_head_under_apply_guard(
     // lineage across every queue block. Repeated short leaves require the full
     // nest vector; an owner fence may then settle only the exact projections of
     // that one attempt, preserving the automatic `#subagentinlineveto` contract.
-    let addressable = addressable_executable_rows(&content)?;
+    let addressable = acknowledgeable_rows(&content)?;
     if let Some(rows) = exact_acknowledgement_rows(&addressable, expected_head, selector)? {
         let row = rows[0];
         if !queue_prompt_text_is_free_text(&content, &row.lineage) {
@@ -981,14 +1013,36 @@ pub fn acknowledge_paused_free_text_queue_head_under_apply_guard(
             }
             crate::queue_lineage::require_integrated_claim_repo_work(file, attempt)?;
         }
+        let open_todo_ids = agent_doc_element::todo::open_todo_ids(&content);
         if agent_doc_document::queue_projection::operator_action_holds_row(
             &row.lineage,
-            &agent_doc_element::todo::open_todo_ids(&content),
+            &open_todo_ids,
         ) {
             anyhow::bail!(
                 "{}: --ack-text refuses {:?} while its linked operator action is open.",
                 file.display(),
                 row.lineage
+            );
+        }
+        // `#orphanreportedrow`: a reported row whose kept response tree still
+        // waits on an open operator request belongs to the operator. Strike
+        // it only after the request is answered and its Todo is closed.
+        if let Some(open) = rows
+            .iter()
+            .filter_map(|row| row.reported_origin.as_ref())
+            .map(|origin| origin.open_request_ids(&open_todo_ids))
+            .find(|open| !open.is_empty())
+        {
+            anyhow::bail!(
+                "{}: refusing to strike reported row {:?}: its response still waits on the \
+                 operator request {} (open in agent:todo). Act on the operator's answer and \
+                 close that Todo first; no change was applied (#orphanreportedrow).",
+                file.display(),
+                row.lineage,
+                open.iter()
+                    .map(|id| format!("[#{id}]"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             );
         }
         let node_keys = rows
@@ -3965,7 +4019,10 @@ fn acknowledge_generated_prompt_id(
 ) -> Result<bool> {
     apply_guard.ensure_protects(file)?;
     use agent_doc_document::queue_projection::{QueueLifecycleMarker, lifecycle_marker};
-    let rows = addressable_executable_rows(content)?;
+    // `#orphanreportedrow`: a reported row kept as the context parent of its
+    // response tree is addressable here too; the ack path below refuses it
+    // while that response's operator request is still open.
+    let rows = acknowledgeable_rows(content)?;
     let nodes =
         agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue").map_err(|err| {
             anyhow::anyhow!("generated prompt ack: failed to derive queue nodes: {err}")
@@ -7035,6 +7092,7 @@ mod core_tests {
                 node_key: "first".to_string(),
                 owner: None,
                 auto: false,
+                reported_origin: None,
             },
             super::AddressableExecutableRow {
                 display: "#address".to_string(),
@@ -7042,6 +7100,7 @@ mod core_tests {
                 node_key: "second".to_string(),
                 owner: None,
                 auto: false,
+                reported_origin: None,
             },
         ];
         let selector = super::AckTextSelector::Occurrence(1);
@@ -11992,6 +12051,142 @@ Old.
             "retrying the exact acknowledged correction must be an idempotent no-op"
         );
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), after_first_ack);
+    }
+
+    /// `#orphanreportedrow` live shape (sdk-dev.md 2026-11-14): a heading
+    /// `☑️` row in `agent:run id=admin` whose kept response tree waits on an
+    /// operator request. The tree makes the row a context parent, so before
+    /// the fix neither `--ack-id <q-…>` nor `--ack-text` could resolve it, and
+    /// no claim, receipt, or lineage record backs it.
+    const ORPHAN_ROW_LINEAGE: &str = "In haiven-sdk, bump `BOSS_ROOM_TAG` in `assemble.py` from `v2.5.0` to `v3.0.0`. [#q-5afca7ba8417] [#subagent-operator-request-bossroom-tag-obsolete]";
+
+    fn orphan_reported_row_doc(root: &Path, todo_open: bool) -> std::path::PathBuf {
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let doc = root.join("sdk-dev.md");
+        let content = r##"---
+queue_active: true
+---
+
+## Admin <!-- agent:run id="admin" subagents preset="#ip" priority -->
+- ### ☑️ [#subagent:bossroom-tag#1] LINEAGE
+  - **Response [#r-5d0ca16f4d91]**
+    - **Timestamp:** 2026-11-14T07:45:39.000Z
+    - **Summary:** **BOSS_ROOM_TAG [#q-5afca7ba8417]: no change made. The row is obsolete.** Close this row as obsolete, or change what it asks for?
+    - **State:** Waiting on operator input.
+    - **Guidance:** More work remains. Keep this tree and answer the operator request below.
+    - **Recommendation:** **close-obsolete** — both halves are settled by merged work.
+    - **Choices:**
+      - **Request**: [#subagent-operator-request-bossroom-tag-obsolete]
+      - **close-obsolete**: no change. Delete or close the row. — **Recommended**
+      - **comment-pr**: a small PR into `sdk-dev` adding one comment line.
+- ### keep this later row
+<!-- /agent:run -->
+
+## Todo <!-- agent:todo priority -->
+- [BOX] [#subagent-operator-request-bossroom-tag-obsolete] Answer the blocking subagent question: Close this row as obsolete? (choices: close-obsolete, comment-pr)
+<!-- /agent:todo -->
+
+<!-- agent:exchange -->
+[#subagent-operator-request-bossroom-tag-obsolete] subagent operator request
+- *kind:* question
+<!-- /agent:exchange -->
+"##
+        .replace("LINEAGE", ORPHAN_ROW_LINEAGE)
+        .replace("BOX", if todo_open { " " } else { "x" });
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        doc
+    }
+
+    /// Once the operator request is answered, `--ack-id <q-…>` strikes the
+    /// evidence-less reported row, leaves later rows alone, and a retry is a
+    /// no-op. Nothing becomes dispatchable: the row is struck, not unmarked.
+    #[test]
+    fn orphanreportedrow_ack_id_strikes_answered_response_origin() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = orphan_reported_row_doc(dir.path(), false);
+        let before = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            addressable_executable_rows(&before)
+                .unwrap()
+                .iter()
+                .all(|row| !row.lineage.contains("q-5afca7ba8417")),
+            "the response tree keeps the row out of the executable leaves"
+        );
+
+        assert!(acknowledge_open_id_backed_queue_head(&doc, "q-5afca7ba8417").unwrap());
+
+        let after = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            after.contains(&format!("- ### ~~{ORPHAN_ROW_LINEAGE}~~")),
+            "{after}"
+        );
+        assert!(!after.contains("☑️ [#subagent:bossroom-tag#1]"), "{after}");
+        assert!(after.contains("- ### keep this later row\n"), "{after}");
+        assert!(
+            agent_doc_queue::transient_closeout::normal_closeout_failure(&after)
+                .unwrap()
+                .is_none(),
+            "the struck row no longer refuses closeout"
+        );
+        assert!(
+            !acknowledge_open_id_backed_queue_head(&doc, "q-5afca7ba8417").unwrap(),
+            "retrying the strike is a no-op"
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), after);
+    }
+
+    /// While the response's operator request is still open in Todo, the row
+    /// belongs to the operator and the strike is refused without a change.
+    #[test]
+    fn orphanreportedrow_ack_id_refuses_while_operator_request_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = orphan_reported_row_doc(dir.path(), true);
+        let before = std::fs::read_to_string(&doc).unwrap();
+
+        let err = acknowledge_open_id_backed_queue_head(&doc, "q-5afca7ba8417")
+            .expect_err("an open operator request keeps the row");
+        let message = format!("{err:#}");
+        assert!(message.contains("#orphanreportedrow"), "{message}");
+        assert!(
+            message.contains("[#subagent-operator-request-bossroom-tag-obsolete]"),
+            "{message}"
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), before);
+    }
+
+    /// The `--ack-text` form the sdk-dev session tried, fenced to the row's
+    /// visible attempt, resolves the same row.
+    #[test]
+    fn orphanreportedrow_ack_text_with_owner_strikes_answered_response_origin() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = orphan_reported_row_doc(dir.path(), false);
+        let selector = AckTextSelector::Owner(QueueOwnerProjection {
+            owner: "subagent:bossroom-tag".to_string(),
+            generation: 1,
+        });
+
+        let outcome = super::acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
+            &doc,
+            ORPHAN_ROW_LINEAGE,
+            Some(&selector),
+            &TEST_EFFECTS,
+        )
+        .unwrap()
+        .expect("the exact lineage resolves");
+        assert_eq!(outcome.consumed_count, 1);
+
+        let after = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            after.contains(&format!("- ### ~~{ORPHAN_ROW_LINEAGE}~~")),
+            "{after}"
+        );
+        assert!(after.contains("- ### keep this later row\n"), "{after}");
     }
 
     /// `#nestedechostrike` live shape (agent-doc-bugs.md 2026-10-27): a

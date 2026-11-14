@@ -6,8 +6,9 @@
 //! work dispatchable again (a top-level row becomes `📥`; a waiting item whose
 //! packet loses it becomes selectable). This audit names every such row so
 //! `repair-managed-state` and `session-check` show the operator exactly which
-//! markers are unbacked; the operator removes the marker (or strikes the row)
-//! to decide.
+//! markers are unbacked. When one agent command strikes the row (a reported
+//! row with a generated `[#q-…]`, `#orphanreportedrow`), the audit names it,
+//! so an agent closes the row instead of asking the operator to delete it.
 
 use std::path::Path;
 
@@ -28,6 +29,10 @@ pub struct UnbackedReportedRow {
     /// different work identity: the row's identity drifted after the attempt
     /// was recorded (an edit, a move, or a re-parented tree).
     pub owner_attempt_elsewhere: bool,
+    /// `#orphanreportedrow`: the exact agent command that strikes the row
+    /// (`queue consume <doc> --ack-id <q-…> --ack-owner <owner#gen>`), when
+    /// the row is outside a waiting packet and carries a generated id.
+    pub close_command: Option<String>,
 }
 
 impl std::fmt::Display for UnbackedReportedRow {
@@ -54,7 +59,14 @@ impl std::fmt::Display for UnbackedReportedRow {
             } else {
                 " (kept: retiring it would make finished work dispatchable)"
             }
-        )
+        )?;
+        if let Some(command) = &self.close_command {
+            write!(
+                f,
+                "; once its work is integrated and any operator request on it is answered, an agent strikes it with `{command}` (#orphanreportedrow): never ask the operator to delete the row"
+            )?;
+        }
+        Ok(())
     }
 }
 
@@ -63,6 +75,7 @@ impl std::fmt::Display for UnbackedReportedRow {
 pub fn unbacked_reported_rows_in(
     content: &str,
     lifecycle: &agent_doc_work_projection::active_lifecycle::ActiveLifecycle,
+    document: &str,
 ) -> Result<Vec<UnbackedReportedRow>> {
     let components = agent_doc_element::element::parse(content)?;
     let set = agent_doc_queue::queue_set::QueueSet::parse(content, &components)?;
@@ -88,15 +101,24 @@ pub fn unbacked_reported_rows_in(
                     attempt.owner == owner.owner && attempt.generation == owner.generation
                 })
             });
+            let in_waiting_packet =
+                agent_doc_queue::waiting_packet::waiting_owner(&block.entries, index).is_some();
+            let close_command = (!in_waiting_packet
+                && agent_doc_element_queue::queue_prompt_stable_id(&prompt.text)
+                    .is_some_and(|id| id.starts_with("q-")))
+            .then(|| {
+                agent_doc_queue::transient_closeout::reported_origin_close_command(
+                    &prompt.text,
+                    document,
+                )
+            })
+            .flatten();
             rows.push(UnbackedReportedRow {
                 queue_id: block.id.to_string(),
                 text: prompt.text.clone(),
-                in_waiting_packet: agent_doc_queue::waiting_packet::waiting_owner(
-                    &block.entries,
-                    index,
-                )
-                .is_some(),
+                in_waiting_packet,
                 owner_attempt_elsewhere,
+                close_command,
             });
         }
     }
@@ -105,7 +127,11 @@ pub fn unbacked_reported_rows_in(
 
 /// [`unbacked_reported_rows_in`] against `file`'s durable state.
 pub fn unbacked_reported_rows(file: &Path, content: &str) -> Result<Vec<UnbackedReportedRow>> {
-    unbacked_reported_rows_in(content, &crate::active_lifecycle::load(file)?)
+    unbacked_reported_rows_in(
+        content,
+        &crate::active_lifecycle::load(file)?,
+        &file.display().to_string(),
+    )
 }
 
 #[cfg(test)]
@@ -123,14 +149,51 @@ mod tests {
         let rows = unbacked_reported_rows_in(
             content,
             &agent_doc_work_projection::active_lifecycle::ActiveLifecycle::default(),
+            "s.md",
         )
         .unwrap();
         assert_eq!(rows.len(), 1, "{rows:?}");
         assert!(!rows[0].in_waiting_packet);
+        assert_eq!(
+            rows[0].close_command, None,
+            "an id-backed row has no q-id strike"
+        );
         assert!(
             rows[0].to_string().contains(
                 "shows ☑️ but no claim, receipt, or lineage record joins its work identity"
             )
+        );
+    }
+
+    /// `#orphanreportedrow` (sdk-dev.md 2026-11-14): the unbacked `☑️`
+    /// BOSS_ROOM_TAG row names the agent command that strikes it, so the
+    /// agent never falls back to asking the operator to delete the line.
+    #[test]
+    fn orphanreportedrow_unbacked_q_id_row_names_its_agent_strike() {
+        let content = concat!(
+            "## Admin <!-- agent:run id=\"admin\" subagents -->\n",
+            "- ### ☑️ [#subagent:bossroom-tag#1] bump the tag [#q-5afca7ba8417] [#subagent-operator-request-bossroom-tag-obsolete]\n",
+            "  - **Response [#r-5d0ca16f4d91]**\n",
+            "    - **State:** Waiting on operator input.\n",
+            "<!-- /agent:run -->\n",
+        );
+        let rows = unbacked_reported_rows_in(
+            content,
+            &agent_doc_work_projection::active_lifecycle::ActiveLifecycle::default(),
+            "tasks/sdk/sdk-dev.md",
+        )
+        .unwrap();
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        let rendered = rows[0].to_string();
+        assert!(
+            rendered.contains(
+                "`agent-doc queue consume tasks/sdk/sdk-dev.md --ack-id q-5afca7ba8417 --ack-owner 'subagent:bossroom-tag#1'`"
+            ),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("never ask the operator to delete the row"),
+            "{rendered}"
         );
     }
 }

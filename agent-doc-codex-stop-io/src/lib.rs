@@ -1544,10 +1544,8 @@ fn unchanged_debts_system_message(
         file.display()
     );
     for debt in debts {
-        message.push_str("\n- row ");
-        message.push_str(&debt.row);
-        message.push_str(": ");
-        message.push_str(debt.owed);
+        message.push('\n');
+        message.push_str(&debt.render());
     }
     message
 }

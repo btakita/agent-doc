@@ -165,8 +165,44 @@ fn splice_followups(
 /// nested origin's ancestors, so the insertion point is the end of the whole
 /// top-level row. That row may also be a Response packet or a Waiting-on-you
 /// tree, where a nested row would read as the operator's answer, not as work.
+///
+/// `#followuporiginmarkers`: a top-level row is often a `### ` navigation
+/// heading, and its lifecycle projection (`☑️`/`🚧`, `[#subagent:x#N]`,
+/// `⟦published⟧`) changes while the worker runs. Both sides compare as work
+/// text ([`origin_match_text`]), so the decorated text `queue report-complete`
+/// reads back from the row and the plain `do [#id]` an operator types both
+/// find it. When no row matches that text exactly, an id-backed origin
+/// (`[#id]`, `do [#id]`) matches the one live row carrying the same tracked
+/// id; several such rows stay ambiguous and fail closed.
 fn live_origin_subtree_ends(body: &str, origin: &str) -> Vec<usize> {
-    let wanted = crate::queue_head_alignment::normalize_queue_head_text(origin);
+    let wanted = origin_match_text(origin);
+    let exact = origin_subtree_ends(body, |row| row == wanted);
+    if !exact.is_empty() {
+        return exact;
+    }
+    match agent_doc_element_queue::queue_head_identity(&wanted) {
+        agent_doc_element_queue::QueueItemIdentity::Id(id) => origin_subtree_ends(body, |row| {
+            matches!(
+                agent_doc_element_queue::queue_head_identity(row),
+                agent_doc_element_queue::QueueItemIdentity::Id(row_id)
+                    if row_id.eq_ignore_ascii_case(&id)
+            )
+        }),
+        agent_doc_element_queue::QueueItemIdentity::FreeText(_) => exact,
+    }
+}
+
+/// A row's (or an origin's) comparable work text: the `### ` navigation
+/// heading and the lifecycle projection removed.
+fn origin_match_text(text: &str) -> String {
+    crate::queue_head_alignment::normalize_queue_head_text(
+        crate::document_queue::strip_top_level_queue_heading(text),
+    )
+}
+
+/// [`live_origin_subtree_ends`] for every live row whose work text satisfies
+/// `matches`.
+fn origin_subtree_ends(body: &str, matches_row: impl Fn(&str) -> bool) -> Vec<usize> {
     let lines = body
         .split_inclusive('\n')
         .scan(0usize, |offset, line| {
@@ -185,7 +221,12 @@ fn live_origin_subtree_ends(body: &str, origin: &str) -> Vec<usize> {
         else {
             continue;
         };
-        if crate::queue_head_alignment::normalize_queue_head_text(prompt) == wanted {
+        // A struck row (`### ~~text~~`, `~### text~`) is closed work.
+        let unheaded = crate::document_queue::strip_top_level_queue_heading(prompt);
+        if crate::document_queue::parse_completed_inline(unheaded).is_some() {
+            continue;
+        }
+        if matches_row(&origin_match_text(prompt)) {
             let (mut root, mut indent) = (index, indent);
             for (candidate, (_, line)) in lines[..index].iter().enumerate().rev() {
                 let candidate_indent = line.len() - line.trim_start().len();
@@ -620,6 +661,86 @@ mod tests {
                 ),
                 head
             )
+        );
+    }
+
+    /// `#followuporiginmarkers`: `queue report-complete` reads the origin
+    /// back as `☑️ [#subagent:x#1] do [#id] ⟦published⟧`, and an operator
+    /// types `do [#id]` or `[#id]`. Every form must find the row whether it
+    /// is a `### ` navigation heading or a plain list row, with any
+    /// lifecycle decoration, and land after its whole subtree.
+    #[test]
+    fn followup_origin_matches_heading_and_list_rows_in_every_decoration() {
+        let origins = [
+            "☑️ [#subagent:x#1] do [#id] ⟦published⟧",
+            "🚧 [#subagent:x#2] do [#id]",
+            "### ☑️ [#subagent:x#1] do [#id] ⟦published⟧",
+            "do [#id] ⟦published⟧",
+            "do [#id]",
+            "[#id]",
+            "[#ID]",
+        ];
+        for row in [
+            "### ☑️ [#subagent:x#1] do [#id] ⟦published⟧",
+            "### 🚧 [#subagent:x#1] do [#id]",
+            "### do [#id]",
+            "☑️ [#subagent:x#1] do [#id] ⟦published⟧",
+            "🚧 [#subagent:x#3] do [#id]",
+            "do [#id] ⟦published⟧",
+            "do [#id]",
+        ] {
+            let doc = format!(
+                "<!-- agent:run id=\"main\" subagents go -->\n\
+                 - ### ~~do [#done] ⟦published⟧~~\n\
+                 - {row}\n  - push\n\
+                 - ### later work\n\
+                 <!-- /agent:run -->\n"
+            );
+            for origin in origins {
+                let updated = plan_queue_followups(&doc, "main", origin, &["fix it".to_string()])
+                    .unwrap_or_else(|err| panic!("row {row:?} origin {origin:?}: {err:#}"));
+                assert!(
+                    updated.contains(&format!("- {row}\n  - push\n- fix it\n- ### later work\n")),
+                    "row {row:?} origin {origin:?}:\n{updated}"
+                );
+            }
+        }
+    }
+
+    /// A struck heading row is closed work: neither its text nor its id is a
+    /// placement target, and a second live row with the same id makes the
+    /// plain id form ambiguous rather than guessed.
+    #[test]
+    fn followup_origin_skips_struck_heading_rows_and_fails_closed_on_shared_ids() {
+        let items = vec!["fix it".to_string()];
+        let struck = concat!(
+            "<!-- agent:run id=main -->\n",
+            "- ### ~~do [#id] ⟦published⟧~~\n",
+            "- ~### do [#id]~\n",
+            "<!-- /agent:run -->\n",
+        );
+        for origin in ["do [#id] ⟦published⟧", "do [#id]", "[#id]"] {
+            let err = plan_queue_followups(struck, "main", origin, &items)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("not found"), "{origin:?}: {err}");
+        }
+
+        let shared = concat!(
+            "<!-- agent:run id=main -->\n",
+            "- ### ☑️ [#subagent:a#1] do [#id] ⟦published⟧\n",
+            "- ### #auth do [#id]\n",
+            "<!-- /agent:run -->\n",
+        );
+        let err = plan_queue_followups(shared, "main", "[#id]", &items)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("ambiguous"), "{err}");
+        // The exact work text still names one row.
+        let updated = plan_queue_followups(shared, "main", "do [#id]", &items).unwrap();
+        assert!(
+            updated.contains("do [#id] ⟦published⟧\n- fix it\n- ### #auth do [#id]\n"),
+            "{updated}"
         );
     }
 

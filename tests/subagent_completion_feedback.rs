@@ -2770,6 +2770,143 @@ fn report_complete_prints_a_runnable_command_when_placement_is_refused() {
     );
 }
 
+/// `#followuporiginmarkers` (agent-doc-bugs.md, 2026-11-13): the dispatched
+/// row was a `### ` navigation heading carrying `☑️ [#subagent:x#1]` and
+/// `⟦published⟧`. `report-complete` could not place the action items, printed
+/// a `queue follow-up --after '<decorated row>'` command, and that command
+/// (and the plain `do [#id]`) then refused the same origin as "not found".
+/// Now report-complete places them itself, and `queue follow-up` accepts the
+/// decorated text, the plain `do [#id]`, and the bare `[#id]` for that row.
+#[test]
+fn report_complete_and_follow_up_place_after_a_decorated_heading_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = committed_run_session(
+        dir.path(),
+        &["- ### do [#alpha] ⟦published⟧", "- ### later work"],
+    );
+    let path = doc.to_str().unwrap();
+    for (what, args) in [
+        (
+            "claim",
+            vec![
+                "queue",
+                "claim",
+                path,
+                "--item",
+                "do [#alpha]",
+                "--owner",
+                "subagent:alpha",
+            ],
+        ),
+        (
+            "start",
+            vec![
+                "queue",
+                "start",
+                path,
+                "--item",
+                "do [#alpha]",
+                "--owner",
+                "subagent:alpha",
+                "--generation",
+                "1",
+                "--worker-id",
+                "worker:alpha",
+            ],
+        ),
+    ] {
+        assert_ok(&run_agent_doc(dir.path(), &args), what);
+    }
+    let origin_row = run_rows(&doc)
+        .into_iter()
+        .find(|row| row.contains("do [#alpha]"))
+        .expect("origin row");
+    assert!(origin_row.starts_with("- ### "), "{origin_row}");
+    let handback = concat!(
+        "**Summary:** fixed the alpha defect.\n",
+        "**Action items:**\n",
+        "- >512-commit documents can miss answers\n",
+        "**Next actions:** none",
+    );
+    let output = run_agent_doc(
+        dir.path(),
+        &[
+            "queue",
+            "report-complete",
+            "--prose-only",
+            path,
+            "--item",
+            "do [#alpha]",
+            "--generation",
+            "1",
+            "--response",
+            handback,
+        ],
+    );
+    assert_ok(&output, "report-complete");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Queued 1 action item(s) as follow-up row(s)"),
+        "{stderr}"
+    );
+    assert!(
+        !stderr
+            .lines()
+            .any(|line| line.starts_with("agent-doc queue follow-up")),
+        "placement must not fall back to a printed command:\n{stderr}"
+    );
+    let rows = run_rows(&doc);
+    let alpha = rows
+        .iter()
+        .position(|row| row.contains("do [#alpha]") && !row.contains("follow up"))
+        .unwrap_or_else(|| panic!("origin row missing: {rows:#?}"));
+    assert!(
+        rows[alpha + 1].ends_with(
+            "follow up on an action item from `alpha`: >512-commit documents can miss answers"
+        ),
+        "{rows:#?}"
+    );
+
+    // The coordinator's own follow-ups: the decorated row text as the origin
+    // reads it now, the plain `do [#id]`, and the bare `[#id]`.
+    let decorated = run_rows(&doc)[alpha]
+        .trim_start()
+        .trim_start_matches("- ")
+        .to_string();
+    for (n, after) in [decorated.as_str(), "do [#alpha]", "[#alpha]"]
+        .into_iter()
+        .enumerate()
+    {
+        let item = format!("coordinator follow-up {n}");
+        let output = run_agent_doc(
+            dir.path(),
+            &[
+                "queue",
+                "follow-up",
+                path,
+                "--id",
+                "default",
+                "--after",
+                after,
+                "--item",
+                &item,
+            ],
+        );
+        assert_ok(&output, &format!("queue follow-up --after {after:?}"));
+        let rows = run_rows(&doc);
+        assert!(
+            rows.iter().any(|row| row.ends_with(&item)),
+            "{after:?}: {rows:#?}"
+        );
+        let later = rows
+            .iter()
+            .position(|row| row.ends_with("later work"))
+            .unwrap();
+        let placed = rows.iter().position(|row| row.ends_with(&item)).unwrap();
+        assert!(placed > alpha && placed < later, "{after:?}: {rows:#?}");
+    }
+}
+
 fn drop_second_run_row(content: &str, origin: &str) -> String {
     let start = content.find("<!-- agent:run ").expect("run");
     let body_start = start + content[start..].find('\n').unwrap() + 1;

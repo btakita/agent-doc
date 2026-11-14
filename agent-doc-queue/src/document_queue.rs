@@ -374,7 +374,7 @@ fn split_list_item(line: &str) -> Option<(usize, Option<String>, &str)> {
 /// continue to see the operator's actual text.  Parsing accepts the heading
 /// both outside and inside a legacy strike wrapper; [`render`] always projects
 /// it back at the very front of top-level list-item content.
-fn strip_top_level_queue_heading(text: &str) -> &str {
+pub(crate) fn strip_top_level_queue_heading(text: &str) -> &str {
     text.trim_start().strip_prefix("### ").unwrap_or(text)
 }
 
@@ -3931,7 +3931,7 @@ pub fn sort_prompts_by_dag_with_operator_authored(
     Some(out)
 }
 
-fn parse_completed_inline(text: &str) -> Option<&str> {
+pub(crate) fn parse_completed_inline(text: &str) -> Option<&str> {
     let trimmed = text.trim();
     let inner = parse_completed_inline_once(trimmed)?;
     let inner = parse_completed_inline_once(inner).unwrap_or(inner);

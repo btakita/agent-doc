@@ -195,6 +195,128 @@ fn queue_maintenance_effect_digest(root: &Path) -> Vec<String> {
         .collect()
 }
 
+/// Document-authority observations still waiting in the controller's durable
+/// handoff outbox (`document_authority_handoffs`), not yet in `state_events`.
+fn pending_document_authority_handoffs(root: &Path) -> Vec<String> {
+    if !agent_doc_sqlite::state_store::document_authority_handoff_db_path(root).exists() {
+        return Vec::new();
+    }
+    agent_doc_sqlite::state_store::load_document_authority_handoffs(root)
+        .unwrap()
+        .into_iter()
+        .map(|handoff| format!("{}@{}", handoff.document_hash, handoff.authority_epoch))
+        .collect()
+}
+
+/// `#authorityhandoffcut`: the effect digest at a cut where the controller's
+/// asynchronous authority lane has reached its exact empty receipt.
+///
+/// `record_document_authority` hands a `document_authority_observed` fact to
+/// the controller, which commits it to the handoff outbox and returns; its
+/// `agent-doc-authority-handoff` worker appends it to `state_events` later (with
+/// a retry backoff of up to 5s). So a CLI command's own observation, such as
+/// preflight's `source=start_preflight`, can reach the ledger after the command
+/// has exited. A digest taken while that row is still in the outbox later
+/// "changes" with no stale worker involved: the busy `make check` failure of
+/// `authority_drift_fences_every_internal_queue_maintenance_effect_family` was
+/// exactly that row, ledgered between its two cuts. A row leaves the outbox only
+/// by the ACK that follows its ledger append, so an empty outbox around the read
+/// is the documented completion signal for every observation enqueued so far.
+/// `wait_for_drain` runs once per poll that still sees a pending row.
+fn await_queue_maintenance_effect_cut(
+    root: &Path,
+    context: &str,
+    mut wait_for_drain: impl FnMut(),
+) -> Vec<String> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
+    loop {
+        let pending = pending_document_authority_handoffs(root);
+        if pending.is_empty() {
+            let digest = queue_maintenance_effect_digest(root);
+            if pending_document_authority_handoffs(root).is_empty() {
+                return digest;
+            }
+            continue;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{context}: controller authority-handoff lane never reached its empty receipt; pending={pending:?}"
+        );
+        wait_for_drain();
+    }
+}
+
+fn await_cli_queue_maintenance_effect_cut(root: &Path, context: &str) -> Vec<String> {
+    // The CLI-launched controller process owns the drain; just poll its receipt.
+    await_queue_maintenance_effect_cut(root, context, || {
+        std::thread::sleep(std::time::Duration::from_millis(10))
+    })
+}
+
+/// `#authorityhandoffcut`: deterministic form of the interleaving that failed
+/// `authority_drift_fences_every_internal_queue_maintenance_effect_family` under
+/// load. The command's authority observation sits in the handoff outbox when
+/// the cut is requested, and folds into the ledger only after that request. A
+/// cut that does not wait for the empty receipt omits the fact here and then
+/// differs from every later digest, which the drift test reported as a stale
+/// worker mutating controller/ledger state.
+#[test]
+fn queue_maintenance_effect_cut_waits_for_the_authority_handoff_receipt() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(&doc, "---\nagent_doc_format: template\n---\n").unwrap();
+    init_git_repo(tmp.path(), &doc);
+    let root = tmp.path().canonicalize().unwrap();
+    let document_hash = agent_doc_hash::document_id_for_path(&doc.canonicalize().unwrap());
+    let authority_epoch = 1_u64;
+    let event = agent_doc_state_backbone::StateEvent::new(
+        format!("document-authority-{document_hash}-{authority_epoch}-start_preflight"),
+        agent_doc_state_backbone::StateFact::DocumentAuthorityObserved {
+            document_hash: document_hash.clone(),
+            authority: agent_doc_state_backbone::DocumentAuthority::DiskReplica,
+            authority_epoch,
+            source: "start_preflight".to_string(),
+            reason: "editor_detached".to_string(),
+            content_hash: None,
+            editor_id: None,
+        },
+    );
+    // Create the state ledger the actor folds into.
+    agent_doc_sqlite::state_store::open_state_db(&root).unwrap();
+    agent_doc_sqlite::state_store::enqueue_document_authority_handoff(
+        &root,
+        &agent_doc_sqlite::state_store::DocumentAuthorityHandoff {
+            document_hash,
+            authority_epoch,
+            controller_generation: 0,
+            payload_json: serde_json::to_string(&event).unwrap(),
+        },
+    )
+    .unwrap();
+    assert_eq!(pending_document_authority_handoffs(&root).len(), 1);
+
+    let mut drains = 0;
+    let cut = await_queue_maintenance_effect_cut(&root, "deterministic", || {
+        drains += 1;
+        agent_doc_controller_io::project_controller::drain_state_actor_document_authority_handoffs_for_tests(&root)
+            .unwrap();
+    });
+
+    assert!(
+        drains >= 1,
+        "the cut was taken while the authority observation was still in the handoff outbox"
+    );
+    assert!(
+        cut.iter().any(|row| row.contains(&event.event_id)),
+        "the cut omits the command's own folded authority observation: {cut:?}"
+    );
+    assert_eq!(
+        queue_maintenance_effect_digest(&root),
+        cut,
+        "a pending authority fold landed after the cut"
+    );
+}
+
 fn queue_effect_ops(lines: &str) -> Vec<&str> {
     lines
         .lines()
@@ -1186,7 +1308,9 @@ fn authority_drift_fences_every_internal_queue_maintenance_effect_family() {
             "operator-authored post-admission maintenance",
         );
         assert_ne!(before_doc, edited, "{family}: fixture edit did not apply");
-        let before_state = queue_maintenance_effect_digest(tmp.path());
+        // `#authorityhandoffcut`: preflight's own authority observation may
+        // still be in the controller's handoff outbox; cut after it folds.
+        let before_state = await_cli_queue_maintenance_effect_cut(tmp.path(), family);
         let before_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc).unwrap();
         let before_ops = fs::read_to_string(&ops_path).unwrap_or_default();
         fs::write(&doc, &edited).unwrap();
@@ -1205,8 +1329,11 @@ fn authority_drift_fences_every_internal_queue_maintenance_effect_family() {
             edited,
             "{family}: stale worker rewrote the operator authority"
         );
+        // Fold anything enqueued meanwhile too, so an authority observation
+        // the stale worker made is in the ledger this compares, not hidden in
+        // the outbox.
         assert_eq!(
-            queue_maintenance_effect_digest(tmp.path()),
+            await_cli_queue_maintenance_effect_cut(tmp.path(), family),
             before_state,
             "{family}: stale worker mutated controller/ledger state after authority drift"
         );
@@ -1290,7 +1417,7 @@ fn authority_drift_fences_edited_queue_head_snapshot_adoption() {
 
     let before_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc).unwrap();
     assert_eq!(before_snapshot.as_deref(), Some(snapshot));
-    let before_state = queue_maintenance_effect_digest(tmp.path());
+    let before_state = await_cli_queue_maintenance_effect_cut(tmp.path(), "before drift");
     let before_ops = fs::read_to_string(&ops_path).unwrap_or_default();
     let superseding = fs::read_to_string(&doc)
         .unwrap()
@@ -1313,7 +1440,7 @@ fn authority_drift_fences_edited_queue_head_snapshot_adoption() {
         "stale edited-head adoption advanced the baseline snapshot"
     );
     assert_eq!(
-        queue_maintenance_effect_digest(tmp.path()),
+        await_cli_queue_maintenance_effect_cut(tmp.path(), "after drift"),
         before_state,
         "stale edited-head adoption mutated durable queue/controller state"
     );
@@ -1391,7 +1518,7 @@ fn authority_drift_before_queue_authority_acquisition_skips_recovery_effects() {
         "operator-authored post-admission acquisition",
     );
     assert_ne!(before_doc, edited);
-    let before_state = queue_maintenance_effect_digest(tmp.path());
+    let before_state = await_cli_queue_maintenance_effect_cut(tmp.path(), "before drift");
     let before_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc).unwrap();
     let before_ops = fs::read_to_string(&ops_path).unwrap_or_default();
     fs::write(&doc, &edited).unwrap();
@@ -1407,7 +1534,7 @@ fn authority_drift_before_queue_authority_acquisition_skips_recovery_effects() {
 
     assert_eq!(fs::read_to_string(&doc).unwrap(), edited);
     assert_eq!(
-        queue_maintenance_effect_digest(tmp.path()),
+        await_cli_queue_maintenance_effect_cut(tmp.path(), "after drift"),
         before_state,
         "stale acquisition mutated controller/ledger state"
     );

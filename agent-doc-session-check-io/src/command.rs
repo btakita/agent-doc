@@ -3896,8 +3896,12 @@ fn refuse_transient_queue_lifecycle_debt(
                 .join(", "),
         )));
     }
-    match agent_doc_queue::transient_closeout::closeout_failure_for_success_message(
-        message, &content,
+    // `#stopquiescentrows`: the same durable evidence the Stop hook reads, so
+    // a heartbeat-fresh worker claim, an operator-owned row, and a loop row a
+    // closed schedule window holds back do not refuse here either.
+    let evidence = agent_doc_queue_io::transient_closeout::closeout_evidence(file, &content);
+    match agent_doc_queue::transient_closeout::closeout_failure_for_success_message_with(
+        message, &content, &evidence,
     )? {
         Some(failure) => Ok(SessionCheckStatus::Interrupted(format!(
             "[session-check] INTERRUPTED: {failure}"
@@ -5882,6 +5886,60 @@ mod terminal_convergence_tests {
         )
         .unwrap();
         assert!(matches!(steering, SessionCheckStatus::SteeringPending(_)));
+    }
+
+    /// `#stopquiescentrows`: session-check shares the Stop hook's gate. A
+    /// heartbeat-fresh worker claim and a recorded `🙋📥` row do not refuse a
+    /// successful closeout; the same `🚧` with its claim abandoned does.
+    #[test]
+    fn quiescent_queue_rows_do_not_refuse_a_successful_closeout() {
+        let _claim_clock = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(
+            agent_doc_queue_io::queue_claim::claim_clock_now_secs(),
+        );
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let request = "subagent-operator-request-flagset";
+        let content = format!(
+            "<!-- agent:exchange -->\n[#{request}] subagent operator request\n<!-- /agent:exchange -->\n\
+<!-- agent:todo -->\n- [ ] [#{request}] Answer the blocking subagent question\n<!-- /agent:todo -->\n\
+<!-- agent:queue -->\n- 🚧 do [#held]\n- 🙋📥 set the flag [#{request}]\n<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&file, &content).unwrap();
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&file, "do [#held]", "subagent:held", 3600)
+                .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &file,
+            "do [#held]",
+            "subagent:held",
+            "worker:held",
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+        std::fs::write(&file, &content).unwrap();
+        let quiet = refuse_transient_queue_closeout(
+            &file,
+            SessionCheckStatus::Ok("[session-check] OK".to_string()),
+        )
+        .unwrap();
+        assert!(matches!(quiet, SessionCheckStatus::Ok(_)), "{quiet:?}");
+
+        agent_doc_queue_io::queue_claim::abandon(&file, "do [#held]").unwrap();
+        std::fs::write(&file, &content).unwrap();
+        match refuse_transient_queue_closeout(
+            &file,
+            SessionCheckStatus::Ok("[session-check] OK".to_string()),
+        )
+        .unwrap()
+        {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("🚧 do [#held]"), "{message}");
+                assert!(!message.contains("set the flag"), "{message}");
+            }
+            other => panic!("a 🚧 with no fresh claim must refuse, got {other:?}"),
+        }
     }
 
     #[test]

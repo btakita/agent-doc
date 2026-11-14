@@ -1432,11 +1432,14 @@ fn apply_claude_stop_with_drain_readiness(
     }
     // `#transientcloseout`: session-check already refuses a successful closeout.
     // Grok ends the turn through this Claude-format Stop hook and never reaches
-    // that inspect. A visible `🚧` or `⚠️🚧` row used to be a quiet
-    // `waiting_on_claims` exit (sdk-dev.md, `subagent:rpversionpr` and
-    // `subagent:pr228seventeen`, 2026-11-11). A genuine turn end stays open
-    // until every live transient row leaves that set. Observe-only stops return
-    // above and do not consult this gate.
+    // that inspect. A visible `🚧` or `⚠️🚧` row with no fresh claim behind it
+    // is not a quiet wait (sdk-dev.md, `subagent:rpversionpr` and
+    // `subagent:pr228seventeen`, 2026-11-11). A heartbeat-fresh worker claim
+    // and an operator-owned `🙋` row whose packet and Todo are recorded are
+    // quiescent and end the turn with `state=waiting_on_claims` /
+    // `waiting_on_operator` (`#stopquiescentrows`, agent-doc-bugs.md
+    // 2026-11-13: six refused stops over two running workers). Observe-only
+    // stops return above and do not consult this gate.
     transient_turn_end_continuation(&file)
 }
 
@@ -1462,13 +1465,35 @@ fn transient_turn_end_continuation(file: &Path) -> Result<Option<ClaudeStopConti
             }));
         }
     };
-    let Some(failure) = agent_doc_queue::transient_closeout::normal_closeout_failure(&content)?
+    // `#stopquiescentrows`: an operator-owned row and a heartbeat-fresh
+    // worker claim cannot move however long the turn stays open. They stay
+    // live for the operator's answer or the worker's report; only the rows
+    // that are agent-actionable now hold the turn.
+    let assessment = agent_doc_queue_io::transient_closeout::assess(file, &content)?;
+    if assessment.debts.is_empty() {
+        if let Some(state) = assessment.quiescent_state() {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "claude_stop_transient_closeout_quiescent {} action=allow_final_answer state={state} (#stopquiescentrows)",
+                    assessment.quiescent_log_fields(),
+                ),
+            );
+        }
+        return Ok(None);
+    }
+    let Some(failure) =
+        agent_doc_queue::transient_closeout::normal_closeout_failure_for(&assessment)
     else {
         return Ok(None);
     };
     agent_doc_ops_log_io::log_op(
         file,
-        "claude_stop_transient_closeout action=block_final_answer (#transientcloseout)",
+        &format!(
+            "claude_stop_transient_closeout debts={} {} action=block_final_answer (#transientcloseout)",
+            assessment.debts.len(),
+            assessment.quiescent_log_fields(),
+        ),
     );
     Ok(Some(ClaudeStopContinuation {
         reason: format!(
@@ -9906,6 +9931,117 @@ agent: grok
             observed,
             serde_json::json!({}),
             "an observe-only session end does not consult transient rows: {observed}"
+        );
+    }
+
+    /// `#stopquiescentrows` (agent-doc-bugs.md, 2026-11-13): the Stop hook
+    /// refused six consecutive stops over two running workers with fresh
+    /// heartbeats, and sdk-dev.md looped over operator-gated `🙋📥` rows. A
+    /// heartbeat-fresh `🚧` and a recorded `🙋📥` end the turn and log
+    /// `state=waiting_on_claims`; the rows stay live. Once the claim is gone
+    /// the same `🚧` refuses again.
+    #[test]
+    fn claude_stop_ends_the_turn_over_fresh_workers_and_operator_rows() {
+        let _claim_clock = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(
+            agent_doc_queue_io::queue_claim::claim_clock_now_secs(),
+        );
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        let request = "subagent-operator-request-flagset";
+        let content = format!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+## Exchange\n\n\
+<!-- agent:exchange patch=append -->\n\
+[#{request}] subagent operator request\n\
+- *kind:* question\n\
+<!-- /agent:exchange -->\n\n\
+## Todo\n\n\
+<!-- agent:todo -->\n\
+- [ ] [#{request}] Answer the blocking subagent question\n\
+<!-- /agent:todo -->\n\n\
+## Queue\n\n\
+<!-- agent:queue -->\n\
+- 🚧 do [#held]\n\
+- 🙋📥 set the flag [#{request}]\n\
+- ⏳ verify the release\n\
+<!-- /agent:queue -->\n\n\
+## Backlog\n\n\
+<!-- agent:backlog -->\n\
+- [ ] [#held] Pin the released gitlinks after the other sessions settle.\n\
+<!-- /agent:backlog -->\n"
+        );
+        fs::write(&doc, &content).unwrap();
+        init_git_repo(dir.path(), &doc);
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&doc, "do [#held]", "subagent:held", 3600)
+                .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "do [#held]",
+            "subagent:held",
+            "worker:held",
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+        // The claim projection may have repainted the row; keep the fixture.
+        fs::write(&doc, &content).unwrap();
+        track_doc(&dir, &doc, "");
+        complete_run(&doc);
+        let input = ClaudeStopInput {
+            session_id: "codex-session".to_string(),
+            cwd: dir.path().display().to_string(),
+            stop_hook_active: false,
+            transcript_path: None,
+            reason: None,
+            subagent_type: None,
+        };
+        let no_supervisor =
+            |_: &Path| agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor;
+
+        let quiet = apply_claude_stop_with_drain_readiness(&input, no_supervisor).unwrap();
+        assert!(
+            quiet.is_none(),
+            "a fresh worker and a recorded operator row must not hold the turn: {:?}",
+            quiet.map(|continuation| continuation.reason)
+        );
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops.contains(
+                "claude_stop_transient_closeout_quiescent waiting_on_claims=1 operator_owned=1"
+            ),
+            "{ops}"
+        );
+        assert!(ops.contains("state=waiting_on_claims"), "{ops}");
+        let after = fs::read_to_string(&doc).unwrap();
+        assert!(after.contains("- 🚧 do [#held]"), "{after}");
+        assert!(
+            after.contains(&format!("- 🙋📥 set the flag [#{request}]")),
+            "the operator row stays live: {after}"
+        );
+
+        // The worker claim is gone: the same visible `🚧` is a stale worker.
+        agent_doc_queue_io::queue_claim::abandon(&doc, "do [#held]").unwrap();
+        fs::write(&doc, &content).unwrap();
+        complete_run(&doc);
+        let refused = apply_claude_stop_with_drain_readiness(&input, no_supervisor)
+            .unwrap()
+            .expect("a 🚧 with no fresh claim still refuses");
+        assert!(
+            refused.reason.contains("normal closeout refused"),
+            "{}",
+            refused.reason
+        );
+        assert!(
+            refused.reason.contains("🚧 do [#held]"),
+            "{}",
+            refused.reason
+        );
+        assert!(
+            !refused.reason.contains("set the flag"),
+            "{}",
+            refused.reason
         );
     }
 

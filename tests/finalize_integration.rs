@@ -6148,8 +6148,9 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
             "<!-- patch:exchange -->\n### Re: setup — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
         )
         .assert()
-        .failure()
-        .stderr(predicates::str::contains("#transientcloseout"));
+        // `#stopquiescentrows`: the setup worker's claim is bound and its
+        // heartbeat fresh, so its `🚧` is a quiet wait, not closeout debt.
+        .success();
     assert!(!head_blob(tmp.path()).contains(question));
 
     // The operator adds the question after the commit; the coordinator claims
@@ -6286,8 +6287,8 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
             "<!-- patch:exchange -->\n### Re: page status enum — gpt-5\n\n> **Queue prompt:** {question}\n\n{worker_response}\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n"
         ))
         .assert()
-        .failure()
-        .stderr(predicates::str::contains("#transientcloseout"));
+        // The only live transient row left is the fresh setup worker.
+        .success();
 
     let head = head_blob(tmp.path());
     assert!(head.contains("`archived`, `historical`"), "{head}");

@@ -18,7 +18,7 @@ const QUEUE_EDIT_OWNER_TTL_SECS_ENV: &str = "AGENT_DOC_QUEUE_EDIT_OWNER_TTL_SECS
 pub const BACKGROUND_QUEUE_EDIT_OWNER_PREFIX: &str = "background-queue-maintenance:";
 const DIRECT_QUEUE_EDIT_OWNER_PREFIX: &str = "direct-";
 const FOREGROUND_BACKGROUND_WAIT: Duration = Duration::from_secs(4);
-const RESPONSE_BACKGROUND_WAIT: Duration = Duration::from_secs(30);
+pub(crate) const RESPONSE_BACKGROUND_WAIT: Duration = Duration::from_secs(30);
 const FOREGROUND_BACKGROUND_POLL: Duration = Duration::from_millis(10);
 /// The longest a foreground acquirer waits on a held apply flock that names no
 /// lease holder: an owner's clear-then-unlock (whose own clear retries for up
@@ -409,7 +409,7 @@ impl QueueEditGuard {
     /// `after_contended_observation` sees the lease read after each contended
     /// attempt, before the wait-or-fail decision. Tests use it to hold the
     /// flock until the acquirer has provably observed a given state.
-    fn acquire_with_background_wait_observed(
+    pub(crate) fn acquire_with_background_wait_observed(
         file: &Path,
         wait: Duration,
         handoff_grace: Duration,
@@ -540,8 +540,17 @@ impl QueueEditGuard {
 
     /// The durable maintenance claim consumed this guard's lease row together
     /// with its request; Drop must not try to clear it again.
-    pub(crate) fn forget_consumed_holder(&mut self) {
+    ///
+    /// `#answerheadmaintrace`: release the apply flock now as well. The guard
+    /// owns nothing more, and a held flock with no lease is the handoff window
+    /// every foreground acquirer waits through for at most
+    /// `QUEUE_APPLY_HANDOFF_GRACE`. Holding it until the guard drops kept the
+    /// detached worker's teardown (`retains_work`'s `state.db` open, with its
+    /// 30 s busy timeout, and the heartbeat join) inside that window, so under
+    /// `state.db` contention an admitted response failed after the grace.
+    pub(crate) fn release_consumed_apply(&mut self) {
         self.holder.clear();
+        drop(self.apply_lock.take());
     }
 
     fn release_with_handoff_hook(&mut self, after_clear_before_unlock: impl FnOnce()) {
@@ -981,6 +990,71 @@ mod tests {
                 "the handoff window is polled before the bound fails it"
             );
         });
+        assert!(read_queue_edit_owner_lease(&file_text).is_none());
+    }
+
+    /// `#answerheadmaintrace`: the handoff grace covers a flock that names no
+    /// holder, never a direct owner. A direct mutation first observed between
+    /// its flock and its token publish (inside the grace) still fails the
+    /// foreground transaction closed as soon as its token appears.
+    #[test]
+    fn direct_owner_observed_before_its_token_publish_still_fails_closed() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        let file_text = file.to_string_lossy().to_string();
+        let entered = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let publish = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let release = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let worker_file = file.clone();
+        let (worker_entered, worker_publish, worker_release) = (
+            std::sync::Arc::clone(&entered),
+            std::sync::Arc::clone(&publish),
+            std::sync::Arc::clone(&release),
+        );
+        let worker = std::thread::spawn(move || {
+            let guard = QueueEditGuard::try_acquire_with_hook(&worker_file, || {
+                worker_entered.wait();
+                worker_publish.wait();
+            })
+            .unwrap()
+            .expect("direct worker acquired the apply lock");
+            worker_release.wait();
+            drop(guard);
+        });
+
+        entered.wait();
+        let mut observations = Vec::new();
+        let refused = QueueEditGuard::acquire_with_background_wait_observed(
+            &file,
+            RESPONSE_BACKGROUND_WAIT,
+            QUEUE_APPLY_HANDOFF_GRACE,
+            |lease| {
+                observations.push(lease.cloned());
+                if lease.is_none() {
+                    publish.wait();
+                    while read_queue_edit_owner_lease(&file_text).is_none() {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                }
+            },
+        )
+        .unwrap_err();
+        assert!(refused.to_string().contains("queue mutation deferred"));
+        assert_eq!(observations.len(), 2, "{observations:?}");
+        assert_eq!(
+            observations[0], None,
+            "first observed inside the handoff window"
+        );
+        assert!(
+            observations[1]
+                .as_ref()
+                .is_some_and(|lease| lease.holder.starts_with(DIRECT_QUEUE_EDIT_OWNER_PREFIX)),
+            "{observations:?}"
+        );
+        release.wait();
+        worker.join().unwrap();
         assert!(read_queue_edit_owner_lease(&file_text).is_none());
     }
 

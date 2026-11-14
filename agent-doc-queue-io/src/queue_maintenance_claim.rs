@@ -321,7 +321,7 @@ impl QueueMaintenanceClaim {
             }
         })?;
         if consumed {
-            guard.forget_consumed_holder();
+            guard.release_consumed_apply();
         }
         Ok(consumed)
     }
@@ -725,6 +725,56 @@ mod tests {
         ));
         assert!(successor.complete(&mut guard, &request).unwrap());
         assert!(!successor.retains_work().unwrap());
+    }
+
+    /// `#answerheadmaintrace` (tmux-ci `answer_head`, 9a0eb19): completion
+    /// consumes the coordination lease in the claim transaction. A worker that
+    /// still held the apply flock afterwards left "flock held, no lease" for as
+    /// long as its remaining teardown took: `retains_work` opens `state.db`
+    /// (30 s busy timeout plus open-time maintenance) and the heartbeat join,
+    /// both before the guard drops. Foreground acquirers bound that window by
+    /// `QUEUE_APPLY_HANDOFF_GRACE`, so under `state.db` contention an admitted
+    /// `write --commit` failed with `queue mutation deferred` while the 30 s
+    /// response wait would still have admitted it. The consumed guard must
+    /// release the flock at completion, so no teardown runs inside the window.
+    /// The worker's guard stays alive across the whole response acquisition
+    /// (an arbitrarily slow teardown), and the handoff grace is shortened to
+    /// make outliving it deterministic.
+    #[test]
+    fn a_completed_claim_releases_the_apply_flock_before_worker_teardown() {
+        let fixture = Fixture::new("completion-handoff");
+        let request = publish_queue_maintenance_request(&fixture.file, "hash-a", true).unwrap();
+        let mut guard = fixture.guard();
+        let claim = QueueMaintenanceClaim::reconnect(&fixture.file).unwrap();
+        claim.claim_request(&request).unwrap();
+        assert!(claim.complete(&mut guard, &request).unwrap());
+        assert!(fixture.holder().is_none(), "completion consumed the lease");
+
+        let mut observations = Vec::new();
+        let response = QueueEditGuard::acquire_with_background_wait_observed(
+            &fixture.file,
+            crate::queue_edit_owner::RESPONSE_BACKGROUND_WAIT,
+            std::time::Duration::from_millis(30),
+            |lease| observations.push(lease.cloned()),
+        )
+        .expect("a response after claim completion must not wait on the worker's teardown");
+        assert!(
+            observations.is_empty(),
+            "the completed worker still held the apply flock with no lease: {observations:?}"
+        );
+        assert!(
+            fixture
+                .holder()
+                .is_some_and(|holder| !holder.starts_with(BACKGROUND_QUEUE_EDIT_OWNER_PREFIX)),
+            "the response owns the apply capability"
+        );
+        drop(response);
+
+        // The worker's teardown runs after the response, and it neither
+        // retains work nor disturbs the released capability.
+        assert!(!claim.retains_work().unwrap());
+        drop(guard);
+        assert!(fixture.holder().is_none());
     }
 
     #[test]

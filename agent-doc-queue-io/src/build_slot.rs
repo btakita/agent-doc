@@ -8,6 +8,11 @@
 //! SIGKILL included; on Linux the child also gets SIGTERM if this process dies
 //! first, so a killed gate does not leave an unslotted build running.
 //!
+//! An in-process release is an explicit `LOCK_UN` (`LockedFile`), never just
+//! a close: a close releases the lock only when no other descriptor shares the
+//! open file description, and a `fork` on any thread shares every descriptor,
+//! `O_CLOEXEC` ones included, until that child execs (`#buildslottestflake`).
+//!
 //! Waiting is FIFO through a gate lock: a blocked `flock` on `gate.lock` queues
 //! waiters in the kernel, and only the gate holder polls the slots. `flock` has
 //! no "any one of N" wait, so that single waiter's bounded poll is the narrow
@@ -93,21 +98,40 @@ pub struct SlotGate {
     dir: PathBuf,
 }
 
+/// A held `flock` that dropping releases with an explicit `LOCK_UN` before
+/// the descriptor closes.
+///
+/// Closing a descriptor drops its `flock` only when it is the last descriptor
+/// on the open file description. A `fork` anywhere in the process (another
+/// thread's `Command::spawn`) copies every descriptor into the child until it
+/// execs, so a close alone can leave the lock held by that child for the
+/// fork-to-exec window. `LOCK_UN` through any descriptor releases the
+/// description's lock at once, whoever else still holds a copy.
+#[derive(Debug)]
+struct LockedFile(File);
+
+impl Drop for LockedFile {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
 /// One held slot; dropping it releases the lock.
 #[derive(Debug)]
 pub struct HeldSlot {
     pub index: usize,
     pub of: usize,
-    file: File,
+    file: LockedFile,
 }
 
 impl HeldSlot {
     /// Record who holds the slot, for the wait message other commands print.
     pub fn record_holder(&mut self, holder: &str) {
-        let _ = self.file.set_len(0);
-        let _ = self.file.rewind();
-        let _ = self.file.write_all(holder.as_bytes());
-        let _ = self.file.flush();
+        let file = &mut self.file.0;
+        let _ = file.set_len(0);
+        let _ = file.rewind();
+        let _ = file.write_all(holder.as_bytes());
+        let _ = file.flush();
     }
 }
 
@@ -152,7 +176,7 @@ impl SlotGate {
                     return Ok(Some(HeldSlot {
                         index,
                         of: slots.get(),
-                        file,
+                        file: LockedFile(file),
                     }));
                 }
                 Err(TryLockError::WouldBlock) => {}
@@ -179,14 +203,14 @@ impl SlotGate {
 
     /// The FIFO gate in front of the slots. `Ok(None)` from the non-blocking
     /// attempt means another command is already queued ahead.
-    fn gate(&self, block: bool) -> Result<Option<File>> {
+    fn gate(&self, block: bool) -> Result<Option<LockedFile>> {
         let file = open_lock(&self.dir.join("gate.lock"))?;
         if block {
             file.lock().context("lock build slot gate")?;
-            return Ok(Some(file));
+            return Ok(Some(LockedFile(file)));
         }
         match file.try_lock() {
-            Ok(()) => Ok(Some(file)),
+            Ok(()) => Ok(Some(LockedFile(file))),
             Err(TryLockError::WouldBlock) => Ok(None),
             Err(TryLockError::Error(err)) => Err(err).context("lock build slot gate"),
         }
@@ -447,6 +471,129 @@ mod tests {
         let code = run_with_parent(options, Some("1/1".into())).unwrap();
         assert_eq!(code, 7);
         drop(busy);
+    }
+
+    /// A forked child parked between `fork` and `exec`: it holds a copy of
+    /// every descriptor this process had open at the fork, `O_CLOEXEC` ones
+    /// included, exactly as a sibling test thread's `Command::spawn` does
+    /// until its child execs. Dropping it releases and reaps the child.
+    #[cfg(target_os = "linux")]
+    struct ForkedDescriptorHolder {
+        pid: libc::pid_t,
+        release: libc::c_int,
+    }
+
+    #[cfg(target_os = "linux")]
+    impl ForkedDescriptorHolder {
+        fn park() -> Self {
+            let mut fds = [0; 2];
+            // O_CLOEXEC keeps the pipe out of sibling threads' exec'd
+            // children. Another test's parked child still inherits the write
+            // end, so the release is an explicit byte, never EOF.
+            assert_eq!(unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) }, 0);
+            let pid = unsafe { libc::fork() };
+            assert!(pid >= 0, "fork failed");
+            if pid == 0 {
+                // Child: only async-signal-safe calls between fork and _exit.
+                unsafe {
+                    libc::close(fds[1]);
+                    let mut byte = 0u8;
+                    while libc::read(fds[0], (&mut byte as *mut u8).cast(), 1) < 0 {}
+                    libc::_exit(0);
+                }
+            }
+            unsafe { libc::close(fds[0]) };
+            Self {
+                pid,
+                release: fds[1],
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    impl Drop for ForkedDescriptorHolder {
+        fn drop(&mut self) {
+            unsafe {
+                let byte = 1u8;
+                libc::write(self.release, (&byte as *const u8).cast(), 1);
+                libc::close(self.release);
+                let mut status = 0;
+                libc::waitpid(self.pid, &mut status, 0);
+            }
+        }
+    }
+
+    /// `#buildslottestflake`: closing a descriptor releases its `flock` only
+    /// when no other descriptor shares the open file description, and a fork
+    /// on any other thread shares it until that child execs. The slot must be
+    /// free the moment its holder drops, whatever another thread forked.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_dropped_slot_is_free_while_a_forked_child_still_holds_its_descriptor() {
+        let dir = tempfile::tempdir().unwrap();
+        let gate = SlotGate::open(dir.path()).unwrap();
+        let held = gate.try_acquire(n(1)).unwrap().unwrap();
+        let holder = ForkedDescriptorHolder::park();
+        drop(held);
+        let retaken = gate.try_acquire(n(1)).unwrap().map(|slot| slot.index);
+        drop(holder);
+        assert_eq!(retaken, Some(1), "slot stayed locked by the forked copy");
+    }
+
+    /// The same interleaving for the FIFO gate: a forked copy of the gate
+    /// descriptor must not make the next command report a phantom queue.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_dropped_gate_is_free_while_a_forked_child_still_holds_its_descriptor() {
+        let dir = tempfile::tempdir().unwrap();
+        let gate = SlotGate::open(dir.path()).unwrap();
+        let entered = gate.gate(false).unwrap().unwrap();
+        let holder = ForkedDescriptorHolder::park();
+        drop(entered);
+        let reentered = gate.gate(false).unwrap().is_some();
+        drop(holder);
+        assert!(reentered, "gate stayed locked by the forked copy");
+    }
+
+    /// `run` itself under the interleaving: a sibling forks while the command
+    /// runs in its slot, and the slot is free as soon as `run` returns.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn run_releases_its_slot_while_a_child_forked_during_the_command_lives() {
+        let dir = tempfile::tempdir().unwrap();
+        let slots = dir.path().join("slots");
+        let started = dir.path().join("started");
+        let proceed = dir.path().join("proceed");
+        let script = format!(
+            ": > '{}'; while [ ! -e '{}' ]; do sleep 0.01; done",
+            started.display(),
+            proceed.display()
+        );
+        let options = BuildSlotOptions {
+            slots: Some(n(1)),
+            dir: Some(slots.clone()),
+            nice: 0,
+            command: vec!["sh".into(), "-c".into(), script.into()],
+        };
+        let runner = std::thread::spawn(move || run_with_parent(options, None));
+        while !started.exists() {
+            assert!(
+                !runner.is_finished(),
+                "run returned before its command started"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        // The slot is held now; fork while it is, as a sibling test would.
+        let holder = ForkedDescriptorHolder::park();
+        std::fs::write(&proceed, "").unwrap();
+        assert_eq!(runner.join().unwrap().unwrap(), 0);
+        let retaken = SlotGate::open(&slots)
+            .unwrap()
+            .try_acquire(n(1))
+            .unwrap()
+            .map(|slot| slot.index);
+        drop(holder);
+        assert_eq!(retaken, Some(1), "run left its slot to the forked copy");
     }
 
     #[test]

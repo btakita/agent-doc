@@ -2016,6 +2016,53 @@ impl QueueClaimLedger {
         Ok(claim.clone())
     }
 
+    /// `#inlinegatefalsereject`: reopen the exact attempt a goal-loop gate
+    /// requeued, so a later hand-back from that same generation and worker
+    /// that now satisfies the gate can be reported.
+    ///
+    /// The gate's requeue marks the attempt `Lost` and abandoned. Without
+    /// this, every later report of that generation is refused as terminal,
+    /// and the row stays on `⚠️🚧` until a new generation repeats work that
+    /// already finished. Only an abandoned `Lost` attempt of exactly
+    /// `generation` and `worker_id` reopens: a reclaim moved the generation,
+    /// and another worker's attempt is not this one. The reopened attempt is
+    /// `Running` with `completion_recovered_after_loss` set, so its report
+    /// still shows the loss boundary (`⚠️☑️`). Returns `None` when nothing
+    /// matched.
+    pub fn reopen_gate_requeued_attempt(
+        &mut self,
+        item: &str,
+        generation: u64,
+        worker_id: &str,
+        now_secs: u64,
+        ttl_secs: u64,
+    ) -> Option<QueueClaim> {
+        let index = self.transition_index(item)?;
+        let claim = &mut self.claims[index];
+        let worker_matches = claim
+            .worker
+            .as_ref()
+            .is_some_and(|worker| worker.worker_id == worker_id);
+        let abandoned = claim
+            .frozen
+            .as_ref()
+            .is_some_and(QueueWorkerFreeze::is_abandon);
+        if claim.generation != generation
+            || claim.state != QueueClaimState::Lost
+            || !worker_matches
+            || !abandoned
+        {
+            return None;
+        }
+        claim.state = QueueClaimState::Running;
+        claim.lost_from = None;
+        claim.frozen = None;
+        claim.lost_continue = None;
+        claim.expires_at_secs = now_secs.saturating_add(ttl_secs);
+        claim.completion_recovered_after_loss = true;
+        Some(claim.clone())
+    }
+
     /// Compare-and-swap one exact worker attempt into `Reported`. The worker
     /// fence closes the same-generation replacement/repair gap left by a
     /// generation-only transition.

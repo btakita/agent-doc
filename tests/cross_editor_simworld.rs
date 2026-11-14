@@ -2010,14 +2010,27 @@ fn two_ide_lane_claims_start_panes_in_their_own_lanes_end_to_end() {
         String::from_utf8_lossy(&refused.stderr).contains("project session is 'proj'"),
         "{refused:?}"
     );
-    let panes_before_bind = all_panes();
+    // The claim binds the existing lane pane instead of provisioning one.
+    // Asserted from what the claim did: the four documents started above are
+    // still running their own startup (supervisor registration, baseline
+    // commits, harness launch) while this claim runs, so a server-wide pane
+    // set taken around it races with their pane work and is not this claim's
+    // evidence. A provisioning claim always announces it.
     let output = claim(&bound_doc, &["--pane", &spare], Some(IDEA));
     assert!(output.status.success(), "{output:?}");
-    assert_eq!(
-        all_panes(),
-        panes_before_bind,
-        "the claim bound the existing lane pane instead of provisioning"
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(&format!(
+            "Claimed {} for pane {spare} ",
+            bound_doc.display()
+        )),
+        "the claim bound the existing lane pane: {stderr}"
     );
+    assert!(
+        !stderr.contains("provisioning a new pane") && !stderr.contains("[route] Started "),
+        "the claim bound the existing lane pane instead of provisioning: {stderr}"
+    );
+    assert_eq!(session_of(&spare), IDEA_LANE);
 
     // Shared mode: a client id is ignored.
     configure("shared");

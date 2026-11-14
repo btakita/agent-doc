@@ -3,6 +3,9 @@
 //! ## Spec
 //! - `check_prereqs()`: resolves the exact tmux client, reports its version, and
 //!   verifies a live-server protocol handshake; also checks `claude` in the caller PATH.
+//!   When `codex` is on PATH, also checks that the Codex code-mode host
+//!   (`codex-code-mode-host`) sits beside it or on PATH (GH #411, see
+//!   `crate::codex_code_mode_host`); a missing host is `BROKEN` with a reinstall hint.
 //!   Never fails — warnings only. A handshake that fails only because no tmux
 //!   server is running yet ("no server running" / "error connecting to ... (No
 //!   such file or directory)") is reported `ok`: a fresh machine has no server
@@ -113,6 +116,11 @@ pub fn check_prereqs() {
         eprintln!(
             "[install]   hint: Install Claude Code CLI or verify it is available in the tmux pane shell; this check does not inspect interactive-shell PATH setup"
         );
+    }
+
+    // GH #411: a bare `codex` without `codex-code-mode-host` cannot run tools.
+    for line in crate::codex_code_mode_host::probe().prereq_lines() {
+        eprintln!("{line}");
     }
 }
 

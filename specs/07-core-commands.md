@@ -187,6 +187,15 @@ parse-checked with `--help`) and pins the help block against the README.
   normal state of a fresh machine and agent-doc starts a server on first use.
   Only a handshake failure against a server that exists reports `BROKEN` with
   the `tmux_bin` hint.
+- When `codex` is on PATH and its `codex features list` has a `code_mode_host`
+  row, also checks for the Codex code-mode host (`codex-code-mode-host`, the
+  executable Codex runs every `exec` tool cell in). It is looked for beside the
+  native `codex` (the canonicalized PATH entry, or the npm package's
+  `vendor/<triple>/bin` when that entry is the `codex.js` launcher), then on
+  PATH. Found nowhere reports `codex ... BROKEN` with a reinstall hint: a bare
+  `codex` binary outside a complete Codex package cannot run tools (GH #411).
+  A launcher whose native binary cannot be located reports "not verified", never
+  `BROKEN`. agent-doc does not spawn the host itself; this is a diagnosis only.
 - Installs editor plugins either for the requested editor or for auto-detected editors.
 - Local source installs inside the `agent-loop` workspace must resolve sibling crates without ad hoc Cargo patch flags.
 

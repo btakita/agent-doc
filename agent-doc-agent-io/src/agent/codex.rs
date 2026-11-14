@@ -75,19 +75,21 @@ use agent_doc_turn_executor::codex_launch::{
     classify_child_network_probe_failure, classify_child_required_ssh_probe_failure,
     classify_child_writable_root_probe_failure,
     codex_child_network_and_writable_roots_probe_prompt, codex_child_network_probe_prompt,
-    codex_child_writable_roots_probe_prompt, codex_exec_args_for_probe,
-    codex_network_probe_shell_command, codex_network_probe_transport, codex_resume_restart_args,
-    codex_text_file_busy_launch_retry_delay, codex_transport_403_429_diagnostic, default_base_args,
-    filter_codex_stderr_noise, format_required_ssh_failure, looks_like_codex_transport_403_429,
-    looks_like_local_browser_cdp_permission_denied, looks_like_opencode_usage_output,
-    looks_like_ssh_alias_config_failure, looks_like_ssh_auth_failure, looks_like_ssh_dns_failure,
-    looks_like_ssh_network_failure, managed_network_child_proof_cache_key,
-    normalized_writable_root_strings, opencode_child_network_probe_prompt,
-    opencode_child_required_ssh_probe_prompt, opencode_run_args_for_probe, proof_status_label,
-    resolve_codex_network_access, resume_capability_drift_notice,
-    transcript_has_required_ssh_failure, transcript_proves_required_ssh_success,
-    validate_codex_child_network_probe_output, validate_codex_child_writable_root_probe_output,
-    validate_opencode_child_probe_marker_output, writable_root_contract_id,
+    codex_child_writable_roots_probe_prompt, codex_code_mode_host_unavailable_diagnostic,
+    codex_exec_args_for_probe, codex_network_probe_shell_command, codex_network_probe_transport,
+    codex_resume_restart_args, codex_text_file_busy_launch_retry_delay,
+    codex_transport_403_429_diagnostic, default_base_args, filter_codex_stderr_noise,
+    format_required_ssh_failure, looks_like_codex_code_mode_host_unavailable,
+    looks_like_codex_transport_403_429, looks_like_local_browser_cdp_permission_denied,
+    looks_like_opencode_usage_output, looks_like_ssh_alias_config_failure,
+    looks_like_ssh_auth_failure, looks_like_ssh_dns_failure, looks_like_ssh_network_failure,
+    managed_network_child_proof_cache_key, normalized_writable_root_strings,
+    opencode_child_network_probe_prompt, opencode_child_required_ssh_probe_prompt,
+    opencode_run_args_for_probe, proof_status_label, resolve_codex_network_access,
+    resume_capability_drift_notice, transcript_has_required_ssh_failure,
+    transcript_proves_required_ssh_success, validate_codex_child_network_probe_output,
+    validate_codex_child_writable_root_probe_output, validate_opencode_child_probe_marker_output,
+    writable_root_contract_id,
 };
 
 #[derive(Clone)]
@@ -1095,6 +1097,17 @@ impl Codex {
             let stderr = filter_codex_stderr_noise(&String::from_utf8_lossy(&output.stderr));
             if looks_like_codex_transport_403_429(&stderr) {
                 anyhow::bail!("{}", codex_transport_403_429_diagnostic(&stderr));
+            }
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if looks_like_codex_code_mode_host_unavailable(&stderr)
+                || looks_like_codex_code_mode_host_unavailable(&stdout)
+            {
+                let detail = if stderr.trim().is_empty() {
+                    stdout.as_ref()
+                } else {
+                    stderr.as_str()
+                };
+                anyhow::bail!("{}", codex_code_mode_host_unavailable_diagnostic(detail));
             }
             anyhow::bail!("codex command failed: {}", stderr.trim());
         }

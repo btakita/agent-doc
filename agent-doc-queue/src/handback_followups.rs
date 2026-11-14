@@ -19,6 +19,14 @@
 //! never do. An **Open items** entry says nothing about which it is, so it
 //! stays in the cell and the report line asks the coordinator to triage it.
 //!
+//! `#humanfollowupowner`: a row an agent cannot close must not read as agent
+//! work. Each action item is classified by owner ([`crate::followup_owner`]):
+//! the worker's `agent:` / `operator:` / `human (<who>):` label, else a
+//! conservative vocabulary of actions only a person can take. A human-owned
+//! row carries `[operator-verify]`, so no drain scope dispatches it, preflight
+//! projects `⏳` onto it, and the Stop hook's `#transientcloseout` gate waits
+//! on the operator instead of refusing every turn end over it.
+//!
 //! `#handbackrefusedcommandexact`: when that placement cannot be proven, the
 //! report line prints one `queue follow-up` command on its own line. `--after`
 //! is the originating head and each `--item` is a follow-up row that was not
@@ -33,6 +41,9 @@ pub struct HandbackFollowups {
     pub queue_id: Option<String>,
     /// Row texts inserted after the originating head, in order.
     pub inserted: Vec<String>,
+    /// How many of `inserted` are human-owned and wait on the operator
+    /// (`[operator-verify]`, `#humanfollowupowner`).
+    pub operator_owned: usize,
     /// Action items whose row the queue already holds (live or struck).
     pub already_present: usize,
     /// Open items held for coordinator triage, not queued.
@@ -149,7 +160,12 @@ pub fn plan_handback_followups(
             withheld += 1;
             continue;
         }
-        queueable.push(action_item_followup_text(&origin_row, &item));
+        // `#humanfollowupowner`: a human-owned item's row waits on the
+        // operator instead of reading as dispatchable agent work.
+        queueable.push(crate::followup_owner::owned_followup_row(
+            action_item_followup_text(&origin_row, &item),
+            &item,
+        ));
     }
     let withheld_reason = (withheld > 0).then(|| {
         format!(
@@ -196,6 +212,10 @@ pub fn plan_handback_followups(
     ) {
         Ok(plan) => {
             outcome.queue_id = Some(plan.queue_id);
+            outcome.operator_owned = fresh
+                .iter()
+                .filter(|row| crate::followup_owner::carries_operator_owned_tag(row))
+                .count();
             outcome.inserted = fresh;
             (plan.content, outcome)
         }
@@ -246,7 +266,14 @@ fn followup_rows_match(line: &str, row: &str) -> bool {
 }
 
 fn followup_hold_key(line: &str) -> String {
-    let collapsed = line.split_whitespace().collect::<Vec<_>>().join(" ");
+    // `#humanfollowupowner`: the owner tag is not part of the row's identity.
+    // A row written before the tag existed, or one the reclassification has
+    // since tagged, still holds the same action item.
+    let collapsed = line
+        .split_whitespace()
+        .filter(|token| !token.eq_ignore_ascii_case(crate::followup_owner::OPERATOR_OWNED_TAG))
+        .collect::<Vec<_>>()
+        .join(" ");
     normalize_quoted_origin(&collapsed.replace("~~", ""))
 }
 
@@ -715,5 +742,65 @@ mod tests {
             quoted,
             "agent-doc queue follow-up 'tasks/my session.md' --id main --after 'do [#alpha]' --item 'follow up on an action item from `alpha`: it'\\''s `done`'"
         );
+    }
+
+    /// `#humanfollowupowner`: an owner-labelled hand-back. The agent bullet
+    /// stays dispatchable work; the human and operator bullets, and an
+    /// unlabelled approval, wait on the operator with `[operator-verify]`.
+    #[test]
+    fn human_owned_action_items_wait_on_the_operator() {
+        let handback = concat!(
+            "**Summary:** opened the PR.\n",
+            "**Action items:**\n",
+            "- agent: merge #240 once hosted CI is green\n",
+            "- human (tmstorm): approve PR #100 at head `38075e7`\n",
+            "- operator: pick stable `0.1.0` or a preview\n",
+            "- A non-author approves PR 9\n",
+            "- Fix the typo in README.md\n",
+        );
+        let content = doc("- do [#decisionidstamp]\n- later work\n");
+        let (updated, outcome) =
+            plan_handback_followups(&content, "do [#decisionidstamp]", handback);
+        let from = "follow up on an action item from `decisionidstamp`:";
+        assert_eq!(
+            outcome.inserted,
+            vec![
+                format!("{from} agent: merge #240 once hosted CI is green"),
+                format!(
+                    "{from} human (tmstorm): approve PR #100 at head `38075e7` [operator-verify]"
+                ),
+                format!("{from} operator: pick stable `0.1.0` or a preview [operator-verify]"),
+                format!("{from} A non-author approves PR 9 [operator-verify]"),
+                format!("{from} Fix the typo in README.md"),
+            ]
+        );
+        assert_eq!(outcome.operator_owned, 3);
+        for row in &outcome.inserted {
+            assert_eq!(
+                crate::queue_continuation::head_awaits_operator_inline(row),
+                row.contains("[operator-verify]"),
+                "{row}"
+            );
+        }
+        let (again, repeat) = plan_handback_followups(&updated, "do [#decisionidstamp]", handback);
+        assert_eq!(again, updated);
+        assert_eq!(repeat.already_present, 5);
+    }
+
+    /// A row written before the owner tag existed, live or struck, still holds
+    /// its action item: a repeated report adds no tagged duplicate.
+    #[test]
+    fn an_untagged_legacy_row_holds_its_human_owned_item() {
+        let handback = "**Summary:** done\n**Action items:**\n- A non-author approves PR 9\n";
+        for legacy in [
+            "- 📥 follow up on an action item from `decisionidstamp`: A non-author approves PR 9 [#q-0123456789ab]\n",
+            "- ~~follow up on an action item from `decisionidstamp`: A non-author approves PR 9~~\n",
+        ] {
+            let content = doc(&format!("- do [#decisionidstamp]\n{legacy}"));
+            let (same, outcome) =
+                plan_handback_followups(&content, "do [#decisionidstamp]", handback);
+            assert_eq!(same, content, "{legacy}");
+            assert_eq!(outcome.already_present, 1, "{legacy}");
+        }
     }
 }

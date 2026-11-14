@@ -7398,6 +7398,40 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         );
     }
 
+    // `#humanfollowupowner`: a `follow up on an action item` row only a person
+    // can close (another reviewer's approval, an org owner's setting, an
+    // operator decision) waits on the operator. Tag every such unstarted row
+    // in every run block, in place and idempotently, so no drain dispatches it
+    // and the Stop hook's `#transientcloseout` gate does not refuse every turn
+    // end over it. Rows written before the owner label existed are classified
+    // by the same conservative vocabulary `queue report-complete` uses.
+    // Each row is classified once: a row whose key the ledger already holds
+    // keeps its text, so an operator who deleted the tag to hand the row back
+    // to an agent is not overruled (the ledger is recorded after the write).
+    if let Some((reclassified, rows)) =
+        agent_doc_queue::followup_owner::reclassify_unseen_human_followup_rows(
+            &current_content,
+            &agent_doc_queue_io::followup_owner_ledger::classified_followup_keys(file),
+        )?
+    {
+        current_content = reclassified;
+        activation.entries_after = queue_entries_for_id(&current_content, &selected_queue_id);
+        mutated = true;
+        eprintln!(
+            "[preflight] queue: {} human-owned follow-up row(s) now wait on the operator ([operator-verify], #humanfollowupowner)",
+            rows.len()
+        );
+        queue_maintenance_log_op(
+            file,
+            effect_fence,
+            &format!(
+                "queue_human_followup_reclassified file={} rows={} (#humanfollowupowner)",
+                file.display(),
+                rows.len()
+            ),
+        )?;
+    }
+
     // Consume start fence if needed
     if activation.consumed_start_fence {
         let new_body = agent_doc_queue::document_queue::render(&activation.entries_after);
@@ -8149,6 +8183,13 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                 &current_content,
                 "queue_halt",
             );
+            // `#humanfollowupowner`: this pass wrote the document, so record
+            // the follow-up rows it classified, as the normal pass does; an
+            // operator who then deletes a tag it added is not overruled.
+            agent_doc_queue_io::followup_owner_ledger::record_classified_followups(
+                file,
+                &current_content,
+            );
             if let Ok(Some(snap)) = agent_doc_snapshot_io::load_document_baseline(file) {
                 let mut new_snap =
                     agent_doc_queue::queue_consume::retire_consumed_completion_feedback(
@@ -8235,6 +8276,19 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                     admitted_authority_hash,
                     effect_fence,
                 )?;
+                // `#humanfollowupowner`: the document was written, so record
+                // the follow-up rows this pass classified. A deferred pass
+                // that writes nothing records nothing, leaving any row it
+                // would have tagged unseen for the next pass that writes.
+                queue_maintenance_effect_step(
+                    file,
+                    effect_fence,
+                    QueueMaintenanceEffectStep::Ledger,
+                )?;
+                agent_doc_queue_io::followup_owner_ledger::record_classified_followups(
+                    file,
+                    &current_content,
+                );
             }
             record_queue_worklist_state(
                 file,
@@ -9389,6 +9443,9 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         file,
         &observed_active_queue_ids,
     );
+    // `#humanfollowupowner`: the follow-up rows whose owner is now decided,
+    // from the document as written.
+    agent_doc_queue_io::followup_owner_ledger::record_classified_followups(file, &current_content);
 
     // Build output
     let queue_prompts: Vec<String> = if activation.active {
@@ -13558,6 +13615,79 @@ mod tests {
                 !agent_doc_queue_io::queue_tombstone::current_tombstones(&doc)
                     .contains("claimrowmigrate"),
                 "pass {pass}: the attempt annotation must not tombstone the row's id"
+            );
+        }
+    }
+
+    /// `#humanfollowupowner` (review of #426): preflight tags a legacy
+    /// human-owned follow-up row once. When the operator deletes the tag to
+    /// hand the row back to an agent, later cycles leave it alone.
+    #[test]
+    fn run_queue_maintenance_does_not_re_tag_a_followup_the_operator_handed_back() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let human = "follow up on an action item from `origin`: A non-author approves PR 9 at head `abc1234`. [#q-0123456789ab]";
+        let snapshot = format!(
+            "---\n\
+agent_doc_session: test\n\
+agent_doc_format: template\n\
+agent_doc_write: crdt\n\
+---\n\n\
+<!-- agent:exchange patch=append -->\n\
+### Re: prior — test\n\nDone.\n\
+<!-- /agent:exchange -->\n\n\
+<!-- agent:queue -->\n\
+- ~~do [#origin]~~\n\
+- 📥 follow up on an action item from `origin`: Fix the typo in README.md. [#q-0123456789ac]\n\
+- 📥 {human}\n\
+<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let human_line = |content: &str| -> String {
+            content
+                .lines()
+                .find(|line| line.contains("A non-author approves PR 9"))
+                .unwrap_or_else(|| panic!("no human row:\n{content}"))
+                .to_string()
+        };
+
+        run_queue_maintenance(&doc, None).unwrap();
+        let tagged = std::fs::read_to_string(&doc).unwrap();
+        let line = human_line(&tagged);
+        assert!(
+            line.contains("[operator-verify] [#q-0123456789ab]"),
+            "{tagged}"
+        );
+
+        // The operator hands it back by deleting the tag.
+        let handed_back = tagged.replace(&line, &line.replace(" [operator-verify]", ""));
+        std::fs::write(&doc, &handed_back).unwrap();
+        for pass in 0..2 {
+            run_queue_maintenance(&doc, None).unwrap();
+            let updated = std::fs::read_to_string(&doc).unwrap();
+            let line = human_line(&updated);
+            // Still unstarted (the agent row ahead of it is the head), so a
+            // repair that ignored the operator would have re-tagged it.
+            assert!(
+                matches!(
+                    agent_doc_document::queue_projection::lifecycle_marker(
+                        line.trim_start_matches("- ").trim_start_matches("### ")
+                    ),
+                    None | Some(
+                        agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+                    )
+                ),
+                "pass {pass}:\n{updated}"
+            );
+            assert!(
+                !line.contains("[operator-verify]"),
+                "pass {pass}: the operator's removal sticks:\n{updated}"
             );
         }
     }
@@ -18715,6 +18845,90 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert!(updated.contains("queue: pause"), "{updated}");
         assert!(updated.contains("<!-- agent:queue -->"), "{updated}");
         assert!(!updated.contains("agent:queue go"), "{updated}");
+    }
+
+    /// `#humanfollowupowner`, re-review of #426: the stop-fence early return
+    /// writes the document, so it records the follow-up rows it classified
+    /// like a normal pass. An operator who then deletes the tag it added is
+    /// not overruled by the next pass.
+    #[test]
+    fn run_queue_maintenance_stop_fence_records_classified_followups() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n",
+            "agent_doc_write: crdt\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n--- stop\n",
+            "- 📥 follow up on an action item from `x`: A non-author approves PR 9 [#q-0123456789ab]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert_eq!(state.queue_halted.as_deref(), Some("stop_fence"));
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("[operator-verify]"), "{updated}");
+        let recorded = agent_doc_queue_io::followup_owner_ledger::classified_followup_keys(&doc);
+        let keys = agent_doc_queue::followup_owner::followup_row_keys(&updated).unwrap();
+        assert_eq!(keys.classified.len(), 1, "{updated}");
+        assert_eq!(recorded, keys.classified, "{updated}");
+
+        // The operator hands the row back; the next pass keeps it untagged.
+        let handed_back = updated.replace(" [operator-verify]", "");
+        std::fs::write(&doc, &handed_back).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &handed_back,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        run_queue_maintenance(&doc, None).unwrap();
+        let after = std::fs::read_to_string(&doc).unwrap();
+        assert!(!after.contains("[operator-verify]"), "{after}");
+    }
+
+    /// `#humanfollowupowner`: a time-gate deferral that writes the document
+    /// (here, to admit a stable id) records the follow-up rows it classified.
+    #[test]
+    fn run_queue_maintenance_time_gate_write_records_classified_followups() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n",
+            "agent_doc_write: crdt\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n--- start at 2099-01-01T00:00\n",
+            "- follow up on an action item from `x`: A non-author approves PR 9\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert!(state.queue_deferred, "{state:?}");
+        assert!(state.maintenance_mutated, "{state:?}");
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("[operator-verify]"), "{updated}");
+        let recorded = agent_doc_queue_io::followup_owner_ledger::classified_followup_keys(&doc);
+        let keys = agent_doc_queue::followup_owner::followup_row_keys(&updated).unwrap();
+        assert_eq!(keys.classified.len(), 1, "{updated}");
+        assert_eq!(recorded, keys.classified, "{updated}");
     }
 
     #[test]

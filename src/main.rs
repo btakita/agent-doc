@@ -5614,6 +5614,23 @@ enum QueueAction {
         #[arg(long = "item", required = true)]
         items: Vec<String>,
     },
+    /// Tag every unstarted human-owned `follow up on an action item` row with
+    /// `[operator-verify]` so it waits on the operator (`⏳`) instead of reading
+    /// as dispatchable agent work (`#humanfollowupowner`). An `agent:` /
+    /// `human (<who>):` / `operator:` label decides the owner; an unlabelled
+    /// row is human-owned when it names an approval, an admin or org-owner
+    /// setting, an operator decision, or a sign-in or credential check.
+    /// Idempotent. Preflight runs the same repair every cycle but classifies
+    /// each row once, so an operator who deletes the tag is not overruled;
+    /// this command tags every unstarted human-owned row regardless.
+    #[command(name = "reclassify-followups")]
+    ReclassifyFollowups {
+        /// Path to the session document
+        file: PathBuf,
+        /// Print the rows that would change without writing the document
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Show a scheduled queue's schedule (`interval=`, `time=`, `loop`,
     /// `#queueschedule`): cadence, whether a pass is running, passes run
     /// against the `loop` limit, the next run, and backoff. The project
@@ -10081,6 +10098,24 @@ fn try_main() -> anyhow::Result<()> {
                     "{}: inserted {count} follow-up head(s) after {:?} in queue id `{id}`",
                     file.display(),
                     after
+                );
+                Ok(())
+            }
+            QueueAction::ReclassifyFollowups { file, dry_run } => {
+                let queue_effects = CliQueueCommandEffects;
+                let rows = agent_doc_queue_io::queue_add::reclassify_followups_with_effects(
+                    &queue_effects,
+                    &file,
+                    dry_run,
+                )?;
+                for row in &rows {
+                    println!("- {}", row.after);
+                }
+                println!(
+                    "{}: {} {} human-owned follow-up row(s) as `[operator-verify]` (#humanfollowupowner)",
+                    file.display(),
+                    if dry_run { "would tag" } else { "tagged" },
+                    rows.len()
                 );
                 Ok(())
             }

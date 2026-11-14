@@ -412,7 +412,15 @@ fn generated_prompt_id_annotation(text: &str) -> Option<(&str, Range<usize>)> {
         return None;
     }
     let id = annotation.strip_suffix(']')?;
-    if !id.starts_with("q-") {
+    // `#humanfollowupowner`: the id is one bracketed token. A row that quotes
+    // an earlier `[#q-…]` (an id-less origin label) and ends in another
+    // bracketed tag (`[operator-verify]`) must not read as one id spanning
+    // both.
+    if !id.starts_with("q-")
+        || !id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+    {
         return None;
     }
     let annotation_start = work.len();

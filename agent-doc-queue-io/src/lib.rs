@@ -11,6 +11,7 @@ pub mod continuation_marker;
 pub mod continuation_request;
 pub mod controller_pause;
 pub mod drain_owner;
+pub mod followup_owner_ledger;
 pub mod goal_loop_handoff;
 pub mod lost_running;
 pub mod one_shot_sync;

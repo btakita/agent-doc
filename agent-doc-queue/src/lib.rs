@@ -36,6 +36,7 @@ pub mod queue_auto_clear;
 pub mod queue_blocked;
 pub mod queue_claim;
 pub use agent_doc_element_queue::QueueReportState;
+pub mod followup_owner;
 pub mod handback_followups;
 pub mod queue_closeout_guard;
 pub mod queue_command;

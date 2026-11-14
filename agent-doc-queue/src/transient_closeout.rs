@@ -30,6 +30,11 @@
 //!   part from this rule.
 //! - **Not due.** A `📥` row that a closed `agent:loop` schedule window holds
 //!   back is not due until the next tick.
+//! - **Awaiting the operator by its text** (`#humanfollowupowner`). A `📥`
+//!   row whose work text carries `[operator-verify]` and no inline operator
+//!   verdict is never drainable, so it is the `⏳` row preflight projects;
+//!   a pending glyph painted before that projection does not hold the turn.
+//!   `queue report-complete` writes human-owned action items this way.
 //!
 //! Rows that are agent-actionable now still refuse: a drainable `📥`, a `☑️`
 //! awaiting integration, a lost row whose continue is owed, `🔄`, and `❔`.
@@ -65,6 +70,9 @@ pub enum QuiescentReason {
     WaitingOnClaim,
     /// A closed schedule window holds the row back until its next tick.
     ScheduleNotDue,
+    /// The row's own text gates it on the operator: `[operator-verify]` with
+    /// no inline verdict (`#humanfollowupowner`).
+    AwaitingOperator,
 }
 
 impl QuiescentReason {
@@ -73,6 +81,7 @@ impl QuiescentReason {
             Self::OperatorOwned => "operator_owned",
             Self::WaitingOnClaim => "waiting_on_claim",
             Self::ScheduleNotDue => "schedule_not_due",
+            Self::AwaitingOperator => "awaiting_operator",
         }
     }
 }
@@ -141,7 +150,9 @@ impl TransientCloseoutAssessment {
     pub fn quiescent_state(&self) -> Option<&'static str> {
         if self.quiescent_count(QuiescentReason::WaitingOnClaim) > 0 {
             Some("waiting_on_claims")
-        } else if self.quiescent_count(QuiescentReason::OperatorOwned) > 0 {
+        } else if self.quiescent_count(QuiescentReason::OperatorOwned) > 0
+            || self.quiescent_count(QuiescentReason::AwaitingOperator) > 0
+        {
             Some("waiting_on_operator")
         } else if self.quiescent_count(QuiescentReason::ScheduleNotDue) > 0 {
             Some("schedule_not_due")
@@ -153,10 +164,11 @@ impl TransientCloseoutAssessment {
     /// One ops-log field list naming each quiescent count.
     pub fn quiescent_log_fields(&self) -> String {
         format!(
-            "waiting_on_claims={} operator_owned={} schedule_not_due={}",
+            "waiting_on_claims={} operator_owned={} schedule_not_due={} awaiting_operator={}",
             self.quiescent_count(QuiescentReason::WaitingOnClaim),
             self.quiescent_count(QuiescentReason::OperatorOwned),
             self.quiescent_count(QuiescentReason::ScheduleNotDue),
+            self.quiescent_count(QuiescentReason::AwaitingOperator),
         )
     }
 }
@@ -376,6 +388,13 @@ pub fn assess_transient_closeout(
                     assessment
                         .quiescent
                         .push(quiescent(QuiescentReason::OperatorOwned));
+                }
+                QueueLifecycleMarker::Pending
+                    if crate::queue_continuation::head_awaits_operator_inline(&prompt.text) =>
+                {
+                    assessment
+                        .quiescent
+                        .push(quiescent(QuiescentReason::AwaitingOperator));
                 }
                 QueueLifecycleMarker::Pending
                     if evidence.schedule_held_heads.contains(&prompt.text)
@@ -822,7 +841,7 @@ mod tests {
         assert_eq!(assessment.quiescent_state(), Some("waiting_on_claims"));
         assert_eq!(
             assessment.quiescent_log_fields(),
-            "waiting_on_claims=3 operator_owned=0 schedule_not_due=0"
+            "waiting_on_claims=3 operator_owned=0 schedule_not_due=0 awaiting_operator=0"
         );
 
         // One worker went stale: only that row refuses.

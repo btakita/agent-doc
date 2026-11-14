@@ -2010,13 +2010,95 @@ fn two_ide_lane_claims_start_panes_in_their_own_lanes_end_to_end() {
         String::from_utf8_lossy(&refused.stderr).contains("project session is 'proj'"),
         "{refused:?}"
     );
-    let panes_before_bind = all_panes();
+    // The claim binds the existing lane pane instead of provisioning one.
+    // The four documents started above run their own startup (supervisor
+    // registration, baseline commits, harness launch) while this claim runs,
+    // and may create panes of their own (a lane layout, a stash). So the pane
+    // set is first allowed to settle, and the claim is then held to what it
+    // could create: no new pane in `spare`'s window, and `bound.md`
+    // registered to `spare` alone (a pane started for it would register
+    // itself). A pane another document creates elsewhere is not this claim's.
+    let pane_field = |pane: &str, format: &str| {
+        iso.raw_cmd(&["display-message", "-p", "-t", pane, format])
+            .map(|out| out.trim().to_string())
+            .unwrap_or_default()
+    };
+    let spare_window = pane_field(&spare, "#{window_id}");
+    let panes_before_bind = {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut last = all_panes();
+        let mut stable_since = Instant::now();
+        while stable_since.elapsed() < Duration::from_millis(1500) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(250));
+            let now = all_panes();
+            if now != last {
+                last = now;
+                stable_since = Instant::now();
+            }
+        }
+        last
+    };
     let output = claim(&bound_doc, &["--pane", &spare], Some(IDEA));
-    assert!(output.status.success(), "{output:?}");
+    let panes_after_bind = all_panes();
+    // On failure, name every pane that appeared and the ops log, so a CI
+    // failure shows which process created it.
+    let diagnostics = || {
+        let created = panes_after_bind
+            .difference(&panes_before_bind)
+            .map(|pane| {
+                format!(
+                    "{pane} {}",
+                    pane_field(
+                        pane,
+                        "#{session_name}:#{window_id}.#{window_name} start=#{pane_start_command}"
+                    )
+                )
+            })
+            .collect::<Vec<_>>();
+        let ops = std::fs::read_to_string(&ops_log).unwrap_or_default();
+        let tail = ops.lines().rev().take(200).collect::<Vec<_>>();
+        format!(
+            "spare={spare} ({spare_window})\nnew panes: {created:#?}\nops.log (last {} lines):\n{}",
+            tail.len(),
+            tail.into_iter().rev().collect::<Vec<_>>().join("\n")
+        )
+    };
+    assert!(output.status.success(), "{output:?}\n{}", diagnostics());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(&format!(
+            "Claimed {} for pane {spare} ",
+            bound_doc.display()
+        )),
+        "the claim bound the existing lane pane: {stderr}\n{}",
+        diagnostics()
+    );
+    assert!(
+        !stderr.contains("provisioning a new pane") && !stderr.contains("[route] Started "),
+        "the claim bound the existing lane pane instead of provisioning: {stderr}\n{}",
+        diagnostics()
+    );
+    assert_eq!(session_of(&spare), IDEA_LANE);
+    for pane in panes_after_bind.difference(&panes_before_bind) {
+        assert_ne!(
+            pane_field(pane, "#{window_id}"),
+            spare_window,
+            "the claim created a pane beside the bound one: {pane}\n{}",
+            diagnostics()
+        );
+    }
+    // Anything started for `bound.md` would register its own pane.
+    let registry = agent_doc_session_registry_io::load_existing_in(&root).unwrap();
+    let bound_panes = registry
+        .values()
+        .filter(|entry| entry.file.ends_with("bound.md"))
+        .map(|entry| entry.pane.as_str())
+        .collect::<Vec<_>>();
     assert_eq!(
-        all_panes(),
-        panes_before_bind,
-        "the claim bound the existing lane pane instead of provisioning"
+        bound_panes,
+        vec![spare.as_str()],
+        "bound.md is registered to the spare pane alone\n{}",
+        diagnostics()
     );
 
     // Shared mode: a client id is ignored.

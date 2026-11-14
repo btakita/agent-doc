@@ -10045,6 +10045,117 @@ agent: grok
         );
     }
 
+    /// `#humanfollowupowner` (haiven-dev sdk-dev.md, 2026-11-13): the Stop
+    /// hook refused every stop over `📥 follow up on an action item` rows
+    /// only a person can close. Once the reclassification tags the human-owned
+    /// row `[operator-verify]` the turn may end over it (logged
+    /// `awaiting_operator=1 ... state=waiting_on_operator`), even while a
+    /// projection still paints `📥`; an agent-owned follow-up still refuses.
+    #[test]
+    fn claude_stop_waits_on_human_owned_followups_and_refuses_agent_ones() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        let queue_doc = |rows: &str| {
+            format!(
+                "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+## Exchange\n\n\
+<!-- agent:exchange patch=append -->\n\
+Reported.\n\
+<!-- /agent:exchange -->\n\n\
+## Queue\n\n\
+<!-- agent:queue -->\n\
+- ~~#adversarial-pr [#q-fc36a4bdbcd3]~~\n\
+{rows}\
+<!-- /agent:queue -->\n"
+            )
+        };
+        let human = "- 📥 follow up on an action item from `q-fc36a4bdbcd3`: Approve and merge https://github.com/haiven-dev/haiven-sdk-godot/pull/9 with a merge commit (not squash or rebase). It is MERGEABLE and blocked only by REVIEW_REQUIRED. [#q-cbfe04f527a4]\n";
+        let agent = "- 📥 follow up on an action item from `q-fc36a4bdbcd3`: Either change the Python requirement in `README.md` and `ci/package_release.py` from 3.9+ to 3.10+, or drop the `Path.write_text(newline=)` call that needs 3.10. This predates this PR. [#q-850420ff17e2]\n";
+        let input = ClaudeStopInput {
+            session_id: "codex-session".to_string(),
+            cwd: dir.path().display().to_string(),
+            stop_hook_active: false,
+            transcript_path: None,
+            reason: None,
+            subagent_type: None,
+        };
+        let no_supervisor =
+            |_: &Path| agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor;
+        let stop_over = |content: &str| {
+            fs::write(&doc, content).unwrap();
+            complete_run(&doc);
+            // Each stop is its own hook invocation; drop the memoized read.
+            invalidate_stop_document_cache();
+            apply_claude_stop_with_drain_readiness(&input, no_supervisor).unwrap()
+        };
+
+        // Before: the untagged human-owned row refuses the stop.
+        let legacy = queue_doc(human);
+        fs::write(&doc, &legacy).unwrap();
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        let refused = stop_over(&legacy).expect("an untagged pending follow-up refuses");
+        assert!(
+            refused.reason.contains("Approve and merge"),
+            "{}",
+            refused.reason
+        );
+
+        // After the reclassification: the human-owned row waits on the operator.
+        let (tagged, rows) =
+            agent_doc_queue::followup_owner::reclassify_human_followup_rows(&legacy)
+                .unwrap()
+                .expect("the approval row is human-owned");
+        assert_eq!(rows.len(), 1);
+        assert!(
+            tagged.contains("- ⏳ follow up on an action item"),
+            "{tagged}"
+        );
+        let quiet = stop_over(&tagged);
+        assert!(
+            quiet.is_none(),
+            "a human-owned follow-up must not hold the turn: {:?}",
+            quiet.map(|continuation| continuation.reason)
+        );
+        // A projection that repaints `📥` over the tag keeps the turn ending.
+        let repainted = tagged.replace("- ⏳ follow up", "- 📥 follow up");
+        let quiet = stop_over(&repainted);
+        assert!(
+            quiet.is_none(),
+            "a tagged pending row waits on the operator: {:?}",
+            quiet.map(|continuation| continuation.reason)
+        );
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(ops.contains("awaiting_operator=1"), "{ops}");
+        assert!(ops.contains("state=waiting_on_operator"), "{ops}");
+
+        // An agent-owned follow-up beside it still refuses, and the refusal
+        // never names the human-owned row.
+        let mixed = format!(
+            "{}{agent}",
+            agent_doc_queue::followup_owner::reclassify_human_followup_rows(&queue_doc(human))
+                .unwrap()
+                .unwrap()
+                .0
+                .split("<!-- /agent:queue -->")
+                .next()
+                .unwrap()
+        ) + "<!-- /agent:queue -->\n";
+        assert!(
+            agent_doc_queue::followup_owner::reclassify_human_followup_rows(&mixed)
+                .unwrap()
+                .is_none(),
+            "the agent-owned row is not reclassified"
+        );
+        let refused = stop_over(&mixed).expect("an agent-owned pending follow-up refuses");
+        assert!(
+            !refused.reason.contains("Approve and merge"),
+            "{}",
+            refused.reason
+        );
+    }
+
     #[test]
     fn claude_stop_rechecks_status_sync_once_at_the_final_boundary() {
         let dir = setup_project();

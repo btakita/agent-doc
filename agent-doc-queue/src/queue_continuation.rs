@@ -2354,8 +2354,35 @@ pub fn head_awaits_operator_inline(text: &str) -> bool {
 /// sentiment-based: "still broken" is as actionable as "verified. looks good",
 /// and both mean a human has now looked. Agent-written heads are bare
 /// `do [#id]`, so a trailing annotation is operator-authored by construction.
+///
+/// On a row that carries the inline `[operator-verify]` tag, the verdict is
+/// read only after the last tag: a colon right after the tag, or right after
+/// the `[#…]` bracket that follows it (the binary's trailing `[#q-…]` id, or
+/// an authored directive id). The text before the tag is the worker's or
+/// author's own, so `approve PR #240: hosted CI is green [operator-verify]`
+/// carries no verdict (`#humanfollowupowner`).
 pub fn head_carries_operator_verdict(text: &str) -> bool {
     let scan = mask_inline_code(text);
+    if let Some(after_tag) = after_last_operator_verify_tag(&scan) {
+        let after_tag = after_tag.trim_start();
+        let rest = match after_tag.strip_prefix(':') {
+            Some(_) => after_tag,
+            None => {
+                let Some(start) = after_tag.find("[#") else {
+                    return false;
+                };
+                let after = &after_tag[start + 2..];
+                match after.find(']') {
+                    Some(end) => &after[end + 1..],
+                    None => return false,
+                }
+            }
+        };
+        return rest
+            .trim_start()
+            .strip_prefix(':')
+            .is_some_and(|annotation| !annotation.trim().is_empty());
+    }
     let rest = if let Some(start) = scan.find("[#") {
         let after = &scan[start + 2..];
         match after.find(']') {
@@ -2375,6 +2402,15 @@ pub fn head_carries_operator_verdict(text: &str) -> bool {
     rest.trim_start()
         .strip_prefix(':')
         .is_some_and(|annotation| !annotation.trim().is_empty())
+}
+
+/// The text after the last `[operator-verify]` tag in an already code-masked
+/// head (case-insensitive, like [`backlog::item_operator_verify_required`]).
+fn after_last_operator_verify_tag(scan: &str) -> Option<&str> {
+    let tag = backlog::OPERATOR_VERIFY_TAG;
+    // ASCII lowercasing keeps every byte offset.
+    let start = scan.to_ascii_lowercase().rfind(tag)?;
+    Some(&scan[start + tag.len()..])
 }
 
 #[cfg(test)]

@@ -24,6 +24,10 @@
 //! person can take makes the bullet human-owned. Misreading agent work as
 //! human parks one row where the operator sees it and can hand it back;
 //! misreading human work as agent work is the loop this module exists to end.
+//! A word that is often the agent's own subject matter (`confirm`,
+//! `authorization`, `approval`, `login`, `password`) counts only in a
+//! human-action position (`Approve …` as an instruction, `an approval`,
+//! `not authorized`, `account login`, `password prompt`).
 //!
 //! # Representation
 //!
@@ -43,8 +47,14 @@
 //!
 //! [`reclassify_human_followup_rows`] tags the live, unstarted
 //! `follow up on an action item` rows whose item is human-owned, in place and
-//! idempotently. Preflight queue maintenance runs it on every cycle, and
-//! `agent-doc queue reclassify-followups <FILE>` runs it on demand.
+//! idempotently. `agent-doc queue reclassify-followups <FILE>` runs it on
+//! demand. Preflight queue maintenance runs it on every cycle, but classifies
+//! each row once: [`reclassify_unseen_human_followup_rows`] skips a row whose
+//! [`followup_owner_key`] it has already recorded ([`followup_row_keys`]), so
+//! an operator who deletes `[operator-verify]` to hand a row back to an agent
+//! is not overruled on the next cycle.
+
+use std::collections::HashSet;
 
 use anyhow::Result;
 
@@ -101,9 +111,10 @@ pub fn explicit_owner_label(item: &str) -> Option<ActionItemOwner> {
     tail.starts_with(':').then_some(owner)
 }
 
-/// Whole words (lowercase) whose presence names an action only a person can
-/// take. Matched against the item with inline code masked, so a path such as
-/// `approve.yml` never matches.
+/// Whole words (lowercase) that name an action only a person can take
+/// wherever they appear. Matched against the item with inline code masked, so
+/// a path such as `admin.rs` never matches. A word joined by a hyphen is one
+/// word: `approval-flow` is not `approval`.
 const HUMAN_WORDS: &[&str] = &[
     // Another person's review decision: an author can never approve their
     // own pull request, and a re-review is the reviewer's act.
@@ -113,79 +124,182 @@ const HUMAN_WORDS: &[&str] = &[
     "non-author",
     "maintainer",
     "maintainers",
+    "approves",
     // Settings only an owner or admin can change.
     "admin",
     "admins",
     "administrator",
-    // An operator decision or confirmation.
+    // An operator decision.
     "decide",
     "decides",
-    "confirm",
-    "confirms",
-    // Authority the agent does not hold.
-    "authorize",
-    "authorized",
-    "authorization",
+    // A credential or check only a person can pass: single sign-on, a second
+    // factor, a hardware key, a device confirmation.
     "sso",
+    "2fa",
+    "mfa",
+    "otp",
+    "totp",
+    "passkey",
+    "passkeys",
+    "security-key",
+    "security-keys",
+    "yubikey",
+    "captcha",
+    "unrecognized-device",
 ];
 
-/// Word prefixes with the same meaning as [`HUMAN_WORDS`]:
-/// `approve`, `approves`, `approved`, `approval`, `approving`.
-const HUMAN_WORD_PREFIXES: &[&str] = &["approv"];
+/// Verbs (lowercase) that name an action only a person can take when they
+/// open a clause, as an instruction: the item's first word, or the first word
+/// after `.`, `;`, `:`, `,`, `(`, `→`, or after `then`, `and`, `or`, `please`
+/// (`Approve and merge PR 9`, `Review and approve #240`). Elsewhere they are
+/// usually what the agent works on (`the approve button`, `how the client
+/// authorizes`), so they are not signals there.
+const HUMAN_CLAUSE_VERBS: &[&str] = &[
+    "approve",
+    "authorize",
+    "authenticate",
+    "re-authenticate",
+    "reauthenticate",
+    "rehearse",
+];
 
-/// Phrases (lowercase, single-spaced words) with the same meaning.
+/// Words after which the next word opens a clause.
+const CLAUSE_JOINERS: &[&str] = &["then", "and", "or", "please"];
+
+/// Phrases (lowercase, single-spaced words) with the same meaning. A phrase
+/// pins the human-action reading a bare word cannot: `an approval` and
+/// `approval from` are another person's act, `the approval docs` is not;
+/// `not authorized` is missing authority, `the authorization header` is code.
 const HUMAN_PHRASES: &[&str] = &[
+    // Another person's review decision.
     "someone other than",
     "someone else",
-    "a reviewer",
     "another reviewer",
+    "an approval",
+    "human approval",
+    "approval from",
+    "approvals from",
+    "approval on",
+    "cannot approve",
+    "can not approve",
+    "can t approve",
+    // Settings only an owner or admin can change.
     "org owner",
     "organization owner",
     "repo owner",
     "repository owner",
     "code owner",
+    // An operator decision or confirmation.
     "ask the operator",
+    "operator confirms",
+    "operator to confirm",
+    "confirm with the operator",
+    "operator decides",
+    "operator to decide",
+    // Authority the agent does not hold.
+    "not authorized",
+    "needs authorization",
+    "need authorization",
+    "requires authorization",
+    "authorization from",
+    // Signing in, or a credential check only a person can pass.
     "sign in",
     "signed in",
+    "sign into",
     "log in",
     "logged in",
+    "log into",
+    "account login",
+    "interactive login",
+    "login prompt",
+    "login checkpoint",
+    "security key",
+    "verification code",
+    "one-time code",
+    "one-time password",
+    "authenticator app",
+    "device confirmation",
+    "unrecognized device",
+    "new device",
+    "password checkpoint",
+    "password prompt",
+    "enter the password",
+    "enter your password",
+    "enter a password",
 ];
 
 /// The first phrase in an unlabelled action item that names an action only a
 /// person can take, or `None` when it names none (`#humanfollowupowner`).
 ///
 /// The vocabulary covers the shapes worker hand-backs use for human work:
-/// approving or re-reviewing a pull request (`approve`, `approval`,
-/// `re-review`, `non-author`, `someone other than the author`, `a reviewer`,
-/// `maintainer`), a setting only an owner or admin can change (`org owner`,
-/// `repo admin`, `admin`), an operator decision (`decide`, `confirm`, `ask
-/// the operator`), and authority the agent does not hold (`not authorized`,
-/// `sign in`, `SSO`). Plain agent verbs (`merge`, `review`, `rebase`, `fix`,
-/// `address`) are not signals: "address the review" and "rebase after #240
-/// merges" are agent work.
+/// another person's review decision (`re-review`, `non-author`, `maintainer`,
+/// `X approves`, `Approve …` as an instruction, `an approval`, `approval
+/// from`, `cannot approve`, `someone other than`, `another reviewer`), a
+/// setting only an owner or admin can change (`org owner`, `repo owner`,
+/// `admin`), an operator decision (`decide`, `ask the operator`, `operator
+/// confirms`), authority the agent does not hold (`not authorized`,
+/// `Authorize …`), and a sign-in or credential check (`sign in`, `log into`,
+/// `account login`, `SSO`, `2FA`, `OTP`, `passkey`, `security key`, `device
+/// confirmation`, `password prompt`). A word that is often the agent's own
+/// subject matter is a signal only in a human-action position: `confirm`,
+/// `authorization`, `approval`, `login`, and `password` alone are not
+/// (`Confirm hosted CI is green`, `Fix the authorization header`, `Update
+/// the approval-flow docs`). Plain agent verbs (`merge`, `review`, `rebase`,
+/// `fix`, `address`) are not signals: "address the review" and "rebase after
+/// #240 merges" are agent work.
 pub fn human_owner_signal(item: &str) -> Option<&'static str> {
     let masked = mask_code_spans(item).to_ascii_lowercase();
-    let words: Vec<&str> = masked
-        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
-        .map(|word| word.trim_matches('-'))
-        .filter(|word| !word.is_empty())
-        .collect();
-    for word in &words {
+    let words = clause_words(&masked);
+    for (word, opens_clause) in &words {
         if let Some(signal) = HUMAN_WORDS.iter().find(|signal| *signal == word) {
             return Some(signal);
         }
-        if let Some(signal) = HUMAN_WORD_PREFIXES
-            .iter()
-            .find(|prefix| word.starts_with(*prefix))
+        if *opens_clause
+            && let Some(signal) = HUMAN_CLAUSE_VERBS.iter().find(|signal| *signal == word)
         {
             return Some(signal);
         }
     }
-    let joined = format!(" {} ", words.join(" "));
+    let joined = format!(
+        " {} ",
+        words
+            .iter()
+            .map(|(word, _)| *word)
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
     HUMAN_PHRASES
         .iter()
         .find(|phrase| joined.contains(&format!(" {phrase} ")))
         .copied()
+}
+
+/// The words of `text` (ASCII alphanumerics and inner hyphens), each with
+/// whether it opens a clause ([`HUMAN_CLAUSE_VERBS`]).
+fn clause_words(text: &str) -> Vec<(&str, bool)> {
+    let mut words = Vec::new();
+    let mut opens_clause = true;
+    let mut start = None;
+    for (index, ch) in text
+        .char_indices()
+        .chain(std::iter::once((text.len(), ' ')))
+    {
+        if ch.is_ascii_alphanumeric() || ch == '-' {
+            start.get_or_insert(index);
+            continue;
+        }
+        if let Some(begin) = start.take() {
+            let word = text[begin..index].trim_matches('-');
+            if !word.is_empty() {
+                words.push((word, opens_clause));
+                opens_clause = CLAUSE_JOINERS.contains(&word);
+            }
+        }
+        if matches!(ch, '.' | ';' | ':' | ',' | '(' | '!' | '?' | '\n' | '→') {
+            opens_clause = true;
+        }
+    }
+    words
 }
 
 /// The owner of an action item and why: the worker's label when present,
@@ -311,12 +425,110 @@ pub fn reclassify_followup_row(text: &str) -> Option<(String, OwnerEvidence)> {
 /// Tag every live, unstarted human-owned `follow up on an action item` row in
 /// every queue block (`#humanfollowupowner`). Lines are rewritten in place;
 /// every other byte is kept. Idempotent: a tagged row is never touched again,
-/// so a second run returns `None`.
+/// so a second run returns `None`. This is the explicit repair
+/// (`agent-doc queue reclassify-followups`); preflight uses
+/// [`reclassify_unseen_human_followup_rows`] so an operator's removal of the
+/// tag sticks.
 pub fn reclassify_human_followup_rows(
     content: &str,
 ) -> Result<Option<(String, Vec<ReclassifiedFollowup>)>> {
-    let components = agent_doc_element::element::parse(content)?;
+    reclassify_unseen_human_followup_rows(content, &HashSet::new())
+}
+
+/// [`reclassify_human_followup_rows`], skipping every row whose
+/// [`followup_owner_key`] is in `seen`.
+///
+/// Preflight classifies a follow-up row once, the first time it sees the row
+/// unstarted ([`followup_row_keys`] records it). A row the operator hands back
+/// to an agent by deleting its `[operator-verify]` tag keeps its key, so the
+/// next cycle leaves it alone instead of re-adding the tag.
+pub fn reclassify_unseen_human_followup_rows(
+    content: &str,
+    seen: &HashSet<String>,
+) -> Result<Option<(String, Vec<ReclassifiedFollowup>)>> {
     let mut edits: Vec<(usize, usize, String)> = Vec::new();
+    let mut rows = Vec::new();
+    for (text_start, text) in followup_row_texts(content)? {
+        if followup_owner_key(text).is_some_and(|key| seen.contains(&key)) {
+            continue;
+        }
+        let Some((after, evidence)) = reclassify_followup_row(text) else {
+            continue;
+        };
+        edits.push((text_start, text_start + text.len(), after.clone()));
+        rows.push(ReclassifiedFollowup {
+            before: text.to_string(),
+            after,
+            evidence,
+        });
+    }
+    if edits.is_empty() {
+        return Ok(None);
+    }
+    let mut updated = content.to_string();
+    for (start, end, replacement) in edits.into_iter().rev() {
+        updated.replace_range(start..end, &replacement);
+    }
+    Ok(Some((updated, rows)))
+}
+
+/// The identity of a follow-up row for owner classification: its work text
+/// without lifecycle projection, the binary's trailing `[#q-…]` id, or the
+/// `[operator-verify]` tag, whitespace collapsed. Deleting the tag, or the
+/// `📥`/`⏳` repaint, leaves the key unchanged. `None` for a row outside the
+/// `follow up on an action item` shape.
+pub fn followup_owner_key(text: &str) -> Option<String> {
+    let text = text.strip_prefix("### ").unwrap_or(text);
+    let work = agent_doc_element_queue::strip_attempt_projection_prefix(text);
+    followup_row_action_item(work)?;
+    let work = agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(work);
+    let key = work
+        .split_whitespace()
+        .filter(|token| !token.eq_ignore_ascii_case(OPERATOR_OWNED_TAG))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Some(key)
+}
+
+/// The follow-up rows of `content` by [`followup_owner_key`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FollowupRowKeys {
+    /// Rows whose owner has been decided: unstarted rows (bare, `📥`, or `⏳`,
+    /// no `🙋`) and every row that carries the tag.
+    pub classified: HashSet<String>,
+    /// Every live (unstruck) follow-up row, in any lifecycle.
+    pub live: HashSet<String>,
+}
+
+/// [`FollowupRowKeys`] of every queue block of `content`. Preflight records
+/// `classified` after it writes the document, and keeps a recorded key only
+/// while its row is `live`.
+pub fn followup_row_keys(content: &str) -> Result<FollowupRowKeys> {
+    let mut keys = FollowupRowKeys::default();
+    for (_, text) in followup_row_texts(content)? {
+        if text.trim_start().starts_with("~~") {
+            continue;
+        }
+        let Some(key) = followup_owner_key(text) else {
+            continue;
+        };
+        let rest = text.strip_prefix("### ").unwrap_or(text);
+        let unstarted = matches!(
+            queue_projection::lifecycle_marker(rest),
+            None | Some(QueueLifecycleMarker::Pending | QueueLifecycleMarker::AwaitingOperator)
+        ) && !queue_projection::operator_action_marked(rest);
+        if unstarted || carries_operator_owned_tag(rest) {
+            keys.classified.insert(key.clone());
+        }
+        keys.live.insert(key);
+    }
+    Ok(keys)
+}
+
+/// `(byte offset, text)` of every single-line list row in a queue block that
+/// mentions [`FOLLOWUP_ROW_PREFIX`]; `text` is the row after its `- ` bullet.
+fn followup_row_texts(content: &str) -> Result<Vec<(usize, &str)>> {
+    let components = agent_doc_element::element::parse(content)?;
     let mut rows = Vec::new();
     for component in components
         .iter()
@@ -336,26 +548,10 @@ pub fn reclassify_human_followup_rows(
             if !text.contains(FOLLOWUP_ROW_PREFIX) {
                 continue;
             }
-            let Some((after, evidence)) = reclassify_followup_row(text) else {
-                continue;
-            };
-            let text_start = line_start + indent + 2;
-            edits.push((text_start, text_start + text.len(), after.clone()));
-            rows.push(ReclassifiedFollowup {
-                before: text.to_string(),
-                after,
-                evidence,
-            });
+            rows.push((line_start + indent + 2, text));
         }
     }
-    if edits.is_empty() {
-        return Ok(None);
-    }
-    let mut updated = content.to_string();
-    for (start, end, replacement) in edits.into_iter().rev() {
-        updated.replace_range(start..end, &replacement);
-    }
-    Ok(Some((updated, rows)))
+    Ok(rows)
 }
 
 /// `text` with the contents of inline code spans replaced by spaces.

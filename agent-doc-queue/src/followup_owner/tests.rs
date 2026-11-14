@@ -19,6 +19,8 @@ const AGENT_ROWS: &[&str] = &[
     "Retarget https://github.com/haiven-dev/haiven-sdk-js/pull/2",
     "Add a byte-identical copy of",
     "After PR 18 and the `sdk-dev` copy land, dispatch",
+    // Checking a release's outcome is agent work; `confirm` is not a signal.
+    "After the first release, confirm that `release.yml` ran",
 ];
 
 /// Fixture rows only a person can do, with the signal that decides each.
@@ -31,9 +33,9 @@ const HUMAN_ROWS: &[(&str, &str)] = &[
         "A non-author approves https://github.com/haiven-dev/haiven-api/pull/855",
         "non-author",
     ),
-    ("An org owner makes `HAIVEN_RELEASE_APP_ID`", "confirms"),
+    ("An org owner makes `HAIVEN_RELEASE_APP_ID`", "org owner"),
     ("Decide who owns each public README", "decide"),
-    ("Confirm this was the operator's failure", "confirm"),
+    ("Confirm this was the operator's failure", "sso"),
     (
         "Get a non-author approval on https://github.com/haiven-dev/haiven-infra/pull/336",
         "non-author",
@@ -43,14 +45,14 @@ const HUMAN_ROWS: &[(&str, &str)] = &[
         "non-author",
     ),
     ("A haiven-sdk repo admin stops GitHub deleting", "admin"),
-    ("Merging was not authorized for this item", "authorized"),
+    ("Merging was not authorized for this item", "not authorized"),
     (
         "Decide whether `haiven-contracts`/`haiven-api` mentions",
         "decide",
     ),
     (
         "Get a human approval on https://github.com/haiven-dev/haiven-sdk/pull/242",
-        "approv",
+        "human approval",
     ),
     (
         "Decide how promotion PRs merge into haiven-sdk `main`",
@@ -58,7 +60,7 @@ const HUMAN_ROWS: &[(&str, &str)] = &[
     ),
     (
         "Approve and merge https://github.com/haiven-dev/haiven-sdk-godot/pull/9",
-        "approv",
+        "approve",
     ),
     ("Decide whether the first release-please release", "decide"),
     (
@@ -66,20 +68,16 @@ const HUMAN_ROWS: &[(&str, &str)] = &[
         "admin",
     ),
     (
-        "After the first release, confirm that `release.yml` ran",
-        "confirm",
-    ),
-    (
         "at the new head `42152a0` (btakita cannot approve)",
         "non-author",
     ),
     (
         "at head `6dd0abe` from someone other than the author",
-        "approv",
+        "someone other than",
     ),
     (
         "Someone other than the author approves and merges PR 18",
-        "approv",
+        "approves",
     ),
     (
         "An org owner adds haiven-cli (repo id `1413929956`)",
@@ -91,7 +89,7 @@ const HUMAN_ROWS: &[(&str, &str)] = &[
     ),
     ("org variable `HAIVEN_RELEASE_APP_ID`", "org owner"),
     ("org secret `HAIVEN_RELEASE_APP_PRIVATE_KEY`", "org owner"),
-    ("Rehearse before 4 PM", "confirm"),
+    ("Rehearse before 4 PM", "rehearse"),
     ("haiven-sdk-unreal-lyra/pull/10", "non-author"),
     (
         "https://github.com/haiven-dev/haiven-sdk/pull/249",
@@ -313,7 +311,7 @@ fn reclassification_skips_started_rows() {
         reclassify_followup_row("follow up on an action item from `x`: approve PR 9"),
         Some((
             "follow up on an action item from `x`: approve PR 9 [operator-verify]".to_string(),
-            OwnerEvidence::Signal("approv")
+            OwnerEvidence::Signal("approve")
         ))
     );
 }
@@ -402,4 +400,217 @@ fn tagged_rows_are_never_drainable() {
     assert!(!crate::queue_continuation::head_awaits_operator_inline(
         "follow up on an action item from `x`: approve PR 9 [operator-verify] [#q-0123456789ab]: approved, merge it"
     ));
+}
+
+/// Review of #426, finding 1: a tagged row whose worker text holds
+/// `#<token>:` (a pull request number) carries no operator verdict. Only a
+/// colon after the tag, or after the `[#…]` id that follows it, is the
+/// operator's answer. The row stays undrainable, keeps its `⏳`, and the turn
+/// end waits on the operator instead of refusing over it.
+#[test]
+fn worker_text_with_a_hash_colon_is_not_an_operator_verdict() {
+    use crate::queue_continuation::{
+        DrainScope, head_awaits_operator_inline, head_carries_operator_verdict,
+        live_drainable_continuation_head_entry,
+    };
+    let human = "follow up on an action item from `x`: human (tmstorm): approve PR #240: hosted CI is green [operator-verify] [#q-0123456789ad]";
+    for row in [
+        human.to_string(),
+        format!("📥 {human}"),
+        format!("⏳ {human}"),
+        // An authored bracket id inside the worker's text, before the tag.
+        "follow up on an action item from `x`: approve [#240]: CI is green [operator-verify] [#q-0123456789ad]".to_string(),
+        // The tag without the binary's id.
+        "follow up on an action item from `x`: approve PR #240: CI is green [operator-verify]".to_string(),
+        // An id-less origin label that quotes an earlier `[#q-…]`.
+        "follow up on an action item from queue item “ship [#q-0123456789aa]”: approve PR #240: CI is green [operator-verify]".to_string(),
+    ] {
+        assert!(!head_carries_operator_verdict(&row), "{row}");
+        assert!(head_awaits_operator_inline(&row), "{row}");
+    }
+    // The operator's answer after the tag or after its id still hands the row
+    // back to an agent.
+    for answered in [
+        "follow up on an action item from `x`: approve PR #240: CI is green [operator-verify] [#q-0123456789ad]: approved, merge it",
+        "follow up on an action item from `x`: approve PR #240: CI is green [operator-verify]: done",
+        "follow up on an action item from queue item “ship [#q-0123456789aa]”: approve PR #240 [operator-verify] [#q-0123456789ad]: done",
+    ] {
+        assert!(head_carries_operator_verdict(answered), "{answered}");
+        assert!(!head_awaits_operator_inline(answered), "{answered}");
+    }
+
+    // Drain: neither scope selects the row; the agent row behind it drains.
+    let content = format!(
+        "---\nagent_doc_format: template\nqueue: go\n---\n\n\
+<!-- agent:queue go -->\n\
+- 📥 {human}\n\
+- 📥 follow up on an action item from `x`: Fix the typo in README.md. [#q-0123456789ac]\n\
+<!-- /agent:queue -->\n"
+    );
+    for scope in [DrainScope::InSessionLoop, DrainScope::Supervisor] {
+        let head = live_drainable_continuation_head_entry(&content, scope)
+            .map(|entry| entry.prompt_text)
+            .unwrap_or_default();
+        assert!(head.contains("Fix the typo"), "{scope:?}: {head}");
+    }
+
+    // Preflight's lifecycle projection paints `⏳`, never strips it.
+    let entries = crate::document_queue::parse(&format!("- 📥 {human}\n- ⏳ {human}\n")).unwrap();
+    let none = std::collections::HashSet::new();
+    let marked = crate::document_queue::set_prompts_lifecycle_markers(&entries, &none, &none)
+        .expect("the 📥 row gains ⏳");
+    for prompt in crate::document_queue::prompts(&marked) {
+        assert!(
+            agent_doc_document::queue_projection::has_awaiting_operator_marker(&prompt.text),
+            "{}",
+            prompt.text
+        );
+    }
+
+    // Stop gate: the row waits on the operator; only the agent row is a debt.
+    let assessment = assess_transient_closeout(&content, &CloseoutEvidence::default()).unwrap();
+    assert_eq!(
+        assessment.quiescent_count(QuiescentReason::AwaitingOperator),
+        1
+    );
+    assert_eq!(assessment.debts.len(), 1);
+}
+
+/// Review of #426, finding 2: agent phrasing that names a human word in a
+/// non-human position stays agent work.
+#[test]
+fn agent_phrasing_with_review_or_auth_words_stays_agent_work() {
+    for item in [
+        "Confirm hosted CI is green on the merge commit",
+        "Fix the authorization header in client.rs",
+        "Update the approval-flow docs",
+        "Update the approval docs for the new flow",
+        "Re-run CI after a reviewer comments",
+        "Fix the login page redirect",
+        "Fix the password reset email template",
+        "Fix the approve button handler",
+        "Document how the client authorizes requests",
+        "After the first release, confirm that the release workflow attached both zips",
+    ] {
+        assert_eq!(
+            classify_action_item(item),
+            (ActionItemOwner::Agent, OwnerEvidence::Default),
+            "{item}"
+        );
+    }
+}
+
+/// Review of #426, finding 2: a credential, second-factor, sign-in, or device
+/// check only a person can pass is human work, as is an instruction to
+/// approve or authorize.
+#[test]
+fn credential_and_sign_in_checkpoints_are_human_work() {
+    for (item, signal) in [
+        (
+            "Complete the npm security-key or password checkpoint and the PyPI unrecognized-device confirmation plus account login, then rerun the publish",
+            "security-key",
+        ),
+        ("Complete the npm security key prompt", "security key"),
+        (
+            "Complete the npm password checkpoint",
+            "password checkpoint",
+        ),
+        (
+            "Complete the PyPI device confirmation",
+            "device confirmation",
+        ),
+        ("Finish the PyPI account login", "account login"),
+        ("Enter the 2FA code for crates.io", "2fa"),
+        ("Enter the OTP for npm publish", "otp"),
+        ("Register a passkey on the npm account", "passkey"),
+        ("Log into the AWS console and rotate the key", "log into"),
+        (
+            "Enter the verification code GitHub emailed",
+            "verification code",
+        ),
+        ("Re-run CI, then approve PR 9", "approve"),
+        ("Review and approve #240", "approve"),
+        ("**Approve** PR 9 once CI is green", "approve"),
+        ("Authorize the haiven-release app for the org", "authorize"),
+        ("btakita cannot approve PR 9 (author)", "cannot approve"),
+        ("Merge #240 once tmstorm approves", "approves"),
+        ("Needs authorization from the repo owner", "repo owner"),
+    ] {
+        assert_eq!(
+            classify_action_item(item),
+            (ActionItemOwner::Human, OwnerEvidence::Signal(signal)),
+            "{item}"
+        );
+    }
+}
+
+/// Review of #426, finding 2: preflight classifies a row once. An operator who
+/// deletes `[operator-verify]` to hand a row back to an agent is not overruled
+/// on the next cycle; a row preflight has never seen is still tagged.
+#[test]
+fn an_operator_removed_tag_stays_removed() {
+    let doc = |rows: &str| format!("<!-- agent:queue go -->\n{rows}<!-- /agent:queue -->\n");
+    let legacy =
+        "- 📥 follow up on an action item from `x`: A non-author approves PR 9 [#q-0123456789ab]\n";
+    let agent =
+        "- 📥 follow up on an action item from `x`: Fix the typo in README.md. [#q-0123456789ac]\n";
+
+    // First cycle: nothing seen yet; the legacy row is tagged.
+    let first = doc(&format!("{legacy}{agent}"));
+    let (tagged, rows) = reclassify_unseen_human_followup_rows(&first, &HashSet::new())
+        .unwrap()
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    let seen = followup_row_keys(&tagged).unwrap();
+    assert_eq!(seen.classified.len(), 2);
+    assert_eq!(seen.classified, seen.live);
+
+    // The operator deletes the tag; `⏳` may linger or be repainted `📥`.
+    let tagged_line = tagged
+        .lines()
+        .find(|line| line.contains("[operator-verify]"))
+        .unwrap();
+    for handed_back in [
+        tagged_line.replace(" [operator-verify]", ""),
+        tagged_line
+            .replace(" [operator-verify]", "")
+            .replace('⏳', "📥"),
+    ] {
+        let edited = tagged.replace(tagged_line, &handed_back);
+        assert_eq!(
+            followup_row_keys(&edited).unwrap().classified,
+            seen.classified,
+            "deleting the tag keeps the row's key"
+        );
+        assert!(
+            reclassify_unseen_human_followup_rows(&edited, &seen.classified)
+                .unwrap()
+                .is_none(),
+            "{handed_back}"
+        );
+        // The explicit repair still tags an unstarted `📥` row on request.
+        assert_eq!(
+            reclassify_human_followup_rows(&edited).unwrap().is_some(),
+            handed_back.contains('📥'),
+            "{handed_back}"
+        );
+    }
+
+    // A new human row the operator never saw is still tagged.
+    let fresh = "- 📥 follow up on an action item from `y`: Get a non-author approval on PR 10 [#q-0123456789ae]\n";
+    let next = tagged.replace(agent, &format!("{agent}{fresh}"));
+    let (_, rows) = reclassify_unseen_human_followup_rows(&next, &seen.classified)
+        .unwrap()
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].before.contains("PR 10"), "{:?}", rows[0]);
+
+    // A row with an attempt in flight is live but not yet classified, so it
+    // is classified once it is unstarted again.
+    let claimed = doc(
+        "- 🟡 [#subagent:a#1] follow up on an action item from `x`: approve PR 9 [#q-0123456789ab]\n",
+    );
+    let keys = followup_row_keys(&claimed).unwrap();
+    assert!(keys.classified.is_empty());
+    assert_eq!(keys.live.len(), 1);
 }

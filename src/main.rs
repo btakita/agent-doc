@@ -5618,8 +5618,10 @@ enum QueueAction {
     /// as dispatchable agent work (`#humanfollowupowner`). An `agent:` /
     /// `human (<who>):` / `operator:` label decides the owner; an unlabelled
     /// row is human-owned when it names an approval, an admin or org-owner
-    /// setting, or an operator decision. Idempotent; preflight runs the same
-    /// repair every cycle.
+    /// setting, an operator decision, or a sign-in or credential check.
+    /// Idempotent. Preflight runs the same repair every cycle but classifies
+    /// each row once, so an operator who deletes the tag is not overruled;
+    /// this command tags every unstarted human-owned row regardless.
     #[command(name = "reclassify-followups")]
     ReclassifyFollowups {
         /// Path to the session document

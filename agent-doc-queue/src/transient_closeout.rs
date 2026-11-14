@@ -37,6 +37,12 @@
 //!   part from this rule.
 //! - **Not due.** A `📥` row that a closed `agent:loop` schedule window holds
 //!   back is not due until the next tick.
+//! - **Held by its queue's control** (`#heldloopstophook`). A `📥` row in a
+//!   queue whose control is the operator's hold (`pause`, or legacy marker
+//!   `stop`, resolved by [`crate::control_binding::explicit_queue_pause_mode`],
+//!   the same predicate queue selection uses for `Paused`) is not drainable
+//!   until the operator lifts the hold. The control is read from the text, so
+//!   every gate, text-only callers included, releases it the same way.
 //! - **Awaiting the operator by its text** (`#humanfollowupowner`). A `📥`
 //!   row whose work text carries `[operator-verify]` and no inline operator
 //!   verdict is never drainable, so it is the `⏳` row preflight projects;
@@ -98,6 +104,10 @@ pub enum QuiescentReason {
     /// The row's own text gates it on the operator: `[operator-verify]` with
     /// no inline verdict (`#humanfollowupowner`).
     AwaitingOperator,
+    /// The row's queue is held by its control (`pause`, legacy marker `stop`),
+    /// so no drain dispatches it until the hold is lifted
+    /// (`#heldloopstophook`).
+    QueueHeld,
 }
 
 impl QuiescentReason {
@@ -107,6 +117,7 @@ impl QuiescentReason {
             Self::WaitingOnClaim => "waiting_on_claim",
             Self::ScheduleNotDue => "schedule_not_due",
             Self::AwaitingOperator => "awaiting_operator",
+            Self::QueueHeld => "queue_held",
         }
     }
 }
@@ -182,6 +193,8 @@ impl TransientCloseoutAssessment {
             || self.quiescent_count(QuiescentReason::AwaitingOperator) > 0
         {
             Some("waiting_on_operator")
+        } else if self.quiescent_count(QuiescentReason::QueueHeld) > 0 {
+            Some("queue_held")
         } else if self.quiescent_count(QuiescentReason::ScheduleNotDue) > 0 {
             Some("schedule_not_due")
         } else {
@@ -192,11 +205,12 @@ impl TransientCloseoutAssessment {
     /// One ops-log field list naming each quiescent count.
     pub fn quiescent_log_fields(&self) -> String {
         format!(
-            "waiting_on_claims={} operator_owned={} schedule_not_due={} awaiting_operator={}",
+            "waiting_on_claims={} operator_owned={} schedule_not_due={} awaiting_operator={} queue_held={}",
             self.quiescent_count(QuiescentReason::WaitingOnClaim),
             self.quiescent_count(QuiescentReason::OperatorOwned),
             self.quiescent_count(QuiescentReason::ScheduleNotDue),
             self.quiescent_count(QuiescentReason::AwaitingOperator),
+            self.quiescent_count(QuiescentReason::QueueHeld),
         )
     }
 }
@@ -344,11 +358,19 @@ pub fn assess_transient_closeout(
     let components = agent_doc_element::element::parse(content)?;
     let mut assessment = TransientCloseoutAssessment::default();
     let mut operator_context: Option<(String, HashSet<String>)> = None;
+    let frontmatter = agent_doc_frontmatter::frontmatter::parse(content)
+        .ok()
+        .map(|(frontmatter, _)| frontmatter);
+    let frontmatter_control = frontmatter
+        .as_ref()
+        .and_then(crate::control_binding::frontmatter_queue_control);
     for component in components
         .iter()
         .filter(|component| component.name == "queue")
     {
         let entries = parse_queue_body(component.content(content))?;
+        // `#heldloopstophook`: the one hold predicate queue selection uses.
+        let held_by_control = queue_held_by_operator_control(&component.attrs, frontmatter_control);
         for (index, entry) in entries.iter().enumerate() {
             let QueueEntry::Prompt(prompt) = entry else {
                 continue;
@@ -474,6 +496,11 @@ pub fn assess_transient_closeout(
                         .quiescent
                         .push(quiescent(QuiescentReason::AwaitingOperator));
                 }
+                QueueLifecycleMarker::Pending if held_by_control => {
+                    assessment
+                        .quiescent
+                        .push(quiescent(QuiescentReason::QueueHeld));
+                }
                 QueueLifecycleMarker::Pending
                     if evidence.schedule_held_heads.contains(&prompt.text)
                         || evidence.schedule_held_heads.contains(&row) =>
@@ -487,6 +514,17 @@ pub fn assess_transient_closeout(
         }
     }
     Ok(assessment)
+}
+
+/// Whether a queue's resolved control is the operator's hold, so none of its
+/// pending heads is drainable (`#heldloopstophook`). This is the predicate
+/// queue selection uses to mark a queue `Paused`
+/// ([`crate::queue_graph`]), so the closeout gates and the drains agree.
+pub fn queue_held_by_operator_control(
+    attrs: &HashMap<String, String>,
+    frontmatter_queue: Option<&str>,
+) -> bool {
+    crate::control_binding::explicit_queue_pause_mode(attrs, frontmatter_queue)
 }
 
 /// Live, unstruck queue rows whose lifecycle marker is still transient and
@@ -934,7 +972,7 @@ mod tests {
         assert_eq!(assessment.quiescent_state(), Some("waiting_on_claims"));
         assert_eq!(
             assessment.quiescent_log_fields(),
-            "waiting_on_claims=3 operator_owned=0 schedule_not_due=0 awaiting_operator=0"
+            "waiting_on_claims=3 operator_owned=0 schedule_not_due=0 awaiting_operator=0 queue_held=0"
         );
 
         // One worker went stale: only that row refuses.
@@ -1076,6 +1114,107 @@ mod tests {
         assert!(
             open_window.contains("Watch https://github.com"),
             "{open_window}"
+        );
+    }
+
+    /// `#heldloopstophook` (agent-doc-bugs.md, 2026-11-14): a `📥` head in a
+    /// queue the operator holds (`pause`) is not drainable, so no gate refuses
+    /// the turn over it. Queue selection reads the same control as `Paused`.
+    #[test]
+    fn a_pending_head_in_a_held_queue_is_quiescent() {
+        const ROW: &str = "📥 Watch https://github.com/btakita/agent-doc/issues for new issues. [#q-241aecb69d4f]";
+        for marker in [
+            "agent:loop interval=\"1h\" priority keep pause",
+            "agent:queue pause",
+            "agent:queue id=\"side\" stop",
+        ] {
+            let name = marker.split_whitespace().next().unwrap();
+            let content = format!("<!-- {marker} -->\n- {ROW}\n<!-- /{name} -->\n");
+            let assessment =
+                assess_transient_closeout(&content, &CloseoutEvidence::default()).unwrap();
+            assert!(assessment.debts.is_empty(), "{marker}: {assessment:?}");
+            assert_eq!(
+                reasons(&assessment),
+                vec![(ROW.to_string(), QuiescentReason::QueueHeld)],
+                "{marker}"
+            );
+            assert_eq!(assessment.quiescent_state(), Some("queue_held"), "{marker}");
+            assert!(
+                assessment.quiescent_log_fields().ends_with("queue_held=1"),
+                "{}",
+                assessment.quiescent_log_fields()
+            );
+            assert_eq!(normal_closeout_failure(&content).unwrap(), None, "{marker}");
+            assert_eq!(
+                crash_recovery_closeout_failure(&content).unwrap(),
+                None,
+                "{marker}"
+            );
+        }
+    }
+
+    /// `#heldloopstophook`: frontmatter `queue: pause` holds a queue whose
+    /// marker carries no control; a marker `go` overrides it, and an unheld
+    /// queue's due `📥` head still refuses beside a held one.
+    #[test]
+    fn frontmatter_pause_holds_only_queues_without_a_marker_control() {
+        let content = "---\nqueue: pause\n---\n\
+<!-- agent:run go -->\n- 📥 run work now\n<!-- /agent:run -->\n\
+<!-- agent:loop interval=\"1h\" priority keep -->\n- 📥 held watch\n<!-- /agent:loop -->\n";
+        let assessment = assess_transient_closeout(content, &CloseoutEvidence::default()).unwrap();
+        assert_eq!(
+            reasons(&assessment),
+            vec![("📥 held watch".to_string(), QuiescentReason::QueueHeld)]
+        );
+        let failure = normal_closeout_failure(content)
+            .unwrap()
+            .expect("the go queue's head is drainable");
+        assert!(failure.contains("📥 run work now"), "{failure}");
+        assert!(!failure.contains("held watch"), "{failure}");
+    }
+
+    /// `#heldloopstophook`: the hold stops new dispatch only. A held queue's
+    /// reported row still owes integration, and its running worker still owes
+    /// a fresh claim.
+    #[test]
+    fn a_held_queue_still_owes_its_non_pending_transitions() {
+        let content = "\
+<!-- agent:queue pause -->
+- ☑️ [#subagent:work#1] reported but open
+- 🚧 [#subagent:other#1] still running
+- 📥 held head
+<!-- /agent:queue -->
+";
+        let assessment = assess_transient_closeout(content, &CloseoutEvidence::default()).unwrap();
+        let debts: Vec<_> = assessment.debts.iter().map(|debt| debt.marker).collect();
+        assert_eq!(
+            debts,
+            vec![
+                QueueLifecycleMarker::Reported,
+                QueueLifecycleMarker::Running
+            ]
+        );
+        assert_eq!(
+            reasons(&assessment),
+            vec![("📥 held head".to_string(), QuiescentReason::QueueHeld)]
+        );
+    }
+
+    /// `#heldloopstophook`: an unheld loop whose window is open has a due,
+    /// drainable `📥` head, and every gate still refuses over it.
+    #[test]
+    fn an_unheld_due_loop_head_still_refuses() {
+        let content = "\
+<!-- agent:loop interval=\"1h\" priority keep -->
+- 📥 Watch https://github.com/btakita/agent-doc/issues for new issues. [#q-241aecb69d4f]
+<!-- /agent:loop -->
+";
+        let failure = normal_closeout_failure(content)
+            .unwrap()
+            .expect("a due loop head refuses");
+        assert!(
+            failure.contains("a head that is still pending means the turn is not over"),
+            "{failure}"
         );
     }
 

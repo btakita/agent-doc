@@ -10470,6 +10470,76 @@ agent: grok
         );
     }
 
+    /// `#heldloopstophook` (agent-doc-bugs.md, 2026-11-14): a `📥` head in a
+    /// queue its control holds is not drainable, so the Stop hook allows the
+    /// first Stop with no refusal (logged `queue_held=1 ... state=queue_held`).
+    /// The same head with the hold lifted is due and still refuses.
+    #[test]
+    fn claude_stop_allows_a_held_queue_head_and_refuses_it_once_unheld() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        let row = "- 📥 Watch https://github.com/btakita/agent-doc/issues for new issues. [#q-241aecb69d4f]\n";
+        let queue_doc = |marker: &str| {
+            format!(
+                "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+## Exchange\n\n\
+<!-- agent:exchange patch=append -->\n\
+Reported.\n\
+<!-- /agent:exchange -->\n\n\
+## Queue\n\n\
+<!-- {marker} -->\n\
+{row}\
+<!-- /agent:queue -->\n"
+            )
+        };
+        let input = ClaudeStopInput {
+            session_id: "codex-session".to_string(),
+            cwd: dir.path().display().to_string(),
+            stop_hook_active: false,
+            transcript_path: None,
+            reason: None,
+            subagent_type: None,
+        };
+        let no_supervisor =
+            |_: &Path| agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor;
+        let stop_over = |content: &str| {
+            fs::write(&doc, content).unwrap();
+            complete_run(&doc);
+            invalidate_stop_document_cache();
+            apply_claude_stop_with_drain_readiness(&input, no_supervisor).unwrap()
+        };
+
+        let held = queue_doc("agent:queue pause");
+        fs::write(&doc, &held).unwrap();
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        let quiet = stop_over(&held);
+        assert!(
+            quiet.is_none(),
+            "a held queue's head must not hold the turn: {:?}",
+            quiet.map(|continuation| continuation.reason)
+        );
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(ops.contains("queue_held=1"), "{ops}");
+        assert!(ops.contains("state=queue_held"), "{ops}");
+
+        let unheld = queue_doc("agent:queue");
+        let refused = stop_over(&unheld).expect("an unheld pending head refuses");
+        assert!(
+            refused
+                .reason
+                .contains("a head that is still pending means the turn is not over"),
+            "{}",
+            refused.reason
+        );
+        assert!(
+            refused.reason.contains("Watch https://github.com"),
+            "{}",
+            refused.reason
+        );
+    }
+
     /// `#humanfollowupowner` (haiven-dev sdk-dev.md, 2026-11-13): the Stop
     /// hook refused every stop over `📥 follow up on an action item` rows
     /// only a person can close. Once the reclassification tags the human-owned

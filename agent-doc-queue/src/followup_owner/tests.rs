@@ -544,6 +544,66 @@ fn credential_and_sign_in_checkpoints_are_human_work() {
     }
 }
 
+/// Re-review of #426, finding 1: an unlabelled item that asks for someone
+/// else's approval in a dependent form (not an instruction-position
+/// `Approve …`) is human work. Each of these was human before the bare
+/// `approv*` prefix was dropped, and must stay human so a later narrowing of
+/// the vocabulary cannot silently turn them back into dispatchable rows.
+#[test]
+fn dependent_approval_phrasing_is_human_work() {
+    for (item, signal) in [
+        (
+            "PR #240 needs approval before it can merge",
+            "needs … approval",
+        ),
+        ("PR #240 requires approval", "requires … approval"),
+        ("Wait for tmstorm to approve PR #240", "to approve"),
+        ("Ask tmstorm to approve PR #240", "to approve"),
+        ("tmstorm needs to approve PR #240", "to approve"),
+        ("Have someone approve PR #240", "have … approve"),
+        ("Merge once a reviewer has approved PR #240", "has approved"),
+        ("Needs tmstorm's approval to merge", "needs … approval"),
+        ("Get PR #240 approved", "get … approved"),
+        ("the operator should approve the release", "<modal> approve"),
+        // The remaining dependent forms.
+        ("PR #240 is awaiting approval", "awaiting … approval"),
+        (
+            "Waiting on tmstorm's approval for PR #240",
+            "awaiting … approval",
+        ),
+        ("Merge after tmstorm’s approval", "'s approval"),
+        ("Merge once PR #240 is approved by tmstorm", "approved by"),
+        ("PR #240 must be approved before merging", "be approved"),
+        ("Then let tmstorm approve PR #240", "have … approve"),
+    ] {
+        assert_eq!(
+            classify_action_item(item),
+            (ActionItemOwner::Human, OwnerEvidence::Signal(signal)),
+            "{item}"
+        );
+    }
+}
+
+/// The dependent approval forms read only inside the target's clause, and an
+/// approval that is the agent's subject matter stays agent work.
+#[test]
+fn dependent_approval_forms_stay_inside_their_clause() {
+    for item in [
+        "Update the approval-flow docs",
+        "Update the approval docs for the new flow",
+        "Fix the approve button handler",
+        "Wire the approved state into the badge",
+        "Add the approval column; needs a migration",
+        "Rename `needs_approval` in the client",
+    ] {
+        assert_eq!(
+            classify_action_item(item),
+            (ActionItemOwner::Agent, OwnerEvidence::Default),
+            "{item}"
+        );
+    }
+}
+
 /// Review of #426, finding 2: preflight classifies a row once. An operator who
 /// deletes `[operator-verify]` to hand a row back to an agent is not overruled
 /// on the next cycle; a row preflight has never seen is still tagged.

@@ -228,13 +228,150 @@ const HUMAN_PHRASES: &[&str] = &[
     "enter a password",
 ];
 
+/// One dependent form of another person's approval: a `target` word preceded,
+/// within `reach` words of the same clause, by one of `leads` (`needs …
+/// approval`, `get … approved`, `should approve`), or, when `leads` is empty,
+/// followed by one of `follows` (`approved by`). The bare instruction
+/// `Approve …` is [`HUMAN_CLAUSE_VERBS`]; these are the forms where the
+/// approval is someone else's act or a wait on it, in any clause position.
+struct DependentApproval {
+    targets: &'static [&'static str],
+    leads: &'static [&'static str],
+    reach: usize,
+    follows: &'static [&'static str],
+    signal: &'static str,
+}
+
+/// The modal and helper words after which `approve` is someone's act, not
+/// the agent's subject matter (`the operator should approve`).
+const APPROVE_MODALS: &[&str] = &[
+    "should", "must", "will", "would", "can", "could", "may", "might", "shall",
+];
+
+/// Dependent approval forms (`#humanfollowupowner`). A word joined by a
+/// hyphen stays one word, so `approval-flow` matches none of them.
+const DEPENDENT_APPROVALS: &[DependentApproval] = &[
+    DependentApproval {
+        targets: &["approve"],
+        leads: &["to"],
+        reach: 1,
+        follows: &[],
+        signal: "to approve",
+    },
+    DependentApproval {
+        targets: &["approve"],
+        leads: APPROVE_MODALS,
+        reach: 1,
+        follows: &[],
+        signal: "<modal> approve",
+    },
+    DependentApproval {
+        targets: &["approve"],
+        leads: &["have", "has", "let", "lets", "make", "makes", "ask", "asks"],
+        reach: 3,
+        follows: &[],
+        signal: "have … approve",
+    },
+    DependentApproval {
+        targets: &["approval", "approvals"],
+        leads: &["need", "needs", "needed", "needing"],
+        reach: 4,
+        follows: &[],
+        signal: "needs … approval",
+    },
+    DependentApproval {
+        targets: &["approval", "approvals"],
+        leads: &["require", "requires", "required", "requiring"],
+        reach: 4,
+        follows: &[],
+        signal: "requires … approval",
+    },
+    DependentApproval {
+        targets: &["approval", "approvals"],
+        leads: &["await", "awaits", "awaiting", "wait", "waits", "waiting"],
+        reach: 4,
+        follows: &[],
+        signal: "awaiting … approval",
+    },
+    DependentApproval {
+        targets: &["approval", "approvals"],
+        leads: &["s"],
+        reach: 1,
+        follows: &[],
+        signal: "'s approval",
+    },
+    DependentApproval {
+        targets: &["approved"],
+        leads: &[],
+        reach: 0,
+        follows: &["by"],
+        signal: "approved by",
+    },
+    DependentApproval {
+        targets: &["approved"],
+        leads: &["has", "have", "had"],
+        reach: 1,
+        follows: &[],
+        signal: "has approved",
+    },
+    DependentApproval {
+        targets: &["approved"],
+        leads: &["get", "gets", "got", "getting"],
+        reach: 4,
+        follows: &[],
+        signal: "get … approved",
+    },
+    DependentApproval {
+        targets: &["approved"],
+        leads: &["be", "been", "being"],
+        reach: 1,
+        follows: &[],
+        signal: "be approved",
+    },
+];
+
+/// The first [`DEPENDENT_APPROVALS`] form in `words` (from [`clause_words`]).
+/// A lead counts only inside the target's clause: the scan back from the
+/// target stops at the word that opens it.
+fn dependent_approval_signal(words: &[(&str, bool)]) -> Option<&'static str> {
+    for (index, (word, opens_clause)) in words.iter().enumerate() {
+        for form in DEPENDENT_APPROVALS {
+            if !form.targets.contains(word) {
+                continue;
+            }
+            if let Some((next, next_opens)) = words.get(index + 1)
+                && !next_opens
+                && form.follows.contains(next)
+            {
+                return Some(form.signal);
+            }
+            if *opens_clause {
+                continue;
+            }
+            for back in 1..=form.reach.min(index) {
+                let (lead, lead_opens) = words[index - back];
+                if form.leads.contains(&lead) {
+                    return Some(form.signal);
+                }
+                if lead_opens {
+                    break;
+                }
+            }
+        }
+    }
+    None
+}
+
 /// The first phrase in an unlabelled action item that names an action only a
 /// person can take, or `None` when it names none (`#humanfollowupowner`).
 ///
 /// The vocabulary covers the shapes worker hand-backs use for human work:
 /// another person's review decision (`re-review`, `non-author`, `maintainer`,
 /// `X approves`, `Approve …` as an instruction, `an approval`, `approval
-/// from`, `cannot approve`, `someone other than`, `another reviewer`), a
+/// from`, `cannot approve`, `someone other than`, `another reviewer`, and the
+/// dependent forms of [`DEPENDENT_APPROVALS`]: `to approve`, `should
+/// approve`, `have someone approve`, `needs/requires/awaiting … approval`,
+/// `'s approval`, `approved by`, `has approved`, `get … approved`), a
 /// setting only an owner or admin can change (`org owner`, `repo owner`,
 /// `admin`), an operator decision (`decide`, `ask the operator`, `operator
 /// confirms`), authority the agent does not hold (`not authorized`,
@@ -272,6 +409,7 @@ pub fn human_owner_signal(item: &str) -> Option<&'static str> {
         .iter()
         .find(|phrase| joined.contains(&format!(" {phrase} ")))
         .copied()
+        .or_else(|| dependent_approval_signal(&words))
 }
 
 /// The words of `text` (ASCII alphanumerics and inner hyphens), each with

@@ -49,6 +49,11 @@
 //!   a pending glyph painted before that projection does not hold the turn.
 //!   `queue report-complete` writes human-owned action items this way.
 //!
+//! The Waiting-on-you heading (`#waitingheadingpending`) is not a row at
+//! all for this gate: it is the waiting tree's container, so a marker a stale
+//! projection painted on it owes no transition
+//! ([`crate::waiting_packet::is_waiting_on_you_root_text`]).
+//!
 //! Rows that are agent-actionable now still refuse: a drainable `📥`, a `☑️`
 //! awaiting integration, a lost row whose continue is owed, `🔄`, and `❔`.
 //! Claim freshness and schedule windows live in durable state, so callers
@@ -375,6 +380,12 @@ pub fn assess_transient_closeout(
             let QueueEntry::Prompt(prompt) = entry else {
                 continue;
             };
+            // `#waitingheadingpending`: the Waiting-on-you heading is a
+            // container, never an executable row. A marker a stale projection
+            // painted on it owes no transition the agent could make.
+            if crate::waiting_packet::is_waiting_on_you_root_text(&prompt.text) {
+                continue;
+            }
             let Some(marker) = queue_projection::lifecycle_marker(&prompt.text) else {
                 continue;
             };
@@ -1477,5 +1488,49 @@ EXCHANGE<!-- /agent:exchange -->
             assessment.debts[0].owed,
             "integrate the report or otherwise leave the reported-but-open state"
         );
+    }
+
+    /// `#waitingheadingpending`: a marker on the Waiting-on-you heading owes
+    /// nothing. The 2026-11-14 handoff painted `📥` there (agent-doc-bugs.md)
+    /// and the 2026-11-13 one left it until a hand patch (`tasks/fpe.md`).
+    /// Whatever marker it carries, with or without items under it, the
+    /// heading never refuses closeout, while a real pending row beside it
+    /// still does.
+    #[test]
+    fn waiting_on_you_heading_marker_never_refuses_closeout() {
+        let heading = "Waiting on you \u{2014} answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->";
+        for marker in ["📥", "🟡", "🚧", "☑️", "⚠️", "🔄", "❔"] {
+            for children in [
+                "",
+                "  - 🙋 [#vscodecodersmoke] Run the smoke. <!-- agent-doc:waiting-item -->\n",
+            ] {
+                let content = format!(
+                    "<!-- agent:run id=\"main\" subagents -->\n- ### {marker} {heading}\n{children}<!-- /agent:run -->\n"
+                );
+                let assessment =
+                    assess_transient_closeout(&content, &CloseoutEvidence::default()).unwrap();
+                assert!(
+                    assessment.debts.is_empty() && assessment.quiescent.is_empty(),
+                    "{marker} heading must not hold the turn: {assessment:?}"
+                );
+            }
+        }
+        // The short heading an older binary rendered, and a legacy stamped
+        // `[#q-…]` id, are the same container.
+        for row in [
+            "- ### 📥 Waiting on you <!-- agent-doc:waiting-on-you -->\n",
+            "- 📥 Waiting on you \u{2014} answer by adding a child line under an item [#q-0123456789ab] <!-- agent-doc:waiting-on-you -->\n",
+        ] {
+            assert!(
+                normal_closeout_failure(&doc(row)).unwrap().is_none(),
+                "{row}"
+            );
+        }
+        let content = format!(
+            "<!-- agent:run id=\"main\" subagents -->\n- ### 📥 {heading}\n- 📥 fix the flaky test\n<!-- /agent:run -->\n"
+        );
+        let debts = live_transient_debts(&content).unwrap();
+        assert_eq!(debts.len(), 1, "{debts:?}");
+        assert_eq!(debts[0].row, "📥 fix the flaky test");
     }
 }

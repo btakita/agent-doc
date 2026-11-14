@@ -361,4 +361,74 @@ mod tests {
         assert!(projected.contains("- 📥 after the fence\n"), "{projected}");
         assert!(projected.contains(fenced), "{projected}");
     }
+
+    /// `#waitingheadingpending`: the runtime projection never paints the
+    /// Waiting-on-you heading, even when a target builder enumerates it as a
+    /// pending row and no executable leaf sits under it (its only item holds
+    /// packet metadata, as in agent-doc-bugs.md on 2026-11-14). A `📥` an older
+    /// pass left there is cleared, and the
+    /// claimed row below it still receives its attempt.
+    #[test]
+    fn runtime_projection_never_marks_the_waiting_on_you_heading() {
+        let main = |heading_marker: &str, claimed: &str| {
+            format!(
+                "- ### {heading_marker}Waiting on you \u{2014} answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n\
+\x20\x20- \u{27e6}you: 1 \u{b7} agent: 0 \u{b7} done: 0\u{27e7} [#vscodecodersmoke] Run the smoke. <!-- agent-doc:waiting-item -->\n\
+\x20\x20\x20\x20- **Next:** you \u{2014} reply under this item with the decision or result it asks for (evidence: no answer or attempt in its packet yet) \u{25ab}\u{fe0f}\n\
+\x20\x20\x20\x20- **Response:** Run the smoke. \u{25ab}\u{fe0f}\n\
+\x20\x20\x20\x20\x20\x20- **Timestamp:** 2026-11-13T21:01-05:00 \u{25ab}\u{fe0f}\n\
+\x20\x20\x20\x20\x20\x20- **Question:** What decision or completion result should be recorded? \u{25ab}\u{fe0f}\n\
+\x20\x20\x20\x20\x20\x20- **Next actions:** \u{25ab}\u{fe0f}\n\
+\x20\x20\x20\x20\x20\x20\x20\x20- **Action:** Run the smoke. \u{25ab}\u{fe0f}\n\
+- ### ~~do [#heldloopstophook] \u{27e6}published\u{27e7}~~\n\
+- {claimed}do [#waitingheadingpending]\n"
+            )
+        };
+        let every_prompt = |block: QueueProjectionBlock<'_>| {
+            block
+                .entries
+                .iter()
+                .filter_map(|entry| match entry {
+                    QueueEntry::Prompt(prompt) => {
+                        Some(if prompt.text.contains("waitingheadingpending") {
+                            QueueRowProjection {
+                                text: prompt.text.clone(),
+                                marker: QueueLifecycleMarker::Running,
+                                owner: owner("subagent:waithead", 1),
+                                blockers: Vec::new(),
+                            }
+                        } else {
+                            QueueRowProjection {
+                                text: prompt.text.clone(),
+                                marker: QueueLifecycleMarker::Pending,
+                                owner: None,
+                                blockers: Vec::new(),
+                            }
+                        })
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let expected = doc(&main("", "🚧 [#subagent:waithead#1] "), "");
+        for start in [
+            main("", ""),
+            main("📥 ", ""),
+            main("📥 ", "🚧 [#subagent:waithead#1] "),
+        ] {
+            let content = doc(&start, "");
+            let projected = project_runtime_projections_across_queues(&content, None, every_prompt)
+                .unwrap()
+                .unwrap_or(content);
+            assert_eq!(projected, expected, "from:\n{start}");
+        }
+        let entries = document_queue::parse(&main("📥 ", "")).unwrap();
+        let heads = document_queue::executable_prompt_indexes(&entries);
+        assert_eq!(heads, vec![entries.len() - 1], "{entries:?}");
+        let childless = document_queue::parse(
+            "- ### 📥 Waiting on you \u{2014} answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n",
+        )
+        .unwrap();
+        assert!(document_queue::executable_prompt_indexes(&childless).is_empty());
+    }
 }

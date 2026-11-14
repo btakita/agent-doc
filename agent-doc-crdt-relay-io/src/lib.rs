@@ -1399,6 +1399,13 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                     if struck && !block.scheduler_selected {
                         return None;
                     }
+                    // `#waitingheadingpending`: the Waiting-on-you heading is
+                    // a container that owns no attempt. A pending target for
+                    // it painted `📥` on the heading at the 2026-11-14
+                    // controller handoff; the projection also clears one.
+                    if agent_doc_queue::waiting_packet::is_waiting_on_you_root_text(&prompt.text) {
+                        return None;
+                    }
                     let identity = agent_doc_queue::queue_claim::claim_identity_at(block.entries, index)
                         .unwrap_or_else(|| {
                             agent_doc_queue::queue_claim::claim_identity(&prompt.text)
@@ -9799,6 +9806,88 @@ mod tests {
             durable_queue_attempt_projection(&doc, &projected).unwrap(),
             projected,
             "hydrating the same durable attempts twice must be idempotent"
+        );
+    }
+
+    /// `#waitingheadingpending`, agent-doc-bugs.md 2026-11-14T22:36Z: the
+    /// controller handoff after a `make install` painted `📥` on the
+    /// Waiting-on-you heading of `agent:run id=main` (`targets=1`, text_len
+    /// +5 bytes = `📥 `), so session-check and the Stop hook refused closeout
+    /// over a container. The heading sits above a claimed row and its only
+    /// item holds nothing but packet metadata, so the group-parent derivation
+    /// finds no leaf under it. Hydration paints the claimed row, leaves the
+    /// heading unmarked, and clears a `📥` an older pass already left there.
+    #[test]
+    fn controller_hydration_never_marks_the_waiting_on_you_heading() {
+        let (dir, doc) = temp_doc("waiting-heading-hydration.md");
+        let heading = "Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->";
+        let body = |heading_prefix: &str, claimed: &str| {
+            format!(
+                "## Run <!-- agent:run id=\"main\" subagents priority go -->\n\
+- ### {heading_prefix}{heading}\n\
+\x20\x20- ⟦you: 1 · agent: 0 · done: 0⟧ [#vscodecodersmoke] Run the smoke on a real workspace. <!-- agent-doc:waiting-item -->\n\
+\x20\x20\x20\x20- **Next:** you — reply under this item with the decision or result it asks for (evidence: no answer or attempt in its packet yet) ▫️\n\
+\x20\x20\x20\x20- **Response:** Run the smoke on a real workspace. ▫️\n\
+\x20\x20\x20\x20\x20\x20- **Timestamp:** 2026-11-13T21:01-05:00 ▫️\n\
+\x20\x20\x20\x20\x20\x20- **Question:** What decision or completion result should be recorded? ▫️\n\
+\x20\x20\x20\x20\x20\x20- **Next actions:** ▫️\n\
+\x20\x20\x20\x20\x20\x20\x20\x20- **Action:** Run the smoke on a real workspace. ▫️\n\
+- ### ~~do [#heldloopstophook] ⟦published⟧~~\n\
+- {claimed}do [#waitingheadingpending]\n\
+<!-- /agent:run -->\n"
+            )
+        };
+        let stale = body("", "");
+        std::fs::write(&doc, &stale).unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let mut ledger = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+        ledger.claim(
+            "do [#waitingheadingpending]",
+            "subagent:waithead",
+            now,
+            3600,
+        );
+        ledger
+            .start(
+                "do [#waitingheadingpending]",
+                "subagent:waithead",
+                "worker-waithead",
+                now,
+                3600,
+                Some(1),
+            )
+            .unwrap();
+        persist_queue_claim_ledger(dir.path(), &doc, &ledger);
+
+        let expected = body("", "🚧 [#subagent:waithead#1] ");
+        let projected = durable_queue_attempt_projection(&doc, &stale).unwrap();
+        assert_eq!(projected, expected, "only the claimed row is painted");
+        assert_eq!(
+            durable_queue_attempt_projection(&doc, &projected).unwrap(),
+            projected,
+            "hydration is idempotent"
+        );
+        let painted = body("📥 ", "🚧 [#subagent:waithead#1] ");
+        assert_eq!(
+            durable_queue_attempt_projection(&doc, &painted).unwrap(),
+            expected,
+            "a stale 📥 on the heading is cleared, not kept"
+        );
+        assert_eq!(
+            agent_doc_queue::transient_closeout::assess_transient_closeout(
+                &painted,
+                &agent_doc_queue::transient_closeout::CloseoutEvidence::default(),
+            )
+            .unwrap()
+            .debts
+            .iter()
+            .filter(|debt| debt.row.contains("Waiting on you"))
+            .count(),
+            0,
+            "the heading's marker owes no closeout transition"
         );
     }
 

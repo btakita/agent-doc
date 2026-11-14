@@ -404,28 +404,11 @@ fn is_generated_packet_text(text: &str) -> bool {
     text.starts_with("**") || text.starts_with("&gt;") || text.starts_with('>')
 }
 
-/// The binary-owned root row: its text, without the heading and hidden
-/// marker, is exactly the root text. A quoted echo of it is not the root.
+/// The binary-owned root row (`#waitingheadingpending`): the shared
+/// [`waiting_packet::is_waiting_on_you_root_text`] predicate, so a stale
+/// marker on the heading never makes it a live row here either.
 fn is_waiting_root_line(line: &str) -> bool {
-    let text = strip_html_comments(
-        line.trim_start()
-            .trim_start_matches("- ")
-            .trim_start_matches("### "),
-    );
-    let work = agent_doc_element_queue::struck_work_text(&text).trim();
-    // `#answerack`: an older binary stamped the root with a generated
-    // `[#q-…]` id (sdk-dev.md); it is still the root, never live work.
-    let work = match work.rsplit_once(" [#q-") {
-        Some((root, id))
-            if id.strip_suffix(']').is_some_and(|hash| {
-                !hash.is_empty() && hash.chars().all(|c| c.is_ascii_hexdigit())
-            }) =>
-        {
-            root.trim_end()
-        }
-        _ => work,
-    };
-    work == crate::queue_consume::WAITING_ON_YOU_ROOT_TEXT
+    waiting_packet::is_waiting_on_you_root_text(line)
 }
 
 /// Build the queue tree of `document`.

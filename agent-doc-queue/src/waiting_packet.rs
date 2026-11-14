@@ -104,6 +104,88 @@ pub fn is_agent_doc_reply_spanned_entry<S>(entries: &[(QueueEntry, S)], index: u
     agent_doc_markdown_ast::reply_row::is_agent_doc_reply_row_in(&SpannedEntryRows(entries), index)
 }
 
+/// The text of the short root heading an older binary rendered
+/// (`- ### Waiting on you <!-- agent-doc:waiting-on-you -->`).
+const LEGACY_SHORT_WAITING_ON_YOU_ROOT_TEXT: &str = "Waiting on you";
+
+/// `#waitingheadingpending`: whether `text` is the binary-owned Waiting-on-you
+/// group heading (`- ### Waiting on you — answer by adding a child line under
+/// an item <!-- agent-doc:waiting-on-you -->`), whatever projection a stale
+/// pass painted on it.
+///
+/// The heading is a container for the waiting items, never an executable
+/// row: it owns no attempt, takes no lifecycle marker, and holds no closeout.
+/// This is the one predicate every projection, head-selection, and closeout
+/// path asks. It accepts a parsed queue row's text or a raw list line (`- `
+/// bullet and `### ` heading are stripped), and it ignores any leading
+/// lifecycle marker, owner annotation, `🙋`, or priority marker, a strike,
+/// hidden HTML comments, and the generated `[#q-…]` id an older binary stamped
+/// on it (`#answerack`). A quoted echo of the heading (`&gt; …`, `> …`, or a
+/// `**Label:** …` metadata row) is not the heading.
+pub fn is_waiting_on_you_root_text(text: &str) -> bool {
+    let line = text.lines().next().unwrap_or_default().trim_start();
+    let line = ["- ", "* ", "+ "]
+        .iter()
+        .find_map(|bullet| line.strip_prefix(bullet))
+        .unwrap_or(line)
+        .trim_start();
+    let line = line.strip_prefix("### ").unwrap_or(line);
+    let work = agent_doc_element_queue::struck_work_text(line);
+    let work = work
+        .strip_prefix("~~")
+        .and_then(|inner| inner.strip_suffix("~~"))
+        .unwrap_or(work)
+        .trim();
+    let work = agent_doc_element_queue::struck_work_text(work);
+    let work = work.strip_prefix("### ").unwrap_or(work);
+    let work = agent_doc_document::queue_projection::strip_priority_markers(work);
+    let work = work.trim();
+    if work.starts_with("&gt;") || work.starts_with('>') || work.starts_with("**") {
+        return false;
+    }
+    let plain = strip_html_comments(work);
+    let plain = match plain.rsplit_once(" [#q-") {
+        Some((root, id))
+            if id.strip_suffix(']').is_some_and(|hash| {
+                !hash.is_empty() && hash.chars().all(|c| c.is_ascii_hexdigit())
+            }) =>
+        {
+            root.trim_end()
+        }
+        _ => plain.as_str(),
+    };
+    plain == crate::queue_consume::WAITING_ON_YOU_ROOT_TEXT
+        || (plain == LEGACY_SHORT_WAITING_ON_YOU_ROOT_TEXT
+            && work.contains(crate::queue_consume::WAITING_ON_YOU_ROOT_MARKER))
+}
+
+/// [`is_waiting_on_you_root_text`] for one parsed queue entry, live, struck,
+/// or inert.
+pub fn is_waiting_on_you_root(entry: &QueueEntry) -> bool {
+    match entry {
+        QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
+            is_waiting_on_you_root_text(&prompt.text)
+        }
+        QueueEntry::Freeform(line) => is_waiting_on_you_root_text(line),
+        _ => false,
+    }
+}
+
+/// `text` without HTML comments, whitespace collapsed.
+fn strip_html_comments(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find("<!--") {
+        out.push_str(&rest[..at]);
+        match rest[at..].find("-->") {
+            Some(end) => rest = &rest[at + end + 3..],
+            None => rest = "",
+        }
+    }
+    out.push_str(rest);
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// Whether `entry` is a waiting-item head row, live or struck.
 pub fn is_waiting_item_head(entry: &QueueEntry) -> bool {
     match entry {
@@ -862,5 +944,36 @@ mod tests {
             once,
             "the Todo id never moves to the tail"
         );
+    }
+
+    /// `#waitingheadingpending`: the one heading predicate sees through every
+    /// projection a stale pass can paint, and rejects a quoted echo.
+    #[test]
+    fn waiting_on_you_root_is_recognized_whatever_marker_it_carries() {
+        let root = "Waiting on you \u{2014} answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->";
+        for text in [
+            root.to_string(),
+            format!("📥 {root}"),
+            format!("🚧 [#subagent:waithead#1] {root}"),
+            format!("🙋 📥 {root}"),
+            format!("- ### 📥 {root}"),
+            format!("- ### {root}"),
+            format!("### 📥 {root}"),
+            "Waiting on you \u{2014} answer by adding a child line under an item [#q-0123456789ab] <!-- agent-doc:waiting-on-you -->".to_string(),
+            "Waiting on you \u{2014} answer by adding a child line under an item".to_string(),
+            "📥 Waiting on you <!-- agent-doc:waiting-on-you -->".to_string(),
+        ] {
+            assert!(is_waiting_on_you_root_text(&text), "{text}");
+        }
+        for text in [
+            format!("&gt; **Queue prompt:** {root}: echo"),
+            format!("> {root}"),
+            format!("**Queue prompt:** {root}"),
+            "Waiting on you".to_string(),
+            format!("do [#waitingheadingpending] '- ### {root}'"),
+            "📥 fix the flaky test".to_string(),
+        ] {
+            assert!(!is_waiting_on_you_root_text(&text), "{text}");
+        }
     }
 }

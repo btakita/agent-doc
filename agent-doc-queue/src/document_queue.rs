@@ -2183,6 +2183,35 @@ pub fn set_prompt_runtime_projections_with(
                     }
                     QueueEntry::Completed(next)
                 }
+                // `#waitingheadingpending`: the Waiting-on-you heading is a
+                // container, never an executable row. When every row under it
+                // is itself a container or packet metadata, the group-parent
+                // derivation above finds no leaf and the heading reaches this
+                // arm. Runtime target builders still enumerate it for
+                // occurrence alignment, so its slot is consumed unpainted and
+                // any marker or owner annotation a stale pass left on it is
+                // cleared.
+                QueueEntry::Prompt(prompt)
+                    if crate::waiting_packet::is_waiting_on_you_root_text(&prompt.text) =>
+                {
+                    let mut next = prompt.clone();
+                    if let Some(stripped) = strip_in_progress_marker_for_display(&next.text) {
+                        next.text = stripped;
+                    }
+                    next.text =
+                        agent_doc_document::queue_projection::apply_owner_projection(&next.text, None);
+                    let key = projection_key(&next.text);
+                    if let Some((_, _, consumed)) = targets
+                        .iter_mut()
+                        .find(|(target_key, _, consumed)| target_key == &key && !*consumed)
+                    {
+                        *consumed = true;
+                    }
+                    if next.text != prompt.text {
+                        changed = true;
+                    }
+                    QueueEntry::Prompt(next)
+                }
                 QueueEntry::Prompt(prompt) => {
                     let reported = matches!(
                         agent_doc_document::queue_projection::lifecycle_marker(&prompt.text),
@@ -4230,6 +4259,14 @@ pub fn executable_prompt_indexes(entries: &[QueueEntry]) -> Vec<usize> {
             QueueEntry::Prompt(_)
                 if waiting_item_origin_index(entries, idx).is_some_and(|origin| origin != idx)
                     || crate::waiting_packet::is_packet_row(entries, idx) =>
+            {
+                None
+            }
+            // `#waitingheadingpending`: the Waiting-on-you heading is the
+            // tree's container, never a head, even with no item under it and
+            // whatever marker a stale projection painted on it.
+            QueueEntry::Prompt(prompt)
+                if crate::waiting_packet::is_waiting_on_you_root_text(&prompt.text) =>
             {
                 None
             }

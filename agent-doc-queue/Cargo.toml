@@ -26,7 +26,7 @@ agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.5
 agent-doc-prompt-context = { path = "../agent-doc-prompt-context", version = "0.35.574" }
 agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.35.574" }
 anyhow = "1"
-lazily = { version = "0.62.0", features = ["thread-safe"] }
+lazily = { version = "0.63.0", features = ["thread-safe"] }
 libc = "0.2"
 parking_lot = "0.12"
 serde = { version = "1", features = ["derive"] }

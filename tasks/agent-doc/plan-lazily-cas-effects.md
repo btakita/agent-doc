@@ -277,9 +277,10 @@ owning-crate defaults, semantics not yet reviewed), `deleted`.
 
 Progress (`#implementlazilyowned`):
 
-- agent-doc pins lazily-rs through `[patch.crates-io]` until the next Lazily
-  release: `91657b5` (EffectCasCore) plus `EffectCasCore::durable_state` /
-  `EffectCasCore::hydrate` (the full-fidelity `EffectCasDurableState` image the
+- agent-doc depends on crates.io `lazily = "0.63.0"`, which ships
+  `EffectCasCore` plus `EffectCasCore::durable_state` /
+  `EffectCasCore::hydrate`; the interim `[patch.crates-io]` git pin to
+  lazily-rs `e0e3b95` is removed (the full-fidelity `EffectCasDurableState` image the
   spec's "Crash recovery hydrates the retained intent ..." clause requires, with
   optional serde).
 - Queue-maintenance document CAS: the hand-rolled refusal/re-observe loop in

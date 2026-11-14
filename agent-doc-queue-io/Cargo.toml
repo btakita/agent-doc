@@ -51,7 +51,7 @@ agent-doc-turn-status-io = { path = "../agent-doc-turn-status-io", version = "0.
 agent-doc-workflow-io = { path = "../agent-doc-workflow-io", version = "0.35.574" }
 agent-doc-work-projection = { path = "../agent-doc-work-projection", version = "0.35.574" }
 anyhow = "1"
-lazily = { version = "0.62.0", features = ["serde"] }
+lazily = { version = "0.63.0", features = ["serde"] }
 libc = "0.2"
 fs2 = "0.4"
 serde = { version = "1", features = ["derive"] }

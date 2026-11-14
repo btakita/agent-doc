@@ -14,7 +14,7 @@ name = "agent_doc_editor_surface"
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.574" }
 agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.574" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.574" }
-lazily = { version = "0.62.0", features = ["thread-safe"] }
+lazily = { version = "0.63.0", features = ["thread-safe"] }
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 

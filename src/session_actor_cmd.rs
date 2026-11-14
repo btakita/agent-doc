@@ -3888,7 +3888,15 @@ pub fn doctor(file: &Path, repair: bool) -> Result<()> {
     }
     let ctx = build_context(file)?;
     print_status_summary(&ctx);
-    let issues = collect_doctor_issues(&ctx);
+    let mut issues = collect_doctor_issues(&ctx);
+    // GH #411: a Codex session whose `codex` has no `codex-code-mode-host` beside
+    // it cannot run any tool. Probed here, not in `collect_doctor_issues`, so the
+    // pure issue collection never spawns a harness binary.
+    if session_uses_codex(&ctx)
+        && let Some(issue) = crate::codex_code_mode_host::probe().doctor_issue()
+    {
+        issues.push(issue);
+    }
     if issues.is_empty() {
         println!("doctor: no issues detected");
     } else {
@@ -5159,6 +5167,24 @@ fn capability_proof_status(ctx: &SessionContext) -> String {
         }
     }
     "missing".to_string()
+}
+
+/// Whether this session runs Codex: its resolved harness, the document's
+/// `agent:`, or the binary the supervisor reports running in the pane.
+fn session_uses_codex(ctx: &SessionContext) -> bool {
+    let is_codex = |value: &str| {
+        Path::new(value.trim())
+            .file_name()
+            .and_then(|name| name.to_str())
+            == Some("codex")
+    };
+    is_codex(&ctx.harness)
+        || ctx.document_agent.as_deref().is_some_and(is_codex)
+        || ctx
+            .supervisor_runtime
+            .current_harness
+            .as_deref()
+            .is_some_and(is_codex)
 }
 
 fn collect_doctor_issues(ctx: &SessionContext) -> Vec<String> {
@@ -8072,6 +8098,18 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             document_agent: None,
             live_pane_window: None,
         };
+        assert!(
+            session_uses_codex(&ctx),
+            "harness `codex` is a Codex session"
+        );
+        let mut claude_ctx = ctx.clone();
+        claude_ctx.harness = "claude-code".to_string();
+        assert!(!session_uses_codex(&claude_ctx));
+        claude_ctx.supervisor_runtime.current_harness = Some("/usr/bin/codex".to_string());
+        assert!(
+            session_uses_codex(&claude_ctx),
+            "the pane's running binary counts too"
+        );
         let issues = collect_doctor_issues(&ctx);
         assert!(issues.iter().any(|issue| issue.contains("actor record")));
         assert!(

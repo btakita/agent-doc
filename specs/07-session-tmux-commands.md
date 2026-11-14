@@ -1854,7 +1854,10 @@ harness (gh-266).
 - `agent-doc session doctor <FILE> [--repair]` reports actor/registry/supervisor
   drift plus controller projection and recent command-stage failures in one
   read-only summary, with `--repair` explicitly escalating into the destructive
-  repair path before re-checking status.
+  repair path before re-checking status. For a Codex session (resolved
+  harness, document `agent:`, or the binary the supervisor reports running),
+  it also reports a missing Codex code-mode host with the same reinstall hint
+  as `agent-doc install` (GH #411).
 
 ### Shared session resolution
 

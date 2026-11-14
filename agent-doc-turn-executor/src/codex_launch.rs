@@ -822,6 +822,32 @@ pub fn codex_transport_403_429_diagnostic(stderr: &str) -> String {
     )
 }
 
+/// Codex reports its code-mode host (`codex-code-mode-host`, the executable
+/// that runs every `exec` tool cell) as unavailable (GH #411).
+pub fn looks_like_codex_code_mode_host_unavailable(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("code mode is unavailable")
+        || lower.contains("code-mode host is not running")
+        || (lower.contains("codex-code-mode-host")
+            && (lower.contains("not found")
+                || lower.contains("no such file")
+                || lower.contains("failed to spawn")
+                || lower.contains("failed to start")))
+}
+
+pub fn codex_code_mode_host_unavailable_diagnostic(detail: &str) -> String {
+    format!(
+        "Codex cannot run tools: its code-mode host (`codex-code-mode-host`) is unavailable. \
+         agent-doc launches `codex`, and Codex runs the host from its own package, next to the \
+         native `codex` binary. A bare `codex` binary copied on its own has no host beside it. \
+         Run `agent-doc install --skip-plugins` to see which `codex` is on PATH and where the \
+         host was searched, then reinstall Codex from a package that ships \
+         `codex-code-mode-host` (npm `@openai/codex`, Homebrew, the official install script, or a \
+         distro package). Original error: {}",
+        detail.trim()
+    )
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodexStderrNoiseReport {
     pub filtered: String,
@@ -1519,6 +1545,37 @@ mod tests {
         assert!(msg.contains("403 Forbidden on WebSocket"));
         assert!(msg.contains("429 Too Many Requests"));
         assert!(msg.contains("restart the codex session"));
+    }
+
+    #[test]
+    fn codex_code_mode_host_unavailable_matches_codex_wording_only() {
+        // The exact text a bare `codex` 0.156.1 binary carries (GH #411).
+        assert!(looks_like_codex_code_mode_host_unavailable(
+            "Code Mode is unavailable because the host executable was not found. ; enable `features.code_mode_host` and install `codex-code-mode-host`."
+        ));
+        assert!(looks_like_codex_code_mode_host_unavailable(
+            "code-mode host is not running"
+        ));
+        assert!(looks_like_codex_code_mode_host_unavailable(
+            "failed to spawn codex-code-mode-host: No such file or directory (os error 2)"
+        ));
+        assert!(!looks_like_codex_code_mode_host_unavailable(
+            "sandbox violation: permission denied"
+        ));
+        assert!(!looks_like_codex_code_mode_host_unavailable(
+            "codex-code-mode-host started"
+        ));
+    }
+
+    #[test]
+    fn codex_code_mode_host_unavailable_diagnostic_is_actionable() {
+        let msg = codex_code_mode_host_unavailable_diagnostic("  Code Mode is unavailable  ");
+        assert!(msg.contains("agent-doc install --skip-plugins"), "{msg}");
+        assert!(msg.contains("reinstall Codex"), "{msg}");
+        assert!(
+            msg.ends_with("Original error: Code Mode is unavailable"),
+            "{msg}"
+        );
     }
 
     #[test]

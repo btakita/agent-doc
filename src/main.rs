@@ -53,6 +53,7 @@ mod cancelled_trigger;
 mod captured_splice_verify;
 mod clean;
 mod cleanup_cmd;
+mod codex_code_mode_host;
 mod commands;
 mod conversation_holders;
 mod convert;

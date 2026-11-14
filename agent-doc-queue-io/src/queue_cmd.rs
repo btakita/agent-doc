@@ -2108,8 +2108,11 @@ pub fn prune_duplicates(
     truncated_prefix_line: Option<usize>,
 ) -> Result<()> {
     // Same single-writer lease as `prune-noise`: idle-watch and preflight
-    // defer across the authoritative read, plan, and converged write.
-    let _queue_edit_guard = apply.then(|| crate::queue_edit_owner::QueueEditGuard::acquire(file));
+    // defer across the authoritative read, plan, and converged write. A failed
+    // acquire fails the command: `--apply` never writes without the lock.
+    let _queue_edit_guard = apply
+        .then(|| crate::queue_edit_owner::QueueEditGuard::acquire(file))
+        .transpose()?;
     let content = effects.current_document_content(file, "queue_prune_duplicates")?;
     let plan = match truncated_prefix_line {
         Some(line) => {
@@ -6697,6 +6700,50 @@ mod prune_duplicates_cmd_tests {
         prune_duplicates(&effects, &file, true, Some(3)).unwrap();
         assert_eq!(effects.writes.get(), 1, "a second apply is a no-op");
         assert_eq!(effects.content.borrow().as_str(), written);
+    }
+
+    #[test]
+    fn prune_duplicates_apply_refuses_while_another_owner_holds_the_apply_lock() {
+        let source = "\
+<!-- agent:run id=\"main\" -->
+- 🚧 [#subagent:shell#1] If the claiming tmux pane for a document is in shell, start agent-doc.
+- 🚧 [#subagent:shell#1] If the claiming tmux pane for a document is in shell, start agent-doc.
+<!-- /agent:run -->
+";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, source).unwrap();
+        let effects = Mem {
+            content: std::cell::RefCell::new(source.to_string()),
+            writes: Cell::new(0),
+            expect_lease: Cell::new(false),
+        };
+        let holder = crate::queue_edit_owner::QueueEditGuard::acquire(&file).unwrap();
+        let holder_lease =
+            crate::queue_edit_owner::read_queue_edit_owner_lease(&file.to_string_lossy())
+                .expect("the other owner publishes its lease");
+
+        // The dry run takes no lock, so it still reports under contention.
+        prune_duplicates(&effects, &file, false, None).unwrap();
+        let error = prune_duplicates(&effects, &file, true, None).unwrap_err();
+        assert!(
+            error.to_string().contains("queue mutation deferred"),
+            "{error:#}"
+        );
+        assert_eq!(effects.writes.get(), 0, "a refused apply must not write");
+        assert_eq!(effects.content.borrow().as_str(), source);
+        assert_eq!(
+            crate::queue_edit_owner::read_queue_edit_owner_lease(&file.to_string_lossy())
+                .map(|lease| lease.holder),
+            Some(holder_lease.holder),
+            "the refused apply leaves the other owner's lease in place"
+        );
+
+        drop(holder);
+        effects.expect_lease.set(true);
+        prune_duplicates(&effects, &file, true, None).unwrap();
+        assert_eq!(effects.writes.get(), 1, "apply writes once the lock frees");
     }
 
     #[test]

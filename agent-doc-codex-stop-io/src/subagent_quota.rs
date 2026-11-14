@@ -171,19 +171,15 @@ fn observe_waiting_end(
     Ok(())
 }
 
+/// `#lostrowreportreopen`: the format is shared with the report path, which
+/// reads the recorded hand-back back out of this freeze.
 fn normal_end_reason(signal: &SubagentEnd) -> String {
-    let message = signal
-        .last_message
-        .as_deref()
-        .or(signal.structured_reason.as_deref())
-        .unwrap_or("no terminal handback was captured");
-    let message = message.split_whitespace().collect::<Vec<_>>().join(" ");
-    let message = message.chars().take(240).collect::<String>();
-    if message.contains(" is still running") {
-        format!("wrapper exited while a child task was still running: {message}")
-    } else {
-        format!("subagent ended before coordinator integration: {message}")
-    }
+    agent_doc_queue::queue_claim::subagent_end_freeze_reason(
+        signal
+            .last_message
+            .as_deref()
+            .or(signal.structured_reason.as_deref()),
+    )
 }
 
 pub(crate) fn subagent_stop_from_payload(

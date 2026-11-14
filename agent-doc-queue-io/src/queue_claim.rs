@@ -1695,50 +1695,64 @@ pub fn report_attempt_with_publication_state(
     Ok(claim)
 }
 
-/// `#inlinegatefalsereject`: reopen the exact attempt a goal-loop gate
-/// requeued, so a corrected hand-back from that same generation and worker can
-/// be reported. See
-/// [`agent_doc_queue::queue_claim::QueueClaimLedger::reopen_gate_requeued_attempt`].
-pub fn reopen_gate_requeued_attempt(
+/// Reopen one exact `Lost` attempt for its report (`#inlinegatefalsereject`,
+/// `#lostrowreportreopen`), so a hand-back from that same generation and
+/// worker can be reported. `gate_requeued` says a goal-loop gate requeued the
+/// attempt; otherwise the harness end-freeze must have recorded `response`.
+/// See
+/// [`agent_doc_queue::queue_claim::QueueClaimLedger::reopen_lost_attempt_for_report`].
+pub fn reopen_lost_attempt_for_report(
     file: &Path,
     item: &str,
     generation: u64,
     worker_id: &str,
+    gate_requeued: bool,
+    response: &str,
 ) -> Result<Option<QueueClaim>> {
-    let resolved = resolve_live_claim_target(file, item, "queue_claim_reopen_gate_requeue").ok();
+    let resolved = resolve_live_claim_target(file, item, "queue_claim_reopen_lost_report").ok();
     let target = resolved
         .as_ref()
         .map(|(target, _)| target.clone())
         .unwrap_or_else(|| item.to_string());
     let heads = resolved.map(|(_, heads)| heads);
     let now = now_secs();
+    let ttl = agent_doc_queue::queue_claim::DEFAULT_QUEUE_CLAIM_TTL_SECS;
     let reopened = mutate_ledger(file, |ledger| {
         if let Some(heads) = heads.as_ref() {
             log_followed(file, &ledger.follow_edits_in_view(now, heads));
         }
         Ok(ledger
-            .reopen_gate_requeued_attempt(
+            .reopen_lost_attempt_for_report(
                 &target,
                 generation,
                 worker_id,
+                gate_requeued,
+                response,
                 now,
-                agent_doc_queue::queue_claim::DEFAULT_QUEUE_CLAIM_TTL_SECS,
+                ttl,
             )
             .or_else(|| {
-                ledger.reopen_gate_requeued_attempt(
+                ledger.reopen_lost_attempt_for_report(
                     item,
                     generation,
                     worker_id,
+                    gate_requeued,
+                    response,
                     now,
-                    agent_doc_queue::queue_claim::DEFAULT_QUEUE_CLAIM_TTL_SECS,
+                    ttl,
                 )
             }))
     })?;
     if let Some(claim) = reopened.as_ref() {
+        let (reason, tag) = if gate_requeued {
+            ("gate_requeue", "#inlinegatefalsereject")
+        } else {
+            ("recorded_end_handback", "#lostrowreportreopen")
+        };
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "queue_claim_state state=running owner={} worker={} generation={} item_bytes={} reopened=gate_requeue (#inlinegatefalsereject)",
+                "queue_claim_state state=running owner={} worker={} generation={} item_bytes={} reopened={reason} ({tag})",
                 claim.owner,
                 worker_id,
                 claim.generation,
@@ -2028,13 +2042,24 @@ pub fn abandon(file: &Path, item: &str) -> Result<Option<QueueClaim>> {
 
 /// `release --requeue` is explicit evidence the worker no longer owns the
 /// attempt, so a bound attempt frees its pool slot (`#subagentworkpool`).
+///
+/// `#lostrowreportreopen`: a requeue of an attempt the harness already froze
+/// when its worker ended is still an abandon. It keeps that freeze's time and
+/// recorded hand-back as evidence and marks it abandoned, so the attempt no
+/// longer reads as a hand-back the coordinator has yet to report.
 fn record_abandoned_worker(claim: &mut QueueClaim, now: u64) {
-    if claim.worker.is_some() && claim.frozen.is_none() {
-        claim.frozen = Some(agent_doc_queue::queue_claim::QueueWorkerFreeze {
-            frozen_at_secs: now,
-            reason: agent_doc_queue::queue_claim::ABANDONED_REQUEUE_REASON.to_string(),
-            abandoned: true,
-        });
+    if claim.worker.is_none() {
+        return;
+    }
+    match claim.frozen.as_mut() {
+        Some(freeze) => freeze.abandoned = true,
+        None => {
+            claim.frozen = Some(agent_doc_queue::queue_claim::QueueWorkerFreeze {
+                frozen_at_secs: now,
+                reason: agent_doc_queue::queue_claim::ABANDONED_REQUEUE_REASON.to_string(),
+                abandoned: true,
+            });
+        }
     }
 }
 

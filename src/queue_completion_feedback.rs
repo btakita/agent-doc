@@ -2361,6 +2361,288 @@ mod tests {
         );
     }
 
+    // ---- `#lostrowreportreopen` -------------------------------------------
+
+    const PR412_ROW: &str =
+        "https://github.com/btakita/agent-doc/pull/412: #adversarial-pr [#q-23c8d4f70342]";
+    const PR412_HAND_BACK: &str =
+        include_str!("../agent-doc-queue/tests/fixtures/pr412_adversarial_handback.md");
+
+    /// The PR 412 session document: the row nested under its `### <PR url>`
+    /// heading. `marker` is the row's visible lifecycle prefix.
+    fn pr412_doc(dir: &Path, marker: &str) -> std::path::PathBuf {
+        let doc = dir.join("prs.md");
+        fs::write(
+            &doc,
+            format!(
+                "---\nagent_doc_session: sample-prs\nagent_doc_format: template\n---\n\n\
+                 <!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n\
+                 <!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n\n\
+                 <!-- agent:queue subagents -->\n\
+                 - ### https://github.com/btakita/agent-doc/pull/412\n\
+                 \x20 - {marker}#adversarial-pr [#q-23c8d4f70342]\n\
+                 <!-- /agent:queue -->\n"
+            ),
+        )
+        .unwrap();
+        doc
+    }
+
+    fn pr412_claim(doc: &Path) -> QueueClaim {
+        agent_doc_queue_io::queue_claim::load_ledger(doc)
+            .unwrap()
+            .claims
+            .into_iter()
+            .find(|claim| claim.owner == "subagent:adv412")
+            .unwrap()
+    }
+
+    /// The PR 412 hand-back with its root-thread receipt removed: the verdict
+    /// the old `#addressinline` gate reached on the real hand-back, which
+    /// counted the cited reply as a second root thread.
+    fn pr412_false_verdict() -> String {
+        PR412_HAND_BACK
+            .lines()
+            .filter(|line| !line.starts_with("THREAD-FIX-ON-HEAD"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The worker ended (the SubagentStop hook froze it with its hand-back),
+    /// and the same pass's lost-running recovery failed to continue it.
+    fn pr412_worker_ended(doc: &Path) {
+        agent_doc_queue_io::queue_claim::freeze_attempt(
+            doc,
+            PR412_ROW,
+            Some(1),
+            &agent_doc_queue::queue_claim::subagent_end_freeze_reason(Some(PR412_HAND_BACK)),
+        )
+        .unwrap();
+        agent_doc_queue_io::lost_running::recover_lost_running_automatically(doc, true).unwrap();
+        let ended = pr412_claim(doc);
+        assert_eq!(
+            ended.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Running
+        );
+        assert!(
+            ended
+                .lost_continue
+                .as_ref()
+                .is_some_and(|record| record.failed),
+            "{ended:#?}"
+        );
+    }
+
+    fn assert_reported_after_loss(outcome: &CompletionFeedbackOutcome, doc: &Path) {
+        assert_eq!(
+            outcome.claim.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Reported
+        );
+        assert_eq!(outcome.claim.generation, 1);
+        assert!(
+            outcome.claim.completion_recovered_after_loss,
+            "the report keeps the loss boundary visible (⚠️☑️)"
+        );
+        let content = fs::read_to_string(doc).unwrap();
+        assert!(content.contains("### Re: Subagent completed"), "{content}");
+    }
+
+    /// `#lostrowreportreopen`: the live PR 412 sequence, end to end. The
+    /// worker ended and the harness froze generation 1 BEFORE the coordinator
+    /// reported, so the gate's two false `#addressinline` requeues and the
+    /// coordinator's `queue release --requeue` all landed on an attempt that
+    /// already carried a harness freeze. PR 422's test skipped the freeze, so
+    /// its gate requeue wrote the abandon its reopen looked for; here the old
+    /// abandon never replaced the harness freeze and the reopen refused, and
+    /// report-complete then failed `generation 1 is terminal (Lost)`.
+    #[test]
+    fn lostrowreportreopen_pr412_sequence_reports_after_freeze_two_gate_requeues_and_release() {
+        let dir = tempfile::tempdir().unwrap();
+        inline_project(dir.path());
+        let doc = pr412_doc(dir.path(), "");
+        start_subagent(&doc, PR412_ROW, "subagent:adv412");
+        pr412_worker_ended(&doc);
+
+        let false_verdict = pr412_false_verdict();
+        for _ in 0..2 {
+            let requeue =
+                requeue_nonterminal_goal_hand_back(&doc, PR412_ROW, Some(1), &false_verdict)
+                    .unwrap()
+                    .expect("the false verdict requeues the attempt");
+            assert!(requeue.inline_threads_pending);
+            let lost = pr412_claim(&doc);
+            assert_eq!(
+                lost.state,
+                agent_doc_queue::queue_claim::QueueClaimState::Lost
+            );
+            assert!(
+                lost.frozen
+                    .as_ref()
+                    .is_some_and(|freeze| freeze.is_abandon()),
+                "a requeue of a harness-frozen attempt is still an abandon: {lost:#?}"
+            );
+        }
+        agent_doc_queue_io::claim_release_receipt::release_attempt(
+            &doc,
+            PR412_ROW,
+            agent_doc_queue_io::claim_release_receipt::ReleaseKind::Requeue,
+            Some(1),
+        )
+        .unwrap();
+
+        assert!(
+            requeue_nonterminal_goal_hand_back(&doc, PR412_ROW, Some(1), PR412_HAND_BACK)
+                .unwrap()
+                .is_none()
+        );
+        let outcome = report_complete(&doc, PR412_ROW, Some(1), None, None, PR412_HAND_BACK)
+            .expect("the gate-requeued generation reports its hand-back");
+        assert_reported_after_loss(&outcome, &doc);
+    }
+
+    /// `#lostrowreportreopen`: the state the live ledger actually holds after
+    /// the binaries before this fix ran that sequence. Generation 1 is `Lost`
+    /// from running, its freeze is still the harness end-freeze recording the
+    /// hand-back (the old requeue never marked it abandoned), its continue
+    /// failed, and no gate hand-off survives (the first post-422 report retired
+    /// it before refusing). The Stop hook demanded continue/retry for it.
+    ///
+    /// The row is closable: the freeze recorded the hand-back the coordinator
+    /// now reports. The Stop hook owes that report, and after it the `⚠️☑️`
+    /// row owes integration, never continue or retry.
+    #[test]
+    fn lostrowreportreopen_legacy_lost_row_with_recorded_hand_back_reports_and_stop_hook_agrees() {
+        let dir = tempfile::tempdir().unwrap();
+        inline_project(dir.path());
+        let doc = pr412_doc(dir.path(), "");
+        start_subagent(&doc, PR412_ROW, "subagent:adv412");
+        pr412_worker_ended(&doc);
+        let mut legacy = agent_doc_queue_io::queue_claim::load_ledger(&doc).unwrap();
+        for claim in &mut legacy.claims {
+            claim.mark_lost();
+        }
+        let root = agent_doc_fs::find_project_root(&doc).unwrap();
+        let conn = agent_doc_sqlite::state_store::open_state_db(&root).unwrap();
+        agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
+                document_hash: agent_doc_hash::path_hash(&doc).unwrap(),
+                state_kind: agent_doc_queue::queue_claim::QUEUE_CLAIMS_STATE_KIND.to_string(),
+                canonical_path: doc.canonicalize().unwrap().display().to_string(),
+                payload_json: serde_json::to_string(&legacy).unwrap(),
+                updated_at_secs: 0,
+            },
+        )
+        .unwrap();
+        drop(conn);
+        let lost = pr412_claim(&doc);
+        assert_eq!(
+            lost.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Lost
+        );
+        assert!(lost.lost_end_hand_back().is_some(), "{lost:#?}");
+        assert!(
+            agent_doc_queue_io::goal_loop_handoff::load(&doc)
+                .unwrap()
+                .handoffs
+                .is_empty()
+        );
+
+        // The Stop hook: report the recorded hand-back, not continue/retry.
+        pr412_doc(dir.path(), "⚠️🚧 [#subagent:adv412#1] ");
+        let content = fs::read_to_string(&doc).unwrap();
+        let evidence = agent_doc_queue_io::transient_closeout::closeout_evidence(&doc, &content);
+        assert_eq!(evidence.reportable_lost.len(), 1, "{evidence:#?}");
+        let failure =
+            agent_doc_queue::transient_closeout::normal_closeout_failure_with(&content, &evidence)
+                .unwrap()
+                .expect("the lost row still owes its report");
+        assert!(
+            failure.contains("report the hand-back its ended worker left"),
+            "{failure}"
+        );
+        assert!(
+            !failure.contains("continue the same generation"),
+            "{failure}"
+        );
+
+        // A different hand-back is not the one the freeze recorded, even when
+        // it passes the gate.
+        let other =
+            PR412_HAND_BACK.replacen("pullrequestreview-5897902287", "pullrequestreview-1", 1);
+        assert!(
+            requeue_nonterminal_goal_hand_back(&doc, PR412_ROW, Some(1), &other)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            pr412_claim(&doc).state,
+            agent_doc_queue::queue_claim::QueueClaimState::Lost,
+            "only the recorded hand-back reopens the attempt"
+        );
+        assert!(report_complete(&doc, PR412_ROW, Some(1), None, None, &other).is_err());
+
+        assert!(
+            requeue_nonterminal_goal_hand_back(&doc, PR412_ROW, Some(1), PR412_HAND_BACK)
+                .unwrap()
+                .is_none()
+        );
+        let outcome = report_complete(&doc, PR412_ROW, Some(1), None, None, PR412_HAND_BACK)
+            .expect("the recorded hand-back reports the lost generation");
+        assert_reported_after_loss(&outcome, &doc);
+
+        let reported = fs::read_to_string(&doc).unwrap();
+        let reported = reported.replace(
+            "⚠️🚧 [#subagent:adv412#1] #adversarial-pr",
+            "⚠️☑️ [#subagent:adv412#1] #adversarial-pr",
+        );
+        let content = reported;
+        let evidence = agent_doc_queue_io::transient_closeout::closeout_evidence(&doc, &content);
+        assert!(evidence.reportable_lost.is_empty(), "{evidence:#?}");
+        let failure =
+            agent_doc_queue::transient_closeout::normal_closeout_failure_with(&content, &evidence)
+                .unwrap()
+                .expect("a recovered report still owes integration");
+        assert!(
+            failure.contains("integrate the recovered report"),
+            "{failure}"
+        );
+        assert!(
+            !failure.contains("continue the same generation"),
+            "{failure}"
+        );
+    }
+
+    /// `#lostrowreportreopen`: a plain `queue release --requeue` of an attempt
+    /// the harness froze when its worker ended is a deliberate abandon. With
+    /// no gate verdict, its report stays refused even with the very hand-back
+    /// the freeze recorded.
+    #[test]
+    fn lostrowreportreopen_a_plain_requeue_after_the_end_freeze_does_not_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        inline_project(dir.path());
+        let doc = pr412_doc(dir.path(), "");
+        start_subagent(&doc, PR412_ROW, "subagent:adv412");
+        pr412_worker_ended(&doc);
+        agent_doc_queue_io::claim_release_receipt::release_attempt(
+            &doc,
+            PR412_ROW,
+            agent_doc_queue_io::claim_release_receipt::ReleaseKind::Requeue,
+            Some(1),
+        )
+        .unwrap();
+        let abandoned = pr412_claim(&doc);
+        assert!(abandoned.lost_end_hand_back().is_none(), "{abandoned:#?}");
+        assert!(
+            requeue_nonterminal_goal_hand_back(&doc, PR412_ROW, Some(1), PR412_HAND_BACK)
+                .unwrap()
+                .is_none()
+        );
+        let err = report_complete(&doc, PR412_ROW, Some(1), None, None, PR412_HAND_BACK)
+            .expect_err("an explicit abandon without a gate verdict stays refused");
+        assert!(err.to_string().contains("terminal (Lost)"), "{err:#}");
+    }
+
     fn start_subagent(doc: &Path, row: &str, owner: &str) {
         agent_doc_queue_io::queue_claim::claim(doc, row, owner, 600).unwrap();
         agent_doc_queue_io::queue_claim::start_attempt(

@@ -216,8 +216,11 @@ pub fn requeue_nonterminal_hand_back(
         && !inline_pending
         && (ordinary_empty || settled_inline_without_states || completes_order || address_lands)
     {
-        if completes_order || address_lands || settled_inline_without_states {
-            reopen_if_gate_requeued(file, &claim, generation)?;
+        let reportable = reopen_if_reportable_lost(file, &claim, generation, response)?;
+        // `#lostrowreportreopen`: the recorded hand-off is the gate-requeue
+        // proof a reopen needs. Retire it only once this report can land; a
+        // refused report keeps it for the next attempt.
+        if reportable && (completes_order || address_lands || settled_inline_without_states) {
             let identity = claim.identity.clone();
             let live = agent_doc_queue::queue_continuation::live_queue_head_identities(content);
             mutate(file, |ledger| {
@@ -300,27 +303,44 @@ pub fn requeue_nonterminal_hand_back(
     }))
 }
 
-/// `#inlinegatefalsereject`: a gate (`#goalpresetterminal`, `#reviewfixonhead`,
-/// `#addressinline`) requeued this exact generation and worker, marking it
-/// `Lost` and abandoned. Its corrected hand-back now completes the row, so
-/// reopen that attempt for the ordinary report. Without this the report is
-/// refused as terminal and the row waits for a new generation to redo
-/// finished work. A quota or prompt-pressure requeue is not a gate verdict
-/// and stays abandoned; a reclaim moved the generation and is not reopened.
-fn reopen_if_gate_requeued(file: &Path, claim: &QueueClaim, generation: Option<u64>) -> Result<()> {
+/// Reopen a `Lost` attempt whose hand-back now passes its gate, so the
+/// ordinary report can land (`#inlinegatefalsereject`, `#lostrowreportreopen`).
+/// Returns whether the claim is reportable: it was not `Lost`, or it reopened.
+///
+/// Two proofs reopen exactly this generation and worker:
+///
+/// - A gate (`#goalpresetterminal`, `#reviewfixonhead`, `#addressinline`)
+///   requeued it, recording a hand-off for that generation and worker. The
+///   gate's verdict is what lost the attempt, and this hand-back now
+///   satisfies the gate. A later plain `queue release --requeue` does not
+///   remove that hand-off, and the gate may have landed on an attempt the
+///   harness had already frozen when its worker ended.
+/// - The harness end-freeze recorded this hand-back as the worker's last
+///   message, and nothing abandoned the attempt since: the coordinator is
+///   reporting the hand-back the freeze said it may report.
+///
+/// A quota or prompt-pressure requeue is not a gate verdict, a plain
+/// `queue release --requeue` with neither proof is a deliberate abandon, and a
+/// reclaim moved the generation; none of them reopens.
+fn reopen_if_reportable_lost(
+    file: &Path,
+    claim: &QueueClaim,
+    generation: Option<u64>,
+    response: &str,
+) -> Result<bool> {
     if claim.state != agent_doc_queue::queue_claim::QueueClaimState::Lost {
-        return Ok(());
+        return Ok(true);
     }
     let Some(worker_id) = claim
         .worker
         .as_ref()
         .map(|worker| worker.worker_id.as_str())
     else {
-        return Ok(());
+        return Ok(false);
     };
     let generation = generation.unwrap_or(claim.generation);
     if generation != claim.generation {
-        return Ok(());
+        return Ok(false);
     }
     let ledger = load(file)?;
     let gate_requeued = ledger.handoffs.iter().any(|handoff| {
@@ -330,15 +350,15 @@ fn reopen_if_gate_requeued(file: &Path, claim: &QueueClaim, generation: Option<u
             && handoff.quota_block.is_none()
             && handoff.prompt_pressure.is_none()
     });
-    if gate_requeued {
-        crate::queue_claim::reopen_gate_requeued_attempt(
-            file,
-            &claim.item_text,
-            claim.generation,
-            worker_id,
-        )?;
-    }
-    Ok(())
+    Ok(crate::queue_claim::reopen_lost_attempt_for_report(
+        file,
+        &claim.item_text,
+        claim.generation,
+        worker_id,
+        gate_requeued,
+        response,
+    )?
+    .is_some())
 }
 
 /// `#promptpressure`: record an unfinished prompt hand-back and requeue the

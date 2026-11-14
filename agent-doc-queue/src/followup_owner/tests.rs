@@ -575,6 +575,15 @@ fn dependent_approval_phrasing_is_human_work() {
         ("Merge once PR #240 is approved by tmstorm", "approved by"),
         ("PR #240 must be approved before merging", "be approved"),
         ("Then let tmstorm approve PR #240", "have … approve"),
+        // A `so` that opens its clause states a consequence, not a purpose.
+        (
+            "CI is green, so tmstorm needs to approve PR #240",
+            "to approve",
+        ),
+        (
+            "Ask tmstorm to approve PR #240 so it can merge",
+            "to approve",
+        ),
     ] {
         assert_eq!(
             classify_action_item(item),
@@ -586,6 +595,12 @@ fn dependent_approval_phrasing_is_human_work() {
 
 /// The dependent approval forms read only inside the target's clause, and an
 /// approval that is the agent's subject matter stays agent work.
+///
+/// Re-review of #426 (review of 540d90f430), finding 1: an approval named as
+/// the outcome of the item's own work (a purpose clause after `so`, `so
+/// that`, or `in order to`), a description of how approval works (`how to
+/// approve`), a gate the agent configures (`make X require approval`), and an
+/// identifier written without backticks are all agent work.
 #[test]
 fn dependent_approval_forms_stay_inside_their_clause() {
     for item in [
@@ -595,6 +610,23 @@ fn dependent_approval_forms_stay_inside_their_clause() {
         "Wire the approved state into the badge",
         "Add the approval column; needs a migration",
         "Rename `needs_approval` in the client",
+        // Purpose clauses after the agent's own work.
+        "Fix the lint failure so the PR can be approved",
+        "Rebase PR #241 onto sdk-dev so it can be approved and merged",
+        "Get CI green on PR #240 so the reviewer can approve",
+        "Address review comments so the reviewer can approve",
+        "Fix the lint failure so that the PR can be approved",
+        "Fix the lint failure in order to get PR #240 approved",
+        "Update release.yml so the publish job no longer needs approval for dry runs",
+        // Workflow, docs, and code work.
+        "Document how to approve a release in RELEASING.md",
+        "Make the deploy-prod environment require approval in deploy.yml",
+        "Make the approve button accessible",
+        // Identifiers written without backticks.
+        "Add approved_by to the audit log",
+        "Rename needs_approval to requires_review",
+        "Fix get_approved_users for empty teams",
+        "Check is_admin before rendering the badge",
     ] {
         assert_eq!(
             classify_action_item(item),

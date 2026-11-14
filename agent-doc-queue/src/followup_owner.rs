@@ -231,14 +231,20 @@ const HUMAN_PHRASES: &[&str] = &[
 /// One dependent form of another person's approval: a `target` word preceded,
 /// within `reach` words of the same clause, by one of `leads` (`needs …
 /// approval`, `get … approved`, `should approve`), or, when `leads` is empty,
-/// followed by one of `follows` (`approved by`). The bare instruction
+/// followed by one of `follows` (`approved by`). A lead does not count when
+/// one of `unless` stands within `unless_reach` words before it in the same
+/// clause: `how to approve` describes the act, and `make X require approval`
+/// configures a gate, so neither waits on anyone. The bare instruction
 /// `Approve …` is [`HUMAN_CLAUSE_VERBS`]; these are the forms where the
-/// approval is someone else's act or a wait on it, in any clause position.
+/// approval is someone else's act or a wait on it, in any clause position
+/// except a purpose clause ([`purpose_clause_words`]).
 struct DependentApproval {
     targets: &'static [&'static str],
     leads: &'static [&'static str],
     reach: usize,
     follows: &'static [&'static str],
+    unless: &'static [&'static str],
+    unless_reach: usize,
     signal: &'static str,
 }
 
@@ -248,6 +254,15 @@ const APPROVE_MODALS: &[&str] = &[
     "should", "must", "will", "would", "can", "could", "may", "might", "shall",
 ];
 
+/// Question words before `to approve` that make it a description of the act
+/// (`Document how to approve a release`), not a wait on someone doing it.
+const APPROVE_QUESTION_WORDS: &[&str] = &["how", "when", "where", "whether", "what", "which"];
+
+/// Causative verbs before `require`/`need … approval` that make it a gate
+/// the agent configures (`Make the environment require approval`), not an
+/// approval a change is waiting on.
+const GATE_CAUSATIVES: &[&str] = &["make", "makes", "made", "making"];
+
 /// Dependent approval forms (`#humanfollowupowner`). A word joined by a
 /// hyphen stays one word, so `approval-flow` matches none of them.
 const DEPENDENT_APPROVALS: &[DependentApproval] = &[
@@ -256,6 +271,8 @@ const DEPENDENT_APPROVALS: &[DependentApproval] = &[
         leads: &["to"],
         reach: 1,
         follows: &[],
+        unless: APPROVE_QUESTION_WORDS,
+        unless_reach: 1,
         signal: "to approve",
     },
     DependentApproval {
@@ -263,13 +280,17 @@ const DEPENDENT_APPROVALS: &[DependentApproval] = &[
         leads: APPROVE_MODALS,
         reach: 1,
         follows: &[],
+        unless: &[],
+        unless_reach: 0,
         signal: "<modal> approve",
     },
     DependentApproval {
         targets: &["approve"],
-        leads: &["have", "has", "let", "lets", "make", "makes", "ask", "asks"],
+        leads: &["have", "has", "let", "lets", "ask", "asks"],
         reach: 3,
         follows: &[],
+        unless: &[],
+        unless_reach: 0,
         signal: "have … approve",
     },
     DependentApproval {
@@ -277,6 +298,8 @@ const DEPENDENT_APPROVALS: &[DependentApproval] = &[
         leads: &["need", "needs", "needed", "needing"],
         reach: 4,
         follows: &[],
+        unless: GATE_CAUSATIVES,
+        unless_reach: 4,
         signal: "needs … approval",
     },
     DependentApproval {
@@ -284,6 +307,8 @@ const DEPENDENT_APPROVALS: &[DependentApproval] = &[
         leads: &["require", "requires", "required", "requiring"],
         reach: 4,
         follows: &[],
+        unless: GATE_CAUSATIVES,
+        unless_reach: 4,
         signal: "requires … approval",
     },
     DependentApproval {
@@ -291,6 +316,8 @@ const DEPENDENT_APPROVALS: &[DependentApproval] = &[
         leads: &["await", "awaits", "awaiting", "wait", "waits", "waiting"],
         reach: 4,
         follows: &[],
+        unless: &[],
+        unless_reach: 0,
         signal: "awaiting … approval",
     },
     DependentApproval {
@@ -298,6 +325,8 @@ const DEPENDENT_APPROVALS: &[DependentApproval] = &[
         leads: &["s"],
         reach: 1,
         follows: &[],
+        unless: &[],
+        unless_reach: 0,
         signal: "'s approval",
     },
     DependentApproval {
@@ -305,6 +334,8 @@ const DEPENDENT_APPROVALS: &[DependentApproval] = &[
         leads: &[],
         reach: 0,
         follows: &["by"],
+        unless: &[],
+        unless_reach: 0,
         signal: "approved by",
     },
     DependentApproval {
@@ -312,6 +343,8 @@ const DEPENDENT_APPROVALS: &[DependentApproval] = &[
         leads: &["has", "have", "had"],
         reach: 1,
         follows: &[],
+        unless: &[],
+        unless_reach: 0,
         signal: "has approved",
     },
     DependentApproval {
@@ -319,6 +352,8 @@ const DEPENDENT_APPROVALS: &[DependentApproval] = &[
         leads: &["get", "gets", "got", "getting"],
         reach: 4,
         follows: &[],
+        unless: &[],
+        unless_reach: 0,
         signal: "get … approved",
     },
     DependentApproval {
@@ -326,15 +361,46 @@ const DEPENDENT_APPROVALS: &[DependentApproval] = &[
         leads: &["be", "been", "being"],
         reach: 1,
         follows: &[],
+        unless: &[],
+        unless_reach: 0,
         signal: "be approved",
     },
 ];
 
-/// The first [`DEPENDENT_APPROVALS`] form in `words` (from [`clause_words`]).
-/// A lead counts only inside the target's clause: the scan back from the
-/// target stops at the word that opens it.
-fn dependent_approval_signal(words: &[(&str, bool)]) -> Option<&'static str> {
+/// Whether each of `words` (from [`clause_words`]) sits in a purpose clause:
+/// after `so` (or `so that`) or `in order to`, up to the end of that clause.
+/// A purpose clause names the outcome of the item's own work (`Fix the lint
+/// failure so the PR can be approved`), so an approval there is not what the
+/// item waits on. A `so` that opens its clause (`CI is green, so tmstorm
+/// needs to approve`) states a consequence, not a purpose, and does not count.
+fn purpose_clause_words(words: &[(&str, bool)]) -> Vec<bool> {
+    let mut in_purpose = false;
+    let mut flags = Vec::with_capacity(words.len());
     for (index, (word, opens_clause)) in words.iter().enumerate() {
+        if *opens_clause {
+            in_purpose = false;
+        }
+        flags.push(in_purpose);
+        let in_order_to = *word == "order"
+            && index > 0
+            && words[index - 1].0 == "in"
+            && words.get(index + 1).is_some_and(|(next, _)| *next == "to");
+        if (*word == "so" && !opens_clause) || in_order_to {
+            in_purpose = true;
+        }
+    }
+    flags
+}
+
+/// The first [`DEPENDENT_APPROVALS`] form in `words` (from [`clause_words`])
+/// outside a purpose clause. A lead counts only inside the target's clause:
+/// the scan back from the target stops at the word that opens it.
+fn dependent_approval_signal(words: &[(&str, bool)]) -> Option<&'static str> {
+    let purpose = purpose_clause_words(words);
+    for (index, (word, opens_clause)) in words.iter().enumerate() {
+        if purpose[index] {
+            continue;
+        }
         for form in DEPENDENT_APPROVALS {
             if !form.targets.contains(word) {
                 continue;
@@ -349,8 +415,9 @@ fn dependent_approval_signal(words: &[(&str, bool)]) -> Option<&'static str> {
                 continue;
             }
             for back in 1..=form.reach.min(index) {
-                let (lead, lead_opens) = words[index - back];
-                if form.leads.contains(&lead) {
+                let lead_index = index - back;
+                let (lead, lead_opens) = words[lead_index];
+                if form.leads.contains(&lead) && !lead_is_cancelled(words, lead_index, form) {
                     return Some(form.signal);
                 }
                 if lead_opens {
@@ -362,6 +429,24 @@ fn dependent_approval_signal(words: &[(&str, bool)]) -> Option<&'static str> {
     None
 }
 
+/// Whether one of `form.unless` stands within `form.unless_reach` words
+/// before the lead at `lead_index`, inside the lead's clause.
+fn lead_is_cancelled(words: &[(&str, bool)], lead_index: usize, form: &DependentApproval) -> bool {
+    if words[lead_index].1 {
+        return false;
+    }
+    for back in 1..=form.unless_reach.min(lead_index) {
+        let (word, opens_clause) = words[lead_index - back];
+        if form.unless.contains(&word) {
+            return true;
+        }
+        if opens_clause {
+            break;
+        }
+    }
+    false
+}
+
 /// The first phrase in an unlabelled action item that names an action only a
 /// person can take, or `None` when it names none (`#humanfollowupowner`).
 ///
@@ -371,8 +456,8 @@ fn dependent_approval_signal(words: &[(&str, bool)]) -> Option<&'static str> {
 /// from`, `cannot approve`, `someone other than`, `another reviewer`, and the
 /// dependent forms of [`DEPENDENT_APPROVALS`]: `to approve`, `should
 /// approve`, `have someone approve`, `needs/requires/awaiting … approval`,
-/// `'s approval`, `approved by`, `has approved`, `get … approved`), a
-/// setting only an owner or admin can change (`org owner`, `repo owner`,
+/// `'s approval`, `approved by`, `has approved`, `get … approved`, except
+/// in a purpose clause such as `so the PR can be approved`), a setting only an owner or admin can change (`org owner`, `repo owner`,
 /// `admin`), an operator decision (`decide`, `ask the operator`, `operator
 /// confirms`), authority the agent does not hold (`not authorized`,
 /// `Authorize …`), and a sign-in or credential check (`sign in`, `log into`,
@@ -381,7 +466,8 @@ fn dependent_approval_signal(words: &[(&str, bool)]) -> Option<&'static str> {
 /// subject matter is a signal only in a human-action position: `confirm`,
 /// `authorization`, `approval`, `login`, and `password` alone are not
 /// (`Confirm hosted CI is green`, `Fix the authorization header`, `Update
-/// the approval-flow docs`). Plain agent verbs (`merge`, `review`, `rebase`,
+/// the approval-flow docs`), and neither is an identifier written without
+/// backticks (`needs_approval`). Plain agent verbs (`merge`, `review`, `rebase`,
 /// `fix`, `address`) are not signals: "address the review" and "rebase after
 /// #240 merges" are agent work.
 pub fn human_owner_signal(item: &str) -> Option<&'static str> {
@@ -412,8 +498,11 @@ pub fn human_owner_signal(item: &str) -> Option<&'static str> {
         .or_else(|| dependent_approval_signal(&words))
 }
 
-/// The words of `text` (ASCII alphanumerics and inner hyphens), each with
-/// whether it opens a clause ([`HUMAN_CLAUSE_VERBS`]).
+/// The words of `text` (ASCII alphanumerics and inner hyphens and
+/// underscores), each with whether it opens a clause ([`HUMAN_CLAUSE_VERBS`]).
+/// An underscore joins a word like a hyphen, so an identifier written without
+/// backticks (`needs_approval`, `approved_by`, `is_admin`) is one word that
+/// matches no signal.
 fn clause_words(text: &str) -> Vec<(&str, bool)> {
     let mut words = Vec::new();
     let mut opens_clause = true;
@@ -422,12 +511,12 @@ fn clause_words(text: &str) -> Vec<(&str, bool)> {
         .char_indices()
         .chain(std::iter::once((text.len(), ' ')))
     {
-        if ch.is_ascii_alphanumeric() || ch == '-' {
+        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
             start.get_or_insert(index);
             continue;
         }
         if let Some(begin) = start.take() {
-            let word = text[begin..index].trim_matches('-');
+            let word = text[begin..index].trim_matches(|c| c == '-' || c == '_');
             if !word.is_empty() {
                 words.push((word, opens_clause));
                 opens_clause = CLAUSE_JOINERS.contains(&word);

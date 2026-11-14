@@ -281,6 +281,61 @@ impl QueueWorkerFreeze {
     pub fn is_abandon(&self) -> bool {
         self.abandoned || self.reason == ABANDONED_REQUEUE_REASON
     }
+
+    /// The worker's hand-back excerpt a harness end-freeze recorded
+    /// (`#lostrowreportreopen`), whitespace-normalized and at most
+    /// [`SUBAGENT_END_HANDBACK_EXCERPT_CHARS`] characters. `None` for an
+    /// abandon, a wrapper exit, or an end that captured no hand-back.
+    pub fn recorded_end_handback(&self) -> Option<&str> {
+        if self.is_abandon() {
+            return None;
+        }
+        let excerpt = self
+            .reason
+            .strip_prefix(SUBAGENT_END_HANDBACK_REASON_PREFIX)?
+            .trim();
+        (!excerpt.is_empty() && excerpt != NO_TERMINAL_HANDBACK_CAPTURED).then_some(excerpt)
+    }
+}
+
+/// How a harness end-freeze reason opens when the worker ended with a
+/// hand-back the coordinator has not reported yet (`#subagentworkpool`).
+pub const SUBAGENT_END_HANDBACK_REASON_PREFIX: &str =
+    "subagent ended before coordinator integration: ";
+
+/// The hand-back text an end-freeze records when the harness captured none.
+pub const NO_TERMINAL_HANDBACK_CAPTURED: &str = "no terminal handback was captured";
+
+/// How many characters of the worker's last message an end-freeze keeps.
+pub const SUBAGENT_END_HANDBACK_EXCERPT_CHARS: usize = 240;
+
+/// The freeze reason for a worker that ended with `message` as its last
+/// message. The message is whitespace-normalized and cut to
+/// [`SUBAGENT_END_HANDBACK_EXCERPT_CHARS`] characters. A message that says a
+/// child task is still running is a wrapper exit, not a hand-back.
+pub fn subagent_end_freeze_reason(message: Option<&str>) -> String {
+    let message = normalize_hand_back_whitespace(message.unwrap_or(NO_TERMINAL_HANDBACK_CAPTURED));
+    let message = message
+        .chars()
+        .take(SUBAGENT_END_HANDBACK_EXCERPT_CHARS)
+        .collect::<String>();
+    if message.contains(" is still running") {
+        format!("wrapper exited while a child task was still running: {message}")
+    } else {
+        format!("{SUBAGENT_END_HANDBACK_REASON_PREFIX}{message}")
+    }
+}
+
+fn normalize_hand_back_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Whether `response` is the hand-back an end-freeze recorded as `excerpt`
+/// (`#lostrowreportreopen`): after whitespace normalization the response
+/// begins with the whole excerpt.
+pub fn hand_back_matches_recorded_end(excerpt: &str, response: &str) -> bool {
+    let excerpt = normalize_hand_back_whitespace(excerpt);
+    !excerpt.is_empty() && normalize_hand_back_whitespace(response).starts_with(&excerpt)
 }
 
 fn is_zero(value: &u64) -> bool {
@@ -797,6 +852,24 @@ impl QueueClaim {
                 .as_ref()
                 .is_some_and(|freeze| !freeze.is_abandon())
             && matches!(self.state, QueueClaimState::Running | QueueClaimState::Lost)
+    }
+
+    /// The hand-back excerpt of a `Lost` attempt whose worker ended with a
+    /// hand-back the harness recorded, when nothing abandoned the attempt
+    /// since (`#lostrowreportreopen`). Such an attempt is reportable: the
+    /// coordinator owes `queue report-complete` with that hand-back, not a
+    /// continue of the ended worker or a new generation. `None` for a quota
+    /// stop, a recovered completion, an abandon, or an end with no hand-back.
+    pub fn lost_end_hand_back(&self) -> Option<&str> {
+        if self.state != QueueClaimState::Lost
+            || self.worker.is_none()
+            || self.completion_recovered_after_loss
+            || self.quota_block.is_some()
+            || self.lost_from == Some(QueueClaimState::QuotaBlocked)
+        {
+            return None;
+        }
+        self.frozen.as_ref()?.recorded_end_handback()
     }
 
     /// The bound worker still owns this attempt, so a lapsed refresh must not
@@ -2016,24 +2089,35 @@ impl QueueClaimLedger {
         Ok(claim.clone())
     }
 
-    /// `#inlinegatefalsereject`: reopen the exact attempt a goal-loop gate
-    /// requeued, so a later hand-back from that same generation and worker
-    /// that now satisfies the gate can be reported.
+    /// Reopen one exact `Lost` attempt so its hand-back can be reported
+    /// (`#inlinegatefalsereject`, `#lostrowreportreopen`).
     ///
-    /// The gate's requeue marks the attempt `Lost` and abandoned. Without
-    /// this, every later report of that generation is refused as terminal,
-    /// and the row stays on `⚠️🚧` until a new generation repeats work that
-    /// already finished. Only an abandoned `Lost` attempt of exactly
-    /// `generation` and `worker_id` reopens: a reclaim moved the generation,
-    /// and another worker's attempt is not this one. The reopened attempt is
-    /// `Running` with `completion_recovered_after_loss` set, so its report
-    /// still shows the loss boundary (`⚠️☑️`). Returns `None` when nothing
-    /// matched.
-    pub fn reopen_gate_requeued_attempt(
+    /// Without this, every later report of that generation is refused as
+    /// terminal, and the row stays on `⚠️🚧` until a new generation repeats
+    /// work that already finished. The attempt must be exactly `generation`
+    /// and `worker_id`, `Lost`, and not stopped on a quota (a reclaim moved
+    /// the generation, and another worker's attempt is not this one). One of
+    /// two proofs must hold:
+    ///
+    /// - `gate_requeued`: a goal-loop gate (`#goalpresetterminal`,
+    ///   `#reviewfixonhead`, `#addressinline`) requeued this exact generation
+    ///   and worker. Its freeze is the gate's abandon, or the harness
+    ///   end-freeze it landed on when the worker had already ended.
+    /// - The harness end-freeze recorded `response` as the worker's hand-back
+    ///   ([`QueueClaim::lost_end_hand_back`]) and no abandon replaced it.
+    ///
+    /// A plain `queue release --requeue` with neither proof stays refused.
+    /// The reopened attempt is `Running` with `completion_recovered_after_loss`
+    /// set, so its report still shows the loss boundary (`⚠️☑️`). Returns
+    /// `None` when nothing matched.
+    #[allow(clippy::too_many_arguments)]
+    pub fn reopen_lost_attempt_for_report(
         &mut self,
         item: &str,
         generation: u64,
         worker_id: &str,
+        gate_requeued: bool,
+        response: &str,
         now_secs: u64,
         ttl_secs: u64,
     ) -> Option<QueueClaim> {
@@ -2043,15 +2127,19 @@ impl QueueClaimLedger {
             .worker
             .as_ref()
             .is_some_and(|worker| worker.worker_id == worker_id);
-        let abandoned = claim
-            .frozen
-            .as_ref()
-            .is_some_and(QueueWorkerFreeze::is_abandon);
         if claim.generation != generation
             || claim.state != QueueClaimState::Lost
             || !worker_matches
-            || !abandoned
+            || claim.quota_block.is_some()
+            || claim.lost_from == Some(QueueClaimState::QuotaBlocked)
         {
+            return None;
+        }
+        let gate_proof = gate_requeued && claim.frozen.is_some();
+        let recorded_proof = claim
+            .lost_end_hand_back()
+            .is_some_and(|excerpt| hand_back_matches_recorded_end(excerpt, response));
+        if !gate_proof && !recorded_proof {
             return None;
         }
         claim.state = QueueClaimState::Running;
@@ -3987,6 +4075,110 @@ impl ClaimedQueueItems {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#lostrowreportreopen`: the end-freeze the SubagentStop hook writes
+    /// records the hand-back's opening, and only the same hand-back matches it.
+    #[test]
+    fn end_freeze_records_the_hand_back_that_reopens_a_lost_attempt() {
+        let hand_back = "REVIEW-CLEAN https://github.com/o/r/pull/1#pullrequestreview-9 base=a head=b cycles=2\n\n\
+                         THREAD-FIX-ON-HEAD https://github.com/o/r/pull/1#discussion_r1 head=b resolved\n\n"
+            .repeat(4);
+        let freeze = QueueWorkerFreeze {
+            frozen_at_secs: 10,
+            reason: subagent_end_freeze_reason(Some(&hand_back)),
+            abandoned: false,
+        };
+        let excerpt = freeze
+            .recorded_end_handback()
+            .expect("a recorded hand-back");
+        assert_eq!(excerpt.chars().count(), SUBAGENT_END_HANDBACK_EXCERPT_CHARS);
+        assert!(hand_back_matches_recorded_end(excerpt, &hand_back));
+        assert!(hand_back_matches_recorded_end(
+            excerpt,
+            &format!("  {}", hand_back.replace("\n\n", "\n"))
+        ));
+        assert!(!hand_back_matches_recorded_end(
+            excerpt,
+            &hand_back.replacen("cycles=2", "cycles=3", 1)
+        ));
+
+        let abandoned = QueueWorkerFreeze {
+            abandoned: true,
+            ..freeze.clone()
+        };
+        assert!(abandoned.recorded_end_handback().is_none());
+        for reason in [
+            subagent_end_freeze_reason(None),
+            subagent_end_freeze_reason(Some("Task abc is still running. Use /codex:status.")),
+            ABANDONED_REQUEUE_REASON.to_string(),
+        ] {
+            let freeze = QueueWorkerFreeze {
+                frozen_at_secs: 10,
+                reason,
+                abandoned: false,
+            };
+            assert!(freeze.recorded_end_handback().is_none(), "{freeze:?}");
+        }
+
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim("do [#ended]", "subagent:ended", 1, 60);
+        let claim = &mut ledger.claims[0];
+        claim.state = QueueClaimState::Running;
+        claim.worker = Some(QueueWorkerBinding {
+            worker_id: "worker-1".into(),
+            started_at_secs: 2,
+        });
+        claim.frozen = Some(freeze);
+        claim.mark_lost();
+        assert!(ledger.claims[0].lost_end_hand_back().is_some());
+        let generation = ledger.claims[0].generation;
+        for (worker, response) in [
+            ("worker-2", hand_back.as_str()),
+            ("worker-1", "REVIEW-CLEAN some other hand-back"),
+        ] {
+            assert!(
+                ledger
+                    .reopen_lost_attempt_for_report(
+                        "do [#ended]",
+                        generation,
+                        worker,
+                        false,
+                        response,
+                        5,
+                        60
+                    )
+                    .is_none()
+            );
+        }
+        assert!(
+            ledger
+                .reopen_lost_attempt_for_report(
+                    "do [#ended]",
+                    generation + 1,
+                    "worker-1",
+                    true,
+                    &hand_back,
+                    5,
+                    60
+                )
+                .is_none(),
+            "a reclaimed generation is not this attempt"
+        );
+        let reopened = ledger
+            .reopen_lost_attempt_for_report(
+                "do [#ended]",
+                generation,
+                "worker-1",
+                false,
+                &hand_back,
+                5,
+                60,
+            )
+            .expect("the recorded hand-back reopens its own attempt");
+        assert_eq!(reopened.state, QueueClaimState::Running);
+        assert!(reopened.completion_recovered_after_loss);
+        assert!(reopened.frozen.is_none());
+    }
 
     /// A completion cell recorded from the claim's nest vector still names the
     /// row after preflight stamps `⟦effect:N⟧` and `[#q-…]`. The equal leaf

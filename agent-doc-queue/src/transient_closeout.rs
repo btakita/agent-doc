@@ -112,6 +112,11 @@ pub struct CloseoutEvidence {
     pub fresh_claims: HashMap<QueueItemIdentity, FreshClaim>,
     /// Head texts that a closed schedule window holds back.
     pub schedule_held_heads: HashSet<String>,
+    /// Work identities whose `Lost` attempt holds an ended worker's recorded,
+    /// unreported hand-back (`#lostrowreportreopen`,
+    /// [`crate::queue_claim::QueueClaim::lost_end_hand_back`]). The row owes a
+    /// report of that hand-back, not a continue or a new generation.
+    pub reportable_lost: HashSet<QueueItemIdentity>,
 }
 
 /// Every live transient row, split into the debts that refuse a normal
@@ -196,10 +201,12 @@ pub fn owed_closeout_transition(marker: QueueLifecycleMarker) -> Option<&'static
         }
         QueueLifecycleMarker::Lost
         | QueueLifecycleMarker::LostClaimed
-        | QueueLifecycleMarker::LostRunning
-        | QueueLifecycleMarker::LostReported => {
+        | QueueLifecycleMarker::LostRunning => {
             "continue the same generation and worker; if continue fails, retry a new generation in this turn so the row leaves Lost"
         }
+        // `#lostrowreportreopen`: the worker's result is already reported.
+        // There is no worker to continue and no work for a new generation.
+        QueueLifecycleMarker::LostReported => OWED_LOST_REPORTED,
         QueueLifecycleMarker::Reconciling => {
             "reconcile the row or close it; a strike retires the completion cell"
         }
@@ -222,6 +229,13 @@ fn owed_stale_worker_transition(marker: QueueLifecycleMarker) -> &'static str {
         }
     }
 }
+
+/// `#lostrowreportreopen`: what a `⚠️☑️` row owes.
+const OWED_LOST_REPORTED: &str = "integrate the recovered report: the worker's result is already reported across a lost attempt, so do not continue the worker or retry a new generation; integrate it and strike the row (or `agent-doc queue consume --ack-text <row> --ack-owner <owner#generation>`)";
+
+/// `#lostrowreportreopen`: what a `⚠️🚧` row owes when its ended worker's
+/// hand-back is recorded and unreported.
+const OWED_LOST_RECORDED_HANDBACK: &str = "report the hand-back its ended worker left: run `agent-doc queue report-complete` for this exact generation with that hand-back (the freeze recorded its opening); do not continue the ended worker or retry a new generation for finished work";
 
 const OWED_OPERATOR_RECORD: &str = "record this row's operator-request packet in agent:exchange and its open agent:todo action, or act on the operator's answer; a 🙋 row waits on the operator only once both are recorded";
 
@@ -343,6 +357,18 @@ pub fn assess_transient_closeout(
                             .debts
                             .push(debt(owed_stale_worker_transition(marker)));
                     }
+                }
+                QueueLifecycleMarker::Lost
+                | QueueLifecycleMarker::LostClaimed
+                | QueueLifecycleMarker::LostRunning
+                    if !evidence.reportable_lost.is_empty()
+                        && evidence.reportable_lost.contains(
+                            &crate::queue_claim::claim_identity_at(&entries, index).unwrap_or_else(
+                                || crate::queue_claim::claim_identity(&prompt.text),
+                            ),
+                        ) =>
+                {
+                    assessment.debts.push(debt(OWED_LOST_RECORDED_HANDBACK));
                 }
                 QueueLifecycleMarker::Pending | QueueLifecycleMarker::Reported
                     if operator == Some(true) =>
@@ -515,6 +541,10 @@ mod tests {
         ));
         assert!(
             failure.contains("integrate the report or otherwise leave the reported-but-open state")
+        );
+        assert!(
+            failure.contains("- row ⚠️☑️ lost worker done: integrate the recovered report"),
+            "a recovered report is integrated, never continued or retried (#lostrowreportreopen): {failure}"
         );
         assert!(
             failure.contains("reconcile the row or close it; a strike retires the completion cell")

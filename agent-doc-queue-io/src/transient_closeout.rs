@@ -19,22 +19,33 @@ use agent_doc_queue::transient_closeout::{
 /// schedule state without writing either. An unreadable ledger proves no
 /// claim fresh, so its rows keep refusing.
 pub fn closeout_evidence_at(file: &Path, content: &str, now_secs: u64) -> CloseoutEvidence {
-    let fresh_claims = match crate::queue_claim::load_ledger_following_read_only(file, content) {
+    let (fresh_claims, reportable_lost) = match crate::queue_claim::load_ledger_following_read_only(
+        file, content,
+    ) {
         Ok(ledger) => {
             let frozen_secs = crate::subagent_pool::frozen_secs();
-            ledger
+            let fresh = ledger
                 .claims
-                .into_iter()
+                .iter()
                 .filter_map(|claim| {
                     fresh_claim_phase(
-                        &claim,
+                        claim,
                         now_secs,
                         frozen_secs,
                         agent_doc_queue::queue_claim::DISPATCH_EVIDENCE_GRACE_SECS,
                     )
-                    .map(|phase| (claim.identity, phase))
+                    .map(|phase| (claim.identity.clone(), phase))
                 })
-                .collect()
+                .collect();
+            // `#lostrowreportreopen`: an ended worker's recorded,
+            // unreported hand-back owes a report, not continue or retry.
+            let reportable = ledger
+                .claims
+                .iter()
+                .filter(|claim| claim.lost_end_hand_back().is_some())
+                .map(|claim| claim.identity.clone())
+                .collect();
+            (fresh, reportable)
         }
         Err(err) => {
             eprintln!(
@@ -50,6 +61,7 @@ pub fn closeout_evidence_at(file: &Path, content: &str, now_secs: u64) -> Closeo
     CloseoutEvidence {
         fresh_claims,
         schedule_held_heads,
+        reportable_lost,
     }
 }
 

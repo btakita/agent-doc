@@ -244,19 +244,25 @@ mod tests {
             "harness reported the worker ended",
         )
         .unwrap();
-        let abandoned = crate::queue_claim::abandon_attempt(&file, item, Some(claimed.generation))
-            .unwrap()
-            .expect("frozen attempt is retained as lost");
-        assert_eq!(abandoned.state, QueueClaimState::Lost);
+        // A Lost attempt that still carries the harness freeze. An explicit
+        // requeue no longer produces this state: it marks the freeze
+        // abandoned (`#lostrowreportreopen`). Ledgers written before that
+        // still hold it.
+        let lost = crate::queue_claim::mutate_ledger(&file, |ledger| {
+            let claim = &mut ledger.claims[0];
+            claim.mark_lost();
+            Ok(claim.clone())
+        })
+        .unwrap();
+        assert_eq!(lost.state, QueueClaimState::Lost);
         assert!(
-            abandoned
-                .frozen
+            lost.frozen
                 .as_ref()
                 .is_some_and(|freeze| !freeze.is_abandon()),
-            "an existing harness freeze is not rewritten into an abandon"
+            "the harness freeze is still not an abandon"
         );
         assert!(!agent_doc_queue::lost_running_recovery::retry_authorized(
-            &abandoned
+            &lost
         ));
 
         let applied = recover_lost_running_automatically(&file, true).unwrap();

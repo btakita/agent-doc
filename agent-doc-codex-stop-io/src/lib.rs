@@ -170,6 +170,55 @@ impl ClaudeStopContinuation {
     }
 }
 
+/// What the Claude/Grok Stop hook answers for a parsed payload.
+///
+/// `Allow` may carry a `systemMessage`: Claude Code shows that top-level field
+/// to the operator and still ends the turn, because there is no `decision`.
+/// `#stophookactiveguard` uses it when the transient-closeout gate releases an
+/// unchanged debt set, so the release is visible outside `ops.log`.
+#[derive(Debug, PartialEq, Eq)]
+enum ClaudeStopAnswer {
+    Continue(ClaudeStopContinuation),
+    Allow { system_message: Option<String> },
+}
+
+impl ClaudeStopAnswer {
+    fn allow() -> Self {
+        Self::Allow {
+            system_message: None,
+        }
+    }
+
+    fn is_plain_allow(&self) -> bool {
+        matches!(
+            self,
+            Self::Allow {
+                system_message: None
+            }
+        )
+    }
+
+    fn to_hook_output(&self) -> serde_json::Value {
+        match self {
+            Self::Continue(continuation) => continuation.to_hook_output(),
+            Self::Allow {
+                system_message: None,
+            } => serde_json::json!({}),
+            Self::Allow {
+                system_message: Some(message),
+            } => serde_json::json!({ "systemMessage": message }),
+        }
+    }
+
+    #[cfg(test)]
+    fn into_continuation(self) -> Option<ClaudeStopContinuation> {
+        match self {
+            Self::Continue(continuation) => Some(continuation),
+            Self::Allow { .. } => None,
+        }
+    }
+}
+
 /// Semantic outcome of a Codex Stop decision.
 ///
 /// The wire protocol unfortunately spells [`Self::ContinueTurn`] as
@@ -624,14 +673,9 @@ fn claude_stop_response_with_quota(
 
     let (response, quota) = match serde_json::from_value::<ClaudeStopInput>(envelope)
         .context("parse Claude Stop JSON")
-        .and_then(|input| apply_claude_stop(&input))
+        .and_then(|input| claude_stop_answer(&input))
     {
-        Ok(response) => (
-            response
-                .map(|response| response.to_hook_output())
-                .unwrap_or_else(|| serde_json::json!({})),
-            quota,
-        ),
+        Ok(answer) => (answer.to_hook_output(), quota),
         // Failing closed is right the FIRST time: the operator needs to hear
         // that the continuation check could not run. Repeating it is not.
         Err(err) if stop_hook_active => {
@@ -660,14 +704,31 @@ fn claude_stop_response_with_quota(
     Ok((response, quota))
 }
 
-fn apply_claude_stop(input: &ClaudeStopInput) -> Result<Option<ClaudeStopContinuation>> {
+fn claude_stop_answer(input: &ClaudeStopInput) -> Result<ClaudeStopAnswer> {
     if input.is_observe_only() {
-        return Ok(None);
+        return Ok(ClaudeStopAnswer::allow());
     }
-    apply_claude_stop_with_drain_readiness(
+    claude_stop_answer_with_drain_readiness(
         input,
         agent_doc_controller_io::project_controller::supervisor_drain_readiness_for_doc,
     )
+}
+
+/// [`claude_stop_answer`] reduced to the continuation, for tests that only
+/// care whether the turn is held open.
+#[cfg(test)]
+fn apply_claude_stop(input: &ClaudeStopInput) -> Result<Option<ClaudeStopContinuation>> {
+    claude_stop_answer(input).map(ClaudeStopAnswer::into_continuation)
+}
+
+/// [`claude_stop_answer_with_drain_readiness`] reduced to the continuation.
+#[cfg(test)]
+fn apply_claude_stop_with_drain_readiness(
+    input: &ClaudeStopInput,
+    drain_readiness: impl Fn(&Path) -> agent_doc_controller::status::SupervisorDrainReadiness,
+) -> Result<Option<ClaudeStopContinuation>> {
+    claude_stop_answer_with_drain_readiness(input, drain_readiness)
+        .map(ClaudeStopAnswer::into_continuation)
 }
 
 /// Whether a previous queue handoff to the supervisor is still undrained.
@@ -1341,18 +1402,40 @@ fn status_sync_synced_payload_for_checkpoint(
     Some(synced)
 }
 
-/// [`apply_claude_stop`] with the supervisor drain-readiness probe injected.
-fn apply_claude_stop_with_drain_readiness(
+/// [`claude_stop_answer`] with the supervisor drain-readiness probe injected.
+fn claude_stop_answer_with_drain_readiness(
     input: &ClaudeStopInput,
     drain_readiness: impl Fn(&Path) -> agent_doc_controller::status::SupervisorDrainReadiness,
-) -> Result<Option<ClaudeStopContinuation>> {
+) -> Result<ClaudeStopAnswer> {
     let cwd = PathBuf::from(&input.cwd);
     let Some((_loaded_root, state)) = load_bound_session_for_stop(&cwd, &input.session_id)? else {
-        return Ok(None);
+        return Ok(ClaudeStopAnswer::allow());
     };
     let file = PathBuf::from(&state.doc_path);
     if !file.exists() {
-        return Ok(None);
+        return Ok(ClaudeStopAnswer::allow());
+    }
+    // `#stophookactiveguard`: the transient-closeout refusal record is
+    // turn-scoped. `stop_hook_active = false` marks this turn's first Stop, and
+    // any gate below may answer it (a queue or steering continuation, a
+    // reported-writeback hold, the final status-sync checkpoint), so the
+    // transient gate might first run on a recursive Stop. Clearing here means
+    // only a refusal issued since this Stop can release an unchanged debt set;
+    // a record from an earlier turn of the same session never does. A failed
+    // clear propagates: a stale record that survived it could allow later, and
+    // on a first Stop the hook-error path refuses and reports the failure.
+    if !input.stop_hook_active
+        && agent_doc_queue_io::transient_closeout_refusal::clear(&file).with_context(|| {
+            format!(
+                "clear the previous turn's transient-closeout refusal for {} (#stophookactiveguard)",
+                file.display()
+            )
+        })?
+    {
+        agent_doc_ops_log_io::log_op(
+            &file,
+            "claude_stop_transient_closeout_refusal_cleared reason=turn_first_stop (#stophookactiveguard)",
+        );
     }
 
     // `#stopneedsclosedcycle`: the marker and the stall projection are both
@@ -1382,15 +1465,17 @@ fn apply_claude_stop_with_drain_readiness(
         if cycle
             .as_ref()
             .is_some_and(|cycle| cycle.phase == agent_doc_turn::CyclePhase::PreflightStarted)
-            && let Some(continuation) = transient_turn_end_continuation(input, &file)?
         {
-            return Ok(Some(continuation));
+            let answer = transient_turn_end_continuation(input, &file)?;
+            if !answer.is_plain_allow() {
+                return Ok(answer);
+            }
         }
         agent_doc_ops_log_io::log_op(
             &file,
             "claude_stop_queue_continuation_skipped reason=cycle_open action=allow_final_answer",
         );
-        return Ok(None);
+        return Ok(ClaudeStopAnswer::allow());
     }
     // `#stopnoresponserun`: a closed cycle that never captured a response
     // answered nothing, so it cannot have drained a head. The stale-lock repair
@@ -1410,7 +1495,7 @@ fn apply_claude_stop_with_drain_readiness(
             &file,
             "claude_stop_queue_continuation_skipped reason=run_captured_no_response action=allow_final_answer",
         );
-        return Ok(None);
+        return Ok(ClaudeStopAnswer::allow());
     }
     // The run this stop is deciding about: the cycle that has just closed. A
     // continuation request is a request that THIS run be followed by another,
@@ -1420,18 +1505,20 @@ fn apply_claude_stop_with_drain_readiness(
     if let Some(continuation) =
         claude_queue_continuation(input, &file, run_id.as_deref(), &drain_readiness)?
     {
-        return Ok(Some(continuation));
+        return Ok(ClaudeStopAnswer::Continue(continuation));
     }
     if let Some(continuation) =
         claude_steering_continuation(input, &file, run_id.as_deref(), &drain_readiness)?
     {
-        return Ok(Some(continuation));
+        return Ok(ClaudeStopAnswer::Continue(continuation));
     }
     if let Some(continuation) = claude_reported_writeback_continuation(input, &file) {
-        return Ok(Some(continuation));
+        return Ok(ClaudeStopAnswer::Continue(continuation));
     }
     if let Some(reason) = final_status_sync_continuation(&file, input.stop_hook_active)? {
-        return Ok(Some(ClaudeStopContinuation { reason }));
+        return Ok(ClaudeStopAnswer::Continue(ClaudeStopContinuation {
+            reason,
+        }));
     }
     // `#transientcloseout`: session-check already refuses a successful closeout.
     // Grok ends the turn through this Claude-format Stop hook and never reaches
@@ -1446,6 +1533,25 @@ fn apply_claude_stop_with_drain_readiness(
     transient_turn_end_continuation(input, &file)
 }
 
+/// Operator-visible notice for `state=unchanged_debts` (`#stophookactiveguard`).
+fn unchanged_debts_system_message(
+    file: &Path,
+    debts: &[agent_doc_queue::transient_closeout::TransientCloseoutDebt],
+) -> String {
+    let mut message = format!(
+        "agent-doc ended this turn with {} queue row(s) in {} still owing a transition (#stophookactiveguard): the Stop hook refused them once this turn and the agent stopped again without moving them. The rows stay live:",
+        debts.len(),
+        file.display()
+    );
+    for debt in debts {
+        message.push_str("\n- row ");
+        message.push_str(&debt.row);
+        message.push_str(": ");
+        message.push_str(debt.owed);
+    }
+    message
+}
+
 /// Refusal for a genuine turn end while live queue rows are still transient.
 ///
 /// `None` when every live row is resting, struck, or unmarked. An unreadable
@@ -1454,15 +1560,17 @@ fn apply_claude_stop_with_drain_readiness(
 /// `#stophookactiveguard`: bounded by `stop_hook_active` plus the durable
 /// record of the previous refusal. A recursive Stop that finds exactly the
 /// debt set this gate last refused for the same harness session allows the
-/// final answer (`state=unchanged_debts`) and leaves the rows live; the agent
-/// was told once and nothing it did moved them. A changed debt set refuses
-/// again, and a first Stop (`stop_hook_active = false`) always refuses, so
-/// every distinct debt set is reported at least once. Claude Code's
+/// final answer (`state=unchanged_debts`), names the rows to the operator in a
+/// `systemMessage`, and leaves them live; the agent was told once and nothing
+/// it did moved them. A changed debt set refuses again, a first Stop
+/// (`stop_hook_active = false`) always refuses, and the record is cleared on
+/// each turn's first Stop before any gate runs, so every distinct debt set is
+/// reported at least once per turn. Claude Code's
 /// consecutive-block cap is never the only guard.
 fn transient_turn_end_continuation(
     input: &ClaudeStopInput,
     file: &Path,
-) -> Result<Option<ClaudeStopContinuation>> {
+) -> Result<ClaudeStopAnswer> {
     let content = match current_document_content(file, "claude_stop_transient_closeout") {
         Ok(content) => content,
         // `#stophookactiveguard`: an unreadable document is bounded the way
@@ -1475,7 +1583,7 @@ fn transient_turn_end_continuation(
                     "claude_stop_transient_closeout_unreadable error={err:#} action=allow_final_answer state=recursive_stop (#stophookactiveguard)"
                 ),
             );
-            return Ok(None);
+            return Ok(ClaudeStopAnswer::allow());
         }
         Err(err) => {
             agent_doc_ops_log_io::log_op(
@@ -1484,7 +1592,7 @@ fn transient_turn_end_continuation(
                     "claude_stop_transient_closeout_unreadable error={err:#} action=block_final_answer (#transientcloseout)"
                 ),
             );
-            return Ok(Some(ClaudeStopContinuation {
+            return Ok(ClaudeStopAnswer::Continue(ClaudeStopContinuation {
                 reason: format!(
                     "agent-doc cannot end this turn because {} could not be read to prove live queue rows are resting (#transientcloseout): {err:#}. Do not send the final answer yet.",
                     file.display()
@@ -1507,12 +1615,12 @@ fn transient_turn_end_continuation(
                 ),
             );
         }
-        return Ok(None);
+        return Ok(ClaudeStopAnswer::allow());
     }
     let Some(failure) =
         agent_doc_queue::transient_closeout::normal_closeout_failure_for(&assessment)
     else {
-        return Ok(None);
+        return Ok(ClaudeStopAnswer::allow());
     };
     let fingerprint = agent_doc_queue_io::transient_closeout_refusal::debts_fingerprint(
         assessment
@@ -1543,7 +1651,11 @@ fn transient_turn_end_continuation(
                 fingerprint,
             ),
         );
-        return Ok(None);
+        // The rows are agent-actionable and stay live; tell the operator,
+        // not only `ops.log`, that this turn ended over them.
+        return Ok(ClaudeStopAnswer::Allow {
+            system_message: Some(unchanged_debts_system_message(file, &assessment.debts)),
+        });
     }
     // Arm the bound BEFORE refusing, and propagate a failure: a refusal the
     // next recursive Stop cannot recognise is unbounded. The hook-error path
@@ -1570,7 +1682,7 @@ fn transient_turn_end_continuation(
             input.stop_hook_active,
         ),
     );
-    Ok(Some(ClaudeStopContinuation {
+    Ok(ClaudeStopAnswer::Continue(ClaudeStopContinuation {
         reason: format!(
             "{failure}\nDo not send the final answer yet. Finish each owed transition in this turn."
         ),
@@ -10041,8 +10153,8 @@ agent: grok
         complete_run(&doc);
         let no_supervisor =
             |_: &Path| agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor;
-        let stop = |stop_hook_active: bool| {
-            apply_claude_stop_with_drain_readiness(
+        let answer = |stop_hook_active: bool| {
+            claude_stop_answer_with_drain_readiness(
                 &ClaudeStopInput {
                     session_id: "codex-session".to_string(),
                     cwd: dir.path().display().to_string(),
@@ -10055,6 +10167,7 @@ agent: grok
             )
             .unwrap()
         };
+        let stop = |stop_hook_active: bool| answer(stop_hook_active).into_continuation();
         let ops = || {
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default()
         };
@@ -10078,10 +10191,23 @@ agent: grok
             stop(false).is_some(),
             "stop_hook_active=false must refuse as today"
         );
-        // Recurse over the unchanged set.
-        assert!(
-            stop(true).is_none(),
-            "a recursive Stop over the unchanged debt set must end the turn"
+        // Recurse over the unchanged set: the turn ends, and the operator is
+        // told which rows were left live through a top-level `systemMessage`.
+        let released = answer(true);
+        let ClaudeStopAnswer::Allow {
+            system_message: Some(notice),
+        } = &released
+        else {
+            panic!("a recursive Stop over the unchanged debt set must end the turn: {released:?}");
+        };
+        assert!(notice.contains("#stophookactiveguard"), "{notice}");
+        assert!(notice.contains("- row 🚧 do [#held]: "), "{notice}");
+        assert!(notice.contains("The rows stay live"), "{notice}");
+        let output = released.to_hook_output();
+        assert_eq!(
+            output,
+            serde_json::json!({ "systemMessage": notice }),
+            "an allow: no decision and no continuation context"
         );
         let log = ops();
         assert!(
@@ -10119,6 +10245,119 @@ agent: grok
                 .unwrap()
                 .debts,
             2
+        );
+    }
+
+    /// `#stophookactiveguard` review (PR 427): the refusal record is
+    /// turn-scoped. With `agent:status sync=`, the final status-sync
+    /// checkpoint answers every turn's first Stop, so the transient gate first
+    /// runs on a recursive Stop. A record left by turn 1 must not release the
+    /// same debt set in turn 2 before turn 2 has refused it once.
+    #[test]
+    fn claude_stop_refuses_each_turn_even_when_an_earlier_gate_answers_its_first_stop() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        let content = "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+## Status\n\n\
+<!-- agent:status sync=\"Keep the release current\" -->\n\
+<!-- status:sync -->\nPublished: v1\n<!-- /status:sync -->\n\
+<!-- /agent:status -->\n\n\
+## Queue\n\n\
+<!-- agent:queue -->\n\
+- 🚧 do [#held]\n\
+- ⏳ verify the release\n\
+<!-- /agent:queue -->\n\n\
+## Backlog\n\n\
+<!-- agent:backlog -->\n\
+- [ ] [#held] Pin the released gitlinks.\n\
+<!-- /agent:backlog -->\n";
+        fs::write(&doc, content).unwrap();
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        complete_run(&doc);
+        let no_supervisor =
+            |_: &Path| agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor;
+        let answer = |stop_hook_active: bool| {
+            claude_stop_answer_with_drain_readiness(
+                &ClaudeStopInput {
+                    session_id: "codex-session".to_string(),
+                    cwd: dir.path().display().to_string(),
+                    stop_hook_active,
+                    transcript_path: None,
+                    reason: None,
+                    subagent_type: None,
+                },
+                no_supervisor,
+            )
+            .unwrap()
+        };
+        let expect_status_sync = |answer: ClaudeStopAnswer| {
+            let ClaudeStopAnswer::Continue(continuation) = answer else {
+                panic!("the first Stop gets the status-sync checkpoint: {answer:?}");
+            };
+            assert!(
+                continuation.reason.contains(FINAL_STATUS_SYNC_MARKER),
+                "{}",
+                continuation.reason
+            );
+        };
+        let expect_transient_refusal = |answer: ClaudeStopAnswer| {
+            let ClaudeStopAnswer::Continue(continuation) = answer else {
+                panic!("the transient gate must refuse once in this turn: {answer:?}");
+            };
+            assert!(
+                continuation.reason.contains("normal closeout refused"),
+                "{}",
+                continuation.reason
+            );
+            assert!(
+                continuation.reason.contains("🚧 do [#held]"),
+                "{}",
+                continuation.reason
+            );
+        };
+        let expect_release = |answer: ClaudeStopAnswer| {
+            assert!(
+                matches!(
+                    answer,
+                    ClaudeStopAnswer::Allow {
+                        system_message: Some(_)
+                    }
+                ),
+                "the unchanged debt set is released after one refusal: {answer:?}"
+            );
+        };
+        let ops = || {
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default()
+        };
+
+        // Turn 1.
+        expect_status_sync(answer(false));
+        expect_transient_refusal(answer(true));
+        expect_release(answer(true));
+        assert!(
+            agent_doc_queue_io::transient_closeout_refusal::load(&doc)
+                .unwrap()
+                .is_some(),
+            "turn 1's refusal is recorded"
+        );
+
+        // Turn 2, same session, rows untouched. Its first Stop is answered by
+        // the status-sync checkpoint, and it clears turn 1's record.
+        expect_status_sync(answer(false));
+        let record_after_first_stop =
+            agent_doc_queue_io::transient_closeout_refusal::load(&doc).unwrap();
+        // The recursive Stop must name the debts again before releasing them.
+        expect_transient_refusal(answer(true));
+        expect_release(answer(true));
+        assert!(
+            record_after_first_stop.is_none(),
+            "the turn's first Stop clears the previous turn's refusal"
+        );
+        assert!(
+            ops().contains("claude_stop_transient_closeout_refusal_cleared reason=turn_first_stop"),
+            "{}",
+            ops()
         );
     }
 

@@ -1831,24 +1831,38 @@ fn claude_stop_hook_process_bounds_an_unchanged_transient_refusal() {
         .unwrap_or_else(|| panic!("the first stop must refuse: {refused}"));
     assert!(context.contains("🚧 do [#held]"), "{context}");
 
+    // The recursive stop over the unchanged debt set ends the turn: no
+    // `decision` and no continuation context, only an operator-visible
+    // `systemMessage` naming the rows left live.
     let ended = stop(true);
+    let notice = ended["systemMessage"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the release must be visible to the operator: {ended}"));
+    assert!(notice.contains("- row 🚧 do [#held]: "), "{notice}");
     assert_eq!(
-        ended,
-        json!({}),
-        "the recursive stop over the unchanged debt set must end the turn"
+        ended.as_object().map(|map| map.len()),
+        Some(1),
+        "the recursive stop over the unchanged debt set must end the turn: {ended}"
     );
-    let ops = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
-    assert!(ops.contains("state=unchanged_debts"), "{ops}");
+    let ops_log =
+        || fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+    assert!(ops_log().contains("state=unchanged_debts"), "{}", ops_log());
     assert!(
         fs::read_to_string(&doc)
             .unwrap()
             .contains("- 🚧 do [#held]")
     );
 
-    // A fresh (non-recursive) stop still refuses the same set.
+    // The next turn's first (non-recursive) stop clears the previous turn's
+    // record in its own process and refuses the same set again.
     assert!(
         stop(false)["hookSpecificOutput"]["additionalContext"]
             .as_str()
             .is_some()
+    );
+    assert!(
+        ops_log().contains("claude_stop_transient_closeout_refusal_cleared reason=turn_first_stop"),
+        "{}",
+        ops_log()
     );
 }

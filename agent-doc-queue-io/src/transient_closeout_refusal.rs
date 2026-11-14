@@ -8,13 +8,15 @@
 //! from ending 9 consecutive times — overriding and ending turn"). The harness
 //! cap must not be the only guard.
 //!
-//! This record lets the gate refuse once per distinct debt set per harness
-//! session. When a recursive Stop (`stop_hook_active = true`) finds exactly
-//! the debt set it refused last time for the same session, the agent already
-//! heard about it and made no progress the hook can see; the gate allows the
-//! final answer and leaves the rows live. A changed debt set (a row advanced,
-//! a new row appeared) or a new session refuses again. Each hook call is a new
-//! process, so the record lives in `state.db`, not in memory.
+//! This record lets the gate refuse once per distinct debt set per turn. When
+//! a recursive Stop (`stop_hook_active = true`) finds exactly the debt set it
+//! refused last time for the same session, the agent already heard about it
+//! and made no progress the hook can see; the gate allows the final answer and
+//! leaves the rows live. A changed debt set (a row advanced, a new row
+//! appeared) or a new session refuses again. The hook [`clear`]s the record on
+//! every turn's first Stop, so a refusal from an earlier turn never satisfies
+//! a later one. Each hook call is a new process, so the record lives in
+//! `state.db`, not in memory.
 
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -88,6 +90,27 @@ pub fn repeats_previous_refusal(
     }))
 }
 
+/// Forget this document's recorded refusal. `Ok(true)` when one was present.
+///
+/// The record is turn-scoped: the Stop hook clears it on every turn's first
+/// Stop (`stop_hook_active = false`), so only a refusal issued since that Stop
+/// can satisfy [`repeats_previous_refusal`]. Without this, a record left by an
+/// earlier turn of the same session would release a later turn's unchanged
+/// debts whenever an earlier gate (a queue or steering continuation, a
+/// reported-writeback hold, the final status-sync checkpoint) answered that
+/// turn's first Stop, and the debts would never be named in that turn.
+pub fn clear(file: &Path) -> Result<bool> {
+    let Some((root, document_hash, _)) = state_identity(file)? else {
+        return Ok(false);
+    };
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    agent_doc_sqlite::state_store::clear_queue_document_state_in_db(
+        &conn,
+        &document_hash,
+        STATE_KIND,
+    )
+}
+
 /// Record a refusal of `debts` rows with `debts_fingerprint` to `session_id`.
 pub fn record(file: &Path, session_id: &str, debts_fingerprint: &str, debts: usize) -> Result<()> {
     let Some((root, document_hash, canonical_path)) = state_identity(file)? else {
@@ -147,5 +170,26 @@ mod tests {
         assert!(!repeats_previous_refusal(&doc, "s1", "f1").unwrap());
         assert!(repeats_previous_refusal(&doc, "s1", "f2").unwrap());
         assert_eq!(load(&doc).unwrap().unwrap().debts, 1);
+    }
+
+    #[test]
+    fn clear_forgets_the_refusal_and_reports_whether_one_existed() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("doc.md");
+        let other = dir.path().join("other.md");
+        std::fs::write(&doc, "x\n").unwrap();
+        std::fs::write(&other, "y\n").unwrap();
+        assert!(!clear(&doc).unwrap(), "nothing recorded yet");
+        record(&doc, "s1", "f1", 1).unwrap();
+        record(&other, "s1", "f1", 1).unwrap();
+        assert!(clear(&doc).unwrap());
+        assert!(load(&doc).unwrap().is_none());
+        assert!(!repeats_previous_refusal(&doc, "s1", "f1").unwrap());
+        assert!(!clear(&doc).unwrap(), "delete-if-present");
+        assert!(
+            repeats_previous_refusal(&other, "s1", "f1").unwrap(),
+            "clearing one document leaves another document's record"
+        );
     }
 }

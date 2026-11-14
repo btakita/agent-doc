@@ -251,9 +251,9 @@ impl QueueBlock<'_> {
 
     /// [`Self::state_excluding_claimed`] that also honors a `pause` control.
     ///
-    /// A marker `pause`, or legacy `stop` on a queue that does not repeat,
-    /// holds the queue. Marker `stop` on a repeating queue is not a hold
-    /// (`#loopunstrike`). Frontmatter `queue: pause` holds it when the marker
+    /// A marker `pause`, or its legacy spelling `stop` (a repeating queue
+    /// included, `#heldloopstophook`), holds the queue. Frontmatter
+    /// `queue: pause` holds it when the marker
     /// has no token; a marker `go` or `start` overrides that. An empty queue
     /// stays `Empty`, so `after=` does not wait on a drained predecessor. A
     /// held queue with live heads stays `Paused`, not `Empty`.
@@ -432,12 +432,12 @@ impl<'a> QueueGraph<'a> {
 
     /// Select the first queue with work available to this drain owner.
     ///
-    /// A queue whose control is `pause` (a legacy marker `stop` on a
-    /// non-repeating queue included), or whose every executable head is
-    /// claimed, operator-gated (`🙋`), or only a non-executable group label,
-    /// is paused, not empty: independent later queues remain selectable, while
-    /// an `after=` dependent still waits for the externally owned work to
-    /// finish. Marker `stop` does not pause a repeating queue.
+    /// A queue whose control is `pause` (a legacy marker `stop` included, on
+    /// a repeating queue too, `#heldloopstophook`), or whose every executable
+    /// head is claimed, operator-gated (`🙋`), or only a non-executable group
+    /// label, is paused, not empty: independent later queues remain
+    /// selectable, while an `after=` dependent still waits for the externally
+    /// owned work to finish.
     pub fn selected_excluding_claimed(
         &self,
         claimed: &crate::queue_claim::ClaimedQueueItems,
@@ -1775,11 +1775,11 @@ mod tests {
         );
     }
 
-    /// A restored `agent:loop` keeps legacy marker `stop` and stays ready.
-    /// Explicit `pause` still holds that loop. An earlier live `agent:run`
-    /// is still selected first.
+    /// `#heldloopstophook`: legacy marker `stop` holds an `agent:loop` like
+    /// `pause`. The held loop is `Paused`, never selected, and an earlier live
+    /// `agent:run` is still selected; without the token the loop is ready.
     #[test]
-    fn loop_marker_stop_leaves_the_repeating_queue_ready() {
+    fn loop_marker_stop_pauses_the_repeating_queue() {
         let doc = concat!(
             "<!-- agent:run go -->\n- run work\n<!-- /agent:run -->\n",
             "<!-- agent:loop interval=\"1h\" priority keep stop -->\n- watch issues\n<!-- /agent:loop -->\n",
@@ -1792,7 +1792,7 @@ mod tests {
                 .block("loop")
                 .unwrap()
                 .state_excluding_claimed_with_control(&none, Some("go")),
-            QueueNodeState::Ready
+            QueueNodeState::Paused
         );
         assert_eq!(
             graph.schedule_excluding_claimed_with_control(&none, Some("go")),
@@ -1806,30 +1806,39 @@ mod tests {
             "<!-- agent:run go -->\n<!-- /agent:run -->\n",
             "<!-- agent:loop interval=\"1h\" priority keep stop -->\n- watch issues\n<!-- /agent:loop -->\n",
         );
-        let only_components = element::parse(only_loop).unwrap();
-        let only_graph = QueueGraph::parse(only_loop, &only_components).unwrap();
+        for held in [
+            only_loop.to_string(),
+            only_loop.replace("keep stop", "keep pause"),
+        ] {
+            let held_components = element::parse(&held).unwrap();
+            let held_graph = QueueGraph::parse(&held, &held_components).unwrap();
+            assert_eq!(
+                held_graph
+                    .block("loop")
+                    .unwrap()
+                    .state_excluding_claimed(&none),
+                QueueNodeState::Paused,
+                "{held}"
+            );
+            assert!(
+                !matches!(
+                    held_graph.schedule_excluding_claimed(&none),
+                    QueueScheduleDecision::Ready { .. }
+                ),
+                "{held}"
+            );
+        }
+
+        let unheld = only_loop.replace("keep stop", "keep");
+        let unheld_components = element::parse(&unheld).unwrap();
+        let unheld_graph = QueueGraph::parse(&unheld, &unheld_components).unwrap();
         assert_eq!(
-            only_graph.schedule_excluding_claimed(&none),
+            unheld_graph.schedule_excluding_claimed(&none),
             QueueScheduleDecision::Ready {
                 queue_id: "loop".into(),
                 occurrence: 1,
             }
         );
-
-        let paused = only_loop.replace("keep stop", "keep pause");
-        let paused_components = element::parse(&paused).unwrap();
-        let paused_graph = QueueGraph::parse(&paused, &paused_components).unwrap();
-        assert_eq!(
-            paused_graph
-                .block("loop")
-                .unwrap()
-                .state_excluding_claimed(&none),
-            QueueNodeState::Paused
-        );
-        assert!(!matches!(
-            paused_graph.schedule_excluding_claimed(&none),
-            QueueScheduleDecision::Ready { .. }
-        ));
     }
 
     #[test]

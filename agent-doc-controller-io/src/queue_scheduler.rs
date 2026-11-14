@@ -1956,18 +1956,18 @@ mod tests {
         }));
     }
 
-    /// `#loopunstrike`: legacy marker `stop` on `agent:loop` is not a cadence
-    /// hold. The next due tick unstrikes the roster, opens the pass, and
-    /// leaves the head unheld so the ordinary drain can run it. An earlier
-    /// live `agent:run` is still selected first. The marker token stays.
+    /// An unheld `agent:loop` (the agent-doc-bugs.md shape with its `stop`
+    /// hold removed) unstrikes its auto-struck roster on the next due tick,
+    /// opens the pass, and leaves the head unheld so the ordinary drain can
+    /// run it. An earlier live `agent:run` is still selected first.
     #[test]
-    fn loop_marker_stop_recovers_the_struck_roster_on_the_next_due_tick() {
+    fn unheld_loop_recovers_the_struck_roster_on_the_next_due_tick() {
         const WATCH: &str = "Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45. [#q-241aecb69d4f]";
         let body = format!(
             "- ~~{WATCH}~~ — auto-struck: addressed this cycle ⟦addressed-at:2026-11-01T14:47:32.000Z⟧; response: [#r-fc6c69471~~do [#trackedworkdropped] ⟦published⟧~~y open issues\n  - **Closed by:** [#r-7fd5420c7f28]\n"
         );
         let content = format!(
-            "---\nqueue: go\n---\n\n<!-- agent:run go -->\n- run work\n<!-- /agent:run -->\n<!-- agent:loop interval=\"1h\" priority keep stop -->\n{body}<!-- /agent:loop -->\n"
+            "---\nqueue: go\n---\n\n<!-- agent:run go -->\n- run work\n<!-- /agent:run -->\n<!-- agent:loop interval=\"1h\" priority keep -->\n{body}<!-- /agent:loop -->\n"
         );
         assert_eq!(
             queue_schedule::completed_heads_for_queue(&content, "loop").unwrap(),
@@ -2003,7 +2003,7 @@ mod tests {
             !text.contains(&format!("~~{WATCH}~~")),
             "the struck copy is removed\n{text}"
         );
-        assert!(text.contains("priority keep stop"), "{text}");
+        assert!(text.contains("priority keep -->"), "{text}");
         assert!(text.contains("- run work\n"), "{text}");
         let state = load_schedule_state_for_queue(&file, "loop")
             .unwrap()
@@ -2057,33 +2057,38 @@ mod tests {
         );
     }
 
+    /// `#heldloopstophook`: explicit `pause` and its legacy spelling `stop`
+    /// (the live `priority keep stop` marker) both skip a loop's due tick and
+    /// leave its struck roster untouched until the operator lifts the hold.
     #[test]
-    fn loop_marker_pause_still_skips_the_due_tick() {
-        let content = concat!(
-            "---\nqueue: go\n---\n\n",
-            "<!-- agent:run go -->\n- run work\n<!-- /agent:run -->\n",
-            "<!-- agent:loop interval=\"1h\" pause -->\n",
-            "- ~~watch issues~~\n",
-            "<!-- /agent:loop -->\n",
-        );
-        let (_dir, file) = project(content);
-        let io = FakeIo::new(content);
-        let worker = worker(&io);
-        worker.refresh(&file);
-        worker.run_due(&due_for(&file, "loop"));
-        let state = load_schedule_state_for_queue(&file, "loop")
-            .unwrap()
-            .unwrap();
-        assert!(!state.window_open());
-        assert_eq!(*io.text.lock(), content);
-        assert!(
-            io.logs
-                .lock()
-                .iter()
-                .any(|line| line.contains("decision=skipped_paused")),
-            "{:?}",
-            io.logs.lock()
-        );
+    fn loop_marker_pause_or_stop_skips_the_due_tick() {
+        for marker in ["pause", "priority keep stop"] {
+            let content = format!(
+                "---\nqueue: go\n---\n\n\
+<!-- agent:run go -->\n- run work\n<!-- /agent:run -->\n\
+<!-- agent:loop interval=\"1h\" {marker} -->\n\
+- ~~watch issues~~\n\
+<!-- /agent:loop -->\n"
+            );
+            let (_dir, file) = project(&content);
+            let io = FakeIo::new(&content);
+            let worker = worker(&io);
+            worker.refresh(&file);
+            worker.run_due(&due_for(&file, "loop"));
+            let state = load_schedule_state_for_queue(&file, "loop")
+                .unwrap()
+                .unwrap();
+            assert!(!state.window_open(), "{marker}");
+            assert_eq!(*io.text.lock(), content, "{marker}");
+            assert!(
+                io.logs
+                    .lock()
+                    .iter()
+                    .any(|line| line.contains("decision=skipped_paused")),
+                "{marker}: {:?}",
+                io.logs.lock()
+            );
+        }
     }
 
     /// GH #348: a failed self-heal still sees the old struck row. That row is

@@ -1153,6 +1153,38 @@ mod tests {
         }
     }
 
+    /// `#heldloopstophook`, the live agent-doc-bugs.md shape (2026-11-14): the
+    /// `## Loop <!-- agent:loop interval="1h" priority keep stop -->` watch row
+    /// inside an open pass refused every Stop with "a head that is still
+    /// pending means the turn is not over". Marker `stop` is the operator's
+    /// hold on a loop too, so the row is quiescent with no schedule evidence,
+    /// while the `agent:run` rows beside it keep their own obligations.
+    #[test]
+    fn the_live_stopped_loop_watch_row_does_not_hold_the_turn() {
+        const WATCH: &str = "📥 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45. [#q-241aecb69d4f]";
+        let content = format!(
+            "---\nagent_doc_format: template\n---\n\n\
+## Run <!-- agent:run id=\"main\" subagents preset=\"#spec-test-build-install-commit-push: #dogfood-install: approve all commit + integration + push: approve all worktree removals\" priority go -->\n\
+<!-- /agent:run -->\n\n\
+## Loop <!-- agent:loop interval=\"1h\" priority keep stop -->\n\
+- {WATCH}\n\
+<!-- /agent:loop -->\n"
+        );
+        let assessment = assess_transient_closeout(&content, &CloseoutEvidence::default()).unwrap();
+        assert!(assessment.debts.is_empty(), "{assessment:?}");
+        assert_eq!(
+            reasons(&assessment),
+            vec![(WATCH.to_string(), QuiescentReason::QueueHeld)]
+        );
+        assert_eq!(normal_closeout_failure(&content).unwrap(), None);
+
+        let unheld = content.replace("priority keep stop", "priority keep");
+        let failure = normal_closeout_failure(&unheld)
+            .unwrap()
+            .expect("without the hold the open-window watch row is due");
+        assert!(failure.contains(WATCH), "{failure}");
+    }
+
     /// `#heldloopstophook`: frontmatter `queue: pause` holds a queue whose
     /// marker carries no control; a marker `go` overrides it, and an unheld
     /// queue's due `📥` head still refuses beside a held one.

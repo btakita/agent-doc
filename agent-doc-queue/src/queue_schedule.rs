@@ -530,11 +530,10 @@ pub fn content_is_scheduled(content: &str) -> bool {
     identified_queue_schedules(content).is_ok_and(|schedules| !schedules.is_empty())
 }
 
-/// Whether the queue's control holds it (`pause`, legacy `stop` on a queue
-/// that does not repeat, or a legacy inert `queue_active:` flag): a scheduled
-/// tick then skips instead of opening a window. Marker `stop` on a repeating
-/// queue is not a hold (`#loopunstrike`). No control at all is `go`
-/// (`#queuegodefault`).
+/// Whether the queue's control holds it (`pause`, legacy marker `stop` on any
+/// queue, a repeating one included (`#heldloopstophook`), or a legacy inert
+/// `queue_active:` flag): a scheduled tick then skips instead of opening a
+/// window. No control at all is `go` (`#queuegodefault`).
 pub fn queue_held_by_control(content: &str) -> bool {
     identified_queue_schedules(content)
         .ok()
@@ -2064,12 +2063,16 @@ mod tests {
         assert!(!queue_held_by_control(&doc("interval=5m", "- a\n")));
         assert!(queue_held_by_control(&doc("interval=5m pause", "- a\n")));
         assert!(queue_held_by_control(&doc("interval=5m stop", "- a\n")));
-        assert!(!queue_held_by_control(&doc(
+        // `#heldloopstophook`: marker `stop` holds a repeating queue too.
+        assert!(queue_held_by_control(&doc(
             "interval=5m loop stop",
             "- a\n"
         )));
-        assert!(!queue_held_by_control(
+        assert!(queue_held_by_control(
             "<!-- agent:loop interval=\"1h\" priority keep stop -->\n- a\n<!-- /agent:loop -->\n"
+        ));
+        assert!(!queue_held_by_control(
+            "<!-- agent:loop interval=\"1h\" priority keep -->\n- a\n<!-- /agent:loop -->\n"
         ));
         assert!(queue_held_by_control(
             "<!-- agent:loop interval=\"1h\" pause -->\n- a\n<!-- /agent:loop -->\n"

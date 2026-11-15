@@ -17,6 +17,7 @@ test-support = ["agent-doc-state-wire/test-support"]
 agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.574" }
 parking_lot = "0.12"
 agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.574" }
+agent-doc-effect-cas = { path = "../agent-doc-effect-cas", version = "0.35.574" }
 agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.35.574" }
 agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.35.574" }
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.574" }

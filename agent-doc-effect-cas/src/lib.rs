@@ -26,6 +26,8 @@
 //! [`EpochDrive::Exhausted`] with the last reason, so the caller renders its own
 //! exhaustion message unchanged.
 
+pub mod latest_intent;
+
 use anyhow::{Result, bail};
 use lazily::{
     EffectApply, EffectCasApplied, EffectCasClaim, EffectCasCore, EffectCasFailure,

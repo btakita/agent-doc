@@ -5201,6 +5201,11 @@ struct ControllerDocumentGraphs {
     /// bounded backoff and replica-rebuild budget only, never authority.
     retained_persistence_retries:
         Mutex<std::collections::HashMap<String, RetainedPersistenceRefusalStreak>>,
+    /// `#implementlazilyowned`: the refused native save's retained retry
+    /// intent per document. Lazily owns its due time, latest-wins supersession
+    /// by a newer refusal, single flight, and receipt.
+    retained_persistence_retry_schedule:
+        Mutex<agent_doc_effect_cas::latest_intent::LatestIntentSchedule<String>>,
     /// Non-authoritative adapter for retained-transition effects that can
     /// enter an editor, actor, state-ledger, or controller boundary. The
     /// reactive graph admits exact typed commands; this worker executes them
@@ -6153,21 +6158,128 @@ impl TestSupportRetainedPersistenceLedger {
     }
 }
 
-/// Wait out the backoff off every lock, then re-claim the refused epoch.
+/// Lazily effect identity of a refused native save's retained retry intent.
+const RETAINED_PERSISTENCE_RETRY_EFFECT: &str = "retained-persistence-refused-retry";
+
+/// `#implementlazilyowned`: retain a refused epoch as the document's newest
+/// Lazily intent (expected authority = the refused delivery epoch), retryable
+/// `delay` after `now`. A newer refusal supersedes an older retained one, so
+/// only the latest refused epoch is ever re-claimed. Returns when the retry
+/// is due.
+fn retain_refused_retained_persistence_intent(
+    schedule: &Mutex<agent_doc_effect_cas::latest_intent::LatestIntentSchedule<String>>,
+    document_hash: &str,
+    epoch: u64,
+    delay: Duration,
+    now: Instant,
+) -> Result<Instant> {
+    use agent_doc_effect_cas::latest_intent::IntentRetry;
+    let mut schedule = schedule.lock();
+    let Some(attempt) = schedule.desire_and_claim(
+        document_hash.to_string(),
+        RETAINED_PERSISTENCE_RETRY_EFFECT,
+        epoch.to_string(),
+        epoch.to_string(),
+        now,
+    )?
+    else {
+        // An older retry attempt holds the flight for a moment; the newer
+        // intent stays desired and the timer claims it at the due time.
+        return Ok(now + delay);
+    };
+    Ok(
+        match schedule.retry_after(&attempt, "refused_receipt", delay, now) {
+            IntentRetry::Retrying { at } => at,
+            IntentRetry::Superseded | IntentRetry::Unknown => now + delay,
+        },
+    )
+}
+
+/// `#implementlazilyowned`: claim the document's due retained retry intent
+/// from Lazily and compare its expected authority (the refused epoch) with the
+/// latest desired native save. A match re-claims the save's single flight; a
+/// moved desire or a held flight is recorded `Superseded`, because that newer
+/// epoch or in-flight attempt owns its own completion edge.
+fn claim_retained_persistence_retry(
+    schedule: &Mutex<agent_doc_effect_cas::latest_intent::LatestIntentSchedule<String>>,
+    persistence: &lazily::ThreadSafeLatestDurableProjection<String, RetainedPersistenceProjection>,
+    ctx: &lazily::ThreadSafeContext,
+    document_hash: &str,
+    now: Instant,
+) -> Option<RetainedPersistenceCommand> {
+    use agent_doc_effect_cas::latest_intent::IntentClaim;
+    let key = document_hash.to_string();
+    let attempt = match schedule.lock().claim(&key, now) {
+        IntentClaim::Claimed(attempt) => attempt,
+        // `Waiting`: a newer refusal retained a later retry, whose own timer
+        // claims it. `Busy` / `Empty`: another claim owns or consumed it.
+        IntentClaim::Waiting { .. } | IntentClaim::Busy | IntentClaim::Empty => return None,
+    };
+    let desired_epoch = persistence
+        .state(&key)
+        .and_then(|state| state.desired)
+        .map(|desired| desired.epoch);
+    if desired_epoch.map(|epoch| epoch.to_string()).as_deref() != Some(attempt.expected()) {
+        let observed = desired_epoch.map_or_else(|| "none".to_string(), |epoch| epoch.to_string());
+        schedule.lock().superseded(&attempt, observed);
+        return None;
+    }
+    let generation = persistence
+        .state(&key)
+        .and_then(|state| state.desired)
+        .map(|desired| desired.value.controller_generation)?;
+    match persistence.claim(ctx, &key, generation) {
+        lazily::LatestDurableClaim::Claimed(envelope) => {
+            schedule
+                .lock()
+                .applied(&attempt, envelope.epoch.to_string());
+            Some(RetainedPersistenceCommand {
+                document_hash: key,
+                envelope,
+            })
+        }
+        _ => {
+            schedule.lock().superseded(&attempt, "single_flight_held");
+            None
+        }
+    }
+}
+
+/// Wait out the Lazily-owned retry due time off every lock, then claim the
+/// retained intent. The timer only wakes the claim; Lazily decides.
 fn schedule_refused_retained_persistence_retry(
     runtime: std::sync::Weak<ControllerRuntime>,
     document_hash: String,
     epoch: u64,
     delay: Duration,
 ) {
+    let Some(strong) = runtime.upgrade() else {
+        return;
+    };
+    let due = match retain_refused_retained_persistence_intent(
+        &strong.document_graphs.retained_persistence_retry_schedule,
+        &document_hash,
+        epoch,
+        delay,
+        Instant::now(),
+    ) {
+        Ok(due) => due,
+        Err(error) => {
+            eprintln!(
+                "[controller] failed to retain refused retained-persistence intent: {error:#}"
+            );
+            return;
+        }
+    };
+    drop(strong);
     let spawned = std::thread::Builder::new()
         .name("agent-doc-retained-persistence-retry".to_string())
         .spawn(move || {
-            std::thread::sleep(delay);
+            std::thread::sleep(due.saturating_duration_since(Instant::now()));
             if let Some(runtime) = runtime.upgrade() {
                 runtime
                     .document_graphs
-                    .retry_refused_retained_persistence(&document_hash, epoch);
+                    .retry_refused_retained_persistence(&document_hash);
             }
         });
     if let Err(error) = spawned {
@@ -7353,6 +7465,9 @@ impl ControllerDocumentGraphs {
             retained_persistence: lazily::ThreadSafeLatestDurableProjection::new(&ctx, 1),
             retained_persistence_sender: Arc::new(OnceLock::new()),
             retained_persistence_retries: Mutex::new(std::collections::HashMap::new()),
+            retained_persistence_retry_schedule: Mutex::new(
+                agent_doc_effect_cas::latest_intent::LatestIntentSchedule::new(),
+            ),
             retained_transition_sender: Arc::new(OnceLock::new()),
             retained_transition_attempted_frontier: lazily::ThreadSafeSourceMap::new(&ctx),
             retained_transition_published_frontier: lazily::ThreadSafeSourceMap::new(&ctx),
@@ -9309,37 +9424,27 @@ impl ControllerDocumentGraphs {
         );
     }
 
-    /// `#retainedsaveretry`: re-claim a refused epoch if it is still the latest
+    /// `#retainedsaveretry`: claim the document's due Lazily retry intent; it
+    /// re-claims the refused epoch only while that epoch is still the latest
     /// desired save and nothing else holds the single flight.
-    fn retry_refused_retained_persistence(&self, document_hash: &str, epoch: u64) {
-        let key = document_hash.to_string();
+    fn retry_refused_retained_persistence(&self, document_hash: &str) {
         let mut command = None;
         self.ctx.batch(|ctx| {
-            let Some(desired) = self
-                .retained_persistence
-                .state(&key)
-                .and_then(|state| state.desired)
-            else {
-                return;
-            };
-            if desired.epoch != epoch {
-                return;
-            }
-            let generation = desired.value.controller_generation;
-            if let lazily::LatestDurableClaim::Claimed(envelope) =
-                self.retained_persistence.claim(ctx, &key, generation)
-            {
+            command = claim_retained_persistence_retry(
+                &self.retained_persistence_retry_schedule,
+                &self.retained_persistence,
+                ctx,
+                document_hash,
+                Instant::now(),
+            );
+            if let Some(command) = &command {
                 agent_doc_ops_log_io::log_op(
-                    &envelope.value.file,
+                    &command.envelope.value.file,
                     &format!(
-                        "retained_persistence_retry document_hash={key} generation={} epoch={} reason=refused_receipt",
-                        envelope.generation, envelope.epoch,
+                        "retained_persistence_retry document_hash={document_hash} generation={} epoch={} reason=refused_receipt",
+                        command.envelope.generation, command.envelope.epoch,
                     ),
                 );
-                command = Some(RetainedPersistenceCommand {
-                    document_hash: key.clone(),
-                    envelope,
-                });
             }
         });
         if let Some(command) = command {
@@ -16153,6 +16258,78 @@ mod tests {
         assert!(matches!(
             persistence.claim(&ctx, &document_hash, 1),
             lazily::LatestDurableClaim::Busy
+        ));
+    }
+
+    #[test]
+    fn refused_retained_persistence_retry_is_a_lazily_intent_superseded_by_a_newer_epoch() {
+        let ctx = lazily::ThreadSafeContext::new();
+        let persistence = lazily::ThreadSafeLatestDurableProjection::new(&ctx, 1);
+        let schedule = Mutex::new(agent_doc_effect_cas::latest_intent::LatestIntentSchedule::new());
+        let document_hash = "document".to_string();
+        let projection = |delivery_version| RetainedPersistenceProjection {
+            file: PathBuf::from("tasks/session.md"),
+            content_hash: format!("hash-{delivery_version}"),
+            content_len: delivery_version as usize,
+            delivery_version,
+            controller_generation: 1,
+        };
+        let refuse = |epoch| {
+            let lazily::LatestDurableClaim::Claimed(envelope) =
+                persistence.claim(&ctx, &document_hash, 1)
+            else {
+                panic!("expected a claim of epoch {epoch}");
+            };
+            assert_eq!(envelope.epoch, epoch);
+            persistence.fail_retryable(&ctx, &document_hash, envelope.generation, envelope.epoch);
+        };
+        let now = Instant::now();
+        persistence.upsert_desired(&ctx, document_hash.clone(), 3, projection(3));
+        refuse(3);
+        let due = retain_refused_retained_persistence_intent(
+            &schedule,
+            &document_hash,
+            3,
+            Duration::from_secs(2),
+            now,
+        )
+        .unwrap();
+        assert!(due >= now + Duration::from_secs(2));
+        assert!(due < now + Duration::from_secs(2) + Duration::from_millis(1));
+        // Not due yet: Lazily keeps the retry waiting.
+        assert!(
+            claim_retained_persistence_retry(&schedule, &persistence, &ctx, &document_hash, now)
+                .is_none()
+        );
+        // Due and still the latest desired epoch: the refused save is re-claimed.
+        let retried =
+            claim_retained_persistence_retry(&schedule, &persistence, &ctx, &document_hash, due)
+                .expect("the due retry of the current epoch re-claims the save");
+        assert_eq!(retried.envelope.epoch, 3);
+        persistence.fail_retryable(&ctx, &document_hash, 1, 3);
+        let due = retain_refused_retained_persistence_intent(
+            &schedule,
+            &document_hash,
+            3,
+            Duration::from_secs(1),
+            now,
+        )
+        .unwrap();
+        // A newer delivery moves the desired epoch before the retry is due:
+        // the retained intent's expected authority no longer matches, so it is
+        // recorded `Superseded` and the save's single flight is left alone.
+        persistence.upsert_desired(&ctx, document_hash.clone(), 6, projection(6));
+        assert!(
+            claim_retained_persistence_retry(&schedule, &persistence, &ctx, &document_hash, due)
+                .is_none()
+        );
+        assert_eq!(
+            schedule.lock().claim(&document_hash, due),
+            agent_doc_effect_cas::latest_intent::IntentClaim::Empty
+        );
+        assert!(matches!(
+            persistence.claim(&ctx, &document_hash, 1),
+            lazily::LatestDurableClaim::Claimed(envelope) if envelope.epoch == 6
         ));
     }
 

@@ -650,22 +650,25 @@ const RETAINED_EDITOR_OPS_RETRY_TIMEOUT: Duration = Duration::from_secs(3);
 const RETAINED_EDITOR_OPS_BACKOFF_MIN: Duration = Duration::from_millis(50);
 const RETAINED_EDITOR_OPS_BACKOFF_MAX: Duration = Duration::from_secs(2);
 
+/// Lazily effect identity of a retained editor-op burst append.
+const RETAINED_EDITOR_OPS_EFFECT: &str = "retained-editor-ops-append";
+
 #[derive(Debug)]
 struct RetainedEditorOpsBatch {
     batch: EditorOpsBatch,
     retained_at: std::time::Instant,
-    attempts: u32,
-    next_attempt_at: std::time::Instant,
 }
 
 #[derive(Debug, Default)]
 struct RetainedEditorOps {
-    /// Per-document FIFO of bursts not yet known to be recorded.
+    /// Per-document FIFO of bursts not yet known to be recorded. The order is
+    /// typing history and stays here; only the head burst is a Lazily intent.
     queues: HashMap<PathBuf, std::collections::VecDeque<RetainedEditorOpsBatch>>,
-    /// Documents with an append attempt in flight (a caller's first attempt or
-    /// a drainer re-send). At most one per document, so bursts reach the
-    /// controller strictly in typing order.
-    in_flight: std::collections::HashSet<PathBuf>,
+    /// `#implementlazilyowned`: Lazily owns each document's single flight (a
+    /// caller's first attempt or a drainer re-send; at most one per document,
+    /// so bursts reach the controller strictly in typing order), the head
+    /// burst's retry due time and attempt count, and exact receipt matching.
+    effects: agent_doc_effect_cas::latest_intent::LatestIntentSchedule<PathBuf>,
 }
 
 struct RetainedEditorOpsStore {
@@ -743,9 +746,9 @@ pub fn record_editor_ops_retaining_with_lineage(
     };
     let key = retained_key(doc);
     let store = retained_editor_ops();
-    {
+    let attempt = {
         let mut state = store.state.lock();
-        let busy = state.in_flight.contains(&key)
+        let busy = state.effects.in_flight(&key)
             || state
                 .queues
                 .get(&key)
@@ -759,12 +762,9 @@ pub fn record_editor_ops_retaining_with_lineage(
                     key.display()
                 );
             }
-            let now = std::time::Instant::now();
             queue.push_back(RetainedEditorOpsBatch {
                 batch,
-                retained_at: now,
-                attempts: 0,
-                next_attempt_at: now,
+                retained_at: std::time::Instant::now(),
             });
             let pending_batches = queue.len();
             drop(state);
@@ -775,25 +775,45 @@ pub fn record_editor_ops_retaining_with_lineage(
                 cause: "ordered behind an unacknowledged editor-op burst".to_string(),
             });
         }
-        state.in_flight.insert(key.clone());
-    }
+        // An idle document has no retained intent, so the claim always
+        // succeeds; Lazily now holds the document's single flight.
+        state
+            .effects
+            .desire_and_claim(
+                key.clone(),
+                RETAINED_EDITOR_OPS_EFFECT,
+                batch.base_hash.clone(),
+                batch.nonce.clone(),
+                std::time::Instant::now(),
+            )?
+            .context("an idle document's editor-op burst was not claimed")?
+    };
 
-    let attempt = append_editor_ops_batch(doc, &batch, EDITOR_OP_CAPTURE_BUSY_TIMEOUT);
+    let result = append_editor_ops_batch(doc, &batch, EDITOR_OP_CAPTURE_BUSY_TIMEOUT);
     let mut state = store.state.lock();
-    state.in_flight.remove(&key);
-    let outcome = match attempt {
-        Ok(()) => Ok(EditorOpsRecordOutcome::Recorded),
-        Err(AppendAttemptError::Rejected(err)) => Err(err),
+    let outcome = match result {
+        Ok(()) => {
+            state.effects.applied(&attempt, "recorded");
+            Ok(EditorOpsRecordOutcome::Recorded)
+        }
+        Err(AppendAttemptError::Rejected(err)) => {
+            state.effects.rejected(&attempt, format!("{err:#}"));
+            Err(err)
+        }
         Err(AppendAttemptError::Transient(err)) => {
-            let queue = state.queues.entry(key.clone()).or_default();
             let now = std::time::Instant::now();
+            state.effects.retry_after(
+                &attempt,
+                format!("{err:#}"),
+                retry_backoff(attempt.attempt() - 1),
+                now,
+            );
+            let queue = state.queues.entry(key.clone()).or_default();
             // Front, not back: bursts typed while this attempt was in flight
             // were queued behind it and must stay behind it.
             queue.push_front(RetainedEditorOpsBatch {
                 batch,
                 retained_at: now,
-                attempts: 1,
-                next_attempt_at: now + retry_backoff(0),
             });
             Ok(EditorOpsRecordOutcome::Retained {
                 pending_batches: queue.len(),
@@ -841,7 +861,7 @@ pub fn retained_editor_ops_pending(doc: &Path) -> usize {
     let key = retained_key(doc);
     let state = retained_editor_ops().state.lock();
     state.queues.get(&key).map_or(0, |queue| queue.len())
-        + usize::from(state.in_flight.contains(&key))
+        + usize::from(state.effects.in_flight(&key))
 }
 
 /// Block until `doc` has no retained or in-flight burst, or `timeout` elapses.
@@ -852,7 +872,7 @@ pub fn wait_for_retained_editor_ops(doc: &Path, timeout: Duration) -> bool {
     let store = retained_editor_ops();
     let mut state = store.state.lock();
     loop {
-        let pending = state.in_flight.contains(&key)
+        let pending = state.effects.in_flight(&key)
             || state
                 .queues
                 .get(&key)
@@ -878,40 +898,53 @@ fn ensure_retained_editor_ops_drainer() {
     });
 }
 
-/// Pick the next ready head burst, mark its document in flight, and return it.
+/// Claim the next due head burst from Lazily and return it.
+///
+/// A head burst that is not yet a Lazily intent (it was queued behind an
+/// earlier burst) is desired first. Lazily then answers whether it is due,
+/// waiting on a retry, or held by another in-flight attempt.
 fn next_retained_editor_ops(
     state: &mut RetainedEditorOps,
     now: std::time::Instant,
-) -> std::result::Result<(PathBuf, EditorOpsBatch), Option<std::time::Instant>> {
+) -> std::result::Result<
+    (
+        agent_doc_effect_cas::latest_intent::IntentAttempt<PathBuf>,
+        EditorOpsBatch,
+    ),
+    Option<std::time::Instant>,
+> {
+    use agent_doc_effect_cas::latest_intent::IntentClaim;
+    let RetainedEditorOps { queues, effects } = state;
     let mut earliest: Option<std::time::Instant> = None;
-    let mut ready: Option<PathBuf> = None;
-    for (key, queue) in &state.queues {
-        if state.in_flight.contains(key) {
+    for (key, queue) in queues.iter() {
+        let Some(head) = queue.front() else { continue };
+        if !effects.in_flight(key)
+            && !effects.is_pending(key)
+            && let Err(error) = effects.desire(
+                key.clone(),
+                RETAINED_EDITOR_OPS_EFFECT,
+                head.batch.base_hash.clone(),
+                head.batch.nonce.clone(),
+            )
+        {
+            eprintln!("[op-capture] retained editor-op burst was not desired: {error:#}");
             continue;
         }
-        let Some(head) = queue.front() else { continue };
-        if head.next_attempt_at <= now {
-            ready = Some(key.clone());
-            break;
+        match effects.claim(key, now) {
+            IntentClaim::Claimed(attempt) => return Ok((attempt, head.batch.clone())),
+            IntentClaim::Waiting { at } => {
+                earliest = Some(earliest.map_or(at, |e| e.min(at)));
+            }
+            IntentClaim::Busy | IntentClaim::Empty => {}
         }
-        earliest = Some(earliest.map_or(head.next_attempt_at, |e| e.min(head.next_attempt_at)));
     }
-    let Some(key) = ready else {
-        return Err(earliest);
-    };
-    let batch = state.queues[&key]
-        .front()
-        .expect("ready queue has a head")
-        .batch
-        .clone();
-    state.in_flight.insert(key.clone());
-    Ok((key, batch))
+    Err(earliest)
 }
 
 fn run_retained_editor_ops_drainer() {
     let store = retained_editor_ops();
     loop {
-        let (key, batch) = {
+        let (attempt, batch) = {
             let mut state = store.state.lock();
             loop {
                 match next_retained_editor_ops(&mut state, std::time::Instant::now()) {
@@ -923,58 +956,79 @@ fn run_retained_editor_ops_drainer() {
                 }
             }
         };
-        let attempt = append_editor_ops_batch(&key, &batch, RETAINED_EDITOR_OPS_RETRY_TIMEOUT);
+        let key = attempt.key().clone();
+        let result = append_editor_ops_batch(&key, &batch, RETAINED_EDITOR_OPS_RETRY_TIMEOUT);
         let mut state = store.state.lock();
         let queue = state.queues.entry(key.clone()).or_default();
         let head_matches = queue
             .front()
-            .is_some_and(|head| head.batch.nonce == batch.nonce);
+            .is_some_and(|head| head.batch.nonce == attempt.payload());
         if !head_matches {
             // Unreachable while only this drainer and first attempts touch
             // queue heads; never pop a different burst on a stale result.
-            state.in_flight.remove(&key);
+            let observed = queue
+                .front()
+                .map(|head| head.batch.nonce.clone())
+                .unwrap_or_default();
+            if queue.is_empty() {
+                state.queues.remove(&key);
+            }
+            state.effects.superseded(&attempt, observed);
             drop(state);
             store.changed.notify_all();
             continue;
         }
         let summary = agent_doc_merge::crdt::summarize_editor_ops_for_log(&batch.ops);
         let base = editor_ops_base_receipt(&batch.base_hash, batch.lineage.as_ref());
-        let line = match attempt {
+        let line = match &result {
             Ok(()) => {
                 let head = queue.pop_front().expect("head checked above");
                 Some(format!(
                     "editor_ops_recorded count={} {base} transaction=batch {summary} retained_retry=true attempts={} retained_ms={} #qbasehashmemo #editoropscheckpointfail",
                     batch.ops.len(),
-                    head.attempts + 1,
+                    attempt.attempt(),
                     head.retained_at.elapsed().as_millis(),
                 ))
             }
             Err(AppendAttemptError::Rejected(err)) => {
-                let head = queue.pop_front().expect("head checked above");
+                queue.pop_front().expect("head checked above");
                 Some(format!(
                     "editor_ops_record_failed count={} transaction=batch retained_retry=true attempts={} error={err:#} #qbasehashmemo #editoropscheckpointfail",
                     batch.ops.len(),
-                    head.attempts + 1,
+                    attempt.attempt(),
                 ))
             }
-            Err(AppendAttemptError::Transient(_)) => {
-                let head = queue.front_mut().expect("head checked above");
-                head.next_attempt_at = std::time::Instant::now() + retry_backoff(head.attempts);
-                head.attempts = head.attempts.saturating_add(1);
-                None
-            }
+            Err(AppendAttemptError::Transient(_)) => None,
         };
         if queue.is_empty() {
             state.queues.remove(&key);
         }
         drop(state);
-        // The document stays in flight until its receipt is written, so a
-        // waiter that sees it drained also sees the receipt. Logging happens
-        // outside the store lock: `log_op` may itself query the controller.
+        // The document stays in flight (Lazily holds its single flight) until
+        // its receipt is written, so a waiter that sees it drained also sees
+        // the receipt. Logging happens outside the store lock: `log_op` may
+        // itself query the controller.
         if let Some(line) = line {
             agent_doc_ops_log_io::log_op(&key, &line);
         }
-        store.state.lock().in_flight.remove(&key);
+        let mut state = store.state.lock();
+        match result {
+            Ok(()) => {
+                state.effects.applied(&attempt, "recorded");
+            }
+            Err(AppendAttemptError::Rejected(err)) => {
+                state.effects.rejected(&attempt, format!("{err:#}"));
+            }
+            Err(AppendAttemptError::Transient(err)) => {
+                state.effects.retry_after(
+                    &attempt,
+                    format!("{err:#}"),
+                    retry_backoff(attempt.attempt() - 1),
+                    std::time::Instant::now(),
+                );
+            }
+        }
+        drop(state);
         store.changed.notify_all();
     }
 }
@@ -1292,34 +1346,55 @@ fn consume_replayed_editor_op_epoch_with(
     mut epoch_absent: impl FnMut(&Path) -> bool,
     mut backoff: impl FnMut(Duration),
 ) -> ReplayedEpochConsumption {
-    let mut last_err = None;
-    for attempt in 1..=REPLAYED_EPOCH_CLEAR_ATTEMPTS {
-        match clear(doc) {
-            Ok(()) => {
-                return ReplayedEpochConsumption::Consumed {
-                    outcome: "cleared_after_successful_write",
-                    attempt,
-                    error: None,
-                };
-            }
-            Err(err) => {
-                if epoch_absent(doc) {
-                    return ReplayedEpochConsumption::Consumed {
+    use agent_doc_effect_cas::{EpochDrive, EpochStep, Pace, drive_effect_epochs};
+    // `#implementlazilyowned`: each clear is one Lazily-claimed attempt. An
+    // acknowledged clear, or a failed one whose epoch reads back absent, is
+    // the applied receipt; a failed clear over a still-projected epoch is
+    // `Retryable`, re-claimed by Lazily after the unchanged backoff.
+    let drive = drive_effect_epochs(
+        &format!("replayed-editor-op-epoch-clear:{}", doc.display()),
+        "editor-op-epoch-open",
+        REPLAYED_EPOCH_CLEAR_ATTEMPTS,
+        &mut |attempt| {
+            Ok(match clear(doc) {
+                Ok(()) => EpochStep::Applied {
+                    receipt: ReplayedEpochConsumption::Consumed {
+                        outcome: "cleared_after_successful_write",
+                        attempt: attempt.attempt,
+                        error: None,
+                    },
+                    authority: "editor-op-epoch-absent".to_string(),
+                },
+                Err(err) if epoch_absent(doc) => EpochStep::Applied {
+                    receipt: ReplayedEpochConsumption::Consumed {
                         outcome: "already_absent_after_clear_error",
-                        attempt,
+                        attempt: attempt.attempt,
                         error: Some(err.to_string()),
-                    };
-                }
-                last_err = Some(err);
-                if attempt < REPLAYED_EPOCH_CLEAR_ATTEMPTS {
-                    backoff(Duration::from_millis(50 * u64::from(attempt)));
-                }
-            }
-        }
-    }
-    ReplayedEpochConsumption::Failed {
-        attempts: REPLAYED_EPOCH_CLEAR_ATTEMPTS,
-        error: last_err.expect("every failed attempt records its error"),
+                    },
+                    authority: "editor-op-epoch-absent".to_string(),
+                },
+                Err(err) => EpochStep::Retryable(err),
+            })
+        },
+        &mut |attempt, _| {
+            backoff(Duration::from_millis(50 * u64::from(attempt)));
+            Ok(Pace::Continue)
+        },
+    );
+    match drive {
+        Ok(EpochDrive::Applied(consumed)) => consumed,
+        Ok(EpochDrive::Exhausted { attempts, reason })
+        | Ok(EpochDrive::Stopped {
+            attempt: attempts,
+            reason,
+        }) => ReplayedEpochConsumption::Failed {
+            attempts,
+            error: reason,
+        },
+        Err(error) => ReplayedEpochConsumption::Failed {
+            attempts: REPLAYED_EPOCH_CLEAR_ATTEMPTS,
+            error,
+        },
     }
 }
 

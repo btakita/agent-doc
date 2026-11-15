@@ -498,6 +498,34 @@ Progress (`#implementlazilyowned`):
   `QueueProjectionSupersededRetry` / `queue_projection_superseded_retry` are
   scheduler state of the self-heal worker in the same supervisor loop as the
   idle-watch retries. They move to step 8.
+- Family 4, retained editor writes and retained-intent lineage (lzowned8):
+  the shared crate gains `agent_doc_effect_cas::latest_intent::LatestIntentSchedule`,
+  a keyed Lazily latest-intent schedule over `EffectCasCore` (single flight,
+  latest-wins supersession by a newer desire, Lazily-owned retry due time and
+  attempt count, exact receipt matching). A refused native save
+  (`schedule_refused_retained_persistence_retry`) is now the document's newest
+  retained intent whose expected authority is the refused delivery epoch; the
+  timer thread only wakes the claim, and `claim_retained_persistence_retry`
+  compares that epoch with the latest desired save, so a newer epoch or a held
+  single flight is Lazily `Superseded` (the bespoke `desired.epoch != epoch`
+  check is gone). The retained editor-op drainer's `in_flight` set and the
+  head burst's `attempts` / `next_attempt_at` are deleted: the head burst of
+  each document's FIFO is the Lazily intent (expected = its base hash, payload
+  = its nonce) holding the document's single flight, and a transient append is
+  `retry_after` with the unchanged backoff; the FIFO stays the typing-order
+  history. `consume_replayed_editor_op_epoch` runs its three clears through
+  `drive_effect_epochs` (a failed clear over a projected epoch is `Retryable`,
+  an absent epoch is the applied receipt). Messages, log markers
+  (`retained_persistence_retry`, `editor_ops_recorded ... attempts=`), retry
+  caps, and pace curves are unchanged. 23 rows: 6 `migrated`, 16
+  `lazily-adapter` (pace/escalation inputs, one-shot compare-and-retire
+  primitives, per-document atomicity locks, the retained-for-retry marker and
+  its classifier, the one-shot retained-response saves, per-attempt response
+  budgets), 1 `excluded` (`live_exchange_without_visible_write_retry_required`:
+  a pure predicate with no production caller), plus 5 new rows (4 `migrated`:
+  `claim_retained_persistence_retry` and the schedule's `IntentRetry` /
+  `retry_after` / `superseded`; 1 `lazily-adapter`:
+  `RETAINED_PERSISTENCE_RETRY_EFFECT`).
 - Not yet done (as of 2026-11-15, agent-doc `59984d315a`; triage is complete,
   0 `triage` rows): migrate the 291 reviewed `pending-migration` rows family
   by family, then delete the remaining bespoke orchestration and make the
@@ -505,11 +533,11 @@ Progress (`#implementlazilyowned`):
 
 ## Resume here
 
-Status 2026-11-15 (after family 3b): ledger = 64 `migrated`, 121 `lazily-adapter`,
-17 `deleted`, 364 `excluded`, 175 `pending-migration`, 0 `triage`. Work the
-175 rows sequentially in ONE worktree (every step edits the ledger), one family
+Status 2026-11-15 (after family 4): ledger = 74 `migrated`, 138 `lazily-adapter`,
+17 `deleted`, 365 `excluded`, 152 `pending-migration`, 0 `triage`. Work the
+152 rows sequentially in ONE worktree (every step edits the ledger), one family
 per pushed commit, `make check` green before each push, in this order (next:
-family 4):
+family 5):
 
 1. DONE: actor-generation fenced writes (`store_actor_record_fenced_tx`,
    `delete_actor_document_fenced_tx`; 20 actor-generation rows) onto the
@@ -539,8 +567,9 @@ family 4):
      `ForceDiskMutationFence`, `VISIBLE_WRITE_RECONCILE_MAX_ATTEMPTS`
      (`reconcile_visible_write` in write-runtime-io), and idle-watch's
      `QueueProjectionSupersededRetry`.
-4. Retained editor writes and retained-intent lineage (23 rows) onto a Lazily
-   latest-intent core.
+4. DONE: retained editor writes and retained-intent lineage (23 rows + 5 new)
+   onto the Lazily latest-intent core
+   (`agent_doc_effect_cas::latest_intent::LatestIntentSchedule`).
 5. tmux/layout/editor-focus latest-wins projections (31 rows) onto a Lazily
    latest-wins key.
 6. Dispatch/recycle retry budget and owner supersession (44 + 1 rows).

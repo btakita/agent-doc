@@ -577,6 +577,7 @@ dependencies = [
  "agent-doc-document",
  "agent-doc-document-realtime",
  "agent-doc-editor-surface",
+ "agent-doc-effect-cas",
  "agent-doc-element",
  "agent-doc-flow",
  "agent-doc-frontmatter",
@@ -1506,6 +1507,7 @@ name = "agent-doc-op-capture-io"
 version = "0.35.574"
 dependencies = [
  "agent-doc-controller",
+ "agent-doc-effect-cas",
  "agent-doc-fs",
  "agent-doc-hash",
  "agent-doc-merge",

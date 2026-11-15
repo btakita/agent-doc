@@ -1185,7 +1185,21 @@ pub fn record(
             event.kind,
             QueueLineageEventKind::Retained | QueueLineageEventKind::Removed
         );
-        if generation < newest && !cleanup_only {
+        // `#stalelineagecancel`: cancelling a still-open older attempt is the
+        // recovery a kept completion names. It is not cleanup. An already
+        // terminal attempt stays uncancellable, and every other stale event,
+        // including `committed`, stays refused.
+        if event.kind == QueueLineageEventKind::Cancelled
+            && let Some(terminal) = attempt.terminal_kind()
+        {
+            bail!(
+                "queue lineage generation {generation} is terminal ({}); refusing {}",
+                terminal.as_str(),
+                event.kind.as_str()
+            );
+        }
+        let open_cancel = event.kind == QueueLineageEventKind::Cancelled;
+        if generation < newest && !cleanup_only && !open_cancel {
             bail!("stale queue lineage generation {generation}; current generation is {newest}");
         }
         if let Some(terminal) = attempt.terminal_kind()
@@ -4160,6 +4174,80 @@ mod tests {
         assert!(verbose.contains("work generation 1 [cancelled"));
         assert!(verbose.contains("work generation 2 [attached"));
         assert!(verbose.contains("owner=subagent:first"));
+    }
+
+    /// `#stalelineagecancel`: an older non-terminal attempt beside a newer
+    /// prose-only report blocks a kept completion. Cancelling that older
+    /// generation is the recovery the error names. `committed` on it stays
+    /// stale, and cancelling an already-terminal attempt stays refused.
+    #[test]
+    fn cancel_open_older_generation_unblocks_kept_completion() {
+        let fixture = RepoFixture::new();
+        let item = "do [#q-stalelineagecancel]";
+        let older = make_claim(&fixture.doc, item, "subagent:older", Some("worker:older"));
+        assert_eq!(older.generation, 1);
+        record_started(&fixture.doc, &older).unwrap();
+
+        let newer = make_claim(&fixture.doc, item, "subagent:newer", Some("worker:newer"));
+        assert_eq!(newer.generation, 2);
+        record_started(&fixture.doc, &newer).unwrap();
+        record_prose_only(&fixture.doc, &newer, "kept report").unwrap();
+        let ambiguous = kept_completion_attempt(&fixture.doc, item)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            ambiguous.contains("cancel the attempt that is not the report"),
+            "{ambiguous}"
+        );
+
+        let stale = record(
+            &fixture.doc,
+            item,
+            older.generation,
+            RecordRequest {
+                kind: QueueLineageEventKind::Committed,
+                source_sha: Some(fixture.head()),
+                ..RecordRequest::default()
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(stale.contains("stale queue lineage generation"), "{stale}");
+
+        record(
+            &fixture.doc,
+            item,
+            older.generation,
+            RecordRequest {
+                kind: QueueLineageEventKind::Cancelled,
+                detail: Some("not the kept report".to_string()),
+                ..RecordRequest::default()
+            },
+        )
+        .unwrap();
+        let kept = kept_completion_attempt(&fixture.doc, item)
+            .unwrap()
+            .expect("single newer prose-only attempt");
+        assert_eq!(kept.generation, newer.generation);
+        assert!(
+            kept.events
+                .iter()
+                .any(|event| event.kind == QueueLineageEventKind::ProseOnly)
+        );
+
+        let terminal = record(
+            &fixture.doc,
+            item,
+            older.generation,
+            RecordRequest {
+                kind: QueueLineageEventKind::Cancelled,
+                detail: Some("already terminal".to_string()),
+                ..RecordRequest::default()
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(terminal.contains("terminal (cancelled)"), "{terminal}");
     }
 
     #[test]

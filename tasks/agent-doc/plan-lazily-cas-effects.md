@@ -609,6 +609,22 @@ Progress (`#implementlazilyowned`):
   timer sets and timers, the no-op drain poll pace and gate, the
   non-operator-epoch capture fences, the generation-fence normalizers), plus
   1 new row (`crdtDoublingBackoffMsUtil` `migrated`).
+- Editor retained surface/layout delivery, second half (plan step 7b): the
+  classic/backend `EditorTabSyncListener` retained-surface delivery refusal
+  count is the Lazily failure ledger's (`EffectFailureLedger`
+  `surface.delivery`; `SurfaceDeliveryRetry` stays its pace curve, cleared on
+  an accepted delivery, a new observation, and shutdown). The uncalled
+  `SyncLayoutAction` deferred-sync helpers (`SYNC_DEFERRED_RETRY_MS`,
+  `SYNC_DEFERRED_MAX_RETRIES`, `deferredSyncRetryDelayMs`,
+  `shouldRerunAfterSupersede`) and their tests are deleted: the controller
+  owns layout sync through Lazily latest-wins keys (step 5). The 262 Remote
+  Dev frontend is shell-only (no native library, GH #339), so no Rust core can
+  own its rows: the ingress connection lease is a carrier of the
+  backend-owned lease the backend compares (`STALE_LEASE`), its reconnect pace
+  is transport resilience, and the bounded presentation recapture is a read
+  the backend asks for (`retrySuggested`) and re-derives from. Messages, log
+  markers, and paces are unchanged. 13 rows: 2 `migrated`, 5 `deleted`, 2
+  `lazily-adapter`, 4 `excluded`.
 - Not yet done (as of 2026-11-15, agent-doc `59984d315a`; triage is complete,
   0 `triage` rows): migrate the 291 reviewed `pending-migration` rows family
   by family, then delete the remaining bespoke orchestration and make the
@@ -616,11 +632,11 @@ Progress (`#implementlazilyowned`):
 
 ## Resume here
 
-Status 2026-11-15 (after family 7a): ledger = 114 `migrated`, 166 `lazily-adapter`,
-25 `deleted`, 415 `excluded`, 35 `pending-migration`, 0 `triage`. Work the
-35 rows sequentially in ONE worktree (every step edits the ledger), one family
+Status 2026-11-15 (after family 7b): ledger = 116 `migrated`, 168 `lazily-adapter`,
+30 `deleted`, 419 `excluded`, 22 `pending-migration`, 0 `triage`. Work the
+22 rows sequentially in ONE worktree (every step edits the ledger), one family
 per pushed commit, `make check` green before each push, in this order (next:
-family 7b):
+family 8):
 
 1. DONE: actor-generation fenced writes (`store_actor_record_fenced_tx`,
    `delete_actor_document_fenced_tx`; 20 actor-generation rows) onto the
@@ -667,7 +683,7 @@ family 7b):
    - 7a. DONE: the 41 `CrdtReplicaManager` / `PatchWatcher` / `TypingTracker`
      rows onto the FFI Lazily failure ledger (`EffectFailureLedger` over
      `agent_doc_effect_cas::failure_ledger`).
-   - 7b. The 13 retained surface/layout delivery rows
+   - 7b. DONE: the 13 retained surface/layout delivery rows
      (`EditorTabSyncListener` `SurfaceDeliveryRetry`, `SyncLayoutAction`
      deferred sync, the 262 frontend `SurfaceIngressLease`).
 8. Remaining small families: authority observation (6), idle-watch/captured

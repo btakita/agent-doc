@@ -99,7 +99,11 @@ class EditorTabSyncListener : FileEditorManagerListener {
     private val projectionAuthorityEpoch = AtomicLong(0)
     private val focusProjectionGeneration = AtomicLong(0)
     private val selectionFocusProbeGeneration = AtomicLong(0)
-    private val surfaceDeliveryRetryAttempt = AtomicLong(0)
+    // `#implementlazilyowned` (plan step 7b): a refused retained-surface delivery is the next
+    // Lazily attempt of the listener's retained delivery (EffectFailureLedger, FFI); the listener
+    // keeps only the pace curve ([SurfaceDeliveryRetry]) and the timer.
+    private val surfaceDeliveryRefusals = EffectFailureLedger("surface.delivery")
+    private val surfaceDeliveryKey = "retained-surface"
     private val openedSessionStarts = OpenedSessionStartBatch<VirtualFile>()
     private val activeFocusProjection = AtomicReference<ScheduledFuture<*>?>(null)
     private val lifecycleLock = Any()
@@ -978,7 +982,7 @@ internal data class CapturedSurface(
             }
         }
         val requested = generation.incrementAndGet()
-        surfaceDeliveryRetryAttempt.set(0)
+        surfaceDeliveryRefusals.clear(surfaceDeliveryKey)
         projectLatestSurfaceOnEditorThread(requested)
     }
 
@@ -993,7 +997,8 @@ internal data class CapturedSurface(
         ) {
             return
         }
-        val attempt = surfaceDeliveryRetryAttempt.incrementAndGet()
+        val attempt =
+            surfaceDeliveryRefusals.recordFailure(surfaceDeliveryKey, "retained-surface-delivery").toLong()
         val delayMs = SurfaceDeliveryRetry.delayMs(attempt)
         try {
             surfaceDeliveryExecutor.schedule(
@@ -1187,7 +1192,7 @@ internal data class CapturedSurface(
             // healthy 1-2 second reconcile does not look like a dropped auto-sync.
             TerminalUtil.showHint(observation.project, SyncLayoutAction.LAYOUT_SYNC_PENDING_MESSAGE)
         }
-        surfaceDeliveryRetryAttempt.set(0)
+        surfaceDeliveryRefusals.clear(surfaceDeliveryKey)
         val publishedEndpoint = SurfaceEndpoint(pending.projectRoot, pending.surfaceId)
         // Decide under the lock that retireControllerProjection drains under: either this endpoint is
         // recorded before the drain (and the handoff forgets it), or the handoff already happened and
@@ -1867,6 +1872,7 @@ internal data class CapturedSurface(
                 surfaceRoots.drain() to surfaceEndpoints.drain()
             }
         latestSurfaceObservation.set(null)
+        surfaceDeliveryRefusals.clearAll()
         if (!policy.retireControllerProjection) {
             // Dynamic replacement keeps the controller's last acknowledged Source live. The new
             // classloader publishes the same client family with a newer generation, atomically

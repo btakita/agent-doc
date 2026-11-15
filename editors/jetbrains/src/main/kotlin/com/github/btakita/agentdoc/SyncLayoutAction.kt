@@ -53,8 +53,6 @@ class SyncLayoutAction : ImplAction {
         internal const val SYNC_ALREADY_RUNNING_WARNING =
             "Sync deferred: another tmux layout sync is already running; this sync will retry shortly."
         internal const val SYNC_PROCESS_TIMEOUT_MS = 30_000L
-        internal const val SYNC_DEFERRED_RETRY_MS = 500L
-        internal const val SYNC_DEFERRED_MAX_RETRIES = 80
         internal const val LAYOUT_SYNC_PENDING_MESSAGE = "Syncing tmux layout…"
         internal const val LAYOUT_SYNC_COMPLETE_MESSAGE = "Tmux layout synced"
 
@@ -352,22 +350,6 @@ class SyncLayoutAction : ImplAction {
                     }
                 }
                 ?: ExactVisibleSyncDecision.RefuseUnknownLayout
-
-        /**
-         * `#recyclerestart` Q2 — decide whether a just-completed sync should re-run to
-         * apply a layout that superseded it mid-flight. Re-run only when WE held the guard
-         * (`heldGuard`) and a newer sync bumped the generation while we ran
-         * (`!generationStillCurrent`). A deferred request (guard not held) never re-runs —
-         * the in-flight holder owns the re-run — and a still-current generation means no
-         * newer sync is pending, so the re-run chain converges and cannot loop forever.
-         */
-        internal fun shouldRerunAfterSupersede(
-            heldGuard: Boolean,
-            generationStillCurrent: Boolean,
-        ): Boolean = heldGuard && !generationStillCurrent
-
-        internal fun deferredSyncRetryDelayMs(attempt: Int): Long? =
-            if (attempt < SYNC_DEFERRED_MAX_RETRIES) SYNC_DEFERRED_RETRY_MS else null
 
         internal fun syncCallerKind(
             noAutostart: Boolean,

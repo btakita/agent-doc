@@ -64,6 +64,9 @@ pub fn run_write_command_with_empty_response_recovery(
 ) -> Result<()> {
     let file = options.file.clone();
     let force_disk = options.force_disk;
+    if commit_mode != agent_doc_write_command_io::CommitMode::None {
+        recover_orphaned_queue_maintenance_before_closeout(&file, "respond_closeout");
+    }
     // `#respondsettle`: remember the cycle this command is closing BEFORE it
     // runs, so a later settle can prove it was THIS cycle that committed.
     let closing_cycle = if commit_mode == agent_doc_write_command_io::CommitMode::None {
@@ -133,6 +136,11 @@ fn settle_failed_strict_closeout(
     // error with `queue mutation deferred` and failed a committed turn. If it
     // never releases, nothing proves the error was superseded, so the original
     // error stands.
+    //
+    // `#deadmaintworker`: a maintenance worker that died during this closeout
+    // left its request pending; adopt it before taking the guard so the
+    // re-check below and every later session-check see it settled.
+    recover_orphaned_queue_maintenance_before_closeout(file, "respond_post_commit_recheck");
     let apply_guard =
         match agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire_after_committed_closeout(
             file,
@@ -232,6 +240,29 @@ fn settle_failed_strict_closeout(
         ),
     );
     Ok(())
+}
+
+/// `#deadmaintworker`: adopt and run an admitted queue-maintenance request
+/// whose worker is gone, before a closeout takes the apply guard.
+///
+/// Only preflight used to redispatch such a request, so a worker that died
+/// after claiming it kept every session-check interrupted until the next turn.
+/// This is best effort: a live owner is left alone, and a failed recovery is
+/// logged and leaves the request recoverable by the next closeout or
+/// preflight, as before.
+fn recover_orphaned_queue_maintenance_before_closeout(file: &Path, source: &str) {
+    if let Err(error) =
+        agent_doc_preflight_command_io::recover_orphaned_queue_maintenance(file, source)
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_maintenance_orphan_recovery_failed file={} source={source} error={}",
+                file.display(),
+                format!("{error:#}").replace('\n', " | "),
+            ),
+        );
+    }
 }
 
 fn recovered_closeout_report(cycle_id: &str) -> String {
@@ -1233,6 +1264,10 @@ pub fn run_session_check_heal(file: &Path) -> Result<()> {
     // It must finish before this repair owns QueueEditGuard so the global lock
     // order remains completion -> queue apply and cannot ABBA with reporters.
     agent_doc_session_check_io::midturn_steering::apply_pending_claim_cancellations(file)?;
+    // `#deadmaintworker`: the read-only check names this command for a
+    // maintenance request whose worker is gone; adopt and run it before the
+    // guard, since the worker body takes the apply flock itself.
+    recover_orphaned_queue_maintenance_before_closeout(file, "session_check_heal");
     let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let session_effects =
         agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(file, &apply_guard)?;

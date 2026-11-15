@@ -3845,6 +3845,22 @@ fn refuse_transient_queue_closeout(
         Ok(false) => {}
     }
     if agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_pending(file) {
+        // `#deadmaintworker`: a request whose worker is gone never completes
+        // on its own; name the owner that adopts and runs it.
+        if let Ok(agent_doc_queue_io::queue_edit_owner::QueueMaintenanceRequestOwner::Orphaned {
+            dead_holder,
+        }) = agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_owner(file)
+        {
+            return Ok(SessionCheckStatus::Interrupted(format!(
+                "[session-check] INTERRUPTED: queue maintenance request is pending for {} and its worker is gone (holder={}, holder_pid={}); terminal closeout is withheld until the admitted generation completes. `{}` adopts and runs it now; `respond` and the next preflight also recover it (#transientcloseout #deadmaintworker)",
+                file.display(),
+                dead_holder
+                    .as_ref()
+                    .map_or("none", |lease| lease.holder.as_str()),
+                dead_holder.as_ref().map_or(0, |lease| lease.holder_pid),
+                session_check_heal_command(file),
+            )));
+        }
         return Ok(SessionCheckStatus::Interrupted(format!(
             "[session-check] INTERRUPTED: queue maintenance request is pending for {}; terminal closeout is withheld until its admitted generation completes (#transientcloseout)",
             file.display(),
@@ -5950,6 +5966,84 @@ mod terminal_convergence_tests {
                 assert!(!message.contains("set the flag"), "{message}");
             }
             other => panic!("a 🚧 with no fresh claim must refuse, got {other:?}"),
+        }
+    }
+
+    /// `#deadmaintworker`: a pending request whose worker died names the
+    /// command that adopts it; a request a live worker owns keeps the plain
+    /// pending refusal. Both withhold terminal status.
+    #[test]
+    fn pending_request_with_a_dead_worker_names_its_recovery() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        std::fs::write(
+            &file,
+            "<!-- agent:queue -->\n- ⏳ awaiting operator\n<!-- /agent:queue -->\n",
+        )
+        .unwrap();
+        let file_text = file.to_string_lossy();
+        agent_doc_queue_io::queue_edit_owner::publish_queue_maintenance_request(
+            &file, "hash", false,
+        )
+        .unwrap();
+        let dead_token = format!(
+            "{}dead-worker",
+            agent_doc_queue_io::queue_edit_owner::BACKGROUND_QUEUE_EDIT_OWNER_PREFIX
+        );
+        assert!(
+            agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
+                &file_text,
+                &dead_token,
+                4_000_000,
+            )
+            .unwrap()
+        );
+        match refuse_transient_queue_closeout(
+            &file,
+            SessionCheckStatus::Ok("[session-check] OK".to_string()),
+        )
+        .unwrap()
+        {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("its worker is gone"), "{message}");
+                assert!(message.contains(&dead_token), "{message}");
+                assert!(message.contains("holder_pid=4000000"), "{message}");
+                assert!(
+                    message.contains(&session_check_heal_command(&file)),
+                    "{message}"
+                );
+                assert!(!is_self_converging_interruption(&message), "{message}");
+            }
+            other => panic!("a dead worker's request falsely reported terminal: {other:?}"),
+        }
+
+        let live_token = format!(
+            "{}live-worker",
+            agent_doc_queue_io::queue_edit_owner::BACKGROUND_QUEUE_EDIT_OWNER_PREFIX
+        );
+        assert!(
+            agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
+                &file_text,
+                &live_token,
+                std::process::id(),
+            )
+            .unwrap()
+        );
+        match refuse_transient_queue_closeout(
+            &file,
+            SessionCheckStatus::Ok("[session-check] OK".to_string()),
+        )
+        .unwrap()
+        {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(
+                    message.contains("queue maintenance request is pending"),
+                    "{message}"
+                );
+                assert!(!message.contains("its worker is gone"), "{message}");
+            }
+            other => panic!("a live worker's request falsely reported terminal: {other:?}"),
         }
     }
 

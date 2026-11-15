@@ -901,10 +901,20 @@ fn superseded_delayed_worker_has_no_advisory_archive_or_worktree_effects() {
     assert!(worktree.is_dir());
     assert_eq!(fs::read_to_string(&doc).unwrap(), content);
     std::thread::sleep(std::time::Duration::from_millis(6500));
-    assert_eq!(
-        fs::read_to_string(&ops).unwrap_or_default(),
-        ops_after_supersede,
-        "superseded worker published durable evidence",
+    // `#deadmaintworker`: the worker's own exit diagnostic is the only line it
+    // may still append; it is not an effect.
+    let ops_after_release = fs::read_to_string(&ops).unwrap_or_default();
+    assert!(
+        ops_after_release.starts_with(&ops_after_supersede),
+        "ops.log was rewritten after supersession",
+    );
+    let appended: Vec<&str> = ops_after_release[ops_after_supersede.len()..]
+        .lines()
+        .filter(|line| !line.contains("queue_maintenance_background_exited"))
+        .collect();
+    assert!(
+        appended.is_empty(),
+        "superseded worker published durable evidence: {appended:#?}",
     );
     assert!(!root.join(".agent-doc/advisories").exists());
     assert!(!root.join("tasks/history.done.md").exists());
@@ -1710,7 +1720,27 @@ fn panic_after_background_effect_retains_incomplete_attempt_until_successor_comp
     );
 
     let ops = tmp.path().join(".agent-doc/logs/ops.log");
-    let recovery_ops_len = fs::read_to_string(&ops).unwrap_or_default().len();
+    // `#deadmaintworker`: the detached worker's stderr is /dev/null, so its
+    // panic must reach ops.log itself, followed by its exit line.
+    let exit_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let panicked_ops = loop {
+        let current = fs::read_to_string(&ops).unwrap_or_default();
+        if current.contains("queue_maintenance_background_exited") {
+            break current;
+        }
+        assert!(
+            std::time::Instant::now() < exit_deadline,
+            "the panicked worker left no durable exit trace: {current}",
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    assert!(
+        panicked_ops.contains("queue_maintenance_background_panicked")
+            && panicked_ops.contains("injected background maintenance panic after pending effect")
+            && panicked_ops.contains("mode=detached outcome=error"),
+        "the panicked worker's exit trace lost its cause: {panicked_ops}",
+    );
+    let recovery_ops_len = panicked_ops.len();
     let recovery = agent_doc_cmd()
         .current_dir(tmp.path())
         .args(["preflight", doc.to_str().unwrap()])
@@ -1746,6 +1776,201 @@ fn panic_after_background_effect_retains_incomplete_attempt_until_successor_comp
         );
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
+}
+
+/// Wait until a crashed detached worker has left its durable incomplete
+/// attempt: a retained lease and a free apply flock.
+fn wait_for_crashed_queue_maintenance_worker(doc: &Path) {
+    let crash_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        if agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(&doc.to_string_lossy())
+            .is_some()
+            && !agent_doc_queue_io::queue_edit_owner::queue_apply_in_flight(doc).unwrap()
+            && matches!(
+                agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_owner(doc).unwrap(),
+                agent_doc_queue_io::queue_edit_owner::QueueMaintenanceRequestOwner::Orphaned { .. }
+            )
+        {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < crash_deadline,
+            "crashed worker did not leave an orphaned request",
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+/// `#deadmaintworker`: a worker that dies after claiming its request leaves
+/// it orphaned. Read-only `session-check` names the dead worker and the heal
+/// command, and `repair --session-check-heal` adopts and runs the request
+/// without waiting for the next preflight.
+#[test]
+fn session_check_heal_adopts_a_request_whose_worker_died() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: dead-worker-heal-test\n",
+        "agent_doc_format: template\n",
+        "agent: codex\n",
+        "model: gpt-5\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — gpt-5\n\nDone.\n",
+        "<!-- agent:boundary:1234abcd -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:backlog priority queue -->\n",
+        "- legacy dead worker item\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let admission = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .env(
+            "AGENT_DOC_TEST_BACKGROUND_MAINTENANCE_CRASH_AFTER_LOCK",
+            "1",
+        )
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        admission.status.success(),
+        "admission failed before detached crash: {}",
+        String::from_utf8_lossy(&admission.stderr),
+    );
+    wait_for_crashed_queue_maintenance_worker(&doc);
+
+    let check = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .env("AGENT_DOC_SESSION_CHECK_SETTLE_SECS", "0")
+        .args(["session-check", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let check_text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&check.stdout),
+        String::from_utf8_lossy(&check.stderr),
+    );
+    assert!(
+        check_text.contains("its worker is gone")
+            && check_text.contains("--session-check-heal")
+            && !check_text.contains("[session-check] ok"),
+        "session-check must name the dead worker's recovery: {check_text}",
+    );
+    assert!(
+        agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_pending(&doc),
+        "read-only session-check must not run the request itself",
+    );
+
+    let heal = agent_doc_cmd()
+        .current_dir(tmp.path())
+        .args(["repair", doc.to_str().unwrap(), "--session-check-heal"])
+        .output()
+        .unwrap();
+    let heal_text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&heal.stdout),
+        String::from_utf8_lossy(&heal.stderr),
+    );
+    assert!(
+        !agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_pending(&doc),
+        "heal must adopt and complete the orphaned request: {heal_text}",
+    );
+    assert!(
+        agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(&doc.to_string_lossy())
+            .is_none(),
+        "heal must not leave the dead worker's token behind: {heal_text}",
+    );
+    let ops = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+    assert!(
+        ops.contains("queue_maintenance_orphan_adopted")
+            && ops.contains("source=session_check_heal")
+            && ops.contains("mode=adopted outcome=ok"),
+        "heal did not log its adoption: {ops}",
+    );
+    assert!(
+        !heal_text.contains("its worker is gone"),
+        "the healed check must no longer report the orphaned request: {heal_text}",
+    );
+}
+
+/// `#deadmaintworker`: the closeout itself adopts a request whose worker
+/// died during the turn, so `respond` commits the turn and every later
+/// session-check sees the request settled.
+#[test]
+fn finalize_adopts_a_request_whose_worker_died_during_the_turn() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let doc = root.join("session.md");
+    let committed = "---\nagent_doc_session: dead-worker-finalize\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+        ## Exchange\n\n\
+        <!-- agent:exchange patch=append -->\n\
+        ### Re: prior response — gpt-5\n\
+        Already committed.\n\
+        <!-- agent:boundary:head-boundary -->\n\
+        <!-- /agent:exchange -->\n";
+    fs::write(&doc, committed).unwrap();
+    init_git_repo(root, &doc);
+    seed_snapshot(root, &doc, committed);
+    let working = committed.replace(
+        "<!-- agent:boundary:head-boundary -->",
+        "❯ follow-up after dispatch\n<!-- agent:boundary:head-boundary -->",
+    );
+    fs::write(&doc, working).unwrap();
+
+    let preflight = agent_doc_cmd()
+        .current_dir(root)
+        .env(
+            "AGENT_DOC_TEST_BACKGROUND_MAINTENANCE_CRASH_AFTER_LOCK",
+            "1",
+        )
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        preflight.status.success(),
+        "preflight failed: {}",
+        String::from_utf8_lossy(&preflight.stderr),
+    );
+    wait_for_crashed_queue_maintenance_worker(&doc);
+
+    let mut finalize = agent_doc_cmd();
+    finalize.current_dir(root);
+    finalize.args(["finalize", doc.to_str().unwrap(), "--origin", "skill"]);
+    finalize
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: follow-up — gpt-5\n\nHandled.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nThe follow-up is handled.\n<!-- /patch:recap -->\n",
+        )
+        .assert()
+        .success();
+
+    assert!(
+        !agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_pending(&doc),
+        "the closeout must adopt and complete the orphaned request",
+    );
+    let ops = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap_or_default();
+    assert!(
+        ops.contains("queue_maintenance_orphan_adopted") && ops.contains("source=respond_closeout"),
+        "finalize did not adopt the orphaned request: {ops}",
+    );
+    let check = agent_doc_cmd()
+        .current_dir(root)
+        .env("AGENT_DOC_SESSION_CHECK_SETTLE_SECS", "0")
+        .args(["session-check", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let check_text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&check.stdout),
+        String::from_utf8_lossy(&check.stderr),
+    );
+    assert!(
+        !check_text.contains("queue maintenance request is pending"),
+        "session-check after the closeout still sees the orphaned request: {check_text}",
+    );
 }
 
 #[test]

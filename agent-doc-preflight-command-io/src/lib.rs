@@ -663,27 +663,222 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
             std::process::id(),
         ),
     );
-    let token = if cfg!(test) {
-        // Unit tests invoke the worker body directly instead of going through
-        // `spawn_background_queue_maintenance`, so reserve the test process as
-        // the worker owner before exercising the same adoption path.
-        let token = new_background_queue_maintenance_token();
-        let _ = agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
-            &file.to_string_lossy(),
-            &token,
-            std::process::id(),
-        )?;
-        let content = std::fs::read_to_string(file)?;
-        agent_doc_queue_io::queue_edit_owner::publish_queue_maintenance_request(
-            file,
-            &agent_doc_hash::content_hash(&content),
-            commit_if_mutated,
-        )?;
-        token
-    } else {
-        std::env::var(BACKGROUND_QUEUE_MAINTENANCE_TOKEN_ENV)
-            .context("background queue maintenance reservation token is missing")?
+    let token = (|| -> Result<String> {
+        if cfg!(test) {
+            // Unit tests invoke the worker body directly instead of going
+            // through `spawn_background_queue_maintenance`, so reserve the test
+            // process as the worker owner before exercising the same adoption
+            // path.
+            let token = new_background_queue_maintenance_token();
+            let _ = agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
+                &file.to_string_lossy(),
+                &token,
+                std::process::id(),
+            )?;
+            let content = std::fs::read_to_string(file)?;
+            agent_doc_queue_io::queue_edit_owner::publish_queue_maintenance_request(
+                file,
+                &agent_doc_hash::content_hash(&content),
+                commit_if_mutated,
+            )?;
+            Ok(token)
+        } else {
+            std::env::var(BACKGROUND_QUEUE_MAINTENANCE_TOKEN_ENV)
+                .context("background queue maintenance reservation token is missing")
+        }
+    })();
+    let token = match token {
+        Ok(token) => token,
+        Err(error) => {
+            log_queue_maintenance_worker_exit(
+                file,
+                QueueMaintenanceWorkerMode::Detached,
+                &Err(anyhow::anyhow!("{error:#}")),
+            );
+            return Err(error);
+        }
     };
+    run_queue_maintenance_worker_logged(file, &token, QueueMaintenanceWorkerMode::Detached)
+}
+
+/// How a queue-maintenance worker body came to own its reservation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QueueMaintenanceWorkerMode {
+    /// The detached child preflight dispatched.
+    Detached,
+    /// A closeout that adopted an orphaned request in process
+    /// (`#deadmaintworker`).
+    Adopted,
+}
+
+impl QueueMaintenanceWorkerMode {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Detached => "detached",
+            Self::Adopted => "adopted",
+        }
+    }
+}
+
+fn panic_payload_text(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|text| (*text).to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "non-string panic payload".to_string())
+}
+
+/// `#deadmaintworker`: every worker exit leaves one durable line. The detached
+/// child runs with stderr on `/dev/null`, so an error it returned (a failed
+/// authority read, a pending-maintenance error, a claim-store error) used to
+/// vanish: the claim stayed in flight and the request stayed pending with no
+/// trace of why the worker stopped.
+fn log_queue_maintenance_worker_exit(
+    file: &Path,
+    mode: QueueMaintenanceWorkerMode,
+    outcome: &Result<()>,
+) {
+    let detail = match outcome {
+        Ok(()) => "outcome=ok".to_string(),
+        Err(error) => format!(
+            "outcome=error error={}",
+            format!("{error:#}").replace('\n', " | ")
+        ),
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_maintenance_background_exited file={} pid={} mode={} {detail}",
+            file.display(),
+            std::process::id(),
+            mode.label(),
+        ),
+    );
+}
+
+/// Run the worker body, converting a panic into a logged error. Unwinding
+/// still runs the claim's `Drop`, so an incomplete attempt stays retained.
+fn run_queue_maintenance_worker_logged(
+    file: &Path,
+    token: &str,
+    mode: QueueMaintenanceWorkerMode,
+) -> Result<()> {
+    let outcome = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        run_queue_maintenance_worker(file, token, mode)
+    })) {
+        Ok(outcome) => outcome,
+        Err(payload) => {
+            let message = panic_payload_text(payload.as_ref());
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "queue_maintenance_background_panicked file={} pid={} mode={} panic={}",
+                    file.display(),
+                    std::process::id(),
+                    mode.label(),
+                    message.replace('\n', " | "),
+                ),
+            );
+            Err(anyhow::anyhow!(
+                "background queue maintenance panicked: {message}"
+            ))
+        }
+    };
+    log_queue_maintenance_worker_exit(file, mode, &outcome);
+    outcome
+}
+
+/// What [`recover_orphaned_queue_maintenance`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrphanedQueueMaintenanceRecovery {
+    /// No request is pending, or a live owner will run it.
+    NotOrphaned,
+    /// Another owner reserved the request first; it runs it.
+    Coalesced { holder_pid: u32 },
+    /// This process adopted the orphaned request and ran it to completion.
+    Recovered,
+}
+
+/// `#deadmaintworker`: adopt and run an admitted maintenance request whose
+/// worker is gone.
+///
+/// Only preflight dispatched maintenance, so a worker that crashed, panicked,
+/// or returned an error after claiming its request left the request pending
+/// until the next turn's preflight: every session-check in between withheld
+/// terminal closeout. A closeout that owns write intent calls this before it
+/// takes the apply guard. It reserves the request exactly as a dispatcher
+/// does (a dead holder's lease is replaced at once, without the TTL), then
+/// runs the same worker body in process: the claim reconnects at a newer
+/// generation, resumes the retained intent, and either applies the admitted
+/// cut or, when the document has moved on, consumes it as superseded. A live
+/// owner is never displaced.
+///
+/// The caller must not hold the document's apply guard.
+pub fn recover_orphaned_queue_maintenance(
+    file: &Path,
+    source: &str,
+) -> Result<OrphanedQueueMaintenanceRecovery> {
+    let agent_doc_queue_io::queue_edit_owner::QueueMaintenanceRequestOwner::Orphaned {
+        dead_holder,
+    } = agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_owner(file)?
+    else {
+        return Ok(OrphanedQueueMaintenanceRecovery::NotOrphaned);
+    };
+    let file_text = file.to_string_lossy();
+    let token = new_background_queue_maintenance_token();
+    if !agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
+        &file_text,
+        &token,
+        std::process::id(),
+    )? {
+        let holder_pid =
+            agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(&file_text)
+                .map(|lease| lease.holder_pid)
+                .unwrap_or_default();
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_maintenance_orphan_recovery_coalesced file={} source={source} holder_pid={holder_pid}",
+                file.display(),
+            ),
+        );
+        return Ok(OrphanedQueueMaintenanceRecovery::Coalesced { holder_pid });
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_maintenance_orphan_adopted file={} source={source} pid={} dead_holder={} dead_holder_pid={}",
+            file.display(),
+            std::process::id(),
+            dead_holder
+                .as_ref()
+                .map_or("none", |lease| lease.holder.as_str()),
+            dead_holder.as_ref().map_or(0, |lease| lease.holder_pid),
+        ),
+    );
+    let outcome =
+        run_queue_maintenance_worker_logged(file, &token, QueueMaintenanceWorkerMode::Adopted);
+    if outcome.is_err() {
+        // A failed detached worker leaves its token behind so its dead PID
+        // marks the attempt recoverable. This process stays alive to finish
+        // its closeout, so a retained token would read as a live reservation
+        // and stall that closeout's own apply guard. Release it: the request
+        // row and the retained claim intent keep the attempt visible and
+        // recoverable.
+        agent_doc_queue_io::queue_edit_owner::clear_queue_edit_owner_lease_if_holder(
+            &file_text, &token,
+        );
+    }
+    outcome.map(|()| OrphanedQueueMaintenanceRecovery::Recovered)
+}
+
+/// The worker body shared by the detached child and an adopting closeout.
+fn run_queue_maintenance_worker(
+    file: &Path,
+    token: &str,
+    mode: QueueMaintenanceWorkerMode,
+) -> Result<()> {
+    let token = token.to_string();
     let Some(mut queue_mutation) = BackgroundQueueMaintenanceClaim::adopt_reserved(file, &token)?
     else {
         let lease = agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(
@@ -709,7 +904,8 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
         );
         return Ok(());
     };
-    if std::env::var_os(TEST_BACKGROUND_MAINTENANCE_CRASH_AFTER_LOCK_ENV).is_some() {
+    let detached = mode == QueueMaintenanceWorkerMode::Detached;
+    if detached && std::env::var_os(TEST_BACKGROUND_MAINTENANCE_CRASH_AFTER_LOCK_ENV).is_some() {
         // Integration-only crash barrier: process::exit intentionally skips
         // Drop, modeling a hard worker crash after flock acquisition and
         // durable adoption but before any maintenance success/effect.
@@ -807,7 +1003,9 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
                     pending_report.todo_signals.len(),
                 ),
             );
-            if std::env::var_os(TEST_BACKGROUND_MAINTENANCE_PANIC_AFTER_EFFECT_ENV).is_some() {
+            if detached
+                && std::env::var_os(TEST_BACKGROUND_MAINTENANCE_PANIC_AFTER_EFFECT_ENV).is_some()
+            {
                 panic!("injected background maintenance panic after pending effect");
             }
             effect_fence.fence_effect(file)?;
@@ -1285,6 +1483,145 @@ mod tests {
                 &doc.to_string_lossy()
             )
             .is_none()
+        );
+    }
+
+    /// `#deadmaintworker`: the 2026-11-15 worker claimed its request, then
+    /// exited with no completion line. Its token stayed behind with a dead
+    /// PID, the claim kept a retained in-flight attempt, and only the next
+    /// preflight could redispatch it. A closeout now adopts the request: it
+    /// reserves past the dead holder at once, reconnects the claim at a newer
+    /// generation, runs the worker body, and consumes the request.
+    #[test]
+    fn closeout_adopts_and_runs_a_request_whose_worker_died() {
+        use agent_doc_queue_io::queue_edit_owner::{
+            QueueMaintenanceRequestOwner, queue_maintenance_request_owner,
+        };
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = "body\n";
+        std::fs::write(&doc, content).unwrap();
+        let doc_text = doc.to_string_lossy().to_string();
+        let request = agent_doc_queue_io::queue_edit_owner::publish_queue_maintenance_request(
+            &doc,
+            &agent_doc_hash::content_hash(content),
+            false,
+        )
+        .unwrap();
+        let dead_token = format!(
+            "{}dead-worker",
+            agent_doc_queue_io::queue_edit_owner::BACKGROUND_QUEUE_EDIT_OWNER_PREFIX
+        );
+        assert!(
+            agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
+                &doc_text,
+                &dead_token,
+                4_000_000,
+            )
+            .unwrap()
+        );
+        // The dead worker had reconnected and claimed the request in flight.
+        let crashed =
+            agent_doc_queue_io::queue_maintenance_claim::QueueMaintenanceClaim::reconnect(&doc)
+                .unwrap();
+        crashed.claim_request(&request).unwrap();
+        assert!(matches!(
+            queue_maintenance_request_owner(&doc).unwrap(),
+            QueueMaintenanceRequestOwner::Orphaned {
+                dead_holder: Some(_)
+            }
+        ));
+
+        let outcome = recover_orphaned_queue_maintenance(&doc, "unit_test").unwrap();
+
+        assert_eq!(outcome, OrphanedQueueMaintenanceRecovery::Recovered);
+        assert!(
+            !agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_pending(&doc),
+            "the adopted request must be consumed"
+        );
+        assert!(
+            agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(&doc_text).is_none(),
+            "the dead holder's token must not survive recovery"
+        );
+        assert!(
+            !crashed.is_current_actor().unwrap(),
+            "recovery must fence the dead worker's generation"
+        );
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("queue_maintenance_orphan_adopted")
+                && ops.contains("source=unit_test")
+                && ops.contains(&format!("dead_holder={dead_token}"))
+                && ops.contains("dead_holder_pid=4000000"),
+            "{ops}"
+        );
+        assert!(
+            ops.contains("queue_maintenance_background_exited")
+                && ops.contains("mode=adopted outcome=ok"),
+            "every worker exit is logged: {ops}"
+        );
+        assert_eq!(
+            recover_orphaned_queue_maintenance(&doc, "unit_test").unwrap(),
+            OrphanedQueueMaintenanceRecovery::NotOrphaned
+        );
+    }
+
+    /// `#deadmaintworker`: recovery never displaces a live owner; a live
+    /// reservation that is about to adopt keeps the request.
+    #[test]
+    fn closeout_recovery_leaves_a_live_worker_request_alone() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "body\n").unwrap();
+        let doc_text = doc.to_string_lossy().to_string();
+        agent_doc_queue_io::queue_edit_owner::publish_queue_maintenance_request(
+            &doc, "hash", false,
+        )
+        .unwrap();
+        let live_token = format!(
+            "{}live-worker",
+            agent_doc_queue_io::queue_edit_owner::BACKGROUND_QUEUE_EDIT_OWNER_PREFIX
+        );
+        assert!(
+            agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
+                &doc_text,
+                &live_token,
+                std::process::id(),
+            )
+            .unwrap()
+        );
+
+        assert_eq!(
+            recover_orphaned_queue_maintenance(&doc, "unit_test").unwrap(),
+            OrphanedQueueMaintenanceRecovery::NotOrphaned
+        );
+        assert!(agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_pending(&doc));
+        assert_eq!(
+            agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(&doc_text)
+                .unwrap()
+                .holder,
+            live_token
+        );
+    }
+
+    /// `#deadmaintworker`: a worker error is logged with its cause instead of
+    /// vanishing into the detached child's `/dev/null` stderr.
+    #[test]
+    fn worker_exit_line_carries_the_error() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "body\n").unwrap();
+        log_queue_maintenance_worker_exit(
+            &doc,
+            QueueMaintenanceWorkerMode::Detached,
+            &Err(anyhow::anyhow!("controller read timed out\nsecond line")),
+        );
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains(
+                "mode=detached outcome=error error=controller read timed out | second line"
+            ),
+            "{ops}"
         );
     }
 

@@ -105,6 +105,53 @@ pub fn queue_maintenance_request_pending(file: &Path) -> bool {
         .is_some()
 }
 
+/// Who will run a pending admitted maintenance request (`#deadmaintworker`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QueueMaintenanceRequestOwner {
+    /// No admitted request is pending.
+    NoRequest,
+    /// A live process owns the request: it holds the apply flock, or a live
+    /// background reservation is about to adopt it.
+    Live { holder_pid: Option<u32> },
+    /// The request is pending and nothing will run it. The apply flock is
+    /// free and the lease is absent, names a dead PID, or is a direct token
+    /// whose transaction already released the flock. Only a new owner that
+    /// reserves, adopts, and runs the request settles it.
+    Orphaned {
+        dead_holder: Option<QueueEditOwnerLease>,
+    },
+}
+
+/// Classify the owner of the pending maintenance request without mutating
+/// anything. A detached worker holds the apply flock for its whole run, so a
+/// free flock with no live background reservation means its worker is gone:
+/// it crashed, panicked, or returned an error after it claimed the request.
+pub fn queue_maintenance_request_owner(file: &Path) -> Result<QueueMaintenanceRequestOwner> {
+    if load_queue_maintenance_request(file)?.is_none() {
+        return Ok(QueueMaintenanceRequestOwner::NoRequest);
+    }
+    // Probe the flock first: a worker that adopts after this probe has
+    // already refreshed its lease, so the read below sees it as live.
+    let in_flight = queue_apply_in_flight(file)?;
+    let lease = read_queue_edit_owner_lease(&file.to_string_lossy());
+    if in_flight {
+        return Ok(QueueMaintenanceRequestOwner::Live {
+            holder_pid: lease.map(|lease| lease.holder_pid),
+        });
+    }
+    Ok(match lease {
+        Some(lease)
+            if !lease.holder.starts_with(DIRECT_QUEUE_EDIT_OWNER_PREFIX)
+                && pid_is_live(lease.holder_pid) =>
+        {
+            QueueMaintenanceRequestOwner::Live {
+                holder_pid: Some(lease.holder_pid),
+            }
+        }
+        dead_holder => QueueMaintenanceRequestOwner::Orphaned { dead_holder },
+    })
+}
+
 pub fn queue_edit_owner_ttl() -> Duration {
     let secs = std::env::var(QUEUE_EDIT_OWNER_TTL_SECS_ENV)
         .ok()
@@ -1337,6 +1384,60 @@ mod tests {
             read_queue_edit_owner_lease(&file_text).unwrap().holder,
             "recovery-worker"
         );
+    }
+
+    /// `#deadmaintworker`: a pending request is owned only while a live
+    /// process holds the flock or a live background reservation will adopt
+    /// it. A worker that died after claiming leaves its token behind with a
+    /// dead PID; that request is orphaned until a new owner runs it.
+    #[test]
+    fn pending_request_owner_distinguishes_a_live_worker_from_a_dead_one() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        let file_text = file.to_string_lossy();
+        assert_eq!(
+            queue_maintenance_request_owner(&file).unwrap(),
+            QueueMaintenanceRequestOwner::NoRequest
+        );
+
+        publish_queue_maintenance_request(&file, "hash-a", false).unwrap();
+        assert_eq!(
+            queue_maintenance_request_owner(&file).unwrap(),
+            QueueMaintenanceRequestOwner::Orphaned { dead_holder: None },
+            "a request nobody reserved is orphaned"
+        );
+
+        let dead = format!("{BACKGROUND_QUEUE_EDIT_OWNER_PREFIX}dead-worker");
+        assert!(try_reserve_queue_edit_owner(&file_text, &dead, 4_000_000).unwrap());
+        match queue_maintenance_request_owner(&file).unwrap() {
+            QueueMaintenanceRequestOwner::Orphaned {
+                dead_holder: Some(lease),
+            } => {
+                assert_eq!(lease.holder, dead);
+                assert_eq!(lease.holder_pid, 4_000_000);
+            }
+            other => panic!("a dead worker's request must be orphaned, got {other:?}"),
+        }
+
+        let live = format!("{BACKGROUND_QUEUE_EDIT_OWNER_PREFIX}live-worker");
+        assert!(try_reserve_queue_edit_owner(&file_text, &live, std::process::id()).unwrap());
+        assert_eq!(
+            queue_maintenance_request_owner(&file).unwrap(),
+            QueueMaintenanceRequestOwner::Live {
+                holder_pid: Some(std::process::id())
+            },
+            "a live reservation about to adopt owns the request"
+        );
+        let guard = QueueEditGuard::adopt_reserved(&file, &live)
+            .unwrap()
+            .expect("the live worker adopts");
+        assert!(matches!(
+            queue_maintenance_request_owner(&file).unwrap(),
+            QueueMaintenanceRequestOwner::Live { .. }
+        ));
+        drop(guard);
     }
 
     #[test]

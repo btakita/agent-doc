@@ -20,6 +20,7 @@ agent-doc-element = { path = "../agent-doc-element", version = "0.35.574" }
 agent-doc-element-review = { path = "../agent-doc-element-review", version = "0.35.574" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.574" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.574" }
+agent-doc-preflight-command-io = { path = "../agent-doc-preflight-command-io", version = "0.35.574" }
 agent-doc-queue-io = { path = "../agent-doc-queue-io", version = "0.35.574" }
 agent-doc-repair-io = { path = "../agent-doc-repair-io", version = "0.35.574" }
 agent-doc-repair-runtime-io = { path = "../agent-doc-repair-runtime-io", version = "0.35.574" }

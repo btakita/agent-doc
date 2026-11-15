@@ -3314,7 +3314,10 @@ pub fn set_prompts_lifecycle_markers(
                 ) =>
             {
                 let mut next = prompt.clone();
-                let id = do_prompt_id(&next.text);
+                // `#gatedheadpending`: a `do [#subagent-operator-request-…]`
+                // head's reserved id reads as an annotation, not its id.
+                let id = do_prompt_id(&next.text)
+                    .or_else(|| crate::queue_continuation::reserved_request_head_id(&next.text));
                 // `#humanfollowupowner`: a row whose own text gates it on the
                 // operator (`[operator-verify]`, no inline verdict) awaits the
                 // operator whatever id the scan finds; a free-text follow-up

@@ -540,7 +540,10 @@ fn derive_runtime_projection_scoped(
     let cleared_identity = cleared_item.map(agent_doc_queue::queue_claim::claim_identity);
     // `#queueblocked`: a row whose tracked item waits on open blockers paints
     // `⛔ ⟦blocked by ...⟧`, outranking a stale `⏭️`/`⏳` it may still carry.
-    let blockers = agent_doc_queue::queue_blocked::queue_blockers(current);
+    // `#gatedheadpending`: an archived (closed) blocker never reads as an
+    // external one.
+    let blockers =
+        agent_doc_element_backlog_io::done_archive::queue_blockers_for_document(file, current);
     let (skip_queue_id, selected) = match scope {
         ClaimProjectionScope::Document => (
             None,

@@ -8643,7 +8643,11 @@ fn run_queue_maintenance_with_options_under_apply_guard(
     // keeps `⏭️` off it and lets the stall evidence fall on the head the
     // cycle could actually have run.
     let blocked_head_ids: std::collections::HashSet<String> = if activation.active {
-        agent_doc_queue::queue_blocked::queue_blockers(&current_content).deferred_ids()
+        agent_doc_element_backlog_io::done_archive::queue_blockers_for_document(
+            file,
+            &current_content,
+        )
+        .deferred_ids()
     } else {
         std::collections::HashSet::new()
     };
@@ -8823,10 +8827,36 @@ fn run_queue_maintenance_with_options_under_apply_guard(
     } else {
         agent_doc_queue::queue_claim::ClaimedQueueItems::none()
     };
+    // `#gatedheadpending`: the selection's text-only drain gate cannot see the
+    // external done archive, so a head whose stays-open clause records an
+    // external blocker could be selected before its `⛔` is painted. Hold every
+    // clause-blocked head (resolved against the archive above) out of the
+    // selection projection, as a dispatched head is.
+    let mut selection_holds = subagent_dispatch.clone();
+    if !blocked_head_ids.is_empty() {
+        selection_holds.extend(
+            activation
+                .entries_after
+                .iter()
+                .filter_map(|entry| match entry {
+                    agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
+                        match agent_doc_queue::queue_claim::claim_identity(&prompt.text) {
+                            agent_doc_element_queue::QueueItemIdentity::Id(id)
+                                if blocked_head_ids.contains(&id.to_ascii_lowercase()) =>
+                            {
+                                Some(prompt.text.clone())
+                            }
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                }),
+        );
+    }
     let projection_entries = entries_without_out_of_loop_heads(
         &activation.entries_after,
         &in_flight_queue_items,
-        &subagent_dispatch,
+        &selection_holds,
     );
     let active_queue_projection = if activation.active {
         let current_components = agent_doc_element::element::parse(&current_content)?;
@@ -8988,7 +9018,12 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             })
             .map(|evidence| evidence.item)
             .collect::<Vec<_>>();
-    let row_blockers = agent_doc_queue::queue_blocked::queue_blockers(&current_content);
+    // `#gatedheadpending`: resolve external stays-open blockers against the
+    // done archive, so an archived (closed) blocker never reads as external.
+    let row_blockers = agent_doc_element_backlog_io::done_archive::queue_blockers_for_document(
+        file,
+        &current_content,
+    );
     // `#strikeisterminal`, per queue: a struck row whose identity is also live in this queue
     // is an earlier attempt's record, never the claim's row.
     let lifecycle_targets = activation
@@ -13443,6 +13478,93 @@ mod tests {
             queue_line(&updated, "stg"),
             "- ### ⛔ ⟦blocked by sbx⟧ do [#stg]",
             "{updated}"
+        );
+    }
+
+    /// `#gatedheadpending` (an sdk session, 2026-11-14): `do` heads whose items
+    /// no agent could advance stayed `📥`, so the Stop hook refused closeout
+    /// and the coordinator invented operator packets to park them. A head
+    /// whose item is itself an open operator request projects `⏳`; a head
+    /// whose item records an external blocker projects `⛔` naming it; a
+    /// blocker that closed into the external done archive is resolved, not
+    /// external; selection goes to the runnable row.
+    #[test]
+    fn run_queue_maintenance_gates_operator_request_and_externally_blocked_heads() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        std::fs::write(
+            dir.path().join("session.done.md"),
+            "- 2026-11-13 [#mergedfix] the archived fix landed\n",
+        )
+        .unwrap();
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — test\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- 📥 do [#subagent-operator-request-pushchoice]\n",
+            "- 📥 do [#licensefix]\n",
+            "- 📥 do [#afterfix]\n",
+            "- do [#runnable]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#subagent-operator-request-pushchoice] Push the scrub branches, or keep them local? (choices: push, keep-local)\n",
+            "- [ ] [#licensefix] Remove the stale sentence. (stays open: blocked behind #vendorfix; the vendor PR still lacks the file)\n",
+            "- [ ] [#afterfix] Follow up. (stays open: blocked behind #mergedfix)\n",
+            "- [ ] [#runnable] a real open task\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done archive -->\n",
+            "<!-- completed work archived in session.done.md -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            queue_line(&updated, "subagent-operator-request-pushchoice")
+                .contains("⏳ do [#subagent-operator-request-pushchoice]"),
+            "{updated}"
+        );
+        assert!(
+            queue_line(&updated, "licensefix")
+                .contains("⛔ ⟦blocked by vendorfix⟧ do [#licensefix]"),
+            "{updated}"
+        );
+        assert!(
+            !queue_line(&updated, "afterfix").contains("⛔"),
+            "an archived blocker is resolved:\n{updated}"
+        );
+        assert!(
+            !state
+                .selected_queue_prompts
+                .iter()
+                .any(|prompt| prompt.contains("licensefix") || prompt.contains("pushchoice")),
+            "{:?}\n{updated}",
+            state.selected_queue_prompts
+        );
+        assert!(
+            agent_doc_queue::transient_closeout::assess_transient_closeout(
+                &updated,
+                &agent_doc_queue::transient_closeout::CloseoutEvidence::default(),
+            )
+            .unwrap()
+            .debts
+            .iter()
+            .all(|debt| !debt.row.contains("licensefix") && !debt.row.contains("pushchoice")),
+            "the gated heads never hold the turn:\n{updated}"
         );
     }
 

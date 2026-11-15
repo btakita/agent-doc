@@ -2672,6 +2672,11 @@ pub fn queue_component_subagent_heads(
 #[derive(Debug, Clone)]
 pub struct QueueDispatchDocumentFacts {
     awaiting_operator: std::collections::HashSet<String>,
+    /// `#gatedheadpending`: tracked ids no drain scope runs because they wait
+    /// on the operator (`[operator-verify]`, or an item that is itself an
+    /// open operator request), in every queue rather than only the selected
+    /// one `awaiting_operator` reads.
+    operator_gated: std::collections::HashSet<String>,
     blockers: agent_doc_queue::queue_blocked::QueueBlockers,
     answer_rows: agent_doc_queue::queue_continuation::AnswerRowRouting,
 }
@@ -2683,14 +2688,33 @@ thread_local! {
 
 impl QueueDispatchDocumentFacts {
     pub fn from_content(content: &str) -> Self {
+        Self::from_content_with_blockers(
+            content,
+            agent_doc_queue::queue_blocked::queue_blockers(content),
+        )
+    }
+
+    /// [`Self::from_content`] with blockers an IO caller already resolved
+    /// against the external done archive (`#gatedheadpending`).
+    pub fn from_content_with_blockers(
+        content: &str,
+        blockers: agent_doc_queue::queue_blocked::QueueBlockers,
+    ) -> Self {
         QUEUE_DISPATCH_FACT_DERIVATIONS.with(|count| count.set(count.get() + 1));
         Self {
             awaiting_operator: agent_doc_queue::queue_continuation::awaiting_operator_head_ids(
                 content,
             ),
+            operator_gated: agent_doc_queue::queue_continuation::deferred_backlog_ids_split(
+                content,
+                agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+            )
+            .all,
             // `#queueblocked`: a row whose tracked item waits on open blockers
-            // is not dispatchable, so it never fills a subagent slot.
-            blockers: agent_doc_queue::queue_blocked::queue_blockers(content),
+            // (or on an external blocker its clause records,
+            // `#gatedheadpending`) is not dispatchable, so it never fills a
+            // subagent slot.
+            blockers,
             answer_rows: agent_doc_queue::queue_continuation::AnswerRowRouting::for_content(
                 content,
             ),
@@ -2728,6 +2752,14 @@ pub fn queue_component_subagent_heads_with_facts(
             presets.classify(&item.raw, SteeringSource::Queue).0 == SteeringDispatch::Subagent
         })
         .filter(|item| !head_awaits_operator(&item.norm, &facts.awaiting_operator))
+        // `#gatedheadpending`: an unanswered head of an operator-gated item
+        // in any queue is the operator's, not a worker's.
+        // The raw row keeps a reserved request id the normalized head drops.
+        .filter(|item| {
+            agent_doc_queue::queue_continuation::head_answers_operator(&item.raw)
+                || !(head_awaits_operator(&item.norm, &facts.operator_gated)
+                    || head_awaits_operator(&item.raw, &facts.operator_gated))
+        })
         .filter(|item| {
             // `🙋` plus a trailing `[#id]` is operator-gated, not a worker head.
             agent_doc_document::queue_projection::operator_action_ids(&item.raw).is_empty()

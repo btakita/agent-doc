@@ -48,6 +48,19 @@
 //!   verdict is never drainable, so it is the `⏳` row preflight projects;
 //!   a pending glyph painted before that projection does not hold the turn.
 //!   `queue report-complete` writes human-owned action items this way.
+//! - **Awaiting the operator by its item** (`#gatedheadpending`). A `📥`
+//!   `do [#id]` row whose tracked item waits on the operator (an open
+//!   `[operator-verify]` item, a gated review row, or an item that is itself
+//!   an open operator request, `[#subagent-operator-request-…]`) and that
+//!   carries no operator answer is the `⏳` row preflight projects
+//!   ([`crate::queue_continuation::awaiting_operator_head_ids`]).
+//! - **Blocked** (`#gatedheadpending`, `#queueblocked`). A `📥` row whose
+//!   tracked item still waits on other open work, or on an external or
+//!   unknown blocker its stays-open clause records, is the `⛔` row preflight
+//!   projects ([`crate::queue_blocked::QueueBlockers`]). No drain or dispatch
+//!   runs it, so it does not hold the turn either. The IO evidence passes the
+//!   external done archive ids ([`CloseoutEvidence::archived_done_ids`]) so a
+//!   blocker that closed and was archived never reads as external.
 //!
 //! The Waiting-on-you heading (`#waitingheadingpending`) is not a row at
 //! all for this gate: it is the waiting tree's container, so a marker a stale
@@ -113,6 +126,9 @@ pub enum QuiescentReason {
     /// so no drain dispatches it until the hold is lifted
     /// (`#heldloopstophook`).
     QueueHeld,
+    /// The row's tracked item waits on open work or on an external blocker
+    /// its stays-open clause records (`#gatedheadpending`, `#queueblocked`).
+    Blocked,
 }
 
 impl QuiescentReason {
@@ -123,6 +139,7 @@ impl QuiescentReason {
             Self::ScheduleNotDue => "schedule_not_due",
             Self::AwaitingOperator => "awaiting_operator",
             Self::QueueHeld => "queue_held",
+            Self::Blocked => "blocked",
         }
     }
 }
@@ -170,6 +187,10 @@ pub struct CloseoutEvidence {
     /// The session document path owed commands name (`#orphanreportedrow`);
     /// `None` renders the `<FILE>` placeholder.
     pub document: Option<String>,
+    /// `#gatedheadpending`: own ids of the document's external done archive,
+    /// when the IO caller read it. `None` keeps the text-only blocker
+    /// derivation ([`crate::queue_blocked::QueueBlockers::from_content`]).
+    pub archived_done_ids: Option<HashSet<String>>,
 }
 
 /// Every live transient row, split into the debts that refuse a normal
@@ -202,6 +223,8 @@ impl TransientCloseoutAssessment {
             Some("queue_held")
         } else if self.quiescent_count(QuiescentReason::ScheduleNotDue) > 0 {
             Some("schedule_not_due")
+        } else if self.quiescent_count(QuiescentReason::Blocked) > 0 {
+            Some("blocked")
         } else {
             None
         }
@@ -210,12 +233,13 @@ impl TransientCloseoutAssessment {
     /// One ops-log field list naming each quiescent count.
     pub fn quiescent_log_fields(&self) -> String {
         format!(
-            "waiting_on_claims={} operator_owned={} schedule_not_due={} awaiting_operator={} queue_held={}",
+            "waiting_on_claims={} operator_owned={} schedule_not_due={} awaiting_operator={} queue_held={} blocked={}",
             self.quiescent_count(QuiescentReason::WaitingOnClaim),
             self.quiescent_count(QuiescentReason::OperatorOwned),
             self.quiescent_count(QuiescentReason::ScheduleNotDue),
             self.quiescent_count(QuiescentReason::AwaitingOperator),
             self.quiescent_count(QuiescentReason::QueueHeld),
+            self.quiescent_count(QuiescentReason::Blocked),
         )
     }
 }
@@ -363,6 +387,8 @@ pub fn assess_transient_closeout(
     let components = agent_doc_element::element::parse(content)?;
     let mut assessment = TransientCloseoutAssessment::default();
     let mut operator_context: Option<(String, HashSet<String>)> = None;
+    // `#gatedheadpending`: item-level gates, derived once on first use.
+    let mut item_gates: Option<PendingItemGates> = None;
     let frontmatter = agent_doc_frontmatter::frontmatter::parse(content)
         .ok()
         .map(|(frontmatter, _)| frontmatter);
@@ -507,6 +533,23 @@ pub fn assess_transient_closeout(
                         .quiescent
                         .push(quiescent(QuiescentReason::AwaitingOperator));
                 }
+                QueueLifecycleMarker::Pending
+                    if item_gates
+                        .get_or_insert_with(|| {
+                            PendingItemGates::from_content(
+                                content,
+                                evidence.archived_done_ids.as_ref(),
+                            )
+                        })
+                        .gate(&prompt.text)
+                        .is_some() =>
+                {
+                    let reason = item_gates
+                        .as_ref()
+                        .and_then(|gates| gates.gate(&prompt.text))
+                        .expect("the guard found an item gate");
+                    assessment.quiescent.push(quiescent(reason));
+                }
                 QueueLifecycleMarker::Pending if held_by_control => {
                     assessment
                         .quiescent
@@ -525,6 +568,54 @@ pub fn assess_transient_closeout(
         }
     }
     Ok(assessment)
+}
+
+/// `#gatedheadpending`: the item-level gates that make a pending `do [#id]`
+/// row undrainable however long the turn stays open. A blocked item shows
+/// `⛔`; an item that waits on the operator, with no answer on the row, shows
+/// `⏳`. The closeout gate treats both as quiescent and the queue-sync
+/// payload never offers them as dispatch or inline work.
+#[derive(Debug, Clone)]
+pub struct PendingItemGates {
+    awaiting: HashSet<String>,
+    blockers: crate::queue_blocked::QueueBlockers,
+}
+
+impl PendingItemGates {
+    /// Derive the gates of `content`. `archived` is the external done
+    /// archive's own ids when an IO caller read them
+    /// ([`crate::queue_blocked::QueueBlockers::from_content_with_archived`]).
+    pub fn from_content(content: &str, archived: Option<&HashSet<String>>) -> Self {
+        let blockers = match archived {
+            Some(archived) => {
+                crate::queue_blocked::QueueBlockers::from_content_with_archived(content, archived)
+            }
+            None => crate::queue_blocked::QueueBlockers::from_content(content),
+        };
+        // Every queue's rows, not only the selected queue's: the ids no
+        // drain scope runs because they wait on the operator, as
+        // `awaiting_operator_head_ids` derives them for the `⏳` projection.
+        let deferred = crate::queue_continuation::deferred_backlog_ids_split(
+            content,
+            crate::queue_continuation::DrainScope::Supervisor,
+        );
+        let mut awaiting = deferred.all;
+        awaiting.extend(crate::queue_continuation::gated_review_ids(content));
+        Self { awaiting, blockers }
+    }
+
+    /// The gate that holds the row `text`, or `None` when it is runnable.
+    pub fn gate(&self, text: &str) -> Option<QuiescentReason> {
+        if self.blockers.blocks_row(text) {
+            return Some(QuiescentReason::Blocked);
+        }
+        if crate::queue_continuation::head_answers_operator(text) {
+            return None;
+        }
+        crate::queue_continuation::extract_head_id(text)
+            .is_some_and(|id| self.awaiting.contains(&id.to_ascii_lowercase()))
+            .then_some(QuiescentReason::AwaitingOperator)
+    }
 }
 
 /// Whether a queue's resolved control is the operator's hold, so none of its
@@ -946,6 +1037,105 @@ mod tests {
         );
     }
 
+    /// `#gatedheadpending` (an sdk session, 2026-11-14): the Stop hook refused
+    /// closeout over `📥` heads no agent could advance, so the coordinator
+    /// parked each behind an invented operator packet. A head whose item is
+    /// itself an open operator request awaits the operator (`⏳`); a head whose
+    /// item records an external blocker is blocked (`⛔`). A runnable head, or
+    /// one the operator already answered, still refuses.
+    fn gated_head_doc(done: &str) -> String {
+        format!(
+            concat!(
+                "<!-- agent:queue -->\n",
+                "- 📥 do [#subagent-operator-request-pushchoice]\n",
+                "- 📥 do [#licensefix]\n",
+                "- 📥 do [#plain]\n",
+                "<!-- /agent:queue -->\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] [#subagent-operator-request-pushchoice] Push the scrub branches, or leave them local? (choices: push, keep-local)\n",
+                "- [ ] [#licensefix] Remove the stale sentence. (stays open: blocked behind #vendorfix; the vendor PR still lacks the file)\n",
+                "- [ ] [#plain] Runnable work.\n",
+                "<!-- /agent:backlog -->\n",
+                "{}",
+            ),
+            done
+        )
+    }
+
+    #[test]
+    fn pending_heads_whose_items_cannot_run_are_quiescent() {
+        let content = gated_head_doc("");
+        let assessment = assess_transient_closeout(&content, &CloseoutEvidence::default()).unwrap();
+        assert_eq!(
+            reasons(&assessment),
+            vec![
+                (
+                    "📥 do [#subagent-operator-request-pushchoice]".to_string(),
+                    QuiescentReason::AwaitingOperator
+                ),
+                ("📥 do [#licensefix]".to_string(), QuiescentReason::Blocked),
+            ],
+            "{assessment:?}"
+        );
+        assert_eq!(assessment.debts.len(), 1, "{assessment:?}");
+        assert_eq!(assessment.debts[0].row, "📥 do [#plain]");
+        assert_eq!(assessment.quiescent_state(), Some("waiting_on_operator"));
+        assert!(
+            assessment
+                .quiescent_log_fields()
+                .ends_with("awaiting_operator=1 queue_held=0 blocked=1"),
+            "{}",
+            assessment.quiescent_log_fields()
+        );
+
+        // The operator's inline answer makes the request head agent work.
+        let answered = content.replace(
+            "- 📥 do [#subagent-operator-request-pushchoice]\n",
+            "- 📥 do [#subagent-operator-request-pushchoice]: push\n",
+        );
+        let failure = normal_closeout_failure(&answered)
+            .unwrap()
+            .expect("answered and runnable heads refuse");
+        assert!(
+            failure.contains("do [#subagent-operator-request-pushchoice]: push"),
+            "{failure}"
+        );
+        assert!(failure.contains("do [#plain]"), "{failure}");
+        assert!(!failure.contains("do [#licensefix]"), "{failure}");
+    }
+
+    /// The IO evidence carries the external done archive: a blocker that
+    /// closed into it is resolved, so the head is runnable and refuses; one
+    /// the archive does not hold is an external blocker.
+    #[test]
+    fn archived_blockers_resolve_through_the_evidence() {
+        let content = gated_head_doc(
+            "<!-- agent:done archive -->\n<!-- completed work archived in x.done.md -->\n<!-- /agent:done -->\n",
+        );
+        let archived = CloseoutEvidence {
+            archived_done_ids: Some(["vendorfix".to_string()].into()),
+            ..CloseoutEvidence::default()
+        };
+        let assessment = assess_transient_closeout(&content, &archived).unwrap();
+        assert!(
+            assessment
+                .debts
+                .iter()
+                .any(|debt| debt.row == "📥 do [#licensefix]"),
+            "{assessment:?}"
+        );
+        let unresolved = CloseoutEvidence {
+            archived_done_ids: Some(HashSet::new()),
+            ..CloseoutEvidence::default()
+        };
+        let assessment = assess_transient_closeout(&content, &unresolved).unwrap();
+        assert_eq!(
+            assessment.quiescent_count(QuiescentReason::Blocked),
+            1,
+            "{assessment:?}"
+        );
+    }
+
     /// `⏳` is resting whatever its packet state, alone or under `🙋`.
     #[test]
     fn awaiting_operator_rows_never_refuse() {
@@ -983,7 +1173,7 @@ mod tests {
         assert_eq!(assessment.quiescent_state(), Some("waiting_on_claims"));
         assert_eq!(
             assessment.quiescent_log_fields(),
-            "waiting_on_claims=3 operator_owned=0 schedule_not_due=0 awaiting_operator=0 queue_held=0"
+            "waiting_on_claims=3 operator_owned=0 schedule_not_due=0 awaiting_operator=0 queue_held=0 blocked=0"
         );
 
         // One worker went stale: only that row refuses.
@@ -1151,7 +1341,9 @@ mod tests {
             );
             assert_eq!(assessment.quiescent_state(), Some("queue_held"), "{marker}");
             assert!(
-                assessment.quiescent_log_fields().ends_with("queue_held=1"),
+                assessment
+                    .quiescent_log_fields()
+                    .ends_with("queue_held=1 blocked=0"),
                 "{}",
                 assessment.quiescent_log_fields()
             );

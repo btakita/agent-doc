@@ -566,8 +566,14 @@ fn queue_attr_subagent_plan_with_pools(
         // once per plan, not once per queue block.
         let heads = agent_doc_queue::subagent_intent::queue_subagents_mode(&block.component.attrs)
             .and_then(|_| {
-                let facts = document_facts
-                    .get_or_insert_with(|| core::QueueDispatchDocumentFacts::from_content(content));
+                let facts = document_facts.get_or_insert_with(|| {
+                    core::QueueDispatchDocumentFacts::from_content_with_blockers(
+                        content,
+                        agent_doc_element_backlog_io::done_archive::queue_blockers_for_document(
+                            file, content,
+                        ),
+                    )
+                });
                 core::queue_component_subagent_heads_with_facts(
                     content,
                     block.component,
@@ -1640,6 +1646,46 @@ queue: go
             pending_subagent_dispatch_for_content(&file, &unblocked).unwrap(),
             vec!["do [#sbx]".to_string()],
             "#sbx returns once its blocker closes; #stg still waits on #sbx"
+        );
+    }
+
+    /// `#gatedheadpending` (an sdk session, 2026-11-14): the dispatch payload
+    /// offered `do` heads no worker could advance: one whose item is itself an
+    /// open operator request, and ones whose items record an external
+    /// blocker. Neither is offered; a head whose blocker closed into the
+    /// external done archive is, and so is plain runnable work.
+    #[test]
+    fn queue_attr_dispatch_never_offers_operator_request_or_externally_blocked_heads() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        std::fs::write(
+            dir.path().join("task.done.md"),
+            "- 2026-11-13 [#mergedfix] the archived fix landed\n",
+        )
+        .unwrap();
+        let content = format!(
+            "{}\n<!-- agent:backlog -->\n\
+             - [ ] [#subagent-operator-request-pushchoice] Push the branches, or keep them local? (choices: push, keep-local)\n\
+             - [ ] [#licensefix] Remove the sentence. (stays open: blocked behind #vendorfix; the vendor PR still lacks the file)\n\
+             - [ ] [#afterfix] Follow up. (stays open: blocked behind #mergedfix)\n\
+             - [ ] [#a] runnable\n\
+             <!-- /agent:backlog -->\n\n\
+             <!-- agent:done archive -->\n<!-- completed work archived in task.done.md -->\n<!-- /agent:done -->\n",
+            attr_doc(
+                "subagents",
+                &[
+                    "📥 do [#subagent-operator-request-pushchoice]",
+                    "📥 do [#licensefix]",
+                    "📥 do [#afterfix]",
+                    "do [#a]",
+                ],
+            )
+        );
+        std::fs::write(&file, &content).unwrap();
+        assert_eq!(
+            pending_subagent_dispatch_for_content(&file, &content).unwrap(),
+            vec!["do [#afterfix]".to_string(), "do [#a]".to_string()],
         );
     }
 

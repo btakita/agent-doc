@@ -151,7 +151,7 @@ impl QueueMarker {
                     "Live row with no claim, worker report, or completion evidence; ready to run."
                 }
                 QueueLifecycleMarker::Blocked => {
-                    "Its tracked item still waits on open work: a `(stays open: blocked behind #a, #b)` clause or an `after=#id` edge names an item still open in backlog, todo or review. `⟦blocked by a, b⟧` lists those ids. The row is held out of drain and subagent dispatch and returns to pending once every blocker closes."
+                    "Its tracked item still waits on open work: a `(stays open: blocked behind #a, #b)` clause or an `after=#id` edge names an item still open in backlog, todo or review, or a stays-open blocker clause names only ids this document never tracked (an external blocker). `⟦blocked by a, b⟧` lists those ids. The row is held out of drain and subagent dispatch and returns to pending once every tracked blocker closes or the external clause changes."
                 }
                 QueueLifecycleMarker::Claimed => {
                     "Reserved for a worker by `queue claim`; no spawned worker is bound yet."
@@ -184,7 +184,7 @@ impl QueueMarker {
                     "It was dispatched and came back unconsumed; the queue advanced past it to the next runnable head."
                 }
                 QueueLifecycleMarker::AwaitingOperator => {
-                    "Agent work is finished and no worker holds it; it waits on an operator verdict (`[operator-verify]` or a gated review)."
+                    "Agent work is finished and no worker holds it; it waits on an operator verdict (`[operator-verify]`, a gated review, or an item that is itself an open operator request)."
                 }
             },
             Self::OperatorAction => {

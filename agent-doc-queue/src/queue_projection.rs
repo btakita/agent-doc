@@ -75,13 +75,11 @@ pub fn queue_prompt_projection_rows(content: &str, entries: &[QueueEntry]) -> Ve
                         &text,
                         preset_supplies_directive,
                     )
-                    && !id.as_ref().is_some_and(|id| {
+                    && !deferral_id(id.as_deref(), &text).is_some_and(|id| {
                         // `#opverifyanswered`: an answered operator-verify head is
                         // live work again, so it stays projectable.
-                        deferred_ids.defers(
-                            id,
-                            crate::queue_continuation::head_carries_operator_verdict(&text),
-                        )
+                        deferred_ids
+                            .defers(&id, crate::queue_continuation::head_answers_operator(&text))
                     });
                 Some(QueuePromptRow::new(
                     prompt.text.clone(),
@@ -92,6 +90,15 @@ pub fn queue_prompt_projection_rows(content: &str, entries: &[QueueEntry]) -> Ve
             _ => None,
         })
         .collect()
+}
+
+/// The tracked id a row's deferral is keyed on. A `do [#subagent-operator-request-…]`
+/// head has no done id (its reserved id reads as an operator annotation), but
+/// its item can still be an open operator request (`#gatedheadpending`).
+fn deferral_id(done_id: Option<&str>, text: &str) -> Option<String> {
+    done_id
+        .map(str::to_string)
+        .or_else(|| crate::queue_continuation::reserved_request_head_id(text))
 }
 
 pub fn active_queue_prompt_projection(

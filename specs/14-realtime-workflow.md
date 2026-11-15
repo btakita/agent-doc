@@ -1025,7 +1025,10 @@ change selected head identity. The canonical marker vocabulary is:
   item still waits on open work, written `⛔ ⟦blocked by a, b⟧` with the open
   blocker ids. The blockers are the ids a `(stays open: blocked behind #a, #b)`
   clause or an `after=` edge cites that are still open items in this
-  document's backlog, todo, or review. A head blocked by a stays-open clause is
+  document's backlog, todo, or review. A stays-open blocker clause that cites
+  no id this document tracks or tracked (open, closed, or in its done
+  archive) records an external blocker and blocks by the ids it cites
+  (`#gatedheadpending`). A head blocked by a stays-open clause is
   deferred in every drain scope and never skipped (an `after=`-only block keeps
   the auto-DAG gate, so an in-progress head is not preempted); no blocked head
   is subagent dispatch work. Like `⏭️` it is
@@ -1040,8 +1043,10 @@ change selected head identity. The canonical marker vocabulary is:
   decides the skip deterministically so the agent is never asked to reconcile it.
 - `⏳` — AWAITING-OPERATOR head projection (`#queueawaitop`): a live head whose
   agent work is finished and which now waits on a human — its tracked item is
-  `[operator-verify]` (and the head carries no inline operator verdict
-  `do [#id]: <text>`) or it names a gated `agent:review` row — and that no
+  `[operator-verify]` or is itself an open operator request (its own id is a
+  reserved `subagent-operator-request-…` id, `#gatedheadpending`), and the head
+  carries no inline operator verdict `do [#id]: <text>` or answer row, or it
+  names a gated `agent:review` row — and that no
   worker holds a live claim on. `[focused-cycle]` is not awaiting the operator
   and gets no marker. Like `⏭️` it is re-derived every maintenance pass,
   stripped for identity, and clears once the head is consumed, claimed again, or

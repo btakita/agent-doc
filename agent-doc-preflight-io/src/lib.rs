@@ -11080,8 +11080,8 @@ fn persist_queue_maintenance_doc_with_admitted_authority(
 
 /// Update the recovery baseline after the Lazily compare-and-swap succeeds.
 pub(crate) fn adopt_edited_queue_head_into_snapshot(file: &Path, current_content: &str) {
-    adopt_queue_region_into_snapshot(file, current_content, |components| {
-        components.iter().find(|c| c.name == "queue")
+    checkpoint_adopted_queue_baseline(file, |snapshot| {
+        edited_queue_head_adopted_into_snapshot(snapshot, current_content)
     });
 }
 
@@ -11139,6 +11139,13 @@ fn adopt_queue_region_into_snapshot(
         &'a [agent_doc_element::element::Component],
     ) -> Option<&'a agent_doc_element::element::Component>,
 ) {
+    checkpoint_adopted_queue_baseline(file, |snapshot| {
+        queue_region_adopted_into_snapshot(snapshot, current_content, select)
+    });
+}
+
+/// Checkpoint the baseline `adopt` derives from the current one, if any.
+fn checkpoint_adopted_queue_baseline(file: &Path, adopt: impl FnOnce(&str) -> Option<String>) {
     let snap_now = match agent_doc_snapshot_io::load_document_baseline(file) {
         Ok(Some(s)) => s,
         Ok(None) => return,
@@ -11147,24 +11154,7 @@ fn adopt_queue_region_into_snapshot(
             return;
         }
     };
-    let Ok(cur_comps) = agent_doc_element::element::parse(current_content) else {
-        return;
-    };
-    let Some(cur_q) = select(&cur_comps) else {
-        return;
-    };
-    let Ok(snap_comps) = agent_doc_element::element::parse(&snap_now) else {
-        return;
-    };
-    let Some(snap_q) = select(&snap_comps) else {
-        return;
-    };
-    let queue_region = &current_content[cur_q.open_start..cur_q.close_end];
-    let mut rebuilt = String::with_capacity(snap_now.len() + queue_region.len());
-    rebuilt.push_str(&snap_now[..snap_q.open_start]);
-    rebuilt.push_str(queue_region);
-    rebuilt.push_str(&snap_now[snap_q.close_end..]);
-    if rebuilt != snap_now
+    if let Some(rebuilt) = adopt(&snap_now)
         && let Err(e) = agent_doc_snapshot_io::checkpoint_document_baseline(
             file,
             &rebuilt,
@@ -11173,6 +11163,40 @@ fn adopt_queue_region_into_snapshot(
     {
         eprintln!("[preflight] queue: adopt-head snapshot sync warning (non-fatal): {e}");
     }
+}
+
+/// The recovery baseline [`adopt_edited_queue_head_into_snapshot`] would
+/// checkpoint, computed without writing (`#implementlazilyowned` plan step
+/// 9a): `None` when the baseline already holds the edited head or either image
+/// lacks the queue component.
+pub(crate) fn edited_queue_head_adopted_into_snapshot(
+    snapshot: &str,
+    current_content: &str,
+) -> Option<String> {
+    queue_region_adopted_into_snapshot(snapshot, current_content, |components| {
+        components.iter().find(|c| c.name == "queue")
+    })
+}
+
+/// `snapshot` with the component `select` picks replaced by the same
+/// component of `current_content`; `None` when unchanged or unresolvable.
+fn queue_region_adopted_into_snapshot(
+    snapshot: &str,
+    current_content: &str,
+    select: for<'a> fn(
+        &'a [agent_doc_element::element::Component],
+    ) -> Option<&'a agent_doc_element::element::Component>,
+) -> Option<String> {
+    let cur_comps = agent_doc_element::element::parse(current_content).ok()?;
+    let cur_q = select(&cur_comps)?;
+    let snap_comps = agent_doc_element::element::parse(snapshot).ok()?;
+    let snap_q = select(&snap_comps)?;
+    let queue_region = &current_content[cur_q.open_start..cur_q.close_end];
+    let mut rebuilt = String::with_capacity(snapshot.len() + queue_region.len());
+    rebuilt.push_str(&snapshot[..snap_q.open_start]);
+    rebuilt.push_str(queue_region);
+    rebuilt.push_str(&snapshot[snap_q.close_end..]);
+    (rebuilt != snapshot).then_some(rebuilt)
 }
 
 #[cfg(test)]
@@ -26433,6 +26457,42 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             "a clean document adds no directive"
         );
         enforce_no_shadow_open_backlog(&doc).unwrap();
+    }
+
+    /// `#implementlazilyowned` plan step 9a: the pure edited-head adoption is
+    /// exactly the baseline the effectful adoption checkpoints.
+    #[test]
+    fn planned_edited_queue_head_adoption_matches_the_checkpointed_baseline() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let snapshot = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\nprior\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n- do [#oldhead]\n- do [#nexthead]\n<!-- /agent:queue -->\n",
+        );
+        let current = snapshot.replace("do [#oldhead]", "do [#newhead]");
+        std::fs::write(&doc, &current).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(&doc, snapshot, |_, _| {}).unwrap();
+
+        let planned = edited_queue_head_adopted_into_snapshot(snapshot, &current)
+            .expect("an edited head plans a baseline adoption");
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .as_deref(),
+            Some(snapshot),
+            "planning must not write the baseline"
+        );
+        adopt_edited_queue_head_into_snapshot(&doc, &current);
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc).unwrap(),
+            Some(planned.clone())
+        );
+        assert_eq!(
+            edited_queue_head_adopted_into_snapshot(&planned, &current),
+            None,
+            "an adopted baseline plans nothing more"
+        );
     }
 }
 

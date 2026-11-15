@@ -733,9 +733,36 @@ Progress (`#implementlazilyowned`):
   `_clear` / `_clear_scope` symbols (first shipped after v0.35.574, the
   latest tag). Delete that fallback once a released agent-doc carrying those
   symbols is the plugin's minimum native library.
-- Plan step 9a (reorder so the document cut is the first plan step) is not
-  landed: see "Resume here" step 9 for the read-after-write dependencies that
-  block a behaviour-preserving reorder.
+- Plan step 9a-1 (pure plan variants for the pre-cut read-backs; no
+  behaviour change): every pre-cut write the maintenance successor reads back
+  now has a variant that computes it without writing.
+  `agent_doc_queue_io::queue_claim::PlannedClaimWrite` is the claim-ledger
+  write of `transfer_promoted_claims`, `transfer_prompt_identity_admissions`,
+  `release_closed_head`, and `reconcile_completion_evidence` (the latter as
+  the completion-cell keys present in the planned content), produced by
+  `plan_transfer_promoted_claims` / `plan_transfer_prompt_identity_admissions`
+  / `plan_release_closed_head` / `plan_reconcile_completion_evidence`, applied
+  in memory by `PlannedClaimWrite::apply_to` and durably by
+  `apply_planned_claim_write` (one ledger transaction, the same evidence
+  lines). `PlannedClaimLedgerOverlay` is the read side: while it is alive,
+  `load_ledger` / `load_ledger_read_only` for that document on that thread
+  return the stored ledger with every staged write applied, so every reader
+  a pass calls (dispatch holds, lifecycle projection, `agent:active`) sees the
+  successor ledger without a write; the stored ledger is re-read on every
+  load. `queue_tombstone::plan_reconcile_for_file` returns the mirror's
+  tombstone set and a serializable `PlannedTombstoneWrite`
+  (`apply_planned_tombstone_write`). The preflight-io
+  `edited_queue_head_adopted_into_snapshot` is the baseline
+  `adopt_edited_queue_head_into_snapshot` checkpoints. The immediate effects
+  are now `plan + apply` (claims, tombstones, snapshot adoption) or unchanged
+  (`reconcile_completion_evidence`), so every existing caller still writes at
+  once. Parity tests:
+  `queue_claim::tests::planned_claim_writes_match_the_immediate_effects_and_stage_without_writing`,
+  `queue_tombstone::tests::planned_reconcile_matches_the_immediate_reconcile_and_writes_nothing`,
+  `agent_doc_preflight_io::tests::planned_edited_queue_head_adoption_matches_the_checkpointed_baseline`.
+  No ledger rows change (no new CAS/fence/lease/retry identifiers).
+- Plan step 9a-2 (reorder so the document cut is the first plan step) is not
+  landed yet: see "Resume here" step 9.
 - Not yet done (as of 2026-11-15, agent-doc `59984d315a`; triage is complete,
   0 `triage` rows): migrate the 291 reviewed `pending-migration` rows family
   by family, then delete the remaining bespoke orchestration and make the
@@ -743,11 +770,11 @@ Progress (`#implementlazilyowned`):
 
 ## Resume here
 
-Status 2026-11-15 (after steps 9b and 10): ledger = 133 `migrated`, 173 `lazily-adapter`,
+Status 2026-11-15 (after steps 9b, 10 and 9a-1): ledger = 133 `migrated`, 173 `lazily-adapter`,
 33 `deleted`, 419 `excluded`, 0 `pending-migration`, 0 `triage`. Every
 inventoried row is migrated; work the remaining steps sequentially in ONE
 worktree, one step per pushed commit, `make check` green before each push, in
-this order (next: step 9a; then the coordinator's `make install` + recycle):
+this order (next: step 9a-2; then the coordinator's `make install` + recycle):
 
 1. DONE: actor-generation fenced writes (`store_actor_record_fenced_tx`,
    `delete_actor_document_fenced_tx`; 20 actor-generation rows) onto the
@@ -810,7 +837,11 @@ this order (next: step 9a; then the coordinator's `make install` + recycle):
    - 9b. DONE: per-step plan receipts in `state.db` beside the claim; a
      resumed request continues from the last receipted cut and skips every
      replayable effect that already has a receipt (see Progress).
-   - 9a. OPEN: the reorder. In `run_queue_maintenance_with_options_under_apply_guard`
+   - 9a-1. DONE: pure `*_plan` variants of the claim, tombstone and
+     edited-head snapshot read-backs, plus the claim-ledger read overlay; the
+     immediate effects are `plan + apply`, so no caller changes (see
+     Progress).
+   - 9a-2. OPEN: the reorder. In `run_queue_maintenance_with_options_under_apply_guard`
      (agent-doc-preflight-io) the pre-cut effects are not all deferrable,
      because later pure computation of the successor reads back what they
      wrote: `queue_claim::transfer_promoted_claims`,
@@ -861,7 +892,7 @@ fence machinery under already-green behavioral regressions.
 
 ## Completion criteria
 
-Status 2026-11-15 (after steps 9b and 10):
+Status 2026-11-15 (after steps 9b, 10 and 9a-1):
 
 - MET: Lazily is the only owner of effect identity, single-flight, supersession,
   retry/coalescing policy, and receipt matching. (Exception by design until a
@@ -872,9 +903,10 @@ Status 2026-11-15 (after steps 9b and 10):
 - PARTLY MET: queue maintenance resumes after crashes and authority changes without stale or
   duplicate effects. Plan receipts persist and a resumed request continues
   from its receipted cut without repeating replayable effects (9b). Not met
-  until 9a: pre-cut ledger/controller/snapshot effects still run before the
-  document cut, so a cut superseded after them leaves those (convergent)
-  effects describing a successor that never landed.
+  until 9a-2 (9a-1 landed the pure plan variants it needs): pre-cut
+  ledger/controller/snapshot effects still run before the document cut, so a
+  cut superseded after them leaves those (convergent) effects describing a
+  successor that never landed.
 - MET: preflight stays under five seconds because comprehensive maintenance remains a
   coalesced background effect (the plan-progress writes run only in the
   detached worker).

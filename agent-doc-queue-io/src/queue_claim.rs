@@ -480,12 +480,18 @@ pub fn claim_owners_for_content(
 }
 
 /// The document's stored claim ledger, including expired/closed rows.
+///
+/// Inside a [`PlannedClaimLedgerOverlay`] for the same document the ledger
+/// also carries that overlay's staged writes, so a queue-maintenance pass
+/// reads the successor it is computing before the writes are applied.
 pub fn load_ledger(file: &Path) -> Result<QueueClaimLedger> {
     let Some((root, document_hash, _)) = state_identity(file)? else {
         return Ok(QueueClaimLedger::default());
     };
     let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
-    load_from_conn(&conn, &document_hash)
+    let mut ledger = load_from_conn(&conn, &document_hash)?;
+    apply_planned_claim_overlay(&document_hash, &mut ledger)?;
+    Ok(ledger)
 }
 
 pub fn load_ledger_read_only(file: &Path) -> Result<QueueClaimLedger> {
@@ -497,9 +503,13 @@ pub fn load_ledger_read_only(file: &Path) -> Result<QueueClaimLedger> {
     }
     let conn = agent_doc_sqlite::state_store::open_state_db_read_only(&root)?;
     if !agent_doc_sqlite::state_store::state_table_exists(&conn, "queue_document_state")? {
-        return Ok(QueueClaimLedger::default());
+        let mut ledger = QueueClaimLedger::default();
+        apply_planned_claim_overlay(&document_hash, &mut ledger)?;
+        return Ok(ledger);
     }
-    load_from_conn(&conn, &document_hash)
+    let mut ledger = load_from_conn(&conn, &document_hash)?;
+    apply_planned_claim_overlay(&document_hash, &mut ledger)?;
+    Ok(ledger)
 }
 
 /// Work texts of projection-bearing queue-head rows.
@@ -2314,16 +2324,10 @@ pub fn completion_feedback_lock_path(file: &Path) -> Result<PathBuf> {
 /// an editor-authority lookup inside closeout). The ledger matches by the
 /// shared claim identity, which is marker-invariant.
 pub fn release_closed_head(file: &Path, head: &str) -> Result<Option<QueueClaim>> {
-    let released = mutate_ledger(file, |ledger| Ok(ledger.release(head)))?;
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "queue_claim_release released={} item_bytes={} reason=closed_by_strike",
-            released.is_some(),
-            head.trim().len()
-        ),
-    );
-    Ok(released)
+    match apply_planned_claim_write(file, &plan_release_closed_head(head))? {
+        PlannedClaimWriteOutcome::Released(released) => Ok(released.map(|claim| *claim)),
+        other => bail!("release_closed_head applied a non-release write: {other:?}"),
+    }
 }
 
 /// Carry live claims from promoted free-text heads to their minted `do [#id]`
@@ -2334,21 +2338,13 @@ pub fn transfer_promoted_claims(
     file: &Path,
     promotions: &[(String, String)],
 ) -> Result<Vec<(String, String, String)>> {
-    if promotions.is_empty() || load_ledger(file)?.claims.is_empty() {
+    let Some(write) = plan_transfer_promoted_claims(file, promotions)? else {
         return Ok(Vec::new());
+    };
+    match apply_planned_claim_write(file, &write)? {
+        PlannedClaimWriteOutcome::Transferred(transferred) => Ok(transferred),
+        other => bail!("transfer_promoted_claims applied a non-transfer write: {other:?}"),
     }
-    let now = now_secs();
-    let transferred = mutate_ledger(file, |ledger| Ok(ledger.transfer_promoted(now, promotions)))?;
-    for (source, id, owner) in &transferred {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "queue_claim_transferred_on_promotion owner={owner} id={id} source_bytes={} (#freetextqueue)",
-                source.trim().len()
-            ),
-        );
-    }
-    Ok(transferred)
 }
 
 /// Carry live claims across exact binary-owned prompt-id admission receipts.
@@ -2356,24 +2352,313 @@ pub fn transfer_prompt_identity_admissions(
     file: &Path,
     admissions: &[(String, String)],
 ) -> Result<Vec<(String, String, String)>> {
-    if admissions.is_empty() || load_ledger(file)?.claims.is_empty() {
+    let Some(write) = plan_transfer_prompt_identity_admissions(file, admissions)? else {
         return Ok(Vec::new());
+    };
+    match apply_planned_claim_write(file, &write)? {
+        PlannedClaimWriteOutcome::Transferred(transferred) => Ok(transferred),
+        other => {
+            bail!("transfer_prompt_identity_admissions applied a non-transfer write: {other:?}")
+        }
     }
-    let now = now_secs();
-    let transferred = mutate_ledger(file, |ledger| {
-        Ok(ledger.transfer_prompt_identity_admissions(now, admissions))
-    })?;
-    for (source, target, owner) in &transferred {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "queue_claim_transferred_on_prompt_identity_admission owner={owner} source_bytes={} target_bytes={}",
-                source.trim().len(),
-                target.trim().len()
+}
+
+/// One claim-ledger write computed without writing (`#implementlazilyowned`
+/// plan step 9a).
+///
+/// Queue maintenance derives its successor document before it writes anything:
+/// each `plan_*` function below returns the write its eponymous effect would
+/// perform, [`PlannedClaimLedgerOverlay`] lets the rest of the pass read the
+/// ledger as if the staged writes had landed, and
+/// [`apply_planned_claim_write`] performs one after the document cut is
+/// receipted. A write is a pure ledger transition, so it is re-evaluated
+/// against the ledger current when it is applied, exactly as the immediate
+/// effect evaluated it when it ran. It serializes into the maintenance plan's
+/// durable image, so a worker that crashed after the cut applies it on resume.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "write", rename_all = "snake_case")]
+pub enum PlannedClaimWrite {
+    /// [`transfer_promoted_claims`].
+    TransferPromoted {
+        now_secs: u64,
+        promotions: Vec<(String, String)>,
+    },
+    /// [`transfer_prompt_identity_admissions`].
+    TransferPromptIdentityAdmissions {
+        now_secs: u64,
+        admissions: Vec<(String, String)>,
+    },
+    /// [`release_closed_head`].
+    ReleaseClosedHead { head: String },
+    /// [`reconcile_completion_evidence`]: the completion-cell keys present in
+    /// the planned content. An attempt whose key is listed is restored to
+    /// `Reported`, the same predicate the immediate reconcile evaluates.
+    RecoverReportedCompletions { completion_keys: Vec<String> },
+}
+
+/// What applying one [`PlannedClaimWrite`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlannedClaimWriteOutcome {
+    /// `(source_head, target, owner)` per transferred claim.
+    Transferred(Vec<(String, String, String)>),
+    Released(Option<Box<QueueClaim>>),
+    /// Attempts restored to `Reported`.
+    Recovered(usize),
+}
+
+impl PlannedClaimWrite {
+    /// Apply this write to `ledger` in memory. This is the whole transition:
+    /// the durable apply runs exactly this inside one ledger transaction.
+    pub fn apply_to(&self, ledger: &mut QueueClaimLedger) -> Result<PlannedClaimWriteOutcome> {
+        Ok(match self {
+            Self::TransferPromoted {
+                now_secs,
+                promotions,
+            } => PlannedClaimWriteOutcome::Transferred(
+                ledger.transfer_promoted(*now_secs, promotions),
             ),
-        );
+            Self::TransferPromptIdentityAdmissions {
+                now_secs,
+                admissions,
+            } => PlannedClaimWriteOutcome::Transferred(
+                ledger.transfer_prompt_identity_admissions(*now_secs, admissions),
+            ),
+            Self::ReleaseClosedHead { head } => {
+                PlannedClaimWriteOutcome::Released(ledger.release(head).map(Box::new))
+            }
+            Self::RecoverReportedCompletions { completion_keys } => {
+                let mut recovered = 0;
+                for claim in &mut ledger.claims {
+                    if !completion_evidence_recoverable(claim) {
+                        continue;
+                    }
+                    let was_lost =
+                        claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost;
+                    let key = completion_feedback_key(claim)?;
+                    if completion_keys.contains(&key) {
+                        claim.state = agent_doc_queue::queue_claim::QueueClaimState::Reported;
+                        claim.completion_recovered_after_loss = was_lost;
+                        recovered += 1;
+                    }
+                }
+                PlannedClaimWriteOutcome::Recovered(recovered)
+            }
+        })
     }
-    Ok(transferred)
+}
+
+/// A Running/Lost attempt with a bound worker may be restored from its durable
+/// completion cell.
+fn completion_evidence_recoverable(claim: &QueueClaim) -> bool {
+    matches!(
+        claim.state,
+        agent_doc_queue::queue_claim::QueueClaimState::Running
+            | agent_doc_queue::queue_claim::QueueClaimState::Lost
+    ) && claim.worker.is_some()
+}
+
+/// The write [`transfer_promoted_claims`] would perform, or `None` when it
+/// would not touch the ledger (nothing promoted, or no claims).
+pub fn plan_transfer_promoted_claims(
+    file: &Path,
+    promotions: &[(String, String)],
+) -> Result<Option<PlannedClaimWrite>> {
+    if promotions.is_empty() || load_ledger(file)?.claims.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(PlannedClaimWrite::TransferPromoted {
+        now_secs: now_secs(),
+        promotions: promotions.to_vec(),
+    }))
+}
+
+/// The write [`transfer_prompt_identity_admissions`] would perform, or `None`
+/// when it would not touch the ledger.
+pub fn plan_transfer_prompt_identity_admissions(
+    file: &Path,
+    admissions: &[(String, String)],
+) -> Result<Option<PlannedClaimWrite>> {
+    if admissions.is_empty() || load_ledger(file)?.claims.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(PlannedClaimWrite::TransferPromptIdentityAdmissions {
+        now_secs: now_secs(),
+        admissions: admissions.to_vec(),
+    }))
+}
+
+/// The write [`release_closed_head`] performs.
+pub fn plan_release_closed_head(head: &str) -> PlannedClaimWrite {
+    PlannedClaimWrite::ReleaseClosedHead {
+        head: head.to_string(),
+    }
+}
+
+/// The write [`reconcile_completion_evidence`] would perform against
+/// `content`: the completion-cell keys of recoverable attempts that `content`
+/// carries.
+pub fn plan_reconcile_completion_evidence(file: &Path, content: &str) -> Result<PlannedClaimWrite> {
+    let ledger = load_ledger(file)?;
+    let mut completion_keys = Vec::new();
+    for claim in ledger
+        .claims
+        .iter()
+        .filter(|claim| completion_evidence_recoverable(claim))
+    {
+        let key = completion_feedback_key(claim)?;
+        if content.contains(&agent_doc_document::subagent_completion::marker(&key))
+            && !completion_keys.contains(&key)
+        {
+            completion_keys.push(key);
+        }
+    }
+    Ok(PlannedClaimWrite::RecoverReportedCompletions { completion_keys })
+}
+
+/// Apply one planned write to the durable ledger in one transaction, with the
+/// same evidence lines the immediate effect writes.
+pub fn apply_planned_claim_write(
+    file: &Path,
+    write: &PlannedClaimWrite,
+) -> Result<PlannedClaimWriteOutcome> {
+    let outcome = mutate_ledger(file, |ledger| write.apply_to(ledger))?;
+    match (write, &outcome) {
+        (
+            PlannedClaimWrite::TransferPromoted { .. },
+            PlannedClaimWriteOutcome::Transferred(transferred),
+        ) => {
+            for (source, id, owner) in transferred {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_claim_transferred_on_promotion owner={owner} id={id} source_bytes={} (#freetextqueue)",
+                        source.trim().len()
+                    ),
+                );
+            }
+        }
+        (
+            PlannedClaimWrite::TransferPromptIdentityAdmissions { .. },
+            PlannedClaimWriteOutcome::Transferred(transferred),
+        ) => {
+            for (source, target, owner) in transferred {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_claim_transferred_on_prompt_identity_admission owner={owner} source_bytes={} target_bytes={}",
+                        source.trim().len(),
+                        target.trim().len()
+                    ),
+                );
+            }
+        }
+        (
+            PlannedClaimWrite::ReleaseClosedHead { head },
+            PlannedClaimWriteOutcome::Released(released),
+        ) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "queue_claim_release released={} item_bytes={} reason=closed_by_strike",
+                    released.is_some(),
+                    head.trim().len()
+                ),
+            );
+        }
+        (
+            PlannedClaimWrite::RecoverReportedCompletions { .. },
+            PlannedClaimWriteOutcome::Recovered(recovered),
+        ) if *recovered > 0 => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!("queue_claim_recovered_reported count={recovered}"),
+            );
+        }
+        _ => {}
+    }
+    Ok(outcome)
+}
+
+struct StagedClaimOverlay {
+    document_hash: String,
+    writes: Vec<PlannedClaimWrite>,
+}
+
+thread_local! {
+    /// Overlays installed on this thread, innermost last.
+    static PLANNED_CLAIM_OVERLAYS: std::cell::RefCell<Vec<StagedClaimOverlay>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Read overlay for claim writes a queue-maintenance pass has planned but not
+/// yet applied (`#implementlazilyowned` plan step 9a).
+///
+/// While the guard is alive, [`load_ledger`] and [`load_ledger_read_only`] for
+/// the same document on this thread return the stored ledger with every staged
+/// write applied in order, so every reader the pass calls (dispatch holds,
+/// lifecycle projection, `agent:active`) sees the successor's ledger without
+/// the ledger being written. The stored ledger is re-read on every load, so a
+/// concurrent claim by another process stays visible. Dropping the guard
+/// discards the staged writes; the caller applies them with
+/// [`apply_planned_claim_write`] after its document cut.
+#[must_use = "staged claim writes are visible only while the overlay is alive"]
+pub struct PlannedClaimLedgerOverlay {
+    installed: bool,
+}
+
+impl PlannedClaimLedgerOverlay {
+    /// Install an empty overlay for `file`. A file outside any agent-doc
+    /// project has no ledger, so the overlay is inert.
+    pub fn install(file: &Path) -> Result<Self> {
+        let Some((_, document_hash, _)) = state_identity(file)? else {
+            return Ok(Self { installed: false });
+        };
+        PLANNED_CLAIM_OVERLAYS.with(|overlays| {
+            overlays.borrow_mut().push(StagedClaimOverlay {
+                document_hash,
+                writes: Vec::new(),
+            })
+        });
+        Ok(Self { installed: true })
+    }
+
+    /// Stage `write`: later loads of this document's ledger on this thread
+    /// include it.
+    pub fn stage(&self, write: &PlannedClaimWrite) {
+        if !self.installed {
+            return;
+        }
+        PLANNED_CLAIM_OVERLAYS.with(|overlays| {
+            if let Some(overlay) = overlays.borrow_mut().last_mut() {
+                overlay.writes.push(write.clone());
+            }
+        });
+    }
+}
+
+impl Drop for PlannedClaimLedgerOverlay {
+    fn drop(&mut self) {
+        if self.installed {
+            PLANNED_CLAIM_OVERLAYS.with(|overlays| {
+                overlays.borrow_mut().pop();
+            });
+        }
+    }
+}
+
+fn apply_planned_claim_overlay(document_hash: &str, ledger: &mut QueueClaimLedger) -> Result<()> {
+    let writes = PLANNED_CLAIM_OVERLAYS.with(|overlays| {
+        overlays
+            .borrow()
+            .iter()
+            .filter(|overlay| overlay.document_hash == document_hash)
+            .flat_map(|overlay| overlay.writes.iter().cloned())
+            .collect::<Vec<_>>()
+    });
+    for write in &writes {
+        write.apply_to(ledger)?;
+    }
+    Ok(())
 }
 
 /// Active claims for `file` judged against `content`: expired claims and claims
@@ -4681,6 +4966,93 @@ mod tests {
             agent_doc_queue::queue_claim::QueueClaimState::Reported
         );
         assert!(stored.blocks_dispatch(u64::MAX));
+    }
+
+    /// `#implementlazilyowned` plan step 9a: every planned claim write is the
+    /// immediate effect's own transition, and staging it writes nothing while
+    /// the overlay makes the pass read the successor ledger.
+    #[test]
+    fn planned_claim_writes_match_the_immediate_effects_and_stage_without_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &["finish worker task", "promote me"]);
+        let (_, claimed) = claim(&doc, "finish worker task", "subagent:worker", 600).unwrap();
+        let running = start_attempt(
+            &doc,
+            "finish worker task",
+            "subagent:worker",
+            "worker:exact",
+            600,
+            claimed.generation,
+        )
+        .unwrap();
+        claim(&doc, "promote me", "subagent:promoter", 600).unwrap();
+        let stored = load_ledger(&doc).unwrap();
+        let cell = agent_doc_document::subagent_completion::cell(
+            &running.owner,
+            &running.item_text,
+            &completion_feedback_key(&running).unwrap(),
+        );
+        let promotions = vec![("promote me".to_string(), "promoted".to_string())];
+
+        let overlay = PlannedClaimLedgerOverlay::install(&doc).unwrap();
+        let transfer = plan_transfer_promoted_claims(&doc, &promotions)
+            .unwrap()
+            .expect("a live claim on a promoted head plans a transfer");
+        overlay.stage(&transfer);
+        let recover = plan_reconcile_completion_evidence(&doc, &cell).unwrap();
+        assert_eq!(
+            recover,
+            PlannedClaimWrite::RecoverReportedCompletions {
+                completion_keys: vec![completion_feedback_key(&running).unwrap()],
+            }
+        );
+        overlay.stage(&recover);
+        let release = plan_release_closed_head("finish worker task");
+        overlay.stage(&release);
+
+        // The overlay reads the successor; the store is untouched.
+        let mut expected = stored.clone();
+        transfer.apply_to(&mut expected).unwrap();
+        recover.apply_to(&mut expected).unwrap();
+        release.apply_to(&mut expected).unwrap();
+        assert_ne!(expected, stored, "the fixture must plan a real transition");
+        assert_eq!(load_ledger(&doc).unwrap(), expected);
+        assert_eq!(load_ledger_read_only(&doc).unwrap(), expected);
+        drop(overlay);
+        assert_eq!(
+            load_ledger(&doc).unwrap(),
+            stored,
+            "staging wrote the ledger"
+        );
+
+        // Applying the planned writes is the same transition as running the
+        // immediate effects on an identical ledger.
+        for write in [&transfer, &recover, &release] {
+            apply_planned_claim_write(&doc, write).unwrap();
+        }
+        let planned = load_ledger(&doc).unwrap();
+        assert_eq!(planned, expected);
+
+        let other_dir = tempfile::tempdir().unwrap();
+        let other = write_doc(other_dir.path(), &["finish worker task", "promote me"]);
+        store_ledger_for_test(&other, &stored).unwrap();
+        transfer_promoted_claims(&other, &promotions).unwrap();
+        assert_eq!(reconcile_completion_evidence(&other, &cell).unwrap(), 1);
+        release_closed_head(&other, "finish worker task").unwrap();
+        assert_eq!(load_ledger(&other).unwrap(), planned);
+
+        // Nothing promoted, or no claims: no write is planned.
+        assert_eq!(plan_transfer_promoted_claims(&doc, &[]).unwrap(), None);
+        let empty_dir = tempfile::tempdir().unwrap();
+        let empty = write_doc(empty_dir.path(), &["unclaimed"]);
+        assert_eq!(
+            plan_transfer_prompt_identity_admissions(
+                &empty,
+                &[("unclaimed".to_string(), "unclaimed q-1".to_string())]
+            )
+            .unwrap(),
+            None
+        );
     }
 
     #[test]

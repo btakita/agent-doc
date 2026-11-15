@@ -153,6 +153,64 @@ pub fn reconcile_for_file(
     current_all_ids: &HashSet<String>,
     current_active_ids: &HashSet<String>,
 ) -> HashSet<String> {
+    let plan = plan_reconcile_for_file(
+        doc,
+        snapshot_active_ids,
+        current_all_ids,
+        current_active_ids,
+    );
+    if let Some(write) = &plan.write {
+        apply_planned_tombstone_write(doc, write);
+    }
+    plan.tombstones
+}
+
+/// The stored tombstone state one reconcile would write, computed without
+/// writing (`#implementlazilyowned` plan step 9a). Serializable, so a
+/// queue-maintenance worker can apply it after its document cut, including
+/// after a crash.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlannedTombstoneWrite {
+    tombstones: Vec<String>,
+    observed_active_ids: Vec<String>,
+}
+
+impl PlannedTombstoneWrite {
+    fn from_state(state: &LoadedQueueTombstones) -> Self {
+        let mut tombstones: Vec<String> = state.tombstones.iter().cloned().collect();
+        tombstones.sort();
+        let mut observed_active_ids: Vec<String> =
+            state.observed_active_ids.iter().cloned().collect();
+        observed_active_ids.sort();
+        Self {
+            tombstones,
+            observed_active_ids,
+        }
+    }
+
+    fn state(&self) -> LoadedQueueTombstones {
+        LoadedQueueTombstones {
+            tombstones: self.tombstones.iter().cloned().collect(),
+            observed_active_ids: self.observed_active_ids.iter().cloned().collect(),
+        }
+    }
+}
+
+/// [`reconcile_for_file`] without its write: the tombstone set the mirror must
+/// skip, and the stored state to persist when it changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TombstoneReconcilePlan {
+    pub tombstones: HashSet<String>,
+    pub write: Option<PlannedTombstoneWrite>,
+}
+
+/// Plan one tombstone reconcile (see [`reconcile_for_file`]) without writing.
+pub fn plan_reconcile_for_file(
+    doc: &Path,
+    snapshot_active_ids: &HashSet<String>,
+    current_all_ids: &HashSet<String>,
+    current_active_ids: &HashSet<String>,
+) -> TombstoneReconcilePlan {
     let previous = load(doc);
     let mut deletion_anchors = snapshot_active_ids.clone();
     deletion_anchors.extend(previous.observed_active_ids.iter().cloned());
@@ -166,10 +224,15 @@ pub fn reconcile_for_file(
         tombstones: tomb.clone(),
         observed_active_ids: current_active_ids.clone(),
     };
-    if next != previous {
-        save(doc, &next);
+    TombstoneReconcilePlan {
+        tombstones: tomb,
+        write: (next != previous).then(|| PlannedTombstoneWrite::from_state(&next)),
     }
-    tomb
+}
+
+/// Persist a planned tombstone state. Best-effort, like every tombstone save.
+pub fn apply_planned_tombstone_write(doc: &Path, write: &PlannedTombstoneWrite) {
+    save(doc, &write.state());
 }
 
 /// Persist the final editor-authoritative active-id frontier after automatic
@@ -233,6 +296,40 @@ mod tests {
             !tomb.contains("a"),
             "a struck/consumed id is not an operator delete"
         );
+    }
+
+    #[test]
+    fn planned_reconcile_matches_the_immediate_reconcile_and_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("plan.md");
+        std::fs::write(&doc, "x").unwrap();
+        record_observed_active_ids(&doc, &set(&["late", "kept"]));
+        let before = load(&doc);
+
+        let plan = plan_reconcile_for_file(&doc, &set(&["a"]), &set(&["kept"]), &set(&["kept"]));
+        assert_eq!(load(&doc), before, "planning must not write the ledger");
+        assert!(plan.tombstones.contains("a") && plan.tombstones.contains("late"));
+        let write = plan
+            .write
+            .clone()
+            .expect("a changed tombstone set is a write");
+
+        apply_planned_tombstone_write(&doc, &write);
+        let planned = load(&doc);
+        // The immediate reconcile from the same prior state is the same
+        // transition: replay it on a second document to compare.
+        let other = dir.path().join("other.md");
+        std::fs::write(&other, "x").unwrap();
+        record_observed_active_ids(&other, &set(&["late", "kept"]));
+        let immediate = reconcile_for_file(&other, &set(&["a"]), &set(&["kept"]), &set(&["kept"]));
+        assert_eq!(immediate, plan.tombstones);
+        assert_eq!(load(&other), planned);
+
+        // An unchanged reconcile plans no write.
+        let settled = plan_reconcile_for_file(&doc, &set(&[]), &set(&["kept"]), &set(&["kept"]));
+        assert_eq!(settled.write, None);
+        assert_eq!(settled.tombstones, plan.tombstones);
     }
 
     #[test]

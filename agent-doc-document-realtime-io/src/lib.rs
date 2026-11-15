@@ -1288,34 +1288,56 @@ fn await_serialized_atomic_write_projection(
     target_hash: &str,
 ) -> Result<agent_doc_crdt_relay_io::CurrentText> {
     let mut projection_observation = ProjectionObservationState::default();
-    loop {
-        let current = observe_live_editor_authority_after_model_ensure(
-            path,
-            "serialized_atomic_write_projection_wait",
-        )?;
-        let agent_doc_crdt_relay_io::CurrentText::Current {
-            ref text,
-            live_editors,
-            delivery_converged,
-            delivery_version,
-            ..
-        } = current
-        else {
-            return Ok(current);
-        };
-        if agent_doc_hash::content_hash(text) != target_hash || delivery_converged {
-            return Ok(current);
-        }
-        if projection_observation.wait_for_delivery_change(DeliveryChangeWait {
-            file: path,
-            source: "serialized_atomic_write_projection_wait",
-            live_editors,
-            delivery_version,
-            signal_immediately: false,
-            max_wait_ms: None,
-        })? == ProjectionObservationWait::ForegroundDeadline
-        {
-            return Ok(current);
+    // `#implementlazilyowned`: each observation is one Lazily-claimed attempt;
+    // a pending delivery of the target is `Retryable` after the delivery wait.
+    let drive = agent_doc_effect_cas::drive_effect_epochs(
+        &format!("serialized-atomic-write-projection:{}", path.display()),
+        target_hash,
+        u32::MAX,
+        &mut |_| {
+            let settled = |current| agent_doc_effect_cas::EpochStep::Applied {
+                receipt: current,
+                authority: target_hash.to_string(),
+            };
+            let current = observe_live_editor_authority_after_model_ensure(
+                path,
+                "serialized_atomic_write_projection_wait",
+            )?;
+            let agent_doc_crdt_relay_io::CurrentText::Current {
+                ref text,
+                live_editors,
+                delivery_converged,
+                delivery_version,
+                ..
+            } = current
+            else {
+                return Ok(settled(current));
+            };
+            if agent_doc_hash::content_hash(text) != target_hash || delivery_converged {
+                return Ok(settled(current));
+            }
+            if projection_observation.wait_for_delivery_change(DeliveryChangeWait {
+                file: path,
+                source: "serialized_atomic_write_projection_wait",
+                live_editors,
+                delivery_version,
+                signal_immediately: false,
+                max_wait_ms: None,
+            })? == ProjectionObservationWait::ForegroundDeadline
+            {
+                return Ok(settled(current));
+            }
+            Ok(agent_doc_effect_cas::EpochStep::Retryable(()))
+        },
+        &mut |_, _| Ok(agent_doc_effect_cas::Pace::Continue),
+    )?;
+    match drive {
+        agent_doc_effect_cas::EpochDrive::Applied(current) => Ok(current),
+        agent_doc_effect_cas::EpochDrive::Exhausted { .. }
+        | agent_doc_effect_cas::EpochDrive::Stopped { .. } => {
+            anyhow::bail!(
+                "serialized atomic write projection wait exhausted its Lazily attempt budget"
+            )
         }
     }
 }
@@ -1360,71 +1382,89 @@ fn await_visible_editor_projection_receipt(path: &Path, target_hash: &str) -> Re
     let started = std::time::Instant::now();
     let mut controller_cursor = None;
     let mut fallback_backoff_ms = CRDT_PROJECTION_FALLBACK_BACKOFF_INITIAL_MS;
-    loop {
-        let current = observe_live_editor_authority_after_model_ensure(
-            path,
-            "serialized_atomic_write_visible_receipt_wait",
-        )?;
-        let agent_doc_crdt_relay_io::CurrentText::Current {
-            ref text,
-            delivery_version,
-            ..
-        } = current
-        else {
-            return Ok(false);
-        };
-        if agent_doc_hash::content_hash(text) != target_hash {
-            return Ok(false);
-        }
-        if visible_editor_projection_receipt_for_target(path, target_hash)? {
-            return Ok(true);
-        }
-        let remaining = std::time::Duration::from_millis(
-            CRDT_PROJECTION_OBSERVATION_TIMEOUT_MS
-                .saturating_sub(started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64),
-        );
-        if remaining.is_zero() {
-            return Ok(false);
-        }
-        note_editor_delivery_wait_entered(path);
-        if agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(path) {
-            let observed = agent_doc_crdt_relay_io::await_delivery_revision_change_for_file(
+    // `#implementlazilyowned`: each observation is one Lazily-claimed attempt.
+    // A settled verdict is the applied receipt; an observed edge that still
+    // lacks the receipt is `Retryable` (the target authority is unchanged).
+    let drive = agent_doc_effect_cas::drive_effect_epochs(
+        &format!("visible-editor-projection-receipt:{}", path.display()),
+        target_hash,
+        u32::MAX,
+        &mut |_| {
+            let settled = |value: bool| agent_doc_effect_cas::EpochStep::Applied {
+                receipt: value,
+                authority: target_hash.to_string(),
+            };
+            let current = observe_live_editor_authority_after_model_ensure(
                 path,
-                delivery_version,
-                remaining,
+                "serialized_atomic_write_visible_receipt_wait",
             )?;
-            if observed.is_none_or(|observed| observed.version == delivery_version) {
-                return Ok(false);
+            let agent_doc_crdt_relay_io::CurrentText::Current {
+                ref text,
+                delivery_version,
+                ..
+            } = current
+            else {
+                return Ok(settled(false));
+            };
+            if agent_doc_hash::content_hash(text) != target_hash {
+                return Ok(settled(false));
             }
-            continue;
-        }
-        match agent_doc_controller_io::project_controller::
-            subscribe_document_delivery_wakes_for_file(path, controller_cursor, remaining)
-        {
-            Ok(subscription) => {
-                if document_delivery_wake_proves_target(&subscription, target_hash) {
-                    return Ok(true);
+            if visible_editor_projection_receipt_for_target(path, target_hash)? {
+                return Ok(settled(true));
+            }
+            let remaining = std::time::Duration::from_millis(
+                CRDT_PROJECTION_OBSERVATION_TIMEOUT_MS
+                    .saturating_sub(started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64),
+            );
+            if remaining.is_zero() {
+                return Ok(settled(false));
+            }
+            note_editor_delivery_wait_entered(path);
+            if agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(path) {
+                let observed = agent_doc_crdt_relay_io::await_delivery_revision_change_for_file(
+                    path,
+                    delivery_version,
+                    remaining,
+                )?;
+                if observed.is_none_or(|observed| observed.version == delivery_version) {
+                    return Ok(settled(false));
                 }
-                controller_cursor = Some(
-                    agent_doc_controller_io::project_controller::ControllerStatePlaneCursor {
-                        controller_generation: subscription.controller_generation,
-                        plane_version: subscription.latest_version,
-                    },
-                );
-                if subscription.timed_out && !subscription.changed {
-                    return Ok(false);
+                return Ok(agent_doc_effect_cas::EpochStep::Retryable(()));
+            }
+            match agent_doc_controller_io::project_controller::
+                subscribe_document_delivery_wakes_for_file(path, controller_cursor, remaining)
+            {
+                Ok(subscription) => {
+                    if document_delivery_wake_proves_target(&subscription, target_hash) {
+                        return Ok(settled(true));
+                    }
+                    controller_cursor = Some(
+                        agent_doc_controller_io::project_controller::ControllerStatePlaneCursor {
+                            controller_generation: subscription.controller_generation,
+                            plane_version: subscription.latest_version,
+                        },
+                    );
+                    if subscription.timed_out && !subscription.changed {
+                        return Ok(settled(false));
+                    }
+                }
+                Err(_) => {
+                    let sleep_ms = fallback_backoff_ms.min(
+                        remaining.as_millis().min(u128::from(u64::MAX)) as u64,
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(sleep_ms));
+                    fallback_backoff_ms = CRDT_PROJECTION_FALLBACK_BACKOFF_POLICY
+                        .next_ms(fallback_backoff_ms, false);
                 }
             }
-            Err(_) => {
-                let sleep_ms = fallback_backoff_ms.min(
-                    remaining.as_millis().min(u128::from(u64::MAX)) as u64,
-                );
-                std::thread::sleep(std::time::Duration::from_millis(sleep_ms));
-                fallback_backoff_ms = CRDT_PROJECTION_FALLBACK_BACKOFF_POLICY
-                    .next_ms(fallback_backoff_ms, false);
-            }
-        }
-    }
+            Ok(agent_doc_effect_cas::EpochStep::Retryable(()))
+        },
+        &mut |_, _| Ok(agent_doc_effect_cas::Pace::Continue),
+    )?;
+    Ok(matches!(
+        drive,
+        agent_doc_effect_cas::EpochDrive::Applied(true)
+    ))
 }
 
 fn atomic_write_rebased_through_authority_body(
@@ -1924,46 +1964,77 @@ fn await_canonical_editor_projection_persisted(
         return Ok(true);
     }
     let started = std::time::Instant::now();
-    let mut backoff_ms = CRDT_PROJECTION_FALLBACK_BACKOFF_INITIAL_MS;
-    while started.elapsed()
-        < std::time::Duration::from_millis(CRDT_PROJECTION_OBSERVATION_TIMEOUT_MS)
-    {
-        let agent_doc_crdt_relay_io::CurrentText::Current {
-            text,
-            live_editors,
-            delivery_converged,
-            ..
-        } = observe_live_editor_authority_after_model_ensure(
-            path,
-            "editor_projection_native_save_wait",
-        )?
-        else {
-            return Ok(false);
-        };
-        if !editor_save_authority_is_sufficient(&text, canonical, live_editors, delivery_converged)
-        {
-            return Ok(false);
-        }
-        // The strict delivery receipt is reactive. The editor's filesystem save
-        // has no corresponding CRDT revision edge, so retain the bounded fallback
-        // only for that final native-save projection.
-        std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
-        if canonical_disk_projection_is_exact(path, canonical) {
-            agent_doc_ops_log_io::log_op(
-                path,
-                &format!(
-                    "editor_projection_native_save_receipt file={} source={} content_hash={} wait_ms={} canonical_disk_exact=true",
-                    path.display(),
-                    source,
-                    agent_doc_hash::content_hash(canonical),
-                    started.elapsed().as_millis(),
-                ),
-            );
-            return Ok(true);
-        }
-        backoff_ms = CRDT_PROJECTION_FALLBACK_BACKOFF_POLICY.next_ms(backoff_ms, false);
+    let timeout = std::time::Duration::from_millis(CRDT_PROJECTION_OBSERVATION_TIMEOUT_MS);
+    if started.elapsed() >= timeout {
+        return Ok(false);
     }
-    Ok(false)
+    let backoff_ms = std::cell::Cell::new(CRDT_PROJECTION_FALLBACK_BACKOFF_INITIAL_MS);
+    // `#implementlazilyowned`: each native-save observation is one
+    // Lazily-claimed attempt; a not-yet-exact disk projection is `Retryable`,
+    // and the observation deadline stops the drive.
+    let canonical_hash = agent_doc_hash::content_hash(canonical);
+    let drive = agent_doc_effect_cas::drive_effect_epochs(
+        &format!("editor-projection-native-save:{}", path.display()),
+        canonical_hash.clone(),
+        u32::MAX,
+        &mut |_| {
+            let settled = |value: bool| agent_doc_effect_cas::EpochStep::Applied {
+                receipt: value,
+                authority: canonical_hash.clone(),
+            };
+            let agent_doc_crdt_relay_io::CurrentText::Current {
+                text,
+                live_editors,
+                delivery_converged,
+                ..
+            } = observe_live_editor_authority_after_model_ensure(
+                path,
+                "editor_projection_native_save_wait",
+            )?
+            else {
+                return Ok(settled(false));
+            };
+            if !editor_save_authority_is_sufficient(
+                &text,
+                canonical,
+                live_editors,
+                delivery_converged,
+            ) {
+                return Ok(settled(false));
+            }
+            // The strict delivery receipt is reactive. The editor's filesystem save
+            // has no corresponding CRDT revision edge, so retain the bounded fallback
+            // only for that final native-save projection.
+            std::thread::sleep(std::time::Duration::from_millis(backoff_ms.get()));
+            if canonical_disk_projection_is_exact(path, canonical) {
+                agent_doc_ops_log_io::log_op(
+                    path,
+                    &format!(
+                        "editor_projection_native_save_receipt file={} source={} content_hash={} wait_ms={} canonical_disk_exact=true",
+                        path.display(),
+                        source,
+                        canonical_hash,
+                        started.elapsed().as_millis(),
+                    ),
+                );
+                return Ok(settled(true));
+            }
+            Ok(agent_doc_effect_cas::EpochStep::Retryable(()))
+        },
+        &mut |_, _| {
+            backoff_ms
+                .set(CRDT_PROJECTION_FALLBACK_BACKOFF_POLICY.next_ms(backoff_ms.get(), false));
+            Ok(if started.elapsed() < timeout {
+                agent_doc_effect_cas::Pace::Continue
+            } else {
+                agent_doc_effect_cas::Pace::Stop
+            })
+        },
+    )?;
+    Ok(matches!(
+        drive,
+        agent_doc_effect_cas::EpochDrive::Applied(true)
+    ))
 }
 
 /// Whether the actual live editor replica has acknowledged the exact canonical
@@ -3265,22 +3336,47 @@ where
     }
 
     let started = std::time::Instant::now();
-    let mut backoff_ms = CRDT_WRITE_BACKOFF_INITIAL_MS;
-    while started.elapsed() < timeout {
-        std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
-        let (next_canonical, next_disk) = sample()?;
-        canonical = next_canonical;
-        disk = next_disk;
-        if !atomic_repair_projection_should_await(classify_atomic_repair_projection(
-            content,
-            expected_current,
-            &canonical,
-            &disk,
-        )) {
-            return Ok((canonical, disk));
-        }
-        backoff_ms = CRDT_WRITE_BACKOFF_POLICY.next_ms(backoff_ms, false);
+    if started.elapsed() >= timeout {
+        return Ok((canonical, disk));
     }
+    let backoff_ms = std::cell::Cell::new(CRDT_WRITE_BACKOFF_INITIAL_MS);
+    // `#implementlazilyowned`: each projection sample is one Lazily-claimed
+    // attempt; a projection that should still be awaited is `Retryable`, and
+    // the settle timeout stops the drive with the last sample.
+    agent_doc_effect_cas::drive_effect_epochs(
+        "atomic-repair-projection-settle",
+        agent_doc_hash::content_hash(expected_current),
+        u32::MAX,
+        &mut |_| {
+            std::thread::sleep(std::time::Duration::from_millis(backoff_ms.get()));
+            let (next_canonical, next_disk) = sample()?;
+            canonical = next_canonical;
+            disk = next_disk;
+            Ok(
+                if atomic_repair_projection_should_await(classify_atomic_repair_projection(
+                    content,
+                    expected_current,
+                    &canonical,
+                    &disk,
+                )) {
+                    agent_doc_effect_cas::EpochStep::Retryable(())
+                } else {
+                    agent_doc_effect_cas::EpochStep::Applied {
+                        receipt: (),
+                        authority: agent_doc_hash::content_hash(&canonical),
+                    }
+                },
+            )
+        },
+        &mut |_, _| {
+            backoff_ms.set(CRDT_WRITE_BACKOFF_POLICY.next_ms(backoff_ms.get(), false));
+            Ok(if started.elapsed() < timeout {
+                agent_doc_effect_cas::Pace::Continue
+            } else {
+                agent_doc_effect_cas::Pace::Stop
+            })
+        },
+    )?;
     Ok((canonical, disk))
 }
 
@@ -3919,592 +4015,158 @@ pub fn apply_canonical_replace_if_attached(
         .checked_sub(std::time::Duration::from_secs(2))
         .unwrap_or_else(std::time::Instant::now);
 
-    loop {
-        // Charge the previous iteration to the state it ended in (`#crdtprojectionprofile`).
-        profile.tick(wait_state);
-        let total_elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
-        let delivery_wait_elapsed_ms =
-            delivery_wait_elapsed.as_millis().min(u128::from(u64::MAX)) as u64;
-        let controller_elapsed_ms =
-            exclusive_controller_elapsed_ms(total_elapsed_ms, delivery_wait_elapsed_ms);
-        deadline.tick(controller_elapsed_ms);
-        if deadline.is_expired() {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "{source}_crdt_convergence_timeout file={} reason={} controller_timeout_ms={} delivery_wait_ms={} profile=[{}] recovery=retry_crdt_merge_no_legacy_replay",
+    // `#implementlazilyowned`: Lazily owns the convergence attempts. Each pass
+    // observes the editor authority and either lands, defers, or refuses the
+    // canonical write (the applied receipt or a rejection), or reports a wait
+    // state: a lost compare-and-swap is `Superseded` and every other wait is
+    // `Retryable`. The convergence deadline above stays the bound.
+    let mut observed_authority = agent_doc_hash::content_hash(expected_current);
+    let drive = agent_doc_effect_cas::drive_effect_epochs(
+        &format!("crdt-canonical-replace:{source}:{}", file.display()),
+        agent_doc_hash::content_hash(expected_current),
+        u32::MAX,
+        &mut |_| {
+            // Charge the previous Lazily attempt to the state it ended in (`#crdtprojectionprofile`).
+            profile.tick(wait_state);
+            let total_elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+            let delivery_wait_elapsed_ms =
+                delivery_wait_elapsed.as_millis().min(u128::from(u64::MAX)) as u64;
+            let controller_elapsed_ms =
+                exclusive_controller_elapsed_ms(total_elapsed_ms, delivery_wait_elapsed_ms);
+            deadline.tick(controller_elapsed_ms);
+            if deadline.is_expired() {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "{source}_crdt_convergence_timeout file={} reason={} controller_timeout_ms={} delivery_wait_ms={} profile=[{}] recovery=retry_crdt_merge_no_legacy_replay",
+                        file.display(),
+                        wait_state,
+                        CRDT_WRITE_CONVERGENCE_TIMEOUT_MS,
+                        delivery_wait_elapsed_ms,
+                        profile.render(wait_state),
+                    ),
+                );
+                anyhow::bail!(
+                    "{source}: CRDT convergence for {} did not settle within {}ms (reason={}); {}",
                     file.display(),
-                    wait_state,
                     CRDT_WRITE_CONVERGENCE_TIMEOUT_MS,
-                    delivery_wait_elapsed_ms,
-                    profile.render(wait_state),
-                ),
-            );
-            anyhow::bail!(
-                "{source}: CRDT convergence for {} did not settle within {}ms (reason={}); {}",
-                file.display(),
-                CRDT_WRITE_CONVERGENCE_TIMEOUT_MS,
-                wait_state,
-                RETAINED_FOR_RETRY_MARKER,
-            );
-        }
+                    wait_state,
+                    RETAINED_FOR_RETRY_MARKER,
+                );
+            }
 
-        // A CP write is issued only from a quiescent editor cut. Waiting here
-        // happens in the caller, outside the controller RPC loop, so editor
-        // deltas and delivery projections remain responsive while typing settles.
-        let mut prewrite_observed = None;
-        if pending_target.is_none() {
-            let remaining_ms =
-                CRDT_WRITE_CONVERGENCE_TIMEOUT_MS.saturating_sub(controller_elapsed_ms);
-            let prewrite_barrier = guard_visible_write_current_transition_with_policy(
-                file,
-                source,
-                remaining_ms.max(1),
-                true,
-                ProjectionRefusalOwnership::PrewriteBase,
-            )
-            .with_context(|| {
-                format!(
-                    "{source}: waiting for the pre-write editor delivery barrier for {}",
-                    file.display()
+            // A CP write is issued only from a quiescent editor cut. Waiting here
+            // happens in the caller, outside the controller RPC loop, so editor
+            // deltas and delivery projections remain responsive while typing settles.
+            let mut prewrite_observed = None;
+            if pending_target.is_none() {
+                let remaining_ms =
+                    CRDT_WRITE_CONVERGENCE_TIMEOUT_MS.saturating_sub(controller_elapsed_ms);
+                let prewrite_barrier = guard_visible_write_current_transition_with_policy(
+                    file,
+                    source,
+                    remaining_ms.max(1),
+                    true,
+                    ProjectionRefusalOwnership::PrewriteBase,
                 )
-            });
-            if let Err(error) = prewrite_barrier {
-                let observed = observe_live_editor_authority_after_model_ensure(file, source)?;
-                // A retained pre-write projection has not mutated disk, snapshot, or the
-                // response-cycle graph. When the relay still exposes the exact base used
-                // to derive this canonical successor, the successor may subsume that
-                // pending cut. Any drift fails closed through the original typed error.
-                if retained_prewrite_base_can_be_superseded(&error, expected_current, &observed) {
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!(
-                            "{source}_crdt_prewrite_retained_base_superseded file={} base_hash={} action=compose_successor_on_exact_pending_base",
-                            file.display(),
-                            agent_doc_hash::content_hash(expected_current),
-                        ),
-                    );
-                    prewrite_observed = Some(observed);
-                } else {
-                    return Err(error);
+                .with_context(|| {
+                    format!(
+                        "{source}: waiting for the pre-write editor delivery barrier for {}",
+                        file.display()
+                    )
+                });
+                if let Err(error) = prewrite_barrier {
+                    let observed = observe_live_editor_authority_after_model_ensure(file, source)?;
+                    // A retained pre-write projection has not mutated disk, snapshot, or the
+                    // response-cycle graph. When the relay still exposes the exact base used
+                    // to derive this canonical successor, the successor may subsume that
+                    // pending cut. Any drift fails closed through the original typed error.
+                    if retained_prewrite_base_can_be_superseded(&error, expected_current, &observed)
+                    {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "{source}_crdt_prewrite_retained_base_superseded file={} base_hash={} action=compose_successor_on_exact_pending_base",
+                                file.display(),
+                                agent_doc_hash::content_hash(expected_current),
+                            ),
+                        );
+                        prewrite_observed = Some(observed);
+                    } else {
+                        return Err(error);
+                    }
                 }
             }
-        }
 
-        let mut delivery_wait_cursor: Option<(u64, usize)> = None;
-        let observed_result: Result<_> = match prewrite_observed {
-            Some(observed) => Ok(observed),
-            None => observe_live_editor_authority_after_model_ensure(file, source),
-        };
-        let observed = match observed_result {
-            Ok(current) => Some(current),
-            Err(err) if transient_convergence_backpressure_error(&err) => {
-                wait_state = CrdtConvergenceState::ControllerModelBackpressure;
-                // The authority/model boundary already records the failed
-                // attempt. The common two-second notice below coalesces retry
-                // telemetry instead of logging every controller/model poll.
-                None
-            }
-            Err(err) => return Err(err),
-        };
+            let mut delivery_wait_cursor: Option<(u64, usize)> = None;
+            let observed_result: Result<_> = match prewrite_observed {
+                Some(observed) => Ok(observed),
+                None => observe_live_editor_authority_after_model_ensure(file, source),
+            };
+            let observed = match observed_result {
+                Ok(current) => Some(current),
+                Err(err) if transient_convergence_backpressure_error(&err) => {
+                    wait_state = CrdtConvergenceState::ControllerModelBackpressure;
+                    // The authority/model boundary already records the failed
+                    // attempt. The common two-second notice below coalesces retry
+                    // telemetry instead of logging every controller/model poll.
+                    None
+                }
+                Err(err) => return Err(err),
+            };
 
-        if let Some(observed) = observed {
-            match observed {
-                agent_doc_crdt_relay_io::CurrentText::Detached => return Ok(None),
-                agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => {
-                    wait_state = CrdtConvergenceState::EditorAttachedModelMissing;
-                }
-                agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
-                    wait_state = CrdtConvergenceState::EditorSyncPending;
-                }
-                agent_doc_crdt_relay_io::CurrentText::Current {
-                    text: relay_text,
-                    live_editors,
-                    delivery_converged,
-                    delivery_version,
-                    ..
-                } => {
-                    delivery_wait_cursor = Some((delivery_version, live_editors));
-                    if let Some(applied_target) = pending_target.as_ref() {
-                        if delivery_converged && relay_text == *applied_target {
-                            // A vanished replica makes the relay quorum
-                            // vacuously converged. That is not editor-visible
-                            // proof: the live IDE process can still hold an
-                            // unsaved operator cut. Settle only if the editor
-                            // already published/saved the exact target.
-                            if !delivery_convergence_is_editor_visible(
-                                live_editors,
-                                durable_visible_write_content_proves_target(file, applied_target),
-                            ) {
-                                let relay_write = pending_write
-                                    .as_ref()
-                                    .expect("pending CRDT target must retain its write receipt");
-                                let recycle_status = agent_doc_controller_io::project_controller::
-                                        schedule_stale_editor_replica_cp_recycle(file, source);
-                                return Err(retained_refusal(
-                                    file,
-                                    format!(
-                                        "{source}: retained canonical target for {} after its editor replica disappeared (content_hash={}): zero-member delivery convergence is not visible-write proof; disk was not written; recycle_status={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; {RETAINED_FOR_RETRY_MARKER}",
-                                        file.display(),
-                                        relay_write.content_hash,
-                                    ),
-                                ));
-                            }
-                            let mut relay_write = pending_write
-                                .take()
-                                .expect("pending CRDT target must retain its write receipt");
-                            relay_write.delivery_converged = true;
-                            relay_write.live_editors = live_editors;
-                            agent_doc_ops_log_io::log_op(
-                                file,
-                                &format!(
-                                    "{source}_crdt_relay_projected file={} content_hash={} update_bytes={} targets={} live_editors={} delivery_converged=true disk_projection=pending wait_ms={} profile=[{}] transport=crdt_only",
-                                    file.display(),
-                                    relay_write.content_hash,
-                                    relay_write.update_bytes,
-                                    relay_write.targets,
+            if let Some(observed) = observed {
+                match observed {
+                    agent_doc_crdt_relay_io::CurrentText::Detached => {
+                        return Ok(canonical_replace_detached_step());
+                    }
+                    agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => {
+                        wait_state = CrdtConvergenceState::EditorAttachedModelMissing;
+                    }
+                    agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
+                        wait_state = CrdtConvergenceState::EditorSyncPending;
+                    }
+                    agent_doc_crdt_relay_io::CurrentText::Current {
+                        text: relay_text,
+                        live_editors,
+                        delivery_converged,
+                        delivery_version,
+                        ..
+                    } => {
+                        observed_authority = agent_doc_hash::content_hash(&relay_text);
+                        delivery_wait_cursor = Some((delivery_version, live_editors));
+                        if let Some(applied_target) = pending_target.as_ref() {
+                            if delivery_converged && relay_text == *applied_target {
+                                // A vanished replica makes the relay quorum
+                                // vacuously converged. That is not editor-visible
+                                // proof: the live IDE process can still hold an
+                                // unsaved operator cut. Settle only if the editor
+                                // already published/saved the exact target.
+                                if !delivery_convergence_is_editor_visible(
                                     live_editors,
-                                    started.elapsed().as_millis(),
-                                    profile.render(wait_state),
-                                ),
-                            );
-                            return noted_relay_write(
-                                file,
-                                source,
-                                content,
-                                applied_target,
-                                relay_write,
-                            );
-                        }
-                        if write_policy::decide_crdt_write_admission(delivery_converged)
-                            == write_policy::CrdtWriteAdmission::WaitForDeliveryProjection
-                        {
-                            let relay_write = pending_write
-                                .take()
-                                .expect("pending CRDT target must retain its write receipt");
-                            agent_doc_ops_log_io::log_op(
-                                file,
-                                &format!(
-                                    "{source}_crdt_delivery_deferred file={} content_hash={} recovery=retained_async_editor_delivery operator_action=none driver=lazy_projection",
-                                    file.display(),
-                                    relay_write.content_hash,
-                                ),
-                            );
-                            return noted_relay_write(
-                                file,
-                                source,
-                                content,
-                                applied_target,
-                                relay_write,
-                            );
-                        } else {
-                            // A controller handoff can overlap the editor's application of
-                            // the valid CP target. A replacement replica may then publish
-                            // one transient, structurally incomplete buffer generation
-                            // (observed as an exchange close without its open marker).
-                            // That cut is not a new target and
-                            // must never be fed through the semantic rebase below: doing so
-                            // mislabels the malformed editor generation as a malformed
-                            // compact target even though the exact valid target is already
-                            // retained in Lazily state.
-                            //
-                            // Preserve the original receipt/intent and ask the replica
-                            // reconciler to refill from the retained canonical frontier.
-                            // Returning the still-unconverged receipt makes the outer write
-                            // boundary stop before snapshot, disk, or commit effects.
-                            if let Some(reason) = structurally_invalid_post_apply_editor_cut(
-                                applied_target,
-                                &relay_text,
-                            ) {
-                                if let Err(err) = reconcile_stalled_replicas(file, source) {
-                                    agent_doc_ops_log_io::log_op(
+                                    durable_visible_write_content_proves_target(
                                         file,
-                                        &format!(
-                                            "{source}_post_apply_structural_cut_reconcile_failed file={} retained_hash={} observed_hash={} error={err:#}",
-                                            file.display(),
-                                            agent_doc_hash::content_hash(applied_target),
-                                            agent_doc_hash::content_hash(&relay_text),
-                                        ),
+                                        applied_target,
+                                    ),
+                                ) {
+                                    let relay_write = pending_write.as_ref().expect(
+                                        "pending CRDT target must retain its write receipt",
                                     );
+                                    let recycle_status = agent_doc_controller_io::project_controller::
+                                            schedule_stale_editor_replica_cp_recycle(file, source);
+                                    return Err(retained_refusal(
+                                        file,
+                                        format!(
+                                            "{source}: retained canonical target for {} after its editor replica disappeared (content_hash={}): zero-member delivery convergence is not visible-write proof; disk was not written; recycle_status={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; {RETAINED_FOR_RETRY_MARKER}",
+                                            file.display(),
+                                            relay_write.content_hash,
+                                        ),
+                                    ));
                                 }
-                                let relay_write = pending_write
+                                let mut relay_write = pending_write
                                     .take()
                                     .expect("pending CRDT target must retain its write receipt");
-                                agent_doc_ops_log_io::log_op(
-                                    file,
-                                    &format!(
-                                        "{source}_post_apply_structural_cut_retained file={} retained_hash={} observed_hash={} reason={} action=await_replica_rebootstrap_no_rebase_no_disk_write",
-                                        file.display(),
-                                        relay_write.content_hash,
-                                        agent_doc_hash::content_hash(&relay_text),
-                                        reason,
-                                    ),
-                                );
-                                return noted_relay_write(
-                                    file,
-                                    source,
-                                    content,
-                                    applied_target,
-                                    relay_write,
-                                );
-                            }
-                            // The editor may publish queue consumption, a new prompt,
-                            // or other operator-owned bytes while ACKing our retained
-                            // response. If semantic rebasing says that converged cut
-                            // already contains the response, accept it byte-for-byte.
-                            // Re-applying the stale whole-document target here creates
-                            // a fresh CRDT transition on every closeout retry.
-                            let relay_text = collapse_progressive_queue_projection(
-                                expected_current,
-                                content,
-                                &relay_text,
-                            )
-                            .unwrap_or(relay_text);
-                            let editor_cut = editor_operator_cut_for_agent_rebase(
-                                file,
-                                expected_current,
-                                &relay_text,
-                                source,
-                            );
-                            let settled_target = rebase_agent_candidate_over_editor_cut(
-                                file,
-                                expected_current,
-                                content,
-                                &editor_cut,
-                            )
-                            .with_context(|| {
-                                format!(
-                                    "{source}: failed to verify the acknowledged editor cut for {}",
-                                    file.display()
-                                )
-                            })?;
-                            let settled_target = canonicalize_and_validate_agent_rebase(
-                                &settled_target,
-                                content,
-                                file,
-                                source,
-                            )?;
-                            if settled_target == relay_text
-                                && delivery_convergence_is_editor_visible(
-                                    live_editors,
-                                    durable_visible_write_content_proves_target(file, &relay_text),
-                                )
-                            {
-                                reconcile_deferred_write_to_canonical_cut_if_needed(
-                                    file,
-                                    &relay_text,
-                                    source,
-                                )?;
-                                let relay_write =
-                                    projected_noop_relay_write(&relay_text, live_editors);
-                                agent_doc_ops_log_io::log_op(
-                                    file,
-                                    &format!(
-                                        "{source}_crdt_relay_semantic_noop file={} prior_target_hash={} acknowledged_hash={} live_editors={} delivery_converged=true action=accept_editor_cut_no_reapply wait_ms={}",
-                                        file.display(),
-                                        agent_doc_hash::content_hash(applied_target),
-                                        relay_write.content_hash,
-                                        live_editors,
-                                        started.elapsed().as_millis(),
-                                    ),
-                                );
-                                return noted_relay_write(
-                                    file,
-                                    source,
-                                    content,
-                                    &relay_text,
-                                    relay_write,
-                                );
-                            }
-
-                            // Genuine operator text still leaves part of the target
-                            // unapplied. Recompute from the original base/candidate
-                            // against that cut, then issue one new CRDT delta.
-                            pending_target = None;
-                            pending_write = None;
-                            agent_projection_may_be_visible = true;
-                            projection_observation.reset();
-                            frontier_backoff_ms = CRDT_WRITE_BACKOFF_INITIAL_MS;
-                            wait_state = CrdtConvergenceState::OperatorAdvancedAfterApply;
-                            continue;
-                        }
-                    } else if let Some(in_flight) =
-                        cp_write_editor_ops_in_flight(file, &relay_text, content, source)
-                    {
-                        // `#inflighttypinghold` (1): the controller's retained
-                        // projection already waits for attested typing
-                        // (`AwaitingEditorOps`), but this direct CP write did
-                        // not. It derived its target over `relay_text` while the
-                        // editor had reported a burst typed over that text
-                        // whose delta was still in flight; written first, the
-                        // burst lands over a replaced cut and is quarantined.
-                        // Wait for the delta, then the rebase below rolls the
-                        // target forward onto the typing.
-                        if last_in_flight_tip.as_deref() != Some(in_flight.tip_hash.as_str()) {
-                            agent_doc_ops_log_io::log_op(
-                                file,
-                                &format!(
-                                    "{source}_crdt_write_held_for_editor_ops file={} relay_hash={} editor_tip_hash={} epoch={} pending_from={} pending_ops={} recovery=await_editor_delta_then_rebase (#inflighttypinghold)",
-                                    file.display(),
-                                    agent_doc_hash::content_hash(&relay_text),
-                                    in_flight.tip_hash,
-                                    in_flight.epoch,
-                                    in_flight.pending_from,
-                                    in_flight.pending_ops,
-                                ),
-                            );
-                            last_in_flight_tip = Some(in_flight.tip_hash.clone());
-                        }
-                        #[cfg(test)]
-                        in_flight_typing_hold_hook::fire();
-                        wait_state = CrdtConvergenceState::AwaitingEditorOps;
-                    } else {
-                        let effective_target = if relay_text == expected_current
-                            || relay_text == content
-                        {
-                            content.to_string()
-                        } else {
-                            let relay_text = if agent_projection_may_be_visible {
-                                collapse_progressive_queue_projection(
-                                    expected_current,
-                                    content,
-                                    &relay_text,
-                                )
-                                .unwrap_or_else(|| relay_text.clone())
-                            } else {
-                                relay_text.clone()
-                            };
-                            let editor_cut = editor_operator_cut_for_agent_rebase(
-                                file,
-                                expected_current,
-                                &relay_text,
-                                source,
-                            );
-                            let merged = rebase_agent_candidate_over_editor_cut(
-file,
-                        expected_current,
-                        content,
-                        &editor_cut,
-                    )
-                    .with_context(|| {
-                        format!(
-                            "{source}: failed to CRDT-merge the settled editor version for {}",
-                                        file.display()
-                                    )
-                                })?;
-                            canonicalize_and_validate_agent_rebase(&merged, content, file, source)?
-                        };
-                        let effective_target = canonicalize_and_validate_agent_rebase(
-                            &effective_target,
-                            content,
-                            file,
-                            source,
-                        )?;
-
-                        // Delivery-worker freshness gates new canonical
-                        // mutations, not an already-satisfied projection. A
-                        // stale worker cannot lose bytes when canonical
-                        // authority, delivery state, and disk all prove the
-                        // exact target and this branch performs no write.
-                        if delivery_converged
-                            && effective_target == relay_text
-                            && canonical_disk_projection_is_exact(file, &effective_target)
-                            && delivery_convergence_is_editor_visible(
-                                live_editors,
-                                durable_visible_write_content_proves_target(
-                                    file,
-                                    &effective_target,
-                                ),
-                            )
-                        {
-                            reconcile_deferred_write_to_canonical_cut_if_needed(
-                                file,
-                                &effective_target,
-                                source,
-                            )?;
-                            let relay_write =
-                                projected_noop_relay_write(&effective_target, live_editors);
-                            agent_doc_ops_log_io::log_op(
-                                file,
-                                &format!(
-                                    "{source}_crdt_relay_exact_noop file={} content_hash={} live_editors={} delivery_converged=true action=skip_compare_and_swap wait_ms={}",
-                                    file.display(),
-                                    relay_write.content_hash,
-                                    live_editors,
-                                    started.elapsed().as_millis(),
-                                ),
-                            );
-                            return noted_relay_write(
-                                file,
-                                source,
-                                content,
-                                &effective_target,
-                                relay_write,
-                            );
-                        }
-
-                        // Buffer authority and delivery health are separate:
-                        // keep the live IDE PID as the disk fence, but do not
-                        // issue a canonical delivery to a component whose
-                        // replica/ACK worker stopped heartbeating. A positive
-                        // relay recipient count is the freshest evidence here:
-                        // registration metadata can lag a just-reregistered
-                        // replica by one projection edge. Treating that lag as
-                        // a stale worker retains a second intent even though the
-                        // live recipient can already accept this write.
-                        let editor_delivery_worker_stale = live_editors == 0
-                            && agent_doc_controller_io::project_controller::
-                                reliable_sync_editor_live_for_file(file)
-                                && agent_doc_controller_io::project_controller::
-                                    live_editor_registration_for_file(file)
-                                    .ok()
-                                    .flatten()
-                                    .is_none();
-                        if editor_delivery_worker_stale {
-                            let intent_id = ensure_deferred_document_write_intent(
-                                file,
-                                &relay_text,
-                                &effective_target,
-                                source,
-                                DocumentWriteDeferredReason::EditorDeliveryWorkerStale,
-                            )?;
-                            let recycle_status = agent_doc_controller_io::project_controller::
-                                    schedule_stale_editor_replica_cp_recycle(file, source);
-                            agent_doc_ops_log_io::log_op(
-                                file,
-                                &format!(
-                                    "{source}_editor_delivery_worker_stale file={} intent_id={} content_hash={} authority=live_ide_pid delivery=fresh_heartbeat_missing recovery=cp_recycle_no_disk_write recycle_status={recycle_status}",
-                                    file.display(),
-                                    intent_id,
-                                    agent_doc_hash::content_hash(&effective_target),
-                                ),
-                            );
-                            return Err(retained_intent_refusal(
-                                file,
-                                &intent_id,
-                                format!(
-                                    "{source}: retained the canonical write for {} in CRDT + Lazily state (intent_id={intent_id}), but the live editor delivery worker heartbeat is stale; disk was not written; recycle_status={recycle_status}. No live editor registration covers this document, so delivery cannot converge on its own. If the response is already visible, run `agent-doc repair {}` to finish the terminal commit; otherwise open the document in an editor so its replica registers",
-                                    file.display(),
-                                    file.display(),
-                                ),
-                            ));
-                        }
-
-                        let zero_replica_visible_write_proven = live_editors == 0
-                            && relay_text == effective_target
-                            && durable_visible_write_content_proves_target(file, &effective_target);
-                        if live_editors == 0 {
-                            if zero_replica_visible_write_proven {
-                                agent_doc_ops_log_io::log_op(
-                                    file,
-                                    &format!(
-                                        "{source}_zero_replica_visible_write_proven file={} content_hash={} authority=lazily_editor_ack action=allow_matching_disk_projection",
-                                        file.display(),
-                                        agent_doc_hash::content_hash(&effective_target),
-                                    ),
-                                );
-                            } else {
-                                // Admit no new CRDT frontier until it has at
-                                // least one delivery recipient. Previously this
-                                // guard covered only an exact canonical no-op;
-                                // a genuine queue/dedupe mutation still crossed
-                                // the relay with `targets=0`, manufacturing the
-                                // retained intent that the next preflight could
-                                // never reconcile. Preserve the merged target in
-                                // the durable journal and let replica
-                                // re-registration replay it.
-                                let intent_id = ensure_deferred_document_write_intent(
-                                    file,
-                                    &relay_text,
-                                    &effective_target,
-                                    source,
-                                    DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
-                )?;
-                                let recycle_status = agent_doc_controller_io::project_controller::
-                    schedule_stale_editor_replica_cp_recycle(file, source);
-                                return Err(retained_intent_refusal(
-                                    file,
-                                    &intent_id,
-                                    format!(
-                                        "{source}: deferred write for {} in Lazily state (intent_id={intent_id}): the editor is the current authority, but no editor replica was registered with the relay; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; run only agent-doc session-check for the existing binary-owned capture; do not resubmit finalize, write --commit, or --force-disk; {RETAINED_FOR_RETRY_MARKER}",
-                                        file.display(),
-                                    ),
-                                ));
-                            }
-                        }
-
-                        if effective_target == relay_text && !delivery_converged {
-                            // The canonical already contains this exact target.
-                            // Delivery is a keyed lazy projection; return its
-                            // retained receipt without polling or issuing a
-                            // recovery request.
-                            reconcile_deferred_write_to_canonical_cut_if_needed(
-                                file,
-                                &effective_target,
-                                source,
-                            )?;
-                            let mut relay_write =
-                                projected_noop_relay_write(&effective_target, live_editors);
-                            relay_write.delivery_converged = false;
-                            agent_doc_ops_log_io::log_op(
-                                file,
-                                &format!(
-                                    "{source}_crdt_relay_noop_delivery_deferred file={} content_hash={} live_editors={} delivery_converged=false action=retain_existing_delivery_no_reapply driver=lazy_projection",
-                                    file.display(),
-                                    relay_write.content_hash,
-                                    live_editors,
-                                ),
-                            );
-                            return noted_relay_write(
-                                file,
-                                source,
-                                content,
-                                &effective_target,
-                                relay_write,
-                            );
-                        }
-
-                        // Retain every accepted candidate before it crosses the
-                        // CRDT delivery boundary. This is the Lazily handoff that
-                        // lets a client ACK retry or forced replica re-register
-                        // finish after this process exits without asking an agent
-                        // to reconstruct or duplicate the response.
-                        let retained_intent_id = ensure_deferred_document_write_intent(
-                            file,
-                            &relay_text,
-                            &effective_target,
-                            source,
-                            DocumentWriteDeferredReason::EditorProjectionPending,
-                        )?;
-
-                        match apply_cp_write_through_relay_authority(
-                            file,
-                            &relay_text,
-                            &effective_target,
-                            source,
-                        ) {
-                            Ok(None) => return Ok(None),
-                            Ok(Some(relay_write))
-                                if relay_write.applied && relay_write.targets == 0 =>
-                            {
-                                agent_doc_ops_log_io::log_op(
-                                    file,
-                                    &format!(
-                                        "{source}_crdt_write_deferred file={} intent_id={} content_hash={} targets=0 live_editors=0 recovery=await_editor_replica_no_disk_write",
-                                        file.display(),
-                                        retained_intent_id,
-                                        relay_write.content_hash,
-                                    ),
-                                );
-                                let recycle_status = agent_doc_controller_io::project_controller::
-                                    schedule_stale_editor_replica_cp_recycle(file, source);
-                                return Err(await_editor_replica_no_disk_write(format!(
-                                    "{source}: retained the canonical write for {} in CRDT + Lazily state (intent_id={retained_intent_id}), but the editor replica disappeared during delivery admission; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; run only agent-doc session-check for the existing binary-owned capture; do not resubmit finalize, write --commit, or --force-disk; {} {RETAINED_FOR_RETRY_MARKER}",
-                                    file.display(),
-                                    retained_write_remedy_for(file),
-                                )));
-                            }
-                            Ok(Some(mut relay_write)) if relay_write.delivery_converged => {
+                                relay_write.delivery_converged = true;
                                 relay_write.live_editors = live_editors;
                                 agent_doc_ops_log_io::log_op(
                                     file,
@@ -4519,15 +4181,20 @@ file,
                                         profile.render(wait_state),
                                     ),
                                 );
-                                return noted_relay_write(
+                                return noted_relay_step(
                                     file,
                                     source,
                                     content,
-                                    &effective_target,
+                                    applied_target,
                                     relay_write,
                                 );
                             }
-                            Ok(Some(relay_write)) => {
+                            if write_policy::decide_crdt_write_admission(delivery_converged)
+                                == write_policy::CrdtWriteAdmission::WaitForDeliveryProjection
+                            {
+                                let relay_write = pending_write
+                                    .take()
+                                    .expect("pending CRDT target must retain its write receipt");
                                 agent_doc_ops_log_io::log_op(
                                     file,
                                     &format!(
@@ -4536,7 +4203,258 @@ file,
                                         relay_write.content_hash,
                                     ),
                                 );
-                                return noted_relay_write(
+                                return noted_relay_step(
+                                    file,
+                                    source,
+                                    content,
+                                    applied_target,
+                                    relay_write,
+                                );
+                            } else {
+                                // A controller handoff can overlap the editor's application of
+                                // the valid CP target. A replacement replica may then publish
+                                // one transient, structurally incomplete buffer generation
+                                // (observed as an exchange close without its open marker).
+                                // That cut is not a new target and
+                                // must never be fed through the semantic rebase below: doing so
+                                // mislabels the malformed editor generation as a malformed
+                                // compact target even though the exact valid target is already
+                                // retained in Lazily state.
+                                //
+                                // Preserve the original receipt/intent and ask the replica
+                                // reconciler to refill from the retained canonical frontier.
+                                // Returning the still-unconverged receipt makes the outer write
+                                // boundary stop before snapshot, disk, or commit effects.
+                                if let Some(reason) = structurally_invalid_post_apply_editor_cut(
+                                    applied_target,
+                                    &relay_text,
+                                ) {
+                                    if let Err(err) = reconcile_stalled_replicas(file, source) {
+                                        agent_doc_ops_log_io::log_op(
+                                            file,
+                                            &format!(
+                                                "{source}_post_apply_structural_cut_reconcile_failed file={} retained_hash={} observed_hash={} error={err:#}",
+                                                file.display(),
+                                                agent_doc_hash::content_hash(applied_target),
+                                                agent_doc_hash::content_hash(&relay_text),
+                                            ),
+                                        );
+                                    }
+                                    let relay_write = pending_write.take().expect(
+                                        "pending CRDT target must retain its write receipt",
+                                    );
+                                    agent_doc_ops_log_io::log_op(
+                                        file,
+                                        &format!(
+                                            "{source}_post_apply_structural_cut_retained file={} retained_hash={} observed_hash={} reason={} action=await_replica_rebootstrap_no_rebase_no_disk_write",
+                                            file.display(),
+                                            relay_write.content_hash,
+                                            agent_doc_hash::content_hash(&relay_text),
+                                            reason,
+                                        ),
+                                    );
+                                    return noted_relay_step(
+                                        file,
+                                        source,
+                                        content,
+                                        applied_target,
+                                        relay_write,
+                                    );
+                                }
+                                // The editor may publish queue consumption, a new prompt,
+                                // or other operator-owned bytes while ACKing our retained
+                                // response. If semantic rebasing says that converged cut
+                                // already contains the response, accept it byte-for-byte.
+                                // Re-applying the stale whole-document target here creates
+                                // a fresh CRDT transition on every closeout retry.
+                                let relay_text = collapse_progressive_queue_projection(
+                                    expected_current,
+                                    content,
+                                    &relay_text,
+                                )
+                                .unwrap_or(relay_text);
+                                let editor_cut = editor_operator_cut_for_agent_rebase(
+                                    file,
+                                    expected_current,
+                                    &relay_text,
+                                    source,
+                                );
+                                let settled_target = rebase_agent_candidate_over_editor_cut(
+                                    file,
+                                    expected_current,
+                                    content,
+                                    &editor_cut,
+                                )
+                                .with_context(|| {
+                                    format!(
+                                        "{source}: failed to verify the acknowledged editor cut for {}",
+                                        file.display()
+                                    )
+                                })?;
+                                let settled_target = canonicalize_and_validate_agent_rebase(
+                                    &settled_target,
+                                    content,
+                                    file,
+                                    source,
+                                )?;
+                                if settled_target == relay_text
+                                    && delivery_convergence_is_editor_visible(
+                                        live_editors,
+                                        durable_visible_write_content_proves_target(
+                                            file,
+                                            &relay_text,
+                                        ),
+                                    )
+                                {
+                                    reconcile_deferred_write_to_canonical_cut_if_needed(
+                                        file,
+                                        &relay_text,
+                                        source,
+                                    )?;
+                                    let relay_write =
+                                        projected_noop_relay_write(&relay_text, live_editors);
+                                    agent_doc_ops_log_io::log_op(
+                                        file,
+                                        &format!(
+                                            "{source}_crdt_relay_semantic_noop file={} prior_target_hash={} acknowledged_hash={} live_editors={} delivery_converged=true action=accept_editor_cut_no_reapply wait_ms={}",
+                                            file.display(),
+                                            agent_doc_hash::content_hash(applied_target),
+                                            relay_write.content_hash,
+                                            live_editors,
+                                            started.elapsed().as_millis(),
+                                        ),
+                                    );
+                                    return noted_relay_step(
+                                        file,
+                                        source,
+                                        content,
+                                        &relay_text,
+                                        relay_write,
+                                    );
+                                }
+
+                                // Genuine operator text still leaves part of the target
+                                // unapplied. Recompute from the original base/candidate
+                                // against that cut, then issue one new CRDT delta.
+                                pending_target = None;
+                                pending_write = None;
+                                agent_projection_may_be_visible = true;
+                                projection_observation.reset();
+                                frontier_backoff_ms = CRDT_WRITE_BACKOFF_INITIAL_MS;
+                                wait_state = CrdtConvergenceState::OperatorAdvancedAfterApply;
+                                return Ok(agent_doc_effect_cas::EpochStep::Superseded {
+                                    observed: agent_doc_hash::content_hash(&relay_text),
+                                    reason: wait_state,
+                                });
+                            }
+                        } else if let Some(in_flight) =
+                            cp_write_editor_ops_in_flight(file, &relay_text, content, source)
+                        {
+                            // `#inflighttypinghold` (1): the controller's retained
+                            // projection already waits for attested typing
+                            // (`AwaitingEditorOps`), but this direct CP write did
+                            // not. It derived its target over `relay_text` while the
+                            // editor had reported a burst typed over that text
+                            // whose delta was still in flight; written first, the
+                            // burst lands over a replaced cut and is quarantined.
+                            // Wait for the delta, then the rebase below rolls the
+                            // target forward onto the typing.
+                            if last_in_flight_tip.as_deref() != Some(in_flight.tip_hash.as_str()) {
+                                agent_doc_ops_log_io::log_op(
+                                    file,
+                                    &format!(
+                                        "{source}_crdt_write_held_for_editor_ops file={} relay_hash={} editor_tip_hash={} epoch={} pending_from={} pending_ops={} recovery=await_editor_delta_then_rebase (#inflighttypinghold)",
+                                        file.display(),
+                                        agent_doc_hash::content_hash(&relay_text),
+                                        in_flight.tip_hash,
+                                        in_flight.epoch,
+                                        in_flight.pending_from,
+                                        in_flight.pending_ops,
+                                    ),
+                                );
+                                last_in_flight_tip = Some(in_flight.tip_hash.clone());
+                            }
+                            #[cfg(test)]
+                            in_flight_typing_hold_hook::fire();
+                            wait_state = CrdtConvergenceState::AwaitingEditorOps;
+                        } else {
+                            let effective_target =
+                                if relay_text == expected_current || relay_text == content {
+                                    content.to_string()
+                                } else {
+                                    let relay_text = if agent_projection_may_be_visible {
+                                        collapse_progressive_queue_projection(
+                                            expected_current,
+                                            content,
+                                            &relay_text,
+                                        )
+                                        .unwrap_or_else(|| relay_text.clone())
+                                    } else {
+                                        relay_text.clone()
+                                    };
+                                    let editor_cut = editor_operator_cut_for_agent_rebase(
+                                        file,
+                                        expected_current,
+                                        &relay_text,
+                                        source,
+                                    );
+                                    let merged = rebase_agent_candidate_over_editor_cut(
+    file,
+                            expected_current,
+                            content,
+                            &editor_cut,
+                        )
+                        .with_context(|| {
+                            format!(
+                                "{source}: failed to CRDT-merge the settled editor version for {}",
+                                            file.display()
+                                        )
+                                    })?;
+                                    canonicalize_and_validate_agent_rebase(
+                                        &merged, content, file, source,
+                                    )?
+                                };
+                            let effective_target = canonicalize_and_validate_agent_rebase(
+                                &effective_target,
+                                content,
+                                file,
+                                source,
+                            )?;
+
+                            // Delivery-worker freshness gates new canonical
+                            // mutations, not an already-satisfied projection. A
+                            // stale worker cannot lose bytes when canonical
+                            // authority, delivery state, and disk all prove the
+                            // exact target and this branch performs no write.
+                            if delivery_converged
+                                && effective_target == relay_text
+                                && canonical_disk_projection_is_exact(file, &effective_target)
+                                && delivery_convergence_is_editor_visible(
+                                    live_editors,
+                                    durable_visible_write_content_proves_target(
+                                        file,
+                                        &effective_target,
+                                    ),
+                                )
+                            {
+                                reconcile_deferred_write_to_canonical_cut_if_needed(
+                                    file,
+                                    &effective_target,
+                                    source,
+                                )?;
+                                let relay_write =
+                                    projected_noop_relay_write(&effective_target, live_editors);
+                                agent_doc_ops_log_io::log_op(
+                                    file,
+                                    &format!(
+                                        "{source}_crdt_relay_exact_noop file={} content_hash={} live_editors={} delivery_converged=true action=skip_compare_and_swap wait_ms={}",
+                                        file.display(),
+                                        relay_write.content_hash,
+                                        live_editors,
+                                        started.elapsed().as_millis(),
+                                    ),
+                                );
+                                return noted_relay_step(
                                     file,
                                     source,
                                     content,
@@ -4544,79 +4462,337 @@ file,
                                     relay_write,
                                 );
                             }
-                            Err(err) => {
-                                let detail = format!("{err:#}");
-                                if detail.contains("recovery=retry_crdt_merge")
-                                    || detail.contains("editor_sync_pending")
-                                {
-                                    agent_projection_may_be_visible = true;
-                                    wait_state = CrdtConvergenceState::CompareAndSwapRaced;
+
+                            // Buffer authority and delivery health are separate:
+                            // keep the live IDE PID as the disk fence, but do not
+                            // issue a canonical delivery to a component whose
+                            // replica/ACK worker stopped heartbeating. A positive
+                            // relay recipient count is the freshest evidence here:
+                            // registration metadata can lag a just-reregistered
+                            // replica by one projection edge. Treating that lag as
+                            // a stale worker retains a second intent even though the
+                            // live recipient can already accept this write.
+                            let editor_delivery_worker_stale = live_editors == 0
+                                && agent_doc_controller_io::project_controller::
+                                    reliable_sync_editor_live_for_file(file)
+                                    && agent_doc_controller_io::project_controller::
+                                        live_editor_registration_for_file(file)
+                                        .ok()
+                                        .flatten()
+                                        .is_none();
+                            if editor_delivery_worker_stale {
+                                let intent_id = ensure_deferred_document_write_intent(
+                                    file,
+                                    &relay_text,
+                                    &effective_target,
+                                    source,
+                                    DocumentWriteDeferredReason::EditorDeliveryWorkerStale,
+                                )?;
+                                let recycle_status = agent_doc_controller_io::project_controller::
+                                        schedule_stale_editor_replica_cp_recycle(file, source);
+                                agent_doc_ops_log_io::log_op(
+                                    file,
+                                    &format!(
+                                        "{source}_editor_delivery_worker_stale file={} intent_id={} content_hash={} authority=live_ide_pid delivery=fresh_heartbeat_missing recovery=cp_recycle_no_disk_write recycle_status={recycle_status}",
+                                        file.display(),
+                                        intent_id,
+                                        agent_doc_hash::content_hash(&effective_target),
+                                    ),
+                                );
+                                return Err(retained_intent_refusal(
+                                    file,
+                                    &intent_id,
+                                    format!(
+                                        "{source}: retained the canonical write for {} in CRDT + Lazily state (intent_id={intent_id}), but the live editor delivery worker heartbeat is stale; disk was not written; recycle_status={recycle_status}. No live editor registration covers this document, so delivery cannot converge on its own. If the response is already visible, run `agent-doc repair {}` to finish the terminal commit; otherwise open the document in an editor so its replica registers",
+                                        file.display(),
+                                        file.display(),
+                                    ),
+                                ));
+                            }
+
+                            let zero_replica_visible_write_proven = live_editors == 0
+                                && relay_text == effective_target
+                                && durable_visible_write_content_proves_target(
+                                    file,
+                                    &effective_target,
+                                );
+                            if live_editors == 0 {
+                                if zero_replica_visible_write_proven {
                                     agent_doc_ops_log_io::log_op(
                                         file,
                                         &format!(
-                                            "{source}_crdt_write_coalesced_retry file={} reason={} backoff_ms={} recovery=wait_settle_remerge",
+                                            "{source}_zero_replica_visible_write_proven file={} content_hash={} authority=lazily_editor_ack action=allow_matching_disk_projection",
                                             file.display(),
-                                            wait_state,
-                                            frontier_backoff_ms,
+                                            agent_doc_hash::content_hash(&effective_target),
                                         ),
                                     );
                                 } else {
-                                    return Err(err);
+                                    // Admit no new CRDT frontier until it has at
+                                    // least one delivery recipient. Previously this
+                                    // guard covered only an exact canonical no-op;
+                                    // a genuine queue/dedupe mutation still crossed
+                                    // the relay with `targets=0`, manufacturing the
+                                    // retained intent that the next preflight could
+                                    // never reconcile. Preserve the merged target in
+                                    // the durable journal and let replica
+                                    // re-registration replay it.
+                                    let intent_id = ensure_deferred_document_write_intent(
+                                        file,
+                                        &relay_text,
+                                        &effective_target,
+                                        source,
+                                        DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
+                    )?;
+                                    let recycle_status = agent_doc_controller_io::project_controller::
+                        schedule_stale_editor_replica_cp_recycle(file, source);
+                                    return Err(retained_intent_refusal(
+                                        file,
+                                        &intent_id,
+                                        format!(
+                                            "{source}: deferred write for {} in Lazily state (intent_id={intent_id}): the editor is the current authority, but no editor replica was registered with the relay; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; run only agent-doc session-check for the existing binary-owned capture; do not resubmit finalize, write --commit, or --force-disk; {RETAINED_FOR_RETRY_MARKER}",
+                                            file.display(),
+                                        ),
+                                    ));
+                                }
+                            }
+
+                            if effective_target == relay_text && !delivery_converged {
+                                // The canonical already contains this exact target.
+                                // Delivery is a keyed lazy projection; return its
+                                // retained receipt without polling or issuing a
+                                // recovery request.
+                                reconcile_deferred_write_to_canonical_cut_if_needed(
+                                    file,
+                                    &effective_target,
+                                    source,
+                                )?;
+                                let mut relay_write =
+                                    projected_noop_relay_write(&effective_target, live_editors);
+                                relay_write.delivery_converged = false;
+                                agent_doc_ops_log_io::log_op(
+                                    file,
+                                    &format!(
+                                        "{source}_crdt_relay_noop_delivery_deferred file={} content_hash={} live_editors={} delivery_converged=false action=retain_existing_delivery_no_reapply driver=lazy_projection",
+                                        file.display(),
+                                        relay_write.content_hash,
+                                        live_editors,
+                                    ),
+                                );
+                                return noted_relay_step(
+                                    file,
+                                    source,
+                                    content,
+                                    &effective_target,
+                                    relay_write,
+                                );
+                            }
+
+                            // Retain every accepted candidate before it crosses the
+                            // CRDT delivery boundary. This is the Lazily handoff that
+                            // lets a client ACK retry or forced replica re-register
+                            // finish after this process exits without asking an agent
+                            // to reconstruct or duplicate the response.
+                            let retained_intent_id = ensure_deferred_document_write_intent(
+                                file,
+                                &relay_text,
+                                &effective_target,
+                                source,
+                                DocumentWriteDeferredReason::EditorProjectionPending,
+                            )?;
+
+                            match apply_cp_write_through_relay_authority(
+                                file,
+                                &relay_text,
+                                &effective_target,
+                                source,
+                            ) {
+                                Ok(None) => return Ok(canonical_replace_detached_step()),
+                                Ok(Some(relay_write))
+                                    if relay_write.applied && relay_write.targets == 0 =>
+                                {
+                                    agent_doc_ops_log_io::log_op(
+                                        file,
+                                        &format!(
+                                            "{source}_crdt_write_deferred file={} intent_id={} content_hash={} targets=0 live_editors=0 recovery=await_editor_replica_no_disk_write",
+                                            file.display(),
+                                            retained_intent_id,
+                                            relay_write.content_hash,
+                                        ),
+                                    );
+                                    let recycle_status = agent_doc_controller_io::project_controller::
+                                        schedule_stale_editor_replica_cp_recycle(file, source);
+                                    return Err(await_editor_replica_no_disk_write(format!(
+                                        "{source}: retained the canonical write for {} in CRDT + Lazily state (intent_id={retained_intent_id}), but the editor replica disappeared during delivery admission; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; run only agent-doc session-check for the existing binary-owned capture; do not resubmit finalize, write --commit, or --force-disk; {} {RETAINED_FOR_RETRY_MARKER}",
+                                        file.display(),
+                                        retained_write_remedy_for(file),
+                                    )));
+                                }
+                                Ok(Some(mut relay_write)) if relay_write.delivery_converged => {
+                                    relay_write.live_editors = live_editors;
+                                    agent_doc_ops_log_io::log_op(
+                                        file,
+                                        &format!(
+                                            "{source}_crdt_relay_projected file={} content_hash={} update_bytes={} targets={} live_editors={} delivery_converged=true disk_projection=pending wait_ms={} profile=[{}] transport=crdt_only",
+                                            file.display(),
+                                            relay_write.content_hash,
+                                            relay_write.update_bytes,
+                                            relay_write.targets,
+                                            live_editors,
+                                            started.elapsed().as_millis(),
+                                            profile.render(wait_state),
+                                        ),
+                                    );
+                                    return noted_relay_step(
+                                        file,
+                                        source,
+                                        content,
+                                        &effective_target,
+                                        relay_write,
+                                    );
+                                }
+                                Ok(Some(relay_write)) => {
+                                    agent_doc_ops_log_io::log_op(
+                                        file,
+                                        &format!(
+                                            "{source}_crdt_delivery_deferred file={} content_hash={} recovery=retained_async_editor_delivery operator_action=none driver=lazy_projection",
+                                            file.display(),
+                                            relay_write.content_hash,
+                                        ),
+                                    );
+                                    return noted_relay_step(
+                                        file,
+                                        source,
+                                        content,
+                                        &effective_target,
+                                        relay_write,
+                                    );
+                                }
+                                Err(err) => {
+                                    let detail = format!("{err:#}");
+                                    if detail.contains("recovery=retry_crdt_merge")
+                                        || detail.contains("editor_sync_pending")
+                                    {
+                                        agent_projection_may_be_visible = true;
+                                        wait_state = CrdtConvergenceState::CompareAndSwapRaced;
+                                        agent_doc_ops_log_io::log_op(
+                                            file,
+                                            &format!(
+                                                "{source}_crdt_write_coalesced_retry file={} reason={} backoff_ms={} recovery=wait_settle_remerge",
+                                                file.display(),
+                                                wait_state,
+                                                frontier_backoff_ms,
+                                            ),
+                                        );
+                                    } else {
+                                        return Err(err);
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
-        }
 
-        if last_notice.elapsed() >= std::time::Duration::from_secs(2) {
-            eprintln!(
-                "[write] Waiting for typing/CRDT versions to settle for {} (reason={}, elapsed={}ms)",
-                file.display(),
-                wait_state,
-                started.elapsed().as_millis(),
-            );
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "{source}_crdt_convergence_wait file={} reason={} elapsed_ms={} backoff_ms={} strategy=coalesced_latest_frontier",
+            if last_notice.elapsed() >= std::time::Duration::from_secs(2) {
+                eprintln!(
+                    "[write] Waiting for typing/CRDT versions to settle for {} (reason={}, elapsed={}ms)",
                     file.display(),
                     wait_state,
                     started.elapsed().as_millis(),
-                    frontier_backoff_ms,
-                ),
-            );
-            last_notice = std::time::Instant::now();
-        }
-        let total_elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
-        let delivery_wait_elapsed_ms =
-            delivery_wait_elapsed.as_millis().min(u128::from(u64::MAX)) as u64;
-        let controller_elapsed_ms =
-            exclusive_controller_elapsed_ms(total_elapsed_ms, delivery_wait_elapsed_ms);
-        let remaining_ms = CRDT_WRITE_CONVERGENCE_TIMEOUT_MS.saturating_sub(controller_elapsed_ms);
-        if wait_state == CrdtConvergenceState::DeliveryProjectionPending
-            && let Some((delivery_version, live_editors)) = delivery_wait_cursor
-        {
-            let _ = projection_observation.wait_for_delivery_change_charged(
-                DeliveryChangeWait {
+                );
+                agent_doc_ops_log_io::log_op(
                     file,
-                    source,
-                    live_editors,
-                    delivery_version,
-                    signal_immediately: false,
-                    max_wait_ms: None,
-                },
-                &mut delivery_wait_elapsed,
-            )?;
-            continue;
-        }
-        let sleep_for = std::time::Duration::from_millis(frontier_backoff_ms.min(remaining_ms));
-        if !sleep_for.is_zero() {
-            std::thread::sleep(sleep_for);
-        }
-        frontier_backoff_ms = CRDT_WRITE_BACKOFF_POLICY.next_ms(frontier_backoff_ms, false);
+                    &format!(
+                        "{source}_crdt_convergence_wait file={} reason={} elapsed_ms={} backoff_ms={} strategy=coalesced_latest_frontier",
+                        file.display(),
+                        wait_state,
+                        started.elapsed().as_millis(),
+                        frontier_backoff_ms,
+                    ),
+                );
+                last_notice = std::time::Instant::now();
+            }
+            let total_elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+            let delivery_wait_elapsed_ms =
+                delivery_wait_elapsed.as_millis().min(u128::from(u64::MAX)) as u64;
+            let controller_elapsed_ms =
+                exclusive_controller_elapsed_ms(total_elapsed_ms, delivery_wait_elapsed_ms);
+            let remaining_ms =
+                CRDT_WRITE_CONVERGENCE_TIMEOUT_MS.saturating_sub(controller_elapsed_ms);
+            if wait_state == CrdtConvergenceState::DeliveryProjectionPending
+                && let Some((delivery_version, live_editors)) = delivery_wait_cursor
+            {
+                let _ = projection_observation.wait_for_delivery_change_charged(
+                    DeliveryChangeWait {
+                        file,
+                        source,
+                        live_editors,
+                        delivery_version,
+                        signal_immediately: false,
+                        max_wait_ms: None,
+                    },
+                    &mut delivery_wait_elapsed,
+                )?;
+                return Ok(agent_doc_effect_cas::EpochStep::Retryable(wait_state));
+            }
+            let sleep_for = std::time::Duration::from_millis(frontier_backoff_ms.min(remaining_ms));
+            if !sleep_for.is_zero() {
+                std::thread::sleep(sleep_for);
+            }
+            frontier_backoff_ms = CRDT_WRITE_BACKOFF_POLICY.next_ms(frontier_backoff_ms, false);
+            // A lost compare-and-swap is Lazily supersession (re-desired over the
+            // re-observed frontier); every other wait state is a transient retry of
+            // the same intent.
+            Ok(if wait_state == CrdtConvergenceState::CompareAndSwapRaced {
+                agent_doc_effect_cas::EpochStep::Superseded {
+                    observed: observed_authority.clone(),
+                    reason: wait_state,
+                }
+            } else {
+                agent_doc_effect_cas::EpochStep::Retryable(wait_state)
+            })
+        },
+        &mut |_, _| Ok(agent_doc_effect_cas::Pace::Continue),
+    )?;
+    match drive {
+        agent_doc_effect_cas::EpochDrive::Applied(write) => Ok(write),
+        agent_doc_effect_cas::EpochDrive::Exhausted { reason, .. }
+        | agent_doc_effect_cas::EpochDrive::Stopped { reason, .. } => anyhow::bail!(
+            "{source}: CRDT convergence for {} exhausted its Lazily attempt budget (reason={reason}); {RETAINED_FOR_RETRY_MARKER}",
+            file.display(),
+        ),
     }
+}
+
+/// Applied receipt of a canonical replace whose document is detached.
+fn canonical_replace_detached_step() -> agent_doc_effect_cas::EpochStep<
+    Option<agent_doc_crdt_relay_io::CpRelayWrite>,
+    CrdtConvergenceState,
+> {
+    agent_doc_effect_cas::EpochStep::Applied {
+        receipt: None,
+        authority: "detached".to_string(),
+    }
+}
+
+/// [`noted_relay_write`] as the applied receipt of one Lazily attempt.
+fn noted_relay_step(
+    file: &Path,
+    source: &str,
+    requested: &str,
+    published: &str,
+    write: agent_doc_crdt_relay_io::CpRelayWrite,
+) -> Result<
+    agent_doc_effect_cas::EpochStep<
+        Option<agent_doc_crdt_relay_io::CpRelayWrite>,
+        CrdtConvergenceState,
+    >,
+> {
+    let authority = write.content_hash.clone();
+    Ok(agent_doc_effect_cas::EpochStep::Applied {
+        receipt: noted_relay_write(file, source, requested, published, write)?,
+        authority,
+    })
 }
 
 fn noted_relay_write(
@@ -8646,121 +8822,153 @@ fn guard_visible_write_current_transition_with_policy(
 ) -> Result<()> {
     let start = std::time::Instant::now();
     let mut projection_observation = ProjectionObservationState::default();
-    loop {
-        // An evicted hub is already a first-class missing-model state. Let the
-        // CP write layer attempt durable-projection recovery (or retain/defer
-        // immediately when none exists) instead of spending the whole settle
-        // budget trying to make a model current before that recovery seam runs.
-        let missing_model = matches!(
-            query_live_editor_authority(file, source),
-            Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)
-        );
-        let (ready, state, delivery_cursor) = if missing_model && allow_missing_replica_defer {
-            (true, "missing_replica_defer", None)
-        } else {
-            match query_live_editor_authority_after_model_ensure(file, source) {
-                Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => (true, "detached", None),
-                Ok(agent_doc_crdt_relay_io::CurrentText::Current {
-                    delivery_converged: true,
-                    ..
-                }) => (true, "lazily_current", None),
-                Ok(agent_doc_crdt_relay_io::CurrentText::Current {
-                    delivery_version,
-                    live_editors,
-                    ..
-                }) => (
-                    false,
-                    "delivery_pending",
-                    Some((delivery_version, live_editors)),
-                ),
-                Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica) => {
-                    (false, "missing_replica", None)
-                }
-                Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => {
-                    (false, "current_pending", None)
-                }
-                Err(_) => (false, "authority_unavailable", None),
-            }
-        };
-        if ready {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "visible_write_current_transition_ready file={} source={} state={}",
-                    file.display(),
-                    source,
-                    state
-                ),
+    // `#implementlazilyowned`: each authority observation is one Lazily-claimed
+    // attempt; a pending transition is `Retryable` after its delivery wait or
+    // pause, and a ready state, deferral, or timeout refusal is terminal.
+    let drive = agent_doc_effect_cas::drive_effect_epochs(
+        &format!(
+            "visible-write-current-transition:{source}:{}",
+            file.display()
+        ),
+        "visible-write-current-transition:unobserved",
+        u32::MAX,
+        &mut |_| {
+            // An evicted hub is already a first-class missing-model state. Let the
+            // CP write layer attempt durable-projection recovery (or retain/defer
+            // immediately when none exists) instead of spending the whole settle
+            // budget trying to make a model current before that recovery seam runs.
+            let missing_model = matches!(
+                query_live_editor_authority(file, source),
+                Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)
             );
-            return Ok(());
-        }
-        if start.elapsed() >= std::time::Duration::from_millis(timeout_ms) {
-            if let Some((delivery_version, live_editors)) = delivery_cursor {
-                return defer_visible_delivery_projection_with_ownership(
-                    file,
-                    source,
-                    delivery_version,
-                    live_editors,
-                    refusal_ownership,
-                );
-            }
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "visible_write_deferred_current_transition file={} source={} state={} timeout_ms={}",
-                    file.display(),
-                    source,
-                    state,
-                    timeout_ms
-                ),
-            );
-            let recovery = if state == "delivery_pending" {
-                "\nThe bounded ACK recovery barrier already replayed delivery and requested \
-                 replacement of any build-skewed endpoint. No disk write was attempted. If the \
-                 editor host cannot hot-reload its listener, reload the IDE host and retry the \
-                 existing operation."
+            let (ready, state, delivery_cursor) = if missing_model && allow_missing_replica_defer {
+                (true, "missing_replica_defer", None)
             } else {
-                ""
+                match query_live_editor_authority_after_model_ensure(file, source) {
+                    Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => (true, "detached", None),
+                    Ok(agent_doc_crdt_relay_io::CurrentText::Current {
+                        delivery_converged: true,
+                        ..
+                    }) => (true, "lazily_current", None),
+                    Ok(agent_doc_crdt_relay_io::CurrentText::Current {
+                        delivery_version,
+                        live_editors,
+                        ..
+                    }) => (
+                        false,
+                        "delivery_pending",
+                        Some((delivery_version, live_editors)),
+                    ),
+                    Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica) => {
+                        (false, "missing_replica", None)
+                    }
+                    Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => {
+                        (false, "current_pending", None)
+                    }
+                    Err(_) => (false, "authority_unavailable", None),
+                }
             };
-            anyhow::bail!(
-                "visible document write for {} deferred: Lazily current transition remained {} for {}ms; retry after it settles{}",
-                file.display(),
-                state,
-                timeout_ms,
-                recovery
-            );
-        }
-        if let Some((delivery_version, live_editors)) = delivery_cursor {
-            let remaining_ms = u64::try_from(
-                std::time::Duration::from_millis(timeout_ms)
-                    .saturating_sub(start.elapsed())
-                    .as_millis(),
-            )
-            .unwrap_or(u64::MAX);
-            if projection_observation.wait_for_delivery_change(DeliveryChangeWait {
-                file,
-                source,
-                live_editors,
-                delivery_version,
-                // Give an ordinary in-flight editor pull/ACK the subscription
-                // fast path first. The controller-owned recovery timers still
-                // replay and force-refresh within the same bounded barrier.
-                signal_immediately: false,
-                max_wait_ms: Some(remaining_ms),
-            })? == ProjectionObservationWait::ForegroundDeadline
-            {
-                return defer_visible_delivery_projection_with_ownership(
+            if ready {
+                agent_doc_ops_log_io::log_op(
                     file,
-                    source,
-                    delivery_version,
-                    live_editors,
-                    refusal_ownership,
+                    &format!(
+                        "visible_write_current_transition_ready file={} source={} state={}",
+                        file.display(),
+                        source,
+                        state
+                    ),
+                );
+                return Ok(agent_doc_effect_cas::EpochStep::Applied {
+                    receipt: (),
+                    authority: state.to_string(),
+                });
+            }
+            if start.elapsed() >= std::time::Duration::from_millis(timeout_ms) {
+                if let Some((delivery_version, live_editors)) = delivery_cursor {
+                    return defer_visible_delivery_projection_with_ownership(
+                        file,
+                        source,
+                        delivery_version,
+                        live_editors,
+                        refusal_ownership,
+                    )
+                    .map(|()| agent_doc_effect_cas::EpochStep::Applied {
+                        receipt: (),
+                        authority: state.to_string(),
+                    });
+                }
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "visible_write_deferred_current_transition file={} source={} state={} timeout_ms={}",
+                        file.display(),
+                        source,
+                        state,
+                        timeout_ms
+                    ),
+                );
+                let recovery = if state == "delivery_pending" {
+                    "\nThe bounded ACK recovery barrier already replayed delivery and requested \
+                     replacement of any build-skewed endpoint. No disk write was attempted. If the \
+                     editor host cannot hot-reload its listener, reload the IDE host and retry the \
+                     existing operation."
+                } else {
+                    ""
+                };
+                anyhow::bail!(
+                    "visible document write for {} deferred: Lazily current transition remained {} for {}ms; retry after it settles{}",
+                    file.display(),
+                    state,
+                    timeout_ms,
+                    recovery
                 );
             }
-            continue;
-        }
-        note_editor_delivery_wait_entered(file);
-        std::thread::sleep(std::time::Duration::from_millis(50));
+            if let Some((delivery_version, live_editors)) = delivery_cursor {
+                let remaining_ms = u64::try_from(
+                    std::time::Duration::from_millis(timeout_ms)
+                        .saturating_sub(start.elapsed())
+                        .as_millis(),
+                )
+                .unwrap_or(u64::MAX);
+                if projection_observation.wait_for_delivery_change(DeliveryChangeWait {
+                    file,
+                    source,
+                    live_editors,
+                    delivery_version,
+                    // Give an ordinary in-flight editor pull/ACK the subscription
+                    // fast path first. The controller-owned recovery timers still
+                    // replay and force-refresh within the same bounded barrier.
+                    signal_immediately: false,
+                    max_wait_ms: Some(remaining_ms),
+                })? == ProjectionObservationWait::ForegroundDeadline
+                {
+                    return defer_visible_delivery_projection_with_ownership(
+                        file,
+                        source,
+                        delivery_version,
+                        live_editors,
+                        refusal_ownership,
+                    )
+                    .map(|()| agent_doc_effect_cas::EpochStep::Applied {
+                        receipt: (),
+                        authority: state.to_string(),
+                    });
+                }
+                return Ok(agent_doc_effect_cas::EpochStep::Retryable(()));
+            }
+            note_editor_delivery_wait_entered(file);
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            Ok(agent_doc_effect_cas::EpochStep::Retryable(()))
+        },
+        &mut |_, _| Ok(agent_doc_effect_cas::Pace::Continue),
+    )?;
+    match drive {
+        agent_doc_effect_cas::EpochDrive::Applied(()) => Ok(()),
+        agent_doc_effect_cas::EpochDrive::Exhausted { .. }
+        | agent_doc_effect_cas::EpochDrive::Stopped { .. } => anyhow::bail!(
+            "visible document write for {} deferred: the current-transition wait exhausted its Lazily attempt budget",
+            file.display()
+        ),
     }
 }
 
@@ -11439,27 +11647,47 @@ fn settle_actorless_document(
 fn await_retained_write_settled(file: &Path, intent_id: &str, source: &str) -> Option<String> {
     let started = std::time::Instant::now();
     let mut backoff_ms = CRDT_PROJECTION_FALLBACK_BACKOFF_INITIAL_MS;
-    loop {
-        match retained_write_settlement(file, source) {
-            agent_doc_state_backbone::retained_write::SettlementVerdict::Satisfied {
-                intent_id: settled,
-                proof,
-                ..
-            } if settled == intent_id => return Some(proof.token().to_string()),
-            agent_doc_state_backbone::retained_write::SettlementVerdict::Satisfied { .. }
-            | agent_doc_state_backbone::retained_write::SettlementVerdict::NoRetainedIntent => {
-                return None;
-            }
-            verdict if verdict.intent_id() != Some(intent_id) => return None,
-            _ => {}
-        }
-        if started.elapsed()
-            >= std::time::Duration::from_millis(CRDT_PROJECTION_OBSERVATION_TIMEOUT_MS)
-        {
-            return None;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
-        backoff_ms = CRDT_PROJECTION_FALLBACK_BACKOFF_POLICY.next_ms(backoff_ms, false);
+    // `#implementlazilyowned`: each settlement read is one Lazily-claimed
+    // attempt; a verdict still pending for this intent is `Retryable`, and the
+    // observation deadline stops the drive.
+    let drive =
+        agent_doc_effect_cas::drive_effect_epochs(
+            &format!("retained-write-settle:{intent_id}"),
+            intent_id,
+            u32::MAX,
+            &mut |_| {
+                let settled = |proof: Option<String>| agent_doc_effect_cas::EpochStep::Applied {
+                    receipt: proof,
+                    authority: intent_id.to_string(),
+                };
+                Ok(match retained_write_settlement(file, source) {
+                agent_doc_state_backbone::retained_write::SettlementVerdict::Satisfied {
+                    intent_id: settled_id,
+                    proof,
+                    ..
+                } if settled_id == intent_id => settled(Some(proof.token().to_string())),
+                agent_doc_state_backbone::retained_write::SettlementVerdict::Satisfied { .. }
+                | agent_doc_state_backbone::retained_write::SettlementVerdict::NoRetainedIntent => {
+                    settled(None)
+                }
+                verdict if verdict.intent_id() != Some(intent_id) => settled(None),
+                _ => agent_doc_effect_cas::EpochStep::Retryable(()),
+            })
+            },
+            &mut |_, _| {
+                if started.elapsed()
+                    >= std::time::Duration::from_millis(CRDT_PROJECTION_OBSERVATION_TIMEOUT_MS)
+                {
+                    return Ok(agent_doc_effect_cas::Pace::Stop);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
+                backoff_ms = CRDT_PROJECTION_FALLBACK_BACKOFF_POLICY.next_ms(backoff_ms, false);
+                Ok(agent_doc_effect_cas::Pace::Continue)
+            },
+        );
+    match drive {
+        Ok(agent_doc_effect_cas::EpochDrive::Applied(proof)) => proof,
+        _ => None,
     }
 }
 

@@ -11,6 +11,8 @@ publish = false
 name = "agent_doc_document_realtime"
 
 [dependencies]
+agent-doc-effect-cas = { path = "../agent-doc-effect-cas", version = "0.35.574" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.574" }
 agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.35.574" }
 agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.574" }
 # `#relaylockpoison`: locks here are parking_lot, not `std::sync` — the workspace

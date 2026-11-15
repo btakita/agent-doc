@@ -473,6 +473,31 @@ Progress (`#implementlazilyowned`):
   `lazily-adapter`, 1 `excluded`, plus 1 new `lazily-adapter` row
   (`RuntimeProjectionRetry`). The 17 document-realtime / idle-watch rows of
   family 3 remain for 3b.
+- Family 3b, document-realtime write convergence (lzowned7): the canonical
+  replace (`apply_canonical_replace_if_attached`) now runs every pass as one
+  `drive_effect_epochs` attempt. A landed, deferred, or retained write is the
+  applied receipt, a refusal is a rejection, a lost compare-and-swap
+  (`CompareAndSwapRaced`) or operator advance is `Superseded` over the
+  observed relay cut, and every other wait state is `Retryable`. The
+  convergence `DeadlineCore` stays the bound. The projection-settle
+  observations also run through the driver. They are the visible-receipt wait,
+  the serialized-atomic-write projection wait, the native-save wait, the
+  atomic-repair settle, the retained-write settle, and the visible-write
+  current-transition guard. A pending observation is `Retryable`, and a
+  deadline is `Pace::Stop` or a terminal receipt. `reconcile_visible_write`
+  (document-realtime) is a Lazily drive whose disk drift is `Superseded` and
+  re-merged. Messages, log markers, timeouts, and pace curves are unchanged.
+  15 rows: 7 `migrated` (the `CRDT_WRITE_BACKOFF_*` /
+  `CRDT_PROJECTION_FALLBACK_BACKOFF_*` pace constants,
+  `VISIBLE_WRITE_RECONCILE_MAX_ATTEMPTS`), 3 `lazily-adapter`
+  (`CrdtWriteBackoff`, `ForceDiskMutationFence`, `force_disk_mutation_fence`),
+  and 5 `excluded`. The excluded rows are the relay `RecoveryRetryBackoff`
+  re-send latch and its two constants (a transport resend with no expected
+  authority) and `CrdtRetryAdmission` / `decide_crdt_retry_admission` (a pure
+  decision used only by the simulation model). Idle-watch's
+  `QueueProjectionSupersededRetry` / `queue_projection_superseded_retry` are
+  scheduler state of the self-heal worker in the same supervisor loop as the
+  idle-watch retries. They move to step 8.
 - Not yet done (as of 2026-11-15, agent-doc `59984d315a`; triage is complete,
   0 `triage` rows): migrate the 291 reviewed `pending-migration` rows family
   by family, then delete the remaining bespoke orchestration and make the
@@ -480,11 +505,11 @@ Progress (`#implementlazilyowned`):
 
 ## Resume here
 
-Status 2026-11-15 (after family 3a): ledger = 57 `migrated`, 118 `lazily-adapter`,
-17 `deleted`, 359 `excluded`, 190 `pending-migration`, 0 `triage`. Work the
-190 rows sequentially in ONE worktree (every step edits the ledger), one family
+Status 2026-11-15 (after family 3b): ledger = 64 `migrated`, 121 `lazily-adapter`,
+17 `deleted`, 364 `excluded`, 175 `pending-migration`, 0 `triage`. Work the
+175 rows sequentially in ONE worktree (every step edits the ledger), one family
 per pushed commit, `make check` green before each push, in this order (next:
-family 3b):
+family 4):
 
 1. DONE: actor-generation fenced writes (`store_actor_record_fenced_tx`,
    `delete_actor_document_fenced_tx`; 20 actor-generation rows) onto the
@@ -505,7 +530,8 @@ family 3b):
    - 3a. DONE: compact-io, route-io `queue_dispatch`, queue-io `queue_cmd` /
      `queue_consume`, the dedupe fixpoint, and the comparator/classifier/pace
      rows, onto `agent_doc_effect_cas::drive_effect_epochs` (27 rows + 1 new).
-   - 3b. The remaining 17 rows: the document-realtime write-convergence
+   - 3b. DONE (15 rows; the 2 idle-watch self-heal rows moved to step 8):
+     the document-realtime write-convergence
      backoffs (`CrdtWriteBackoff`, the `CRDT_WRITE_BACKOFF_*` /
      `CRDT_PROJECTION_FALLBACK_BACKOFF_*` policies inside
      `apply_canonical_replace_if_attached` and the projection-settle polls),
@@ -522,7 +548,9 @@ family 3b):
    `PatchWatcher`, `TypingTracker`; 41 + 13 editor rows): move
    retry/supersession behind the Rust core (FFI) so Lazily owns it.
 8. Remaining small families: authority observation (6), idle-watch/captured
-   finalize retry (6), Git commit/closeout helpers around `ref_cas` (8).
+   finalize retry (6, plus idle-watch's `QueueProjectionSupersededRetry` /
+   `queue_projection_superseded_retry` self-heal schedule from family 3), Git
+   commit/closeout helpers around `ref_cas` (8).
 9. Per-step plan receipts persisted for crash resume, and reorder the
    maintenance body so the document cut is literally the first plan step.
 10. Phase 6 rollout: delete compatibility paths and duplicate state, final

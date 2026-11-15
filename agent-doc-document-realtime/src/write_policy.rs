@@ -2037,16 +2037,36 @@ pub fn reconcile_visible_write<C: ?Sized, T>(
 ) -> Result<(String, T)> {
     let mut current = initial_current;
     let mut payload = initial_payload;
-    for _ in 0..max_attempts {
-        match guard(context, &current, &payload)? {
-            VisibleWriteReconcile::Clean => return Ok((current, payload)),
+    if max_attempts == 0 {
+        fail_closed(context, &current, &payload)?;
+        return Ok((current, payload));
+    }
+    // `#implementlazilyowned`: Lazily owns the reconcile epochs. A clean guard
+    // is the applied receipt; reconcilable disk drift is `Superseded` and the
+    // re-merged payload is re-desired over the fresh disk cut.
+    let drive = agent_doc_effect_cas::drive_effect_epochs(
+        "visible-write-reconcile",
+        agent_doc_hash::content_hash(&current),
+        u32::try_from(max_attempts).unwrap_or(u32::MAX),
+        &mut |_| match guard(context, &current, &payload)? {
+            VisibleWriteReconcile::Clean => Ok(agent_doc_effect_cas::EpochStep::Applied {
+                receipt: (),
+                authority: agent_doc_hash::content_hash(&current),
+            }),
             VisibleWriteReconcile::DiskDrifted { fresh_current } => {
                 current = fresh_current;
                 payload = recompute(&current)?;
+                Ok(agent_doc_effect_cas::EpochStep::Superseded {
+                    observed: agent_doc_hash::content_hash(&current),
+                    reason: (),
+                })
             }
-        }
+        },
+        &mut |_, _| Ok(agent_doc_effect_cas::Pace::Continue),
+    )?;
+    if !matches!(drive, agent_doc_effect_cas::EpochDrive::Applied(())) {
+        fail_closed(context, &current, &payload)?;
     }
-    fail_closed(context, &current, &payload)?;
     Ok((current, payload))
 }
 

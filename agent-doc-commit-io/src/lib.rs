@@ -1887,18 +1887,19 @@ fn commit_proven_response_replay_canonicalization_scoped(file: &Path) -> Result<
         return Ok(false);
     }
 
-    let normalized_head =
-        agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication_for_file(
+    let head_candidate =
+        agent_doc_document_realtime_io::prepare_recoverable_response_replay_recovery_for_file(
             file,
             &head,
             "commit_response_replay_canonicalization_head",
         )?;
-    let normalized_head = normalized_head.ok_or_else(|| {
+    let head_candidate = head_candidate.ok_or_else(|| {
         anyhow::anyhow!(
             "refusing response-replay repair commit for {}: HEAD has no losslessly canonicalizable response replay",
             file.display()
         )
     })?;
+    let normalized_head = head_candidate.content.clone();
     anyhow::ensure!(
         normalized_head != head,
         "refusing response-replay repair commit for {}: HEAD replay normalization is a no-op",
@@ -1996,6 +1997,7 @@ fn commit_proven_response_replay_canonicalization_scoped(file: &Path) -> Result<
             authority != normalized_head,
         ),
     );
+    agent_doc_document_realtime_io::report_applied_response_replay_recovery(file, &head_candidate);
     Ok(true)
 }
 

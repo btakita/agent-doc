@@ -2403,8 +2403,8 @@ fn repair_structural_projection_if_needed(
     file: &Path,
     doc_content: &str,
 ) -> Result<String> {
-    let Some(repaired) =
-        agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication_for_file(
+    let Some(candidate) =
+        agent_doc_document_realtime_io::prepare_recoverable_response_replay_recovery_for_file(
             file,
             doc_content,
             "repair_structural_projection",
@@ -2412,6 +2412,7 @@ fn repair_structural_projection_if_needed(
     else {
         return Ok(doc_content.to_string());
     };
+    let repaired = candidate.content.clone();
 
     agent_doc_document_realtime_io::reconcile_deferred_write_to_canonical_cut_if_needed(
         file,
@@ -2442,6 +2443,7 @@ fn repair_structural_projection_if_needed(
         "[repair] removed proven duplicated editor projection debris from {}",
         file.display()
     );
+    agent_doc_document_realtime_io::report_applied_response_replay_recovery(file, &candidate);
     Ok(settled)
 }
 

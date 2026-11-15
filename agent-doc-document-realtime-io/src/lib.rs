@@ -4990,14 +4990,85 @@ fn recover_concatenated_document_generations(
     Ok((canonical != content).then_some(canonical))
 }
 
+/// One prepared response-replay recovery candidate. Preparing it observes
+/// only: it records the ops.log `_candidate_prepared` line but prints no
+/// operator-facing "restored" wording, because read-only probes (plain
+/// `session-check`, `#sessioncheckread`), settlement classifiers, and commit
+/// proofs prepare candidates they never apply (`#probewarnrestored`). Only a
+/// caller that actually applies [`Self::content`] calls
+/// [`report_applied_response_replay_recovery`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResponseReplayRecoveryCandidate {
+    pub content: String,
+    /// The candidate restores an interrupted empty response heading from exact
+    /// retained-capture and baseline evidence.
+    pub restores_interrupted_empty_shell: bool,
+}
+
+impl ResponseReplayRecoveryCandidate {
+    fn plain(content: String) -> Self {
+        Self {
+            content,
+            restores_interrupted_empty_shell: false,
+        }
+    }
+
+    /// The stderr warning an applying caller prints once the candidate landed.
+    pub fn applied_warning(&self, file: &Path) -> Option<String> {
+        self.restores_interrupted_empty_shell.then(|| {
+            format!(
+                "[recovery] WARNING: restored an interrupted empty response heading in {} from exact retained-capture and baseline evidence",
+                file.display()
+            )
+        })
+    }
+
+    /// The observe-only wording for a probe that applies nothing.
+    pub fn pending_warning(&self, file: &Path) -> Option<String> {
+        self.restores_interrupted_empty_shell.then(|| {
+            format!(
+                "[recovery] would restore an interrupted empty response heading in {} from exact retained-capture and baseline evidence (pending; applied nothing)",
+                file.display()
+            )
+        })
+    }
+}
+
+/// Print the applied-recovery warning for a candidate the caller has actually
+/// applied (written, committed, or retained as the canonical projection).
+pub fn report_applied_response_replay_recovery(
+    file: &Path,
+    candidate: &ResponseReplayRecoveryCandidate,
+) {
+    if let Some(warning) = candidate.applied_warning(file) {
+        eprintln!("{warning}");
+    }
+}
+
 /// File-aware replay normalization. In addition to the narrow pure repairs,
 /// this may collapse two concatenated logical editor generations, but only when
 /// the durable pending intent proves one complete branch byte-for-byte.
+///
+/// Observation-only content view of
+/// [`prepare_recoverable_response_replay_recovery_for_file`]; it never prints.
 pub fn normalize_recoverable_response_replay_duplication_for_file(
     file: &Path,
     content: &str,
     source: &str,
 ) -> Result<Option<String>> {
+    Ok(
+        prepare_recoverable_response_replay_recovery_for_file(file, content, source)?
+            .map(|candidate| candidate.content),
+    )
+}
+
+/// Prepare the file-aware replay recovery candidate without applying or
+/// announcing it. See [`ResponseReplayRecoveryCandidate`].
+pub fn prepare_recoverable_response_replay_recovery_for_file(
+    file: &Path,
+    content: &str,
+    source: &str,
+) -> Result<Option<ResponseReplayRecoveryCandidate>> {
     for checkpoint in agent_doc_cycle_state_io::load_recent_captured_response_checkpoints(file, 4)?
     {
         let Some(baseline) = checkpoint.baseline_content.as_deref() else {
@@ -5025,15 +5096,11 @@ pub fn normalize_recoverable_response_replay_duplication_for_file(
                     recovery.kind.as_str(),
                 ),
             );
-            if recovery.kind
-                == agent_doc_merge::response_cell::CapturedResponseReplayRecoveryKind::InterruptedEmptyShell
-            {
-                eprintln!(
-                    "[recovery] WARNING: restored an interrupted empty response heading in {} from exact retained-capture and baseline evidence",
-                    file.display()
-                );
-            }
-            return Ok(Some(recovered));
+            return Ok(Some(ResponseReplayRecoveryCandidate {
+                content: recovered,
+                restores_interrupted_empty_shell: recovery.kind
+                    == agent_doc_merge::response_cell::CapturedResponseReplayRecoveryKind::InterruptedEmptyShell,
+            }));
         }
     }
     if let Some(pending) = pending_document_write(file)
@@ -5058,9 +5125,10 @@ pub fn normalize_recoverable_response_replay_duplication_for_file(
                 agent_doc_hash::content_hash(&recovered),
             ),
         );
-        return Ok(Some(recovered));
+        return Ok(Some(ResponseReplayRecoveryCandidate::plain(recovered)));
     }
-    Ok(normalize_recoverable_response_replay_duplication(content))
+    Ok(normalize_recoverable_response_replay_duplication(content)
+        .map(ResponseReplayRecoveryCandidate::plain))
 }
 
 /// Classify one post-repair authority observation without treating a newer
@@ -13868,6 +13936,24 @@ mod tests {
         )
         .unwrap()
         .expect("the durable capture should restore its retained empty shell");
+
+        // `#probewarnrestored`: preparing the candidate announces nothing; the
+        // applied wording belongs to appliers and the probe wording is pending.
+        let candidate = prepare_recoverable_response_replay_recovery_for_file(
+            &file,
+            stranded,
+            "test_retained_empty_heading",
+        )
+        .unwrap()
+        .expect("the prepared candidate carries the same recovery");
+        assert_eq!(candidate.content, recovered);
+        assert!(candidate.restores_interrupted_empty_shell);
+        let applied = candidate.applied_warning(&file).unwrap();
+        assert!(applied.contains("WARNING: restored an interrupted empty response heading"));
+        let pending = candidate.pending_warning(&file).unwrap();
+        assert!(pending.contains("would restore an interrupted empty response heading"));
+        assert!(pending.contains("(pending; applied nothing)"));
+        assert!(!pending.contains("restored"));
 
         assert!(recovered.contains("Exact durable captured body."));
         assert!(recovered.contains("> **Chat prompt (#chatprompt):** Fix the cause of the error"));

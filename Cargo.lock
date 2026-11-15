@@ -2449,6 +2449,7 @@ dependencies = [
  "agent-doc-fs",
  "agent-doc-log-time",
  "agent-doc-state-backbone",
+ "agent-doc-supervisor",
  "agent-doc-topic",
  "agent-doc-turn",
  "anyhow",

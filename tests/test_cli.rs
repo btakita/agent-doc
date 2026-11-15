@@ -20285,18 +20285,51 @@ fn test_dispatch_turn_start_is_recorded_on_the_busy_transition() {
     // own new receipt released by the old edge. Pin both halves: the release sits
     // before the lifecycle transaction's commit, guarded by `Ready`, and the
     // lifecycle handler stores through it with no separate release call.
-    let lifecycle_tx_at = state_store
-        .find("fn store_actor_record_in_tx(")
-        .expect("agent-doc-sqlite must own the lifecycle actor write transaction");
-    let lifecycle_tx = &state_store[lifecycle_tx_at..];
-    let lifecycle_tx = &lifecycle_tx[..lifecycle_tx.find("\n}\n").unwrap()];
-    let release_at = lifecycle_tx
-        .find("mark_open_dispatches_consumed_as_of(&tx,")
-        .expect("the Ready release must run on the lifecycle write's own transaction");
+    //
+    // `#implementlazilyowned`: the accepted write body
+    // (`apply_actor_record_write_in_tx`) is shared by the unfenced transaction
+    // and the Lazily actor-generation adapter's (`ledger_cas`), and it never
+    // commits; each transaction applies it before its own commit.
+    let apply_at = state_store
+        .find("fn apply_actor_record_write_in_tx(")
+        .expect("agent-doc-sqlite must own the accepted actor write body");
+    let apply = &state_store[apply_at..];
+    let apply = &apply[..apply.find("\n}\n").unwrap()];
     assert!(
-        release_at < lifecycle_tx.find("tx.commit()").unwrap(),
-        "the Ready release must commit with the `ready` projection, not after it"
+        apply.contains("mark_open_dispatches_consumed_as_of(tx,"),
+        "the Ready release must run on the lifecycle write's own transaction"
     );
+    assert!(
+        !apply.contains(".commit()"),
+        "the accepted write body runs inside its caller's transaction"
+    );
+    let ledger_cas =
+        fs::read_to_string(manifest_dir.join("agent-doc-sqlite/src/ledger_cas.rs")).unwrap();
+    for (label, source, transaction) in [
+        (
+            "state_store",
+            state_store.as_str(),
+            "fn store_actor_record_in_tx(",
+        ),
+        (
+            "ledger_cas",
+            ledger_cas.as_str(),
+            "    fn transact(\n        &self,\n        key: &ActorGenerationKey,",
+        ),
+    ] {
+        let tx_at = source
+            .find(transaction)
+            .unwrap_or_else(|| panic!("{label}: the lifecycle actor write transaction"));
+        let tx = &source[tx_at..];
+        let tx = &tx[..tx.find("\n}\n").unwrap_or(tx.len())];
+        let applied_at = tx
+            .find("apply_actor_record_write_in_tx(")
+            .unwrap_or_else(|| panic!("{label}: the transaction applies the accepted write"));
+        assert!(
+            applied_at < tx.find("tx.commit()").unwrap(),
+            "{label}: the Ready release must commit with the `ready` projection, not after it"
+        );
+    }
     assert!(
         state_store.contains("(record.state == ActorState::Ready).then_some(now_secs)"),
         "only a Ready lifecycle write releases dispatch receipts"

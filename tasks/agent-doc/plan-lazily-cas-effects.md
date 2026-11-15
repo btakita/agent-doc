@@ -400,6 +400,20 @@ Progress (`#implementlazilyowned`):
   `QueueMaintenanceAuthoritySuperseded` is replaced by the plan's typed
   `QueueMaintenanceEffectSuperseded::admitted_authority` (3 rows `deleted`
   with `absent:` proofs).
+- Family 1, actor-generation fenced writes (`#implementlazilyowned`
+  continuation, lzowned5): `ledger_cas::ActorGenerationWrite` is the
+  `CompareAndApply` adapter (authority = generation + `ActorRevision`, one
+  IMMEDIATE transaction); `store_actor_record_fenced_tx`,
+  `store_actor_lifecycle_record_fenced_tx`, and `delete_actor_document_fenced_tx`
+  are single Lazily epochs, and a loss is the typed `ActorGenerationSuperseded`.
+  Every re-deciding caller (the four controller sweeps and the start_session
+  alias close, the three registration binds, start's generation race, the
+  route lifecycle write) runs through `ledger_cas::drive_actor_generation_decisions`;
+  the four string classifiers collapse into `ledger_cas::actor_generation_superseded`
+  over `agent_doc_supervisor::actor_generation::ACTOR_GENERATION_SUPERSEDED_MARKER`.
+  20 rows: 14 `migrated`, 4 `deleted`, 2 reclassified `lazily-adapter`
+  (`LifecycleFencePayload`, `BindingFence`: wire form / value of the expected
+  authority), plus 5 new `lazily-adapter` rows.
 - Not yet done (as of 2026-11-15, agent-doc `59984d315a`; triage is complete,
   0 `triage` rows): migrate the 291 reviewed `pending-migration` rows family
   by family, then delete the remaining bespoke orchestration and make the
@@ -407,14 +421,16 @@ Progress (`#implementlazilyowned`):
 
 ## Resume here
 
-Status 2026-11-15: ledger = 23 `migrated`, 39 `lazily-adapter`, 13 `deleted`,
-356 `excluded`, 291 `pending-migration`, 0 `triage`. Work the 291 rows
-sequentially in ONE worktree (every step edits the ledger), one family per
-pushed commit, `make check` green before each push, in this order:
+Status 2026-11-15 (after family 1): ledger = 37 `migrated`, 46 `lazily-adapter`,
+17 `deleted`, 356 `excluded`, 271 `pending-migration`, 0 `triage`. Work the
+271 rows sequentially in ONE worktree (every step edits the ledger), one family
+per pushed commit, `make check` green before each push, in this order (next:
+family 2):
 
-1. Actor-generation fenced writes (`store_actor_record_fenced_tx`,
+1. DONE: actor-generation fenced writes (`store_actor_record_fenced_tx`,
    `delete_actor_document_fenced_tx`; 20 actor-generation rows) onto the
-   `ledger_cas` adapter shape.
+   `ledger_cas` adapter shape (`ActorGenerationWrite`,
+   `drive_actor_generation_decisions`).
 2. Closeout lease and drain-owner claims (37 closeout/turn-fenced + 17
    cross-process owner-lease rows) onto a durable Lazily claim, as
    `queue_maintenance_claim` does.

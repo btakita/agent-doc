@@ -8,6 +8,7 @@ use agent_doc_controller::status::LaunchMode;
 use agent_doc_frontmatter::frontmatter::{self, TerminalHostPreference};
 use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_session_registry_io::registration as sessions;
+use agent_doc_sqlite::ledger_cas::{ActorGenerationDecision, ActorGenerationDrive};
 use agent_doc_supervisor::{
     lifecycle::start_session_retryable_during_recycle,
     route_owned::{
@@ -2834,33 +2835,41 @@ fn start_controller_session(
         harness: Some(harness.to_string()),
     };
     let mut attempts_used = 0usize;
-    let mut generation_race_attempts_used = 0usize;
+    let mut generation_race_attempts_used = 0u32;
     const MAX_START_SESSION_RECYCLE_RETRIES: usize = 2;
-    const MAX_START_SESSION_GENERATION_RACE_RETRIES: usize = 2;
+    const MAX_START_SESSION_GENERATION_RACE_RETRIES: u32 = 2;
+    let document_id = canonical.to_string_lossy().to_string();
     loop {
-        match agent_doc_controller_io::project_controller::start_session(
-            project_root,
-            start_request.clone(),
-        ) {
-            Ok(record) => break Ok(record),
-            Err(err) => {
-                let current_actor = if start_session_generation_cas_failed(&err)
-                    && generation_race_attempts_used < MAX_START_SESSION_GENERATION_RACE_RETRIES
-                {
-                    agent_doc_controller_io::project_controller::authoritative_actor_binding(
-                        project_root,
-                        canonical,
-                    )
-                    .ok()
-                    .flatten()
-                } else {
-                    None
-                };
-                if let Some(retry_generation) = start_session_generation_race_retry_generation(
-                    &err,
-                    current_actor.as_ref(),
-                    &start_request,
-                ) {
+        // `#implementlazilyowned`: each start_session request is one Lazily
+        // actor-generation epoch. A lost generation fence is `Superseded`; a
+        // newer generation that still names this exact logical owner is
+        // re-decided as the next epoch at the following generation, while any
+        // other supersession is final and returns the controller's error.
+        let last_error = std::cell::RefCell::new(None::<anyhow::Error>);
+        let drive = agent_doc_sqlite::ledger_cas::drive_actor_generation_decisions(
+            &document_id,
+            1 + MAX_START_SESSION_GENERATION_RACE_RETRIES
+                .saturating_sub(generation_race_attempts_used),
+            &mut |decision| {
+                if decision > 1 {
+                    let err = last_error
+                        .borrow_mut()
+                        .take()
+                        .expect("a re-decision follows a recorded supersession");
+                    let current_actor =
+                        agent_doc_controller_io::project_controller::authoritative_actor_binding(
+                            project_root,
+                            canonical,
+                        )
+                        .ok()
+                        .flatten();
+                    let Some(retry_generation) = start_session_generation_race_retry_generation(
+                        &err,
+                        current_actor.as_ref(),
+                        &start_request,
+                    ) else {
+                        return Ok(ActorGenerationDecision::Settled(err));
+                    };
                     generation_race_attempts_used += 1;
                     let observed_generation = current_actor
                         .as_ref()
@@ -2886,61 +2895,82 @@ fn start_controller_session(
                         ),
                     );
                     start_request.generation = retry_generation;
-                    continue;
                 }
-                let recycle_status =
-                    agent_doc_controller_io::project_controller::supervisor_recycle_status_for_file(
-                        file,
-                    )
-                    .unwrap_or_default();
-                let recycle_pending = matches!(
-                    recycle_status.phase,
-                    agent_doc_state_backbone::SupervisorRecyclePhase::InFlight
-                );
-                if !start_session_retryable_during_recycle(
-                    recycle_pending,
-                    attempts_used,
-                    MAX_START_SESSION_RECYCLE_RETRIES,
-                ) {
-                    break Err(err);
-                }
-                attempts_used += 1;
-                let reason = recycle_status
-                    .reason
-                    .unwrap_or_else(|| "unknown".to_string());
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "start_session_recycle_retry file={} pane={} attempt={} reason={} err={}",
-                        file.display(),
-                        pane_id,
-                        attempts_used,
-                        reason,
-                        err
-                    ),
-                );
-                log_event(
-                    session_log,
-                    &format!("start_session_recycle_retry attempt={attempts_used} reason={reason}"),
-                );
-                let settled = agent_doc_controller_io::project_controller::
-                    wait_for_supervisor_recycle_settle_for_file(file)
-                        .map(|projection| {
-                            matches!(
-                                projection.phase,
-                                agent_doc_state_backbone::SupervisorRecyclePhase::Settled
-                            )
-                        })
-                        .unwrap_or(false);
-                if !settled {
-                    break Err(err);
-                }
-                agent_doc_controller_io::project_controller::ensure_controller_running(
+                // The controller's start_session fences on the generation it
+                // supersedes only; it names no revision.
+                Ok(ActorGenerationDecision::Write {
+                    authority: agent_doc_sqlite::ledger_cas::ActorGenerationAuthority {
+                        generation: start_request.generation.saturating_sub(1),
+                        revision: agent_doc_controller::actor::ActorRevision::ABSENT,
+                    },
+                    write: start_request.clone(),
+                })
+            },
+            &mut |_, request| {
+                agent_doc_controller_io::project_controller::start_session(
                     project_root,
-                    LaunchMode::Lazy,
-                )?;
-            }
+                    request.clone(),
+                )
+            },
+            &mut |_, _, _, err| {
+                *last_error.borrow_mut() = Some(anyhow::anyhow!("{err:#}"));
+            },
+        );
+        let err = match drive {
+            Ok(ActorGenerationDrive::Applied { receipt, .. }) => break Ok(receipt),
+            Ok(ActorGenerationDrive::Settled(err))
+            | Ok(ActorGenerationDrive::Exhausted { error: err, .. })
+            | Err(err) => err,
+        };
+        let recycle_status =
+            agent_doc_controller_io::project_controller::supervisor_recycle_status_for_file(file)
+                .unwrap_or_default();
+        let recycle_pending = matches!(
+            recycle_status.phase,
+            agent_doc_state_backbone::SupervisorRecyclePhase::InFlight
+        );
+        if !start_session_retryable_during_recycle(
+            recycle_pending,
+            attempts_used,
+            MAX_START_SESSION_RECYCLE_RETRIES,
+        ) {
+            break Err(err);
         }
+        attempts_used += 1;
+        let reason = recycle_status
+            .reason
+            .unwrap_or_else(|| "unknown".to_string());
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "start_session_recycle_retry file={} pane={} attempt={} reason={} err={}",
+                file.display(),
+                pane_id,
+                attempts_used,
+                reason,
+                err
+            ),
+        );
+        log_event(
+            session_log,
+            &format!("start_session_recycle_retry attempt={attempts_used} reason={reason}"),
+        );
+        let settled = agent_doc_controller_io::project_controller::
+            wait_for_supervisor_recycle_settle_for_file(file)
+                .map(|projection| {
+                    matches!(
+                        projection.phase,
+                        agent_doc_state_backbone::SupervisorRecyclePhase::Settled
+                    )
+                })
+                .unwrap_or(false);
+        if !settled {
+            break Err(err);
+        }
+        agent_doc_controller_io::project_controller::ensure_controller_running(
+            project_root,
+            LaunchMode::Lazy,
+        )?;
     }
 }
 
@@ -2954,7 +2984,7 @@ fn start_session_generation_race_retry_generation(
     current: Option<&agent_doc_controller::actor::ActorRecord>,
     request: &agent_doc_controller_io::project_controller::StartSessionRequest,
 ) -> Option<u64> {
-    if !start_session_generation_cas_failed(error) {
+    if !agent_doc_sqlite::ledger_cas::actor_generation_superseded(error) {
         return None;
     }
     let current = current?;
@@ -2970,13 +3000,6 @@ fn start_session_generation_race_retry_generation(
         return None;
     }
     current.generation.checked_add(1)
-}
-
-fn start_session_generation_cas_failed(error: &anyhow::Error) -> bool {
-    const GENERATION_CAS_MARKER: &str = "generation compare-and-swap failed";
-    error
-        .chain()
-        .any(|cause| cause.to_string().contains(GENERATION_CAS_MARKER))
 }
 
 fn fire_session_start_hooks(

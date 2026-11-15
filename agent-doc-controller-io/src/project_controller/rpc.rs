@@ -29570,42 +29570,55 @@ fn ensure_start_session_pane_not_claimed_by_other_actor_with_hook(
     if pane_id.is_empty() {
         return Ok(());
     }
-    let mut attempt = 0;
-    loop {
-        attempt += 1;
-        let stale_aliases =
-            start_session_stale_pane_aliases(project_root, document_id, session_id, pane_id)?;
-        let mut fence_lost = None;
-        for (existing, revision) in stale_aliases {
-            between_decision_and_close(&existing);
-            if let Err(err) = close_stale_start_session_pane_alias(
-                project_root,
-                document_id,
-                pane_id,
-                &existing,
-                revision,
-            ) {
-                if !agent_doc_session_actor_io::binding_fence_lost(&err) {
-                    return Err(err);
-                }
-                fence_lost = Some(err);
-                break;
+    // `#implementlazilyowned`: each scan of the pane's stale aliases is one
+    // Lazily actor-generation decision fenced on the first alias it closes;
+    // a lost fence re-scans against the newer records as the next epoch.
+    let drive = drive_actor_generation_decisions(
+        pane_id,
+        ACTOR_CLOSE_FENCE_ATTEMPTS,
+        &mut |_| {
+            let stale_aliases =
+                start_session_stale_pane_aliases(project_root, document_id, session_id, pane_id)?;
+            let Some((first, revision)) = stale_aliases.first() else {
+                return Ok(ActorGenerationDecision::Settled(()));
+            };
+            Ok(ActorGenerationDecision::Write {
+                authority: ActorGenerationAuthority {
+                    generation: first.generation,
+                    revision: *revision,
+                },
+                write: stale_aliases,
+            })
+        },
+        &mut |_, stale_aliases| {
+            for (existing, revision) in stale_aliases {
+                between_decision_and_close(existing);
+                close_stale_start_session_pane_alias(
+                    project_root,
+                    document_id,
+                    pane_id,
+                    existing,
+                    *revision,
+                )?;
             }
-        }
-        let Some(err) = fence_lost else {
-            return Ok(());
-        };
-        agent_doc_ops_log_io::log_op(
-            Path::new(document_id),
-            &format!(
-                "controller_start_session_pane_alias_close_fence_lost document_id={document_id} pane={pane_id} attempt={attempt} error={err:#} (#controllerclosefence)"
-            ),
-        );
-        if attempt >= ACTOR_CLOSE_FENCE_ATTEMPTS {
-            return Err(err.context(format!(
-                "start_session pane alias for {pane_id} kept changing after {attempt} close attempts"
-            )));
-        }
+            Ok(())
+        },
+        &mut |attempt, _, _, err| {
+            agent_doc_ops_log_io::log_op(
+                Path::new(document_id),
+                &format!(
+                    "controller_start_session_pane_alias_close_fence_lost document_id={document_id} pane={pane_id} attempt={attempt} error={err:#} (#controllerclosefence)"
+                ),
+            );
+        },
+    )?;
+    match drive {
+        ActorGenerationDrive::Settled(()) | ActorGenerationDrive::Applied { .. } => Ok(()),
+        ActorGenerationDrive::Exhausted {
+            decisions, error, ..
+        } => Err(error.context(format!(
+            "start_session pane alias for {pane_id} kept changing after {decisions} close attempts"
+        ))),
     }
 }
 

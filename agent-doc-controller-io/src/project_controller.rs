@@ -18,6 +18,10 @@ use agent_doc_controller::status::{
     preparing_controller_is_stale, resolve_controller_identity_version,
     stale_preparing_controller_threshold_from_env_value,
 };
+use agent_doc_sqlite::ledger_cas::{
+    ActorGenerationAuthority, ActorGenerationDecision, ActorGenerationDrive,
+    drive_actor_generation_decisions,
+};
 use agent_doc_sqlite::state_store;
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
 use anyhow::{Context, Result};
@@ -14037,10 +14041,18 @@ fn store_actor_lifecycle_record_write(
     }
 }
 
-/// `#controllerclosefence`: how many times a controller sweep re-decides one
-/// record after its fenced write lost to a newer commit before leaving the
-/// record to the next sweep.
-const ACTOR_CLOSE_FENCE_ATTEMPTS: usize = 3;
+/// `#controllerclosefence`: how many decisions a controller sweep makes for one
+/// record (each one Lazily actor-generation epoch; a lost fence re-decides as
+/// the next epoch) before leaving the record to the next sweep.
+const ACTOR_CLOSE_FENCE_ATTEMPTS: u32 = 3;
+
+/// What a controller actor sweep settled on for one record without writing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActorSweepSettled {
+    Kept,
+    /// A dry run counted the record as closed (or pruned).
+    Closed,
+}
 
 /// The actor record for `document_id` with the [`ActorRevision`] it was
 /// committed at, read in one statement (`#controllerclosefence`). A sweep
@@ -14193,103 +14205,114 @@ fn close_stale_starting_actors_with_hook(
         .map(|record| record.document_id.clone())
         .collect::<Vec<_>>();
     for document_id in candidates {
-        let mut attempt = 0;
-        loop {
-            attempt += 1;
-            let now = timestamp_secs();
-            let (record, revision) =
-                load_actor_record_with_revision_from_conn(&conn, &document_id)?;
-            let Some(record) = record
-                .filter(|record| record.state == agent_doc_controller::actor::ActorState::Starting)
-            else {
-                // No longer `Starting`: an owner moved it on after the
-                // enumeration (or after a lost fence). Nothing is stale.
-                kept += 1;
-                break;
-            };
-            let age = now.saturating_sub(record.last_transition.timestamp);
-            if age <= stale_after.as_secs() {
-                kept += 1;
-                break;
-            }
+        let drive = drive_actor_generation_decisions(
+            &document_id,
+            ACTOR_CLOSE_FENCE_ATTEMPTS,
+            &mut |_| {
+                let now = timestamp_secs();
+                let (record, revision) =
+                    load_actor_record_with_revision_from_conn(&conn, &document_id)?;
+                let Some(record) = record.filter(|record| {
+                    record.state == agent_doc_controller::actor::ActorState::Starting
+                }) else {
+                    // No longer `Starting`: an owner moved it on after the
+                    // enumeration (or after a lost fence). Nothing is stale.
+                    return Ok(ActorGenerationDecision::Settled(ActorSweepSettled::Kept));
+                };
+                let age = now.saturating_sub(record.last_transition.timestamp);
+                if age <= stale_after.as_secs() {
+                    return Ok(ActorGenerationDecision::Settled(ActorSweepSettled::Kept));
+                }
 
-            let lease =
-                load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)?;
-            if lease.as_ref().is_some_and(|lease| {
-                status::supervisor_lease_is_fresh_and_alive(
-                    lease.last_heartbeat,
-                    lease.supervisor_pid.is_some_and(process_is_alive),
-                    now,
-                    stale_after,
+                let lease =
+                    load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)?;
+                if lease.as_ref().is_some_and(|lease| {
+                    status::supervisor_lease_is_fresh_and_alive(
+                        lease.last_heartbeat,
+                        lease.supervisor_pid.is_some_and(process_is_alive),
+                        now,
+                        stale_after,
+                    )
+                }) {
+                    return Ok(ActorGenerationDecision::Settled(ActorSweepSettled::Kept));
+                }
+
+                if dry_run {
+                    eprintln!(
+                        "[{}] would close stale starting actor: {} session={} pane={} generation={} age_secs={}",
+                        caller,
+                        record.document_id,
+                        record.session_id,
+                        record.pane_id,
+                        record.generation,
+                        age
+                    );
+                    return Ok(ActorGenerationDecision::Settled(ActorSweepSettled::Closed));
+                }
+
+                let mut next = record.clone();
+                next.state = agent_doc_controller::actor::ActorState::Closed;
+                next.last_transition = agent_doc_controller::actor::ActorLastTransition {
+                    caller: caller.to_string(),
+                    reason: "stale_starting_actor".to_string(),
+                    timestamp: now,
+                    prior_generation: record.generation,
+                    new_generation: record.generation,
+                };
+                between_decision_and_write(&record);
+                Ok(ActorGenerationDecision::Write {
+                    authority: ActorGenerationAuthority {
+                        generation: record.generation,
+                        revision,
+                    },
+                    write: (record, next, age),
+                })
+            },
+            &mut |authority, (_, next, _)| {
+                store_actor_record_fenced(
+                    project_root,
+                    authority.generation,
+                    authority.revision,
+                    next,
                 )
-            }) {
-                kept += 1;
-                break;
-            }
-
-            if dry_run {
-                eprintln!(
-                    "[{}] would close stale starting actor: {} session={} pane={} generation={} age_secs={}",
-                    caller,
-                    record.document_id,
-                    record.session_id,
-                    record.pane_id,
-                    record.generation,
-                    age
+            },
+            &mut |attempt, redecide, (record, _, _), err| {
+                agent_doc_ops_log_io::log_op(
+                    Path::new(&record.document_id),
+                    &format!(
+                        "{}_close_stale_starting_actor_fence_lost file={} pane={} generation={} attempt={} redecide={} error={:#} (#controllerclosefence)",
+                        caller,
+                        record.document_id,
+                        record.pane_id,
+                        record.generation,
+                        attempt,
+                        redecide,
+                        err
+                    ),
+                );
+            },
+        )?;
+        match drive {
+            ActorGenerationDrive::Settled(ActorSweepSettled::Kept)
+            | ActorGenerationDrive::Exhausted { .. } => kept += 1,
+            ActorGenerationDrive::Settled(ActorSweepSettled::Closed) => closed += 1,
+            ActorGenerationDrive::Applied {
+                write: (record, _, age),
+                ..
+            } => {
+                agent_doc_ops_log_io::log_op(
+                    Path::new(&record.document_id),
+                    &format!(
+                        "{}_closed_stale_starting_actor file={} session={} pane={} generation={} age_secs={}",
+                        caller,
+                        record.document_id,
+                        record.session_id,
+                        record.pane_id,
+                        record.generation,
+                        age
+                    ),
                 );
                 closed += 1;
-                break;
-            }
-
-            let mut next = record.clone();
-            next.state = agent_doc_controller::actor::ActorState::Closed;
-            next.last_transition = agent_doc_controller::actor::ActorLastTransition {
-                caller: caller.to_string(),
-                reason: "stale_starting_actor".to_string(),
-                timestamp: now,
-                prior_generation: record.generation,
-                new_generation: record.generation,
-            };
-            between_decision_and_write(&record);
-            match store_actor_record_fenced(project_root, record.generation, revision, &next) {
-                Ok(_) => {
-                    agent_doc_ops_log_io::log_op(
-                        Path::new(&record.document_id),
-                        &format!(
-                            "{}_closed_stale_starting_actor file={} session={} pane={} generation={} age_secs={}",
-                            caller,
-                            record.document_id,
-                            record.session_id,
-                            record.pane_id,
-                            record.generation,
-                            age
-                        ),
-                    );
-                    closed += 1;
-                    break;
-                }
-                Err(err) if agent_doc_session_actor_io::binding_fence_lost(&err) => {
-                    let redecide = attempt < ACTOR_CLOSE_FENCE_ATTEMPTS;
-                    agent_doc_ops_log_io::log_op(
-                        Path::new(&record.document_id),
-                        &format!(
-                            "{}_close_stale_starting_actor_fence_lost file={} pane={} generation={} attempt={} redecide={} error={:#} (#controllerclosefence)",
-                            caller,
-                            record.document_id,
-                            record.pane_id,
-                            record.generation,
-                            attempt,
-                            redecide,
-                            err
-                        ),
-                    );
-                    if redecide {
-                        continue;
-                    }
-                    kept += 1;
-                    break;
-                }
-                Err(err) => return Err(err),
             }
         }
     }
@@ -14552,131 +14575,179 @@ where
         .filter(|record| is_candidate(record))
         .map(|record| record.document_id.clone())
         .collect::<Vec<_>>();
-    let mut attempts = BTreeMap::<String, usize>::new();
-    let mut queue = candidates
-        .into_iter()
-        .collect::<std::collections::VecDeque<_>>();
-    while let Some(document_id) = queue.pop_front() {
-        let attempt = {
-            let attempt = attempts.entry(document_id.clone()).or_insert(0);
-            *attempt += 1;
-            *attempt
-        };
-        let now = timestamp_secs();
-        let (record, revision) = load_actor_record_with_revision_from_conn(&conn, &document_id)?;
-        let Some(record) = record.filter(|record| is_candidate(record)) else {
-            // Closed or unbound after the enumeration (or after a lost fence):
-            // nothing is left for this sweep to close.
-            kept += 1;
-            continue;
-        };
-        let record = &record;
-        let pane_is_alive = pane_alive(&record.pane_id);
-        let last_activity = actor_last_activity_timestamp(record);
-        let idle_age = now.saturating_sub(last_activity);
-        let idle = idle_for.is_some_and(|threshold| idle_age >= threshold.as_secs());
-        if pane_is_alive && !idle {
-            kept += 1;
-            continue;
-        }
+    for document_id in candidates {
+        let write_failed = std::cell::Cell::new(false);
+        let last_decided = std::cell::RefCell::new(None);
+        let drive = drive_actor_generation_decisions(
+            &document_id,
+            ACTOR_CLOSE_FENCE_ATTEMPTS,
+            &mut |_| {
+                let now = timestamp_secs();
+                let (record, revision) =
+                    load_actor_record_with_revision_from_conn(&conn, &document_id)?;
+                let Some(record) = record.filter(|record| is_candidate(record)) else {
+                    // Closed or unbound after the enumeration (or after a lost fence):
+                    // nothing is left for this sweep to close.
+                    return Ok(ActorGenerationDecision::Settled(ActorSweepSettled::Kept));
+                };
+                let record = &record;
+                let pane_is_alive = pane_alive(&record.pane_id);
+                let last_activity = actor_last_activity_timestamp(record);
+                let idle_age = now.saturating_sub(last_activity);
+                let idle = idle_for.is_some_and(|threshold| idle_age >= threshold.as_secs());
+                if pane_is_alive && !idle {
+                    return Ok(ActorGenerationDecision::Settled(ActorSweepSettled::Kept));
+                }
 
-        // `#gcdefercrash`: a dead-pane close must not pre-empt the crash
-        // watchdog. Closing hides the actor from it, and the session then
-        // never restarts (2026-10-20 `agent-doc-bugs.md`).
-        if !idle {
-            let decision = crash_owner(record);
-            if decision
-                == agent_doc_supervisor::crash_policy::DeadPaneActorGcDecision::DeferToWatchdog
-            {
-                agent_doc_ops_log_io::log_op(
-                    Path::new(&record.document_id),
-                    &format!(
-                        "{caller}_close_stale_actor_deferred file={} session={} pane={} generation={} cause=dead_pane decision={} reason=crash_watchdog_owns_recovery (#gcdefercrash)",
+                // `#gcdefercrash`: a dead-pane close must not pre-empt the crash
+                // watchdog. Closing hides the actor from it, and the session then
+                // never restarts (2026-10-20 `agent-doc-bugs.md`).
+                if !idle {
+                    let decision = crash_owner(record);
+                    if decision
+                        == agent_doc_supervisor::crash_policy::DeadPaneActorGcDecision::DeferToWatchdog
+                    {
+                        agent_doc_ops_log_io::log_op(
+                            Path::new(&record.document_id),
+                            &format!(
+                                "{caller}_close_stale_actor_deferred file={} session={} pane={} generation={} cause=dead_pane decision={} reason=crash_watchdog_owns_recovery (#gcdefercrash)",
+                                record.document_id,
+                                record.session_id,
+                                record.pane_id,
+                                record.generation,
+                                decision.as_str(),
+                            ),
+                        );
+                        return Ok(ActorGenerationDecision::Settled(ActorSweepSettled::Kept));
+                    }
+                }
+
+                let cause = if idle {
+                    format!("idle age_secs={idle_age}")
+                } else {
+                    "dead_pane".to_string()
+                };
+                let mut supervisor_kill = None;
+                if idle && pane_is_alive {
+                    match agent_doc_supervisor_io::selfkill::drive_supervisor_kill(
+                        Path::new(&record.document_id),
+                        agent_doc_supervisor_io::selfkill::selfkill_grace(),
+                        dry_run,
+                    ) {
+                        Ok(
+                            agent_doc_supervisor_io::selfkill::SupervisorKillOutcome::RefusedSelfAncestor(
+                                pid,
+                            ),
+                        ) => {
+                            agent_doc_ops_log_io::log_op(
+                                Path::new(&record.document_id),
+                                &format!(
+                                    "{caller}_close_idle_actor_skipped file={} pane={} generation={} supervisor_pid={} reason=self_ancestor",
+                                    record.document_id, record.pane_id, record.generation, pid
+                                ),
+                            );
+                            return Ok(ActorGenerationDecision::Settled(ActorSweepSettled::Kept));
+                        }
+                        Ok(outcome) => supervisor_kill = Some(format!("{outcome:?}")),
+                        Err(error) => {
+                            agent_doc_ops_log_io::log_op(
+                                Path::new(&record.document_id),
+                                &format!(
+                                    "{caller}_close_idle_actor_skipped file={} pane={} generation={} reason=supervisor_kill_failed error={error:#}",
+                                    record.document_id, record.pane_id, record.generation
+                                ),
+                            );
+                            return Ok(ActorGenerationDecision::Settled(ActorSweepSettled::Kept));
+                        }
+                    }
+                }
+
+                if dry_run {
+                    eprintln!(
+                        "[{}] would close stale actor: {} session={} pane={} generation={} state={} cause={} supervisor_kill={} reason={}",
+                        caller,
                         record.document_id,
                         record.session_id,
                         record.pane_id,
                         record.generation,
-                        decision.as_str(),
-                    ),
-                );
-                kept += 1;
-                continue;
-            }
-        }
+                        record.state.as_str(),
+                        cause,
+                        supervisor_kill.as_deref().unwrap_or("not_required"),
+                        reason
+                    );
+                    return Ok(ActorGenerationDecision::Settled(ActorSweepSettled::Closed));
+                }
 
-        let cause = if idle {
-            format!("idle age_secs={idle_age}")
-        } else {
-            "dead_pane".to_string()
-        };
-        let mut supervisor_kill = None;
-        if idle && pane_is_alive {
-            match agent_doc_supervisor_io::selfkill::drive_supervisor_kill(
+                let mut next = record.clone();
+                next.state = agent_doc_controller::actor::ActorState::Closed;
+                next.pane_id.clear();
+                next.window_id.clear();
+                next.last_transition = agent_doc_controller::actor::ActorLastTransition {
+                    caller: caller.to_string(),
+                    reason: reason.to_string(),
+                    timestamp: now,
+                    prior_generation: record.generation,
+                    new_generation: record.generation,
+                };
+                between_decision_and_write(record);
+                *last_decided.borrow_mut() = Some((record.clone(), cause.clone()));
+                Ok(ActorGenerationDecision::Write {
+                    authority: ActorGenerationAuthority {
+                        generation: record.generation,
+                        revision,
+                    },
+                    write: (record.clone(), next, cause, supervisor_kill),
+                })
+            },
+            &mut |authority, (_, next, _, _)| {
+                store_actor_record_fenced(
+                    project_root,
+                    authority.generation,
+                    authority.revision,
+                    next,
+                )
+                .inspect_err(|err| {
+                    write_failed.set(!agent_doc_session_actor_io::binding_fence_lost(err))
+                })
+            },
+            &mut |attempt, redecide, (record, _, cause, _), err| {
+                // `#controllerclosefence`: a commit landed after the decision.
+                // Re-decide against it instead of closing what it wrote.
+                if redecide {
+                    agent_doc_ops_log_io::log_op(
+                        Path::new(&record.document_id),
+                        &format!(
+                            "{}_close_stale_actor_fence_lost file={} pane={} generation={} cause={} attempt={} redecide=true error={:#} (#controllerclosefence)",
+                            caller,
+                            record.document_id,
+                            record.pane_id,
+                            record.generation,
+                            cause,
+                            attempt,
+                            err
+                        ),
+                    );
+                }
+            },
+        );
+        let skipped = |record: &agent_doc_controller::actor::ActorRecord,
+                       cause: &str,
+                       err: &anyhow::Error| {
+            agent_doc_ops_log_io::log_op(
                 Path::new(&record.document_id),
-                agent_doc_supervisor_io::selfkill::selfkill_grace(),
-                dry_run,
-            ) {
-                Ok(
-                    agent_doc_supervisor_io::selfkill::SupervisorKillOutcome::RefusedSelfAncestor(
-                        pid,
-                    ),
-                ) => {
-                    agent_doc_ops_log_io::log_op(
-                        Path::new(&record.document_id),
-                        &format!(
-                            "{caller}_close_idle_actor_skipped file={} pane={} generation={} supervisor_pid={} reason=self_ancestor",
-                            record.document_id, record.pane_id, record.generation, pid
-                        ),
-                    );
-                    kept += 1;
-                    continue;
-                }
-                Ok(outcome) => supervisor_kill = Some(format!("{outcome:?}")),
-                Err(error) => {
-                    agent_doc_ops_log_io::log_op(
-                        Path::new(&record.document_id),
-                        &format!(
-                            "{caller}_close_idle_actor_skipped file={} pane={} generation={} reason=supervisor_kill_failed error={error:#}",
-                            record.document_id, record.pane_id, record.generation
-                        ),
-                    );
-                    kept += 1;
-                    continue;
-                }
-            }
-        }
-
-        if dry_run {
-            eprintln!(
-                "[{}] would close stale actor: {} session={} pane={} generation={} state={} cause={} supervisor_kill={} reason={}",
-                caller,
-                record.document_id,
-                record.session_id,
-                record.pane_id,
-                record.generation,
-                record.state.as_str(),
-                cause,
-                supervisor_kill.as_deref().unwrap_or("not_required"),
-                reason
+                &format!(
+                    "{}_close_stale_actor_skipped file={} pane={} generation={} cause={} error={}",
+                    caller, record.document_id, record.pane_id, record.generation, cause, err
+                ),
             );
-            closed += 1;
-            continue;
-        }
-
-        let mut next = record.clone();
-        next.state = agent_doc_controller::actor::ActorState::Closed;
-        next.pane_id.clear();
-        next.window_id.clear();
-        next.last_transition = agent_doc_controller::actor::ActorLastTransition {
-            caller: caller.to_string(),
-            reason: reason.to_string(),
-            timestamp: now,
-            prior_generation: record.generation,
-            new_generation: record.generation,
         };
-        between_decision_and_write(record);
-        match store_actor_record_fenced(project_root, record.generation, revision, &next) {
-            Ok(_) => {
+        match drive {
+            Ok(ActorGenerationDrive::Settled(ActorSweepSettled::Kept)) => kept += 1,
+            Ok(ActorGenerationDrive::Settled(ActorSweepSettled::Closed)) => closed += 1,
+            Ok(ActorGenerationDrive::Applied {
+                write: (record, _, cause, supervisor_kill),
+                ..
+            }) => {
                 agent_doc_ops_log_io::log_op(
                     Path::new(&record.document_id),
                     &format!(
@@ -14694,40 +14765,25 @@ where
                 );
                 closed += 1;
             }
-            Err(err)
-                if agent_doc_session_actor_io::binding_fence_lost(&err)
-                    && attempt < ACTOR_CLOSE_FENCE_ATTEMPTS =>
-            {
-                // `#controllerclosefence`: a commit landed after the decision.
-                // Re-decide against it instead of closing what it wrote.
-                agent_doc_ops_log_io::log_op(
-                    Path::new(&record.document_id),
-                    &format!(
-                        "{}_close_stale_actor_fence_lost file={} pane={} generation={} cause={} attempt={} redecide=true error={:#} (#controllerclosefence)",
-                        caller,
-                        record.document_id,
-                        record.pane_id,
-                        record.generation,
-                        cause,
-                        attempt,
-                        err
-                    ),
-                );
-                queue.push_front(document_id);
-            }
-            Err(err) => {
-                agent_doc_ops_log_io::log_op(
-                    Path::new(&record.document_id),
-                    &format!(
-                        "{}_close_stale_actor_skipped file={} pane={} generation={} cause={} error={}",
-                        caller, record.document_id, record.pane_id, record.generation, cause, err
-                    ),
-                );
+            Ok(ActorGenerationDrive::Exhausted {
+                write: (record, _, cause, _),
+                error,
+                ..
+            }) => {
+                skipped(&record, &cause, &error);
                 kept += 1;
             }
+            // A failed write (not a lost fence) leaves the record to the next
+            // sweep; a failed decision read propagates.
+            Err(err) if write_failed.get() => {
+                if let Some((record, cause)) = last_decided.borrow().as_ref() {
+                    skipped(record, cause, &err);
+                }
+                kept += 1;
+            }
+            Err(err) => return Err(err),
         }
     }
-
     Ok((closed, kept))
 }
 
@@ -14878,80 +14934,116 @@ fn prune_dead_actors_with_hook(
     between_decision_and_delete: &mut dyn FnMut(&agent_doc_controller::actor::ActorRecord),
 ) -> Result<(usize, usize)> {
     let store = load_actor_store(project_root)?;
-    let mut conn = open_state_db(project_root)?;
+    let conn = std::cell::RefCell::new(open_state_db(project_root)?);
     let mut pruned = 0;
     let mut kept = 0;
 
     let document_ids = store.keys().cloned().collect::<Vec<_>>();
     for document_id in document_ids {
-        let mut attempt = 0;
-        loop {
-            attempt += 1;
-            let now = timestamp_secs();
-            let (record, revision) =
-                load_actor_record_with_revision_from_conn(&conn, &document_id)?;
-            let Some(record) = record else {
-                // Already removed after the enumeration.
-                break;
-            };
-            if record.state != agent_doc_controller::actor::ActorState::Closed {
-                kept += 1;
-                break;
-            }
-            let age = now.saturating_sub(record.last_transition.timestamp);
-            if age <= dead_after.as_secs() {
-                kept += 1;
-                break;
-            }
-            // Never prune a record a live supervisor still owns (same guard as the
-            // stale-Starting sweep). The pid-alive check inside means a dead
-            // supervisor's lingering lease never blocks the prune.
-            let lease =
-                load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)?;
-            if lease.as_ref().is_some_and(|lease| {
-                status::supervisor_lease_is_fresh_and_alive(
-                    lease.last_heartbeat,
-                    lease.supervisor_pid.is_some_and(process_is_alive),
-                    now,
-                    dead_after,
-                )
-            }) {
-                kept += 1;
-                break;
-            }
+        let drive = drive_actor_generation_decisions(
+            &document_id,
+            ACTOR_CLOSE_FENCE_ATTEMPTS,
+            &mut |_| {
+                let conn = conn.borrow();
+                let now = timestamp_secs();
+                let (record, revision) =
+                    load_actor_record_with_revision_from_conn(&conn, &document_id)?;
+                let Some(record) = record else {
+                    // Already removed after the enumeration.
+                    return Ok(ActorGenerationDecision::Settled(None));
+                };
+                if record.state != agent_doc_controller::actor::ActorState::Closed {
+                    return Ok(ActorGenerationDecision::Settled(Some(
+                        ActorSweepSettled::Kept,
+                    )));
+                }
+                let age = now.saturating_sub(record.last_transition.timestamp);
+                if age <= dead_after.as_secs() {
+                    return Ok(ActorGenerationDecision::Settled(Some(
+                        ActorSweepSettled::Kept,
+                    )));
+                }
+                // Never prune a record a live supervisor still owns (same guard as the
+                // stale-Starting sweep). The pid-alive check inside means a dead
+                // supervisor's lingering lease never blocks the prune.
+                let lease =
+                    load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)?;
+                if lease.as_ref().is_some_and(|lease| {
+                    status::supervisor_lease_is_fresh_and_alive(
+                        lease.last_heartbeat,
+                        lease.supervisor_pid.is_some_and(process_is_alive),
+                        now,
+                        dead_after,
+                    )
+                }) {
+                    return Ok(ActorGenerationDecision::Settled(Some(
+                        ActorSweepSettled::Kept,
+                    )));
+                }
 
-            if dry_run {
-                eprintln!(
-                    "[{}] would prune dead actor record: {} session={} generation={} state={} age_secs={}",
-                    caller,
-                    record.document_id,
-                    record.session_id,
-                    record.generation,
-                    record.state.as_str(),
-                    age
-                );
-                agent_doc_ops_log_io::log_op(
-                    Path::new(&record.document_id),
-                    &format!(
-                        "{}_would_prune_dead_actor document_id={} generation={} state={} age_secs={} reason=dead_closed_record",
+                if dry_run {
+                    eprintln!(
+                        "[{}] would prune dead actor record: {} session={} generation={} state={} age_secs={}",
                         caller,
                         record.document_id,
+                        record.session_id,
                         record.generation,
                         record.state.as_str(),
                         age
+                    );
+                    agent_doc_ops_log_io::log_op(
+                        Path::new(&record.document_id),
+                        &format!(
+                            "{}_would_prune_dead_actor document_id={} generation={} state={} age_secs={} reason=dead_closed_record",
+                            caller,
+                            record.document_id,
+                            record.generation,
+                            record.state.as_str(),
+                            age
+                        ),
+                    );
+                    return Ok(ActorGenerationDecision::Settled(Some(
+                        ActorSweepSettled::Closed,
+                    )));
+                }
+
+                between_decision_and_delete(&record);
+                Ok(ActorGenerationDecision::Write {
+                    authority: ActorGenerationAuthority {
+                        generation: record.generation,
+                        revision,
+                    },
+                    write: (record, age),
+                })
+            },
+            &mut |authority, (record, _)| {
+                state_store::delete_actor_document_fenced_tx(
+                    &mut conn.borrow_mut(),
+                    &record.document_id,
+                    authority.generation,
+                    authority.revision,
+                )
+            },
+            &mut |attempt, redecide, (record, _), err| {
+                agent_doc_ops_log_io::log_op(
+                    Path::new(&record.document_id),
+                    &format!(
+                        "{}_prune_dead_actor_fence_lost document_id={} generation={} attempt={} redecide={} error={:#} (#controllerclosefence)",
+                        caller, record.document_id, record.generation, attempt, redecide, err
                     ),
                 );
-                pruned += 1;
-                break;
-            }
-
-            between_decision_and_delete(&record);
-            match state_store::delete_actor_document_fenced_tx(
-                &mut conn,
-                &record.document_id,
-                revision,
-            ) {
-                Ok(removed) if removed > 0 => {
+            },
+        )?;
+        match drive {
+            ActorGenerationDrive::Settled(None) => {}
+            ActorGenerationDrive::Settled(Some(ActorSweepSettled::Kept))
+            | ActorGenerationDrive::Exhausted { .. } => kept += 1,
+            ActorGenerationDrive::Settled(Some(ActorSweepSettled::Closed)) => pruned += 1,
+            ActorGenerationDrive::Applied {
+                write: (record, age),
+                receipt: removed,
+            } => {
+                if removed > 0 {
                     agent_doc_ops_log_io::log_op(
                         Path::new(&record.document_id),
                         &format!(
@@ -14964,28 +15056,9 @@ fn prune_dead_actors_with_hook(
                         ),
                     );
                     pruned += 1;
-                    break;
-                }
-                Ok(_) => {
+                } else {
                     kept += 1;
-                    break;
                 }
-                Err(err) if agent_doc_session_actor_io::binding_fence_lost(&err) => {
-                    let redecide = attempt < ACTOR_CLOSE_FENCE_ATTEMPTS;
-                    agent_doc_ops_log_io::log_op(
-                        Path::new(&record.document_id),
-                        &format!(
-                            "{}_prune_dead_actor_fence_lost document_id={} generation={} attempt={} redecide={} error={:#} (#controllerclosefence)",
-                            caller, record.document_id, record.generation, attempt, redecide, err
-                        ),
-                    );
-                    if redecide {
-                        continue;
-                    }
-                    kept += 1;
-                    break;
-                }
-                Err(err) => return Err(err),
             }
         }
     }
@@ -15500,50 +15573,54 @@ fn evict_cross_document_pane_bindings_with_hook(
         .collect::<Vec<_>>();
     let mut evicted = 0;
     for document_id in candidates {
-        let mut attempt = 0;
-        loop {
-            attempt += 1;
-            let now = timestamp_secs();
-            let (record, revision) =
-                load_actor_record_with_revision_from_conn(&conn, &document_id)?;
-            let Some(record) = record.filter(|record| is_alias(record)) else {
-                break;
-            };
-            let mut next = record.clone();
-            next.state = agent_doc_controller::actor::ActorState::Closed;
-            next.pane_id.clear();
-            next.window_id.clear();
-            next.last_transition = agent_doc_controller::actor::ActorLastTransition {
-                caller: caller.to_string(),
-                reason: format!(
-                    "evicted_cross_document_pane owner={owner_document_id} pane={pane_id}"
-                ),
-                timestamp: now,
-                prior_generation: record.generation,
-                new_generation: record.generation,
-            };
-            between_decision_and_write(&record);
-            match store_actor_record_fenced(project_root, record.generation, revision, &next) {
-                Ok(_) => {
-                    agent_doc_ops_log_io::log_op(
-                        Path::new(&record.document_id),
-                        &format!(
-                            "{}_evicted_cross_document_pane_binding stale_document={} owner_document={} pane={} generation={} prior_state={}",
-                            caller,
-                            record.document_id,
-                            owner_document_id,
-                            pane_id,
-                            record.generation,
-                            record.state.as_str()
-                        ),
-                    );
-                    evicted += 1;
-                    break;
-                }
-                Err(err)
-                    if agent_doc_session_actor_io::binding_fence_lost(&err)
-                        && attempt < ACTOR_CLOSE_FENCE_ATTEMPTS =>
-                {
+        let write_failed = std::cell::Cell::new(false);
+        let last_decided = std::cell::RefCell::new(None);
+        let drive = drive_actor_generation_decisions(
+            &document_id,
+            ACTOR_CLOSE_FENCE_ATTEMPTS,
+            &mut |_| {
+                let now = timestamp_secs();
+                let (record, revision) =
+                    load_actor_record_with_revision_from_conn(&conn, &document_id)?;
+                let Some(record) = record.filter(|record| is_alias(record)) else {
+                    return Ok(ActorGenerationDecision::Settled(()));
+                };
+                let mut next = record.clone();
+                next.state = agent_doc_controller::actor::ActorState::Closed;
+                next.pane_id.clear();
+                next.window_id.clear();
+                next.last_transition = agent_doc_controller::actor::ActorLastTransition {
+                    caller: caller.to_string(),
+                    reason: format!(
+                        "evicted_cross_document_pane owner={owner_document_id} pane={pane_id}"
+                    ),
+                    timestamp: now,
+                    prior_generation: record.generation,
+                    new_generation: record.generation,
+                };
+                between_decision_and_write(&record);
+                *last_decided.borrow_mut() = Some(record.clone());
+                Ok(ActorGenerationDecision::Write {
+                    authority: ActorGenerationAuthority {
+                        generation: record.generation,
+                        revision,
+                    },
+                    write: (record, next),
+                })
+            },
+            &mut |authority, (_, next)| {
+                store_actor_record_fenced(
+                    project_root,
+                    authority.generation,
+                    authority.revision,
+                    next,
+                )
+                .inspect_err(|err| {
+                    write_failed.set(!agent_doc_session_actor_io::binding_fence_lost(err))
+                })
+            },
+            &mut |attempt, redecide, (record, _), err| {
+                if redecide {
                     agent_doc_ops_log_io::log_op(
                         Path::new(&record.document_id),
                         &format!(
@@ -15552,17 +15629,49 @@ fn evict_cross_document_pane_bindings_with_hook(
                         ),
                     );
                 }
-                Err(err) => {
-                    agent_doc_ops_log_io::log_op(
-                        Path::new(&record.document_id),
-                        &format!(
-                            "{}_evict_cross_document_pane_binding_skipped stale_document={} pane={} generation={} error={}",
-                            caller, record.document_id, pane_id, record.generation, err
-                        ),
-                    );
-                    break;
+            },
+        );
+        let skipped = |record: &agent_doc_controller::actor::ActorRecord, err: &anyhow::Error| {
+            agent_doc_ops_log_io::log_op(
+                Path::new(&record.document_id),
+                &format!(
+                    "{}_evict_cross_document_pane_binding_skipped stale_document={} pane={} generation={} error={}",
+                    caller, record.document_id, pane_id, record.generation, err
+                ),
+            );
+        };
+        match drive {
+            Ok(ActorGenerationDrive::Settled(())) => {}
+            Ok(ActorGenerationDrive::Applied {
+                write: (record, _), ..
+            }) => {
+                agent_doc_ops_log_io::log_op(
+                    Path::new(&record.document_id),
+                    &format!(
+                        "{}_evicted_cross_document_pane_binding stale_document={} owner_document={} pane={} generation={} prior_state={}",
+                        caller,
+                        record.document_id,
+                        owner_document_id,
+                        pane_id,
+                        record.generation,
+                        record.state.as_str()
+                    ),
+                );
+                evicted += 1;
+            }
+            Ok(ActorGenerationDrive::Exhausted {
+                write: (record, _),
+                error,
+                ..
+            }) => skipped(&record, &error),
+            // A failed write (not a lost fence) leaves this binding to the
+            // next sweep; a failed decision read propagates.
+            Err(err) if write_failed.get() => {
+                if let Some(record) = last_decided.borrow().as_ref() {
+                    skipped(record, &err);
                 }
             }
+            Err(err) => return Err(err),
         }
     }
     Ok(evicted)

@@ -1,5 +1,6 @@
 //! Authoritative actor dispatch target and controller authorization I/O.
 
+use agent_doc_sqlite::ledger_cas::{ActorGenerationDecision, ActorGenerationDrive};
 use anyhow::Result;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -1320,35 +1321,59 @@ pub(crate) fn mark_route_lifecycle_fenced_with_hook(
 ) -> Result<RouteLifecycleWrite> {
     let base_dir = registry_base_dir_for_dispatch(file_path);
     let file_key = file.to_string_lossy();
-    let (current, revision) =
-        agent_doc_session_actor_io::load_record_with_revision_in(&base_dir, &file_key)?;
-    let Some(current) = current else {
-        return Ok(RouteLifecycleWrite::Superseded(None));
-    };
-    if !route_lifecycle_decision_still_current(decided, &current) {
-        return Ok(RouteLifecycleWrite::Superseded(Some(current)));
-    }
-    between_decision_and_write();
-    match agent_doc_controller_io::project_controller::mark_lifecycle(
-        &base_dir,
-        agent_doc_controller_io::project_controller::LifecycleRequest {
-            file: file.to_path_buf(),
-            session_id: current.session_id.clone(),
-            pane_id: current.pane_id.clone(),
-            generation: current.generation,
-            state,
-            caller: "route".to_string(),
-            reason: reason.to_string(),
-            expected_revision: Some(revision),
+    // `#implementlazilyowned`: one Lazily actor-generation epoch. A route
+    // decision is projection evidence, so a lost fence is final (one
+    // decision): the newer record is reported, never re-decided over.
+    let drive = agent_doc_sqlite::ledger_cas::drive_actor_generation_decisions(
+        &file_key,
+        1,
+        &mut |_| {
+            let (current, revision) =
+                agent_doc_session_actor_io::load_record_with_revision_in(&base_dir, &file_key)?;
+            let Some(current) = current else {
+                return Ok(ActorGenerationDecision::Settled(
+                    RouteLifecycleWrite::Superseded(None),
+                ));
+            };
+            if !route_lifecycle_decision_still_current(decided, &current) {
+                return Ok(ActorGenerationDecision::Settled(
+                    RouteLifecycleWrite::Superseded(Some(current)),
+                ));
+            }
+            between_decision_and_write();
+            Ok(ActorGenerationDecision::Write {
+                authority: agent_doc_sqlite::ledger_cas::ActorGenerationAuthority {
+                    generation: current.generation,
+                    revision,
+                },
+                write: current,
+            })
         },
-    ) {
-        Ok(updated) => Ok(RouteLifecycleWrite::Written(updated)),
-        Err(err) if agent_doc_session_actor_io::binding_fence_lost(&err) => {
+        &mut |authority, current| {
+            agent_doc_controller_io::project_controller::mark_lifecycle(
+                &base_dir,
+                agent_doc_controller_io::project_controller::LifecycleRequest {
+                    file: file.to_path_buf(),
+                    session_id: current.session_id.clone(),
+                    pane_id: current.pane_id.clone(),
+                    generation: authority.generation,
+                    state,
+                    caller: "route".to_string(),
+                    reason: reason.to_string(),
+                    expected_revision: Some(authority.revision),
+                },
+            )
+        },
+        &mut |_, _, _, _| {},
+    )?;
+    match drive {
+        ActorGenerationDrive::Settled(write) => Ok(write),
+        ActorGenerationDrive::Applied { receipt, .. } => Ok(RouteLifecycleWrite::Written(receipt)),
+        ActorGenerationDrive::Exhausted { .. } => {
             let (newer, _) =
                 agent_doc_session_actor_io::load_record_with_revision_in(&base_dir, &file_key)?;
             Ok(RouteLifecycleWrite::Superseded(newer))
         }
-        Err(err) => Err(err),
     }
 }
 

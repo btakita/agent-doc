@@ -6618,7 +6618,6 @@ pub fn store_actor_record_tx(
     store_actor_record_in_tx(
         conn,
         expected_prior_generation,
-        None,
         record,
         launch_mode,
         controller_epoch,
@@ -6643,14 +6642,18 @@ pub fn store_actor_record_fenced_tx(
     launch_mode: Option<String>,
     controller_epoch: Option<i64>,
 ) -> Result<ActorStoreWrite> {
-    store_actor_record_in_tx(
+    crate::ledger_cas::store_actor_record_if_generation(
         conn,
-        Some(expected_prior_generation),
-        Some(expected_prior_revision),
-        record,
-        launch_mode,
-        controller_epoch,
-        None,
+        crate::ledger_cas::ActorGenerationAuthority {
+            generation: expected_prior_generation,
+            revision: expected_prior_revision,
+        },
+        crate::ledger_cas::ActorRecordStore {
+            record: record.clone(),
+            launch_mode,
+            controller_epoch,
+            release_ready_dispatches_as_of: None,
+        },
     )
     .map(|(write, _)| write)
 }
@@ -6686,7 +6689,6 @@ pub fn store_actor_lifecycle_record_tx(
     store_actor_record_in_tx(
         conn,
         expected_prior_generation,
-        None,
         record,
         launch_mode,
         controller_epoch,
@@ -6714,21 +6716,24 @@ pub fn store_actor_lifecycle_record_fenced_tx(
     controller_epoch: Option<i64>,
     now_secs: i64,
 ) -> Result<(ActorStoreWrite, usize)> {
-    store_actor_record_in_tx(
+    crate::ledger_cas::store_actor_record_if_generation(
         conn,
-        Some(expected_prior_generation),
-        Some(expected_prior_revision),
-        record,
-        launch_mode,
-        controller_epoch,
-        (record.state == ActorState::Ready).then_some(now_secs),
+        crate::ledger_cas::ActorGenerationAuthority {
+            generation: expected_prior_generation,
+            revision: expected_prior_revision,
+        },
+        crate::ledger_cas::ActorRecordStore {
+            record: record.clone(),
+            launch_mode,
+            controller_epoch,
+            release_ready_dispatches_as_of: (record.state == ActorState::Ready).then_some(now_secs),
+        },
     )
 }
 
 fn store_actor_record_in_tx(
     conn: &mut Connection,
     expected_prior_generation: Option<u64>,
-    expected_prior_revision: Option<ActorRevision>,
     record: &ActorRecord,
     launch_mode: Option<String>,
     controller_epoch: Option<i64>,
@@ -6756,18 +6761,35 @@ fn store_actor_record_in_tx(
             prior_generation
         );
     }
-    if let Some(expected) = expected_prior_revision {
-        let found = load_actor_revision(&tx, &record.document_id)?;
-        if found != expected {
-            anyhow::bail!(
-                "controller actor generation compare-and-swap failed for {}: generation {} was rewritten after the decision (expected revision {:?}, found {:?})",
-                record.document_id,
-                prior_generation,
-                expected.last_transition_id,
-                found.last_transition_id
-            );
-        }
-    }
+    let written = apply_actor_record_write_in_tx(
+        &tx,
+        previous.as_ref(),
+        prior_generation,
+        record,
+        launch_mode,
+        controller_epoch,
+        release_ready_dispatches_as_of,
+    )?;
+    tx.commit()?;
+    Ok(written)
+}
+
+/// The writes of one accepted actor-record transaction, run inside the caller's
+/// transaction after its comparison (`store_actor_record_in_tx`'s generation
+/// check, or the Lazily actor-generation adapter's
+/// [`crate::ledger_cas::ActorGenerationWrite`] comparator): reject a
+/// generation regression, recover cross-document pane aliases, insert the
+/// transition, upsert the document row, and release the dispatch receipts a
+/// `Ready` edge ends. The caller commits.
+pub(crate) fn apply_actor_record_write_in_tx(
+    tx: &Connection,
+    previous: Option<&ActorRecord>,
+    prior_generation: u64,
+    record: &ActorRecord,
+    launch_mode: Option<String>,
+    controller_epoch: Option<i64>,
+    release_ready_dispatches_as_of: Option<i64>,
+) -> Result<(ActorStoreWrite, usize)> {
     if record.generation < prior_generation {
         anyhow::bail!(
             "controller actor generation regression for {}: attempted {}, current {}",
@@ -6778,7 +6800,7 @@ fn store_actor_record_in_tx(
     }
     let evicted_document_ids = if record.state != ActorState::Closed {
         evict_cross_document_actor_pane_bindings_tx(
-            &tx,
+            tx,
             &record.document_id,
             &record.pane_id,
             &record.last_transition.caller,
@@ -6789,24 +6811,23 @@ fn store_actor_record_in_tx(
     } else {
         Vec::new()
     };
-    let transition_id = insert_actor_transition(&tx, previous.as_ref(), record)?;
-    upsert_actor_document(&tx, record, transition_id, launch_mode, controller_epoch)?;
+    let transition_id = insert_actor_transition(tx, previous, record)?;
+    upsert_actor_document(tx, record, transition_id, launch_mode, controller_epoch)?;
     // `#queuedclearflake`: only a transition INTO `Ready` ends a turn. A `Ready`
     // re-asserted onto a `Ready` actor (a supervisor `idle_pane_reconcile` racing
     // its own slow startup `prompt_ready`, or any repeat) ended nothing: the actor
     // never left `Ready`, which is also exactly the state a route-dispatched turn
     // runs in. Settling there released that running turn's receipt. It keeps the
     // pre-turn-grace leak sweep only.
-    let released_dispatches = match (release_ready_dispatches_as_of, previous.as_ref()) {
+    let released_dispatches = match (release_ready_dispatches_as_of, previous) {
         (None, _) => 0,
         (Some(now_secs), Some(prior)) if prior.state == ActorState::Ready => {
-            sweep_open_dispatches_past_pre_turn_grace_as_of(&tx, &record.document_id, now_secs)?
+            sweep_open_dispatches_past_pre_turn_grace_as_of(tx, &record.document_id, now_secs)?
         }
         (Some(now_secs), _) => {
-            mark_open_dispatches_consumed_as_of(&tx, &record.document_id, now_secs)?
+            mark_open_dispatches_consumed_as_of(tx, &record.document_id, now_secs)?
         }
     };
-    tx.commit()?;
     Ok((
         ActorStoreWrite {
             record: record.clone(),
@@ -6826,6 +6847,18 @@ fn store_actor_record_in_tx(
 /// 1).
 pub fn delete_actor_document_tx(conn: &mut Connection, document_id: &str) -> Result<usize> {
     let tx = crate::immediate_transaction(conn)?;
+    let removed = delete_actor_document_rows_in_tx(&tx, document_id)?;
+    tx.commit()?;
+    Ok(removed)
+}
+
+/// Delete `document_id`'s `documents` row with its `actor_transitions` history
+/// and `supervisor_leases` rows inside the caller's transaction. Returns the
+/// number of `documents` rows removed (0 or 1).
+pub(crate) fn delete_actor_document_rows_in_tx(
+    tx: &Connection,
+    document_id: &str,
+) -> Result<usize> {
     tx.execute(
         "DELETE FROM actor_transitions WHERE document_id = ?1",
         params![document_id],
@@ -6834,12 +6867,10 @@ pub fn delete_actor_document_tx(conn: &mut Connection, document_id: &str) -> Res
         "DELETE FROM supervisor_leases WHERE document_id = ?1",
         params![document_id],
     )?;
-    let removed = tx.execute(
+    Ok(tx.execute(
         "DELETE FROM documents WHERE document_id = ?1",
         params![document_id],
-    )?;
-    tx.commit()?;
-    Ok(removed)
+    )?)
 }
 
 /// `#controllerclosefence`: [`delete_actor_document_tx`] fenced on the exact
@@ -6854,32 +6885,17 @@ pub fn delete_actor_document_tx(conn: &mut Connection, document_id: &str) -> Res
 pub fn delete_actor_document_fenced_tx(
     conn: &mut Connection,
     document_id: &str,
+    expected_prior_generation: u64,
     expected_prior_revision: ActorRevision,
 ) -> Result<usize> {
-    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    let found = load_actor_revision(&tx, document_id)?;
-    if found != expected_prior_revision {
-        anyhow::bail!(
-            "controller actor generation compare-and-swap failed for {}: the record was rewritten after the prune decision (expected revision {:?}, found {:?})",
-            document_id,
-            expected_prior_revision.last_transition_id,
-            found.last_transition_id
-        );
-    }
-    tx.execute(
-        "DELETE FROM actor_transitions WHERE document_id = ?1",
-        params![document_id],
-    )?;
-    tx.execute(
-        "DELETE FROM supervisor_leases WHERE document_id = ?1",
-        params![document_id],
-    )?;
-    let removed = tx.execute(
-        "DELETE FROM documents WHERE document_id = ?1",
-        params![document_id],
-    )?;
-    tx.commit()?;
-    Ok(removed)
+    crate::ledger_cas::delete_actor_document_if_generation(
+        conn,
+        document_id,
+        crate::ledger_cas::ActorGenerationAuthority {
+            generation: expected_prior_generation,
+            revision: expected_prior_revision,
+        },
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -9753,7 +9769,7 @@ mod tests {
 
         // Re-opened at the same generation after the prune decided.
         store_actor_record_tx(&mut conn, Some(2), &actor(ActorState::Starting), None, None)?;
-        let err = delete_actor_document_fenced_tx(&mut conn, "doc", decided)
+        let err = delete_actor_document_fenced_tx(&mut conn, "doc", 2, decided)
             .expect_err("a delete fenced on a superseded revision must fail");
         assert!(
             err.to_string()
@@ -9768,7 +9784,7 @@ mod tests {
 
         let (_, current) = load_actor_record_with_revision_from_db(&conn, "doc")?;
         assert_eq!(
-            delete_actor_document_fenced_tx(&mut conn, "doc", current)?,
+            delete_actor_document_fenced_tx(&mut conn, "doc", 2, current)?,
             1
         );
         assert!(load_actor_record_from_db(&conn, "doc")?.is_none());

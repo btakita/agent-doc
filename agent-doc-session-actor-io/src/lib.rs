@@ -37,7 +37,7 @@ use std::path::{Path, PathBuf};
 
 pub use agent_doc_controller::actor::ActorRevision;
 use agent_doc_controller::actor::{ActorLastTransition, ActorRecord, ActorState};
-use agent_doc_sqlite::state_store;
+use agent_doc_sqlite::{ledger_cas, state_store};
 
 type ActorStore = std::collections::BTreeMap<String, ActorRecord>;
 
@@ -124,8 +124,21 @@ fn store_actor_record_in(
     let mut conn = state_store::open_state_db(base_dir)?;
     match (expected_prior_generation, expected_prior_revision) {
         (Some(generation), Some(revision)) => {
-            state_store::store_actor_record_fenced_tx(
-                &mut conn, generation, revision, record, None, None,
+            // `#implementlazilyowned`: one Lazily actor-generation epoch; a
+            // commit after the decision is `Superseded` (see
+            // [`binding_fence_lost`]) and writes nothing.
+            ledger_cas::store_actor_record_if_generation(
+                &mut conn,
+                ledger_cas::ActorGenerationAuthority {
+                    generation,
+                    revision,
+                },
+                ledger_cas::ActorRecordStore {
+                    record: record.clone(),
+                    launch_mode: None,
+                    controller_epoch: None,
+                    release_ready_dispatches_as_of: None,
+                },
             )?;
         }
         _ => {
@@ -300,7 +313,9 @@ pub fn binding_generation_in(base_dir: &Path, file: &str, session_id: &str) -> R
     current_generation_in(base_dir, file, Some(session_id))
 }
 
-/// The binding a fenced write decided against (`#dispatchrebindaudit`).
+/// The binding a fenced write decided against (`#dispatchrebindaudit`): the
+/// expected authority of the binding's Lazily actor-generation epoch
+/// ([`BindingFence::authority`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BindingFence {
     /// The actor generation the caller observed when it decided to bind.
@@ -311,6 +326,16 @@ pub struct BindingFence {
     /// kept the generation (an owner's `Busy`, a `Closed`, a same-pane
     /// projection) still moves the revision, so the fenced write fails on it.
     pub prior_revision: ActorRevision,
+}
+
+impl BindingFence {
+    /// The Lazily expected authority this fence names.
+    pub fn authority(&self) -> ledger_cas::ActorGenerationAuthority {
+        ledger_cas::ActorGenerationAuthority {
+            generation: self.prior_generation,
+            revision: self.prior_revision,
+        }
+    }
 }
 
 /// [`project_binding_in`] fenced on the record the caller decided against
@@ -376,13 +401,11 @@ pub fn load_record_with_revision_in(
 }
 
 /// Whether `err` is a fenced actor write that lost to a commit after its
-/// decision: a generation or same-generation revision compare-and-swap failure.
+/// decision: the Lazily actor-generation epoch was `Superseded`
+/// ([`agent_doc_sqlite::ledger_cas::actor_generation_superseded`]), locally or
+/// across the controller IPC channel.
 pub fn binding_fence_lost(err: &anyhow::Error) -> bool {
-    err.chain().any(|cause| {
-        cause
-            .to_string()
-            .contains("generation compare-and-swap failed")
-    })
+    agent_doc_sqlite::ledger_cas::actor_generation_superseded(err)
 }
 
 /// Correct the recorded window of an existing binding, fenced on the record the

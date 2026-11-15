@@ -695,6 +695,25 @@ deterministic tests.
   writes (`admin reap`/`handoff`, fenced on the operator's observed generation)
   and an owner's own lifecycle, harness, and placement writes are not sweeps and
   keep their generation fence.
+- Lazily owns the actor-generation effect (`#implementlazilyowned`). Every
+  fenced actor write (store, lifecycle store, `#actorprune` delete) is one
+  `lazily::EffectCasCore` epoch whose expected authority is the decision's
+  `ActorGenerationAuthority` (generation + `ActorRevision`);
+  `agent_doc_sqlite::ledger_cas::ActorGenerationWrite` is its
+  `CompareAndApply` adapter, comparing and writing in one IMMEDIATE
+  transaction. A moved authority is `Superseded`, writes zero rows, and
+  surfaces as the typed `ActorGenerationSuperseded` whose rendering keeps the
+  `generation compare-and-swap failed` text (the one classifier is
+  `ledger_cas::actor_generation_superseded`, which also recognizes that text
+  across the controller IPC channel); a generation regression or SQLite failure
+  is a rejection. A writer that re-decides (the controller sweeps, the
+  start_session alias close, the post-launch / pre-dispatch / recovered-owner
+  binds, start's same-owner generation race) runs through
+  `ledger_cas::drive_actor_generation_decisions`: each decision is the next
+  epoch, a supersession re-decides from a fresh read until the writer's cap
+  (three for sweeps, four for binds, one plus two for start), and no caller
+  loops on its own. A route lifecycle write and a window refresh take one
+  decision: their supersession is final.
 - A lifecycle transition decided from projection evidence is fenced on the
   revision too (`#bindingcallersaudit`). The route's `caller=route` lifecycle
   writes (promoting a `Starting` actor it saw at a ready prompt, recovering a

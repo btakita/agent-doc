@@ -81,6 +81,10 @@ use crate as session_registry_io;
 use agent_doc_controller::actor::ActorRecord;
 use agent_doc_session_actor_io::ActorRevision;
 use agent_doc_session_registry as session_registry;
+use agent_doc_sqlite::ledger_cas::{
+    ActorGenerationAuthority, ActorGenerationDecision, ActorGenerationDrive,
+    drive_actor_generation_decisions,
+};
 use agent_doc_sqlite::state_store;
 use agent_doc_supervisor::{
     OwnershipGeneration, OwnershipTransitionEvent, format_transition_event,
@@ -498,12 +502,35 @@ fn decide_post_launch_bind(
     ))
 }
 
-fn generation_cas_failed(err: &anyhow::Error) -> bool {
-    err.chain().any(|cause| {
-        cause
-            .to_string()
-            .contains("generation compare-and-swap failed")
-    })
+/// The Lazily expected authority of a bind write: a fenced bind names its own;
+/// a preserving refresh writes no actor record, so it carries the observed one.
+fn bind_write_authority(
+    write: ActorBindingWrite,
+    record: Option<&ActorRecord>,
+    revision: ActorRevision,
+) -> ActorGenerationAuthority {
+    match write {
+        ActorBindingWrite::Fenced(fence) => fence.authority(),
+        _ => ActorGenerationAuthority {
+            generation: record.map_or(0, |record| record.generation),
+            revision,
+        },
+    }
+}
+
+/// The exhausted-race error of a re-deciding bind: the last supersession with
+/// the bind's context.
+fn bind_race_lost<T>(
+    drive: ActorGenerationDrive<T, impl Sized, T>,
+    context: impl FnOnce() -> String,
+) -> Result<T> {
+    match drive {
+        ActorGenerationDrive::Settled(outcome)
+        | ActorGenerationDrive::Applied {
+            receipt: outcome, ..
+        } => Ok(outcome),
+        ActorGenerationDrive::Exhausted { error, .. } => Err(error.context(context())),
+    }
 }
 
 /// Bind `pane_id` as the dispatch target for `file` after the route launched or
@@ -557,59 +584,68 @@ pub fn bind_dispatch_target_after_owner_launch_with_hook_in(
     cwd: &str,
     between_decision_and_write: &mut dyn FnMut(),
 ) -> Result<PostLaunchDispatchBind> {
-    const MAX_DECISIONS: usize = 4;
+    const MAX_DECISIONS: u32 = 4;
     let registry_key = session_registry::canonical_registry_key_in(base_dir, file);
-    let mut last_error = None;
-    for _ in 0..MAX_DECISIONS {
-        let (record, revision) = load_actor_record_with_revision(base_dir, &registry_key)?;
-        let fence = match decide_post_launch_bind(
-            base_dir,
-            file,
-            session_id,
-            pane_id,
-            record.as_ref(),
-            revision,
-        )? {
-            PostLaunchBindDecision::Done(outcome) => return Ok(outcome),
-            PostLaunchBindDecision::Reclaim(fence) => fence,
-        };
-        between_decision_and_write();
-        let _lock = crate::registry_lock::acquire(
-            &session_registry_io::registry_path_in(base_dir),
-            "bind a dispatch target",
-        )?;
-        let mut registry = session_registry_io::load_in(base_dir)?;
-        match register_full_internal_fenced(
-            base_dir,
-            &mut registry,
-            session_id,
-            pane_id,
-            file,
-            pid,
-            window,
-            cwd,
-            None,
-            "route",
-            "dispatch_bind",
-            ActorBindingWrite::Fenced(fence),
-        ) {
-            Ok(generations) => {
-                return Ok(PostLaunchDispatchBind::Reclaimed {
-                    generations: generations.unwrap_or(OwnershipGeneration {
-                        prior_generation: fence.prior_generation,
-                        new_generation: fence.prior_generation,
-                    }),
-                });
-            }
-            Err(err) if generation_cas_failed(&err) => last_error = Some(err),
-            Err(err) => return Err(err),
-        }
-    }
-    Err(last_error
-        .unwrap_or_else(|| anyhow::anyhow!("post-launch dispatch bind made no decision"))
-        .context(format!(
+    // `#implementlazilyowned`: each decision is one Lazily actor-generation
+    // epoch; a lost fence re-decides against the newer record.
+    let drive = drive_actor_generation_decisions(
+        &registry_key,
+        MAX_DECISIONS,
+        &mut |_| {
+            let (record, revision) = load_actor_record_with_revision(base_dir, &registry_key)?;
+            let fence = match decide_post_launch_bind(
+                base_dir,
+                file,
+                session_id,
+                pane_id,
+                record.as_ref(),
+                revision,
+            )? {
+                PostLaunchBindDecision::Done(outcome) => {
+                    return Ok(ActorGenerationDecision::Settled(outcome));
+                }
+                PostLaunchBindDecision::Reclaim(fence) => fence,
+            };
+            between_decision_and_write();
+            Ok(ActorGenerationDecision::Write {
+                authority: fence.authority(),
+                write: fence,
+            })
+        },
+        &mut |_, fence| {
+            let _lock = crate::registry_lock::acquire(
+                &session_registry_io::registry_path_in(base_dir),
+                "bind a dispatch target",
+            )?;
+            let mut registry = session_registry_io::load_in(base_dir)?;
+            let generations = register_full_internal_fenced(
+                base_dir,
+                &mut registry,
+                session_id,
+                pane_id,
+                file,
+                pid,
+                window,
+                cwd,
+                None,
+                "route",
+                "dispatch_bind",
+                ActorBindingWrite::Fenced(*fence),
+            )?;
+            Ok(PostLaunchDispatchBind::Reclaimed {
+                generations: generations.unwrap_or(OwnershipGeneration {
+                    prior_generation: fence.prior_generation,
+                    new_generation: fence.prior_generation,
+                }),
+            })
+        },
+        &mut |_, _, _, _| {},
+    )?;
+    bind_race_lost(drive, || {
+        format!(
             "dispatch bind for {file} on pane {pane_id} lost the actor generation race {MAX_DECISIONS} times"
-        )))
+        )
+    })
 }
 
 /// What a route-side bind of an already-running pane did before dispatch
@@ -771,71 +807,80 @@ pub fn bind_running_dispatch_target_with_hook_in(
     owner_pane_alive: &dyn Fn(&str) -> bool,
     between_decision_and_write: &mut dyn FnMut(),
 ) -> Result<PreDispatchDispatchBind> {
-    const MAX_DECISIONS: usize = 4;
+    const MAX_DECISIONS: u32 = 4;
     let registry_key = session_registry::canonical_registry_key_in(base_dir, file);
-    let mut last_error = None;
-    for _ in 0..MAX_DECISIONS {
-        let (record, revision) = load_actor_record_with_revision(base_dir, &registry_key)?;
-        let decision = decide_pre_dispatch_bind(
-            base_dir,
-            file,
-            session_id,
-            pane_id,
-            record.as_ref(),
-            revision,
-            owner_pane_alive,
-        )?;
-        let (binding, preserved) = match decision {
-            PreDispatchBindDecision::Done(outcome) => return Ok(outcome),
-            PreDispatchBindDecision::Preserve { state, generation } => (
-                ActorBindingWrite::PreserveOwner,
-                Some(PreDispatchDispatchBind::OwnerStatePreserved { state, generation }),
-            ),
-            PreDispatchBindDecision::Bind(fence) => (ActorBindingWrite::Fenced(fence), None),
-        };
-        between_decision_and_write();
-        let _lock = crate::registry_lock::acquire(
-            &session_registry_io::registry_path_in(base_dir),
-            "bind a running dispatch target",
-        )?;
-        let mut registry = session_registry_io::load_in(base_dir)?;
-        match register_full_internal_fenced(
-            base_dir,
-            &mut registry,
-            session_id,
-            pane_id,
-            file,
-            pid,
-            window,
-            cwd,
-            None,
-            "route",
-            "dispatch_bind",
-            binding,
-        ) {
-            Ok(generations) => {
-                if let Some(preserved) = preserved {
-                    return Ok(preserved);
+    // `#implementlazilyowned`: each decision is one Lazily actor-generation
+    // epoch; a lost fence re-decides against the newer record.
+    let drive = drive_actor_generation_decisions(
+        &registry_key,
+        MAX_DECISIONS,
+        &mut |_| {
+            let (record, revision) = load_actor_record_with_revision(base_dir, &registry_key)?;
+            let decision = decide_pre_dispatch_bind(
+                base_dir,
+                file,
+                session_id,
+                pane_id,
+                record.as_ref(),
+                revision,
+                owner_pane_alive,
+            )?;
+            let (binding, preserved) = match decision {
+                PreDispatchBindDecision::Done(outcome) => {
+                    return Ok(ActorGenerationDecision::Settled(outcome));
                 }
-                let ActorBindingWrite::Fenced(fence) = binding else {
-                    unreachable!("a non-preserving pre-dispatch bind is fenced");
-                };
-                return Ok(PreDispatchDispatchBind::Bound {
-                    generations: generations.unwrap_or(OwnershipGeneration {
-                        prior_generation: fence.prior_generation,
-                        new_generation: fence.prior_generation,
-                    }),
-                });
+                PreDispatchBindDecision::Preserve { state, generation } => (
+                    ActorBindingWrite::PreserveOwner,
+                    Some(PreDispatchDispatchBind::OwnerStatePreserved { state, generation }),
+                ),
+                PreDispatchBindDecision::Bind(fence) => (ActorBindingWrite::Fenced(fence), None),
+            };
+            between_decision_and_write();
+            Ok(ActorGenerationDecision::Write {
+                authority: bind_write_authority(binding, record.as_ref(), revision),
+                write: (binding, preserved),
+            })
+        },
+        &mut |_, (binding, preserved)| {
+            let _lock = crate::registry_lock::acquire(
+                &session_registry_io::registry_path_in(base_dir),
+                "bind a running dispatch target",
+            )?;
+            let mut registry = session_registry_io::load_in(base_dir)?;
+            let generations = register_full_internal_fenced(
+                base_dir,
+                &mut registry,
+                session_id,
+                pane_id,
+                file,
+                pid,
+                window,
+                cwd,
+                None,
+                "route",
+                "dispatch_bind",
+                *binding,
+            )?;
+            if let Some(preserved) = preserved {
+                return Ok(preserved.clone());
             }
-            Err(err) if generation_cas_failed(&err) => last_error = Some(err),
-            Err(err) => return Err(err),
-        }
-    }
-    Err(last_error
-        .unwrap_or_else(|| anyhow::anyhow!("pre-dispatch bind made no decision"))
-        .context(format!(
+            let ActorBindingWrite::Fenced(fence) = binding else {
+                unreachable!("a non-preserving pre-dispatch bind is fenced");
+            };
+            Ok(PreDispatchDispatchBind::Bound {
+                generations: generations.unwrap_or(OwnershipGeneration {
+                    prior_generation: fence.prior_generation,
+                    new_generation: fence.prior_generation,
+                }),
+            })
+        },
+        &mut |_, _, _, _| {},
+    )?;
+    bind_race_lost(drive, || {
+        format!(
             "dispatch bind for {file} on pane {pane_id} lost the actor generation race {MAX_DECISIONS} times"
-        )))
+        )
+    })
 }
 
 /// The pane a sync/resync recovery re-registers as a document's owner
@@ -914,91 +959,100 @@ pub fn rebind_recovered_owner_with_hook_in(
     between_decision_and_write: &mut dyn FnMut(),
 ) -> Result<RecoveredOwnerBind> {
     use agent_doc_controller::actor::ActorState;
-    const MAX_DECISIONS: usize = 4;
+    const MAX_DECISIONS: u32 = 4;
     let (caller, reason) = if binding.supervisor_instance_id.is_some() {
         ("sync", "recover_owner")
     } else {
         ("route", "dispatch_bind")
     };
     let registry_key = session_registry::canonical_registry_key_in(base_dir, binding.file);
-    let mut last_error = None;
-    for decision in 0..MAX_DECISIONS {
-        let (record, revision) = load_actor_record_with_revision(base_dir, &registry_key)?;
-        let names_pane = record.as_ref().is_some_and(|record| {
-            record.pane_id == binding.pane_id && record.session_id == binding.session_id
-        });
-        let open = record
-            .as_ref()
-            .is_some_and(|record| record.state != ActorState::Closed);
-        let superseded = |record: &ActorRecord| RecoveredOwnerBind::OwnerSuperseded {
-            pane_id: record.pane_id.clone(),
-            generation: record.generation,
-            caller: record.last_transition.caller.clone(),
-            reason: record.last_transition.reason.clone(),
-        };
-        let write = if names_pane && open {
-            ActorBindingWrite::PreserveOwner
-        } else if !binding.may_write_actor {
-            return Ok(RecoveredOwnerBind::ActorNotBound);
-        } else if let Some(record) = record.as_ref().filter(|record| {
-            decision > 0
-                && !names_pane
-                && record.state != ActorState::Closed
-                && !binding_projection_write(record)
-        }) {
-            return Ok(superseded(record));
-        } else {
-            ActorBindingWrite::Fenced(agent_doc_session_actor_io::BindingFence {
-                prior_generation: match record.as_ref() {
-                    Some(record) => record.generation,
-                    None => agent_doc_session_actor_io::binding_generation_in(
-                        base_dir,
-                        binding.file,
-                        binding.session_id,
-                    )?,
-                },
-                prior_names_pane: names_pane,
-                prior_revision: revision,
+    // `#implementlazilyowned`: each decision is one Lazily actor-generation
+    // epoch; a lost fence re-decides against the newer record.
+    let drive = drive_actor_generation_decisions(
+        &registry_key,
+        MAX_DECISIONS,
+        &mut |decision| {
+            let (record, revision) = load_actor_record_with_revision(base_dir, &registry_key)?;
+            let names_pane = record.as_ref().is_some_and(|record| {
+                record.pane_id == binding.pane_id && record.session_id == binding.session_id
+            });
+            let open = record
+                .as_ref()
+                .is_some_and(|record| record.state != ActorState::Closed);
+            let superseded = |record: &ActorRecord| RecoveredOwnerBind::OwnerSuperseded {
+                pane_id: record.pane_id.clone(),
+                generation: record.generation,
+                caller: record.last_transition.caller.clone(),
+                reason: record.last_transition.reason.clone(),
+            };
+            let write = if names_pane && open {
+                ActorBindingWrite::PreserveOwner
+            } else if !binding.may_write_actor {
+                return Ok(ActorGenerationDecision::Settled(
+                    RecoveredOwnerBind::ActorNotBound,
+                ));
+            } else if let Some(record) = record.as_ref().filter(|record| {
+                decision > 1
+                    && !names_pane
+                    && record.state != ActorState::Closed
+                    && !binding_projection_write(record)
+            }) {
+                return Ok(ActorGenerationDecision::Settled(superseded(record)));
+            } else {
+                ActorBindingWrite::Fenced(agent_doc_session_actor_io::BindingFence {
+                    prior_generation: match record.as_ref() {
+                        Some(record) => record.generation,
+                        None => agent_doc_session_actor_io::binding_generation_in(
+                            base_dir,
+                            binding.file,
+                            binding.session_id,
+                        )?,
+                    },
+                    prior_names_pane: names_pane,
+                    prior_revision: revision,
+                })
+            };
+            between_decision_and_write();
+            Ok(ActorGenerationDecision::Write {
+                authority: bind_write_authority(write, record.as_ref(), revision),
+                write,
             })
-        };
-        between_decision_and_write();
-        let _lock = crate::registry_lock::acquire(
-            &session_registry_io::registry_path_in(base_dir),
-            "rebind a recovered owner",
-        )?;
-        let mut registry = session_registry_io::load_in(base_dir)?;
-        match register_full_internal_fenced(
-            base_dir,
-            &mut registry,
-            binding.session_id,
-            binding.pane_id,
-            binding.file,
-            binding.pid,
-            binding.window,
-            binding.cwd,
-            binding.supervisor_instance_id,
-            caller,
-            reason,
-            write,
-        ) {
-            Ok(generations) => {
-                return Ok(match (write, generations) {
-                    (ActorBindingWrite::Fenced(_), Some(generations)) => {
-                        RecoveredOwnerBind::Bound { generations }
-                    }
-                    _ => RecoveredOwnerBind::RegistryRefreshed,
-                });
-            }
-            Err(err) if generation_cas_failed(&err) => last_error = Some(err),
-            Err(err) => return Err(err),
-        }
-    }
-    Err(last_error
-        .unwrap_or_else(|| anyhow::anyhow!("recovered-owner bind made no decision"))
-        .context(format!(
+        },
+        &mut |_, write| {
+            let _lock = crate::registry_lock::acquire(
+                &session_registry_io::registry_path_in(base_dir),
+                "rebind a recovered owner",
+            )?;
+            let mut registry = session_registry_io::load_in(base_dir)?;
+            let generations = register_full_internal_fenced(
+                base_dir,
+                &mut registry,
+                binding.session_id,
+                binding.pane_id,
+                binding.file,
+                binding.pid,
+                binding.window,
+                binding.cwd,
+                binding.supervisor_instance_id,
+                caller,
+                reason,
+                *write,
+            )?;
+            Ok(match (write, generations) {
+                (ActorBindingWrite::Fenced(_), Some(generations)) => {
+                    RecoveredOwnerBind::Bound { generations }
+                }
+                _ => RecoveredOwnerBind::RegistryRefreshed,
+            })
+        },
+        &mut |_, _, _, _| {},
+    )?;
+    bind_race_lost(drive, || {
+        format!(
             "recovered-owner bind for {} on pane {} lost the actor record race {MAX_DECISIONS} times",
             binding.file, binding.pane_id
-        )))
+        )
+    })
 }
 
 #[allow(clippy::too_many_arguments)]

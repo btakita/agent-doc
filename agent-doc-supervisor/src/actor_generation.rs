@@ -7,7 +7,16 @@
 use agent_doc_state_scope::ProcessScope;
 use lazily::{Computed, Source, ThreadSafeContext};
 
-const GENERATION_CAS_RETIRED_MARKER: &str = "generation compare-and-swap failed";
+/// The rendering of a Lazily actor-generation supersession
+/// (`agent_doc_sqlite::ledger_cas::ActorGenerationSuperseded`): a fenced actor
+/// write lost to a newer commit. It is the one classifier of that outcome for
+/// errors carried across the controller IPC channel as text.
+pub const ACTOR_GENERATION_SUPERSEDED_MARKER: &str = "generation compare-and-swap failed";
+
+/// Whether a rendered controller error is an actor-generation supersession.
+pub fn actor_generation_superseded_detail(detail: &str) -> bool {
+    detail.contains(ACTOR_GENERATION_SUPERSEDED_MARKER)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActorGenerationFailureTransition {
@@ -40,9 +49,12 @@ impl ActorGenerationLease {
     }
 
     /// Observe one failed controller transition and retire exactly once when a
-    /// newer authoritative generation rejected this process's lease.
+    /// newer authoritative generation rejected this process's lease: the
+    /// transition's Lazily actor-generation epoch was `Superseded`
+    /// ([`actor_generation_superseded_detail`]), which is final for this
+    /// generation, so nothing re-desires it.
     pub fn observe_failure(&self, detail: &str) -> ActorGenerationFailureTransition {
-        if !detail.contains(GENERATION_CAS_RETIRED_MARKER) {
+        if !actor_generation_superseded_detail(detail) {
             return ActorGenerationFailureTransition::Retryable;
         }
         if !self.active() {

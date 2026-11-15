@@ -3604,11 +3604,10 @@ fn report_queue_auto_clear_yield(
 ) {
     clear_queue_drain_stall_after_valid_closeout(file, "queue_auto_clear_yield");
     let file_str = file.to_string_lossy();
-    if agent_doc_queue_io::drain_owner::read_drain_owner_lease(&file_str).is_some_and(|lease| {
-        lease.owner == agent_doc_queue_io::drain_owner::DRAIN_OWNER_CLAUDE_LOOP
-    }) {
-        agent_doc_queue_io::drain_owner::clear_drain_owner_lease(&file_str);
-    }
+    agent_doc_queue_io::drain_owner::release_drain_owner_if(
+        &file_str,
+        agent_doc_queue_io::drain_owner::DRAIN_OWNER_CLAUDE_LOOP,
+    );
     if let Ok(content) = crate::resolve_current_document_content(file, "queue_auto_clear_yield") {
         // #claimeddrainwarn: record only the head the supervisor will dispatch
         // (claimed heads skipped); an all-claimed queue clears the record.

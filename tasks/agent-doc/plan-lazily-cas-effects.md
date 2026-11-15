@@ -414,6 +414,24 @@ Progress (`#implementlazilyowned`):
   20 rows: 14 `migrated`, 4 `deleted`, 2 reclassified `lazily-adapter`
   (`LifecycleFencePayload`, `BindingFence`: wire form / value of the expected
   authority), plus 5 new `lazily-adapter` rows.
+- Family 2a, cross-process owner leases (lzowned6):
+  `agent_doc_sqlite::owner_lease_claim` is a durable Lazily owner claim (an
+  `EffectCasCore` image in `state.db`, transitioned in one IMMEDIATE
+  transaction; one grant = one `[Grant, Release]` epoch whose retained
+  `Release` step is the ownership). `OwnerLeaseWrite` is its `CompareAndApply`
+  adapter over a backend row (`CoordinationLeaseBackend`,
+  `BootstrapSlotBackend`). The queue drain owner (`refresh` / `read` /
+  `clear_drain_owner_lease`), the predecessor-drain slot
+  (`record` / `read_predecessor_drain_lease`), and the orphan-drain dispatch
+  slot (`claim_orphan_drain_dispatch`, replacing
+  `claim_coordination_lease_if_expired_in_db`) run through it. session-check's
+  read-then-clear of a loop drain owner is now `release_drain_owner_if`, one
+  epoch that compares the owner. 17 rows: 6 `migrated`, 10 `lazily-adapter`
+  (freshness/deadline predicates, grant values, backend scopes, and
+  `QUEUE_APPLY_LEASE_SCOPE`, the backend lock scope behind
+  `queue_maintenance_claim`), 1 `excluded` (`DocumentTurnAuthorityStreamLease`:
+  an in-process RAII subscription refcount, no effect ownership), plus 11 new
+  `lazily-adapter` rows.
 - Not yet done (as of 2026-11-15, agent-doc `59984d315a`; triage is complete,
   0 `triage` rows): migrate the 291 reviewed `pending-migration` rows family
   by family, then delete the remaining bespoke orchestration and make the
@@ -421,19 +439,26 @@ Progress (`#implementlazilyowned`):
 
 ## Resume here
 
-Status 2026-11-15 (after family 1): ledger = 37 `migrated`, 46 `lazily-adapter`,
-17 `deleted`, 356 `excluded`, 271 `pending-migration`, 0 `triage`. Work the
-271 rows sequentially in ONE worktree (every step edits the ledger), one family
+Status 2026-11-15 (after family 2a): ledger = 43 `migrated`, 67 `lazily-adapter`,
+17 `deleted`, 357 `excluded`, 254 `pending-migration`, 0 `triage`. Work the
+254 rows sequentially in ONE worktree (every step edits the ledger), one family
 per pushed commit, `make check` green before each push, in this order (next:
-family 2):
+family 2b):
 
 1. DONE: actor-generation fenced writes (`store_actor_record_fenced_tx`,
    `delete_actor_document_fenced_tx`; 20 actor-generation rows) onto the
    `ledger_cas` adapter shape (`ActorGenerationWrite`,
    `drive_actor_generation_decisions`).
-2. Closeout lease and drain-owner claims (37 closeout/turn-fenced + 17
-   cross-process owner-lease rows) onto a durable Lazily claim, as
-   `queue_maintenance_claim` does.
+2. Closeout lease and drain-owner claims onto a durable Lazily claim, as
+   `queue_maintenance_claim` does, in two pushed halves:
+   - 2a. DONE: the 17 cross-process owner-lease rows (queue drain owner,
+     predecessor-drain slot, orphan-drain dispatch slot) onto
+     `agent_doc_sqlite::owner_lease_claim`.
+   - 2b. The 37 closeout/turn-fenced rows (`CloseoutOwnerCapability` lease
+     loss, the closeout-owner claim retry, captured-finalize resume lease,
+     the `*_if_turn_fence` / `*_with_turn_fence` frontmatter marks, and the
+     state-backbone lease constants) onto a Lazily claim + the ControllerLedger
+     SQLite adapter.
 3. Document CAS refusal/re-observe retry loops (29 rows: compact-io,
    route-io `queue_dispatch`, queue-io `queue_cmd` / `queue_consume`) onto
    `DocumentCasBackend` + Lazily epochs, plus queue projection CAS (15 rows)

@@ -2526,7 +2526,7 @@ fn retire_removed_state_event_variants(conn: &Connection) -> Result<()> {
 ///
 /// These leases coordinate processes; they are not document content and must
 /// never be projected through a live-buffer filesystem sidecar.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CoordinationLeaseRecord {
     pub scope_kind: String,
     pub scope_id: String,

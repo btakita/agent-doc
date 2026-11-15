@@ -1124,7 +1124,10 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
     hand-off is overdue): preflight reports `queue_auto_clear_yield: true` with
     `queue_continuation_required: false`, session-check prints
     `queue_continuation_required=false queue_auto_clear_yield=true`, records the
-    supervisor drain hand-off, and releases a `/loop` drain-owner lease, and the
+    supervisor drain hand-off, and releases a `/loop` drain-owner lease (only
+    while the loop still owns it: the owner comparison and the release are one
+    Lazily owner-claim epoch, so an owner that claimed after the decision keeps
+    the drain), and the
     Codex Stop hook allows the stop (`codex_stop_queue_continuation_yield`)
     instead of continuing in-pane. Otherwise the in-session drain continues in
     the same context — never a stall.
@@ -1325,7 +1328,10 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   predecessor first. A predecessor that is draining holds a durable drain lease
   (`predecessor_drain_lease` in `state.db`: pid, generation, deadline), written
   before the public socket is renamed (self-handoff) or by the delegating client
-  while it still holds the launch claim (below). Same-project duplicate reaping
+  while it still holds the launch claim (below). The slot is the backend lock of
+  a durable Lazily owner claim (`agent_doc_sqlite::owner_lease_claim`,
+  `#implementlazilyowned`): each handoff's grant is a latest-wins epoch that
+  supersedes the previous predecessor's retained epoch. Same-project duplicate reaping
   (`reap_stale_duplicate_controllers`, run at promotion and launch-recovery
   transitions) skips the leased pid until the deadline
   (`controller_duplicate_reap_protected_draining_predecessor`);

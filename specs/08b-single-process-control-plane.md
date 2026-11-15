@@ -714,6 +714,22 @@ deterministic tests.
   (three for sweeps, four for binds, one plus two for start), and no caller
   loops on its own. A route lifecycle write and a window refresh take one
   decision: their supersession is final.
+- Lazily owns cross-process owner leases (`#implementlazilyowned`, family 2a).
+  The queue drain owner (`queue_drain`), the predecessor-drain slot
+  (`predecessor_drain_lease`), and the controller's orphan-drain dispatch slot
+  (`queue_orphan_drain_backoff`) are durable owner claims
+  (`agent_doc_sqlite::owner_lease_claim`): a `lazily::EffectCasCore` persisted
+  in `state.db` and transitioned inside one IMMEDIATE transaction. One grant is
+  one epoch with the plan `[Grant, Release]`; its retained `Release` step is the
+  ownership. A different holder's grant supersedes it, the same holder's grant
+  renews the backend row, and a release completes only the current holder's
+  epoch, so a superseded holder never clears its successor. A backoff slot
+  admits a grant only once the previous dispatch's interval has elapsed; a
+  refused admission writes nothing. `OwnerLeaseWrite` is the `CompareAndApply`
+  adapter: it compares the backend row's holder with the epoch's expected
+  holder and writes or clears the row only on a match. The backend rows keep
+  their scopes, so heartbeat readers (orphan drain, pool heartbeat, idle watch)
+  are unchanged.
 - A lifecycle transition decided from projection evidence is fenced on the
   revision too (`#bindingcallersaudit`). The route's `caller=route` lifecycle
   writes (promoting a `Starting` actor it saw at a ready prompt, recovering a

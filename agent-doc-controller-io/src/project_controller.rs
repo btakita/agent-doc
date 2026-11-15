@@ -13304,17 +13304,23 @@ pub(crate) fn record_stale_restart_attempt(
 }
 
 /// `#drainingpredecessor`: single-slot durable lease for the controller that is
-/// handing off and must drain before it retires.
+/// handing off and must drain before it retires. The slot is the backend lock
+/// of a durable Lazily owner claim (`owner_lease_claim`): each handoff's grant
+/// is a latest-wins epoch that supersedes the previous predecessor's.
 const PREDECESSOR_DRAIN_LEASE_SCOPE: &str = "predecessor_drain_lease";
+
+fn predecessor_drain_claim() -> agent_doc_sqlite::owner_lease_claim::BootstrapSlotBackend<
+    agent_doc_controller::recycle::PredecessorDrainLease,
+> {
+    agent_doc_sqlite::owner_lease_claim::BootstrapSlotBackend::new(PREDECESSOR_DRAIN_LEASE_SCOPE)
+}
 
 pub(crate) fn read_predecessor_drain_lease(
     project_root: &Path,
 ) -> Option<agent_doc_controller::recycle::PredecessorDrainLease> {
     let conn = open_state_db(project_root).ok()?;
-    let json =
-        state_store::load_controller_bootstrap_json_from_db(&conn, PREDECESSOR_DRAIN_LEASE_SCOPE)
-            .ok()??;
-    serde_json::from_str(&json).ok()
+    agent_doc_sqlite::owner_lease_claim::observe_owner_lease(&conn, &predecessor_drain_claim())
+        .ok()?
 }
 
 /// [`read_predecessor_drain_lease`] for a project root this process does not
@@ -13342,14 +13348,12 @@ pub(crate) fn record_predecessor_drain_lease(
         generation,
         deadline_secs: timestamp_secs().saturating_add(ttl.as_secs()),
     };
-    let Ok(json) = serde_json::to_string(&lease) else {
-        return;
-    };
-    if let Ok(conn) = open_state_db(project_root) {
-        let _ = state_store::store_controller_bootstrap_json_in_db(
-            &conn,
-            PREDECESSOR_DRAIN_LEASE_SCOPE,
-            &json,
+    if let Ok(mut conn) = open_state_db(project_root) {
+        let _ = agent_doc_sqlite::owner_lease_claim::acquire_owner_lease(
+            &mut conn,
+            &predecessor_drain_claim(),
+            lease,
+            |_| true,
         );
     }
 }

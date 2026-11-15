@@ -21721,6 +21721,34 @@ fn orphan_drain_attempt_holder(
     format!("{ORPHAN_DRAIN_BACKOFF_HOLDER}:{digest}")
 }
 
+/// Claim the document's orphan-drain dispatch slot for `dispatch`.
+///
+/// The slot is a durable Lazily owner claim
+/// (`agent_doc_sqlite::owner_lease_claim`): one dispatch is one epoch,
+/// admitted only while the slot is free or its previous dispatch is at or
+/// before `eligible_at_or_before`; a refused admission mutates nothing.
+fn claim_orphan_drain_dispatch(
+    conn: &mut agent_doc_sqlite::state_store::Connection,
+    dispatch: state_store::CoordinationLeaseRecord,
+    eligible_at_or_before: u64,
+) -> Result<bool> {
+    let slot = agent_doc_sqlite::owner_lease_claim::CoordinationLeaseBackend::new(
+        ORPHAN_DRAIN_BACKOFF_SCOPE,
+        dispatch.scope_id.clone(),
+    );
+    Ok(!matches!(
+        agent_doc_sqlite::owner_lease_claim::acquire_owner_lease(
+            conn,
+            &slot,
+            dispatch,
+            |previous| {
+                previous.is_none_or(|lease| lease.heartbeat_secs <= eligible_at_or_before)
+            }
+        )?,
+        agent_doc_sqlite::owner_lease_claim::OwnerLeaseAcquired::Held(_)
+    ))
+}
+
 fn orphan_drain_same_attempt(
     last_dispatch: Option<&state_store::CoordinationLeaseRecord>,
     current_holder: &str,
@@ -22342,6 +22370,34 @@ mod orphan_drain_attempt_tests {
     }
 
     #[test]
+    fn orphan_drain_dispatch_slot_admits_one_dispatch_per_interval() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let mut conn = open_state_db(dir.path()).unwrap();
+        let dispatch = |holder: &str, heartbeat_secs| state_store::CoordinationLeaseRecord {
+            heartbeat_secs,
+            ..lease(holder)
+        };
+        assert!(claim_orphan_drain_dispatch(&mut conn, dispatch("a", 100), 40).unwrap());
+        // Inside the interval neither the same attempt nor a new one dispatches,
+        // and the refused claim leaves the slot unchanged.
+        assert!(!claim_orphan_drain_dispatch(&mut conn, dispatch("a", 110), 50).unwrap());
+        assert!(!claim_orphan_drain_dispatch(&mut conn, dispatch("b", 110), 50).unwrap());
+        assert_eq!(
+            state_store::load_coordination_lease_from_db(
+                &conn,
+                ORPHAN_DRAIN_BACKOFF_SCOPE,
+                "document"
+            )
+            .unwrap(),
+            Some(dispatch("a", 100))
+        );
+        // Once the previous dispatch is old enough, the next one is admitted.
+        assert!(claim_orphan_drain_dispatch(&mut conn, dispatch("b", 200), 100).unwrap());
+        assert!(claim_orphan_drain_dispatch(&mut conn, dispatch("b", 300), 200).unwrap());
+    }
+
+    #[test]
     fn recovered_actor_fallback_requires_the_same_orphan_attempt() {
         let current = format!("{ORPHAN_DRAIN_BACKOFF_HOLDER}:current");
         let stale = lease(&format!("{ORPHAN_DRAIN_BACKOFF_HOLDER}:stale"));
@@ -22525,7 +22581,7 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
         }
     };
     let project_root = bootstrap.project_root.clone();
-    let conn = match open_state_db(&project_root) {
+    let mut conn = match open_state_db(&project_root) {
         Ok(conn) => conn,
         Err(err) => {
             eprintln!(
@@ -22921,11 +22977,7 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
             heartbeat_secs: now,
         };
         let eligible_at_or_before = now.saturating_sub(DEFAULT_MIN_DISPATCH_INTERVAL_SECS);
-        match state_store::claim_coordination_lease_if_expired_in_db(
-            &conn,
-            &dispatch_claim,
-            eligible_at_or_before,
-        ) {
+        match claim_orphan_drain_dispatch(&mut conn, dispatch_claim, eligible_at_or_before) {
             Ok(true) => {}
             Ok(false) => continue,
             Err(err) => {

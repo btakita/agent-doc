@@ -13336,8 +13336,14 @@ fn test_controller_orphan_drain_dispatch_is_serialized_scoped_and_durably_fenced
         !controller.contains("spawn_editor_route_detached"),
         "orphan drain must not spawn recursive agent-doc route processes"
     );
+    // `#implementlazilyowned`: the dispatch backoff slot is a durable Lazily
+    // owner claim, admitted only once the previous dispatch's interval elapsed.
     assert!(
-        orphan_drain.contains("claim_coordination_lease_if_expired_in_db"),
+        orphan_drain.contains(
+            "claim_orphan_drain_dispatch(&mut conn, dispatch_claim, eligible_at_or_before)"
+        ) && controller
+            .contains("previous.is_none_or(|lease| lease.heartbeat_secs <= eligible_at_or_before)")
+            && !controller.contains("claim_coordination_lease_if_expired_in_db"),
         "orphan drain must atomically persist its per-document dispatch backoff"
     );
     assert!(
@@ -13365,7 +13371,7 @@ fn test_controller_orphan_drain_dispatch_is_serialized_scoped_and_durably_fenced
         .find(".skip_detail(\"sweep_commit\")")
         .expect("orphan drain rechecks claims at its commit point");
     let backoff_lease_at = orphan_drain
-        .find("claim_coordination_lease_if_expired_in_db")
+        .find("claim_orphan_drain_dispatch(&mut conn")
         .unwrap();
     assert!(
         snapshot_at < selector_claims_at && commit_recheck_at < backoff_lease_at,

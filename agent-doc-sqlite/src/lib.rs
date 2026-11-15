@@ -38,6 +38,7 @@ pub mod archive_index;
 pub mod context_injection_ledger;
 pub mod ledger_cas;
 pub mod op_log;
+pub mod owner_lease_claim;
 pub mod premise_statement_index;
 pub mod reliable_sync_inbox;
 pub(crate) mod schema_declaration;

@@ -2366,7 +2366,25 @@ new one is minted). Wire contract:
   `canonical_covers_retained_frontier` answer, and a retained canonical
   projection (`crdt_replica_register_history_lineage_mismatch` in ops.log). A
   fresh controller reseeding from that retained replica is exempt: its empty
-  canonical adopts the replica's history.
+  canonical adopts the replica's history, and the reseed hub takes that
+  history's id as its own `history_lineage`
+  (`RelayHub::adopt_retained_replica_history`,
+  `crdt_replica_register_reseed_history_adopted`, `#installreattachambiguous`).
+  Only a hub whose reseed is pending and whose canonical holds no operation
+  can take it, because only an empty history can be renamed without changing
+  what an op id means; the durable-frame `lineage` is not touched. A later
+  registration from the same retained replica therefore matches and gets its
+  coverage answer. Before this, the reseed hub minted a new history id: when
+  the reseeding attempt failed before committing (live: `retained reseed
+  lacked a durable publication receipt`), the plugin kept its reload resume
+  state, which still named the predecessor's history, so every later
+  registration read as foreign, `canonical_covers_retained_frontier` stayed
+  unanswered, and a buffer byte-identical to its settled shadow held
+  `ambiguous-retained-projection` after each `make install` until the operator
+  closed the tab, repaired, and reopened (sdk-dev.md, 2026-11-15 00:27 and
+  00:56). With the coverage answer, `buffer_equals_shadow` plus coverage
+  adopts canonical on its own. A buffer holding text past its shadow still
+  takes the containment, merge, or hold rules.
 
 JetBrains (all generations, through the classic sources), VS Code and the Zed
 sidecar refuse a delta delivery whose stamp differs from their registration's

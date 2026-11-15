@@ -41,6 +41,9 @@ enum ResumeRelease {
 struct SimForwarder {
     identity: String,
     replica: ReplicaState,
+    /// The registration ack's `history_lineage` (`CrdtReplicaForwarder.historyLineage`),
+    /// which a resume state captured from this endpoint names.
+    history_lineage: String,
 }
 
 /// What one `forwarderFor` attempt did.
@@ -78,6 +81,10 @@ struct SimPluginEditor {
     /// `nativeReloadResumeStates[path]`: the encoded native replica a library
     /// reload captured.
     reload_resume_state: Option<Vec<u8>>,
+    /// The `history_lineage` the reload resume state names (`ReplicaResumeState.historyLineage`):
+    /// the cached endpoint's at the reload. A registration that fails before it
+    /// commits never replaces it.
+    reload_resume_lineage: Option<String>,
     cached: Option<SimForwarder>,
     release: ResumeRelease,
     /// The controller holds a durable retained visible write for this
@@ -115,6 +122,7 @@ impl SimPluginEditor {
             buffer: String::new(),
             settled_shadow: None,
             reload_resume_state: None,
+            reload_resume_lineage: None,
             cached: None,
             release,
             controller_retains_visible_write: false,
@@ -124,7 +132,7 @@ impl SimPluginEditor {
             last: None,
         };
         let registration = editor
-            .register_endpoint(&base_identity, None)
+            .register_endpoint(&base_identity, None, None)
             .expect("initial editor registration");
         let replica =
             ReplicaState::from_encoded(registration.client_id, &registration.bootstrap).unwrap();
@@ -133,6 +141,7 @@ impl SimPluginEditor {
         editor.cached = Some(SimForwarder {
             identity: base_identity,
             replica,
+            history_lineage: registration.history_lineage,
         });
         editor.settle_receipts();
         editor
@@ -140,19 +149,23 @@ impl SimPluginEditor {
 
     /// The controller's `replica_register` RPC (`controller_crdt_replica_data`):
     /// a retained visible write forces a full canonical bootstrap, and the
-    /// editor's retained frontier is passed through either way.
+    /// editor's retained frontier is passed through either way, beside the
+    /// history it belongs to (`#deliverylineagestamp`).
     fn register_endpoint(
         &self,
         identity: &str,
         retained_state_vector: Option<&[u8]>,
+        retained_history_lineage: Option<&str>,
     ) -> Option<ReplicaRegistration> {
-        register_replica_for_file_with_precondition(
+        register_replica_for_file_with_retained_history(
             &self.doc,
             identity,
             retained_state_vector,
+            retained_history_lineage,
             Some(self.process.pid()),
             self.controller_retains_visible_write,
             None,
+            false,
         )
         .unwrap()
     }
@@ -214,6 +227,7 @@ impl SimPluginEditor {
     fn reload_native_library(&mut self) {
         let forwarder = self.cached.take().expect("an attached forwarder");
         self.reload_resume_state = Some(forwarder.replica.encode_state());
+        self.reload_resume_lineage = Some(forwarder.history_lineage);
     }
 
     /// One `forwarderFor(replaceCached = true)` attempt. `swap_moves` makes the
@@ -233,8 +247,19 @@ impl SimPluginEditor {
         let retained_state_vector = retained_resume_state
             .as_ref()
             .map(|state| ReplicaState::from_encoded(1, state).unwrap().state_vector());
+        let retained_history_lineage = match &self.cached {
+            Some(cached) => Some(cached.history_lineage.clone()),
+            None => self
+                .reload_resume_lineage
+                .clone()
+                .filter(|_| retained_resume_state.is_some()),
+        };
         let registration = self
-            .register_endpoint(&identity, retained_state_vector.as_deref())
+            .register_endpoint(
+                &identity,
+                retained_state_vector.as_deref(),
+                retained_history_lineage.as_deref(),
+            )
             .expect("the live editor registers");
         // `CrdtReplicaForwarder.register`: a delta bootstrap opens the retained
         // state, applies the delta, and publishes the retained suffix.
@@ -297,6 +322,7 @@ impl SimPluginEditor {
         }
         if self.release == ResumeRelease::BeforeSwap && retained_resume_state.is_some() {
             self.reload_resume_state = None;
+            self.reload_resume_lineage = None;
         }
         if swap_moves {
             deregister_replica_for_file(&self.doc, &identity).unwrap();
@@ -327,11 +353,16 @@ impl SimPluginEditor {
         if let Some(previous) = self.cached.take() {
             deregister_replica_for_file(&self.doc, &previous.identity).unwrap();
         }
-        self.cached = Some(SimForwarder { identity, replica });
+        self.cached = Some(SimForwarder {
+            identity,
+            replica,
+            history_lineage: registration.history_lineage.clone(),
+        });
         self.buffer = target.clone();
         self.settled_shadow = Some(target);
         if self.release == ResumeRelease::OnCommit {
             self.reload_resume_state = None;
+            self.reload_resume_lineage = None;
         }
         self.settle_receipts();
         self.controller_retains_visible_write = false;
@@ -354,6 +385,7 @@ impl SimPluginEditor {
             deregister_replica_for_file(&self.doc, &previous.identity).unwrap();
         }
         self.reload_resume_state = None;
+        self.reload_resume_lineage = None;
         self.attach_held = false;
         self.settled_shadow = persisted_shadow;
     }
@@ -1423,4 +1455,165 @@ fn a_durable_record_proves_nothing_about_a_canonical_past_its_tip() {
         editor.last()
     );
     assert_eq!(editor.buffer, saved);
+}
+
+const INSTALL_DOC: &str = "# sdk-dev\n\n<!-- agent:queue -->\n- do [#adversarial-pr]\n- do [#docscleanup]\n<!-- /agent:queue -->\n\n## Exchange\n\noperator prompt\n";
+
+impl SimPluginEditor {
+    /// The controller's deliveries reach the native replica, but no visible
+    /// projection settles (the buffer is busy, or the projection is deferred):
+    /// the replica runs ahead of the buffer, and the buffer stays equal to its
+    /// settled shadow.
+    fn receive_without_projecting(&mut self) {
+        let identity = self.forwarder().identity.clone();
+        let Some(pull) = pull_replica_updates_for_file(&self.doc, &identity).unwrap() else {
+            return;
+        };
+        for update in pull.updates {
+            self.forwarder()
+                .replica
+                .apply_update(&update.update)
+                .unwrap();
+        }
+    }
+}
+
+/// One `make install` as it ran live (sdk-dev.md, 2026-11-15 00:27 and
+/// 00:56): the native library reloads and the controller recycles, the first
+/// re-registration reseeds the fresh controller from the retained replica and
+/// then fails before committing (live: `retained reseed lacked a durable
+/// publication receipt`), and the replacement controller projects queue markers
+/// and an agent row onto the reseed before the editor re-attaches.
+fn install_with_a_failed_reseed_attempt(doc: &std::path::Path, editor: &mut SimPluginEditor) {
+    editor.reload_native_library();
+    forget_controller_relay_state_for_test(doc);
+    assert_eq!(editor.reregister(true), Attempt::SwapRefused);
+    assert!(
+        editor.last().retained_replica_reseed_pending,
+        "the first registration reseeds the fresh controller: {:#?}",
+        editor.last()
+    );
+    let reseeded = hub_text(doc);
+    let marked = reseeded
+        .replacen("- do [#adversarial-pr]", "- 🙋📥 do [#adversarial-pr]", 1)
+        .replacen("- do [#docscleanup]", "- 🚧 do [#docscleanup]", 1);
+    apply_cp_write_for_file(
+        doc,
+        &reseeded,
+        &marked,
+        "crdt_handoff_queue_attempt_projection",
+    )
+    .unwrap()
+    .expect("the controller write uses the live relay");
+    let followed = marked.replacen(
+        "<!-- /agent:queue -->",
+        "- do [#followuprow]\n<!-- /agent:queue -->",
+        1,
+    );
+    apply_cp_write_for_file(doc, &marked, &followed, "queue_follow_up")
+        .unwrap()
+        .expect("the controller write uses the live relay");
+}
+
+/// `#installreattachambiguous`: after each `make install`, an attached editor
+/// whose buffer was byte-identical to its settled shadow held
+/// `ambiguous-retained-projection` and the operator was handed a
+/// close-tab/repair/reopen. The reseed hub minted a new history id, so every
+/// later registration from the same retained replica read as foreign
+/// (`crdt_replica_register_history_lineage_mismatch`) and got no coverage
+/// answer. The reseed hub now takes the replica's history, so the coverage
+/// proof answers and the unedited buffer re-attaches on its own, across two
+/// installs in a row.
+#[test]
+fn an_install_reload_reattaches_an_unedited_buffer_without_an_operator_step() {
+    let (_dir, doc) = temp_doc("install-reattach.md");
+    std::fs::write(&doc, INSTALL_DOC).unwrap();
+    let mut editor = SimPluginEditor::open(&doc, ResumeRelease::OnCommit);
+    // An agent write reached the replica but never projected into the buffer.
+    let current = hub_text(&doc);
+    let responded = current.replacen(
+        "operator prompt\n",
+        "operator prompt\n\n### Re: answer\n",
+        1,
+    );
+    apply_cp_write_for_file(&doc, &current, &responded, "response_cell")
+        .unwrap()
+        .expect("the controller write uses the live relay");
+    editor.receive_without_projecting();
+    assert_ne!(editor.forwarder().replica.text(), editor.buffer);
+    assert_eq!(
+        editor.settled_shadow.as_deref(),
+        Some(editor.buffer.as_str())
+    );
+
+    for install in 0..2 {
+        install_with_a_failed_reseed_attempt(&doc, &mut editor);
+        let operator_text = editor.buffer.clone();
+        let attempt = editor.reregister(false);
+        let facts = editor.last().clone();
+        assert_eq!(
+            facts.shadow.as_deref(),
+            Some(facts.buffer.as_str()),
+            "install {install}: the live signature, shadow_hash == buffer_hash"
+        );
+        assert_ne!(facts.canonical, facts.buffer, "install {install}");
+        assert_eq!(
+            facts.canonical_covers_retained_frontier,
+            Some(true),
+            "install {install}: the retained frontier is in the reseeded history: {facts:#?}"
+        );
+        assert_eq!(
+            attempt,
+            Attempt::Committed(RegistrationProjectionAction::ApplyCanonical),
+            "install {install}: {facts:#?}"
+        );
+        assert_eq!(editor.buffer, hub_text(&doc), "install {install}");
+        assert!(editor.buffer.contains("- do [#followuprow]"));
+        assert!(editor.buffer.contains("### Re: answer"));
+        assert!(
+            editor.buffer.contains("operator prompt"),
+            "every operator line survives: {operator_text}"
+        );
+        // The next install starts from a settled, attached editor again; the
+        // response stays undelivered to the buffer across it.
+        let current = hub_text(&doc);
+        let next = current.replacen("### Re: answer\n", "### Re: answer\n\nmore\n", 1);
+        apply_cp_write_for_file(&doc, &current, &next, "response_cell")
+            .unwrap()
+            .expect("the controller write uses the live relay");
+        editor.receive_without_projecting();
+    }
+}
+
+/// The safety half of `#installreattachambiguous`: the same install sequence
+/// over a buffer holding operator text the replica never received still never
+/// adopts canonical over it. Whatever the registration answers, the operator's
+/// text is not lost.
+#[test]
+fn an_install_reload_never_adopts_canonical_over_unsynced_operator_text() {
+    let (_dir, doc) = temp_doc("install-reattach-typed.md");
+    std::fs::write(&doc, INSTALL_DOC).unwrap();
+    let mut editor = SimPluginEditor::open(&doc, ResumeRelease::OnCommit);
+    install_with_a_failed_reseed_attempt(&doc, &mut editor);
+    let typed = editor.buffer.replacen(
+        "operator prompt\n",
+        "operator prompt\nunsynced operator line\n",
+        1,
+    );
+    editor.type_unapplied(&typed);
+
+    let attempt = editor.reregister(false);
+    let facts = editor.last().clone();
+    assert_ne!(
+        attempt,
+        Attempt::Committed(RegistrationProjectionAction::ApplyCanonical),
+        "{facts:#?}"
+    );
+    assert!(
+        editor.buffer.contains("unsynced operator line"),
+        "the operator's text stays in the buffer: {attempt:?} {facts:#?}"
+    );
+    if let Attempt::Committed(_) = attempt {
+        assert!(hub_text(&doc).contains("unsynced operator line"));
+    }
 }

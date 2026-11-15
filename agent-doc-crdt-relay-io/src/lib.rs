@@ -3618,6 +3618,28 @@ fn register_replica_for_file_incremental_locked(
         // Metadata readers release their lock before entering the hub. Publish
         // the successor only after its precondition passes, before membership.
         record_replica_identity(&document_hash, client_id, identity, &retired_client_ids)?;
+        // `#installreattachambiguous`: the empty reseed hub takes the retained
+        // replica's history, which is the op-id namespace its canonical is about
+        // to hold. A later registration from that same retained state (the
+        // plugin keeps it when this attempt fails before committing, e.g. on a
+        // missing publication receipt) then matches, and the coverage proof below
+        // answers instead of a lineage mismatch withholding it.
+        if restore_fresh_controller_from_retained_replica
+            && retained_state_vector.is_some()
+            && let Some(history) = retained_history_lineage
+            && history != hub.history_lineage()
+            && hub.adopt_retained_replica_history(history)
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "crdt_replica_register_reseed_history_adopted file={} client_id={} history_lineage={} (#installreattachambiguous #deliverylineagestamp)",
+                    file.display(),
+                    client_id,
+                    history,
+                ),
+            );
+        }
         // `#deliverylineagestamp`: the editor named the history its retained
         // replica belongs to, and it is not this hub's. Its frontier counts op
         // ids of that other history, so neither an incremental delta against it

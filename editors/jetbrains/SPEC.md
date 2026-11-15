@@ -959,6 +959,15 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   differs only by agent-doc's queue marker projections adopts canonical instead
   of holding `ambiguous-retained-projection`. An absent or empty list, or a
   canonical the list was not proven against, changes nothing.
+  `#installreattachambiguous`: after a `make install` (native reload plus a
+  controller recycle), a buffer byte-identical to its settled shadow exits the
+  retained-projection hold through `canonical_covers_retained_frontier = true`
+  even when the reseeding registration failed before committing and the plugin
+  kept a reload resume state naming the predecessor's history. The controller's
+  reseed hub takes the retained replica's history id, so that resume state is
+  not foreign (`specs/14-realtime-workflow.md`, `#deliverylineagestamp`). The
+  plugin's decision rules are unchanged; a buffer holding text past its shadow
+  still holds unless containment or a clean merge proves an exit.
 - `attach_failure_diagnosis` (phase 5b): what a CRDT replica attach failure
   means for the operator. Evidence is the recorded failure reason, for the
   operator notification the document's file name, and `live_replica_attached`

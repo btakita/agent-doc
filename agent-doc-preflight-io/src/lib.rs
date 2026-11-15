@@ -6456,10 +6456,17 @@ fn run_queue_maintenance_with_options_under_apply_guard(
     // A valued backlog `queue=<id>` is durable ownership, not a hint to the
     // queue selected today. Route it before selection so the target can run in
     // this pass. Unlike inferred mirrors, an explicit target may be a loop.
-    let routing = agent_doc_queue::backlog_sync::project_explicit_backlog_queue_routes(
-        &components,
-        &current_content,
-    )?;
+    // `#followuprootprovenance`: an open item with a live follow-up row is
+    // already queued, though no row names its id.
+    let routing =
+        agent_doc_queue::backlog_sync::project_explicit_backlog_queue_routes_with_followup_roots(
+            &components,
+            &current_content,
+            &agent_doc_queue_io::followup_provenance_ledger::live_root_item_ids(
+                file,
+                &current_content,
+            ),
+        )?;
     if !routing.placement_debt.is_empty() {
         eprintln!(
             "[preflight] queue: {} backlog item(s) require main-agent queue placement reconciliation",
@@ -7213,11 +7220,22 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             &selected_queue_id,
         )?
         .context("queue maintenance: selected queue vanished before backlog sync")?;
-        let sibling_ids = agent_doc_queue::backlog_sync::sibling_run_queue_reference_ids(
+        let mut sibling_ids = agent_doc_queue::backlog_sync::sibling_run_queue_reference_ids(
             &sync_components,
             &current_content,
             sync_target.open_start,
         )?;
+        // `#followuprootprovenance`: an open item whose live follow-up row is
+        // running (or waiting to) is already in the queue; re-adding its
+        // `do [#id]` head would put a second worker on the same work. An id
+        // the target already references keeps its own row.
+        sibling_ids.extend(agent_doc_queue::followup_provenance::roots_absent_from(
+            &agent_doc_queue_io::followup_provenance_ledger::live_root_item_ids(
+                file,
+                &current_content,
+            ),
+            &entries,
+        ));
         if let Some(synced) =
             agent_doc_queue::document_queue::sync_backlog_into_queue_with_external_ids(
                 &entries,
@@ -9937,11 +9955,13 @@ fn route_same_cycle_actionable_backlog_into_named_queues(
     let project =
         |content: &str| -> Result<agent_doc_queue::backlog_sync::BacklogQueueRoutingProjection> {
             let components = agent_doc_element::element::parse(content)?;
-            agent_doc_queue::backlog_sync::project_explicit_backlog_queue_routes_for_ids(
+            agent_doc_queue::backlog_sync::project_explicit_backlog_queue_routes_for_ids_with_followup_roots(
                 &components,
                 content,
                 actionable,
                 mode,
+                // `#followuprootprovenance`
+                &agent_doc_queue_io::followup_provenance_ledger::live_root_item_ids(file, content),
             )
         };
     let Some(content) = same_cycle_queue_sync_base(file) else {
@@ -10182,12 +10202,19 @@ fn sync_same_cycle_actionable_backlog_into_legacy_go_mirror(
     let anchored_ids: Vec<String> = agent_doc_cycle_state_io::pending_anchored_ids(file)
         .into_iter()
         .collect();
-    let current_content = match agent_doc_queue::backlog_sync::enqueue_actionable_ids_reporting(
-        &content,
-        &backlog_ids,
-        placement,
-        &anchored_ids,
-    )? {
+    // `#followuprootprovenance`: an open item with a live follow-up row is
+    // already queued, though no row names its id.
+    let followup_roots =
+        agent_doc_queue_io::followup_provenance_ledger::live_root_item_ids(file, &content);
+    let outcome =
+        agent_doc_queue::backlog_sync::enqueue_actionable_ids_reporting_with_followup_roots(
+            &content,
+            &backlog_ids,
+            placement,
+            &anchored_ids,
+            &followup_roots,
+        )?;
+    let current_content = match outcome {
         agent_doc_queue::backlog_sync::MirrorOutcome::Mirrored(next) => next,
         agent_doc_queue::backlog_sync::MirrorOutcome::Refused(refusal) => {
             // `#bkqattrcli`: a document that can NEVER mirror is a configuration
@@ -10267,10 +10294,21 @@ fn sync_same_cycle_actionable_backlog_into_legacy_go_mirror(
                     // Recompute against the live document: the primary attempt may
                     // have observed a different image, and the backlog write that
                     // created these ids already landed there.
-                    agent_doc_queue::backlog_sync::enqueue_actionable_ids_in_content(
-                        live,
-                        &backlog_ids,
-                        placement,
+                    Ok(
+                        match agent_doc_queue::backlog_sync::enqueue_actionable_ids_reporting_with_followup_roots(
+                            live,
+                            &backlog_ids,
+                            placement,
+                            &[],
+                            &agent_doc_queue_io::followup_provenance_ledger::live_root_item_ids(
+                                file, live,
+                            ),
+                        )? {
+                            agent_doc_queue::backlog_sync::MirrorOutcome::Mirrored(next) => {
+                                Some(next)
+                            }
+                            agent_doc_queue::backlog_sync::MirrorOutcome::Refused(_) => None,
+                        },
                     )
                 },
             )
@@ -18173,6 +18211,138 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             updated_state.synced_queue_ids
         );
     }
+    /// `#followuprootprovenance` (agent-loop `tasks/software/lazily.md`,
+    /// 2026-11-15): the `do [#id]` head of an open item was acknowledged,
+    /// struck and reaped while its follow-up row was running a worker. The row
+    /// quotes its origin without `#`, so the go-mode mirror saw no queue
+    /// presence and re-added a pending head for work the worker owned.
+    fn followup_root_doc(run: &str) -> String {
+        format!(
+            concat!(
+                "---\n",
+                "agent_doc_session: test\n",
+                "agent_doc_format: template\n",
+                "agent_doc_write: crdt\n",
+                "queue: go\n",
+                "queue_active: true\n",
+                "---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: prior — gpt-5\n\nDone.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue go -->\n",
+                "{}",
+                "<!-- /agent:queue -->\n\n",
+                "<!-- agent:backlog queue=append -->\n",
+                "- [ ] [#alpha] already running\n",
+                "- [ ] [#owned] stays open across many slices\n",
+                "<!-- /agent:backlog -->\n",
+            ),
+            run
+        )
+    }
+
+    const OWNED_FOLLOWUP: &str =
+        "follow up on an action item from `owned`: agent: Continue the remaining rows";
+
+    fn write_baselined(doc: &Path, content: &str) {
+        std::fs::write(doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+    }
+
+    fn live_owned_heads(content: &str) -> usize {
+        content
+            .lines()
+            .filter(|line| line.contains("do [#owned]") && !line.contains("~~"))
+            .count()
+    }
+
+    /// (a) + (b): while the recorded follow-up of `#owned` is live, queue
+    /// maintenance adds no `do [#owned]` head; once it is struck, it does.
+    #[test]
+    fn run_queue_maintenance_go_mode_counts_a_live_followup_as_its_roots_queue_presence() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = followup_root_doc(&format!("- do [#alpha]\n- {OWNED_FOLLOWUP}\n"));
+        write_baselined(&doc, &content);
+        // What `queue report-complete` records for the row it created from
+        // the `do [#owned]` head, before that head was struck and reaped.
+        assert_eq!(
+            agent_doc_queue_io::followup_provenance_ledger::record_followup_roots(
+                &doc,
+                &content,
+                &["do [#owned]"],
+                &[OWNED_FOLLOWUP.to_string()],
+            )
+            .as_deref(),
+            Some("owned")
+        );
+
+        run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            live_owned_heads(&updated),
+            0,
+            "a live follow-up of #owned is its queue presence:\n{updated}"
+        );
+        assert!(updated.contains(OWNED_FOLLOWUP), "{updated}");
+
+        let struck = followup_root_doc(&format!("- do [#alpha]\n- ~~{OWNED_FOLLOWUP}~~\n"));
+        write_baselined(&doc, &struck);
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            live_owned_heads(&updated),
+            1,
+            "a struck follow-up no longer holds the head out:\n{updated}"
+        );
+        assert!(state.synced_queue_ids.contains(&"owned".to_string()));
+    }
+
+    /// (d): the same row with no recorded provenance keeps today's mirror.
+    #[test]
+    fn run_queue_maintenance_go_mode_ignores_followups_without_provenance() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = followup_root_doc(&format!("- do [#alpha]\n- {OWNED_FOLLOWUP}\n"));
+        write_baselined(&doc, &content);
+        run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(live_owned_heads(&updated), 1, "{updated}");
+    }
+
+    /// (a) through the closeout same-cycle go mirror: an id made actionable
+    /// this cycle is not re-headed while its recorded follow-up is live.
+    #[test]
+    fn closeout_go_mirror_counts_a_live_followup_as_its_roots_queue_presence() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = followup_root_doc(&format!("- do [#alpha]\n- {OWNED_FOLLOWUP}\n"));
+        write_baselined(&doc, &content);
+        agent_doc_queue_io::followup_provenance_ledger::record_followup_roots(
+            &doc,
+            &content,
+            &["do [#owned]"],
+            &[OWNED_FOLLOWUP.to_string()],
+        );
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
+        agent_doc_cycle_state_io::record_pending_actionable_ids(&doc, &["owned".to_string()])
+            .unwrap();
+
+        let synced = sync_same_cycle_actionable_backlog_into_go_queue(
+            &doc,
+            agent_doc_queue::backlog_sync::FollowUpQueuePlacement::default(),
+        )
+        .unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(synced.is_empty(), "{synced:?}");
+        assert_eq!(live_owned_heads(&updated), 0, "{updated}");
+    }
+
     #[test]
     fn run_queue_maintenance_queue_start_without_go_holds_fresh_backlog() {
         // `queue: start` is the durable active-state spelling for a normal queue

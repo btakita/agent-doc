@@ -706,6 +706,20 @@ fn upsert_completion_feedback(
     // CLI process alive through typing/native-save backpressure. Detached files
     // still use the ordinary synchronous CAS write.
     let retained_intent = publish_exchange_update(file, current, &updated, scope)?;
+    // `#followuprootprovenance`: the rows serve the origin's root tracked
+    // item (its id, or the root a follow-up origin already carries), so the
+    // backlog mirror counts that item as queued while any of them is live.
+    let origin_row =
+        agent_doc_queue::queue_response::queue_row_text_for_head(&with_cell, &claim.item_text);
+    agent_doc_queue_io::followup_provenance_ledger::record_followup_roots(
+        file,
+        &updated,
+        &[
+            origin_row.as_deref().unwrap_or(&claim.item_text),
+            &claim.item_text,
+        ],
+        &followups.inserted,
+    );
     agent_doc_ops_log_io::log_op(
         file,
         &format!(

@@ -269,11 +269,22 @@ pub fn project_explicit_backlog_queue_routes(
     components: &[element::Component],
     content: &str,
 ) -> anyhow::Result<BacklogQueueRoutingProjection> {
+    project_explicit_backlog_queue_routes_with_followup_roots(components, content, &HashSet::new())
+}
+
+/// [`project_explicit_backlog_queue_routes`] that treats each id in
+/// `followup_roots` as already queued (`#followuprootprovenance`).
+pub fn project_explicit_backlog_queue_routes_with_followup_roots(
+    components: &[element::Component],
+    content: &str,
+    followup_roots: &HashSet<String>,
+) -> anyhow::Result<BacklogQueueRoutingProjection> {
     project_explicit_backlog_queue_routes_scoped(
         components,
         content,
         None,
         BacklogQueueSyncMode::Append,
+        followup_roots,
     )
 }
 
@@ -291,8 +302,32 @@ pub fn project_explicit_backlog_queue_routes_for_ids(
     ids: &[String],
     mode: BacklogQueueSyncMode,
 ) -> anyhow::Result<BacklogQueueRoutingProjection> {
+    project_explicit_backlog_queue_routes_for_ids_with_followup_roots(
+        components,
+        content,
+        ids,
+        mode,
+        &HashSet::new(),
+    )
+}
+
+/// [`project_explicit_backlog_queue_routes_for_ids`] that treats each id in
+/// `followup_roots` as already queued (`#followuprootprovenance`).
+pub fn project_explicit_backlog_queue_routes_for_ids_with_followup_roots(
+    components: &[element::Component],
+    content: &str,
+    ids: &[String],
+    mode: BacklogQueueSyncMode,
+    followup_roots: &HashSet<String>,
+) -> anyhow::Result<BacklogQueueRoutingProjection> {
     let only: HashSet<String> = ids.iter().map(|id| normalize_id(id)).collect();
-    project_explicit_backlog_queue_routes_scoped(components, content, Some(&only), mode)
+    project_explicit_backlog_queue_routes_scoped(
+        components,
+        content,
+        Some(&only),
+        mode,
+        followup_roots,
+    )
 }
 
 fn project_explicit_backlog_queue_routes_scoped(
@@ -300,6 +335,7 @@ fn project_explicit_backlog_queue_routes_scoped(
     content: &str,
     only_ids: Option<&HashSet<String>>,
     mode: BacklogQueueSyncMode,
+    followup_roots: &HashSet<String>,
 ) -> anyhow::Result<BacklogQueueRoutingProjection> {
     let queues = crate::queue_set::QueueSet::parse(content, components)?;
     let placement_debt = collect_backlog_queue_placement_debt(components, content)?;
@@ -339,8 +375,12 @@ fn project_explicit_backlog_queue_routes_scoped(
         if ids.is_empty() {
             continue;
         }
-        let sibling_ids =
+        let mut sibling_ids =
             sibling_run_queue_reference_ids(components, content, target.component.open_start)?;
+        sibling_ids.extend(crate::followup_provenance::roots_absent_from(
+            followup_roots,
+            &target.entries,
+        ));
         let Some(synced) = document_queue::sync_backlog_into_queue_with_external_ids(
             &target.entries,
             &ids,
@@ -909,6 +949,27 @@ pub fn enqueue_actionable_ids_reporting(
     placement: FollowUpQueuePlacement,
     anchored_ids: &[String],
 ) -> anyhow::Result<MirrorOutcome> {
+    enqueue_actionable_ids_reporting_with_followup_roots(
+        content,
+        actionable_ids,
+        placement,
+        anchored_ids,
+        &HashSet::new(),
+    )
+}
+
+/// [`enqueue_actionable_ids_reporting`] that also treats every id in
+/// `followup_roots` as already queued (`#followuprootprovenance`): a live
+/// follow-up row descends from that open item, so the item's work is already
+/// in the queue even though no row references its id
+/// ([`crate::followup_provenance::live_followup_root_ids`]).
+pub fn enqueue_actionable_ids_reporting_with_followup_roots(
+    content: &str,
+    actionable_ids: &[String],
+    placement: FollowUpQueuePlacement,
+    anchored_ids: &[String],
+    followup_roots: &HashSet<String>,
+) -> anyhow::Result<MirrorOutcome> {
     if actionable_ids.is_empty() {
         return Ok(MirrorOutcome::Refused(MirrorRefusal::NoQueueableIds));
     }
@@ -971,10 +1032,18 @@ pub fn enqueue_actionable_ids_reporting(
         queue_comp.open_start,
     )?);
 
+    // `#followuprootprovenance`: a live follow-up row of the item is its queue
+    // presence. Kept out of `existing`, which also locates anchor heads.
+    let followup_roots: HashSet<String> = followup_roots
+        .iter()
+        .map(|id| normalize_id(id.trim_start_matches('#')))
+        .collect();
     let mut seen = HashSet::new();
     let mut fresh: Vec<String> = queueable
         .iter()
-        .filter(|id| !existing.contains(*id) && seen.insert((*id).clone()))
+        .filter(|id| {
+            !existing.contains(*id) && !followup_roots.contains(*id) && seen.insert((*id).clone())
+        })
         .cloned()
         .collect();
 

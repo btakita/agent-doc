@@ -3068,3 +3068,144 @@ fn followups_of_a_nested_origin_leave_the_parent_children_alone_and_stay_acknowl
         "the parent's other child is untouched: {rows:#?}"
     );
 }
+
+/// Claim and start `item` for `owner` as its first attempt.
+fn claim_and_start(dir: &std::path::Path, path: &str, item: &str, owner: &str) {
+    assert_ok(
+        &run_agent_doc(
+            dir,
+            &["queue", "claim", path, "--item", item, "--owner", owner],
+        ),
+        "queue claim",
+    );
+    assert_ok(
+        &run_agent_doc(
+            dir,
+            &[
+                "queue",
+                "start",
+                path,
+                "--item",
+                item,
+                "--owner",
+                owner,
+                "--generation",
+                "1",
+                "--worker-id",
+                &format!("worker:{owner}"),
+            ],
+        ),
+        "queue start",
+    );
+}
+
+/// `#followuprootprovenance` (agent-loop `tasks/software/lazily.md`,
+/// 2026-11-15): `[#implementlazilyowned]` stayed open across many slices.
+/// Its `do [#id]` head was acknowledged, struck and reaped while the
+/// follow-up row `report-complete` created from it ran a worker. The row
+/// quotes its origin without `#`, so the go-mode mirror found no queue
+/// presence for the open item and re-added a pending `do [#id]` head for work
+/// the running worker owned; `#transientcloseout` then refused closeout until
+/// a second worker was dispatched onto the same ledger.
+///
+/// `report-complete` now records the row's root item, and every mirror counts
+/// a live descendant row as that item's queue presence. A follow-up of the
+/// follow-up keeps the root.
+#[test]
+fn a_running_followup_keeps_its_open_backlog_item_out_of_the_go_mirror() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = committed_run_session(dir.path(), &["- do [#alpha]", "- do [#beta]"]);
+    let path = doc.to_str().unwrap();
+    claim_and_start(dir.path(), path, "do [#alpha]", "subagent:alpha");
+    let report = |item: &str, action: &str| {
+        let handback = format!(
+            "**Summary:** migrated one family.\n**Verification:** make check exit=0\n**Action items:**\n- {action}\n"
+        );
+        let output = run_agent_doc(
+            dir.path(),
+            &[
+                "queue",
+                "report-complete",
+                "--prose-only",
+                path,
+                "--item",
+                item,
+                "--generation",
+                "1",
+                "--response",
+                &handback,
+            ],
+        );
+        assert_ok(&output, "report-complete");
+    };
+    report("do [#alpha]", "agent: Continue the remaining alpha rows");
+    let followup =
+        "follow up on an action item from `alpha`: agent: Continue the remaining alpha rows";
+    assert!(
+        run_rows(&doc).iter().any(|row| row.ends_with(followup)),
+        "{:#?}",
+        run_rows(&doc)
+    );
+    let ledger = agent_doc_queue_io::followup_provenance_ledger::load(&doc);
+    assert_eq!(ledger.root_of_row(followup), Some("alpha"), "{ledger:?}");
+
+    // The coordinator acknowledges the origin head (the item stays open),
+    // and a later pass reaps the struck row.
+    assert_ok(
+        &run_agent_doc(
+            dir.path(),
+            &[
+                "backlog",
+                path,
+                "edit",
+                "alpha",
+                "fix the alpha defect (stays open: the follow-up continues the migration)",
+            ],
+        ),
+        "record the stays-open reason",
+    );
+    assert_ok(
+        &run_agent_doc(dir.path(), &["queue", "consume", path, "--ack-id", "alpha"]),
+        "queue consume --ack-id",
+    );
+    let content = fs::read_to_string(&doc).unwrap();
+    let reaped: String = content
+        .split_inclusive('\n')
+        .filter(|line| !(line.contains("~~") && line.contains("do [#alpha]")))
+        .collect();
+    assert_ne!(
+        reaped, content,
+        "the acknowledged head is struck: {content}"
+    );
+    fs::write(&doc, &reaped).unwrap();
+    git(dir.path(), &["add", "session.md"]);
+    git(dir.path(), &["commit", "-q", "--no-verify", "-m", "reap"]);
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        &doc,
+        &reaped,
+        agent_doc_ops_log_io::log_op,
+    )
+    .unwrap();
+    assert!(rows_naming(&run_rows(&doc), "alpha").is_empty());
+
+    // A worker runs the follow-up row.
+    claim_and_start(dir.path(), path, followup, "subagent:alpha2");
+    preflight_json(dir.path(), &doc);
+    let rows = run_rows(&doc);
+    assert!(
+        rows_naming(&rows, "alpha").is_empty(),
+        "the go mirror must not re-add `do [#alpha]` while its follow-up runs: {rows:#?}"
+    );
+    assert!(rows.iter().any(|row| row.contains(followup)), "{rows:#?}");
+
+    // The follow-up's own action item: a follow-up of a follow-up keeps the
+    // root item.
+    report(followup, "agent: Continue the last alpha family");
+    let ledger = agent_doc_queue_io::followup_provenance_ledger::load(&doc);
+    let nested = run_rows(&doc)
+        .into_iter()
+        .find(|row| row.contains("Continue the last alpha family"))
+        .unwrap_or_else(|| panic!("nested row missing: {:#?}", run_rows(&doc)));
+    let nested = nested.trim_start().strip_prefix("- ").unwrap_or(&nested);
+    assert_eq!(ledger.root_of_row(nested), Some("alpha"), "{ledger:?}");
+}

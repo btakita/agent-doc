@@ -205,6 +205,15 @@ pub fn add_followups_with_effects(
     let plan = queue_inbound::plan_queue_followups_targeted(&current, queue_id, origin, followups)
         .with_context(|| format!("queue follow-up: {}", file.display()))?;
     effects.converge_document_or_disk(file, &plan.content, &current, "queue_followup")?;
+    // `#followuprootprovenance`: record which tracked item the new rows serve,
+    // so the backlog mirror counts that item as queued while they are live.
+    let origin_row = agent_doc_queue::queue_response::queue_row_text_for_head(&current, origin);
+    crate::followup_provenance_ledger::record_followup_roots(
+        file,
+        &plan.content,
+        &[origin_row.as_deref().unwrap_or(origin), origin],
+        followups,
+    );
     let target_queue_id = plan.queue_id.as_str();
     agent_doc_ops_log_io::log_op(
         file,

@@ -37,6 +37,7 @@ pub mod queue_blocked;
 pub mod queue_claim;
 pub use agent_doc_element_queue::QueueReportState;
 pub mod followup_owner;
+pub mod followup_provenance;
 pub mod handback_followups;
 #[cfg(test)]
 mod nest_leaf_select_tests;

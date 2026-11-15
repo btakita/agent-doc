@@ -34,7 +34,12 @@
 //!   durable phase: a `🚧` backed only by an unbound dispatch is not a running
 //!   worker. A stale `🚧`, an unacknowledged `🟡`, or a row with no backing
 //!   claim still refuses. The `🙋` part of `🙋🚧` does not exempt its worker
-//!   part from this rule.
+//!   part from this rule. `#finishedheadrefill`: a `🟡`/`🚧` row whose
+//!   current-generation attempt is report-owed (its worker ended and the
+//!   harness recorded its hand-back, [`ReportOwedAttempt`]) is not a stale
+//!   worker either: it refuses with the exact `queue report-complete` for
+//!   that generation, the same debt a `⚠️🚧` row with a recorded hand-back
+//!   owes.
 //! - **Not due.** A `📥` row that a closed `agent:loop` schedule window holds
 //!   back is not due until the next tick.
 //! - **Held by its queue's control** (`#heldloopstophook`). A `📥` row in a
@@ -229,6 +234,12 @@ pub struct CloseoutEvidence {
     /// [`crate::queue_claim::QueueClaim::lost_end_hand_back`]). The row owes a
     /// report of that hand-back, not a continue or a new generation.
     pub reportable_lost: HashSet<QueueItemIdentity>,
+    /// `#finishedheadrefill`: work identities whose current-generation attempt is
+    /// report-owed ([`ReportOwedAttempt::of`]), whether still `Running` or
+    /// already `Lost`. A `🟡`/`🚧` row owes the report instead of a heartbeat
+    /// refresh, and every report-owed refusal names the exact
+    /// `queue report-complete` command for that generation.
+    pub report_owed: HashMap<QueueItemIdentity, ReportOwedAttempt>,
     /// The session document path owed commands name (`#orphanreportedrow`);
     /// `None` renders the `<FILE>` placeholder.
     pub document: Option<String>,
@@ -241,6 +252,55 @@ pub struct CloseoutEvidence {
     /// `integrating` receipt. Only [`IntegrationInFlightStatus::Live`] holds a
     /// `☑️` row quiescent.
     pub integrations_in_flight: HashMap<QueueItemIdentity, IntegrationInFlight>,
+}
+
+/// `#finishedheadrefill`: a current-generation attempt whose worker finished and
+/// whose result is not reported yet ([`crate::lost_running_recovery::report_owed`]).
+/// The coordinator owes `queue report-complete` for this exact generation,
+/// not a heartbeat refresh, a continue, or a new generation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReportOwedAttempt {
+    /// The claim's CLI handle ([`crate::queue_claim::claim_item_handle`]).
+    pub item: String,
+    pub generation: u64,
+}
+
+impl ReportOwedAttempt {
+    /// The report-owed attempt of `claim`: a bound worker's `Running` or
+    /// `Lost` attempt that [`crate::lost_running_recovery::report_owed`]
+    /// classifies as finished and unreported. `None` for every other claim.
+    pub fn of(claim: &crate::queue_claim::QueueClaim) -> Option<Self> {
+        use crate::queue_claim::QueueClaimState;
+        if !matches!(
+            claim.state,
+            QueueClaimState::Running | QueueClaimState::Lost
+        ) || claim.worker.is_none()
+            || !crate::lost_running_recovery::report_owed(claim)
+        {
+            return None;
+        }
+        Some(Self {
+            item: crate::queue_claim::claim_item_handle(&claim.item_text),
+            generation: claim.generation,
+        })
+    }
+
+    /// `agent-doc queue report-complete <document> --item <row> --generation
+    /// <n> --response '<complete worker hand-back>'`.
+    pub fn report_command(&self, document: &str) -> String {
+        crate::reported_closeout::shell_command(&[
+            "agent-doc".to_string(),
+            "queue".to_string(),
+            "report-complete".to_string(),
+            document.to_string(),
+            "--item".to_string(),
+            self.item.clone(),
+            "--generation".to_string(),
+            self.generation.to_string(),
+            "--response".to_string(),
+            "<complete worker hand-back>".to_string(),
+        ])
+    }
 }
 
 /// Every live transient row, split into the debts that refuse a normal
@@ -381,6 +441,11 @@ const OWED_LOST_REPORTED: &str = "integrate the recovered report: the worker's r
 /// `#lostrowreportreopen`: what a `⚠️🚧` row owes when its ended worker's
 /// hand-back is recorded and unreported.
 const OWED_LOST_RECORDED_HANDBACK: &str = "report the hand-back its ended worker left: run `agent-doc queue report-complete` for this exact generation with that hand-back (the freeze recorded its opening); do not continue the ended worker or retry a new generation for finished work";
+
+/// `#finishedheadrefill`: what a `🟡`/`🚧` row owes when its current-generation
+/// worker ended and its hand-back is recorded and unreported. It is not a
+/// stale worker: no heartbeat refresh revives it.
+const OWED_RUNNING_RECORDED_HANDBACK: &str = "report the hand-back its ended worker left: the worker finished and its hand-back is recorded but not reported, so run `agent-doc queue report-complete` for this exact generation with the worker's complete hand-back; do not refresh its heartbeat, continue the ended worker, or claim a new generation for finished work (only to discard the result, `agent-doc queue release --requeue` this generation)";
 
 /// `#orphanreportedrow`: what a reported row owes once its kept response
 /// tree's operator request is answered (or when it names none).
@@ -555,7 +620,15 @@ pub fn assess_transient_closeout(
                 QueueLifecycleMarker::Claimed | QueueLifecycleMarker::Running => {
                     let identity = crate::queue_claim::claim_identity_at(&entries, index)
                         .unwrap_or_else(|| crate::queue_claim::claim_identity(&prompt.text));
-                    if evidence
+                    // `#finishedheadrefill`: a finished worker's unreported
+                    // hand-back owes its report, not a heartbeat refresh.
+                    if let Some(owed) = evidence.report_owed.get(&identity) {
+                        let mut owed_debt = debt(OWED_RUNNING_RECORDED_HANDBACK);
+                        owed_debt.close_command = Some(
+                            owed.report_command(evidence.document.as_deref().unwrap_or("<FILE>")),
+                        );
+                        assessment.debts.push(owed_debt);
+                    } else if evidence
                         .fresh_claims
                         .get(&identity)
                         .is_some_and(|fresh| fresh.backs(marker))
@@ -579,7 +652,17 @@ pub fn assess_transient_closeout(
                             ),
                         ) =>
                 {
-                    assessment.debts.push(debt(OWED_LOST_RECORDED_HANDBACK));
+                    let mut owed_debt = debt(OWED_LOST_RECORDED_HANDBACK);
+                    owed_debt.close_command =
+                        crate::queue_claim::claim_identity_at(&entries, index)
+                            .or_else(|| Some(crate::queue_claim::claim_identity(&prompt.text)))
+                            .and_then(|identity| evidence.report_owed.get(&identity))
+                            .map(|owed| {
+                                owed.report_command(
+                                    evidence.document.as_deref().unwrap_or("<FILE>"),
+                                )
+                            });
+                    assessment.debts.push(owed_debt);
                 }
                 QueueLifecycleMarker::Pending | QueueLifecycleMarker::Reported
                     if operator == Some(true) =>
@@ -1958,6 +2041,146 @@ EXCHANGE<!-- /agent:exchange -->
         );
         assert!(
             failure.contains("`--event integrated` supersedes it"),
+            "{failure}"
+        );
+    }
+
+    /// A worker that ended with `hand_back` recorded by the subagent-end
+    /// freeze, its attempt still `Running`, generation `generation`.
+    fn finished_worker_claim(
+        generation: u64,
+        hand_back: Option<&str>,
+    ) -> crate::queue_claim::QueueClaim {
+        let mut claim = worker_claim(
+            crate::queue_claim::QueueClaimState::Running,
+            1_000,
+            Some(1_000),
+            Some(1_100),
+        );
+        claim.generation = generation;
+        claim.frozen = Some(crate::queue_claim::QueueWorkerFreeze {
+            frozen_at_secs: 1_200,
+            reason: crate::queue_claim::subagent_end_freeze_reason(hand_back),
+            abandoned: false,
+        });
+        claim
+    }
+
+    /// `#finishedheadrefill`, at the Stop gate: the subagent-end
+    /// hook froze a worker that FINISHED before the coordinator ran `queue
+    /// report-complete`, so its `🚧` row's `Running` attempt is report-owed.
+    /// The Stop hook said "no heartbeat-fresh worker claim backs this row:
+    /// refresh the heartbeat", which no refresh can satisfy. It now names the
+    /// exact `queue report-complete` for that generation, as it already did
+    /// for a `⚠️🚧` row with a recorded hand-back.
+    #[test]
+    fn finishedheadrefill_a_finished_running_worker_owes_the_report_not_a_refresh() {
+        let content = doc("- 🚧 [#subagent:work#3] do [#work]\n");
+        let finished = finished_worker_claim(3, Some("**Summary** fixed it."));
+        let owed = ReportOwedAttempt::of(&finished).expect("a finished worker is report-owed");
+        assert_eq!(
+            owed,
+            ReportOwedAttempt {
+                item: "#work".to_string(),
+                generation: 3,
+            }
+        );
+        let evidence = CloseoutEvidence {
+            report_owed: HashMap::from([(identity_of(&content, "#work"), owed)]),
+            document: Some("tasks/session.md".to_string()),
+            ..CloseoutEvidence::default()
+        };
+        let assessment = assess_transient_closeout(&content, &evidence).unwrap();
+        assert!(assessment.quiescent.is_empty(), "{assessment:?}");
+        assert_eq!(assessment.debts.len(), 1, "{assessment:?}");
+        let failure = normal_closeout_failure_for(&assessment).unwrap();
+        assert!(
+            failure.contains("report the hand-back its ended worker left"),
+            "{failure}"
+        );
+        assert!(
+            failure.contains(
+                "agent-doc queue report-complete tasks/session.md --item '#work' --generation 3 --response '<complete worker hand-back>'"
+            ),
+            "{failure}"
+        );
+        assert!(
+            !failure.contains("no heartbeat-fresh worker claim backs this row"),
+            "{failure}"
+        );
+        assert!(
+            !failure.contains("agent-doc queue claim --refresh"),
+            "{failure}"
+        );
+
+        // A `🟡` row whose attempt is report-owed owes the same report, not
+        // "start the claimed worker".
+        let claimed = doc("- 🟡 [#subagent:work#3] do [#work]\n");
+        let failure = normal_closeout_failure_with(&claimed, &evidence)
+            .unwrap()
+            .expect("a report-owed row refuses");
+        assert!(
+            failure.contains("queue report-complete tasks/session.md"),
+            "{failure}"
+        );
+        assert!(!failure.contains("no recent dispatch claim"), "{failure}");
+
+        // Without the report-owed evidence the row is the generic stale worker.
+        let failure = normal_closeout_failure(&content)
+            .unwrap()
+            .expect("a stale running worker refuses");
+        assert!(
+            failure.contains("no heartbeat-fresh worker claim backs this row"),
+            "{failure}"
+        );
+    }
+
+    /// Only a finished, unreported attempt is report-owed: an end with no
+    /// captured hand-back, an abandon, a live worker, and a reported attempt
+    /// are not.
+    #[test]
+    fn finishedheadrefill_only_a_recorded_unreported_hand_back_is_report_owed() {
+        use crate::queue_claim::QueueClaimState;
+        assert!(ReportOwedAttempt::of(&finished_worker_claim(1, None)).is_none());
+        let live = worker_claim(QueueClaimState::Running, 1_000, Some(1_000), Some(1_100));
+        assert!(ReportOwedAttempt::of(&live).is_none());
+        let mut abandoned = finished_worker_claim(1, Some("done"));
+        abandoned.frozen.as_mut().unwrap().abandoned = true;
+        assert!(ReportOwedAttempt::of(&abandoned).is_none());
+        let mut reported = finished_worker_claim(1, Some("done"));
+        reported.state = QueueClaimState::Reported;
+        assert!(ReportOwedAttempt::of(&reported).is_none());
+        let mut lost = finished_worker_claim(2, Some("done"));
+        lost.mark_lost();
+        assert_eq!(
+            ReportOwedAttempt::of(&lost).map(|owed| owed.generation),
+            Some(2)
+        );
+    }
+
+    /// The `⚠️🚧` refusal with a recorded hand-back names the same exact
+    /// command once the evidence carries the attempt.
+    #[test]
+    fn finishedheadrefill_the_lost_recorded_hand_back_names_the_report_command() {
+        let content = doc("- ⚠️🚧 [#subagent:work#2] do [#work]\n");
+        let mut lost = finished_worker_claim(2, Some("done"));
+        lost.mark_lost();
+        let identity = identity_of(&content, "#work");
+        let evidence = CloseoutEvidence {
+            reportable_lost: HashSet::from([identity.clone()]),
+            report_owed: HashMap::from([(identity, ReportOwedAttempt::of(&lost).unwrap())]),
+            ..CloseoutEvidence::default()
+        };
+        let failure = normal_closeout_failure_with(&content, &evidence)
+            .unwrap()
+            .expect("the lost row owes its report");
+        assert!(
+            failure.contains("report the hand-back its ended worker left"),
+            "{failure}"
+        );
+        assert!(
+            failure
+                .contains("agent-doc queue report-complete '<FILE>' --item '#work' --generation 2"),
             "{failure}"
         );
     }

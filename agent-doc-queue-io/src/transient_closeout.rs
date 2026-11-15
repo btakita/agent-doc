@@ -8,6 +8,9 @@
 //! session-check) reads them here, the same way, before it classifies.
 //! `#integrationinflight`: a `☑️` row's recorded integration in flight lives
 //! in the queue lineage ledger, read here the same way.
+//! `#finishedheadrefill`: a `🚧` row whose current-generation worker ended with a
+//! recorded, unreported hand-back is report-owed, read from the claim ledger
+//! here the same way.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -16,8 +19,8 @@ use anyhow::Result;
 
 use agent_doc_element_queue::QueueItemIdentity;
 use agent_doc_queue::transient_closeout::{
-    CloseoutEvidence, IntegrationInFlight, TransientCloseoutAssessment, assess_transient_closeout,
-    fresh_claim_phase,
+    CloseoutEvidence, IntegrationInFlight, ReportOwedAttempt, TransientCloseoutAssessment,
+    assess_transient_closeout, fresh_claim_phase,
 };
 
 /// The evidence for `content` at `now_secs`. Reads the claim ledger and the
@@ -26,6 +29,8 @@ use agent_doc_queue::transient_closeout::{
 pub fn closeout_evidence_at(file: &Path, content: &str, now_secs: u64) -> CloseoutEvidence {
     // `#integrationinflight`: read from the same claim ledger, below.
     let mut integrations_in_flight = Default::default();
+    // `#finishedheadrefill`: read from the same claim ledger, below.
+    let mut report_owed = HashMap::new();
     let (fresh_claims, reportable_lost) = match crate::queue_claim::load_ledger_following_read_only(
         file, content,
     ) {
@@ -52,6 +57,15 @@ pub fn closeout_evidence_at(file: &Path, content: &str, now_secs: u64) -> Closeo
                 .filter(|claim| claim.lost_end_hand_back().is_some())
                 .map(|claim| claim.identity.clone())
                 .collect();
+            // `#finishedheadrefill`: a finished worker's unreported hand-back
+            // owes `queue report-complete` for its generation, not a refresh.
+            report_owed = ledger
+                .claims
+                .iter()
+                .filter_map(|claim| {
+                    ReportOwedAttempt::of(claim).map(|owed| (claim.identity.clone(), owed))
+                })
+                .collect();
             integrations_in_flight =
                 reported_integrations_in_flight(file, &ledger.claims, now_secs);
             (fresh, reportable)
@@ -71,6 +85,7 @@ pub fn closeout_evidence_at(file: &Path, content: &str, now_secs: u64) -> Closeo
         fresh_claims,
         schedule_held_heads,
         reportable_lost,
+        report_owed,
         document: Some(file.display().to_string()),
         // `#gatedheadpending`: a blocker that closed into the external done
         // archive is resolved, not external.
@@ -271,5 +286,68 @@ mod tests {
         let assessment = assess_transient_closeout(&content, &evidence).unwrap();
         assert!(assessment.quiescent.is_empty(), "{assessment:?}");
         assert_eq!(assessment.debts.len(), 1, "{assessment:?}");
+    }
+
+    /// `#finishedheadrefill`, at the Stop gate: the
+    /// subagent-end hook froze a FINISHED worker's `Running` attempt with its
+    /// hand-back before the coordinator reported it. The Stop hook's evidence
+    /// reads that attempt from the claim ledger as report-owed, so the `🚧`
+    /// row refuses with the exact `queue report-complete` for generation 1
+    /// instead of the generic stale-worker refresh, and the report clears it.
+    #[test]
+    fn finishedheadrefill_the_stop_gate_names_the_report_for_a_finished_running_worker() {
+        const FINISHED: &str = "do [#finishedworker]";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        write_doc(&doc, FINISHED);
+        crate::queue_claim::claim(&doc, FINISHED, "subagent:fin", 600).unwrap();
+        crate::queue_claim::start_attempt(&doc, FINISHED, "subagent:fin", "worker:fin", 600, 1)
+            .unwrap();
+        let content = write_doc(&doc, &format!("🚧 [#subagent:fin#1] {FINISHED}"));
+
+        // A live worker with no fresh heartbeat is the generic stale worker.
+        let late = crate::queue_claim::claim_clock_now_secs() + 3_600;
+        let failure = agent_doc_queue::transient_closeout::normal_closeout_failure_with(
+            &content,
+            &closeout_evidence_at(&doc, &content, late),
+        )
+        .unwrap()
+        .expect("a stale running worker refuses");
+        assert!(
+            failure.contains("no heartbeat-fresh worker claim backs this row"),
+            "{failure}"
+        );
+
+        let reason = agent_doc_queue::queue_claim::subagent_end_freeze_reason(Some(
+            "**Summary** fixed it. **What changed** branch fix/finished, commit 1234abc.",
+        ));
+        let frozen = crate::queue_claim::freeze_attempt(&doc, FINISHED, Some(1), &reason).unwrap();
+        assert_eq!(
+            frozen.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Running
+        );
+        let evidence = closeout_evidence(&doc, &content);
+        assert_eq!(evidence.report_owed.len(), 1, "{evidence:#?}");
+        assert!(evidence.reportable_lost.is_empty(), "{evidence:#?}");
+        let failure =
+            agent_doc_queue::transient_closeout::normal_closeout_failure_with(&content, &evidence)
+                .unwrap()
+                .expect("the finished worker's row still owes its report");
+        assert!(
+            failure.contains("report the hand-back its ended worker left"),
+            "{failure}"
+        );
+        let document = doc.display().to_string();
+        assert!(
+            failure.contains(&format!(
+                "agent-doc queue report-complete {document} --item '#finishedworker' --generation 1 --response '<complete worker hand-back>'"
+            )),
+            "{failure}"
+        );
+        assert!(
+            !failure.contains("no heartbeat-fresh worker claim backs this row"),
+            "{failure}"
+        );
     }
 }

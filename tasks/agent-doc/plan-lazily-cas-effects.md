@@ -400,12 +400,50 @@ Progress (`#implementlazilyowned`):
   `QueueMaintenanceAuthoritySuperseded` is replaced by the plan's typed
   `QueueMaintenanceEffectSuperseded::admitted_authority` (3 rows `deleted`
   with `absent:` proofs).
-- Not yet done: the reviewed `pending-migration` families above, moving the remaining `controller-ledger-sqlite` seams (actor generation,
-  closeout lease, drain-owner claims) onto the SQLite adapter, persisting
-  per-step plan receipts for crash resume inside one request (today a resumed
-  request re-derives its idempotent effects), reordering the maintenance body
-  so the document cut is the first plan step, triage of the `triage` rows, and
-  deletion of the remaining bespoke orchestration.
+- Not yet done (as of 2026-11-15, agent-doc `59984d315a`; triage is complete,
+  0 `triage` rows): migrate the 291 reviewed `pending-migration` rows family
+  by family, then delete the remaining bespoke orchestration and make the
+  final audit show no second application-owned retry/supersession loop.
+
+## Resume here
+
+Status 2026-11-15: ledger = 23 `migrated`, 39 `lazily-adapter`, 13 `deleted`,
+356 `excluded`, 291 `pending-migration`, 0 `triage`. Work the 291 rows
+sequentially in ONE worktree (every step edits the ledger), one family per
+pushed commit, `make check` green before each push, in this order:
+
+1. Actor-generation fenced writes (`store_actor_record_fenced_tx`,
+   `delete_actor_document_fenced_tx`; 20 actor-generation rows) onto the
+   `ledger_cas` adapter shape.
+2. Closeout lease and drain-owner claims (37 closeout/turn-fenced + 17
+   cross-process owner-lease rows) onto a durable Lazily claim, as
+   `queue_maintenance_claim` does.
+3. Document CAS refusal/re-observe retry loops (29 rows: compact-io,
+   route-io `queue_dispatch`, queue-io `queue_cmd` / `queue_consume`) onto
+   `DocumentCasBackend` + Lazily epochs, plus queue projection CAS (15 rows)
+   onto the queue-maintenance plan/claim.
+4. Retained editor writes and retained-intent lineage (23 rows) onto a Lazily
+   latest-intent core.
+5. tmux/layout/editor-focus latest-wins projections (31 rows) onto a Lazily
+   latest-wins key.
+6. Dispatch/recycle retry budget and owner supersession (44 + 1 rows).
+7. The editor half of the document authority (`CrdtReplicaManager`,
+   `PatchWatcher`, `TypingTracker`; 41 + 13 editor rows): move
+   retry/supersession behind the Rust core (FFI) so Lazily owns it.
+8. Remaining small families: authority observation (6), idle-watch/captured
+   finalize retry (6), Git commit/closeout helpers around `ref_cas` (8).
+9. Per-step plan receipts persisted for crash resume, and reorder the
+   maintenance body so the document cut is literally the first plan step.
+10. Phase 6 rollout: delete compatibility paths and duplicate state, final
+    source audit, then `make install` + recycle (coordinator only).
+
+Per family: parity/`Superseded` contract test first, switch callers, delete
+the old loop, mark rows `migrated`/`deleted` with `absent:` proofs, update this
+Progress list, push. Preserve messages, log markers, and retry caps unless the
+ledger row states why they change. Use a paired worktree
+(`<parent>/<label>/agent-doc` + private `<parent>/<label>/tmux-router` detached
+at `2a9dfdd`; the superproject pointer `f4acd6d` lacks `RegistryLockWait`).
+Tracking item: `#implementlazilyowned` in agent-loop `tasks/software/lazily.md`.
 
 ## Integration order
 

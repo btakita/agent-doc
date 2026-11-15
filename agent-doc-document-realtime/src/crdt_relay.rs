@@ -2050,6 +2050,31 @@ impl RelayHub {
         self.ctx.get(&self.retained_replica_reseed_pending)
     }
 
+    /// `#installreattachambiguous`: a reseed hub takes the history of the
+    /// retained replica that reseeds it. Its canonical holds no op yet, and the
+    /// reseed publishes exactly that replica's ops into it, so the op-id
+    /// namespace the canonical extends IS the replica's history. Minting a new
+    /// history id here (what [`Self::new`] does) made every later registration
+    /// from the same retained replica read as foreign
+    /// (`crdt_replica_register_history_lineage_mismatch`), withholding the
+    /// coverage proof, so an editor whose buffer still equalled its settled
+    /// shadow held `ambiguous-retained-projection` after every `make install`.
+    ///
+    /// Refused (returns `false`) unless a reseed is pending and the canonical
+    /// holds no operation: only an empty history can be renamed without
+    /// changing what any op id means. The durable-frame [`Self::lineage`] is
+    /// unchanged; it fences frames, not histories.
+    pub fn adopt_retained_replica_history(&mut self, history_lineage: &str) -> bool {
+        if history_lineage.is_empty()
+            || !self.retained_replica_reseed_pending()
+            || self.canonical.state_vector() != ReplicaState::new(self.canonical_id).state_vector()
+        {
+            return false;
+        }
+        self.history_lineage = history_lineage.to_string();
+        true
+    }
+
     fn complete_retained_replica_reseed(&self) {
         if !self.retained_replica_reseed_pending() {
             return;
@@ -6975,6 +7000,35 @@ mod tests {
     /// `#deliverylineagestamp`: the history lineage names the op-id namespace.
     /// A generation fence rotates only the durable-frame lineage; a text
     /// rebuild starts a new history; recovery keeps the history it can prove.
+    #[test]
+    fn only_an_empty_reseed_hub_takes_the_retained_replica_history() {
+        // `#installreattachambiguous`
+        let mut cold = RelayHub::new(1);
+        assert!(
+            !cold.adopt_retained_replica_history("retained-history"),
+            "no reseed is pending"
+        );
+        cold.begin_retained_replica_reseed();
+        let frame_lineage = cold.lineage().to_string();
+        assert!(!cold.adopt_retained_replica_history(""));
+        assert!(cold.adopt_retained_replica_history("retained-history"));
+        assert_eq!(cold.history_lineage(), "retained-history");
+        assert_eq!(
+            cold.lineage(),
+            frame_lineage,
+            "the durable-frame fence is not the history"
+        );
+
+        let mut seeded = RelayHub::from_text(1, "- do [#a]\n");
+        seeded.begin_retained_replica_reseed();
+        let history = seeded.history_lineage().to_string();
+        assert!(
+            !seeded.adopt_retained_replica_history("retained-history"),
+            "a canonical that holds ops keeps its history"
+        );
+        assert_eq!(seeded.history_lineage(), history);
+    }
+
     #[test]
     fn history_lineage_survives_a_generation_fence_and_rotates_with_a_text_rebuild() {
         let mut hub = RelayHub::from_text(1, "- do [#a]\n- do [#b]\n");

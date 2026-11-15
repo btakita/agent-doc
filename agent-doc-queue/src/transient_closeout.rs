@@ -62,6 +62,18 @@
 //!   external done archive ids ([`CloseoutEvidence::archived_done_ids`]) so a
 //!   blocker that closed and was archived never reads as external.
 //!
+//! - **Integration in flight** (`#integrationinflight`). A `☑️` row whose
+//!   coordinator already merged the worker's branch and is still running the
+//!   verification on the merged tree is waiting on that verification, not on
+//!   an agent action (`state=waiting_on_integration`). The coordinator records
+//!   it with `queue lineage-record --event integrating`, bound to the
+//!   attempt's claim generation, the worker's source sha, and the candidate
+//!   integration sha, with a deadline. The IO evidence
+//!   ([`CloseoutEvidence::integrations_in_flight`]) carries only the record of
+//!   the row's live `Reported` claim and generation that no `integrated`
+//!   receipt has superseded. An expired record, or one whose source sha or
+//!   generation no longer matches the row, refuses again.
+//!
 //! The Waiting-on-you heading (`#waitingheadingpending`) is not a row at
 //! all for this gate: it is the waiting tree's container, so a marker a stale
 //! projection painted on it owes no transition
@@ -129,6 +141,9 @@ pub enum QuiescentReason {
     /// The row's tracked item waits on open work or on an external blocker
     /// its stays-open clause records (`#gatedheadpending`, `#queueblocked`).
     Blocked,
+    /// A `☑️` row whose coordinator integration is recorded in flight and
+    /// still inside its deadline (`#integrationinflight`).
+    WaitingOnIntegration,
 }
 
 impl QuiescentReason {
@@ -140,6 +155,7 @@ impl QuiescentReason {
             Self::AwaitingOperator => "awaiting_operator",
             Self::QueueHeld => "queue_held",
             Self::Blocked => "blocked",
+            Self::WaitingOnIntegration => "waiting_on_integration",
         }
     }
 }
@@ -172,6 +188,35 @@ impl FreshClaim {
     }
 }
 
+/// Whether a recorded integration in flight still holds its `☑️` row
+/// quiescent (`#integrationinflight`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntegrationInFlightStatus {
+    /// Inside its deadline and bound to the row's current claim generation
+    /// and source sha.
+    Live,
+    /// Its deadline passed with no `integrated` receipt.
+    Expired,
+    /// The attempt's recorded source sha changed since the record (a newer
+    /// report), so it describes a different integration.
+    SourceMismatch,
+}
+
+/// The newest `integrating` lineage receipt of one reported attempt that no
+/// `integrated` receipt has superseded (`#integrationinflight`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IntegrationInFlight {
+    /// The claim generation the receipt belongs to.
+    pub generation: u64,
+    pub source_sha: String,
+    /// The candidate integration commit whose verification is running.
+    pub integration_sha: String,
+    /// The verification command running on the candidate.
+    pub verification: String,
+    pub expires_at_secs: u64,
+    pub status: IntegrationInFlightStatus,
+}
+
 /// Durable-state facts the text-only gate cannot read (`#stopquiescentrows`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CloseoutEvidence {
@@ -191,6 +236,11 @@ pub struct CloseoutEvidence {
     /// when the IO caller read it. `None` keeps the text-only blocker
     /// derivation ([`crate::queue_blocked::QueueBlockers::from_content`]).
     pub archived_done_ids: Option<HashSet<String>>,
+    /// `#integrationinflight`: work identities whose live `Reported` claim's
+    /// lineage attempt (same generation) carries an unsuperseded
+    /// `integrating` receipt. Only [`IntegrationInFlightStatus::Live`] holds a
+    /// `☑️` row quiescent.
+    pub integrations_in_flight: HashMap<QueueItemIdentity, IntegrationInFlight>,
 }
 
 /// Every live transient row, split into the debts that refuse a normal
@@ -215,6 +265,8 @@ impl TransientCloseoutAssessment {
     pub fn quiescent_state(&self) -> Option<&'static str> {
         if self.quiescent_count(QuiescentReason::WaitingOnClaim) > 0 {
             Some("waiting_on_claims")
+        } else if self.quiescent_count(QuiescentReason::WaitingOnIntegration) > 0 {
+            Some("waiting_on_integration")
         } else if self.quiescent_count(QuiescentReason::OperatorOwned) > 0
             || self.quiescent_count(QuiescentReason::AwaitingOperator) > 0
         {
@@ -233,13 +285,14 @@ impl TransientCloseoutAssessment {
     /// One ops-log field list naming each quiescent count.
     pub fn quiescent_log_fields(&self) -> String {
         format!(
-            "waiting_on_claims={} operator_owned={} schedule_not_due={} awaiting_operator={} queue_held={} blocked={}",
+            "waiting_on_claims={} operator_owned={} schedule_not_due={} awaiting_operator={} queue_held={} blocked={} waiting_on_integration={}",
             self.quiescent_count(QuiescentReason::WaitingOnClaim),
             self.quiescent_count(QuiescentReason::OperatorOwned),
             self.quiescent_count(QuiescentReason::ScheduleNotDue),
             self.quiescent_count(QuiescentReason::AwaitingOperator),
             self.quiescent_count(QuiescentReason::QueueHeld),
             self.quiescent_count(QuiescentReason::Blocked),
+            self.quiescent_count(QuiescentReason::WaitingOnIntegration),
         )
     }
 }
@@ -279,9 +332,7 @@ pub fn owed_closeout_transition(marker: QueueLifecycleMarker) -> Option<&'static
         QueueLifecycleMarker::Running => {
             "finish the running worker without converting the claim to Lost; a worker that is still running means the turn is not over; a frozen 🚧 whose continue already failed authorizes a new generation in the same turn"
         }
-        QueueLifecycleMarker::Reported => {
-            "integrate the report or otherwise leave the reported-but-open state"
-        }
+        QueueLifecycleMarker::Reported => OWED_REPORTED,
         QueueLifecycleMarker::Lost
         | QueueLifecycleMarker::LostClaimed
         | QueueLifecycleMarker::LostRunning => {
@@ -312,6 +363,17 @@ fn owed_stale_worker_transition(marker: QueueLifecycleMarker) -> &'static str {
         }
     }
 }
+
+/// What a `☑️` row owes. `#integrationinflight`: it names the receipt that
+/// lets the gate wait while a merged integration's verification still runs.
+const OWED_REPORTED: &str = "integrate the report or otherwise leave the reported-but-open state. If its integration is already merged and verification on the merged tree is still running, record that so the turn may end while it runs: `agent-doc queue lineage-record <FILE> --item <row> --generation <n> --event integrating --source-sha <worker-source-sha> --integration-sha <candidate-merge-sha> --verification '<command>'` (deadline `--deadline-secs`, default 3600; `--event integrated` supersedes it)";
+
+/// `#integrationinflight`: a recorded integration whose deadline passed.
+const OWED_REPORTED_INTEGRATION_EXPIRED: &str = "integrate the report: the integration recorded in flight for this row (`--event integrating`) passed its deadline with no `integrated` receipt. Finish it and record `agent-doc queue lineage-record ... --event integrated`, or, only if its verification is genuinely still running, record a fresh `--event integrating` receipt";
+
+/// `#integrationinflight`: a recorded integration that no longer describes
+/// the row's current attempt.
+const OWED_REPORTED_INTEGRATION_STALE: &str = "integrate the report: the integration recorded in flight for this row (`--event integrating`) no longer matches it (the attempt's source sha or claim generation changed since). Integrate the current report and record `--event integrated`, or record a fresh `--event integrating` receipt for the current source and generation";
 
 /// `#lostrowreportreopen`: what a `⚠️☑️` row owes.
 const OWED_LOST_REPORTED: &str = "integrate the recovered report: the worker's result is already reported across a lost attempt, so do not continue the worker or retry a new generation; integrate it and strike the row (or `agent-doc queue consume --ack-text <row> --ack-owner <owner#generation>`)";
@@ -526,6 +588,27 @@ pub fn assess_transient_closeout(
                         .quiescent
                         .push(quiescent(QuiescentReason::OperatorOwned));
                 }
+                // `#integrationinflight`: a recorded, unexpired integration of
+                // this exact attempt is a wait on its verification.
+                QueueLifecycleMarker::Reported if !evidence.integrations_in_flight.is_empty() => {
+                    let identity = crate::queue_claim::claim_identity_at(&entries, index)
+                        .unwrap_or_else(|| crate::queue_claim::claim_identity(&prompt.text));
+                    match integration_in_flight_status(
+                        &prompt.text,
+                        evidence.integrations_in_flight.get(&identity),
+                    ) {
+                        Some(IntegrationInFlightStatus::Live) => assessment
+                            .quiescent
+                            .push(quiescent(QuiescentReason::WaitingOnIntegration)),
+                        Some(IntegrationInFlightStatus::Expired) => assessment
+                            .debts
+                            .push(debt(OWED_REPORTED_INTEGRATION_EXPIRED)),
+                        Some(IntegrationInFlightStatus::SourceMismatch) => {
+                            assessment.debts.push(debt(OWED_REPORTED_INTEGRATION_STALE))
+                        }
+                        None => assessment.debts.push(debt(owed)),
+                    }
+                }
                 QueueLifecycleMarker::Pending
                     if crate::queue_continuation::head_awaits_operator_inline(&prompt.text) =>
                 {
@@ -568,6 +651,23 @@ pub fn assess_transient_closeout(
         }
     }
     Ok(assessment)
+}
+
+/// `#integrationinflight`: the status of `record` for the reported row
+/// `text`. A row whose visible owner projection names another generation than
+/// the record's is a different attempt, so the record is stale.
+fn integration_in_flight_status(
+    text: &str,
+    record: Option<&IntegrationInFlight>,
+) -> Option<IntegrationInFlightStatus> {
+    let record = record?;
+    let generation_moved = queue_projection::owner_projection(text)
+        .is_some_and(|owner| owner.generation != record.generation);
+    Some(if generation_moved {
+        IntegrationInFlightStatus::SourceMismatch
+    } else {
+        record.status
+    })
 }
 
 /// `#gatedheadpending`: the item-level gates that make a pending `do [#id]`
@@ -1083,7 +1183,7 @@ mod tests {
         assert!(
             assessment
                 .quiescent_log_fields()
-                .ends_with("awaiting_operator=1 queue_held=0 blocked=1"),
+                .ends_with("awaiting_operator=1 queue_held=0 blocked=1 waiting_on_integration=0"),
             "{}",
             assessment.quiescent_log_fields()
         );
@@ -1173,7 +1273,7 @@ mod tests {
         assert_eq!(assessment.quiescent_state(), Some("waiting_on_claims"));
         assert_eq!(
             assessment.quiescent_log_fields(),
-            "waiting_on_claims=3 operator_owned=0 schedule_not_due=0 awaiting_operator=0 queue_held=0 blocked=0"
+            "waiting_on_claims=3 operator_owned=0 schedule_not_due=0 awaiting_operator=0 queue_held=0 blocked=0 waiting_on_integration=0"
         );
 
         // One worker went stale: only that row refuses.
@@ -1343,7 +1443,7 @@ mod tests {
             assert!(
                 assessment
                     .quiescent_log_fields()
-                    .ends_with("queue_held=1 blocked=0"),
+                    .ends_with("queue_held=1 blocked=0 waiting_on_integration=0"),
                 "{}",
                 assessment.quiescent_log_fields()
             );
@@ -1676,9 +1776,11 @@ EXCHANGE<!-- /agent:exchange -->
 ";
         let assessment = assess_transient_closeout(content, &CloseoutEvidence::default()).unwrap();
         assert_eq!(assessment.debts.len(), 1, "{assessment:?}");
-        assert_eq!(
-            assessment.debts[0].owed,
-            "integrate the report or otherwise leave the reported-but-open state"
+        assert_eq!(assessment.debts[0].owed, OWED_REPORTED);
+        assert!(
+            assessment.debts[0]
+                .owed
+                .starts_with("integrate the report or otherwise leave the reported-but-open state")
         );
     }
 
@@ -1724,5 +1826,139 @@ EXCHANGE<!-- /agent:exchange -->
         let debts = live_transient_debts(&content).unwrap();
         assert_eq!(debts.len(), 1, "{debts:?}");
         assert_eq!(debts[0].row, "📥 fix the flaky test");
+    }
+
+    // ---- `#integrationinflight` --------------------------------------------
+
+    const INFLIGHT_ROW: &str = "☑️ [#subagent:inflight#1] do [#integrationinflight]";
+
+    fn in_flight(
+        content: &str,
+        generation: u64,
+        status: IntegrationInFlightStatus,
+    ) -> CloseoutEvidence {
+        CloseoutEvidence {
+            integrations_in_flight: HashMap::from([(
+                identity_of(content, "do [#integrationinflight]"),
+                IntegrationInFlight {
+                    generation,
+                    source_sha: "a".repeat(40),
+                    integration_sha: "b".repeat(40),
+                    verification: "make check".to_string(),
+                    expires_at_secs: 4_600,
+                    status,
+                },
+            )]),
+            ..CloseoutEvidence::default()
+        }
+    }
+
+    /// 2026-11-15, `tasks/agent-doc/agent-doc-bugs.md`: the coordinator had
+    /// merged `#resumemaintrace`, `#gatedheadpending`, and
+    /// `#installreattachambiguous` in its integration worktree and `make
+    /// check` was still running, yet every Stop refused the `☑️` row. A live
+    /// in-flight record of the row's own generation is a wait, not a debt.
+    #[test]
+    fn integrationinflight_a_live_record_holds_the_reported_row_quiescent() {
+        let content = doc(&format!("- {INFLIGHT_ROW}\n"));
+        let assessment = assess_transient_closeout(
+            &content,
+            &in_flight(&content, 1, IntegrationInFlightStatus::Live),
+        )
+        .unwrap();
+        assert!(assessment.debts.is_empty(), "{assessment:?}");
+        assert_eq!(
+            reasons(&assessment),
+            vec![(
+                INFLIGHT_ROW.to_string(),
+                QuiescentReason::WaitingOnIntegration
+            )]
+        );
+        assert_eq!(assessment.quiescent_state(), Some("waiting_on_integration"));
+        assert!(
+            assessment
+                .quiescent_log_fields()
+                .ends_with("waiting_on_integration=1"),
+            "{}",
+            assessment.quiescent_log_fields()
+        );
+        // The row stays live: nothing strikes it, and a turn with other
+        // agent-actionable rows still refuses over them alone.
+        let mixed = doc(&format!("- {INFLIGHT_ROW}\n- 📥 drainable work\n"));
+        let assessment = assess_transient_closeout(
+            &mixed,
+            &in_flight(&mixed, 1, IntegrationInFlightStatus::Live),
+        )
+        .unwrap();
+        assert_eq!(assessment.debts.len(), 1, "{assessment:?}");
+        assert_eq!(assessment.debts[0].row, "📥 drainable work");
+    }
+
+    #[test]
+    fn integrationinflight_an_expired_or_stale_record_refuses_again() {
+        let content = doc(&format!("- {INFLIGHT_ROW}\n"));
+        let expired = normal_closeout_failure_with(
+            &content,
+            &in_flight(&content, 1, IntegrationInFlightStatus::Expired),
+        )
+        .unwrap()
+        .expect("an expired in-flight record refuses");
+        assert!(expired.contains(INFLIGHT_ROW), "{expired}");
+        assert!(expired.contains("passed its deadline"), "{expired}");
+
+        let mismatched = normal_closeout_failure_with(
+            &content,
+            &in_flight(&content, 1, IntegrationInFlightStatus::SourceMismatch),
+        )
+        .unwrap()
+        .expect("a record for another source refuses");
+        assert!(mismatched.contains("no longer matches it"), "{mismatched}");
+
+        // The visible row names generation 2: a record of generation 1 is a
+        // different attempt and never quiets the gate, even while live.
+        let regenerated = doc("- ☑️ [#subagent:inflight#2] do [#integrationinflight]\n");
+        let assessment = assess_transient_closeout(
+            &regenerated,
+            &in_flight(&regenerated, 1, IntegrationInFlightStatus::Live),
+        )
+        .unwrap();
+        assert!(assessment.quiescent.is_empty(), "{assessment:?}");
+        assert_eq!(assessment.debts.len(), 1, "{assessment:?}");
+        assert!(
+            assessment.debts[0].owed.contains("no longer matches it"),
+            "{assessment:?}"
+        );
+
+        // A record for another row does not cover this one.
+        let other = doc("- ☑️ [#subagent:other#1] do [#otherrow]\n");
+        let evidence = in_flight(&content, 1, IntegrationInFlightStatus::Live);
+        let assessment = assess_transient_closeout(&other, &evidence).unwrap();
+        assert!(assessment.quiescent.is_empty(), "{assessment:?}");
+        assert_eq!(assessment.debts.len(), 1, "{assessment:?}");
+    }
+
+    /// The reported-row refusal tells the coordinator how to record an
+    /// integration in flight, so it does not take a refusal every turn while
+    /// verification runs.
+    #[test]
+    fn integrationinflight_the_reported_refusal_names_the_integrating_receipt() {
+        let content = doc(&format!("- {INFLIGHT_ROW}\n"));
+        let failure = normal_closeout_failure(&content)
+            .unwrap()
+            .expect("a reported row with no record refuses");
+        assert!(
+            failure.contains("integrate the report or otherwise leave the reported-but-open state"),
+            "{failure}"
+        );
+        assert!(
+            failure.contains(
+                "agent-doc queue lineage-record <FILE> --item <row> --generation <n> --event integrating --source-sha <worker-source-sha> --integration-sha <candidate-merge-sha> --verification '<command>'"
+            ),
+            "{failure}"
+        );
+        assert!(
+            failure.contains("`--event integrated` supersedes it"),
+            "{failure}"
+        );
     }
 }

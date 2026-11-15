@@ -620,6 +620,21 @@ interface AgentDocLib : Library {
     fun agent_doc_sync_check_generation(gen: Long): Boolean
 
     /**
+     * `#implementlazilyowned` (plan step 7): record one refused editor attempt of [key] in [scope];
+     * returns its Lazily attempt number, or -1 on an invalid argument. See [EffectFailureLedger].
+     */
+    fun agent_doc_effect_failure_record(scope: String, key: String, reason: String?): Int
+
+    /** The Lazily attempt number of [key]'s retained failure in [scope] (0 when none). */
+    fun agent_doc_effect_failure_count(scope: String, key: String): Int
+
+    /** Receipt [key]'s retained failure in [scope]: 1 when one was retained, 0 when none. */
+    fun agent_doc_effect_failure_clear(scope: String, key: String): Int
+
+    /** Drop every retained failure of [scope]; returns how many were retained. */
+    fun agent_doc_effect_failure_clear_scope(scope: String): Int
+
+    /**
      * Start the IPC socket listener on a background thread. The callback receives each JSON message
      * (read-only, do NOT free) and returns true if handled, false on error. The listener generates
      * receipt responses internally.

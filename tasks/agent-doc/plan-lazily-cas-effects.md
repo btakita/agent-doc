@@ -584,6 +584,31 @@ Progress (`#implementlazilyowned`):
   and attempt budgets). The renumbered `compare_exchange` occurrence keeps its
   excluded review; the deleted handoff flag is
   `compare_exchange(recycle_handoff_in_flight)`.
+- Editor document-authority retries, first half (plan step 7a): the
+  JetBrains plugin's retry refusal counts move behind the FFI onto a Lazily
+  failure ledger (`agent_doc_effect_cas::failure_ledger::FailureLedger`, a
+  `LatestIntentSchedule` per scope whose attempt number is the count; exported
+  as `agent_doc_effect_failure_{record,count,clear,clear_scope}`). The Kotlin
+  `EffectFailureLedger` binds it per family and owner scope
+  (`crdt.local-editor-flush`, `crdt.replica-registration`,
+  `crdt.template-guard-recovery`, `crdt.deferred-write-replay`,
+  `crdt.undurable-local-forward`, `typing.base-hash`), reads the last Lazily
+  count on the EDT (where native calls are forbidden), owes EDT records and
+  clears to the native ledger in order, and falls back to the previous
+  plugin-side count when the loaded library predates the ABI (learned once per
+  native generation; never throws). The managers keep only pace curves (the
+  three inline doubling curves are one `crdtDoublingBackoffMsUtil`) and timers.
+  The write-only `registerRetryAfterMs` / `registerFailureCounts` maps and the
+  uncalled `PatchWatcher.scheduleRepositionRetry` are deleted. Messages, log
+  markers, the 5 base-hash and 8 settle bounds, and every pace are unchanged
+  (the local-flush count is no longer clamped at 13; its delay exponent was
+  already clamped at 12). 41 rows: 19 `migrated`, 6 `deleted`, 2
+  `lazily-adapter` (the patch-generation comparator over the binary-minted
+  baseline hashes, which runs under the EDT capture and refuses back to the
+  binary), 14 `excluded` (the read-lock capture-cut retry, the single-flight
+  timer sets and timers, the no-op drain poll pace and gate, the
+  non-operator-epoch capture fences, the generation-fence normalizers), plus
+  1 new row (`crdtDoublingBackoffMsUtil` `migrated`).
 - Not yet done (as of 2026-11-15, agent-doc `59984d315a`; triage is complete,
   0 `triage` rows): migrate the 291 reviewed `pending-migration` rows family
   by family, then delete the remaining bespoke orchestration and make the
@@ -591,11 +616,11 @@ Progress (`#implementlazilyowned`):
 
 ## Resume here
 
-Status 2026-11-15 (after family 6): ledger = 94 `migrated`, 164 `lazily-adapter`,
-19 `deleted`, 401 `excluded`, 76 `pending-migration`, 0 `triage`. Work the
-76 rows sequentially in ONE worktree (every step edits the ledger), one family
+Status 2026-11-15 (after family 7a): ledger = 114 `migrated`, 166 `lazily-adapter`,
+25 `deleted`, 415 `excluded`, 35 `pending-migration`, 0 `triage`. Work the
+35 rows sequentially in ONE worktree (every step edits the ledger), one family
 per pushed commit, `make check` green before each push, in this order (next:
-family 7):
+family 7b):
 
 1. DONE: actor-generation fenced writes (`store_actor_record_fenced_tx`,
    `delete_actor_document_fenced_tx`; 20 actor-generation rows) onto the
@@ -639,6 +664,12 @@ family 7):
 7. The editor half of the document authority (`CrdtReplicaManager`,
    `PatchWatcher`, `TypingTracker`; 41 + 13 editor rows): move
    retry/supersession behind the Rust core (FFI) so Lazily owns it.
+   - 7a. DONE: the 41 `CrdtReplicaManager` / `PatchWatcher` / `TypingTracker`
+     rows onto the FFI Lazily failure ledger (`EffectFailureLedger` over
+     `agent_doc_effect_cas::failure_ledger`).
+   - 7b. The 13 retained surface/layout delivery rows
+     (`EditorTabSyncListener` `SurfaceDeliveryRetry`, `SyncLayoutAction`
+     deferred sync, the 262 frontend `SurfaceIngressLease`).
 8. Remaining small families: authority observation (6), idle-watch/captured
    finalize retry (6, plus idle-watch's `QueueProjectionSupersededRetry` /
    `queue_projection_superseded_retry` self-heal schedule from family 3), Git

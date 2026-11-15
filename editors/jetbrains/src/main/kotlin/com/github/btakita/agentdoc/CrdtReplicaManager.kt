@@ -574,13 +574,18 @@ internal data class ReplicaRegistrationRetryProjection(
     val backoffMs: Long,
 )
 
+/**
+ * `#implementlazilyowned` (plan step 7): the registration retry projection of the
+ * [refusalCount]-th refused registration, where the count is the Lazily failure ledger's attempt
+ * number ([EffectFailureLedger]). Only the pace curve is the plugin's.
+ */
 internal fun nextReplicaRegistrationRetryProjection(
-    previous: ReplicaRegistrationRetryProjection?,
+    refusalCount: Int,
     nowMs: Long,
     baseBackoffMs: Long = CRDT_REGISTER_FAILURE_BASE_BACKOFF_MS,
     maxBackoffMs: Long = CRDT_REGISTER_FAILURE_MAX_BACKOFF_MS,
 ): ReplicaRegistrationRetryProjection {
-    val failureCount = ((previous?.failureCount ?: 0) + 1).coerceAtMost(16)
+    val failureCount = refusalCount.coerceIn(1, 16)
     val step = (failureCount - 1).coerceAtLeast(0).coerceAtMost(15)
     val multiplier = 1L shl step
     val backoffMs =
@@ -839,6 +844,19 @@ internal fun undurableLocalForwardSettlementUtil(
     }
 }
 
+/**
+ * The doubling pace shared by the deferred-write replay, template-guard recovery, and no-op
+ * drain retries: `failureCount` 1 waits [CRDT_DRAIN_NOOP_RESCHEDULE_BASE_BACKOFF_MS], each later
+ * one doubles, capped at [CRDT_DRAIN_NOOP_RESCHEDULE_MAX_BACKOFF_MS].
+ */
+internal fun crdtDoublingBackoffMsUtil(failureCount: Int): Long {
+    val shifted = 1L shl minOf(failureCount.coerceAtLeast(1) - 1, 12)
+    return minOf(
+        CRDT_DRAIN_NOOP_RESCHEDULE_BASE_BACKOFF_MS * shifted,
+        CRDT_DRAIN_NOOP_RESCHEDULE_MAX_BACKOFF_MS,
+    )
+}
+
 internal fun localEditorRetryDelayMsUtil(failureCount: Int): Long {
     val exponent = (failureCount.coerceAtLeast(1) - 1).coerceAtMost(12)
     return (LOCAL_EDITOR_RETRY_BASE_MS * (1L shl exponent))
@@ -1053,9 +1071,7 @@ private class UndurableLocalForward(
     val capturedEdits: List<CapturedLocalEditorEdit>,
     val batch: PreparedLocalEditorBatch,
     val projectionEpoch: Long,
-) {
-    var settleAttempts: Int = 0
-}
+)
 
 private enum class LocalEditorForwardResult {
     Applied,
@@ -1314,7 +1330,14 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private val pendingLocalEdits = ConcurrentHashMap<String, AtomicInteger>()
     private val localEditorFlushVersions = ConcurrentHashMap<String, AtomicLong>()
     private val localEditorFlushTasks = ConcurrentHashMap<String, ScheduledFuture<*>>()
-    private val localEditorRetryFailureCounts = ConcurrentHashMap<String, Int>()
+    // `#implementlazilyowned` (plan step 7): every editor retry family's refusal count is the
+    // Lazily failure ledger's attempt number (`agent_doc_effect_cas::failure_ledger`, FFI); the
+    // manager keeps only each family's pace curve and timer.
+    private val localEditorFlushRefusals = EffectFailureLedger("crdt.local-editor-flush")
+    private val replicaRegistrationRefusals = EffectFailureLedger("crdt.replica-registration")
+    private val templateGuardRecoveryRefusals = EffectFailureLedger("crdt.template-guard-recovery")
+    private val deferredWriteReplayRefusals = EffectFailureLedger("crdt.deferred-write-replay")
+    private val undurableLocalForwardWaits = EffectFailureLedger("crdt.undurable-local-forward")
     private val pendingLocalEditorEdits =
         ConcurrentHashMap<String, MutableList<CapturedLocalEditorEdit>>()
     private val undurableLocalForwards = ConcurrentHashMap<String, UndurableLocalForward>()
@@ -1327,8 +1350,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private val drainQueued = AtomicBoolean(false)
     private val drainAllRequested = AtomicBoolean(false)
     private val drainRequestedPaths = ConcurrentHashMap.newKeySet<String>()
-    private val registerFailureCounts = ConcurrentHashMap<String, Int>()
-    private val registerRetryAfterMs = ConcurrentHashMap<String, Long>()
     private val registerRetryProjections =
         ConcurrentHashMap<String, ReplicaRegistrationRetryProjection>()
     private val registerRetryTasks = ConcurrentHashMap<String, ScheduledFuture<*>>()
@@ -1345,9 +1366,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private val retainedProjectionHoldPaths = ConcurrentHashMap.newKeySet<String>()
     private val templateGuardRecoveryPaths = ConcurrentHashMap.newKeySet<String>()
     private val templateGuardRecoveryRetryPaths = ConcurrentHashMap.newKeySet<String>()
-    private val templateGuardRecoveryFailureCounts = ConcurrentHashMap<String, Int>()
     private val deferredWriteReplayRetryPaths = ConcurrentHashMap.newKeySet<String>()
-    private val deferredWriteReplayFailureCounts = ConcurrentHashMap<String, Int>()
     // `#ctrlkillreregister` Tier 3: transport loss is reported per document, but a
     // dead controller strands every document at once. One pull answers for all of
     // them, so the second and third file to notice must not each start their own.
@@ -1405,7 +1424,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         documentWorkers.shutdownNow()
         localEditorFlushTasks.clear()
         localEditorFlushVersions.clear()
-        localEditorRetryFailureCounts.clear()
+        localEditorFlushRefusals.clearAll()
+        undurableLocalForwardWaits.clearAll()
         pendingLocalEditorEdits.clear()
         undurableLocalForwards.clear()
         localEditorFlushPendingPaths.clear()
@@ -1419,12 +1439,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         remoteEditorEffectGenerations.clear()
         templateGuardRecoveryPaths.clear()
         templateGuardRecoveryRetryPaths.clear()
-        templateGuardRecoveryFailureCounts.clear()
+        templateGuardRecoveryRefusals.clearAll()
         deferredWriteReplayRetryPaths.clear()
-        deferredWriteReplayFailureCounts.clear()
+        deferredWriteReplayRefusals.clearAll()
         drainRequestedPaths.clear()
-        registerFailureCounts.clear()
-        registerRetryAfterMs.clear()
+        replicaRegistrationRefusals.clearAll()
         registerRetryProjections.clear()
         registerRetryTasks.values.forEach { it.cancel(false) }
         registerRetryTasks.clear()
@@ -1584,7 +1603,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         if (retryVersion == null && localEditorFlushPendingPaths.add(filePath)) {
             markLocalPending(filePath)
         }
-        val retryFailureCount = localEditorRetryFailureCounts[filePath] ?: 0
+        val retryFailureCount = localEditorFlushRefusals.count(filePath)
         val delayMs =
             if (retryVersion == null && retryFailureCount == 0) {
                 LOCAL_EDITOR_FLUSH_QUIET_MS
@@ -1626,11 +1645,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         } finally {
                     if (retrySplices) {
                         prependLocalEditorEdits(filePath, retainedEdits)
-                        localEditorRetryFailureCounts.compute(filePath) { _, failures ->
-                            ((failures ?: 0) + 1).coerceAtMost(13)
-                        }
+                        localEditorFlushRefusals.recordFailure(filePath, "local-editor-splice-retry")
                     } else {
-                        localEditorRetryFailureCounts.remove(filePath)
+                        localEditorFlushRefusals.clear(filePath)
                     }
                             if (versionCounter.get() == version) {
                                 if (retrySplices && !disposed.get()) {
@@ -1662,7 +1679,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         } catch (error: RejectedExecutionException) {
             if (versionCounter.get() == version) {
                 localEditorFlushVersions.remove(filePath, versionCounter)
-                localEditorRetryFailureCounts.remove(filePath)
+                localEditorFlushRefusals.clear(filePath)
                 if (localEditorFlushPendingPaths.remove(filePath)) {
                     clearLocalPending(filePath)
                 }
@@ -1925,14 +1942,15 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 localEditorFlushVersions.remove(oldPath)
                 pendingLocalEditorEdits.remove(oldPath)
                 undurableLocalForwards.remove(oldPath)
+                undurableLocalForwardWaits.clear(oldPath)
+                localEditorFlushRefusals.clear(oldPath)
                 if (localEditorFlushPendingPaths.remove(oldPath)) {
                     clearLocalPending(oldPath)
                 }
                 pendingLocalEdits.remove(oldPath)
                 remoteEditorEffectGenerations.remove(oldPath)
                 drainRequestedPaths.remove(oldPath)
-                registerFailureCounts.remove(oldPath)
-                registerRetryAfterMs.remove(oldPath)
+                replicaRegistrationRefusals.clear(oldPath)
                 registerRetryProjections.remove(oldPath)
                 registerRetryTasks.remove(oldPath)?.cancel(false)
                 projectionRecoveryReregisterStartedAtMs.remove(oldPath)
@@ -1941,9 +1959,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 retainedCanonicalProjectionPaths.remove(oldPath)
                 templateGuardRecoveryPaths.remove(oldPath)
                 templateGuardRecoveryRetryPaths.remove(oldPath)
-                templateGuardRecoveryFailureCounts.remove(oldPath)
+                templateGuardRecoveryRefusals.clear(oldPath)
                 deferredWriteReplayRetryPaths.remove(oldPath)
-                deferredWriteReplayFailureCounts.remove(oldPath)
+                deferredWriteReplayRefusals.clear(oldPath)
                 nonOperatorMutationEpochs.remove(oldPath)?.let { oldEpoch ->
                     nonOperatorMutationEpochs
                         .computeIfAbsent(newPath) { AtomicLong(0L) }
@@ -2020,7 +2038,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return false
         }
         deferredWriteReplayRetryPaths.remove(filePath)
-        deferredWriteReplayFailureCounts.remove(filePath)
+        deferredWriteReplayRefusals.clear(filePath)
         // FFI only wakes/projects the retained semantic intent into the
         // controller-owned CRDT authority. The ordinary remote-delivery path
         // below is the sole owner of editor mutation and persistence.
@@ -2039,14 +2057,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         reason: String,
     ) {
         if (!deferredWriteReplayRetryPaths.add(filePath)) return
-        val failureCount = deferredWriteReplayFailureCounts.merge(filePath, 1) { current, one ->
-            current + one
-        } ?: 1
-        val shifted = 1L shl minOf(failureCount - 1, 12)
-        val delayMs = minOf(
-            CRDT_DRAIN_NOOP_RESCHEDULE_BASE_BACKOFF_MS * shifted,
-            CRDT_DRAIN_NOOP_RESCHEDULE_MAX_BACKOFF_MS,
-        )
+        val failureCount = deferredWriteReplayRefusals.recordFailure(filePath, reason)
+        val delayMs = crdtDoublingBackoffMsUtil(failureCount)
         log.info(
             "[crdt-replica] deferred write replay retry scheduled for ${File(filePath).name}; " +
                 "reason=$reason delay_ms=$delayMs failures=$failureCount",
@@ -2147,6 +2159,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         fileCacheConflicts.remove(filePath)
     }
 
+    /** Retire [checkpoint] and receipt its Lazily-ledgered settle wait. */
+    private fun retireUndurableLocalForward(filePath: String, checkpoint: UndurableLocalForward) {
+        if (undurableLocalForwards.remove(filePath, checkpoint)) undurableLocalForwardWaits.clear(filePath)
+    }
+
     /**
      * `#captureddeltalivelock`: settle a local delta the replica applied whose
      * durable publish was not acknowledged, before the retained burst is
@@ -2168,26 +2185,27 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 currentEpoch = nonOperatorMutationEpoch(filePath),
                 shadow = shadows[filePath],
                 capturedEdits = capturedEdits,
-                attempts = checkpoint.settleAttempts,
+                attempts = undurableLocalForwardWaits.count(filePath),
                 canonicalCarriesCheckpoint = { canonicalCarriesUndurableLocalForward(filePath, checkpoint) },
             )
         return when (settlement) {
             UndurableLocalForwardSettlement.NotApplicable -> {
-                undurableLocalForwards.remove(filePath, checkpoint)
+                retireUndurableLocalForward(filePath, checkpoint)
                 capturedEdits
             }
 
             UndurableLocalForwardSettlement.Pending -> {
-                checkpoint.settleAttempts++
+                undurableLocalForwardWaits.recordFailure(filePath, "undurable-local-delta-unsettled")
                 requestRemoteDrain(filePath, "undurable-local-delta-retry")
                 null
             }
 
             UndurableLocalForwardSettlement.Abandoned -> {
-                undurableLocalForwards.remove(filePath, checkpoint)
+                val attempts = undurableLocalForwardWaits.count(filePath) + 1
+                retireUndurableLocalForward(filePath, checkpoint)
                 log.warn(
                     "[crdt-replica] unacknowledged local delta for ${File(filePath).name} was not carried by " +
-                        "canonical after ${checkpoint.settleAttempts + 1} attempts; " +
+                        "canonical after $attempts attempts; " +
                         "shadow_hash=${contentHash(checkpoint.shadowText)} " +
                         "delta_hash=${contentHash(checkpoint.batch.resultingText)} " +
                         "recovery=undurable-local-delta-unsettled (rebasing the whole captured burst)",
@@ -2196,7 +2214,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             }
 
             is UndurableLocalForwardSettlement.Settled -> {
-                undurableLocalForwards.remove(filePath, checkpoint)
+                retireUndurableLocalForward(filePath, checkpoint)
                 val settledShadow = settlement.settledShadow
                 shadows[filePath] = settledShadow
                 log.warn(
@@ -2345,6 +2363,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 // splices it holds so the retry settles them by canonical proof
                 // instead of rebasing them (plus later typing) over a canonical
                 // that may already carry them.
+                undurableLocalForwardWaits.clear(filePath)
                 undurableLocalForwards[filePath] =
                     UndurableLocalForward(
                         forwarder = holder,
@@ -2650,12 +2669,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     }
 
     private fun nextNoOpRescheduleBackoffMs(): Long {
-        val n = consecutiveNoOpReschedules.incrementAndGet()
-        val shifted = 1L shl minOf(n - 1, 12)
-        return minOf(
-            CRDT_DRAIN_NOOP_RESCHEDULE_BASE_BACKOFF_MS * shifted,
-            CRDT_DRAIN_NOOP_RESCHEDULE_MAX_BACKOFF_MS,
-        )
+        return crdtDoublingBackoffMsUtil(consecutiveNoOpReschedules.incrementAndGet())
     }
 
     private fun scheduleRemoteDrainAfterBackoff(delayMs: Long, retryFilePath: String? = null) {
@@ -3196,14 +3210,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private fun scheduleTemplateGuardRecoveryRetry(filePath: String, reason: String) {
         if (!templateGuardRecoveryRetryPaths.add(filePath)) return
         templateGuardRecoveryPaths.add(filePath)
-        val failureCount = templateGuardRecoveryFailureCounts.merge(filePath, 1) { current, one ->
-            current + one
-        } ?: 1
-        val shifted = 1L shl minOf(failureCount - 1, 12)
-        val delayMs = minOf(
-            CRDT_DRAIN_NOOP_RESCHEDULE_BASE_BACKOFF_MS * shifted,
-            CRDT_DRAIN_NOOP_RESCHEDULE_MAX_BACKOFF_MS,
-        )
+        val failureCount = templateGuardRecoveryRefusals.recordFailure(filePath, reason)
+        val delayMs = crdtDoublingBackoffMsUtil(failureCount)
         log.debug(
             "[crdt-replica] template-guard recovery retry scheduled for ${File(filePath).name}; " +
                 "reason=$reason delay_ms=$delayMs failures=$failureCount",
@@ -3220,7 +3228,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     }
 
     private fun clearTemplateGuardRecoveryBackoff(filePath: String) {
-        templateGuardRecoveryFailureCounts.remove(filePath)
+        templateGuardRecoveryRefusals.clear(filePath)
         templateGuardRecoveryRetryPaths.remove(filePath)
     }
 
@@ -4858,11 +4866,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         attachFailureReasons[filePath] = reason
         val now = System.currentTimeMillis()
         val projection =
-            registerRetryProjections.compute(filePath) { _, previous ->
-                nextReplicaRegistrationRetryProjection(previous, now)
-            }!!
-        registerFailureCounts[filePath] = projection.failureCount
-        registerRetryAfterMs[filePath] = projection.retryAfterMs
+            nextReplicaRegistrationRetryProjection(
+                replicaRegistrationRefusals.recordFailure(filePath, reason),
+                now,
+            )
+        registerRetryProjections[filePath] = projection
         log.warn(
             "[crdt-replica] register failed for ${File(filePath).name}; " +
                 "reason=$reason failure_count=${projection.failureCount} " +
@@ -4911,7 +4919,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             // The diagnosis names the event that can change this answer. Keep
             // the hold and its reason visible, but disarm every time-driven
             // retry surface so IDEA and agent-doc remain idle until then.
-            registerRetryAfterMs.remove(filePath)
+            replicaRegistrationRefusals.clear(filePath)
             registerRetryProjections.remove(filePath)
             registerRetryTasks.remove(filePath)?.cancel(false)
             log.warn(
@@ -4956,8 +4964,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private fun recordTerminalRegisterRefusal(filePath: String, reason: String) {
         retainedProjectionHoldPaths.remove(filePath)
         surfacedAttachFailureReasons.remove(filePath)
-        registerFailureCounts.remove(filePath)
-        registerRetryAfterMs.remove(filePath)
+        replicaRegistrationRefusals.clear(filePath)
         registerRetryProjections.remove(filePath)
         registerRetryTasks.remove(filePath)?.cancel(false)
         attachFailureReasons[filePath] = reason
@@ -5014,8 +5021,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         attachFailureReasons.remove(filePath)
         retainedProjectionHoldPaths.remove(filePath)
         surfacedAttachFailureReasons.remove(filePath)
-        registerFailureCounts.remove(filePath)
-        registerRetryAfterMs.remove(filePath)
+        replicaRegistrationRefusals.clear(filePath)
         registerRetryProjections.remove(filePath)
         registerRetryTasks.remove(filePath)?.cancel(false)
     }
@@ -5295,6 +5301,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         // and anything typed after the cut is kept and forwarded from it.
         shadows[filePath] = visibleText
         undurableLocalForwards.remove(filePath)
+        undurableLocalForwardWaits.clear(filePath)
         unforwardedOperatorTextObservations.remove(filePath)
         retainedCanonicalProjectionPaths.remove(filePath)
         fenceCapturedEditsSubsumedByPublishedBuffer(filePath, visibleText, "visible-roll-forward")

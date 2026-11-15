@@ -852,6 +852,109 @@ pub extern "C" fn agent_doc_sync_check_generation(generation: u64) -> i32 {
     (SYNC_GENERATION.load(Ordering::SeqCst) == generation) as i32
 }
 
+/// Read a NUL-terminated UTF-8 argument of the editor failure-ledger ABI.
+unsafe fn effect_failure_arg<'a>(value: *const c_char) -> Option<&'a str> {
+    if value.is_null() {
+        return None;
+    }
+    unsafe { CStr::from_ptr(value) }.to_str().ok()
+}
+
+/// `#implementlazilyowned` (plan step 7): record one refused editor attempt of
+/// `key` in `scope` and return its Lazily attempt number (1 for the first
+/// refusal since the last clear), or `-1` on an invalid argument.
+///
+/// The editor reads its retry pace and give-up bound from this count, so the
+/// retry decision is Lazily's (`agent_doc_effect_cas::failure_ledger`), not a
+/// plugin-side counter. The ledger is in-memory and never blocks on I/O.
+///
+/// # Safety
+///
+/// `scope`, `key`, and `reason` must be valid, NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_effect_failure_record(
+    scope: *const c_char,
+    key: *const c_char,
+    reason: *const c_char,
+) -> i32 {
+    let (Some(scope), Some(key)) = (unsafe { effect_failure_arg(scope) }, unsafe {
+        effect_failure_arg(key)
+    }) else {
+        return -1;
+    };
+    let reason = unsafe { effect_failure_arg(reason) }.unwrap_or("refused");
+    match agent_doc_effect_cas::failure_ledger::process_failure_ledger()
+        .lock()
+        .record_failure(scope, key, reason)
+    {
+        Ok(count) => i32::try_from(count).unwrap_or(i32::MAX),
+        Err(error) => {
+            eprintln!("[ffi] agent_doc_effect_failure_record failed for {scope}/{key}: {error}");
+            -1
+        }
+    }
+}
+
+/// The Lazily attempt number of `key`'s retained failure in `scope` (0 when
+/// none), or `-1` on an invalid argument.
+///
+/// # Safety
+///
+/// `scope` and `key` must be valid, NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_effect_failure_count(
+    scope: *const c_char,
+    key: *const c_char,
+) -> i32 {
+    let (Some(scope), Some(key)) = (unsafe { effect_failure_arg(scope) }, unsafe {
+        effect_failure_arg(key)
+    }) else {
+        return -1;
+    };
+    let count = agent_doc_effect_cas::failure_ledger::process_failure_ledger()
+        .lock()
+        .count(scope, key);
+    i32::try_from(count).unwrap_or(i32::MAX)
+}
+
+/// Receipt `key`'s retained failure in `scope`: `1` when one was retained,
+/// `0` when none, `-1` on an invalid argument.
+///
+/// # Safety
+///
+/// `scope` and `key` must be valid, NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_effect_failure_clear(
+    scope: *const c_char,
+    key: *const c_char,
+) -> i32 {
+    let (Some(scope), Some(key)) = (unsafe { effect_failure_arg(scope) }, unsafe {
+        effect_failure_arg(key)
+    }) else {
+        return -1;
+    };
+    agent_doc_effect_cas::failure_ledger::process_failure_ledger()
+        .lock()
+        .clear(scope, key) as i32
+}
+
+/// Drop every retained failure of `scope` (its owner was disposed). Returns how
+/// many were retained, or `-1` on an invalid argument.
+///
+/// # Safety
+///
+/// `scope` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_effect_failure_clear_scope(scope: *const c_char) -> i32 {
+    let Some(scope) = (unsafe { effect_failure_arg(scope) }) else {
+        return -1;
+    };
+    let dropped = agent_doc_effect_cas::failure_ledger::process_failure_ledger()
+        .lock()
+        .clear_scope(scope);
+    i32::try_from(dropped).unwrap_or(i32::MAX)
+}
+
 /// Start the IPC socket listener on a background thread.
 ///
 /// The plugin calls this on project open to start listening for socket IPC
@@ -4392,6 +4495,57 @@ fn force_link_core_ffi_symbols() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#implementlazilyowned` step 7: the editor failure-ledger ABI the
+    /// JetBrains `EffectFailureLedger` binds counts Lazily attempts per
+    /// `(scope, key)`, restarts at 1 after a clear, and drops a disposed scope.
+    #[test]
+    fn effect_failure_ledger_abi_counts_lazily_attempts_per_scope_and_key() {
+        let scope = std::ffi::CString::new("ffi-test.local-editor-flush@1").unwrap();
+        let other = std::ffi::CString::new("ffi-test.local-editor-flush@2").unwrap();
+        let key = std::ffi::CString::new("/docs/plan.md").unwrap();
+        let reason = std::ffi::CString::new("refused").unwrap();
+        unsafe {
+            assert_eq!(
+                agent_doc_effect_failure_count(scope.as_ptr(), key.as_ptr()),
+                0
+            );
+            assert_eq!(
+                agent_doc_effect_failure_record(scope.as_ptr(), key.as_ptr(), reason.as_ptr()),
+                1
+            );
+            assert_eq!(
+                agent_doc_effect_failure_record(scope.as_ptr(), key.as_ptr(), std::ptr::null()),
+                2
+            );
+            assert_eq!(
+                agent_doc_effect_failure_record(other.as_ptr(), key.as_ptr(), reason.as_ptr()),
+                1
+            );
+            assert_eq!(
+                agent_doc_effect_failure_count(scope.as_ptr(), key.as_ptr()),
+                2
+            );
+            assert_eq!(
+                agent_doc_effect_failure_clear(scope.as_ptr(), key.as_ptr()),
+                1
+            );
+            assert_eq!(
+                agent_doc_effect_failure_clear(scope.as_ptr(), key.as_ptr()),
+                0
+            );
+            assert_eq!(
+                agent_doc_effect_failure_record(scope.as_ptr(), key.as_ptr(), reason.as_ptr()),
+                1
+            );
+            assert_eq!(agent_doc_effect_failure_clear_scope(scope.as_ptr()), 1);
+            assert_eq!(agent_doc_effect_failure_clear_scope(other.as_ptr()), 1);
+            assert_eq!(
+                agent_doc_effect_failure_record(std::ptr::null(), key.as_ptr(), reason.as_ptr()),
+                -1
+            );
+        }
+    }
 
     #[test]
     fn post_register_projection_accepts_exact_idempotent_relay_target_only() {

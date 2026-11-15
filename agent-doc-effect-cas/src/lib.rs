@@ -26,6 +26,7 @@
 //! [`EpochDrive::Exhausted`] with the last reason, so the caller renders its own
 //! exhaustion message unchanged.
 
+pub mod failure_ledger;
 pub mod latest_intent;
 pub mod single_flight;
 

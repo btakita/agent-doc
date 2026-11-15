@@ -505,7 +505,9 @@ object TypingTracker : DocumentListener {
     // `#basehashdropsops`: consecutive quiet boundaries at which the native
     // resolver returned no merge base for this path. Reset whenever a base hash
     // does resolve, so a transient failure never counts toward the bound.
-    private val baseHashRetries = ConcurrentHashMap<String, Int>()
+    // `#implementlazilyowned` (plan step 7): the count is the Lazily failure
+    // ledger's attempt number of the burst's retained hand-over.
+    private val baseHashUnresolved = EffectFailureLedger("typing.base-hash")
 
     // GH #242: a per-Document count of the `DocumentEvent`s this listener has seen.
     // It is the drain's race clock instead of `Document.modificationStamp`, which
@@ -1116,9 +1118,9 @@ object TypingTracker : DocumentListener {
             // the merge base was unresolvable at this boundary. Keep it, exactly as
             // a drain that raced the buffer does, and let the next quiet boundary
             // try again against a resolver that may have recovered.
-            val attempts = baseHashRetries.merge(filePath, 1, Int::plus) ?: 1
+            val attempts = baseHashUnresolved.recordFailure(filePath, "base-hash-unresolved")
             if (baseHashRetriesExhaustedUtil(attempts)) {
-                baseHashRetries.remove(filePath)
+                baseHashUnresolved.clear(filePath)
                 logOpCaptureRefusal(
                     lib,
                     filePath,
@@ -1131,7 +1133,7 @@ object TypingTracker : DocumentListener {
             scheduleFullContentReport(filePath, document)
             return
         }
-        baseHashRetries.remove(filePath)
+        baseHashUnresolved.clear(filePath)
     }
 
 /**

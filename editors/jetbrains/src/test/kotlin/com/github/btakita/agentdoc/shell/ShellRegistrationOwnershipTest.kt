@@ -318,7 +318,6 @@ class ShellRegistrationOwnershipTest {
             "newThread" to 14,
             "schedule" to 6,
             "scheduleWithFixedDelay" to 1,
-            "submit" to 1,
         )
 
         val PENDING: List<Pair<String, Regex>> = listOf(

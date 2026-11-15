@@ -802,8 +802,9 @@ class CrdtReplicaProjectionFrontierTest {
             manager
                 .substringAfter("private fun scheduleLocalEditorFlush(")
                 .substringBefore("private fun drainLocalEditorEdits(")
-        assertTrue(flushEffect.contains("localEditorRetryFailureCounts.compute(filePath)"))
-        assertTrue(flushEffect.contains("localEditorRetryFailureCounts.remove(filePath)"))
+        assertTrue(flushEffect.contains("localEditorFlushRefusals.recordFailure(filePath, "))
+        assertTrue(flushEffect.contains("localEditorFlushRefusals.clear(filePath)"))
+        assertTrue(flushEffect.contains("localEditorFlushRefusals.count(filePath)"))
         assertTrue(flushEffect.contains("retryVersion == null && retryFailureCount == 0"))
         assertFalse(flushEffect.contains("LOCAL_EDITOR_READ_RETRY_MS"))
     }

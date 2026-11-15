@@ -330,7 +330,7 @@ class TypingTrackerEdtBudgetTest {
         val refreshFunction = watcher.substringAfter("private fun refreshContentViaDocument")
             .substringBefore("private fun repositionBoundaryViaDocument")
         val repositionFunction = watcher.substringAfter("private fun repositionBoundaryViaDocument")
-            .substringBefore("private fun scheduleRepositionRetry")
+            .substringBefore("private fun nodePatchesJson(")
         val nativeSideEffectBody = watcher.substringAfter("private fun runNativeSideEffectOffEdt")
             .substringBefore("private fun appendOpsLog")
         val disposeBody = watcher.substringAfter("override fun dispose()")
@@ -892,7 +892,7 @@ class TypingTrackerEdtBudgetTest {
                 localFlushBody.contains("localEditorFlushPendingPaths.add(filePath)") &&
                     localFlushBody.contains("LOCAL_EDITOR_FLUSH_QUIET_MS") &&
                     localFlushBody.contains("localEditorRetryDelayMsUtil(retryFailureCount)") &&
-                    localFlushBody.contains("localEditorRetryFailureCounts.compute(filePath)") &&
+                    localFlushBody.contains("localEditorFlushRefusals.recordFailure(filePath, ") &&
                     localFlushBody.contains("retryVersion == null && retryFailureCount == 0") &&
                     localFlushBody.contains("localEditorFlushTasks.put(filePath, scheduled)?.cancel(false)"),
         )

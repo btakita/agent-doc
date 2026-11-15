@@ -736,7 +736,7 @@ One.
             .substringBefore("private fun repositionBoundaryViaDocument")
         val reposition = patchWatcher
             .substringAfter("private fun repositionBoundaryViaDocument")
-            .substringBefore("private fun scheduleRepositionRetry")
+            .substringBefore("private fun nodePatchesJson(")
         val resume = patchWatcher
             .substringAfter("private fun resumeAfterExtract(")
             .substringBefore("private fun refreshContentViaDocument(")

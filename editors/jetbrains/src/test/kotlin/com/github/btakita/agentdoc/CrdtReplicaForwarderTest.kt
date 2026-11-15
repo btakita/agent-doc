@@ -886,9 +886,11 @@ class CrdtReplicaForwarderTest {
 
     @Test
     fun `desired replica registration backs off to its configured ceiling`() {
+        // `#implementlazilyowned` step 7: the refusal count is the failure ledger's.
+        val refusals = EffectFailureLedger("test.registration", native = { null })
         val first =
             nextReplicaRegistrationRetryProjection(
-                previous = null,
+                refusalCount = refusals.recordFailure("/doc.md", "refused"),
                 nowMs = 1_000L,
                 baseBackoffMs = 100L,
                 maxBackoffMs = 800L,
@@ -900,7 +902,7 @@ class CrdtReplicaForwarderTest {
 
         val second =
             nextReplicaRegistrationRetryProjection(
-                previous = first,
+                refusalCount = refusals.recordFailure("/doc.md", "refused"),
                 nowMs = 1_100L,
                 baseBackoffMs = 100L,
                 maxBackoffMs = 800L,
@@ -912,7 +914,7 @@ class CrdtReplicaForwarderTest {
         repeat(4) {
             retained =
                 nextReplicaRegistrationRetryProjection(
-                    previous = retained,
+                    refusalCount = refusals.recordFailure("/doc.md", "refused"),
                     nowMs = retained.retryAfterMs,
                     baseBackoffMs = 100L,
                     maxBackoffMs = 3_000L,
@@ -921,6 +923,18 @@ class CrdtReplicaForwarderTest {
         assertEquals(6, retained.failureCount)
         assertEquals(3_000L, retained.backoffMs)
         assertTrue(replicaRegistrationAttemptDueUtil(null, retained.retryAfterMs))
+
+        // A cleared refusal restarts the curve at its base.
+        refusals.clear("/doc.md")
+        assertEquals(
+            100L,
+            nextReplicaRegistrationRetryProjection(
+                refusalCount = refusals.recordFailure("/doc.md", "refused"),
+                nowMs = 0L,
+                baseBackoffMs = 100L,
+                maxBackoffMs = 800L,
+            ).backoffMs,
+        )
     }
 
     @Test

@@ -95,10 +95,6 @@ class PatchWatcher(private val project: Project) : Disposable {
     private data class FrozenExtract(val operationId: String, val wasWritable: Boolean)
     private val frozenExtracts = java.util.concurrent.ConcurrentHashMap<String, FrozenExtract>()
 
-    /** Boundary reposition requests delayed after a stale proof/apply attempt. */
-    private val scheduledRepositionRetries = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
-
-
     /** Immutable EDT capture consumed by the socket listener worker. */
     private sealed interface PatchApplyCapture {
         data class Rejected(val retryReason: String = "socket_apply_failed") : PatchApplyCapture
@@ -1070,23 +1066,6 @@ class PatchWatcher(private val project: Project) : Disposable {
         return false
     }
 
-    private fun scheduleRepositionRetry(filePath: String, boundaryId: String?, preserveHead: Boolean) {
-        val key = "$filePath|${boundaryId ?: ""}|$preserveHead"
-        if (!scheduledRepositionRetries.add(key)) return
-        GenerationWork.submit {
-            try {
-                Thread.sleep(PATCH_RETRY_DELAY_MS)
-                if (running) {
-                    repositionBoundaryViaDocument(filePath, boundaryId, preserveHead)
-                }
-            } catch (_: InterruptedException) {
-                Thread.currentThread().interrupt()
-            } finally {
-                scheduledRepositionRetries.remove(key)
-            }
-        }
-    }
-
     private fun nodePatchesJson(nodePatches: List<NodePatch>): String {
         return nodePatchesJsonStatic(nodePatches)
     }
@@ -1960,7 +1939,6 @@ class PatchWatcher(private val project: Project) : Disposable {
     companion object {
         private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(PatchWatcher::class.java)
         private val instances = mutableMapOf<Project, PatchWatcher>()
-        private const val PATCH_RETRY_DELAY_MS = 500L
         private const val UI_OUTCOME_REAL_COMPONENT_CONFLICT =
             "ui_outcome_contract=ui-outcome-v1 ui_outcome=real_component_conflict ui_outcome_class=blocked next_action=resolve_component_conflict"
 

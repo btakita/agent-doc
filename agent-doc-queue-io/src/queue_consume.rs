@@ -1926,34 +1926,55 @@ fn retry_queue_authority_awaiting_projection<T>(
     mut pause: impl FnMut(),
     mut log: impl FnMut(String),
 ) -> Result<T> {
+    // `#implementlazilyowned`: Lazily owns the re-ask. Each ask is one claimed
+    // attempt; a projection-lag refusal inside the budget is `Retryable` and
+    // re-claimed after the pause, the value is the applied receipt, and any
+    // other error (or the last lag refusal once the budget is spent) is a
+    // rejection returned unchanged.
     let started = std::time::Instant::now();
-    let mut asks = 0usize;
-    loop {
-        asks += 1;
-        let err = match attempt() {
-            Ok(value) => {
-                if asks > 1 {
-                    log(format!(
-                        "queue_authority_projection_lag_settled asks={asks} waited_ms={}",
-                        started.elapsed().as_millis()
-                    ));
+    let drive = agent_doc_effect_cas::drive_effect_epochs(
+        "queue-authority-projection-lag",
+        "queue-authority:unobserved",
+        u32::MAX,
+        &mut |epoch| {
+            let asks = epoch.attempt;
+            let err = match attempt() {
+                Ok(value) => {
+                    if asks > 1 {
+                        log(format!(
+                            "queue_authority_projection_lag_settled asks={asks} waited_ms={}",
+                            started.elapsed().as_millis()
+                        ));
+                    }
+                    return Ok(agent_doc_effect_cas::EpochStep::Applied {
+                        receipt: value,
+                        authority: format!("queue-authority:ask:{asks}"),
+                    });
                 }
-                return Ok(value);
+                Err(err) => err,
+            };
+            if !awaits_projection(&err) {
+                return Err(err);
             }
-            Err(err) => err,
-        };
-        if !awaits_projection(&err) {
-            return Err(err);
-        }
-        if started.elapsed() >= budget {
-            log(format!(
-                "queue_authority_projection_lag_exhausted asks={asks} waited_ms={} budget_ms={}",
-                started.elapsed().as_millis(),
-                budget.as_millis()
-            ));
-            return Err(err);
-        }
-        pause();
+            if started.elapsed() >= budget {
+                log(format!(
+                    "queue_authority_projection_lag_exhausted asks={asks} waited_ms={} budget_ms={}",
+                    started.elapsed().as_millis(),
+                    budget.as_millis()
+                ));
+                return Err(err);
+            }
+            Ok(agent_doc_effect_cas::EpochStep::Retryable(err))
+        },
+        &mut |_, _| {
+            pause();
+            Ok(agent_doc_effect_cas::Pace::Continue)
+        },
+    )?;
+    match drive {
+        agent_doc_effect_cas::EpochDrive::Applied(value) => Ok(value),
+        agent_doc_effect_cas::EpochDrive::Exhausted { reason, .. }
+        | agent_doc_effect_cas::EpochDrive::Stopped { reason, .. } => Err(reason),
     }
 }
 

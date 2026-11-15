@@ -17,8 +17,8 @@ pub struct RouteQueueEffects {
     pub refresh_explicit_send_after_enqueue: bool,
 }
 
-const ROUTE_QUEUE_MAX_WRITE_ATTEMPTS: usize = 3;
-const ROUTE_QUEUE_MAX_RESOLVE_ATTEMPTS: usize = 2;
+const ROUTE_QUEUE_MAX_WRITE_ATTEMPTS: u32 = 3;
+const ROUTE_QUEUE_MAX_RESOLVE_ATTEMPTS: u32 = 2;
 
 /// `#witnessretrygate` — how long the refused resolve retry waits for the editor
 /// replica registration to actually land before re-asking.
@@ -53,104 +53,122 @@ pub fn enqueue_route_dispatch_prompt(
     priority: bool,
     effects: RouteQueueEffects,
 ) -> Result<RouteQueueEnqueueOutcome> {
-    let mut attempt = 0usize;
-    loop {
-        attempt += 1;
-        let original =
-            resolve_route_queue_document_content(file, "route_dispatch_queue_enqueue", || {
-                agent_doc_document_realtime_io::try_resolve_current_document_content(
-                    file,
-                    "route_dispatch_queue_enqueue",
-                )
-            })?;
-        let update = agent_doc_queue::route_dispatch::prepare_route_dispatch_queue_update(
-            &original,
-            prompt_text,
-            priority,
-        )?;
-        if let Some(parse_err) = update.unparseable_queue_error.as_deref() {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "route_queue_dispatch_unparseable_preserved file={} prompt_hash={} reason={}",
-                    file.display(),
-                    agent_doc_hash::content_hash(&update.prompt_text),
-                    parse_err
-                ),
-            );
-        }
-
-        let content = update.content;
-        let activated = content != original;
-        if activated {
-            match (effects.write_document)(file, &content, &original, "route_dispatch_queue") {
-                Ok(()) => {
-                    agent_doc_snapshot_io::checkpoint_document_baseline(
+    // `#implementlazilyowned`: Lazily owns the re-observe loop. Each attempt
+    // resolves the live authority, derives the queue successor, and
+    // compare-and-applies it; a `retry_crdt_merge` refusal is `Superseded` and
+    // the still-wanted dispatch is re-desired from a fresh cut.
+    let drive = agent_doc_effect_cas::drive_effect_epochs(
+        &format!("route-dispatch-queue:{}", file.display()),
+        ROUTE_QUEUE_UNOBSERVED_AUTHORITY,
+        ROUTE_QUEUE_MAX_WRITE_ATTEMPTS,
+        &mut |_attempt| {
+            let original =
+                resolve_route_queue_document_content(file, "route_dispatch_queue_enqueue", || {
+                    agent_doc_document_realtime_io::try_resolve_current_document_content(
                         file,
-                        &content,
-                        agent_doc_ops_log_io::log_op,
+                        "route_dispatch_queue_enqueue",
                     )
-                    .with_context(|| {
-                        format!(
-                            "failed to sync snapshot after queueing dispatch for {}",
-                            file.display()
-                        )
-                    })?;
-                    if effects.refresh_explicit_send_after_enqueue {
-                        agent_doc_session_check_io::midturn_steering::refresh_explicit_send_after_route_enqueue(
-                            file,
-                            &original,
-                            &content,
-                        )?;
-                    }
-                }
-                Err(err)
-                    if attempt < ROUTE_QUEUE_MAX_WRITE_ATTEMPTS
-                        && is_retryable_crdt_merge_error(&err) =>
-                {
-                    log_route_queue_write_retry(
-                        file,
-                        "route_dispatch_queue",
-                        attempt,
-                        &content,
-                        &original,
-                        &err,
-                    );
-                    continue;
-                }
-                Err(err) => {
-                    return Err(err).with_context(|| {
-                        format!(
+                })?;
+            let update = agent_doc_queue::route_dispatch::prepare_route_dispatch_queue_update(
+                &original,
+                prompt_text,
+                priority,
+            )?;
+            if let Some(parse_err) = update.unparseable_queue_error.as_deref() {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_queue_dispatch_unparseable_preserved file={} prompt_hash={} reason={}",
+                        file.display(),
+                        agent_doc_hash::content_hash(&update.prompt_text),
+                        parse_err
+                    ),
+                );
+            }
+            let activated = update.content != original;
+            if activated {
+                let refused = (effects.write_document)(
+                    file,
+                    &update.content,
+                    &original,
+                    "route_dispatch_queue",
+                );
+                if let Some(step) = route_queue_write_step(refused, &update.content, &original)
+                    .map_err(|err| {
+                        err.context(format!(
                             "failed to converge queued dispatch for {} through editor IPC/disk",
                             file.display()
-                        )
-                    });
+                        ))
+                    })?
+                {
+                    return Ok(step);
                 }
             }
+            Ok(agent_doc_effect_cas::EpochStep::Applied {
+                authority: agent_doc_hash::content_hash(&update.content),
+                receipt: (update, original, activated),
+            })
+        },
+        &mut |attempt, refusal: &RouteQueueWriteRefusal| {
+            refusal.log(file, "route_dispatch_queue", attempt);
+            Ok(agent_doc_effect_cas::Pace::Continue)
+        },
+    )?;
+    let (update, original, activated) = match drive {
+        agent_doc_effect_cas::EpochDrive::Applied(applied) => applied,
+        agent_doc_effect_cas::EpochDrive::Exhausted { reason, .. }
+        | agent_doc_effect_cas::EpochDrive::Stopped { reason, .. } => {
+            return Err(reason.error).with_context(|| {
+                format!(
+                    "failed to converge queued dispatch for {} through editor IPC/disk",
+                    file.display()
+                )
+            });
         }
-        agent_doc_ops_log_io::log_op(
+    };
+    let content = update.content;
+    if activated {
+        agent_doc_snapshot_io::checkpoint_document_baseline(
             file,
-            &format!(
-                "route_dispatch_queued file={} source={} appended={} already_present={} superseded={} component_created={} activated={} prompt={:?}",
-                file.display(),
-                source,
-                update.appended,
-                update.already_present,
-                update.superseded,
-                update.component_created,
-                activated,
-                update.prompt_text
-            ),
-        );
-        return Ok(RouteQueueEnqueueOutcome {
-            prompt_text: update.prompt_text,
-            appended: update.appended,
-            already_present: update.already_present,
-            superseded: update.superseded,
-            component_created: update.component_created,
-            activated,
-        });
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .with_context(|| {
+            format!(
+                "failed to sync snapshot after queueing dispatch for {}",
+                file.display()
+            )
+        })?;
+        if effects.refresh_explicit_send_after_enqueue {
+            agent_doc_session_check_io::midturn_steering::refresh_explicit_send_after_route_enqueue(
+                file,
+                &original,
+                &content,
+            )?;
+        }
     }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_dispatch_queued file={} source={} appended={} already_present={} superseded={} component_created={} activated={} prompt={:?}",
+            file.display(),
+            source,
+            update.appended,
+            update.already_present,
+            update.superseded,
+            update.component_created,
+            activated,
+            update.prompt_text
+        ),
+    );
+    Ok(RouteQueueEnqueueOutcome {
+        prompt_text: update.prompt_text,
+        appended: update.appended,
+        already_present: update.already_present,
+        superseded: update.superseded,
+        component_created: update.component_created,
+        activated,
+    })
 }
 
 pub fn enqueue_exchange_slash_command_for_idle_drain(
@@ -242,76 +260,140 @@ pub fn activate_existing_route_queue_head(
     if crate::invocation::trigger_only() {
         return Ok(None);
     }
-    let mut attempt = 0usize;
-    loop {
-        attempt += 1;
-        let original =
-            resolve_route_queue_document_content(file, "route_queue_activation", || {
-                agent_doc_document_realtime_io::try_resolve_current_document_content(
-                    file,
-                    "route_queue_activation",
-                )
-            })?;
-        let Some(prompt_text) = inactive_route_queue_head_in_content(file, &original)? else {
-            return Ok(None);
-        };
-        let content =
-            agent_doc_queue::route_dispatch::activate_existing_route_queue_content(&original)?;
-        let activated = content != original;
-        if activated {
-            match (effects.write_document)(file, &content, &original, "route_queue_activation") {
-                Ok(()) => {
-                    agent_doc_snapshot_io::checkpoint_document_baseline(
-                        file,
-                        &content,
-                        agent_doc_ops_log_io::log_op,
-                    )
-                    .with_context(|| {
-                        format!(
-                            "failed to sync snapshot after activating queue for {}",
-                            file.display()
-                        )
-                    })?;
-                }
-                Err(err)
-                    if attempt < ROUTE_QUEUE_MAX_WRITE_ATTEMPTS
-                        && is_retryable_crdt_merge_error(&err) =>
-                {
-                    log_route_queue_write_retry(
+    // `#implementlazilyowned`: same Lazily-owned re-observe epochs as
+    // [`enqueue_route_dispatch_prompt`].
+    let drive = agent_doc_effect_cas::drive_effect_epochs(
+        &format!("route-queue-activation:{}", file.display()),
+        ROUTE_QUEUE_UNOBSERVED_AUTHORITY,
+        ROUTE_QUEUE_MAX_WRITE_ATTEMPTS,
+        &mut |_attempt| {
+            let original =
+                resolve_route_queue_document_content(file, "route_queue_activation", || {
+                    agent_doc_document_realtime_io::try_resolve_current_document_content(
                         file,
                         "route_queue_activation",
-                        attempt,
-                        &content,
-                        &original,
-                        &err,
-                    );
-                    continue;
-                }
-                Err(err) => {
-                    return Err(err).with_context(|| {
-                        format!("failed to activate queue in {}", file.display())
-                    });
+                    )
+                })?;
+            let Some(prompt_text) = inactive_route_queue_head_in_content(file, &original)? else {
+                return Ok(agent_doc_effect_cas::EpochStep::Applied {
+                    authority: agent_doc_hash::content_hash(&original),
+                    receipt: None,
+                });
+            };
+            let content =
+                agent_doc_queue::route_dispatch::activate_existing_route_queue_content(&original)?;
+            let activated = content != original;
+            if activated {
+                let refused =
+                    (effects.write_document)(file, &content, &original, "route_queue_activation");
+                if let Some(step) =
+                    route_queue_write_step(refused, &content, &original).map_err(|err| {
+                        err.context(format!("failed to activate queue in {}", file.display()))
+                    })?
+                {
+                    return Ok(step);
                 }
             }
+            Ok(agent_doc_effect_cas::EpochStep::Applied {
+                authority: agent_doc_hash::content_hash(&content),
+                receipt: Some((prompt_text, content, activated)),
+            })
+        },
+        &mut |attempt, refusal: &RouteQueueWriteRefusal| {
+            refusal.log(file, "route_queue_activation", attempt);
+            Ok(agent_doc_effect_cas::Pace::Continue)
+        },
+    )?;
+    let (prompt_text, content, activated) = match drive {
+        agent_doc_effect_cas::EpochDrive::Applied(Some(applied)) => applied,
+        agent_doc_effect_cas::EpochDrive::Applied(None) => return Ok(None),
+        agent_doc_effect_cas::EpochDrive::Exhausted { reason, .. }
+        | agent_doc_effect_cas::EpochDrive::Stopped { reason, .. } => {
+            return Err(reason.error)
+                .with_context(|| format!("failed to activate queue in {}", file.display()));
         }
-        agent_doc_ops_log_io::log_op(
+    };
+    if activated {
+        agent_doc_snapshot_io::checkpoint_document_baseline(
             file,
-            &format!(
-                "route_existing_queue_head_activated file={} source={} activated={} prompt={:?}",
-                file.display(),
-                source,
-                activated,
-                prompt_text
-            ),
-        );
-        return Ok(Some(RouteQueueEnqueueOutcome {
-            prompt_text,
-            appended: false,
-            already_present: true,
-            superseded: false,
-            component_created: false,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .with_context(|| {
+            format!(
+                "failed to sync snapshot after activating queue for {}",
+                file.display()
+            )
+        })?;
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_existing_queue_head_activated file={} source={} activated={} prompt={:?}",
+            file.display(),
+            source,
             activated,
-        }));
+            prompt_text
+        ),
+    );
+    Ok(Some(RouteQueueEnqueueOutcome {
+        prompt_text,
+        appended: false,
+        already_present: true,
+        superseded: false,
+        component_created: false,
+        activated,
+    }))
+}
+
+/// Opaque initial authority of a route queue drive: every attempt resolves the
+/// live cut itself, so the first epoch compares against nothing observed yet.
+const ROUTE_QUEUE_UNOBSERVED_AUTHORITY: &str = "route-queue:unobserved";
+
+/// A `retry_crdt_merge` refusal of one route queue write: the reason Lazily
+/// records with the supersession and the diagnostic `between` renders.
+struct RouteQueueWriteRefusal {
+    attempted: String,
+    expected: String,
+    error: anyhow::Error,
+}
+
+impl RouteQueueWriteRefusal {
+    fn log(&self, file: &Path, reason: &str, attempt: u32) {
+        log_route_queue_write_retry(
+            file,
+            reason,
+            attempt as usize,
+            &self.attempted,
+            &self.expected,
+            &self.error,
+        );
+    }
+}
+
+/// Adapter mapping of one route queue write: `Ok(None)` = applied, a
+/// `retry_crdt_merge` refusal = Lazily `Superseded` (the relay current moved
+/// past `expected`; it reports no newer cut, so the next attempt re-resolves),
+/// any other error = rejection.
+#[allow(clippy::type_complexity)]
+fn route_queue_write_step<R>(
+    written: Result<()>,
+    attempted: &str,
+    expected: &str,
+) -> Result<Option<agent_doc_effect_cas::EpochStep<R, RouteQueueWriteRefusal>>> {
+    match written {
+        Ok(()) => Ok(None),
+        Err(error) if is_retryable_crdt_merge_error(&error) => {
+            Ok(Some(agent_doc_effect_cas::EpochStep::Superseded {
+                observed: format!("refused:{}", agent_doc_hash::content_hash(expected)),
+                reason: RouteQueueWriteRefusal {
+                    attempted: attempted.to_string(),
+                    expected: expected.to_string(),
+                    error,
+                },
+            }))
+        }
+        Err(error) => Err(error),
     }
 }
 
@@ -343,43 +425,59 @@ fn resolve_route_queue_document_content_awaiting(
     mut resolve: impl FnMut() -> Result<String>,
     mut await_liveness_change: impl FnMut(&Path) -> bool,
 ) -> Result<String> {
-    for attempt in 1..=ROUTE_QUEUE_MAX_RESOLVE_ATTEMPTS {
-        match resolve() {
-            Ok(content) => return Ok(content),
-            Err(err)
-                if attempt < ROUTE_QUEUE_MAX_RESOLVE_ATTEMPTS
-                    && is_retryable_editor_authority_recovery_error(&err) =>
-            {
-                // Re-asking against the same liveness witness is a provable
-                // no-op: both missing-replica recovery latches are keyed on it,
-                // so the second attempt would skip the re-registration loop and
-                // the terminal rebuild and bail on this same refusal. Only a
-                // registration that actually landed earns the retry.
-                let witness_changed = await_liveness_change(file);
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "{reason}_resolve_retry file={} attempt={} max_attempts={} reason=editor_authority_recovery witness_changed={} decision={} error={}",
-                        file.display(),
-                        attempt,
-                        ROUTE_QUEUE_MAX_RESOLVE_ATTEMPTS,
-                        witness_changed,
-                        if witness_changed {
-                            "retry"
-                        } else {
-                            "fail_closed"
-                        },
-                        agent_doc_secret_redact::redact(&format!("{err:#}")).replace('\n', " "),
-                    ),
-                );
-                if !witness_changed {
-                    return Err(err);
-                }
+    // `#implementlazilyowned`: Lazily owns the bounded resolve. A recovery
+    // refusal is `Retryable` (the authority is unchanged until a registration
+    // lands); the witness wait is the pace, and an unchanged witness stops the
+    // drive fail-closed.
+    let drive = agent_doc_effect_cas::drive_effect_epochs(
+        &format!("route-queue-resolve:{reason}:{}", file.display()),
+        ROUTE_QUEUE_UNOBSERVED_AUTHORITY,
+        ROUTE_QUEUE_MAX_RESOLVE_ATTEMPTS,
+        &mut |_attempt| match resolve() {
+            Ok(content) => Ok(agent_doc_effect_cas::EpochStep::Applied {
+                authority: agent_doc_hash::content_hash(&content),
+                receipt: content,
+            }),
+            Err(err) if is_retryable_editor_authority_recovery_error(&err) => {
+                Ok(agent_doc_effect_cas::EpochStep::Retryable(err))
             }
-            Err(err) => return Err(err),
-        }
+            Err(err) => Err(err),
+        },
+        &mut |attempt, err: &anyhow::Error| {
+            // Re-asking against the same liveness witness is a provable
+            // no-op: both missing-replica recovery latches are keyed on it,
+            // so the second attempt would skip the re-registration loop and
+            // the terminal rebuild and bail on this same refusal. Only a
+            // registration that actually landed earns the retry.
+            let witness_changed = await_liveness_change(file);
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{reason}_resolve_retry file={} attempt={} max_attempts={} reason=editor_authority_recovery witness_changed={} decision={} error={}",
+                    file.display(),
+                    attempt,
+                    ROUTE_QUEUE_MAX_RESOLVE_ATTEMPTS,
+                    witness_changed,
+                    if witness_changed {
+                        "retry"
+                    } else {
+                        "fail_closed"
+                    },
+                    agent_doc_secret_redact::redact(&format!("{err:#}")).replace('\n', " "),
+                ),
+            );
+            Ok(if witness_changed {
+                agent_doc_effect_cas::Pace::Continue
+            } else {
+                agent_doc_effect_cas::Pace::Stop
+            })
+        },
+    )?;
+    match drive {
+        agent_doc_effect_cas::EpochDrive::Applied(content) => Ok(content),
+        agent_doc_effect_cas::EpochDrive::Exhausted { reason, .. }
+        | agent_doc_effect_cas::EpochDrive::Stopped { reason, .. } => Err(reason),
     }
-    unreachable!("bounded route queue resolver always returns from the loop")
 }
 
 /// Whether `err` is the attached-editor refusal raised when authority recovery
@@ -558,7 +656,7 @@ mod tests {
         )
         .unwrap_err();
 
-        assert_eq!(calls, ROUTE_QUEUE_MAX_RESOLVE_ATTEMPTS);
+        assert_eq!(calls, ROUTE_QUEUE_MAX_RESOLVE_ATTEMPTS as usize);
         assert!(format!("{err:#}").contains("disk read authority is refused"));
     }
 }

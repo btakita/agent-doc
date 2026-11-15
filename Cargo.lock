@@ -498,6 +498,7 @@ dependencies = [
  "agent-doc-document-realtime",
  "agent-doc-document-realtime-io",
  "agent-doc-dynamic-context-io",
+ "agent-doc-effect-cas",
  "agent-doc-element",
  "agent-doc-element-backlog",
  "agent-doc-frontmatter",
@@ -899,6 +900,14 @@ dependencies = [
  "agent-doc-sqlite",
  "anyhow",
  "tempfile",
+]
+
+[[package]]
+name = "agent-doc-effect-cas"
+version = "0.35.574"
+dependencies = [
+ "anyhow",
+ "lazily 0.63.0",
 ]
 
 [[package]]
@@ -1893,6 +1902,7 @@ dependencies = [
  "agent-doc-debounce",
  "agent-doc-document",
  "agent-doc-document-realtime",
+ "agent-doc-effect-cas",
  "agent-doc-element",
  "agent-doc-element-backlog",
  "agent-doc-element-backlog-io",
@@ -2051,7 +2061,9 @@ name = "agent-doc-response-replay-io"
 version = "0.35.574"
 dependencies = [
  "agent-doc-document-realtime-io",
+ "agent-doc-effect-cas",
  "agent-doc-fs",
+ "agent-doc-hash",
  "agent-doc-turn",
  "anyhow",
  "tempfile",
@@ -2094,6 +2106,7 @@ dependencies = [
  "agent-doc-debounce",
  "agent-doc-document-realtime",
  "agent-doc-document-realtime-io",
+ "agent-doc-effect-cas",
  "agent-doc-element",
  "agent-doc-element-backlog-io",
  "agent-doc-element-backlog-runtime-io",

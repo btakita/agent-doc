@@ -452,6 +452,27 @@ Progress (`#implementlazilyowned`):
   (`cross_session_decision_with_lease`: a pure claim gate over a lease
   freshness bool). There are also 2 new `lazily-adapter` rows. The heartbeat
   thread's transport-retry cadence is unchanged.
+- Family 3a, document CAS refusal/re-observe loops and queue projection CAS
+  (lzowned7): the new leaf crate `agent-doc-effect-cas` holds the one shared
+  driver, `drive_effect_epochs` (an `EffectCasCore` drive keyed by an effect
+  identity). Each claimed attempt reports `Applied`, `Superseded { observed }`
+  (re-desired over the observed authority as the next epoch), or `Retryable`
+  (the same epoch re-claimed); an attempt error is a Lazily rejection. A
+  `between` hook runs only before another Lazily claim. It holds the
+  diagnostics and the physical wait, and `Pace::Stop` fails closed. The
+  following loops now run through it: compact's converge
+  (`converge_compact_targets_with_retry`) and commit observation; route-io's
+  dispatch enqueue, queue activation, and witness-gated resolve; queue-io's
+  claim runtime projection and queue-authority projection-lag re-ask; and the
+  `dedupe` fixpoint. Messages, log markers, and attempt caps are unchanged.
+  The relay/controller CAS comparators, the claim-ledger generation
+  comparators, the consume CAS under `QueueEditGuard`, the `retry_crdt_merge`
+  classifiers, and the `settle_before_projection_retry` pace hooks are
+  `lazily-adapter`. `fence_compacted_crdt_epoch` (one relay epoch-rotation
+  request, no retry) is `excluded`. 27 rows: 11 `migrated`, 15
+  `lazily-adapter`, 1 `excluded`, plus 1 new `lazily-adapter` row
+  (`RuntimeProjectionRetry`). The 17 document-realtime / idle-watch rows of
+  family 3 remain for 3b.
 - Not yet done (as of 2026-11-15, agent-doc `59984d315a`; triage is complete,
   0 `triage` rows): migrate the 291 reviewed `pending-migration` rows family
   by family, then delete the remaining bespoke orchestration and make the
@@ -459,11 +480,11 @@ Progress (`#implementlazilyowned`):
 
 ## Resume here
 
-Status 2026-11-15 (after family 2b): ledger = 46 `migrated`, 102 `lazily-adapter`,
-17 `deleted`, 358 `excluded`, 217 `pending-migration`, 0 `triage`. Work the
-217 rows sequentially in ONE worktree (every step edits the ledger), one family
+Status 2026-11-15 (after family 3a): ledger = 57 `migrated`, 118 `lazily-adapter`,
+17 `deleted`, 359 `excluded`, 190 `pending-migration`, 0 `triage`. Work the
+190 rows sequentially in ONE worktree (every step edits the ledger), one family
 per pushed commit, `make check` green before each push, in this order (next:
-family 3):
+family 3b):
 
 1. DONE: actor-generation fenced writes (`store_actor_record_fenced_tx`,
    `delete_actor_document_fenced_tx`; 20 actor-generation rows) onto the
@@ -479,10 +500,19 @@ family 3):
      the `*_if_turn_fence` / `*_with_turn_fence` frontmatter marks, and the
      state-backbone lease constants) onto a Lazily claim + the ControllerLedger
      SQLite adapter.
-3. Document CAS refusal/re-observe retry loops (29 rows: compact-io,
-   route-io `queue_dispatch`, queue-io `queue_cmd` / `queue_consume`) onto
-   `DocumentCasBackend` + Lazily epochs, plus queue projection CAS (15 rows)
-   onto the queue-maintenance plan/claim.
+3. Document CAS refusal/re-observe retry loops (29 rows) plus queue
+   projection CAS (15 rows), in two pushed halves:
+   - 3a. DONE: compact-io, route-io `queue_dispatch`, queue-io `queue_cmd` /
+     `queue_consume`, the dedupe fixpoint, and the comparator/classifier/pace
+     rows, onto `agent_doc_effect_cas::drive_effect_epochs` (27 rows + 1 new).
+   - 3b. The remaining 17 rows: the document-realtime write-convergence
+     backoffs (`CrdtWriteBackoff`, the `CRDT_WRITE_BACKOFF_*` /
+     `CRDT_PROJECTION_FALLBACK_BACKOFF_*` policies inside
+     `apply_canonical_replace_if_attached` and the projection-settle polls),
+     the relay `RecoveryRetryBackoff` re-send latch, `CrdtRetryAdmission`,
+     `ForceDiskMutationFence`, `VISIBLE_WRITE_RECONCILE_MAX_ATTEMPTS`
+     (`reconcile_visible_write` in write-runtime-io), and idle-watch's
+     `QueueProjectionSupersededRetry`.
 4. Retained editor writes and retained-intent lineage (23 rows) onto a Lazily
    latest-intent core.
 5. tmux/layout/editor-focus latest-wins projections (31 rows) onto a Lazily

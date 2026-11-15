@@ -1726,170 +1726,231 @@ fn project_runtime_state_with_effects(
 ) -> Result<bool> {
     apply_guard.ensure_protects(file)?;
     let mut wrote_successor = false;
-    for attempt in 1..=max_attempts {
-        if queue_repair_generation(file)? != repair_generation {
-            return Err(QueueRuntimeProjectionSuperseded.into());
-        }
-        // Start every attempt from the live authority. This first absorbs any
-        // operator/editor normalization that raced the ledger transition; the
-        // marker overlay below is then rederived by stable work identity.
-        let current = effects.current_document_content(file, "queue_claim_runtime_projection")?;
-        // A completion cell is durable attempt-scoped evidence. Reconcile it
-        // into the ledger before deriving claim markers, including after
-        // restart. Blocker-only refresh is a document projection and must not
-        // acquire that ledger side effect.
-        if runtime_projection_repairs_every_row(rows) {
-            crate::queue_claim::reconcile_completion_evidence(file, &current)?;
-        }
-        let projection = match rows {
-            RuntimeProjectionRows::All
-            | RuntimeProjectionRows::BackgroundComplete
-            | RuntimeProjectionRows::LifecycleEvidence => derive_runtime_projection_scoped(
-                file,
-                &current,
-                cleared_item,
-                ClaimProjectionScope::Document,
-                rows,
-                only_identity,
-            )?,
-            RuntimeProjectionRows::BlockedOrPreviouslyBlocked => {
-                derive_blocker_runtime_projection(file, &current)?
+    // `#implementlazilyowned`: Lazily owns the projection epochs. Every
+    // attempt starts from the live authority; a `retry_crdt_merge` refusal or
+    // an unsettled verification is `Superseded` and the same lifecycle
+    // projection is re-desired from a fresh cut within the attempt budget.
+    let max_epochs = u32::try_from(max_attempts).unwrap_or(u32::MAX);
+    let drive = agent_doc_effect_cas::drive_effect_epochs(
+        &format!("queue-claim-runtime-projection:{}", file.display()),
+        format!("queue-repair-generation:{repair_generation}"),
+        max_epochs,
+        &mut |epoch| {
+            let attempt = epoch.attempt;
+            if queue_repair_generation(file)? != repair_generation {
+                return Err(QueueRuntimeProjectionSuperseded.into());
             }
-        };
-        let target_content = agent_doc_work_projection::reconcile_managed_active_items_for(
-            file,
-            &projection.target_content,
-        )?
-        .unwrap_or(projection.target_content);
-        // `#sdkdocumentselfheal`: exact operator-request rows and their Todo
-        // receipts are one lifecycle. Older/interrupted closeouts could strike
-        // the queue row but leave its same-id Todo open until another foreground
-        // preflight happened to repair it. A full runtime projection already
-        // owns every queue row, so fold the same proof-complete reconciliation
-        // into its CAS successor. The pure helper refuses cited ids and refuses
-        // when any duplicate row is still live.
-        let target_content =
-            if runtime_projection_repairs_every_row(rows) && only_identity.is_none() {
-                agent_doc_queue::queue_consume::reconcile_terminal_operator_request_todos(
+            // Start every attempt from the live authority. This first absorbs any
+            // operator/editor normalization that raced the ledger transition; the
+            // marker overlay below is then rederived by stable work identity.
+            let current =
+                effects.current_document_content(file, "queue_claim_runtime_projection")?;
+            // A completion cell is durable attempt-scoped evidence. Reconcile it
+            // into the ledger before deriving claim markers, including after
+            // restart. Blocker-only refresh is a document projection and must not
+            // acquire that ledger side effect.
+            if runtime_projection_repairs_every_row(rows) {
+                crate::queue_claim::reconcile_completion_evidence(file, &current)?;
+            }
+            let projection = match rows {
+                RuntimeProjectionRows::All
+                | RuntimeProjectionRows::BackgroundComplete
+                | RuntimeProjectionRows::LifecycleEvidence => derive_runtime_projection_scoped(
+                    file,
+                    &current,
+                    cleared_item,
+                    ClaimProjectionScope::Document,
+                    rows,
+                    only_identity,
+                )?,
+                RuntimeProjectionRows::BlockedOrPreviouslyBlocked => {
+                    derive_blocker_runtime_projection(file, &current)?
+                }
+            };
+            let target_content = agent_doc_work_projection::reconcile_managed_active_items_for(
+                file,
+                &projection.target_content,
+            )?
+            .unwrap_or(projection.target_content);
+            // `#sdkdocumentselfheal`: exact operator-request rows and their Todo
+            // receipts are one lifecycle. Older/interrupted closeouts could strike
+            // the queue row but leave its same-id Todo open until another foreground
+            // preflight happened to repair it. A full runtime projection already
+            // owns every queue row, so fold the same proof-complete reconciliation
+            // into its CAS successor. The pure helper refuses cited ids and refuses
+            // when any duplicate row is still live.
+            let target_content =
+                if runtime_projection_repairs_every_row(rows) && only_identity.is_none() {
+                    agent_doc_queue::queue_consume::reconcile_terminal_operator_request_todos(
+                        &target_content,
+                        &[],
+                    )?
+                    .content
+                } else {
+                    target_content
+                };
+            if target_content != current {
+                if queue_repair_generation(file)? != repair_generation {
+                    return Err(QueueRuntimeProjectionSuperseded.into());
+                }
+                match effects.converge_document_or_disk_for_generation(
+                    file,
                     &target_content,
+                    &current,
+                    "queue_claim_runtime_projection",
+                    repair_generation,
+                ) {
+                    Ok(true) => wrote_successor = true,
+                    Ok(false) => return Err(QueueRuntimeProjectionSuperseded.into()),
+                    // `#claimprojectionretry`: a CAS refusal means a concurrent
+                    // CRDT write moved the relay current past the cut this attempt
+                    // derived its successor from. The marker overlay is rederived
+                    // by stable work identity, so the same lifecycle transition
+                    // (and the same claim generation) retries its projection from
+                    // a fresh authority cut instead of surfacing a
+                    // `projection_failure` the caller can only clear by claiming
+                    // again. Every retry is earned by an explicit refusal and
+                    // shares the bounded attempt budget.
+                    // Lazily records the refusal as `Superseded` and re-desires
+                    // the projection from a fresh cut; `between` logs it and lets
+                    // the in-flight delivery settle. A single-attempt projection
+                    // reports the refusal itself.
+                    Err(error)
+                        if max_attempts > 1 && is_retryable_projection_cas_refusal(&error) =>
+                    {
+                        return Ok(agent_doc_effect_cas::EpochStep::Superseded {
+                            observed: format!("refused:{}", agent_doc_hash::content_hash(&current)),
+                            reason: RuntimeProjectionRetry::CasRefused {
+                                expected_hash: agent_doc_hash::content_hash(&current),
+                                attempted_hash: agent_doc_hash::content_hash(&target_content),
+                                error,
+                            },
+                        });
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+
+            // Convergence may legitimately preserve a concurrent editor cell over
+            // this cosmetic successor. Success is therefore a property of a fresh
+            // authoritative cut, not of the write call returning `Ok(())`.
+            let authoritative =
+                effects.current_document_content(file, "queue_claim_runtime_projection_verify")?;
+            let settled = match rows {
+                RuntimeProjectionRows::All
+                | RuntimeProjectionRows::BackgroundComplete
+                | RuntimeProjectionRows::LifecycleEvidence => derive_runtime_projection_scoped(
+                    file,
+                    &authoritative,
+                    cleared_item,
+                    ClaimProjectionScope::Document,
+                    rows,
+                    only_identity,
+                )?,
+                RuntimeProjectionRows::BlockedOrPreviouslyBlocked => {
+                    derive_blocker_runtime_projection(file, &authoritative)?
+                }
+            };
+            let active_settled = agent_doc_work_projection::reconcile_managed_active_items_for(
+                file,
+                &authoritative,
+            )?
+            .is_none();
+            let terminal_todos_settled = !runtime_projection_repairs_every_row(rows)
+                || only_identity.is_some()
+                || agent_doc_queue::queue_consume::reconcile_terminal_operator_request_todos(
+                    &authoritative,
                     &[],
                 )?
-                .content
-            } else {
-                target_content
-            };
-        if target_content != current {
-            if queue_repair_generation(file)? != repair_generation {
+                .completed_ids
+                .is_empty();
+            if !settled.changed && active_settled && terminal_todos_settled {
+                if queue_repair_generation(file)? != repair_generation {
+                    return Err(QueueRuntimeProjectionSuperseded.into());
+                }
+                let accepted = ClaimRuntimeProjection {
+                    target_content: authoritative,
+                    persisted_heads: settled.persisted_heads,
+                    changed: wrote_successor,
+                };
+                record_claim_runtime_projection_scoped(
+                    file,
+                    &accepted,
+                    cleared_item,
+                    only_identity,
+                    apply_guard,
+                )?;
+                return Ok(agent_doc_effect_cas::EpochStep::Applied {
+                    receipt: wrote_successor,
+                    authority: agent_doc_hash::content_hash(&accepted.target_content),
+                });
+            }
+            let authority_superseded = authoritative != current;
+            if max_attempts == 1 && authority_superseded {
                 return Err(QueueRuntimeProjectionSuperseded.into());
             }
-            match effects.converge_document_or_disk_for_generation(
-                file,
-                &target_content,
-                &current,
-                "queue_claim_runtime_projection",
-                repair_generation,
-            ) {
-                Ok(true) => wrote_successor = true,
-                Ok(false) => return Err(QueueRuntimeProjectionSuperseded.into()),
-                // `#claimprojectionretry`: a CAS refusal means a concurrent
-                // CRDT write moved the relay current past the cut this attempt
-                // derived its successor from. The marker overlay is rederived
-                // by stable work identity, so the same lifecycle transition
-                // (and the same claim generation) retries its projection from
-                // a fresh authority cut instead of surfacing a
-                // `projection_failure` the caller can only clear by claiming
-                // again. Every retry is earned by an explicit refusal and
-                // shares the bounded attempt budget.
-                Err(error)
-                    if attempt < max_attempts && is_retryable_projection_cas_refusal(&error) =>
-                {
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!(
-                            "queue_claim_runtime_projection_cas_retry attempt={attempt} max={max_attempts} expected_hash={} attempted_hash={} recovery=retry_crdt_merge (#claimprojectionretry)",
-                            agent_doc_hash::content_hash(&current),
-                            agent_doc_hash::content_hash(&target_content),
-                        ),
-                    );
-                    effects.settle_before_projection_retry(file);
-                    continue;
-                }
-                Err(error) if max_attempts > 1 && is_retryable_projection_cas_refusal(&error) => {
-                    return Err(error).context(format!(
-                        "queue claim runtime projection CAS was refused on all {max_attempts} attempts; concurrent CRDT writes kept advancing the document (#claimprojectionretry)"
-                    ));
-                }
-                Err(error) => return Err(error),
-            }
-        }
 
-        // Convergence may legitimately preserve a concurrent editor cell over
-        // this cosmetic successor. Success is therefore a property of a fresh
-        // authoritative cut, not of the write call returning `Ok(())`.
-        let authoritative =
-            effects.current_document_content(file, "queue_claim_runtime_projection_verify")?;
-        let settled = match rows {
-            RuntimeProjectionRows::All
-            | RuntimeProjectionRows::BackgroundComplete
-            | RuntimeProjectionRows::LifecycleEvidence => derive_runtime_projection_scoped(
+            agent_doc_ops_log_io::log_op(
                 file,
-                &authoritative,
-                cleared_item,
-                ClaimProjectionScope::Document,
-                rows,
-                only_identity,
-            )?,
-            RuntimeProjectionRows::BlockedOrPreviouslyBlocked => {
-                derive_blocker_runtime_projection(file, &authoritative)?
+                &format!(
+                    "queue_claim_runtime_projection_retry attempt={attempt} max={} (#queueclaimprojectionrace)",
+                    max_attempts
+                ),
+            );
+            Ok(agent_doc_effect_cas::EpochStep::Superseded {
+                observed: agent_doc_hash::content_hash(&authoritative),
+                reason: RuntimeProjectionRetry::Unsettled,
+            })
+        },
+        &mut |attempt, retry: &RuntimeProjectionRetry| {
+            if let RuntimeProjectionRetry::CasRefused {
+                expected_hash,
+                attempted_hash,
+                ..
+            } = retry
+            {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_claim_runtime_projection_cas_retry attempt={attempt} max={max_attempts} expected_hash={expected_hash} attempted_hash={attempted_hash} recovery=retry_crdt_merge (#claimprojectionretry)",
+                    ),
+                );
+                effects.settle_before_projection_retry(file);
             }
-        };
-        let active_settled =
-            agent_doc_work_projection::reconcile_managed_active_items_for(file, &authoritative)?
-                .is_none();
-        let terminal_todos_settled = !runtime_projection_repairs_every_row(rows)
-            || only_identity.is_some()
-            || agent_doc_queue::queue_consume::reconcile_terminal_operator_request_todos(
-                &authoritative,
-                &[],
-            )?
-            .completed_ids
-            .is_empty();
-        if !settled.changed && active_settled && terminal_todos_settled {
-            if queue_repair_generation(file)? != repair_generation {
-                return Err(QueueRuntimeProjectionSuperseded.into());
-            }
-            let accepted = ClaimRuntimeProjection {
-                target_content: authoritative,
-                persisted_heads: settled.persisted_heads,
-                changed: wrote_successor,
-            };
-            record_claim_runtime_projection_scoped(
-                file,
-                &accepted,
-                cleared_item,
-                only_identity,
-                apply_guard,
-            )?;
-            return Ok(wrote_successor);
+            Ok(agent_doc_effect_cas::Pace::Continue)
+        },
+    )?;
+    match drive {
+        agent_doc_effect_cas::EpochDrive::Applied(wrote) => Ok(wrote),
+        agent_doc_effect_cas::EpochDrive::Exhausted {
+            reason: RuntimeProjectionRetry::CasRefused { error, .. },
+            ..
         }
-        let authority_superseded = authoritative != current;
-        if max_attempts == 1 && authority_superseded {
-            return Err(QueueRuntimeProjectionSuperseded.into());
-        }
-
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "queue_claim_runtime_projection_retry attempt={attempt} max={} (#queueclaimprojectionrace)",
-                max_attempts
-            ),
-        );
+        | agent_doc_effect_cas::EpochDrive::Stopped {
+            reason: RuntimeProjectionRetry::CasRefused { error, .. },
+            ..
+        } => Err(error).context(format!(
+            "queue claim runtime projection CAS was refused on all {max_attempts} attempts; concurrent CRDT writes kept advancing the document (#claimprojectionretry)"
+        )),
+        agent_doc_effect_cas::EpochDrive::Exhausted { .. }
+        | agent_doc_effect_cas::EpochDrive::Stopped { .. } => bail!(
+            "queue claim runtime projection did not converge after {} authoritative retries; the claim ledger transition is durable but its live queue marker is not yet verified",
+            max_attempts
+        ),
     }
+}
 
-    bail!(
-        "queue claim runtime projection did not converge after {} authoritative retries; the claim ledger transition is durable but its live queue marker is not yet verified",
-        max_attempts
-    )
+/// Why one runtime-projection epoch was superseded: the reason Lazily records
+/// and `between` renders.
+enum RuntimeProjectionRetry {
+    /// The owning CRDT actor refused the successor (`recovery=retry_crdt_merge`).
+    CasRefused {
+        expected_hash: String,
+        attempted_hash: String,
+        error: anyhow::Error,
+    },
+    /// The write returned but a fresh authoritative cut is not yet settled.
+    Unsettled,
 }
 
 /// Read claim reports from the same live document authority used by claim

@@ -11,6 +11,7 @@ members = [
     "agent-doc-codex-hook-io",
     "agent-doc-codex-stop-io",
     "agent-doc-commit-io",
+    "agent-doc-effect-cas",
     "agent-doc-closeout-runtime-io",
     "agent-doc-compact-io",
     "agent-doc-config",

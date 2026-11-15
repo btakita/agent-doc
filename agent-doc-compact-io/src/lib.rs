@@ -1009,61 +1009,81 @@ fn run_in_controller_scoped(
             //
             // Give convergence a bounded chance, then fail loudly. Silently
             // reporting success is the one outcome that must not survive.
-            let mut observed = dirty;
-            for attempt in 1..=COMPACT_COMMIT_OBSERVE_ATTEMPTS {
-                // `#lazily-hot-path` Theme A — the reason this loop re-reads at all is
-                // that a live editor may still be delivering the compacted buffer
-                // (the reported case logged `delivery_converged=false live_editors=1`).
-                // Wait on the controller's convergence witness for the backoff window
-                // instead of sleeping it blindly: when delivery settles we re-read
-                // immediately. The hub is process-local, so only the controller can
-                // answer — when it cannot (no hub for this document, or no controller
-                // at all) we fall back to exactly the previous blind sleep, which
-                // keeps this fail-open.
-                match agent_doc_controller_io::project_controller::await_delivery_convergence_for_file(
-                    file,
-                    COMPACT_COMMIT_OBSERVE_BACKOFF,
-                ) {
-                    // Observed: the await already consumed up to the window (it
-                    // returns early only when convergence landed), so do not sleep
-                    // it a second time.
-                    Ok(Some(_)) => {}
-                    Ok(None) => std::thread::sleep(COMPACT_COMMIT_OBSERVE_BACKOFF),
-                    Err(err) => {
-                        agent_doc_ops_log_io::log_op(
+            //
+            // `#implementlazilyowned`: Lazily owns the bounded observation. Each
+            // re-read is one claimed attempt; an unobservable change is
+            // `Retryable` (the authority has not moved yet) and an observed one
+            // is the applied receipt.
+            let observed = match agent_doc_effect_cas::drive_effect_epochs(
+                &format!("compact-commit-observe:{}", file.display()),
+                agent_doc_hash::content_hash(&content),
+                COMPACT_COMMIT_OBSERVE_ATTEMPTS,
+                &mut |attempt| {
+                    let attempt = attempt.attempt;
+                    // `#lazily-hot-path` Theme A — the reason this loop re-reads at all is
+                    // that a live editor may still be delivering the compacted buffer
+                    // (the reported case logged `delivery_converged=false live_editors=1`).
+                    // Wait on the controller's convergence witness for the backoff window
+                    // instead of sleeping it blindly: when delivery settles we re-read
+                    // immediately. The hub is process-local, so only the controller can
+                    // answer — when it cannot (no hub for this document, or no controller
+                    // at all) we fall back to exactly the previous blind sleep, which
+                    // keeps this fail-open.
+                    match agent_doc_controller_io::project_controller::await_delivery_convergence_for_file(
                             file,
-                            &format!(
-                                "compact_commit_observe_convergence_unavailable file={} fallback=blind_backoff detail={}",
-                                file.display(),
-                                format!("{err:#}")
-                                    .replace('\n', " | ")
-                                    .chars()
-                                    .take(160)
-                                    .collect::<String>()
-                            ),
-                        );
-                        std::thread::sleep(COMPACT_COMMIT_OBSERVE_BACKOFF);
-                    }
-                }
-                let retried_disk = effects
-                    .force_disk_document_content(file, "compact_commit_observe_retry")
-                    .unwrap_or_else(|_| content.to_string());
-                let retried_snapshot = agent_doc_snapshot_io::verify_snapshot_committed(file)?;
-                observed = compact_dirty(retried_disk != content, &retried_snapshot);
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "compact_commit_observe_retry file={} attempt={}/{} dirty={} (#bbdcompactnocommit)",
-                        file.display(),
-                        attempt,
-                        COMPACT_COMMIT_OBSERVE_ATTEMPTS,
-                        observed,
-                    ),
-                );
-                if observed {
-                    break;
-                }
-            }
+                            COMPACT_COMMIT_OBSERVE_BACKOFF,
+                        ) {
+                            // Observed: the await already consumed up to the window (it
+                            // returns early only when convergence landed), so do not sleep
+                            // it a second time.
+                            Ok(Some(_)) => {}
+                            Ok(None) => std::thread::sleep(COMPACT_COMMIT_OBSERVE_BACKOFF),
+                            Err(err) => {
+                                agent_doc_ops_log_io::log_op(
+                                    file,
+                                    &format!(
+                                        "compact_commit_observe_convergence_unavailable file={} fallback=blind_backoff detail={}",
+                                        file.display(),
+                                        format!("{err:#}")
+                                            .replace('\n', " | ")
+                                            .chars()
+                                            .take(160)
+                                            .collect::<String>()
+                                    ),
+                                );
+                                std::thread::sleep(COMPACT_COMMIT_OBSERVE_BACKOFF);
+                            }
+                        }
+                    let retried_disk = effects
+                        .force_disk_document_content(file, "compact_commit_observe_retry")
+                        .unwrap_or_else(|_| content.to_string());
+                    let retried_snapshot = agent_doc_snapshot_io::verify_snapshot_committed(file)?;
+                    let observed = compact_dirty(retried_disk != content, &retried_snapshot);
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "compact_commit_observe_retry file={} attempt={}/{} dirty={} (#bbdcompactnocommit)",
+                            file.display(),
+                            attempt,
+                            COMPACT_COMMIT_OBSERVE_ATTEMPTS,
+                            observed,
+                        ),
+                    );
+                    Ok(if observed {
+                        agent_doc_effect_cas::EpochStep::Applied {
+                            receipt: (),
+                            authority: agent_doc_hash::content_hash(&retried_disk),
+                        }
+                    } else {
+                        agent_doc_effect_cas::EpochStep::Retryable(())
+                    })
+                },
+                &mut |_, _| Ok(agent_doc_effect_cas::Pace::Continue),
+            )? {
+                agent_doc_effect_cas::EpochDrive::Applied(()) => true,
+                agent_doc_effect_cas::EpochDrive::Exhausted { .. }
+                | agent_doc_effect_cas::EpochDrive::Stopped { .. } => false,
+            };
             if observed {
                 commit_compacted_authoritative(file, &targets.committed, &targets.live)?;
             } else {
@@ -1791,7 +1811,7 @@ fn assert_non_exchange_markers_preserved(
 /// Bounded editor-convergence retries for a compact write that hits
 /// `retry_crdt_merge` (#compactcrdtretry). Small: only the transient in-flight
 /// editor-delta race is retried; a genuine concurrent edit fails closed.
-const COMPACT_CONVERGE_MAX_ATTEMPTS: usize = 3;
+const COMPACT_CONVERGE_MAX_ATTEMPTS: u32 = 3;
 
 /// How long a `retry_crdt_merge` retry waits for the controller's
 /// delivery-convergence witness before re-reading the live canonical text
@@ -1844,7 +1864,6 @@ fn converge_compact_targets_with_retry(
     source_content: &str,
     target_component: Option<&str>,
 ) -> Result<CompactDocumentTargets> {
-    let mut attempt = 0usize;
     let mut source_content = source_content.to_string();
     if let Some(target) = target_component {
         let current = effects.current_document_content(file, "compact_component_preconverge")?;
@@ -1853,85 +1872,118 @@ fn converge_compact_targets_with_retry(
             source_content = current;
         }
     }
-    loop {
-        attempt += 1;
-        match effects.try_editor_converge(file, &targets.live, &source_content, "compact") {
-            Ok(_) => return Ok(targets),
-            Err(err)
-                if attempt < COMPACT_CONVERGE_MAX_ATTEMPTS
-                    && is_retryable_crdt_merge_error(&err) =>
-            {
-                // A `retry_crdt_merge` refusal means the live canonical text is
-                // mid-delta from an in-flight editor delivery, so retrying instantly
-                // just re-hits the same in-flight state. Wait on the controller's
-                // delivery-convergence witness first: the hub is process-local, so
-                // only the controller can answer. It returns EARLY the moment
-                // convergence lands, otherwise it consumes the window. Doing this
-                // BEFORE the `current_document_content` re-read also makes the drift
-                // check below MORE accurate — reading a settled buffer distinguishes
-                // "transient in-flight delta" from "genuine concurrent operator edit"
-                // instead of sampling a half-applied delta and mistaking it for
-                // either one. `Ok(None)` (no hub for this document) and `Err` (the
-                // controller could not be asked) both mean "nothing to wait on" —
-                // never "delivery finished" — so we proceed to the same drift check,
-                // which still fails closed on a real edit. This keeps the retry
-                // fail-open exactly as before.
-                match agent_doc_controller_io::project_controller::await_delivery_convergence_for_file(
-                    file,
-                    COMPACT_CONVERGE_DELIVERY_WAIT,
-                ) {
-                    // Observed: the await already consumed up to the window (it
-                    // returns early only when convergence landed), so do not wait
-                    // again here.
-                    Ok(Some(_)) => {}
-                    // No hub for this document: there is no in-flight delivery to
-                    // wait for, so the immediate re-read is already the settled read.
-                    Ok(None) => {}
-                    Err(wait_err) => {
-                        agent_doc_ops_log_io::log_op(
-                            file,
-                            &format!(
-                                "compact_converge_convergence_unavailable file={} fallback=immediate_reread detail={}",
-                                file.display(),
-                                format!("{wait_err:#}")
-                                    .replace('\n', " | ")
-                                    .chars()
-                                    .take(160)
-                                    .collect::<String>()
-                            ),
-                        );
-                    }
+    // `#implementlazilyowned`: Lazily owns the bounded converge epochs. A
+    // `retry_crdt_merge` refusal is `Superseded`; before a non-final epoch the
+    // adapter waits for delivery, re-observes the live cut, and re-desires the
+    // still-wanted compaction over it (or fails closed on a genuine edit).
+    let drive = agent_doc_effect_cas::drive_effect_epochs(
+        &format!("compact-converge:{}", file.display()),
+        agent_doc_hash::content_hash(&source_content),
+        COMPACT_CONVERGE_MAX_ATTEMPTS,
+        &mut |epoch| {
+            let attempt = epoch.attempt;
+            let err = match effects.try_editor_converge(
+                file,
+                &targets.live,
+                &source_content,
+                "compact",
+            ) {
+                Ok(_) => {
+                    return Ok(agent_doc_effect_cas::EpochStep::Applied {
+                        receipt: (),
+                        authority: agent_doc_hash::content_hash(&targets.live),
+                    });
                 }
-                let current = effects
-                    .current_document_content(file, "compact_converge_retry")
-                    .unwrap_or_default();
-                if let Some(target) = target_component {
-                    if current != source_content {
-                        targets =
-                            targets.rebase_undelivered_target(&source_content, &current, target)?;
-                        source_content = current;
-                    }
-                } else if current != source_content {
-                    anyhow::bail!(
-                        "compact: document changed during compaction; re-run compact when the editor is idle (the live buffer no longer matches the compacted base). Underlying: {err:#}"
+                Err(err) if is_retryable_crdt_merge_error(&err) => err,
+                Err(err) => return Err(err),
+            };
+            if epoch.is_final() {
+                return Ok(agent_doc_effect_cas::EpochStep::Superseded {
+                    observed: epoch.expected.to_string(),
+                    reason: err,
+                });
+            }
+            // A `retry_crdt_merge` refusal means the live canonical text is
+            // mid-delta from an in-flight editor delivery, so retrying instantly
+            // just re-hits the same in-flight state. Wait on the controller's
+            // delivery-convergence witness first: the hub is process-local, so
+            // only the controller can answer. It returns EARLY the moment
+            // convergence lands, otherwise it consumes the window. Doing this
+            // BEFORE the `current_document_content` re-read also makes the drift
+            // check below MORE accurate — reading a settled buffer distinguishes
+            // "transient in-flight delta" from "genuine concurrent operator edit"
+            // instead of sampling a half-applied delta and mistaking it for
+            // either one. `Ok(None)` (no hub for this document) and `Err` (the
+            // controller could not be asked) both mean "nothing to wait on" —
+            // never "delivery finished" — so we proceed to the same drift check,
+            // which still fails closed on a real edit. This keeps the retry
+            // fail-open exactly as before.
+            match agent_doc_controller_io::project_controller::await_delivery_convergence_for_file(
+                file,
+                COMPACT_CONVERGE_DELIVERY_WAIT,
+            ) {
+                // Observed: the await already consumed up to the window (it
+                // returns early only when convergence landed), so do not wait
+                // again here.
+                Ok(Some(_)) => {}
+                // No hub for this document: there is no in-flight delivery to
+                // wait for, so the immediate re-read is already the settled read.
+                Ok(None) => {}
+                Err(wait_err) => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "compact_converge_convergence_unavailable file={} fallback=immediate_reread detail={}",
+                            file.display(),
+                            format!("{wait_err:#}")
+                                .replace('\n', " | ")
+                                .chars()
+                                .take(160)
+                                .collect::<String>()
+                        ),
                     );
                 }
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "compact_converge_retry file={} attempt={} max_attempts={} reason=retry_crdt_merge",
-                        file.display(),
-                        attempt,
-                        COMPACT_CONVERGE_MAX_ATTEMPTS
-                    ),
-                );
             }
-            Err(err) if is_retryable_crdt_merge_error(&err) => {
+            let current = effects
+                .current_document_content(file, "compact_converge_retry")
+                .unwrap_or_default();
+            if let Some(target) = target_component {
+                if current != source_content {
+                    targets = targets.clone().rebase_undelivered_target(
+                        &source_content,
+                        &current,
+                        target,
+                    )?;
+                    source_content = current;
+                }
+            } else if current != source_content {
                 anyhow::bail!(
-                    "compact: could not converge the compacted document after {COMPACT_CONVERGE_MAX_ATTEMPTS} attempts (the live canonical kept drifting from the compacted base); re-run compact when the editor is idle. Underlying: {err:#}"
+                    "compact: document changed during compaction; re-run compact when the editor is idle (the live buffer no longer matches the compacted base). Underlying: {err:#}"
                 );
             }
-            Err(err) => return Err(err),
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "compact_converge_retry file={} attempt={} max_attempts={} reason=retry_crdt_merge",
+                    file.display(),
+                    attempt,
+                    COMPACT_CONVERGE_MAX_ATTEMPTS
+                ),
+            );
+            Ok(agent_doc_effect_cas::EpochStep::Superseded {
+                observed: agent_doc_hash::content_hash(&source_content),
+                reason: err,
+            })
+        },
+        &mut |_, _| Ok(agent_doc_effect_cas::Pace::Continue),
+    )?;
+    match drive {
+        agent_doc_effect_cas::EpochDrive::Applied(()) => Ok(targets),
+        agent_doc_effect_cas::EpochDrive::Exhausted { reason: err, .. }
+        | agent_doc_effect_cas::EpochDrive::Stopped { reason: err, .. } => {
+            anyhow::bail!(
+                "compact: could not converge the compacted document after {COMPACT_CONVERGE_MAX_ATTEMPTS} attempts (the live canonical kept drifting from the compacted base); re-run compact when the editor is idle. Underlying: {err:#}"
+            );
         }
     }
 }

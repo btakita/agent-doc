@@ -1,0 +1,15 @@
+[package]
+name = "agent-doc-effect-cas"
+version = "0.35.574"
+edition = "2024"
+description = "Lazily-owned effect epoch driver (#implementlazilyowned) shared across agent-doc crates"
+license = "Apache-2.0"
+repository = "https://github.com/btakita/agent-doc"
+publish = false
+
+[lib]
+name = "agent_doc_effect_cas"
+
+[dependencies]
+anyhow = "1"
+lazily = { version = "0.63.0" }

@@ -11,7 +11,9 @@ publish = false
 name = "agent_doc_response_replay_io"
 
 [dependencies]
+agent-doc-effect-cas = { path = "../agent-doc-effect-cas", version = "0.35.574" }
 agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.574" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.574" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.574" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.574" }
 anyhow = "1"

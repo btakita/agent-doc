@@ -45,35 +45,55 @@ pub fn run<E: DedupeEffects + ?Sized>(effects: &E, file: &Path) -> Result<()> {
         return Ok(());
     }
 
+    // `#implementlazilyowned`: Lazily owns the fixpoint epochs. An attempt that
+    // finds the authority already deduplicated is the applied receipt; one that
+    // writes the cut and re-reads a still-duplicated authority is `Superseded`
+    // and the repair is re-desired over the observed authority.
     let mut content = original.clone();
-    for attempt in 1..=DEDUPE_CONVERGENCE_ATTEMPTS {
-        let result = dedupe_responses(&content);
-        if result == content {
-            let removed = original.len().saturating_sub(content.len());
-            eprintln!(
-                "[dedupe] removed {} bytes of duplicate content from {}",
-                removed,
-                file.display()
-            );
-            return Ok(());
-        }
+    let drive = agent_doc_effect_cas::drive_effect_epochs(
+        &format!("response-replay-dedupe:{}", file.display()),
+        agent_doc_hash::content_hash(&original),
+        DEDUPE_CONVERGENCE_ATTEMPTS,
+        &mut |epoch| {
+            let attempt = epoch.attempt;
+            let result = dedupe_responses(&content);
+            if result == content {
+                return Ok(agent_doc_effect_cas::EpochStep::Applied {
+                    receipt: original.len().saturating_sub(content.len()),
+                    authority: agent_doc_hash::content_hash(&content),
+                });
+            }
 
-        effects.write_deduped_document(file, &content, &result)?;
-        effects.save_snapshot(file, &result)?;
+            effects.write_deduped_document(file, &content, &result)?;
+            effects.save_snapshot(file, &result)?;
 
-        // Re-read the authority rather than trusting the cut we just handed the
-        // write path: an accepted-but-undelivered repair leaves the duplicate in
-        // place, and reporting removed bytes off `result` would claim a repair
-        // that never became visible.
-        content = current_document_content(file)?;
-        if attempt < DEDUPE_CONVERGENCE_ATTEMPTS && dedupe_responses(&content) != content {
-            eprintln!(
-                "[dedupe] repair not yet visible in {} (attempt {}/{}); reapplying against current authority",
-                file.display(),
-                attempt,
-                DEDUPE_CONVERGENCE_ATTEMPTS,
-            );
-        }
+            // Re-read the authority rather than trusting the cut we just handed the
+            // write path: an accepted-but-undelivered repair leaves the duplicate in
+            // place, and reporting removed bytes off `result` would claim a repair
+            // that never became visible.
+            content = current_document_content(file)?;
+            if attempt < DEDUPE_CONVERGENCE_ATTEMPTS && dedupe_responses(&content) != content {
+                eprintln!(
+                    "[dedupe] repair not yet visible in {} (attempt {}/{}); reapplying against current authority",
+                    file.display(),
+                    attempt,
+                    DEDUPE_CONVERGENCE_ATTEMPTS,
+                );
+            }
+            Ok(agent_doc_effect_cas::EpochStep::Superseded {
+                observed: agent_doc_hash::content_hash(&content),
+                reason: (),
+            })
+        },
+        &mut |_, _| Ok(agent_doc_effect_cas::Pace::Continue),
+    )?;
+    if let agent_doc_effect_cas::EpochDrive::Applied(removed) = drive {
+        eprintln!(
+            "[dedupe] removed {} bytes of duplicate content from {}",
+            removed,
+            file.display()
+        );
+        return Ok(());
     }
 
     anyhow::bail!(

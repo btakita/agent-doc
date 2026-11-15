@@ -861,7 +861,26 @@ impl QueueClaim {
     /// continue of the ended worker or a new generation. `None` for a quota
     /// stop, a recovered completion, an abandon, or an end with no hand-back.
     pub fn lost_end_hand_back(&self) -> Option<&str> {
-        if self.state != QueueClaimState::Lost
+        if self.state != QueueClaimState::Lost {
+            return None;
+        }
+        self.ended_hand_back_owed()
+    }
+
+    /// The hand-back excerpt of a current-generation worker that ended with a
+    /// hand-back the harness recorded and no report has consumed yet
+    /// (`#finishedheadrefill`), whether the attempt is still `Running` (the
+    /// subagent-end hook froze it before the coordinator ran `queue
+    /// report-complete`) or already `Lost` ([`Self::lost_end_hand_back`]).
+    ///
+    /// Such an attempt is report-owed: the worker finished, so the
+    /// coordinator owes `queue report-complete` for this exact generation
+    /// (or a continue of the same worker, or an explicit `queue release
+    /// --requeue`). It is not a stopped worker whose row may be offered for a
+    /// new claim. `None` for a quota stop, a recovered completion, an abandon,
+    /// a reported attempt, or an end with no hand-back.
+    pub fn ended_hand_back_owed(&self) -> Option<&str> {
+        if !matches!(self.state, QueueClaimState::Running | QueueClaimState::Lost)
             || self.worker.is_none()
             || self.completion_recovered_after_loss
             || self.quota_block.is_some()

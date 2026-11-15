@@ -22,6 +22,16 @@
 //! `lost_continue.failed` is not held by the freeze. A frozen handback that
 //! was not report-completed, quota exhaustion, and lost-reported closeout
 //! stay outside this recovery.
+//!
+//! A frozen handback includes the subagent-end hook's freeze of a worker that
+//! FINISHED: its recorded reason carries the worker's terminal hand-back
+//! (`#finishedheadrefill`, 2026-11-15: three finished workers on
+//! `agent-doc-bugs.md` had continue fail on them, so the work pool offered each
+//! finished row for a new claim before the coordinator ran `queue
+//! report-complete`). Such an attempt is [`report_owed`], never continued or
+//! retried. Only an end with no captured hand-back, a wrapper exit while a
+//! child task still runs, or a coordinator `queue freeze` with its own reason
+//! is a stopped worker this recovery retries.
 
 use crate::queue_claim::{LostContinueRecord, QueueClaim, QueueClaimState};
 use crate::subagent_pool::{DEFAULT_WORKER_FROZEN_SECS, last_heartbeat_secs};
@@ -130,10 +140,27 @@ fn continue_already_failed(claim: &QueueClaim) -> bool {
 }
 
 fn frozen_unreported_handback(claim: &QueueClaim) -> bool {
-    claim.frozen.is_some()
+    report_owed(claim)
+}
+
+/// Whether `claim` is a finished worker's unreported result
+/// (`#finishedheadrefill`): a freeze on an attempt that already carries a
+/// delivered publication state, or a harness end-freeze that recorded the
+/// worker's terminal hand-back ([`QueueClaim::ended_hand_back_owed`]).
+///
+/// The worker is done, not lost. The coordinator owes `queue report-complete`
+/// for this exact generation (or a continue of the same worker, or an
+/// explicit `queue release --requeue`). Continue never runs and never fails
+/// for it, so no new generation is authorized, and the work pool keeps the
+/// head out of its refill. A ledger an older binary wrote with
+/// `lost_continue.failed` already set is not retried either: this check
+/// comes before that record is read.
+pub fn report_owed(claim: &QueueClaim) -> bool {
+    let published = claim.frozen.is_some()
         && claim.publication_state.is_some()
         && claim.state != QueueClaimState::Reported
-        && !claim.completion_recovered_after_loss
+        && !claim.completion_recovered_after_loss;
+    published || claim.ended_hand_back_owed().is_some()
 }
 
 /// Continue, or retry when a previous continue failed. `None` for every other
@@ -377,6 +404,75 @@ mod tests {
         // the no-handback CLI freeze that synchronously authorizes a retry.
         assert!(recovery_action(&claim).is_none());
         assert!(!retry_authorized(&claim));
+    }
+
+    /// `#finishedheadrefill`: the subagent-end hook froze a worker that
+    /// FINISHED (its freeze recorded the terminal hand-back) before the
+    /// coordinator ran `queue report-complete`. Continue must not run or fail
+    /// on it, so no new generation is authorized and the row stays held, on a
+    /// `Running` attempt, on a `Lost` one, and on a ledger an older binary
+    /// already marked `lost_continue.failed`. An end with no captured
+    /// hand-back is still a stopped worker this recovery retries.
+    #[test]
+    fn a_finished_workers_recorded_hand_back_is_report_owed_not_retried() {
+        let ended = |reason: String| {
+            let mut claim = lost_running("do [#finished]", 1_000);
+            claim.state = QueueClaimState::Running;
+            claim.lost_from = None;
+            claim.frozen = Some(QueueWorkerFreeze {
+                frozen_at_secs: 1_100,
+                reason,
+                abandoned: false,
+            });
+            claim
+        };
+        let finished = ended(crate::queue_claim::subagent_end_freeze_reason(Some(
+            "**Summary** fixed it. **What changed** branch fix/x, commit abc123.",
+        )));
+        assert!(finished.ended_hand_back_owed().is_some());
+        assert!(report_owed(&finished));
+        assert!(!is_stopped_harness_freeze(&finished));
+        assert!(recovery_action(&finished).is_none());
+        assert!(!retry_authorized(&finished));
+        assert!(finished.blocks_dispatch(9_000));
+        let mut claims = vec![finished.clone()];
+        let applied = recover_claims(&mut claims, 1_200, 3_600, false, &mut |_| {
+            panic!("continue must not run on a finished worker's attempt")
+        });
+        assert!(applied.is_empty(), "{applied:?}");
+        assert_eq!(claims[0], finished, "recovery leaves the attempt untouched");
+
+        let mut lost = finished.clone();
+        lost.mark_lost();
+        assert!(lost.lost_end_hand_back().is_some());
+        assert!(recovery_action(&lost).is_none());
+        assert!(lost.blocks_dispatch(9_000));
+
+        let mut legacy = finished.clone();
+        legacy.lost_continue = Some(LostContinueRecord {
+            attempted_at_secs: 1_150,
+            failed: true,
+            reason: "harness freeze worker is gone; continue refused".to_string(),
+            during_turn: false,
+        });
+        assert!(
+            !retry_authorized(&legacy),
+            "an older binary's failed continue does not authorize a retry of finished work"
+        );
+        assert!(legacy.blocks_dispatch(9_000));
+
+        for reason in [
+            crate::queue_claim::subagent_end_freeze_reason(None),
+            crate::queue_claim::subagent_end_freeze_reason(Some(
+                "Task abc is still running. Use /codex:status.",
+            )),
+            "ended without a result".to_string(),
+        ] {
+            let stopped = ended(reason);
+            assert!(!report_owed(&stopped), "{stopped:?}");
+            assert!(is_stopped_harness_freeze(&stopped), "{stopped:?}");
+            assert_eq!(recovery_action(&stopped), Some(LostRunningAction::Continue));
+        }
     }
 
     #[test]

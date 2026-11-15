@@ -2684,6 +2684,10 @@ fn subagent_pool_refill_fingerprint(refill: &agent_doc_queue::subagent_pool::Poo
     for head in &refill.next_heads {
         parts.push(format!("n:{}", head.item));
     }
+    // `#finishedheadrefill`: each finished worker owed a report is surfaced once.
+    for entry in &refill.report_owed {
+        parts.push(format!("o:{}:{}", entry.generation, entry.item));
+    }
     if let Some(block) = &refill.quota_refill_block {
         parts.push(format!(
             "q:{}:{}",
@@ -2752,12 +2756,13 @@ fn subagent_pool_checkpoint(file: &Path, observed_at_ms: u64) -> Result<Option<S
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "subagent_pool_refill_surfaced file={} cycle={} unstarted={} refresh_due={} next_heads={} (#subagentworkpool)",
+            "subagent_pool_refill_surfaced file={} cycle={} unstarted={} refresh_due={} next_heads={} report_owed={} (#subagentworkpool)",
             file.display(),
             cycle.cycle_id,
             refill.unstarted.len(),
             refill.refresh_due.len(),
             refill.next_heads.len(),
+            refill.report_owed.len(),
         ),
     );
     Ok(refill.render())
@@ -2993,6 +2998,63 @@ mod tests {
             .expect("changed refill");
         assert!(!second.contains("URGENT"), "{second}");
         assert!(second.contains("do [#b]"), "{second}");
+    }
+
+    /// `#finishedheadrefill`, the live PostToolUse sequence (agent-doc-bugs.md,
+    /// 2026-11-15): a worker finished and the `SubagentStop` hook froze its
+    /// generation with the hand-back before the coordinator reported it. The
+    /// steering refill offered `Refill a free pool slot with queue item
+    /// "do [#a]"` for that finished row. It now says to report generation 1,
+    /// once, and offers no new claim.
+    #[test]
+    fn pool_checkpoint_asks_for_the_report_of_a_finished_worker_not_a_new_claim() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let content = "---\nsession: sid\nagent_doc_format: template\n---\n\n<!-- agent:queue subagents=2 go -->\n- do [#a]\n- do [#b]\n- do [#c]\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, content).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&file, Some(content), Some(content)).unwrap();
+        let clock = agent_doc_queue_io::queue_claim::claim_clock_now_secs();
+        let _pin = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(clock);
+        for (item, owner) in [("do [#a]", "subagent:a"), ("do [#b]", "subagent:b")] {
+            let (_, claim) =
+                agent_doc_queue_io::queue_claim::claim(&file, item, owner, 7200).unwrap();
+            agent_doc_queue_io::queue_claim::start_attempt(
+                &file,
+                item,
+                owner,
+                &format!("worker:{owner}"),
+                7200,
+                claim.generation,
+            )
+            .unwrap();
+        }
+        agent_doc_queue_io::queue_claim::freeze_attempt(
+            &file,
+            "do [#a]",
+            Some(1),
+            &agent_doc_queue::queue_claim::subagent_end_freeze_reason(Some(
+                "**Summary** done. **What changed** commit abc123 on fix/a.",
+            )),
+        )
+        .unwrap();
+
+        let surfaced = subagent_pool_checkpoint(&file, 1_000)
+            .unwrap()
+            .expect("the owed report is surfaced");
+        assert!(!surfaced.contains("Refill a free pool slot"), "{surfaced}");
+        assert!(
+            surfaced.contains("Report the finished worker"),
+            "{surfaced}"
+        );
+        assert!(surfaced.contains("queue report-complete"), "{surfaced}");
+        assert!(surfaced.contains("--generation 1"), "{surfaced}");
+        assert!(surfaced.contains("report-owed 1"), "{surfaced}");
+        assert_eq!(
+            subagent_pool_checkpoint(&file, 2_000).unwrap(),
+            None,
+            "the same owed report is surfaced once"
+        );
     }
 
     /// The owner turn is still the harness turn after the cycle captured its

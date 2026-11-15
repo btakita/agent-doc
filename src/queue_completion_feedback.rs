@@ -2415,8 +2415,10 @@ mod tests {
             .join("\n")
     }
 
-    /// The worker ended (the SubagentStop hook froze it with its hand-back),
-    /// and the same pass's lost-running recovery failed to continue it.
+    /// The worker ended (the SubagentStop hook froze it with its hand-back).
+    /// Since `#finishedheadrefill` the same pass's lost-running recovery
+    /// leaves it alone: a recorded hand-back is report-owed, so continue
+    /// never runs, never fails, and authorizes no new generation.
     fn pr412_worker_ended(doc: &Path) {
         agent_doc_queue_io::queue_claim::freeze_attempt(
             doc,
@@ -2431,11 +2433,10 @@ mod tests {
             ended.state,
             agent_doc_queue::queue_claim::QueueClaimState::Running
         );
+        assert!(ended.lost_continue.is_none(), "{ended:#?}");
+        assert!(ended.ended_hand_back_owed().is_some(), "{ended:#?}");
         assert!(
-            ended
-                .lost_continue
-                .as_ref()
-                .is_some_and(|record| record.failed),
+            !agent_doc_queue::lost_running_recovery::retry_authorized(&ended),
             "{ended:#?}"
         );
     }
@@ -2526,6 +2527,13 @@ mod tests {
         pr412_worker_ended(&doc);
         let mut legacy = agent_doc_queue_io::queue_claim::load_ledger(&doc).unwrap();
         for claim in &mut legacy.claims {
+            // The binaries before `#finishedheadrefill` failed continue on it.
+            claim.lost_continue = Some(agent_doc_queue::queue_claim::LostContinueRecord {
+                attempted_at_secs: claim.claimed_at_secs,
+                failed: true,
+                reason: "harness freeze worker is gone; continue refused".to_string(),
+                during_turn: true,
+            });
             claim.mark_lost();
         }
         let root = agent_doc_fs::find_project_root(&doc).unwrap();

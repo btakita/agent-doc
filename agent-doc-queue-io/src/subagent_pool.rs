@@ -14,7 +14,7 @@ use anyhow::Result;
 
 use agent_doc_queue::subagent_pool::{
     FrozenWorker, PoolRefill, PoolRefillTrigger, PoolSize, PoolSizeInputs, RefillHead, RefreshDue,
-    UnstartedDispatch,
+    ReportOwedWorker, UnstartedDispatch,
 };
 
 /// Operator override of the default pool size for a bare `subagents` queue.
@@ -212,6 +212,45 @@ fn pool_refill_for_content_at_for_harness(
                 reason: agent_doc_queue::worker_quota::quota_blocked_next_step(&document, claim),
             },
         );
+    // `#finishedheadrefill`: a finished worker's unreported result owes a
+    // report for its exact generation, never a new claim.
+    let report_owed = claim_states
+        .iter()
+        .filter(|claim| {
+            matches!(
+                agent_doc_queue::subagent_pool::classify_attempt(claim, now_secs, frozen_bound),
+                agent_doc_queue::subagent_pool::AttemptSlot::ReportOwed
+            )
+        })
+        .map(|claim| {
+            let quoted_document = crate::queue_claim::shell_single_quote(&document);
+            let item = crate::queue_claim::shell_single_quote(
+                &agent_doc_queue::queue_claim::claim_item_handle(&claim.item_text),
+            );
+            ReportOwedWorker {
+                item: claim.item_text.clone(),
+                owner: claim.owner.clone(),
+                generation: claim.generation,
+                worker_id: claim
+                    .worker
+                    .as_ref()
+                    .map(|worker| worker.worker_id.clone())
+                    .unwrap_or_default(),
+                hand_back_excerpt: claim
+                    .ended_hand_back_owed()
+                    .unwrap_or_default()
+                    .to_string(),
+                report_command: format!(
+                    "agent-doc queue report-complete {quoted_document} --item {item} --generation {} --response '<complete worker hand-back>'",
+                    claim.generation,
+                ),
+                release_command: format!(
+                    "agent-doc queue release {quoted_document} --item {item} --generation {} --requeue",
+                    claim.generation,
+                ),
+            }
+        })
+        .collect::<Vec<_>>();
     let frozen = claim_states
         .into_iter()
         .filter_map(|claim| {
@@ -250,6 +289,7 @@ fn pool_refill_for_content_at_for_harness(
         unstarted,
         refresh_due,
         frozen,
+        report_owed,
         next_heads,
         quota_refill_block,
         waiting_for_slot,
@@ -286,12 +326,13 @@ pub fn render_pool_refill_or_warn(
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "subagent_pool_refill trigger={} unstarted={} refresh_due={} next_heads={} frozen={} waiting={} quota_withheld={} (#subagentworkpool)",
+                        "subagent_pool_refill trigger={} unstarted={} refresh_due={} next_heads={} frozen={} report_owed={} waiting={} quota_withheld={} (#subagentworkpool)",
                         trigger.as_str(),
                         refill.unstarted.len(),
                         refill.refresh_due.len(),
                         refill.next_heads.len(),
                         refill.frozen.len(),
+                        refill.report_owed.len(),
                         refill.waiting_for_slot,
                         u8::from(refill.quota_refill_block.is_some()),
                     ),
@@ -424,6 +465,104 @@ mod tests {
         assert!(
             resumed.next_heads.is_empty(),
             "the heartbeat re-occupies the slot"
+        );
+    }
+
+    /// `#finishedheadrefill`, the live sequence (agent-doc-bugs.md,
+    /// 2026-11-15, three times): a worker finishes, the harness's
+    /// `SubagentStop` freezes its generation with the hand-back before the
+    /// coordinator runs `queue report-complete`, and the next refill (the
+    /// PostToolUse steering one) offered `Refill a free pool slot with queue
+    /// item "do [#a]"` for that finished row. The head is report-owed: it
+    /// keeps its slot, it is never a refill head, and its guidance is
+    /// `queue report-complete` for generation 1. That report still succeeds,
+    /// and only then is the slot handed to the next head.
+    #[test]
+    fn a_finished_worker_awaiting_its_report_is_not_offered_again() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = pool_doc("subagents=2", &["do [#a]", "do [#b]", "do [#c]"]);
+        std::fs::write(&file, &content).unwrap();
+        let clock = crate::queue_claim::claim_clock_now_secs();
+        let _pin = crate::queue_claim::pin_claim_clock_for_current_thread(clock);
+        start(&file, "do [#a]", "subagent:a");
+        start(&file, "do [#b]", "subagent:b");
+
+        let reason = agent_doc_queue::queue_claim::subagent_end_freeze_reason(Some(
+            "**Summary** fixed the refill. **What changed** branch fix/a, commit 1234abc.",
+        ));
+        match crate::worker_quota_autodetect::apply_subagent_freeze_autodetect(
+            std::slice::from_ref(&file),
+            Some(&file),
+            "worker:subagent:a",
+            &reason,
+        )
+        .unwrap()
+        {
+            crate::worker_quota_autodetect::SubagentFreezeAutodetect::Applied(applied) => {
+                assert_eq!(applied.claim.generation, 1);
+            }
+            other => panic!("the subagent-end hook freezes the finished worker: {other:?}"),
+        }
+
+        for trigger in [
+            PoolRefillTrigger::Plan,
+            PoolRefillTrigger::Frozen,
+            PoolRefillTrigger::RunningTurn,
+        ] {
+            let refill = pool_refill_for_content(&file, &content, trigger).unwrap();
+            assert!(
+                refill.next_heads.iter().all(|head| head.item != "do [#a]"),
+                "a finished row is never a refill head: {refill:#?}"
+            );
+            assert!(refill.next_heads.is_empty(), "{refill:#?}");
+            assert_eq!(refill.pools[0].occupancy.report_owed, 1, "{refill:#?}");
+            assert_eq!(refill.pools[0].occupancy.running, 1, "{refill:#?}");
+            assert_eq!(refill.pools[0].occupancy.free, 0, "{refill:#?}");
+            assert!(refill.frozen.is_empty(), "{refill:#?}");
+            assert_eq!(refill.waiting_for_slot, 1, "{refill:#?}");
+            let owed = refill
+                .report_owed
+                .iter()
+                .map(|entry| (entry.item.as_str(), entry.generation))
+                .collect::<Vec<_>>();
+            assert_eq!(owed, [("do [#a]", 1)], "{refill:#?}");
+            let text = refill.render().unwrap();
+            assert!(!text.contains("Refill a free pool slot"), "{text}");
+            assert!(text.contains("queue report-complete"), "{text}");
+            assert!(text.contains("--generation 1"), "{text}");
+            assert!(text.contains("report-owed 1"), "{text}");
+        }
+        assert!(
+            crate::queue_claim::claimed_items_for_content(&file, &content).claims("do [#a]"),
+            "the finished attempt keeps its claim for the report"
+        );
+        let held = crate::queue_claim::claim_states_for_content(&file, &content)
+            .unwrap()
+            .into_iter()
+            .find(|claim| claim.item_text == "do [#a]")
+            .unwrap();
+        assert_eq!(held.generation, 1);
+        assert!(held.lost_continue.is_none(), "{held:#?}");
+
+        let reported = crate::queue_claim::report_attempt(&file, "do [#a]", Some(1)).unwrap();
+        assert_eq!(
+            reported.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Reported
+        );
+        assert_eq!(reported.generation, 1);
+        let after =
+            pool_refill_for_content(&file, &content, PoolRefillTrigger::ReportComplete).unwrap();
+        assert!(after.report_owed.is_empty(), "{after:#?}");
+        assert_eq!(
+            after
+                .next_heads
+                .iter()
+                .map(|head| head.item.as_str())
+                .collect::<Vec<_>>(),
+            ["do [#c]"],
+            "the report frees the slot for the next head, not the finished one: {after:#?}"
         );
     }
 
@@ -669,7 +808,8 @@ mod tests {
 
     /// `#waitingfreezelive` (2026-11-13): the hook froze a worker that was
     /// only waiting on its own background `make tmux-ci`, and the pool offered
-    /// its row for a duplicate dispatch. Proof of life, whether the
+    /// its row for a duplicate dispatch (since `#finishedheadrefill` the
+    /// recorded hand-back makes that head report-owed instead). Proof of life, whether the
     /// coordinator's generation-fenced `queue claim --refresh` or the hook's
     /// next waiting stop, clears that freeze and its failed continue, puts the
     /// worker back in its slot, and withdraws the offer.
@@ -689,12 +829,15 @@ mod tests {
                 "subagent ended before coordinator integration: The commit is in. Waiting on `make tmux-ci` before I push.",
             )
             .unwrap();
-            let offered =
-                pool_refill_for_content(&file, &content, PoolRefillTrigger::Frozen).unwrap();
+            // `#finishedheadrefill`: the stop recorded a hand-back, so the
+            // head is report-owed and no longer offered for a duplicate
+            // dispatch even before proof of life arrives.
+            let owed = pool_refill_for_content(&file, &content, PoolRefillTrigger::Frozen).unwrap();
             assert!(
-                offered.next_heads.iter().any(|head| head.item == "do [#a]"),
-                "the bug's precondition: {offered:#?}"
+                owed.next_heads.iter().all(|head| head.item != "do [#a]"),
+                "{owed:#?}"
             );
+            assert_eq!(owed.report_owed.len(), 1, "{owed:#?}");
 
             let claim = if via_coordinator_refresh {
                 crate::queue_claim::refresh_attempt(&file, "do [#a]", "subagent:a", 7200, Some(1))

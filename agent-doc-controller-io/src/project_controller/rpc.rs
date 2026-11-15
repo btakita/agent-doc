@@ -33470,13 +33470,39 @@ fn surface_intent_label(intent: &SurfaceIntent) -> &'static str {
 /// handed to the layout owner) are verdicts, not losses, and are not retried.
 #[derive(Clone)]
 struct EditorSurfaceRetry {
-    surface: EditorSurface,
     intent: SurfaceIntent,
 }
 
-static EDITOR_SURFACE_RETRY: std::sync::LazyLock<
-    parking_lot::Mutex<std::collections::HashMap<(PathBuf, String), EditorSurfaceRetry>>,
-> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
+/// `#implementlazilyowned` (plan step 5): the failed focus is a Lazily
+/// retained intent per (project root, editor client) whose expected authority
+/// is the surface it failed under. A later failure is the newest intent
+/// (latest-wins); an observation of a different surface is a moved authority
+/// and Lazily records the retained intent `Superseded`; an accepted effect is
+/// its applied receipt. The map below only stores each retained intent's
+/// payload.
+#[derive(Default)]
+struct EditorSurfaceRetryStore {
+    effects: agent_doc_effect_cas::latest_intent::LatestIntentSchedule<(PathBuf, String)>,
+    intents: std::collections::HashMap<(PathBuf, String), EditorSurfaceRetry>,
+}
+
+/// Lazily effect identity of a failed editor-surface focus effect.
+const EDITOR_SURFACE_RETRY_EFFECT: &str = "editor-surface-focus-effect";
+
+static EDITOR_SURFACE_RETRY: std::sync::LazyLock<parking_lot::Mutex<EditorSurfaceRetryStore>> =
+    std::sync::LazyLock::new(|| parking_lot::Mutex::new(EditorSurfaceRetryStore::default()));
+
+/// The authority a retained focus intent was desired over: the surface fields
+/// that decide which focus the effect derives.
+fn editor_surface_retry_authority(surface: &EditorSurface) -> String {
+    serde_json::json!({
+        "focused": surface.focused,
+        "columns": surface.columns,
+        "focus_only": surface.focus_only,
+        "preserve_focus": surface.preserve_focus,
+    })
+    .to_string()
+}
 
 /// Return the intent whose effect failed, and forget it once the editor has
 /// moved to another document. The intent remains pending until an effect is
@@ -33486,23 +33512,24 @@ fn pending_editor_surface_retry(
     client_id: &str,
     surface: &EditorSurface,
 ) -> Option<SurfaceIntent> {
+    use agent_doc_effect_cas::latest_intent::IntentClaim;
     let key = (project_root.to_path_buf(), client_id.to_string());
-    let mut pending = EDITOR_SURFACE_RETRY.lock();
-    match pending.get(&key) {
-        Some(retry)
-            if retry.surface.focused == surface.focused
-                && retry.surface.columns == surface.columns
-                && retry.surface.focus_only == surface.focus_only
-                && retry.surface.preserve_focus == surface.preserve_focus =>
-        {
-            Some(retry.intent.clone())
-        }
-        Some(_) => {
-            pending.remove(&key);
-            None
-        }
-        None => None,
+    let mut store = EDITOR_SURFACE_RETRY.lock();
+    let now = Instant::now();
+    let IntentClaim::Claimed(attempt) = store.effects.claim(&key, now) else {
+        return None;
+    };
+    if attempt.expected() != editor_surface_retry_authority(surface) {
+        store.effects.superseded(&attempt, "editor_surface_moved");
+        store.intents.remove(&key);
+        return None;
     }
+    // Still the same surface: re-derive the focus, and keep the intent retained
+    // until an effect is accepted.
+    store
+        .effects
+        .retry_after(&attempt, "awaiting_accepted_effect", Duration::ZERO, now);
+    store.intents.get(&key).map(|retry| retry.intent.clone())
 }
 
 /// Record the outcome of one editor-driven focus effect for the retry above.
@@ -33513,18 +33540,31 @@ fn record_editor_surface_effect(
     intent: &SurfaceIntent,
     effect_failed: bool,
 ) {
+    use agent_doc_effect_cas::latest_intent::IntentClaim;
     let key = (project_root.to_path_buf(), client_id.to_string());
-    let mut pending = EDITOR_SURFACE_RETRY.lock();
+    let mut store = EDITOR_SURFACE_RETRY.lock();
     if effect_failed {
-        pending.insert(
+        let authority = editor_surface_retry_authority(surface);
+        if let Err(error) = store.effects.desire(
+            key.clone(),
+            EDITOR_SURFACE_RETRY_EFFECT,
+            authority.clone(),
+            authority,
+        ) {
+            eprintln!("[controller] failed editor-surface focus was not retained: {error:#}");
+            return;
+        }
+        store.intents.insert(
             key,
             EditorSurfaceRetry {
-                surface: surface.clone(),
                 intent: intent.clone(),
             },
         );
     } else {
-        pending.remove(&key);
+        if let IntentClaim::Claimed(attempt) = store.effects.claim(&key, Instant::now()) {
+            store.effects.applied(&attempt, "effect_accepted");
+        }
+        store.intents.remove(&key);
     }
 }
 
@@ -36416,8 +36456,16 @@ fn state_plane_subscription_channel(
 #[derive(Default)]
 struct PaneLayoutDesiredEffectState {
     pending_frame: Option<ControllerStatePlaneFrame>,
+    /// `#implementlazilyowned` (plan step 5): the pending frame is the lane's
+    /// Lazily latest-wins intent (expected authority = its plane version).
+    /// Lazily owns the attempt count, the retry due time, and supersession by
+    /// a newer frame; the worker only waits and projects.
+    effect: agent_doc_effect_cas::latest_intent::LatestIntentSchedule<()>,
     worker_active: bool,
 }
+
+/// Lazily effect identity of one lane's `pane_layout_desired` projection.
+const PANE_LAYOUT_DESIRED_EFFECT: &str = "pane-layout-desired-projection";
 
 /// The `pane_layout_desired` state-plane sink (`#ideriderindependentnav` P3).
 ///
@@ -36545,6 +36593,15 @@ impl PaneLayoutDesiredLaneEffectSink {
             {
                 return;
             }
+            if let Err(error) = state.effect.desire(
+                (),
+                PANE_LAYOUT_DESIRED_EFFECT,
+                frame.plane_version.to_string(),
+                frame.plane_version.to_string(),
+            ) {
+                eprintln!("[controller] pane_layout_desired frame was not desired: {error:#}");
+                return;
+            }
             state.pending_frame = Some(frame);
             if state.worker_active {
                 false
@@ -36581,20 +36638,38 @@ fn pane_layout_desired_effect_worker(
     wake: Arc<Condvar>,
     last_applied_version: Arc<AtomicU64>,
 ) {
-    let mut attempt = 0_u64;
+    use agent_doc_effect_cas::latest_intent::IntentClaim;
     loop {
         let Some(runtime) = runtime.upgrade() else {
             state.lock().worker_active = false;
             return;
         };
-        let frame = {
+        // Claim the lane's latest frame from Lazily. A retained retry that is
+        // not yet due parks on `wake` until its due time; a newer frame wakes
+        // the wait and is claimable at once (it superseded the retry).
+        let (claimed, frame) = {
             let mut state = state.lock();
-            let Some(frame) = state.pending_frame.clone() else {
-                state.worker_active = false;
-                return;
-            };
-            frame
+            loop {
+                match state.effect.claim(&(), Instant::now()) {
+                    IntentClaim::Claimed(claimed) => {
+                        let Some(frame) = state.pending_frame.clone() else {
+                            state.effect.superseded(&claimed, "no_pending_frame");
+                            state.worker_active = false;
+                            return;
+                        };
+                        break (claimed, frame);
+                    }
+                    IntentClaim::Waiting { at } => {
+                        wake.wait_until(&mut state, at);
+                    }
+                    IntentClaim::Busy | IntentClaim::Empty => {
+                        state.worker_active = false;
+                        return;
+                    }
+                }
+            }
         };
+        let attempt = u64::from(claimed.attempt());
         if frame.plane_version <= last_applied_version.load(Ordering::SeqCst) {
             let mut state = state.lock();
             if state
@@ -36604,7 +36679,7 @@ fn pane_layout_desired_effect_worker(
             {
                 state.pending_frame.take();
             }
-            attempt = 0;
+            state.effect.applied(&claimed, "already_applied");
             continue;
         }
 
@@ -36633,6 +36708,9 @@ fn pane_layout_desired_effect_worker(
                 {
                     state.pending_frame.take();
                 }
+                state
+                    .effect
+                    .applied(&claimed, frame.plane_version.to_string());
                 agent_doc_ops_log_io::log_op(
                     &bootstrap.project_root,
                     &format!(
@@ -36645,10 +36723,8 @@ fn pane_layout_desired_effect_worker(
                             .unwrap_or_default(),
                     ),
                 );
-                attempt = 0;
             }
             Err(error) => {
-                attempt = attempt.saturating_add(1);
                 if let Ok(bootstrap) = runtime.bootstrap_snapshot() {
                     agent_doc_ops_log_io::log_op(
                         &bootstrap.project_root,
@@ -36658,24 +36734,15 @@ fn pane_layout_desired_effect_worker(
                         ),
                     );
                 }
-                let retry_delay = tmux_layout_effect_state_retry_delay(attempt);
-                let mut effect_state = state.lock();
-                if effect_state
-                    .pending_frame
-                    .as_ref()
-                    .is_some_and(|current| current.plane_version > frame.plane_version)
-                {
-                    attempt = 0;
-                    continue;
-                }
-                wake.wait_for(&mut effect_state, retry_delay);
-                if effect_state
-                    .pending_frame
-                    .as_ref()
-                    .is_some_and(|current| current.plane_version > frame.plane_version)
-                {
-                    attempt = 0;
-                }
+                // Lazily retains the frame until the backoff is due, or
+                // records it `Superseded` when a newer frame arrived during
+                // the attempt; the next claim above decides which.
+                state.lock().effect.retry_after(
+                    &claimed,
+                    format!("{error:#}"),
+                    tmux_layout_effect_state_retry_delay(attempt),
+                    Instant::now(),
+                );
             }
         }
     }

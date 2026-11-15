@@ -550,6 +550,7 @@ name = "agent-doc-controller"
 version = "0.35.574"
 dependencies = [
  "agent-doc-editor-surface",
+ "agent-doc-effect-cas",
  "agent-doc-element-backlog",
  "agent-doc-flow",
  "agent-doc-fs",
@@ -559,6 +560,7 @@ dependencies = [
  "agent-doc-turn",
  "agent-doc-turn-executor-tmux",
  "hex",
+ "lazily 0.63.0",
  "serde",
  "serde_json",
  "sha2",

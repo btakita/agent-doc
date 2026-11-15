@@ -526,6 +526,34 @@ Progress (`#implementlazilyowned`):
   `claim_retained_persistence_retry` and the schedule's `IntentRetry` /
   `retry_after` / `superseded`; 1 `lazily-adapter`:
   `RETAINED_PERSISTENCE_RETRY_EFFECT`).
+- Family 5, tmux/layout/editor-focus latest-wins projections (lzowned8):
+  `LatestTmuxEffectWorkerState` is backed by a Lazily `EffectCasCore`
+  latest-wins key: every `schedule` desires its revision as the key's epoch
+  (a stale revision is Lazily `StaleEpoch`), and `is_superseded` /
+  `pending_revision` read the Lazily latest epoch; `active` only guards the
+  worker thread's spawn. `TmuxEffectAttemptLedger`'s `attempts` counter is
+  deleted: a generation is one `LatestIntentSchedule` intent, each admitted
+  attempt is a Lazily claim, the previous unconverged attempt is recorded
+  `Retryable` at the next admission, a claim past
+  `TMUX_EFFECT_RETRY_ATTEMPT_LIMIT` is a Lazily rejection, and a retirement
+  records the claimed attempt rejected (budget) or superseded (yield, forget,
+  newer generation). The `pane_layout_desired` projector's bespoke `attempt`
+  counter is deleted: each lane's pending frame is a Lazily latest-wins intent
+  (expected = plane version), the worker claims it, a failed projection is
+  `retry_after` with the unchanged backoff, and a newer frame supersedes a
+  retrying one. `EditorSurfaceRetry` is a Lazily retained intent per
+  (project root, editor client) whose expected authority is the surface it
+  failed under: a moved surface is `Superseded`, an accepted effect is its
+  receipt. `LatestIntentSchedule::claim` now rounds `now` up to the Lazily
+  millisecond clock so a zero-delay retry is claimable at once. Messages, log
+  markers, the twelve-attempt cap, and the 250ms..5s pace are unchanged.
+  31 rows: 9 `migrated`, 9 `lazily-adapter` (the focus-fence comparators over
+  the Lazily `ThreadSafeSourceMap` latest focus intent, the generation
+  worker's pace wait, the budget accessor), 13 `excluded` (the route-lease
+  RAII publication holds, the four "superseded plugin bytes" route-admission
+  verdicts, and the best-effort superseded tmux session cleanups), plus 3 new
+  rows (`EditorSurfaceRetryStore` `migrated`; `EDITOR_SURFACE_RETRY_EFFECT`,
+  `editor_surface_retry_authority` `lazily-adapter`).
 - Not yet done (as of 2026-11-15, agent-doc `59984d315a`; triage is complete,
   0 `triage` rows): migrate the 291 reviewed `pending-migration` rows family
   by family, then delete the remaining bespoke orchestration and make the
@@ -533,11 +561,11 @@ Progress (`#implementlazilyowned`):
 
 ## Resume here
 
-Status 2026-11-15 (after family 4): ledger = 74 `migrated`, 138 `lazily-adapter`,
-17 `deleted`, 365 `excluded`, 152 `pending-migration`, 0 `triage`. Work the
-152 rows sequentially in ONE worktree (every step edits the ledger), one family
+Status 2026-11-15 (after family 5): ledger = 84 `migrated`, 149 `lazily-adapter`,
+17 `deleted`, 378 `excluded`, 121 `pending-migration`, 0 `triage`. Work the
+121 rows sequentially in ONE worktree (every step edits the ledger), one family
 per pushed commit, `make check` green before each push, in this order (next:
-family 5):
+family 6):
 
 1. DONE: actor-generation fenced writes (`store_actor_record_fenced_tx`,
    `delete_actor_document_fenced_tx`; 20 actor-generation rows) onto the
@@ -570,8 +598,10 @@ family 5):
 4. DONE: retained editor writes and retained-intent lineage (23 rows + 5 new)
    onto the Lazily latest-intent core
    (`agent_doc_effect_cas::latest_intent::LatestIntentSchedule`).
-5. tmux/layout/editor-focus latest-wins projections (31 rows) onto a Lazily
-   latest-wins key.
+5. DONE: tmux/layout/editor-focus latest-wins projections (31 rows + 3 new)
+   onto Lazily latest-wins keys (`LatestTmuxEffectWorkerState`,
+   `TmuxEffectAttemptLedger`, the `pane_layout_desired` projector,
+   `EditorSurfaceRetryStore`).
 6. Dispatch/recycle retry budget and owner supersession (44 + 1 rows).
 7. The editor half of the document authority (`CrdtReplicaManager`,
    `PatchWatcher`, `TypingTracker`; 41 + 13 editor rows): move

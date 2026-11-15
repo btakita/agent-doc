@@ -160,8 +160,11 @@ impl<K: Ord + Clone + std::fmt::Debug> LatestIntentSchedule<K> {
     }
 
     /// Claim `key`'s retained intent if its retry is due at `now`.
+    ///
+    /// `now` rounds up to Lazily's millisecond clock, like a due time, so a
+    /// zero-delay retry is claimable at the instant it was recorded.
     pub fn claim(&mut self, key: &K, now: Instant) -> IntentClaim<K> {
-        let logical = self.logical(now);
+        let logical = self.logical_ceil(now);
         match self.core.claim(key, GENERATION, logical).1 {
             EffectCasClaim::Claimed(attempt) => IntentClaim::Claimed(IntentAttempt { attempt }),
             EffectCasClaim::Waiting { retry_at } => IntentClaim::Waiting {
@@ -347,6 +350,20 @@ mod tests {
         let second = claimed(&mut schedule, now);
         assert_eq!((second.expected(), second.payload()), ("epoch-2", "two"));
         assert_eq!(second.attempt(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn a_zero_delay_retry_is_claimable_at_once() -> Result<()> {
+        let mut schedule = LatestIntentSchedule::new();
+        let now = Instant::now() + Duration::from_micros(300);
+        schedule.desire("doc", "test:zero", "epoch-1", "one")?;
+        let first = claimed(&mut schedule, now);
+        assert!(matches!(
+            schedule.retry_after(&first, "again", Duration::ZERO, now),
+            IntentRetry::Retrying { .. }
+        ));
+        assert_eq!(claimed(&mut schedule, now).attempt(), 2);
         Ok(())
     }
 

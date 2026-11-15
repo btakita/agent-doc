@@ -49,10 +49,25 @@ pub const MANUAL_PANE_LAYOUT_EFFECT_TIMEOUT: Duration = Duration::from_secs(30);
 /// transport independently adds another five-second tier around this wait.
 pub const MANUAL_PANE_LAYOUT_COMMAND_TIMEOUT: Duration = Duration::from_secs(35);
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// `#implementlazilyowned` (plan step 5): the latest exact-input revision of
+/// one navigation lane's tmux layout effect is a Lazily latest-wins key. Every
+/// [`Self::schedule`] desires its revision as the key's epoch, so Lazily
+/// refuses a stale (older) revision and supersedes every older desire, and
+/// [`Self::is_superseded`] reads the Lazily latest epoch. `active` only guards
+/// the spawn of the single worker thread.
+#[derive(Clone, Debug)]
 pub struct LatestTmuxEffectWorkerState {
-    pending_revision: u64,
+    latest: lazily::EffectCasCore<(), u64, u64, u64, String>,
     active: bool,
+}
+
+impl Default for LatestTmuxEffectWorkerState {
+    fn default() -> Self {
+        Self {
+            latest: lazily::EffectCasCore::new(0),
+            active: false,
+        }
+    }
 }
 
 impl LatestTmuxEffectWorkerState {
@@ -60,7 +75,19 @@ impl LatestTmuxEffectWorkerState {
     /// the single worker. An already-active worker observes the newer revision
     /// through the same retained state.
     pub fn schedule(&mut self, revision: u64) -> bool {
-        self.pending_revision = self.pending_revision.max(revision);
+        if let Ok(identity) =
+            lazily::EffectIdentity::new(format!("tmux-layout-effect-input#{revision}"))
+        {
+            // A stale revision is Lazily `StaleEpoch` and leaves the newer
+            // desire in place; an identical one is `Unchanged`.
+            let _ = self.latest.upsert_desired(lazily::EffectIntent {
+                identity,
+                epoch: revision,
+                key: (),
+                expected: revision,
+                plan: lazily::EffectPlan::single(revision),
+            });
+        }
         if self.active {
             false
         } else {
@@ -69,8 +96,13 @@ impl LatestTmuxEffectWorkerState {
         }
     }
 
+    /// The Lazily latest desired revision (never claimed: the worker reads
+    /// the graph's desired layout and only compares revisions).
     pub fn pending_revision(&self) -> u64 {
-        self.pending_revision
+        self.latest
+            .state(&())
+            .and_then(|state| state.pending)
+            .map_or(0, |pending| pending.intent.epoch)
     }
 
     pub fn is_active(&self) -> bool {
@@ -78,7 +110,7 @@ impl LatestTmuxEffectWorkerState {
     }
 
     pub fn is_superseded(&self, revision: u64) -> bool {
-        self.pending_revision > revision
+        self.pending_revision() > revision
     }
 
     /// Retire only when no newer retained input revision is waiting. Holding
@@ -106,7 +138,7 @@ impl LatestTmuxEffectWorkerState {
     /// deterministic effect panic must not become a hot respawn loop.
     pub fn recover_after_failure(&mut self, failed_revision: u64) -> bool {
         self.active = false;
-        if self.pending_revision <= failed_revision {
+        if self.pending_revision() <= failed_revision {
             return false;
         }
         self.active = true;
@@ -510,10 +542,18 @@ pub enum TmuxEffectAttemptAdmission {
 /// graph, keyed by generation, so a retired generation stays retired until a
 /// newer generation replaces it, and the window-claim stamp of a generation is
 /// minted exactly once.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 pub struct TmuxEffectAttemptLedger {
     generation: u64,
-    attempts: u64,
+    /// `#implementlazilyowned` (plan step 5): the generation is one Lazily
+    /// retained intent. Each admitted attempt is a Lazily claim of it, and the
+    /// previous unconverged attempt is recorded `Retryable` at the next
+    /// admission, so Lazily owns the attempt count the budget reads.
+    effect: agent_doc_effect_cas::latest_intent::LatestIntentSchedule<()>,
+    /// The claimed attempt of `generation` the worker is running or ran last.
+    current: Option<agent_doc_effect_cas::latest_intent::IntentAttempt<()>>,
+    /// Lazily's attempt number of the last claim (`0` before the first).
+    last_attempt: u64,
     claim_stamp_ms: Option<u64>,
     publication: Option<crate::layout_owner::EditorPublicationOrder>,
     /// `#focusnosnapshotrestart`: the editor surface (frame) whose
@@ -595,20 +635,55 @@ impl TmuxEffectAttemptLedger {
         if let Some(retired) = self.retired {
             return TmuxEffectAttemptAdmission::Retired(retired);
         }
-        if self.attempts >= TMUX_EFFECT_RETRY_ATTEMPT_LIMIT {
+        use agent_doc_effect_cas::latest_intent::IntentClaim;
+        let now = std::time::Instant::now();
+        if let Some(previous) = self.current.take() {
+            // The previous attempt did not converge: Lazily retains the same
+            // generation and counts the next claim. The physical pace between
+            // attempts is the worker's wait, not this ledger's.
+            self.effect
+                .retry_after(&previous, "unconverged", Duration::ZERO, now);
+        } else if !self.effect.is_pending(&())
+            && !self.effect.in_flight(&())
+            && self
+                .effect
+                .desire(
+                    (),
+                    "tmux-layout-effect-generation",
+                    generation.to_string(),
+                    generation.to_string(),
+                )
+                .is_err()
+        {
             self.retired = Some(TmuxEffectRetirement::RetryBudgetExhausted);
             return TmuxEffectAttemptAdmission::Retired(TmuxEffectRetirement::RetryBudgetExhausted);
         }
-        self.attempts += 1;
-        TmuxEffectAttemptAdmission::Attempt {
-            number: self.attempts,
+        let attempt = match self.effect.claim(&(), now) {
+            IntentClaim::Claimed(attempt) => attempt,
+            IntentClaim::Waiting { .. } | IntentClaim::Busy | IntentClaim::Empty => {
+                // Unreachable for a ledger that only this worker admits
+                // through; fail closed rather than re-apply untracked.
+                self.retired = Some(TmuxEffectRetirement::RetryBudgetExhausted);
+                return TmuxEffectAttemptAdmission::Retired(
+                    TmuxEffectRetirement::RetryBudgetExhausted,
+                );
+            }
+        };
+        let number = u64::from(attempt.attempt());
+        if number > TMUX_EFFECT_RETRY_ATTEMPT_LIMIT {
+            self.effect.rejected(&attempt, "retry_budget_exhausted");
+            self.retired = Some(TmuxEffectRetirement::RetryBudgetExhausted);
+            return TmuxEffectAttemptAdmission::Retired(TmuxEffectRetirement::RetryBudgetExhausted);
         }
+        self.last_attempt = number;
+        self.current = Some(attempt);
+        TmuxEffectAttemptAdmission::Attempt { number }
     }
 
     /// True when the attempt just run was the last one the budget allows, so
     /// an unconverged result must retire instead of scheduling a retry.
     pub fn retry_budget_spent(&self, generation: u64) -> bool {
-        self.generation == generation && self.attempts >= TMUX_EFFECT_RETRY_ATTEMPT_LIMIT
+        self.generation == generation && self.last_attempt >= TMUX_EFFECT_RETRY_ATTEMPT_LIMIT
     }
 
     /// Retire `generation`. Returns true only for the first retirement, so the
@@ -616,6 +691,16 @@ impl TmuxEffectAttemptLedger {
     pub fn retire(&mut self, generation: u64, reason: TmuxEffectRetirement) -> bool {
         if !self.track(generation) || self.retired.is_some() {
             return false;
+        }
+        if let Some(attempt) = self.current.take() {
+            // The retirement is this generation's Lazily terminal: a spent
+            // budget is a rejection, every other reason lost to something
+            // newer.
+            if reason == TmuxEffectRetirement::RetryBudgetExhausted {
+                self.effect.rejected(&attempt, reason.as_str());
+            } else {
+                self.effect.superseded(&attempt, reason.as_str());
+            }
         }
         self.retired = Some(reason);
         true

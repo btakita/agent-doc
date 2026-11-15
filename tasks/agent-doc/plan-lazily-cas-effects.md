@@ -385,12 +385,22 @@ Progress (`#implementlazilyowned`):
   editor half of the document authority in `CrdtReplicaManager`,
   `PatchWatcher`, and `TypingTracker`, plus retained surface/layout delivery,
   whose retry/supersession must move behind the Rust core so Lazily owns it).
-- Not yet done: the 13 original preflight `pending-migration` rows (authority
-  observation retry `observe_current_text_with_bounded_retry_fenced` and
-  friends, `fence_pending_maintenance_effect`, `run_pending_maintenance_fenced`,
-  `fence_queue_maintenance_authority_acquisition`,
-  `QueueMaintenanceAuthoritySuperseded`), then the reviewed
-  `pending-migration` families above, moving the remaining `controller-ledger-sqlite` seams (actor generation,
+- The 13 original preflight `pending-migration` rows are done. Authority
+  observation retries (`observe_current_text_with_bounded_retry_fenced`, the
+  native-save reconciliation, the re-arm/repeat evidence reads, and the
+  model-ensure re-registration) run through
+  `queue_maintenance_effect_cas::drive_authority_observation`: each
+  observation is a Lazily-claimed attempt, a transient status is `Retryable`,
+  a settled one is the applied receipt, and a fence error is a rejection; the
+  bespoke `for attempt in 1..=attempts` loops are gone (10 rows `migrated`).
+  `fence_pending_maintenance_effect` and
+  `fence_queue_maintenance_authority_acquisition` are deleted: every barrier
+  is a `QueueMaintenanceEffectPlan` step (`Verify`, and the new
+  `AuthorityAcquisition` step that keeps its test delay), and
+  `QueueMaintenanceAuthoritySuperseded` is replaced by the plan's typed
+  `QueueMaintenanceEffectSuperseded::admitted_authority` (3 rows `deleted`
+  with `absent:` proofs).
+- Not yet done: the reviewed `pending-migration` families above, moving the remaining `controller-ledger-sqlite` seams (actor generation,
   closeout lease, drain-owner claims) onto the SQLite adapter, persisting
   per-step plan receipts for crash resume inside one request (today a resumed
   request re-derives its idempotent effects), reordering the maintenance body

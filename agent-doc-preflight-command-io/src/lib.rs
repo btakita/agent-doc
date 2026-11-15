@@ -1035,83 +1035,83 @@ fn run_queue_maintenance_worker(
                 queue_mutation.apply_guard(),
             );
             match outcome {
-            Ok(state) => {
-                if let Some(authoritative) = state.authoritative_content.as_deref() {
-                    agent_doc_preflight_io::PendingMaintenanceEffectFence::record_applied_content(
+                Ok(state) => {
+                    if let Some(authoritative) = state.authoritative_content.as_deref() {
+                        agent_doc_preflight_io::PendingMaintenanceEffectFence::record_applied_content(
                         &effect_fence,
                         file,
                         authoritative,
                     )?;
+                    }
+                    effect_fence.fence_effect(file)?;
+                    agent_doc_cycle_state_io::record_queue_mirrored_ids_or_warn(
+                        file,
+                        &state.mirrored_queue_ids,
+                        "background_queue_maintenance",
+                    );
+                    let committed = match request.commit_if_mutated {
+                        true => match effect_fence
+                            .fence_effect(file)
+                            .and_then(|()| agent_doc_commit_io::commit(file))
+                        {
+                            Ok(committed) => committed,
+                            Err(error) => {
+                                effect_fence.fence_effect(file)?;
+                                agent_doc_ops_log_io::log_op(
+                                    file,
+                                    &format!(
+                                        "queue_maintenance_background_failed file={} stage=commit error={}",
+                                        file.display(),
+                                        format!("{error:#}").replace('\n', " | "),
+                                    ),
+                                );
+                                return Err(error);
+                            }
+                        },
+                        false => false,
+                    };
+                    effect_fence.fence_effect(file)?;
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "queue_maintenance_background_completed file={} mutated={} committed={} drainable={}",
+                            file.display(),
+                            state.maintenance_mutated,
+                            committed,
+                            state.queue_drainable_head_count,
+                        ),
+                    );
+                    Ok(())
                 }
-                effect_fence.fence_effect(file)?;
-                agent_doc_cycle_state_io::record_queue_mirrored_ids_or_warn(
-                    file,
-                    &state.mirrored_queue_ids,
-                    "background_queue_maintenance",
-                );
-                let committed = match request.commit_if_mutated {
-                    true => match effect_fence
-                        .fence_effect(file)
-                        .and_then(|()| agent_doc_commit_io::commit(file))
-                    {
-                        Ok(committed) => committed,
-                        Err(error) => {
-                            effect_fence.fence_effect(file)?;
-                            agent_doc_ops_log_io::log_op(
-                                file,
-                                &format!(
-                                    "queue_maintenance_background_failed file={} stage=commit error={}",
-                                    file.display(),
-                                    format!("{error:#}").replace('\n', " | "),
-                                ),
-                            );
-                            return Err(error);
-                        }
-                    },
-                    false => false,
-                };
-                effect_fence.fence_effect(file)?;
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "queue_maintenance_background_completed file={} mutated={} committed={} drainable={}",
-                        file.display(),
-                        state.maintenance_mutated,
-                        committed,
-                        state.queue_drainable_head_count,
-                    ),
-                );
-                Ok(())
-            }
-            Err(error)
-                if error
-                    .downcast_ref::<agent_doc_preflight_io::QueueMaintenanceAuthoritySuperseded>()
-                    .is_some() =>
-            {
-                effect_fence.fence_effect(file)?;
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "queue_maintenance_background_superseded_authority file={} error={}",
-                        file.display(),
-                        format!("{error:#}").replace('\n', " | "),
-                    ),
-                );
-                Ok(())
-            }
-            Err(error) => {
-                effect_fence.fence_effect(file)?;
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "queue_maintenance_background_failed file={} error={}",
-                        file.display(),
-                        format!("{error:#}").replace('\n', " | "),
-                    ),
-                );
                 Err(error)
+                    if error
+                        .downcast_ref::<agent_doc_preflight_io::QueueMaintenanceEffectSuperseded>()
+                        .is_some() =>
+                {
+                    effect_fence.fence_effect(file)?;
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "queue_maintenance_background_superseded_authority file={} error={}",
+                            file.display(),
+                            format!("{error:#}").replace('\n', " | "),
+                        ),
+                    );
+                    Ok(())
+                }
+                Err(error) => {
+                    effect_fence.fence_effect(file)?;
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "queue_maintenance_background_failed file={} error={}",
+                            file.display(),
+                            format!("{error:#}").replace('\n', " | "),
+                        ),
+                    );
+                    Err(error)
+                }
             }
-        }
         })();
 
         match result {

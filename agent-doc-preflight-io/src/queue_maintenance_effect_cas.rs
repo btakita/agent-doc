@@ -28,7 +28,7 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use lazily::{
     CompareAndApply, EffectApply, EffectAttempt, EffectCasApplied, EffectCasClaim, EffectCasCore,
     EffectCasFailure, EffectCasOutcome, EffectCasUpsert, EffectIdentity, EffectIntent, EffectPlan,
@@ -58,6 +58,15 @@ impl QueueMaintenanceEffectSuperseded {
             message: message.into(),
         }
     }
+
+    /// The admitted authority no longer equals the canonical authority the
+    /// owner observed before its first effect: the plan's admission is
+    /// superseded and no effect may run.
+    pub fn admitted_authority(expected: String, observed: String) -> Self {
+        Self::new(format!(
+            "queue maintenance admitted authority was superseded (expected={expected}, observed={observed})"
+        ))
+    }
 }
 
 impl std::fmt::Display for QueueMaintenanceEffectSuperseded {
@@ -79,6 +88,9 @@ impl std::error::Error for QueueMaintenanceEffectSuperseded {}
 pub enum QueueMaintenanceEffectStep {
     /// A plain authority verification between effects.
     Verify,
+    /// Entry to the authority acquisition path (replica repair or native-save
+    /// adoption): a stale owner is superseded before it starts.
+    AuthorityAcquisition,
     /// Ops-log evidence describing an effect.
     Ops,
     /// Controller state or recovery.
@@ -101,6 +113,7 @@ impl QueueMaintenanceEffectStep {
     pub fn label(self) -> &'static str {
         match self {
             Self::Verify => "verify",
+            Self::AuthorityAcquisition => "authority_acquisition",
             Self::Ops => "ops",
             Self::Controller => "controller",
             Self::Document => "document",
@@ -579,6 +592,143 @@ pub(crate) fn persist_document_cut<B: DocumentCasBackend>(
     }
 }
 
+/// One bounded authority-observation attempt (`#implementlazilyowned`).
+#[derive(Debug)]
+pub enum AuthorityObservationStep<T> {
+    /// The observation is final: return it.
+    Settled(T),
+    /// A transient status: Lazily may claim another attempt.
+    Transient(T),
+}
+
+/// The observation core's opaque authority: an observation compares nothing,
+/// so every attempt expects the same token.
+const OBSERVATION_AUTHORITY: &str = "authority-observation";
+
+type ObservationCore = EffectCasCore<PathBuf, String, (), u32, String>;
+
+/// Adapter over one authority observation: `Settled` is `Applied`, `Transient`
+/// is `Retryable`, an error is `Rejected`. The observed value is kept beside
+/// the core for the caller.
+struct ObservationAttempt<'a, T> {
+    observe: RefCell<&'a mut dyn FnMut(u32) -> Result<AuthorityObservationStep<T>>>,
+    number: std::cell::Cell<u32>,
+    value: RefCell<Option<T>>,
+    error: RefCell<Option<anyhow::Error>>,
+}
+
+impl<T> CompareAndApply<PathBuf, String, (), u32> for ObservationAttempt<'_, T> {
+    type Error = String;
+
+    fn observe(&self, _key: &PathBuf) -> Result<String, String> {
+        Ok(OBSERVATION_AUTHORITY.to_string())
+    }
+
+    fn compare_and_apply(
+        &self,
+        _attempt: &EffectAttempt<PathBuf, String, (), u32>,
+    ) -> EffectApply<u32, String, String> {
+        let number = self.number.get() + 1;
+        self.number.set(number);
+        match (self.observe.borrow_mut())(number) {
+            Ok(AuthorityObservationStep::Settled(value)) => {
+                *self.value.borrow_mut() = Some(value);
+                EffectApply::Applied {
+                    receipt: number,
+                    authority: OBSERVATION_AUTHORITY.to_string(),
+                }
+            }
+            Ok(AuthorityObservationStep::Transient(value)) => {
+                *self.value.borrow_mut() = Some(value);
+                EffectApply::Retryable(format!("transient authority observation {number}"))
+            }
+            Err(error) => {
+                let rendered = format!("{error:#}");
+                *self.error.borrow_mut() = Some(error);
+                EffectApply::Rejected(rendered)
+            }
+        }
+    }
+}
+
+/// Drive a bounded authority observation through Lazily.
+///
+/// Lazily owns the observation's single-flight claim and retry state: each
+/// `observe(attempt)` call is one claimed attempt; a `Transient` result is
+/// `Retryable` and re-claimed from Lazily's retained intent, a `Settled`
+/// result is the applied receipt, and an error is a rejection returned as-is.
+/// `pace(attempt)` runs between attempts (the physical backoff); it never
+/// decides whether to retry. After `attempts` transient observations the last
+/// observed value is returned.
+pub fn drive_authority_observation<T>(
+    file: &Path,
+    attempts: u32,
+    observe: &mut dyn FnMut(u32) -> Result<AuthorityObservationStep<T>>,
+    pace: &mut dyn FnMut(u32),
+) -> Result<T> {
+    let key = file.to_path_buf();
+    let adapter = ObservationAttempt {
+        observe: RefCell::new(observe),
+        number: std::cell::Cell::new(0),
+        value: RefCell::new(None),
+        error: RefCell::new(None),
+    };
+    let mut core = ObservationCore::new(GENERATION);
+    let intent = EffectIntent {
+        identity: EffectIdentity::new(format!("queue-authority-observation:{}#1", file.display()))
+            .map_err(|error| anyhow::anyhow!("invalid effect identity: {error:?}"))?,
+        epoch: 1,
+        key: key.clone(),
+        expected: OBSERVATION_AUTHORITY.to_string(),
+        plan: EffectPlan::single(()),
+    };
+    match core.upsert_desired(intent).1 {
+        EffectCasUpsert::Accepted => {}
+        other => anyhow::bail!("authority observation was not accepted: {other:?}"),
+    }
+    let attempts = attempts.max(1);
+    let mut now = 0;
+    for attempt in 1..=attempts {
+        let claimed = match core.claim(&key, GENERATION, now).1 {
+            EffectCasClaim::Claimed(claimed) => claimed,
+            other => anyhow::bail!("authority observation was not claimed: {other:?}"),
+        };
+        let outcome = adapter.compare_and_apply(&claimed);
+        match core
+            .record_outcome(&key, &claimed.identity, outcome, now + 1)
+            .1
+        {
+            EffectCasOutcome::Applied(EffectCasApplied::Completed { .. }) => {
+                return adapter
+                    .value
+                    .borrow_mut()
+                    .take()
+                    .context("authority observation applied without a value");
+            }
+            EffectCasOutcome::Failure(EffectCasFailure::Rejected) => {
+                return Err(adapter
+                    .error
+                    .borrow_mut()
+                    .take()
+                    .unwrap_or_else(|| anyhow::anyhow!("authority observation was rejected")));
+            }
+            EffectCasOutcome::Failure(EffectCasFailure::Retrying { .. }) if attempt < attempts => {
+                pace(attempt);
+                now += 1;
+            }
+            EffectCasOutcome::Failure(EffectCasFailure::Retrying { .. }) => break,
+            recorded => {
+                anyhow::bail!("authority observation outcome diverged from Lazily: {recorded:?}")
+            }
+        }
+    }
+    adapter
+        .value
+        .borrow_mut()
+        .take()
+        .context("authority observation exhausted without a value")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -969,6 +1119,60 @@ mod tests {
         assert!(error.to_string().contains("worktree inventory unreadable"));
         assert_eq!(plan.applied_through(), None);
         assert_eq!(plan.last_receipt(), None);
+    }
+
+    #[test]
+    fn authority_observation_transient_is_retried_by_lazily_until_settled() {
+        let mut seen = Vec::new();
+        let mut paced = Vec::new();
+        let value = drive_authority_observation(
+            Path::new("doc.md"),
+            3,
+            &mut |attempt| {
+                seen.push(attempt);
+                Ok(if attempt < 2 {
+                    AuthorityObservationStep::Transient(format!("pending-{attempt}"))
+                } else {
+                    AuthorityObservationStep::Settled(format!("current-{attempt}"))
+                })
+            },
+            &mut |attempt| paced.push(attempt),
+        )
+        .unwrap();
+        assert_eq!(value, "current-2");
+        assert_eq!(seen, vec![1, 2]);
+        assert_eq!(paced, vec![1]);
+    }
+
+    #[test]
+    fn authority_observation_exhaustion_returns_the_last_transient_value() {
+        let mut paced = Vec::new();
+        let value = drive_authority_observation(
+            Path::new("doc.md"),
+            3,
+            &mut |attempt| Ok(AuthorityObservationStep::Transient(attempt)),
+            &mut |attempt| paced.push(attempt),
+        )
+        .unwrap();
+        assert_eq!(value, 3);
+        assert_eq!(paced, vec![1, 2], "no pacing after the final attempt");
+    }
+
+    #[test]
+    fn authority_observation_error_is_rejected_without_retry() {
+        let mut calls = 0;
+        let error = drive_authority_observation::<()>(
+            Path::new("doc.md"),
+            3,
+            &mut |_| {
+                calls += 1;
+                anyhow::bail!("superseded owner")
+            },
+            &mut |_| panic!("a rejection is not paced"),
+        )
+        .unwrap_err();
+        assert_eq!(calls, 1);
+        assert!(error.to_string().contains("superseded owner"));
     }
 
     #[test]

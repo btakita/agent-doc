@@ -112,11 +112,14 @@ impl QueueMaintenanceEffectStep {
     }
 }
 
-/// Receipt of one crossed plan step: which step, at which authority.
+/// Receipt of one crossed plan step: which step, at which authority, and — for
+/// an effect step — the digest of the effect the adapter applied.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueueMaintenanceStepReceipt {
     pub step: QueueMaintenanceEffectStep,
     pub authority: String,
+    /// Digest of the applied effect (`None` for a verify-only step).
+    pub effect: Option<String>,
 }
 
 type PlanCore =
@@ -187,11 +190,57 @@ impl QueueMaintenanceEffectPlan {
         let adapter = StepAuthority {
             observe,
             target: None,
+            effect: None,
             error: RefCell::new(None),
         };
         self.apply(step, &adapter, || {
             "background queue maintenance admitted authority was superseded".to_string()
         })
+    }
+
+    /// Apply one effect of `step`'s family as a single compare-and-apply
+    /// epoch of the plan (`#implementlazilyowned` snapshot / worktree-cleanup /
+    /// ops-evidence adapters).
+    ///
+    /// Inside the Lazily claim the adapter compares the observed canonical
+    /// authority with the step's expected authority (the previous step's
+    /// receipt) and runs `effect` only on a match; `effect` returns the digest
+    /// recorded in the step receipt. A mismatch is Lazily `Superseded` and
+    /// `effect` is never invoked, so the backend is untouched; an effect error
+    /// is a Lazily rejection. The effect must be idempotent: the snapshot
+    /// baseline is content-addressed, worktree reconciliation converges, and
+    /// ops evidence describes the already-receipted lineage. Comparison and
+    /// effect are serialized by the queue apply guard, not one physical
+    /// cross-backend transaction.
+    pub fn apply_effect(
+        &self,
+        step: QueueMaintenanceEffectStep,
+        observe: &dyn Fn() -> Result<String>,
+        effect: &mut dyn FnMut() -> Result<String>,
+    ) -> Result<()> {
+        let adapter = StepAuthority {
+            observe,
+            target: None,
+            effect: Some(RefCell::new(effect)),
+            error: RefCell::new(None),
+        };
+        self.apply(step, &adapter, || {
+            format!(
+                "background queue maintenance admitted authority was superseded before the {} effect",
+                step.label()
+            )
+        })
+    }
+
+    /// The receipt of the most recently applied step, if any.
+    pub fn last_receipt(&self) -> Option<QueueMaintenanceStepReceipt> {
+        let core = self.core.lock().unwrap();
+        match core.state(&self.key).and_then(|state| state.terminal) {
+            Some(EffectTerminal::Applied { receipts, .. }) => {
+                receipts.last().map(|receipt| receipt.receipt.clone())
+            }
+            _ => None,
+        }
     }
 
     /// Receipt a document cut this owner just produced. The backend must now
@@ -204,6 +253,7 @@ impl QueueMaintenanceEffectPlan {
         let adapter = StepAuthority {
             observe,
             target: Some(cut_hash),
+            effect: None,
             error: RefCell::new(None),
         };
         self.apply(QueueMaintenanceEffectStep::DocumentCut, &adapter, || {
@@ -282,11 +332,13 @@ impl QueueMaintenanceEffectPlan {
 }
 
 /// Adapter: compare the observed canonical document authority with the step's
-/// expected authority (or, for a produced cut, with that cut). Observation is
-/// effect-free; a mismatch mutates nothing and reports the observed authority.
+/// expected authority (or, for a produced cut, with that cut) and, for an
+/// effect step, apply the effect only on a match. Observation is effect-free;
+/// a mismatch mutates nothing and reports the observed authority.
 struct StepAuthority<'a> {
     observe: &'a dyn Fn() -> Result<String>,
     target: Option<String>,
+    effect: Option<RefCell<&'a mut dyn FnMut() -> Result<String>>>,
     error: RefCell<Option<anyhow::Error>>,
 }
 
@@ -316,13 +368,27 @@ impl CompareAndApply<PathBuf, String, QueueMaintenanceEffectStep, QueueMaintenan
     ) -> EffectApply<QueueMaintenanceStepReceipt, String, String> {
         let wanted = self.target.as_ref().unwrap_or(&attempt.expected);
         match (self.observe)() {
-            Ok(observed) if &observed == wanted => EffectApply::Applied {
-                receipt: QueueMaintenanceStepReceipt {
-                    step: attempt.payload,
-                    authority: observed.clone(),
-                },
-                authority: observed,
-            },
+            Ok(observed) if &observed == wanted => {
+                let effect = match &self.effect {
+                    None => None,
+                    Some(effect) => match (effect.borrow_mut())() {
+                        Ok(digest) => Some(digest),
+                        Err(error) => {
+                            let rendered = format!("{error:#}");
+                            *self.error.borrow_mut() = Some(error);
+                            return EffectApply::Rejected(rendered);
+                        }
+                    },
+                };
+                EffectApply::Applied {
+                    receipt: QueueMaintenanceStepReceipt {
+                        step: attempt.payload,
+                        authority: observed.clone(),
+                        effect,
+                    },
+                    authority: observed,
+                }
+            }
             Ok(observed) => EffectApply::Superseded { observed },
             Err(error) => {
                 let rendered = format!("{error:#}");
@@ -761,6 +827,148 @@ mod tests {
         );
         assert_eq!(plan.applied_through(), None);
         assert_eq!(plan.expected_authority_hash(), None);
+    }
+
+    /// The three effect adapters migrated from verify-then-act steps: the
+    /// effect is the step's compare-and-apply, so its backend is touched only
+    /// under the expected authority.
+    const EFFECT_FAMILIES: [QueueMaintenanceEffectStep; 3] = [
+        QueueMaintenanceEffectStep::Snapshot,
+        QueueMaintenanceEffectStep::Worktree,
+        QueueMaintenanceEffectStep::Ops,
+    ];
+
+    #[test]
+    fn effect_step_applies_under_matching_authority_and_receipts_the_effect_digest() {
+        for family in EFFECT_FAMILIES {
+            let plan = QueueMaintenanceEffectPlan::admit(Path::new("doc.md"), "h-admitted");
+            let mut backend: Vec<String> = Vec::new();
+            plan.apply_effect(family, &authority(&["h-admitted"]), &mut || {
+                backend.push(format!("{}-effect", family.label()));
+                Ok(format!("{}:digest", family.label()))
+            })
+            .unwrap();
+            assert_eq!(backend, vec![format!("{}-effect", family.label())]);
+            assert_eq!(plan.applied_through(), Some(1));
+            assert_eq!(
+                plan.last_receipt(),
+                Some(QueueMaintenanceStepReceipt {
+                    step: family,
+                    authority: "h-admitted".into(),
+                    effect: Some(format!("{}:digest", family.label())),
+                })
+            );
+        }
+    }
+
+    /// Superseded contract for the snapshot, worktree-cleanup, and
+    /// ops-evidence adapters: a changed authority is Lazily `Superseded`, the
+    /// effect is never invoked (backend byte-for-byte unchanged), the frontier
+    /// does not advance, and every later effect is refused.
+    #[test]
+    fn changed_authority_supersedes_each_effect_adapter_and_leaves_its_backend_unchanged() {
+        for family in EFFECT_FAMILIES {
+            let plan = QueueMaintenanceEffectPlan::admit(Path::new("doc.md"), "h-admitted");
+            plan.cross(
+                QueueMaintenanceEffectStep::Ledger,
+                &authority(&["h-admitted"]),
+            )
+            .unwrap();
+            let backend = std::cell::RefCell::new(String::from("baseline-bytes"));
+            let mut invoked = 0;
+            let error = plan
+                .apply_effect(family, &authority(&["h-operator"]), &mut || {
+                    invoked += 1;
+                    backend.borrow_mut().push_str("+stale");
+                    Ok("stale".into())
+                })
+                .unwrap_err();
+            assert!(
+                error
+                    .downcast_ref::<QueueMaintenanceEffectSuperseded>()
+                    .is_some(),
+                "{family:?}: {error:#}"
+            );
+            let message = error.to_string();
+            assert!(
+                message.contains("expected=h-admitted observed=h-operator")
+                    && message.contains(&format!("before the {} effect", family.label())),
+                "{message}"
+            );
+            assert_eq!(invoked, 0, "{family:?} effect ran under a stale authority");
+            assert_eq!(*backend.borrow(), "baseline-bytes");
+            assert_eq!(plan.applied_through(), Some(1));
+            assert_eq!(plan.expected_authority_hash(), None);
+            for later in EFFECT_FAMILIES {
+                let mut ran = false;
+                assert!(
+                    plan.apply_effect(later, &authority(&["h-admitted"]), &mut || {
+                        ran = true;
+                        Ok("late".into())
+                    })
+                    .is_err()
+                );
+                assert!(!ran, "{later:?} ran after supersession at {family:?}");
+            }
+        }
+    }
+
+    /// The effect steps expect the receipted document cut, never the stale
+    /// admission: after a cut, an effect under the admission is superseded and
+    /// an effect under the cut applies.
+    #[test]
+    fn effect_steps_expect_the_receipted_document_cut() {
+        let plan = QueueMaintenanceEffectPlan::admit(Path::new("doc.md"), "h-admitted");
+        plan.record_document_cut("h-applied".into(), &authority(&["h-applied"]))
+            .unwrap();
+        let mut applied = Vec::new();
+        plan.apply_effect(
+            QueueMaintenanceEffectStep::Snapshot,
+            &authority(&["h-applied"]),
+            &mut || {
+                applied.push("snapshot");
+                Ok("snapshot:h-applied".into())
+            },
+        )
+        .unwrap();
+        assert_eq!(applied, vec!["snapshot"]);
+        assert_eq!(
+            plan.last_receipt().map(|receipt| receipt.authority),
+            Some("h-applied".to_string())
+        );
+        let mut stale = false;
+        assert!(
+            plan.apply_effect(
+                QueueMaintenanceEffectStep::Ops,
+                &authority(&["h-admitted"]),
+                &mut || {
+                    stale = true;
+                    Ok("ops".into())
+                },
+            )
+            .is_err()
+        );
+        assert!(!stale);
+    }
+
+    #[test]
+    fn effect_failure_is_rejected_not_superseded() {
+        let plan = QueueMaintenanceEffectPlan::admit(Path::new("doc.md"), "h-admitted");
+        let error = plan
+            .apply_effect(
+                QueueMaintenanceEffectStep::Worktree,
+                &authority(&["h-admitted"]),
+                &mut || anyhow::bail!("worktree inventory unreadable"),
+            )
+            .unwrap_err();
+        assert!(
+            error
+                .downcast_ref::<QueueMaintenanceEffectSuperseded>()
+                .is_none()
+        );
+        assert!(error.to_string().contains("worktree inventory unreadable"));
+        assert_eq!(plan.applied_through(), None);
+        assert_eq!(plan.last_receipt(), None);
     }
 
     #[test]

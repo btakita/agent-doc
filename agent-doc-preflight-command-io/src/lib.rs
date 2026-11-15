@@ -634,6 +634,18 @@ impl agent_doc_preflight_io::PendingMaintenanceEffectFence for BackgroundRequest
         self.plan.cross(step, &observe)
     }
 
+    fn apply_effect_step(
+        &self,
+        file: &Path,
+        step: agent_doc_preflight_io::QueueMaintenanceEffectStep,
+        effect: &mut dyn FnMut() -> Result<String>,
+    ) -> Result<()> {
+        self.owner.verify(self.request)?;
+        let observe =
+            || observe_document_authority(file, "background_queue_maintenance_effect_fence");
+        self.plan.apply_effect(step, &observe, effect)
+    }
+
     fn record_applied_content(&self, file: &Path, content: &str) -> Result<()> {
         self.owner.verify(self.request)?;
         let observe =

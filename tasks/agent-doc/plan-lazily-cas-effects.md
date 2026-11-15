@@ -325,13 +325,24 @@ Progress (`#implementlazilyowned`):
   single-flight key (`closeout_terminal_effect::TerminalEffectSingleFlight`);
   the landed receipt is its applied frontier, and a failed or unwinding run is a
   Lazily rejection that frees the key.
+- Snapshot / worktree-cleanup / ops-evidence adapters: these effects are no
+  longer verify-then-act. `PendingMaintenanceEffectFence::apply_effect_step`
+  hands the effect to `QueueMaintenanceEffectPlan::apply_effect`, whose step
+  adapter compares the observed canonical authority with the step's expected
+  authority inside the Lazily claim and runs the effect only on a match; the
+  effect's digest (`snapshot:<content hash>`, `worktree:<reconciled hash>` /
+  `worktree:unchanged`, `ops:<message hash>`) is the step receipt. A changed
+  authority is `Superseded` and the effect is never invoked; an effect error
+  is a Lazily rejection. The snapshot baseline is content-addressed and the
+  worktree reconciliation converges, so a retried request repeats them
+  harmlessly. Contract tests:
+  `queue_maintenance_effect_cas::tests::changed_authority_supersedes_each_effect_adapter_and_leaves_its_backend_unchanged`
+  and siblings.
 - Not yet done: the caller-side `RetryableHeadMoved`/`RetryableIndexLock`
   retry loops in `agent-doc-commit-io` (they now retry a Lazily `Superseded` /
   `Retryable` outcome, but the loop itself is still application-owned; triage
   rows), the controller/ledger SQLite transaction adapter for the remaining
-  `controller-ledger-sqlite` triage rows, true compare-and-apply snapshot /
-  worktree-cleanup / ops-evidence adapters (today these are verify-only steps of
-  `QueueMaintenanceEffectPlan` immediately before each effect), persisting
+  `controller-ledger-sqlite` triage rows, persisting
   per-step plan receipts for crash resume inside one request (today a resumed
   request re-derives its idempotent effects), reordering the maintenance body
   so the document cut is the first plan step, triage of the `triage` rows, and

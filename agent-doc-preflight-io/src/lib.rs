@@ -2386,6 +2386,20 @@ pub trait PendingMaintenanceEffectFence {
     fn apply_step(&self, file: &Path, _step: QueueMaintenanceEffectStep) -> Result<()> {
         self.check(file)
     }
+
+    /// Apply one effect of `step`'s family as a compare-and-apply step of the
+    /// owner's Lazily plan: the effect runs only when the authority still
+    /// matches, and its returned digest is the step receipt. Owners without a
+    /// plan check, then run the effect.
+    fn apply_effect_step(
+        &self,
+        file: &Path,
+        step: QueueMaintenanceEffectStep,
+        effect: &mut dyn FnMut() -> Result<String>,
+    ) -> Result<()> {
+        self.apply_step(file, step)?;
+        effect().map(|_| ())
+    }
 }
 
 impl<F> PendingMaintenanceEffectFence for F
@@ -5923,34 +5937,144 @@ fn queue_maintenance_effect_step(
         return Ok(());
     };
     effect_fence.apply_step(file, step)?;
-    let delayed_family = std::env::var("AGENT_DOC_TEST_QUEUE_MAINTENANCE_EFFECT_DELAY_FAMILY").ok();
-    if delayed_family.as_deref() == Some(step.label()) {
-        let delay_ms = std::env::var("AGENT_DOC_TEST_QUEUE_MAINTENANCE_EFFECT_DELAY_MS")
-            .ok()
-            .and_then(|raw| raw.trim().parse::<u64>().ok())
-            .unwrap_or(750);
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "queue_maintenance_internal_effect_test_delay file={} family={} delay_ms={delay_ms}",
-                file.display(),
-                step.label(),
-            ),
-        );
-        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+    if queue_maintenance_effect_test_delay(file, step) {
         effect_fence.apply_step(file, step)?;
     }
     Ok(())
 }
 
+/// Test barrier: pause before an effect of `step`'s family so a test can move
+/// the authority. Returns whether it paused.
+fn queue_maintenance_effect_test_delay(file: &Path, step: QueueMaintenanceEffectStep) -> bool {
+    let delayed_family = std::env::var("AGENT_DOC_TEST_QUEUE_MAINTENANCE_EFFECT_DELAY_FAMILY").ok();
+    if delayed_family.as_deref() != Some(step.label()) {
+        return false;
+    }
+    let delay_ms = std::env::var("AGENT_DOC_TEST_QUEUE_MAINTENANCE_EFFECT_DELAY_MS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .unwrap_or(750);
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_maintenance_internal_effect_test_delay file={} family={} delay_ms={delay_ms}",
+            file.display(),
+            step.label(),
+        ),
+    );
+    std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+    true
+}
+
+/// Run one effect of `step`'s family through the owner's Lazily effect plan
+/// (`#implementlazilyowned`): the effect is the plan step's compare-and-apply,
+/// so a superseded authority never invokes it. `digest` names the applied
+/// effect in the step receipt. Without an owner the effect simply runs.
+fn queue_maintenance_effect<T>(
+    file: &Path,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
+    step: QueueMaintenanceEffectStep,
+    effect: impl FnOnce() -> Result<T>,
+    digest: impl FnOnce(&T) -> String,
+) -> Result<T> {
+    let Some(effect_fence) = effect_fence else {
+        return effect();
+    };
+    if queue_maintenance_effect_test_delay_armed(step) {
+        effect_fence.apply_step(file, step)?;
+        queue_maintenance_effect_test_delay(file, step);
+    }
+    let mut pending = Some((effect, digest));
+    let mut output = None;
+    effect_fence.apply_effect_step(file, step, &mut || {
+        let (effect, digest) = pending
+            .take()
+            .context("queue maintenance effect was applied twice")?;
+        let value = effect()?;
+        let receipt = digest(&value);
+        output = Some(value);
+        Ok(receipt)
+    })?;
+    output.with_context(|| {
+        format!(
+            "queue maintenance {} step was receipted without applying its effect",
+            step.label()
+        )
+    })
+}
+
+fn queue_maintenance_effect_test_delay_armed(step: QueueMaintenanceEffectStep) -> bool {
+    std::env::var("AGENT_DOC_TEST_QUEUE_MAINTENANCE_EFFECT_DELAY_FAMILY")
+        .ok()
+        .as_deref()
+        == Some(step.label())
+}
+
+/// Ops-evidence adapter: the evidence line is appended only as the receipted
+/// Ops step of the owner's plan, i.e. while the lineage it describes is still
+/// the canonical authority.
 fn queue_maintenance_log_op(
     file: &Path,
     effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
     message: &str,
 ) -> Result<()> {
-    queue_maintenance_effect_step(file, effect_fence, QueueMaintenanceEffectStep::Ops)?;
-    agent_doc_ops_log_io::log_op(file, message);
-    Ok(())
+    queue_maintenance_effect(
+        file,
+        effect_fence,
+        QueueMaintenanceEffectStep::Ops,
+        || {
+            agent_doc_ops_log_io::log_op(file, message);
+            Ok(())
+        },
+        |()| format!("ops:{}", agent_doc_hash::content_hash(message)),
+    )
+}
+
+/// Snapshot adapter: checkpoint `content` as the document baseline as the
+/// receipted Snapshot step. The baseline is content-addressed, so a repeat is
+/// idempotent; a checkpoint failure stays a warning, as before.
+fn queue_maintenance_checkpoint_snapshot(
+    file: &Path,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
+    content: &str,
+    warning_label: &str,
+) -> Result<()> {
+    queue_maintenance_effect(
+        file,
+        effect_fence,
+        QueueMaintenanceEffectStep::Snapshot,
+        || {
+            if let Err(error) = agent_doc_snapshot_io::checkpoint_document_baseline(
+                file,
+                content,
+                agent_doc_ops_log_io::log_op,
+            ) {
+                eprintln!("[preflight] {warning_label}: snapshot sync warning: {error}");
+            }
+            Ok(())
+        },
+        |()| format!("snapshot:{}", agent_doc_hash::content_hash(content)),
+    )
+}
+
+/// Worktree-cleanup adapter: reconcile the worktree inventory as the receipted
+/// Worktree step, keyed by the lineage the previous step receipted. The
+/// reconciliation converges, so a retried request repeats it harmlessly.
+fn queue_maintenance_reconcile_worktrees(
+    file: &Path,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
+    reconcile: impl FnOnce() -> Result<Option<String>>,
+) -> Result<Option<String>> {
+    queue_maintenance_effect(
+        file,
+        effect_fence,
+        QueueMaintenanceEffectStep::Worktree,
+        reconcile,
+        |reconciled| match reconciled {
+            Some(content) => format!("worktree:{}", agent_doc_hash::content_hash(content)),
+            None => "worktree:unchanged".to_string(),
+        },
+    )
 }
 
 /// Revalidate the admitted authority immediately before the authority
@@ -8214,18 +8338,12 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                         new_snap = m;
                     }
                     if new_snap != snap {
-                        queue_maintenance_effect_step(
+                        queue_maintenance_checkpoint_snapshot(
                             file,
                             effect_fence,
-                            QueueMaintenanceEffectStep::Snapshot,
-                        )?;
-                        if let Err(e) = agent_doc_snapshot_io::checkpoint_document_baseline(
-                            file,
                             &new_snap,
-                            agent_doc_ops_log_io::log_op,
-                        ) {
-                            eprintln!("[preflight] queue halt: snapshot sync warning: {}", e);
-                        }
+                            "queue halt",
+                        )?;
                     }
                 }
             }
@@ -8390,12 +8508,21 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                 eprintln!(
                     "[preflight] queue: head prompt modified in Lazily current — adopting edited head and continuing loop (#queue-no-stall-on-head-edit)"
                 );
-                queue_maintenance_effect_step(
+                queue_maintenance_effect(
                     file,
                     effect_fence,
                     QueueMaintenanceEffectStep::Snapshot,
+                    || {
+                        adopt_edited_queue_head_into_snapshot(file, &current_content);
+                        Ok(())
+                    },
+                    |()| {
+                        format!(
+                            "snapshot:queue-head:{}",
+                            agent_doc_hash::content_hash(&current_content)
+                        )
+                    },
                 )?;
-                adopt_edited_queue_head_into_snapshot(file, &current_content);
             }
         }
     }
@@ -9259,14 +9386,13 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         mutated = true;
         eprintln!("[preflight] active: reconciled after queue lifecycle projection");
     }
-    queue_maintenance_effect_step(file, effect_fence, QueueMaintenanceEffectStep::Worktree)?;
-    if let Some(reconciled) =
+    if let Some(reconciled) = queue_maintenance_reconcile_worktrees(file, effect_fence, || {
         agent_doc_queue_io::worktree_inventory::reconcile_maintained_under_apply_guard(
             file,
             &current_content,
             apply_guard,
-        )?
-    {
+        )
+    })? {
         current_content = reconciled;
         mutated = true;
         eprintln!("[preflight] worktrees: reconciled after queue lifecycle projection");
@@ -9438,26 +9564,14 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         {
             new_snap = reconciled;
         }
-        queue_maintenance_effect_step(file, effect_fence, QueueMaintenanceEffectStep::Worktree)?;
-        if let Some(reconciled) =
-            agent_doc_queue_io::worktree_inventory::reconcile(file, &new_snap)?
-        {
+        if let Some(reconciled) = queue_maintenance_reconcile_worktrees(file, effect_fence, || {
+            agent_doc_queue_io::worktree_inventory::reconcile(file, &new_snap)
+        })? {
             new_snap = reconciled;
         }
 
         if new_snap != snap_content {
-            queue_maintenance_effect_step(
-                file,
-                effect_fence,
-                QueueMaintenanceEffectStep::Snapshot,
-            )?;
-            if let Err(e) = agent_doc_snapshot_io::checkpoint_document_baseline(
-                file,
-                &new_snap,
-                agent_doc_ops_log_io::log_op,
-            ) {
-                eprintln!("[preflight] queue: snapshot sync warning: {}", e);
-            }
+            queue_maintenance_checkpoint_snapshot(file, effect_fence, &new_snap, "queue")?;
         }
     }
 

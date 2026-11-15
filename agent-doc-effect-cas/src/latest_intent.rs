@@ -292,6 +292,65 @@ impl<K: Ord + Clone + std::fmt::Debug> LatestIntentSchedule<K> {
             .state(key)
             .is_some_and(|state| state.pending.is_some())
     }
+
+    /// Whether `key`'s retained intent is claimable at `now` (Lazily would
+    /// answer `Claimed`, not `Waiting`), without claiming it.
+    pub fn is_due(&self, key: &K, now: Instant) -> bool {
+        let logical = self.logical_ceil(now);
+        self.core.state(key).is_some_and(|state| {
+            state.inflight.is_none()
+                && state
+                    .pending
+                    .is_some_and(|pending| pending.ready_at.is_none_or(|at| at <= logical))
+        })
+    }
+
+    /// Re-time `key`'s retained intent (desired, not in flight) to become
+    /// claimable at `at`, keeping its epoch and attempt number. Returns
+    /// whether an intent was retained.
+    ///
+    /// The producer contributes evidence about *when* the effect can run — a
+    /// backend lease deadline, or a state edge that makes a backed-off intent
+    /// due now — and Lazily still owns the decision: `claim` answers `Waiting`
+    /// until the re-timed instant, and the attempt number continues. The
+    /// re-time goes through Lazily's full-fidelity durable image (the path
+    /// crash recovery hydrates), so nothing but the retained intent's ready
+    /// time changes.
+    pub fn retime(&mut self, key: &K, at: Instant) -> bool {
+        let ready_at = self.logical_ceil(at);
+        let mut image = self.core.durable_state();
+        let Some(pending) = image
+            .keys
+            .iter_mut()
+            .find(|entry| &entry.key == key)
+            .and_then(|entry| entry.pending.as_mut())
+        else {
+            return false;
+        };
+        pending.ready_at = Some(ready_at);
+        match EffectCasCore::hydrate(image) {
+            Ok(core) => {
+                self.core = core;
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// The producer no longer desires `key`'s retained intent (its operation
+    /// disappeared): Lazily records it `Superseded { observed }` and drops it.
+    /// Returns whether an intent was retained. An in-flight attempt is left to
+    /// its own receipt.
+    pub fn withdraw(&mut self, key: &K, observed: impl Into<String>, now: Instant) -> bool {
+        if !self.is_pending(key) {
+            return false;
+        }
+        self.retime(key, now);
+        match self.claim(key, now) {
+            IntentClaim::Claimed(attempt) => self.superseded(&attempt, observed),
+            _ => false,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -379,6 +438,58 @@ mod tests {
             schedule.retry_after(&first, "late", Duration::ZERO, now),
             IntentRetry::Unknown
         );
+        assert_eq!(schedule.claim(&"doc", now), IntentClaim::Empty);
+        Ok(())
+    }
+
+    #[test]
+    fn a_retimed_intent_keeps_its_attempt_and_waits_for_the_new_instant() -> Result<()> {
+        let mut schedule = LatestIntentSchedule::new();
+        let now = Instant::now();
+        schedule.desire("doc", "test:retime", "epoch-1", "one")?;
+        let first = claimed(&mut schedule, now);
+        assert!(
+            !schedule.retime(&"doc", now),
+            "an in-flight intent is not retained"
+        );
+        schedule.retry_after(&first, "refused", Duration::from_secs(30), now);
+        assert!(!schedule.is_due(&"doc", now));
+
+        // New evidence (a state edge) makes the backed-off intent due now.
+        assert!(schedule.retime(&"doc", now));
+        assert!(schedule.is_due(&"doc", now));
+        let second = claimed(&mut schedule, now);
+        assert_eq!((second.epoch(), second.attempt()), (first.epoch(), 2));
+
+        // A lease deadline defers a fresh intent without consuming an attempt.
+        assert!(schedule.superseded(&second, "lease-held"));
+        schedule.desire("doc", "test:retime", "lease-held", "one")?;
+        let deadline = now + Duration::from_secs(45);
+        assert!(schedule.retime(&"doc", deadline));
+        assert!(!schedule.is_due(&"doc", now));
+        assert!(matches!(
+            schedule.claim(&"doc", now),
+            IntentClaim::Waiting { at } if at >= deadline
+        ));
+        assert!(schedule.is_due(&"doc", deadline));
+        assert_eq!(claimed(&mut schedule, deadline).attempt(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn a_withdrawn_intent_is_dropped_even_while_it_waits() -> Result<()> {
+        let mut schedule = LatestIntentSchedule::new();
+        let now = Instant::now();
+        assert!(!schedule.withdraw(&"doc", "absent", now));
+        schedule.desire("doc", "test:withdraw", "epoch-1", "one")?;
+        let first = claimed(&mut schedule, now);
+        assert!(
+            !schedule.withdraw(&"doc", "absent", now),
+            "an in-flight attempt keeps its own receipt"
+        );
+        schedule.retry_after(&first, "refused", Duration::from_secs(30), now);
+        assert!(schedule.withdraw(&"doc", "absent", now));
+        assert!(!schedule.is_pending(&"doc"));
         assert_eq!(schedule.claim(&"doc", now), IntentClaim::Empty);
         Ok(())
     }

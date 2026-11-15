@@ -222,7 +222,9 @@ impl CapturedFinalizeResumeTriggers {
     }
 
     /// Publish expiry of a backoff for a failed effect. This is intentionally a
-    /// different Source edge from document convergence.
+    /// different Source edge from document convergence. The due time itself is
+    /// Lazily's: the idle watch publishes this edge once when its retained
+    /// captured-finalize intent becomes claimable (`#implementlazilyowned`).
     pub fn observe_effect_retry_due(&self) {
         let mut projection = self.scope.ctx().get(&self.projection);
         projection.effect_retry_epoch = projection.effect_retry_epoch.saturating_add(1);
@@ -527,6 +529,9 @@ pub fn owned_pane_queue_continuation_prompt(
 /// Exponential retry capped at one attempt per 30 seconds. Transient editor or
 /// controller recovery can therefore complete unattended without recreating the
 /// high-frequency finalize/backpressure loop it is intended to heal.
+///
+/// This is only the pace curve: `attempt` is the Lazily attempt number of the
+/// retained intent, and Lazily owns its due time (`#implementlazilyowned`).
 pub fn captured_finalize_resume_retry_delay(attempt: u32) -> Duration {
     const BASE_SECS: u64 = 2;
     const MAX_SECS: u64 = 30;
@@ -536,6 +541,7 @@ pub fn captured_finalize_resume_retry_delay(attempt: u32) -> Duration {
 
 /// Convert an epoch lease expiry into the supervisor's monotonic retry edge.
 /// A past deadline still waits one tick so a stale projection cannot hot-loop.
+/// The idle watch retains a fresh Lazily epoch due after this delay.
 pub fn captured_finalize_resume_retry_at_delay(now_secs: u64, retry_at_secs: u64) -> Duration {
     Duration::from_secs(retry_at_secs.saturating_sub(now_secs).max(1))
 }

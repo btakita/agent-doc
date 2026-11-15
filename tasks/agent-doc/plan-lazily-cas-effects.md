@@ -643,6 +643,33 @@ Progress (`#implementlazilyowned`):
   commit-transaction / `ref_cas` drives. Messages, log markers, attempt caps,
   budgets, and paces are unchanged. 14 rows: 9 `migrated`, 5
   `lazily-adapter`.
+- Idle-watch captured-finalize resume and queue projection self-heal (plan
+  step 8b): both retained intents of the idle-watch supervisor are a
+  `LatestIntentSchedule` (`agent-doc-start-runtime-io`
+  `idle_watch_schedules.rs`). `CapturedFinalizeResumeSchedule` replaces
+  `CapturedFinalizeResumeRetry`'s `attempts` / `retry_at`: the attempt number
+  logged and paced is Lazily's, the due time is the retained intent's ready
+  time, and each per-outcome attempt reset is a fresh Lazily epoch (a
+  live-owner lease records the attempt `Superseded` and retains a fresh epoch
+  retimed to the lease deadline, so the next attempt is 1; an operator or
+  unlandable verdict counts as the fresh epoch's first refusal, so the next is
+  2; an unlandable capture is a Lazily rejection; a state wait, a terminal
+  receipt, or an absent operation retires the epoch). A document edge retimes
+  the retained intent to now (the pre-migration `retry_at = now`) and owns the
+  next attempt. `QueueProjectionSelfHealSchedule` replaces the
+  `queue_projection_self_heal_due` / `_retry_at` pair and
+  `QueueProjectionSupersededRetry`: the claimed attempt rides the worker,
+  refusals are `defer`red (`retry_after`, or a retime of a repair requested
+  mid-attempt), and a superseded attempt is recorded `Superseded { observed:
+  <watermark> }` with one new repair due after the quiet window; the quiet
+  window stays the caller's operator-typing debounce. `LatestIntentSchedule`
+  gains `is_due`, `retime` (through Lazily's durable image, the crash-recovery
+  path), and `withdraw`. Messages, log markers, and paces are unchanged. Race
+  difference: a retryable outcome of an attempt whose operation key changed
+  mid-flight no longer leaves a timed retry for the old key (Lazily records it
+  `Superseded`; the new key's fresh epoch owns the next attempt). 11 rows: 8
+  `migrated` (the 5 delay/edge rows plus 3 new schedule methods), 3
+  `deleted`.
 - Not yet done (as of 2026-11-15, agent-doc `59984d315a`; triage is complete,
   0 `triage` rows): migrate the 291 reviewed `pending-migration` rows family
   by family, then delete the remaining bespoke orchestration and make the
@@ -650,11 +677,11 @@ Progress (`#implementlazilyowned`):
 
 ## Resume here
 
-Status 2026-11-15 (after family 8a): ledger = 125 `migrated`, 173 `lazily-adapter`,
-30 `deleted`, 419 `excluded`, 8 `pending-migration`, 0 `triage`. Work the
-8 rows sequentially in ONE worktree (every step edits the ledger), one family
-per pushed commit, `make check` green before each push, in this order (next:
-family 8b):
+Status 2026-11-15 (after family 8b): ledger = 133 `migrated`, 173 `lazily-adapter`,
+33 `deleted`, 419 `excluded`, 0 `pending-migration`, 0 `triage`. Every
+inventoried row is migrated; work the remaining steps sequentially in ONE
+worktree, one step per pushed commit, `make check` green before each push, in
+this order (next: step 9):
 
 1. DONE: actor-generation fenced writes (`store_actor_record_fenced_tx`,
    `delete_actor_document_fenced_tx`; 20 actor-generation rows) onto the
@@ -707,13 +734,11 @@ family 8b):
 8. Remaining small families:
    - 8a. DONE: authority observation (6) and Git commit/closeout helpers
      around `ref_cas` (8) onto `drive_effect_epochs` / `lazily-adapter`.
-   - 8b. Idle-watch/captured finalize retry (6, plus idle-watch's
+   - 8b. DONE: idle-watch/captured finalize retry (6, plus idle-watch's
      `QueueProjectionSupersededRetry` / `queue_projection_superseded_retry`
-     self-heal schedule from family 3): `CapturedFinalizeResumeRetry`'s
-     `attempts`/`retry_at` is a bespoke retained intent keyed by
-     `CapturedFinalizeResumeKey`; move it onto a `LatestIntentSchedule`
-     (or the `failure_ledger` count) without changing the per-outcome
-     attempt resets.
+     self-heal schedule from family 3) onto `LatestIntentSchedule`
+     (`CapturedFinalizeResumeSchedule`, `QueueProjectionSelfHealSchedule`),
+     per-outcome attempt resets as fresh Lazily epochs.
 9. Per-step plan receipts persisted for crash resume, and reorder the
    maintenance body so the document cut is literally the first plan step.
 10. Phase 6 rollout: delete compatibility paths and duplicate state, final

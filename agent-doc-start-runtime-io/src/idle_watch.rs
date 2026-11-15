@@ -458,6 +458,8 @@ fn record_idle_watch_queue_observation_attempt(
 
 struct CapturedFinalizeResumeWorker {
     key: agent_doc_repair_command_io::CapturedFinalizeResumeKey,
+    /// The Lazily attempt this worker runs; its outcome is recorded against it.
+    attempt: crate::idle_watch_schedules::ScheduleAttempt,
     result: std::sync::mpsc::Receiver<agent_doc_repair_command_io::CapturedFinalizeResumeOutcome>,
 }
 
@@ -469,6 +471,8 @@ struct CapturedFinalizeResumeWorker {
 /// input. A supervisor owns at most one worker, so a changed document creates
 /// one repair edge instead of a retry storm.
 struct QueueProjectionSelfHealWorker {
+    /// The Lazily attempt this worker runs; its outcome is recorded against it.
+    attempt: crate::idle_watch_schedules::ScheduleAttempt,
     result: std::sync::mpsc::Receiver<anyhow::Result<QueueProjectionSelfHealWorkerOutcome>>,
     cancel: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
@@ -551,19 +555,6 @@ impl agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionEffects
     }
 }
 
-struct CapturedFinalizeResumeRetry {
-    key: agent_doc_repair_command_io::CapturedFinalizeResumeKey,
-    attempts: u32,
-    retry_at: std::time::Instant,
-    needs_operator: bool,
-    trigger_published: bool,
-    /// GH 90: the captured bytes are deterministically refused. Unlike
-    /// `needs_operator`, no document-state edge retires this: only a different
-    /// operation key (the requoted re-capture, or a superseding cycle) does,
-    /// because `resume_retry` is reset whenever the key changes.
-    unlandable: bool,
-}
-
 /// Publish new document evidence to captured-finalize recovery, retire any
 /// operator gate, and preempt a retry deadline derived from the previous
 /// document state.
@@ -573,23 +564,16 @@ struct CapturedFinalizeResumeRetry {
 /// delivery convergence without a cycle-phase change is still a real state edge.
 fn observe_captured_finalize_document_edge(
     triggers: &CapturedFinalizeResumeTriggers,
-    retry: &mut Option<CapturedFinalizeResumeRetry>,
+    resume: &mut crate::idle_watch_schedules::CapturedFinalizeResumeSchedule,
     now: std::time::Instant,
 ) -> bool {
     triggers.observe_state_edge();
-    let Some(retry) = retry.as_mut() else {
-        return false;
-    };
-    let operator_gate_cleared = retry.needs_operator;
-    retry.needs_operator = false;
-    retry.retry_at = now;
     // The document edge itself owns the next attempt. This also preempts a
     // live-owner lease deadline: an exact retained-delivery wake can authorize
     // captured-finalize handoff before that lease expires, so the deadline was
     // derived from evidence that is no longer current. Publishing a timed retry
     // on top of the state edge would turn one transition into two effects.
-    retry.trigger_published = true;
-    operator_gate_cleared
+    resume.observe_document_edge(now)
 }
 
 struct CapturedFinalizeResumeSignalWatch {
@@ -832,6 +816,7 @@ fn spawn_captured_finalize_resume_signal_watch(
 fn spawn_captured_finalize_resume_worker(
     file: PathBuf,
     key: agent_doc_repair_command_io::CapturedFinalizeResumeKey,
+    attempt: crate::idle_watch_schedules::ScheduleAttempt,
 ) -> std::io::Result<CapturedFinalizeResumeWorker> {
     let (send, result) = std::sync::mpsc::channel();
     let worker_key = key.clone();
@@ -841,12 +826,17 @@ fn spawn_captured_finalize_resume_worker(
             let outcome = agent_doc_repair_command_io::resume_captured_finalize(&file, &worker_key);
             let _ = send.send(outcome);
         })?;
-    Ok(CapturedFinalizeResumeWorker { key, result })
+    Ok(CapturedFinalizeResumeWorker {
+        key,
+        attempt,
+        result,
+    })
 }
 
 fn spawn_queue_projection_self_heal_worker(
     file: PathBuf,
     request: agent_doc_queue::queue_repair_generation::QueueProjectionRepairRequest,
+    attempt: crate::idle_watch_schedules::ScheduleAttempt,
 ) -> std::io::Result<QueueProjectionSelfHealWorker> {
     let (send, result) = std::sync::mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
@@ -894,6 +884,7 @@ fn spawn_queue_projection_self_heal_worker(
             let _ = send.send(outcome);
         })?;
     Ok(QueueProjectionSelfHealWorker {
+        attempt,
         result,
         cancel,
         thread: Some(thread),
@@ -916,22 +907,6 @@ fn queue_projection_self_heal_can_start(
     due && retry_ready
         && quiet_ready
         && captured_finalize_presence == CapturedFinalizePresence::Absent
-}
-
-#[derive(Debug, Clone, Copy)]
-struct QueueProjectionSupersededRetry {
-    due: bool,
-    retry_at: std::time::Instant,
-    not_before: std::time::Instant,
-}
-
-fn queue_projection_superseded_retry(now: std::time::Instant) -> QueueProjectionSupersededRetry {
-    let retry_at = now + QUEUE_PROJECTION_SELF_HEAL_QUIET;
-    QueueProjectionSupersededRetry {
-        due: true,
-        retry_at,
-        not_before: retry_at,
-    }
 }
 
 /// `#sdkclearwedge`: has the deferred clear's target pane already started an
@@ -2805,11 +2780,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
     // `#sdkdocumentselfheal`: queue markers are derived state. Reconcile them
     // once on supervisor start and after quiet document-delivery edges, but keep the
     // potentially slow editor/controller round trips off this watch thread.
-    // The Option is the single-flight lease: no retry can start while one
-    // document-local repair still owns the effect.
+    // The repair is one Lazily retained intent (`#implementlazilyowned`): the
+    // schedule owns whether it is desired, when it is due, and its single
+    // flight; the worker holds the claimed attempt.
     let mut queue_projection_self_heal_worker: Option<QueueProjectionSelfHealWorker> = None;
-    let mut queue_projection_self_heal_due = true;
-    let mut queue_projection_self_heal_retry_at: Option<std::time::Instant> = None;
+    let mut queue_projection_self_heal =
+        crate::idle_watch_schedules::QueueProjectionSelfHealSchedule::new();
     let mut queue_projection_self_heal_superseded_through: Option<
         agent_doc_controller_io::project_controller::ControllerStatePlaneCursor,
     > = None;
@@ -2819,7 +2795,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
     // latch is refreshed from the authoritative captured-finalize key below;
     // it prevents two background writers from racing the same operator cut.
     let mut captured_finalize_presence = CapturedFinalizePresence::Unknown;
-    let mut resume_retry: Option<CapturedFinalizeResumeRetry> = None;
+    // The retained resume is a Lazily intent (`#implementlazilyowned`): its
+    // attempt number, due time, and per-outcome resets live in the schedule.
+    let mut resume_retry = crate::idle_watch_schedules::CapturedFinalizeResumeSchedule::new();
     let resume_triggers = CapturedFinalizeResumeTriggers::new();
     let resume_signal_watch =
         spawn_captured_finalize_resume_signal_watch(path.clone(), Arc::clone(&stop)).ok();
@@ -2878,6 +2856,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
         let supervisor_stale_fast = shared.refresh_binary_stale();
         let now = std::time::Instant::now();
         if let Some(worker) = queue_projection_self_heal_worker.as_ref() {
+            let attempt = worker.attempt.clone();
             match worker.result.try_recv() {
                 Ok(Ok(QueueProjectionSelfHealWorkerOutcome {
                     projection:
@@ -2888,26 +2867,34 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     ..
                 })) => {
                     queue_projection_self_heal_worker = None;
-                    queue_projection_self_heal_retry_at = None;
                     queue_projection_self_heal_superseded_through = None;
                     match agent_doc_queue_io::queue_cmd::clear_queue_projection_repair_request(
                         &path,
                         &request,
                     ) {
-                        Ok(true) => {}
+                        Ok(true) => queue_projection_self_heal.settled(&attempt),
                         Ok(false) => {
-                            queue_projection_self_heal_due =
-                                agent_doc_queue_io::queue_cmd::load_queue_projection_repair_request(
-                                    &path,
-                                )
-                                .ok()
-                                .flatten()
-                                .is_some();
+                            queue_projection_self_heal.settled(&attempt);
+                            if agent_doc_queue_io::queue_cmd::load_queue_projection_repair_request(
+                                &path,
+                            )
+                            .ok()
+                            .flatten()
+                            .is_some()
+                            {
+                                queue_projection_self_heal.request();
+                            } else {
+                                queue_projection_self_heal
+                                    .withdraw("queue_projection_repair_request_absent", now);
+                            }
                         }
                         Err(error) => {
-                            queue_projection_self_heal_due = true;
-                            queue_projection_self_heal_retry_at =
-                                Some(now + IDLE_WATCH_CONTROLLER_BACKOFF);
+                            queue_projection_self_heal.defer(
+                                &attempt,
+                                &format!("{error:#}"),
+                                IDLE_WATCH_CONTROLLER_BACKOFF,
+                                now,
+                            );
                             agent_doc_ops_log_io::log_op(
                                 &path,
                                 &format!(
@@ -2942,10 +2929,17 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     // Requiring yet another delivery edge loses the operator's
                     // final keystroke forever; immediate retry competes with
                     // typing. The durable request generation stays unchanged.
-                    let retry = queue_projection_superseded_retry(now);
-                    queue_projection_self_heal_due = retry.due;
-                    queue_projection_self_heal_retry_at = Some(retry.retry_at);
-                    queue_projection_self_heal_not_before = retry.not_before;
+                    queue_projection_self_heal_not_before = queue_projection_self_heal
+                        .superseded_after_quiet(
+                            &attempt,
+                            &format!(
+                                "controller_generation={} plane_version={}",
+                                terminal_delivery_cursor.controller_generation,
+                                terminal_delivery_cursor.plane_version,
+                            ),
+                            QUEUE_PROJECTION_SELF_HEAL_QUIET,
+                            now,
+                        );
                     queue_projection_self_heal_superseded_through =
                         Some(terminal_delivery_cursor);
                     agent_doc_ops_log_io::log_op(
@@ -2966,8 +2960,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     ..
                 })) => {
                     queue_projection_self_heal_worker = None;
-                    queue_projection_self_heal_due = false;
-                    queue_projection_self_heal_retry_at = None;
+                    queue_projection_self_heal.cancelled(
+                        &attempt,
+                        "missing_superseded_controller_watermark",
+                        now,
+                    );
                     agent_doc_ops_log_io::log_op(
                         &path,
                         &format!(
@@ -2978,9 +2975,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 }
                 Ok(Err(error)) => {
                     queue_projection_self_heal_worker = None;
-                    queue_projection_self_heal_due = true;
-                    queue_projection_self_heal_retry_at =
-                        Some(now + IDLE_WATCH_CONTROLLER_BACKOFF);
+                    queue_projection_self_heal.defer(
+                        &attempt,
+                        &format!("{error:#}"),
+                        IDLE_WATCH_CONTROLLER_BACKOFF,
+                        now,
+                    );
                     agent_doc_ops_log_io::log_op(
                         &path,
                         &format!(
@@ -2992,9 +2992,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     queue_projection_self_heal_worker = None;
-                    queue_projection_self_heal_due = true;
-                    queue_projection_self_heal_retry_at =
-                        Some(now + IDLE_WATCH_CONTROLLER_BACKOFF);
+                    queue_projection_self_heal.defer(
+                        &attempt,
+                        "queue projection self-heal worker disconnected",
+                        IDLE_WATCH_CONTROLLER_BACKOFF,
+                        now,
+                    );
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
             }
@@ -3039,7 +3042,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
         }
         if document_delivery_debounce.take_ready(now) {
             document_delivery_reconcile_pending = true;
-            queue_projection_self_heal_due = true;
+            queue_projection_self_heal.request();
             queue_projection_self_heal_not_before = now + QUEUE_PROJECTION_SELF_HEAL_QUIET;
             let operator_gate_cleared = observe_captured_finalize_document_edge(
                 &resume_triggers,
@@ -3049,14 +3052,14 @@ pub(super) fn spawn_idle_queue_watch_thread(
             resume_key_refresh_pending = true;
             last_quiescent_maintenance = None;
             if operator_gate_cleared
-                && let Some(retry) = resume_retry.as_ref()
+                && let Some(retained) = resume_retry.retained_key()
             {
                 let event = format!(
                     "captured_finalize_resume_operator_gate_cleared file={} cycle_id={} capture_id={} response_sha256={} reason=controller_document_delivery_edge (#deliveryresumewake)",
                     path.display(),
-                    retry.key.cycle_id,
-                    retry.key.capture_id,
-                    retry.key.response_sha256,
+                    retained.cycle_id,
+                    retained.capture_id,
+                    retained.response_sha256,
                 );
                 log_event(&mut session_log, &event);
                 agent_doc_ops_log_io::log_op(&path, &event);
@@ -3108,14 +3111,14 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // `captured_finalize_resume_should_start` false and reproduce the
             // deadlock the trigger fix removes.
             if operator_gate_cleared
-                && let Some(retry) = resume_retry.as_ref()
+                && let Some(retained) = resume_retry.retained_key()
             {
                 let event = format!(
                     "captured_finalize_resume_operator_gate_cleared file={} cycle_id={} capture_id={} response_sha256={} reason=controller_document_state_edge (#needsoperatorstateedge)",
                     path.display(),
-                    retry.key.cycle_id,
-                    retry.key.capture_id,
-                    retry.key.response_sha256,
+                    retained.cycle_id,
+                    retained.capture_id,
+                    retained.response_sha256,
                 );
                 log_event(&mut session_log, &event);
                 agent_doc_ops_log_io::log_op(&path, &event);
@@ -3125,17 +3128,18 @@ pub(super) fn spawn_idle_queue_watch_thread(
         }
         let finished_resume = resume_worker.as_ref().and_then(|worker| {
                     match worker.result.try_recv() {
-                        Ok(outcome) => Some((worker.key.clone(), outcome)),
+                        Ok(outcome) => Some((worker.key.clone(), worker.attempt.clone(), outcome)),
                         Err(std::sync::mpsc::TryRecvError::Empty) => None,
                         Err(std::sync::mpsc::TryRecvError::Disconnected) => Some((
                             worker.key.clone(),
+                            worker.attempt.clone(),
                     agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::RetryableEffect {
                         reason: "captured finalize resume worker disconnected".to_string(),
                     },
                         )),
                     }
                 });
-                if let Some((key, outcome)) = finished_resume {
+                if let Some((key, attempt, outcome)) = finished_resume {
                     resume_worker = None;
                     last_quiescent_maintenance = None;
                     match outcome {
@@ -3144,7 +3148,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 } => {
                     captured_finalize_presence = CapturedFinalizePresence::Unknown;
                     resume_key_refresh_pending = true;
-                    resume_retry = None;
+                    resume_retry.completed(&attempt, "committed");
                     resume_triggers.observe_operation(None);
                     let event = format!(
                                 "captured_finalize_resume_committed file={} cycle_id={} capture_id={} response_sha256={} repair_outcome={} authority=editor_crdt",
@@ -3160,7 +3164,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Superseded => {
                     captured_finalize_presence = CapturedFinalizePresence::Unknown;
                     resume_key_refresh_pending = true;
-                    resume_retry = None;
+                    resume_retry.completed(&attempt, "controller_superseded");
                     resume_triggers.observe_operation(None);
                             let event = format!(
                                 "captured_finalize_resume_superseded file={} cycle_id={} capture_id={} response_sha256={}",
@@ -3175,7 +3179,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::RetainedDeliverySettled => {
                     captured_finalize_presence = CapturedFinalizePresence::Unknown;
                     resume_key_refresh_pending = true;
-                    resume_retry = None;
+                    resume_retry.completed(&attempt, "retained_delivery_settled");
                     resume_triggers.observe_operation(None);
                     let event = format!(
                         "captured_finalize_retained_delivery_settled file={} cycle_id={} capture_id={} response_sha256={}",
@@ -3189,7 +3193,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     resume_key_refresh_pending = true;
                     // `#splicectlcommit`: terminal without a commit — stop
                     // retrying this capture, exactly like a commit receipt.
-                    resume_retry = None;
+                    resume_retry.completed(&attempt, "closed_ignored_path");
                     resume_triggers.observe_operation(None);
                     let event = format!(
                         "captured_finalize_resume_closed_ignored_path file={} cycle_id={} capture_id={} response_sha256={} outcome=terminal_without_commit",
@@ -3204,7 +3208,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::WaitingForSignal {
                     reason,
                 } => {
-                    resume_retry = None;
+                    resume_retry.awaiting_state_edge(&attempt);
                     let event = format!(
                         "captured_finalize_resume_waiting_for_state file={} cycle_id={} capture_id={} response_sha256={} reason_bytes={} reason_sha256={} action=await_controller_state_edge",
                         path.display(),
@@ -3225,14 +3229,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         current_epoch_secs(),
                         retry_at_secs,
                     );
-                    resume_retry = Some(CapturedFinalizeResumeRetry {
-                        key: key.clone(),
-                        attempts: 0,
-                        retry_at: now + delay,
-                        needs_operator: false,
-                        trigger_published: false,
-                        unlandable: false,
-                    });
+                    resume_retry.lease_held(&attempt, &key, delay, now);
                     let event = format!(
                         "captured_finalize_resume_lease_retry_scheduled file={} cycle_id={} capture_id={} response_sha256={} retry_at_secs={} delay_ms={} reason_bytes={} reason_sha256={} authority=editor_crdt no_force_disk=true",
                         path.display(),
@@ -3250,19 +3247,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::RetryableEffect {
                     reason,
                 } => {
-                            let attempts = resume_retry
-                                .as_ref()
-                                .filter(|retry| retry.key == key)
-                                .map_or(1, |retry| retry.attempts.saturating_add(1));
-                            let delay = captured_finalize_effect_retry_delay(attempts, &reason);
-                            resume_retry = Some(CapturedFinalizeResumeRetry {
-                                key: key.clone(),
-                                attempts,
-                        retry_at: now + delay,
-                        needs_operator: false,
-                        trigger_published: false,
-                        unlandable: false,
-                            });
+                            let (attempts, delay) = resume_retry.retry_after(
+                                &attempt,
+                                &key,
+                                &reason,
+                                |attempt| captured_finalize_effect_retry_delay(attempt, &reason),
+                                now,
+                            );
                             let event = format!(
                                 "captured_finalize_resume_retry_scheduled file={} cycle_id={} capture_id={} response_sha256={} attempt={} delay_ms={} reason_bytes={} reason_sha256={} authority=editor_crdt no_force_disk=true controller_pressure_single_flight={}",
                                 path.display(),
@@ -3285,17 +3276,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     // GH 90: the captured bytes can never land. Stop retrying
                     // this key — a state edge cannot change the verdict — and
                     // say exactly what unblocks it, once.
-                    let already_reported = resume_retry
-                        .as_ref()
-                        .is_some_and(|retry| retry.key == key && retry.unlandable);
-                    resume_retry = Some(CapturedFinalizeResumeRetry {
-                        key: key.clone(),
-                        attempts: 1,
-                        retry_at: now,
-                        needs_operator: false,
-                        trigger_published: true,
-                        unlandable: true,
-                    });
+                    let already_reported = resume_retry.unlandable(&attempt, &key, &reason);
                     let reason_head =
                         agent_doc_supervisor::idle_watch::captured_finalize_resume_reason_head(
                             &reason,
@@ -3324,17 +3305,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     // after it. Mirror the decision here, or this second,
                     // independent gate reproduces the deadlock on its own.
                     let latched = resume_triggers.require_operator();
-                    resume_retry = Some(CapturedFinalizeResumeRetry {
-                        key: key.clone(),
-                        attempts: 1,
-                        retry_at: now,
-                        needs_operator: latched,
-                        // Either the operator gate owns the next attempt, or the
-                        // already-pending state edge does. Neither wants a
-                        // backoff edge published on top of it.
-                        trigger_published: true,
-                        unlandable: false,
-                    });
+                    // Either the operator gate owns the next attempt, or the
+                    // already-pending state edge does. Neither wants a backoff
+                    // edge published on top of it.
+                    resume_retry.needs_operator_verdict(&attempt, &key, latched, &reason, now);
                     // `#needsoperatorstateedge`: carry a bounded, redacted head
                     // of the reason. A `reason_sha256` alone identifies the
                     // failure without ever explaining it, which is why the
@@ -3436,12 +3410,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
             || last_quiescent_maintenance.is_none_or(|last| {
                 last.elapsed() >= IDLE_WATCH_QUIESCENT_MAINTENANCE_INTERVAL
             });
-        if let Some(retry) = resume_retry.as_mut()
-            && !retry.needs_operator
-            && !retry.trigger_published
-            && now >= retry.retry_at
-        {
-            retry.trigger_published = true;
+        if resume_retry.take_due_edge(now) {
             resume_triggers.observe_effect_retry_due();
             resume_key_refresh_pending = true;
             last_quiescent_maintenance = None;
@@ -3455,8 +3424,14 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         // Dropping the worker cancels it and joins its thread,
                         // so captured-finalize admission cannot overlap the
                         // older queue projection CAS.
-                        queue_projection_self_heal_worker = None;
-                        queue_projection_self_heal_due = true;
+                        if let Some(worker) = queue_projection_self_heal_worker.take() {
+                            queue_projection_self_heal.defer(
+                                &worker.attempt,
+                                "preempted by captured finalize",
+                                std::time::Duration::ZERO,
+                                now,
+                            );
+                        }
                         queue_projection_self_heal_not_before =
                             now + QUEUE_PROJECTION_SELF_HEAL_QUIET;
                         agent_doc_ops_log_io::log_op(
@@ -3473,26 +3448,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         "{}:{}:{}",
                         key.cycle_id, key.capture_id, key.response_sha256
                     )));
-                    if resume_retry
-                        .as_ref()
-                        .is_some_and(|retry| retry.key != key)
-                            {
-                                resume_retry = None;
-                            }
-                            let needs_operator = resume_retry
-                                .as_ref()
-                                .filter(|retry| retry.key == key)
-                                .is_some_and(|retry| retry.needs_operator);
-                            let retry_cooldown_elapsed = resume_retry
-                                .as_ref()
-                                .filter(|retry| retry.key == key)
-                                .is_none_or(|retry| now >= retry.retry_at);
+                    // A different operation key is a fresh Lazily epoch.
+                    resume_retry.observe_operation(&key);
+                            let needs_operator = resume_retry.needs_operator();
+                            let retry_cooldown_elapsed = resume_retry.is_due(now);
                             // GH 90: a deterministically unlandable capture
                             // is never re-attempted under the same key.
-                            let unlandable = resume_retry
-                                .as_ref()
-                                .filter(|retry| retry.key == key)
-                                .is_some_and(|retry| retry.unlandable);
+                            let unlandable = resume_retry.is_unlandable(&key);
                 let facts = CapturedFinalizeResumeFacts {
                     captured_operation_present: true,
                     // Diagnostic only: a captured finalize must recover even
@@ -3516,16 +3478,17 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         stale_recycle_pending: stale_recycle_reconcile_due,
                         exclusive_supervisor_maintenance,
                     };
-                    if resume_triggers.ready() && captured_finalize_resume_should_start(facts) {
+                    if resume_triggers.ready()
+                        && captured_finalize_resume_should_start(facts)
+                        && let Some(claimed) = resume_retry.claim(now)
+                    {
                         match spawn_captured_finalize_resume_worker(
                             path.clone(),
                             key.clone(),
+                            claimed.clone(),
                                 ) {
                                     Ok(worker) => {
-                                        let attempt = resume_retry
-                                            .as_ref()
-                                            .filter(|retry| retry.key == key)
-                                            .map_or(1, |retry| retry.attempts.saturating_add(1));
+                                        let attempt = claimed.attempt();
                                         let event = format!(
                                             "captured_finalize_resume_started file={} cycle_id={} capture_id={} response_sha256={} attempt={} authority=editor_crdt no_force_disk=true",
                                             path.display(),
@@ -3540,19 +3503,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 resume_worker = Some(worker);
                             }
                                     Err(err) => {
-                                        let attempts = resume_retry
-                                            .as_ref()
-                                            .filter(|retry| retry.key == key)
-                                            .map_or(1, |retry| retry.attempts.saturating_add(1));
-                                        resume_retry = Some(CapturedFinalizeResumeRetry {
-                                            key,
-                                    attempts,
-                                    retry_at: now
-                                        + captured_finalize_resume_retry_delay(attempts),
-                                    needs_operator: false,
-                                    trigger_published: false,
-                                    unlandable: false,
-                                });
+                                        resume_retry.retry_after(
+                                            &claimed,
+                                            &key,
+                                            &format!("{err}"),
+                                            captured_finalize_resume_retry_delay,
+                                            now,
+                                        );
                                         eprintln!(
                                             "[agent-doc] warning: failed to spawn captured finalize resume worker: {err}"
                                         );
@@ -3565,7 +3522,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     resume_key_refresh_pending = false;
                     last_resume_key_error_hash = None;
                     if resume_worker.is_none() {
-                        resume_retry = None;
+                        resume_retry.clear(now);
                         resume_triggers.observe_operation(None);
                     }
                 }
@@ -4760,20 +4717,23 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 if queue_projection_self_heal_worker.is_some() {
                     break 'drain;
                 }
-                let self_heal_retry_ready = queue_projection_self_heal_retry_at
-                    .is_none_or(|retry_at| now >= retry_at);
                 if queue_projection_self_heal_can_start(
-                    queue_projection_self_heal_due,
-                    self_heal_retry_ready,
+                    queue_projection_self_heal.is_pending(),
+                    queue_projection_self_heal.is_due(now),
                     now >= queue_projection_self_heal_not_before,
                     captured_finalize_presence,
-                ) {
+                ) && let Some(attempt) = queue_projection_self_heal.claim(now)
+                {
                     let generation =
                         match agent_doc_queue_io::queue_cmd::queue_repair_generation(&path) {
                             Ok(generation) => generation,
                             Err(error) => {
-                                queue_projection_self_heal_retry_at =
-                                    Some(now + IDLE_WATCH_CONTROLLER_BACKOFF);
+                                queue_projection_self_heal.defer(
+                                    &attempt,
+                                    &format!("{error:#}"),
+                                    IDLE_WATCH_CONTROLLER_BACKOFF,
+                                    now,
+                                );
                                 agent_doc_ops_log_io::log_op(
                                     &path,
                                     &format!(
@@ -4792,8 +4752,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         ) {
                         Ok(request) => request,
                         Err(error) => {
-                            queue_projection_self_heal_retry_at =
-                                Some(now + IDLE_WATCH_CONTROLLER_BACKOFF);
+                            queue_projection_self_heal.defer(
+                                &attempt,
+                                &format!("{error:#}"),
+                                IDLE_WATCH_CONTROLLER_BACKOFF,
+                                now,
+                            );
                             agent_doc_ops_log_io::log_op(
                                 &path,
                                 &format!(
@@ -4805,11 +4769,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             break 'drain;
                         }
                     };
-                    match spawn_queue_projection_self_heal_worker(path.clone(), request) {
+                    match spawn_queue_projection_self_heal_worker(
+                        path.clone(),
+                        request,
+                        attempt.clone(),
+                    ) {
                         Ok(worker) => {
                             queue_projection_self_heal_worker = Some(worker);
-                            queue_projection_self_heal_due = false;
-                            queue_projection_self_heal_retry_at = None;
                             agent_doc_ops_log_io::log_op(
                                 &path,
                                 &format!(
@@ -4820,8 +4786,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             );
                         }
                         Err(error) => {
-                            queue_projection_self_heal_retry_at =
-                                Some(now + IDLE_WATCH_CONTROLLER_BACKOFF);
+                            queue_projection_self_heal.defer(
+                                &attempt,
+                                &format!("{error}"),
+                                IDLE_WATCH_CONTROLLER_BACKOFF,
+                                now,
+                            );
                             agent_doc_ops_log_io::log_op(
                                 &path,
                                 &format!(
@@ -5555,7 +5525,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 let stale_capture_resume_latched =
                     agent_doc_supervisor::lifecycle::stale_generation_capture_resume_needs_recycle(
                         supervisor_stale || own_binary_replaced,
-                        resume_retry.as_ref().is_some_and(|retry| retry.needs_operator),
+                        resume_retry.needs_operator(),
                     );
                 // `#gh181`: the cycle's own typed durable capture is already the
                 // replay checkpoint accepted by generation-transition policy. A
@@ -7791,17 +7761,24 @@ mod tests {
         );
 
         let now = std::time::Instant::now();
-        let retry = queue_projection_superseded_retry(now);
-        assert!(retry.due);
+        let mut schedule = crate::idle_watch_schedules::QueueProjectionSelfHealSchedule::new();
+        let attempt = schedule.claim(now).expect("start reconciles once");
+        let not_before = schedule.superseded_after_quiet(
+            &attempt,
+            "controller_generation=41 plane_version=900",
+            QUEUE_PROJECTION_SELF_HEAL_QUIET,
+            now,
+        );
+        assert!(schedule.is_pending(), "Lazily retains one new attempt");
         assert!(!queue_projection_self_heal_can_start(
-            retry.due,
-            now >= retry.retry_at,
-            now >= retry.not_before,
+            schedule.is_pending(),
+            schedule.is_due(now),
+            now >= not_before,
             CapturedFinalizePresence::Absent,
         ));
         assert!(queue_projection_self_heal_can_start(
-            retry.due,
-            true,
+            schedule.is_pending(),
+            schedule.is_due(not_before),
             true,
             CapturedFinalizePresence::Absent,
         ));
@@ -8063,25 +8040,24 @@ mod tests {
         };
         triggers.observe_operation(Some("cycle-a:capture-a:response-a".to_string()));
         triggers.consume_attempt();
-        triggers.require_operator();
+        let latched = triggers.require_operator();
         let now = std::time::Instant::now();
-        let mut retry = Some(CapturedFinalizeResumeRetry {
-            key,
-            attempts: 1,
-            retry_at: now + std::time::Duration::from_secs(30),
-            needs_operator: true,
-            trigger_published: false,
-            unlandable: false,
-        });
+        let mut retry = crate::idle_watch_schedules::CapturedFinalizeResumeSchedule::new();
+        retry.observe_operation(&key);
+        let attempt = retry.claim(now).expect("a fresh operation claims");
+        retry.needs_operator_verdict(&attempt, &key, latched, "conflict", now);
+        assert!(retry.needs_operator());
 
         assert!(observe_captured_finalize_document_edge(
             &triggers, &mut retry, now,
         ));
         assert!(triggers.ready());
-        let retry = retry.unwrap();
-        assert!(!retry.needs_operator);
-        assert_eq!(retry.retry_at, now);
-        assert!(retry.trigger_published);
+        assert!(!retry.needs_operator());
+        assert!(retry.is_due(now));
+        assert!(
+            !retry.take_due_edge(now),
+            "the state edge owns the next attempt"
+        );
     }
 
     /// GH 90: a deterministically unlandable capture is not retired by a
@@ -8098,24 +8074,25 @@ mod tests {
         triggers.observe_operation(Some("cycle-a:capture-a:response-a".to_string()));
         triggers.consume_attempt();
         let now = std::time::Instant::now();
-        let mut retry = Some(CapturedFinalizeResumeRetry {
-            key,
-            attempts: 1,
-            retry_at: now,
-            needs_operator: false,
-            trigger_published: true,
-            unlandable: true,
-        });
+        let mut retry = crate::idle_watch_schedules::CapturedFinalizeResumeSchedule::new();
+        retry.observe_operation(&key);
+        let attempt = retry.claim(now).expect("a fresh operation claims");
+        retry.unlandable(&attempt, &key, "refused bytes");
         assert!(
             !observe_captured_finalize_document_edge(&triggers, &mut retry, now),
             "an unlandable verdict is not an operator gate a state edge clears"
         );
-        assert!(retry.as_ref().is_some_and(|retry| retry.unlandable));
+        assert!(retry.is_unlandable(&key));
+        assert!(!retry.is_due(now), "Lazily rejected the unlandable intent");
 
+        assert!(
+            include_str!("idle_watch_schedules.rs").contains(&["unlandable: ", "true,"].concat()),
+            "the resume schedule lost the GH 90 unlandable latch"
+        );
         let source = include_str!("idle_watch.rs");
         for needle in [
             ["CapturedFinalizeResumeOutcome::", "Unlandable {"].concat(),
-            ["unlandable: ", "true,"].concat(),
+            ["resume_retry.", "unlandable(&attempt, &key, &reason)"].concat(),
             [
                 "&& !needs_operator\n",
                 "                                    && !unlandable,",
@@ -8141,23 +8118,22 @@ mod tests {
         triggers.observe_operation(Some("cycle-a:capture-a:response-a".to_string()));
         triggers.consume_attempt();
         let now = std::time::Instant::now();
-        let mut retry = Some(CapturedFinalizeResumeRetry {
-            key,
-            attempts: 0,
-            retry_at: now + std::time::Duration::from_secs(300),
-            needs_operator: false,
-            trigger_published: false,
-            unlandable: false,
-        });
+        let mut retry = crate::idle_watch_schedules::CapturedFinalizeResumeSchedule::new();
+        retry.observe_operation(&key);
+        let attempt = retry.claim(now).expect("a fresh operation claims");
+        retry.lease_held(&attempt, &key, std::time::Duration::from_secs(300), now);
+        assert!(!retry.is_due(now));
 
         assert!(
             !observe_captured_finalize_document_edge(&triggers, &mut retry, now),
             "preempting a lease retry must not claim that an operator gate cleared"
         );
         assert!(triggers.ready());
-        let retry = retry.unwrap();
-        assert_eq!(retry.retry_at, now);
-        assert!(retry.trigger_published);
+        assert!(retry.is_due(now));
+        assert!(
+            !retry.take_due_edge(now),
+            "the state edge owns the next attempt"
+        );
     }
 
     #[test]
@@ -8632,7 +8608,7 @@ mod tests {
         let join = ["stale_generation_capture_resume", "_needs_recycle("].concat();
         let stale_generation = ["supervisor_stale || ", "own_binary_replaced,"].concat();
         let generic_request = ["supervisor_stale || ", "recycle_requested,"].concat();
-        let latch = ["retry.", "needs_operator)"].concat();
+        let latch = ["resume_retry.", "needs_operator(),"].concat();
         let slot = ["|| stale_capture_resume", "_latched)"].concat();
         for needle in [&join, &stale_generation, &latch, &slot] {
             assert!(

@@ -282,6 +282,7 @@ fn record_session_startup_miss(
 }
 
 mod idle_watch;
+mod idle_watch_schedules;
 
 fn owned_pane_id(shared: &SupervisorShared) -> Option<&str> {
     shared.inject_pane.as_deref().or_else(|| {

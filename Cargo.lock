@@ -2544,6 +2544,7 @@ dependencies = [
  "agent-doc-document",
  "agent-doc-document-realtime",
  "agent-doc-document-realtime-io",
+ "agent-doc-effect-cas",
  "agent-doc-element",
  "agent-doc-frontmatter",
  "agent-doc-frontmatter-io",

@@ -511,6 +511,8 @@ pub fn project_document_queue_sync(
         .collect::<HashMap<_, _>>();
     let document_path = document_path.into();
     let mut payload = QueueSyncPayload::default();
+    // `#gatedheadpending`: item-level gates, derived once on first use.
+    let mut item_gates: Option<crate::transient_closeout::PendingItemGates> = None;
 
     for block in graph.blocks() {
         crate::subagent_intent::validate_queue_subagents_attrs(&block.component.attrs)
@@ -569,6 +571,27 @@ pub fn project_document_queue_sync(
                     }
                     if queue_paused && lifecycle == QueueSyncLifecycle::Pending {
                         lifecycle = QueueSyncLifecycle::Blocked;
+                    }
+                    // `#gatedheadpending`: a pending head whose item no agent
+                    // can advance (an external or open blocker, or an item
+                    // that waits on the operator) is never offered as work,
+                    // even before preflight paints its `⛔` / `⏳`.
+                    if claim.is_none() && lifecycle == QueueSyncLifecycle::Pending {
+                        let gates = item_gates.get_or_insert_with(|| {
+                            crate::transient_closeout::PendingItemGates::from_content(
+                                current_content,
+                                None,
+                            )
+                        });
+                        match gates.gate(&prompt.text) {
+                            Some(crate::transient_closeout::QuiescentReason::Blocked) => {
+                                lifecycle = QueueSyncLifecycle::Blocked;
+                            }
+                            Some(crate::transient_closeout::QuiescentReason::AwaitingOperator) => {
+                                lifecycle = QueueSyncLifecycle::OperatorGated;
+                            }
+                            _ => {}
+                        }
                     }
                     let operation = if lifecycle == QueueSyncLifecycle::Running
                         && running_item_changed_since_previous_turn(
@@ -1273,6 +1296,47 @@ mod tests {
             payload.running[0].operation,
             QueueSyncOperation::ForwardSteering
         );
+    }
+
+    /// `#gatedheadpending`: a `📥` head whose item records an external
+    /// blocker, or whose item is itself an open operator request, is wait or
+    /// operator-gate debt, never dispatch work; a runnable head still is.
+    #[test]
+    fn gated_pending_heads_are_never_offered_for_dispatch() {
+        let content = concat!(
+            "<!-- agent:run id=main subagents -->\n",
+            "- 📥 do [#subagent-operator-request-pushchoice]\n",
+            "- 📥 do [#licensefix]\n",
+            "- 📥 do [#plain]\n",
+            "<!-- /agent:run -->\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#subagent-operator-request-pushchoice] Push the branches, or keep them local? (choices: push, keep-local)\n",
+            "- [ ] [#licensefix] Remove the sentence. (stays open: blocked behind #vendorfix; the vendor PR still lacks the file)\n",
+            "- [ ] [#plain] runnable\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let payload = project_document_queue_sync(
+            "/tmp/session.md",
+            QueueSyncDocumentScope::Current,
+            content,
+            None,
+            &[],
+        )
+        .unwrap();
+        let dispatched = payload
+            .items()
+            .filter(|item| item.operation == QueueSyncOperation::Dispatch)
+            .map(|item| item.item.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(dispatched, vec!["📥 do [#plain]"]);
+        assert_eq!(payload.blocked.len(), 1);
+        assert_eq!(payload.blocked[0].item, "📥 do [#licensefix]");
+        assert_eq!(payload.blocked[0].operation, QueueSyncOperation::Wait);
+        assert!(payload.items().any(|item| {
+            item.item == "📥 do [#subagent-operator-request-pushchoice]"
+                && item.lifecycle == QueueSyncLifecycle::OperatorGated
+                && item.operation == QueueSyncOperation::OperatorGate
+        }));
     }
 
     #[test]

@@ -50,7 +50,7 @@ start` binds the replacement worker.
 | --- | --- | --- | --- |
 | 👀 | `seen` | seen | Agent-doc has seen this prompt and has not yet emitted it in the prepare step. The prefix is the seen glyph `👀`. Prepare replaces it with pending when it emits the prompt. |
 | 📥 | `pending` | pending | Live row with no claim, worker report, or completion evidence; ready to run. |
-| ⛔ | `blocked` | blocked | Its tracked item still waits on open work: a `(stays open: blocked behind #a, #b)` clause or an `after=#id` edge names an item still open in backlog, todo or review. `⟦blocked by a, b⟧` lists those ids. The row is held out of drain and subagent dispatch and returns to pending once every blocker closes. |
+| ⛔ | `blocked` | blocked | Its tracked item still waits on open work: a `(stays open: blocked behind #a, #b)` clause or an `after=#id` edge names an item still open in backlog, todo or review, or a stays-open blocker clause names only ids this document never tracked (an external blocker). `⟦blocked by a, b⟧` lists those ids. The row is held out of drain and subagent dispatch and returns to pending once every tracked blocker closes or the external clause changes. |
 | 🟡 | `claimed` | claimed | Reserved for a worker by `queue claim`; no spawned worker is bound yet. |
 | 🚧 | `running` | running | A spawned worker is bound to this exact claim by `queue start`. |
 | ☑️ | `reported` | keep: worker done | Keep this live row: the worker reported back (`queue report-complete`), but the coordinator still has to integrate, verify, and close it. Do not delete it yet. |
@@ -61,7 +61,7 @@ start` binds the replacement worker.
 | 🔄 | `reconciling` | needs reconcile | A binary completion cell whose recorded item is this row's own work is in the document, but no current claim or report receipt owns it. A longer line that only shares the tracked id is not this row. The row is held out of dispatch until the coordinator closes it (striking retires the cell) or reconciles it. |
 | ❔ | `unknown` | unknown | Durable queue state is unreadable or contradicts the row (for example a struck row with a live claim); diagnose it, do not redispatch. |
 | ⏭️ | `skipped` | skipped | It was dispatched and came back unconsumed; the queue advanced past it to the next runnable head. |
-| ⏳ | `awaiting_operator` | awaiting operator | Agent work is finished and no worker holds it; it waits on an operator verdict (`[operator-verify]` or a gated review). |
+| ⏳ | `awaiting_operator` | awaiting operator | Agent work is finished and no worker holds it; it waits on an operator verdict (`[operator-verify]`, a gated review, or an item that is itself an open operator request). |
 | 🙋 | `operator_action` | operator action | A blocking operator request is open for this row. It combines with a lifecycle marker (`🙋🚧`) and links the request packet by its `[#request-id]`. |
 | 📌 | `prioritized` | pinned | Operator priority pin (`**pin**` and `:pushpin:` are also accepted); the row keeps its position at the top tier. |
 | 📍 | `agent_prioritized` | agent pin | Agent priority pin (`*pin*` and `:round_pushpin:` are also accepted); it sorts above unpinned rows, never above operator pins. |
@@ -124,13 +124,19 @@ in `agent:backlog`, `agent:todo`, or `agent:review`:
   a `(stays open: ...)` note about something else is not read as one.
 - **An `after=#id` edge**, or a nested ordered-list predecessor in the queue.
 
-A candidate blocks only while it names an item that is still open in this
-document's backlog, todo, or review. An id that is done, archived, or not an
-item here does not block: a PR number such as `#749`, or an id that moved to
-another document. So the row returns to `📥` on the first projection after its
-last open blocker closes. A clause whose ids are all closed or absent leaves
-the row runnable, because agent-doc only derives blocked state from ids it can
-watch close.
+When the clause cites at least one id this document tracks or tracked (open
+or closed, including items moved to its done archive), a candidate blocks only
+while it names an item that is still open in this document's backlog, todo, or
+review. An id that is done, archived, or not an item here does not block: a PR
+number such as `#749`, or an id that moved to another document. So the row
+returns to `📥` on the first projection after its last open blocker closes.
+
+A clause that cites no tracked id at all records an external or unknown
+blocker, such as `(stays open: blocked behind #vendorfix; the vendor PR still
+lacks the file)` written by a worker that could not finish. No agent can move
+that row, so it shows `⛔ ⟦blocked by vendorfix⟧` and stays blocked until
+someone edits the clause, the id becomes tracked work, or you disregard it.
+All-digit ids (PR or issue numbers) never block (`#gatedheadpending`).
 
 A claimed row also shows `⛔` when its worker stopped on a harness usage or
 credit limit (`#harnessquotaexhausted`). Nothing is running it and it is not

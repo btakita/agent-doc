@@ -63,6 +63,11 @@ pub fn closeout_evidence_at(file: &Path, content: &str, now_secs: u64) -> Closeo
         schedule_held_heads,
         reportable_lost,
         document: Some(file.display().to_string()),
+        // `#gatedheadpending`: a blocker that closed into the external done
+        // archive is resolved, not external.
+        archived_done_ids: agent_doc_element_backlog_io::done_archive::blocker_archive_ids(
+            file, content,
+        ),
     }
 }
 

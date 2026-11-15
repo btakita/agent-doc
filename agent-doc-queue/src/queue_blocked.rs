@@ -8,17 +8,33 @@
 //! - an `after=#id` edge (or a nested ordered-list predecessor in
 //!   `agent:queue`) names a prerequisite.
 //!
-//! A cited id blocks only while it names an OPEN item in `agent:backlog`
-//! (or legacy `agent:pending`), `agent:todo`, or `agent:review`. An id that
-//! is closed, struck, archived, or absent from the document (a PR number such
-//! as `#749`, an id moved to another document) does not block, so a row
-//! unblocks as soon as its last open blocker closes. A clause that names no
-//! open id therefore leaves the row runnable: the binary derives blocked
-//! state only from ids it can watch close.
+//! A clause that cites a KNOWN id (an item of this document, open or closed,
+//! in `agent:backlog` / legacy `agent:pending`, `agent:todo`, `agent:review`,
+//! `agent:icebox` or `agent:done`, or an id in the document's external done
+//! archive) is a tracked clause: its cited ids block only while they name an
+//! OPEN item, so the row unblocks as soon as its last open blocker closes. An
+//! id a tracked clause cites that is absent (a PR number such as `#749`, an id
+//! moved to another document) does not block on its own.
+//!
+//! `#gatedheadpending`: a blocker clause that cites NO known id records an
+//! external or unknown blocker (`(stays open: blocked behind #vendorfix; ...)`).
+//! No agent can advance such a row until that blocker resolves, so it blocks by
+//! the ids it cites (all-digit ids such as PR numbers are references, never
+//! blockers). It stays blocked until the clause changes, the cited id appears
+//! as tracked work, or the operator records a disregard (`#blockerdisregard`).
+//! A closed blocker the done archive moved out of the document is still known,
+//! so archival never turns a resolved tracked blocker into an external one:
+//! [`QueueBlockers::from_content_with_archived`] reads the archive ids an IO
+//! caller passes in. The text-only [`QueueBlockers::from_content`] cannot see
+//! an external archive, so when the document declares one it keeps only the
+//! external blockers the IO projection already painted on the item's row
+//! (`⛔ ⟦blocked by …⟧`); without an external archive the document holds
+//! every closed item and the text-only derivation is exact.
 //!
 //! The derivation is pure (document text in, map out). Preflight and the
 //! projection paths paint `⛔ ⟦blocked by a, b⟧` from it, the drain gates treat
-//! a blocked id as deferred, and subagent dispatch never offers it.
+//! a blocked id as deferred, the closeout gate treats a blocked `📥` row as
+//! quiescent (`#stopquiescentrows`), and subagent dispatch never offers it.
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -39,16 +55,39 @@ pub const STAYS_OPEN_CLAUSE_OPEN: &str = "(stays open:";
 /// nothing. Whether a cited id is tracked work is the caller's question.
 pub fn stays_open_blocker_ids(text: &str) -> Vec<String> {
     let mut ids = Vec::new();
-    for body in stays_open_clause_bodies(text) {
-        if body.to_ascii_lowercase().contains("block") {
+    for clause in stays_open_blocker_clauses(text) {
+        for id in clause {
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+    }
+    ids
+}
+
+/// The ids each stays-open BLOCKER clause in `text` cites, one list per
+/// clause in order (see [`stays_open_blocker_ids`]). A blocker clause that
+/// cites no id yields an empty list.
+pub fn stays_open_blocker_clauses(text: &str) -> Vec<Vec<String>> {
+    stays_open_clause_bodies(text)
+        .into_iter()
+        .filter(|body| body.to_ascii_lowercase().contains("block"))
+        .map(|body| {
+            let mut ids: Vec<String> = Vec::new();
             for id in cited_hash_ids(body) {
                 if !ids.contains(&id) {
                     ids.push(id);
                 }
             }
-        }
-    }
-    ids
+            ids
+        })
+        .collect()
+}
+
+/// True when `id` is all digits: a pull request or issue number, a reference
+/// rather than a tracked-work id.
+fn is_reference_number(id: &str) -> bool {
+    id.chars().all(|c| c.is_ascii_digit())
 }
 
 /// The body of every `(stays open: ...)` clause in `text`, in order, with
@@ -112,18 +151,63 @@ pub struct QueueBlockers {
     /// (auto-DAG), and a head already in progress must not be preempted by a
     /// dependency edit (GH #162).
     clause_blocked: HashSet<String>,
+    /// `#gatedheadpending`: the text-only derivation of a document with an
+    /// external done archive found a blocker clause citing only ids absent
+    /// from the document, which an archive read could resolve. IO callers
+    /// rederive with [`Self::from_content_with_archived`] when this is set.
+    archive_lookup_needed: bool,
+}
+
+/// What the derivation knows about closed items outside the document text.
+#[derive(Clone, Copy)]
+enum ArchiveKnowledge<'a> {
+    /// Text only: trust the painted `⛔` for clauses an archive could resolve.
+    TextOnly,
+    /// The own ids of the document's external done archive.
+    Archived(&'a HashSet<String>),
 }
 
 impl QueueBlockers {
-    /// Derive the blocked set from `content` (see the module docs).
+    /// Derive the blocked set from `content` alone (see the module docs).
     pub fn from_content(content: &str) -> Self {
+        Self::derive(content, ArchiveKnowledge::TextOnly)
+    }
+
+    /// Derive the blocked set from `content` with the own ids of its external
+    /// done archive (`agent:done archive`), read by the caller. A clause that
+    /// cites an archived id is tracked work that closed, never an external
+    /// blocker.
+    pub fn from_content_with_archived(content: &str, archived: &HashSet<String>) -> Self {
+        Self::derive(content, ArchiveKnowledge::Archived(archived))
+    }
+
+    /// True when the text-only derivation left an external-blocker question an
+    /// archive read answers (see the `archive_lookup_needed` field).
+    pub fn archive_lookup_needed(&self) -> bool {
+        self.archive_lookup_needed
+    }
+
+    fn derive(content: &str, archive: ArchiveKnowledge<'_>) -> Self {
         let Ok(components) = element::parse(content) else {
             return Self::default();
         };
         // Open tracked items and every text that can carry their clauses.
         let mut open: HashSet<String> = HashSet::new();
         let mut texts: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        // `#gatedheadpending`: every id this document tracks or tracked, open
+        // or closed. A blocker clause that cites none of them is external.
+        let mut known: HashSet<String> = HashSet::new();
+        let mut external_archive = false;
         for comp in &components {
+            if element::is_backlog_done_component(&comp.name) {
+                external_archive |= comp.attrs.contains_key("archive");
+            }
+            if element::is_tracked_work_component(&comp.name)
+                || element::is_backlog_done_component(&comp.name)
+                || todo::is_todo_component(&comp.name)
+            {
+                known.extend(backlog::extract_done_item_own_ids(comp.content(content)));
+            }
             if !(element::is_backlog_component(&comp.name)
                 || element::is_review_component(&comp.name))
             {
@@ -159,6 +243,10 @@ impl QueueBlockers {
         if open.is_empty() {
             return Self::default();
         }
+        known.extend(open.iter().cloned());
+        if let ArchiveKnowledge::Archived(archived) = archive {
+            known.extend(archived.iter().map(|id| backlog::normalize_pending_id(id)));
+        }
         // `#blockerdisregard`: an operator record names the exact invented
         // edges to ignore. Parsing the comment does not call back into this
         // derivation. Edges the comment does not name still block.
@@ -180,11 +268,31 @@ impl QueueBlockers {
             true
         };
         let mut clause_blocked = HashSet::new();
+        // `#gatedheadpending`: external clauses, resolved after the tracked
+        // edges because the text-only resolution reads the painted rows.
+        let mut external: Vec<(String, Vec<String>)> = Vec::new();
         for (id, item_texts) in &texts {
             for text in item_texts {
-                for dep in stays_open_blocker_ids(text) {
-                    if add(id, &dep) {
-                        clause_blocked.insert(id.clone());
+                for clause in stays_open_blocker_clauses(text) {
+                    let cited: Vec<String> = clause
+                        .iter()
+                        .map(|dep| backlog::normalize_pending_id(dep))
+                        .filter(|dep| !dep.is_empty() && dep != id)
+                        .collect();
+                    if cited.iter().any(|dep| known.contains(dep)) {
+                        for dep in &cited {
+                            if add(id, dep) {
+                                clause_blocked.insert(id.clone());
+                            }
+                        }
+                    } else {
+                        let unknown: Vec<String> = cited
+                            .into_iter()
+                            .filter(|dep| !is_reference_number(dep))
+                            .collect();
+                        if !unknown.is_empty() {
+                            external.push((id.clone(), unknown));
+                        }
                     }
                 }
             }
@@ -198,9 +306,39 @@ impl QueueBlockers {
                 add(&id, dep);
             }
         }
+        let mut archive_lookup_needed = false;
+        let painted = match archive {
+            ArchiveKnowledge::TextOnly if external_archive && !external.is_empty() => {
+                archive_lookup_needed = true;
+                Some(painted_blocker_ids(content, &components))
+            }
+            _ => None,
+        };
+        for (id, deps) in external {
+            for dep in deps {
+                // Text only, with an external archive: the cited id may be a
+                // closed item the archive holds, so only the IO projection's
+                // painted `⛔` keeps it blocking until a rederivation.
+                if painted
+                    .as_ref()
+                    .is_some_and(|painted| !painted.get(&id).is_some_and(|ids| ids.contains(&dep)))
+                {
+                    continue;
+                }
+                if disregarded.ignores(&id, &dep) {
+                    continue;
+                }
+                let slot = by_item.entry(id.clone()).or_default();
+                if !slot.contains(&dep) {
+                    slot.push(dep);
+                }
+                clause_blocked.insert(id.clone());
+            }
+        }
         Self {
             by_item,
             clause_blocked,
+            archive_lookup_needed,
         }
     }
 
@@ -252,6 +390,36 @@ impl QueueBlockers {
 /// [`QueueBlockers::from_content`].
 pub fn queue_blockers(content: &str) -> QueueBlockers {
     QueueBlockers::from_content(content)
+}
+
+/// Blocker ids painted on live queue rows (`⛔ ⟦blocked by a, b⟧ do [#x]`),
+/// by the tracked item each row names.
+fn painted_blocker_ids(
+    content: &str,
+    components: &[element::Component],
+) -> BTreeMap<String, HashSet<String>> {
+    let mut painted: BTreeMap<String, HashSet<String>> = BTreeMap::new();
+    for comp in components.iter().filter(|comp| comp.name == "queue") {
+        let Ok(entries) = crate::document_queue::parse(comp.content(content)) else {
+            continue;
+        };
+        for entry in &entries {
+            let crate::document_queue::QueueEntry::Prompt(prompt) = entry else {
+                continue;
+            };
+            let ids = agent_doc_document::queue_projection::blocked_marker_ids(&prompt.text);
+            if ids.is_empty() {
+                continue;
+            }
+            if let QueueItemIdentity::Id(item) = crate::queue_claim::claim_identity(&prompt.text) {
+                painted
+                    .entry(backlog::normalize_pending_id(&item))
+                    .or_default()
+                    .extend(ids.iter().map(|id| backlog::normalize_pending_id(id)));
+            }
+        }
+    }
+    painted
 }
 
 #[cfg(test)]
@@ -393,6 +561,122 @@ mod tests {
             "the disregarded stays-open edge is no longer a drain deferral"
         );
         assert!(blockers.deferred_ids().contains("bossroom-stg-provision"));
+    }
+
+    /// `#gatedheadpending` (an sdk session, 2026-11-14): a worker handed back
+    /// `(stays open: blocked behind #vendorfix; ...)` naming a blocker the
+    /// document does not track. The head stayed a drainable `📥` that no
+    /// agent could advance. A clause citing no known id is an external
+    /// blocker: it blocks by the ids it cites until the clause changes.
+    fn external_doc(done: &str) -> String {
+        format!(
+            concat!(
+                "<!-- agent:queue -->\n",
+                "- 📥 do [#licensefix]\n",
+                "- 📥 do [#prnumber]\n",
+                "- 📥 do [#plain]\n",
+                "<!-- /agent:queue -->\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] [#licensefix] Remove the stale sentence. (stays open: blocked behind #vendorfix; the vendor PR still lacks the file)\n",
+                "- [ ] [#prnumber] Land the bump. (stays open: blocked behind PR #12)\n",
+                "- [ ] [#plain] Runnable work.\n",
+                "<!-- /agent:backlog -->\n",
+                "{}",
+            ),
+            done
+        )
+    }
+
+    #[test]
+    fn a_clause_naming_only_unknown_ids_is_an_external_blocker() {
+        let doc = external_doc("");
+        let blockers = queue_blockers(&doc);
+        assert_eq!(
+            blockers.blockers_for_id("licensefix"),
+            Some(&["vendorfix".to_string()][..])
+        );
+        assert!(blockers.deferred_ids().contains("licensefix"));
+        assert!(blockers.blocks_row("📥 do [#licensefix]"));
+        assert!(
+            !blockers.archive_lookup_needed(),
+            "without an external archive the text holds every closed item"
+        );
+        // A pull request number is a reference, never a blocker id.
+        assert_eq!(blockers.blockers_for_id("prnumber"), None);
+        // An item with no blocker clause still runs.
+        assert_eq!(blockers.blockers_for_id("plain"), None);
+
+        // Dropping the clause, or recording a disregard, releases the row.
+        let cleared = doc.replace(
+            " (stays open: blocked behind #vendorfix; the vendor PR still lacks the file)",
+            "",
+        );
+        assert!(queue_blockers(&cleared).is_empty());
+        let disregarded =
+            format!("<!-- agent-doc:blocker-disregard queue=licensefix:vendorfix -->\n{doc}");
+        assert_eq!(
+            queue_blockers(&disregarded).blockers_for_id("licensefix"),
+            None
+        );
+    }
+
+    #[test]
+    fn a_closed_or_archived_blocker_is_resolved_not_external() {
+        // Closed in place, or reaped into the inline `agent:done`.
+        let closed =
+            external_doc("<!-- agent:todo -->\n- [x] [#vendorfix] merged\n<!-- /agent:todo -->\n");
+        assert_eq!(queue_blockers(&closed).blockers_for_id("licensefix"), None);
+        let inline_done = external_doc(
+            "<!-- agent:done -->\n- 2026-11-14 [#vendorfix] merged\n<!-- /agent:done -->\n",
+        );
+        assert_eq!(
+            queue_blockers(&inline_done).blockers_for_id("licensefix"),
+            None
+        );
+        // An open tracked blocker blocks by that id, as before.
+        let open =
+            external_doc("<!-- agent:todo -->\n- [ ] [#vendorfix] land it\n<!-- /agent:todo -->\n");
+        assert_eq!(
+            queue_blockers(&open).blockers_for_id("licensefix"),
+            Some(&["vendorfix".to_string()][..])
+        );
+
+        // With an external archive the text cannot tell an archived blocker
+        // from an unknown one: the archive ids decide.
+        let archived_doc = external_doc(
+            "<!-- agent:done archive -->\n<!-- completed work archived in x.done.md -->\n<!-- /agent:done -->\n",
+        );
+        let text_only = queue_blockers(&archived_doc);
+        assert!(text_only.archive_lookup_needed());
+        assert_eq!(
+            text_only.blockers_for_id("licensefix"),
+            None,
+            "unpainted and unresolved, the text-only read keeps the row runnable"
+        );
+        let in_archive: HashSet<String> = ["vendorfix".to_string()].into();
+        assert_eq!(
+            QueueBlockers::from_content_with_archived(&archived_doc, &in_archive)
+                .blockers_for_id("licensefix"),
+            None
+        );
+        let elsewhere: HashSet<String> = ["unrelated".to_string()].into();
+        let resolved = QueueBlockers::from_content_with_archived(&archived_doc, &elsewhere);
+        assert_eq!(
+            resolved.blockers_for_id("licensefix"),
+            Some(&["vendorfix".to_string()][..])
+        );
+        assert!(!resolved.archive_lookup_needed());
+
+        // Once the IO projection painted the row, text-only readers (drain
+        // gates, dispatch facts) agree with it.
+        let painted = archived_doc.replace(
+            "- 📥 do [#licensefix]",
+            "- ⛔ ⟦blocked by vendorfix⟧ do [#licensefix]",
+        );
+        assert_eq!(
+            queue_blockers(&painted).blockers_for_id("licensefix"),
+            Some(&["vendorfix".to_string()][..])
+        );
     }
 
     #[test]

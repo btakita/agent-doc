@@ -539,6 +539,7 @@ pub fn deferred_backlog_ids_split(content: &str, scope: DrainScope) -> DeferredB
         }
         let body = &content[comp.open_end..comp.close_start];
         for (id, ctx) in backlog::active_item_execution_contexts(body) {
+            let ctx = operator_request_item_context(&id, ctx);
             let undrainable = match scope {
                 DrainScope::InSessionLoop => ctx.loop_undrainable(),
                 DrainScope::Supervisor => ctx.supervisor_undrainable(),
@@ -567,6 +568,48 @@ pub fn deferred_backlog_ids_split(content: &str, scope: DrainScope) -> DeferredB
     }
     deferred.blocked = blockers.blocked_ids();
     deferred
+}
+
+/// `#gatedheadpending`: an open tracked item whose own id is a reserved
+/// operator-request id (`subagent-operator-request-…`) IS an operator
+/// question, so its `do [#id]` head waits on the operator exactly as an
+/// `[operator-verify]` item does. No agent drain scope runs it, preflight
+/// projects `⏳`, and an inline operator verdict on the head (`do [#id]: …`)
+/// or an answer row is the operator input that releases it.
+fn operator_request_item_context(
+    id: &str,
+    ctx: backlog::ExecutionContext,
+) -> backlog::ExecutionContext {
+    if agent_doc_document::queue_projection::is_reserved_operator_action_id(id) {
+        backlog::ExecutionContext {
+            operator_verify_required: true,
+            ..ctx
+        }
+    } else {
+        ctx
+    }
+}
+
+/// `#gatedheadpending`: the reserved operator-request id a `do
+/// [#subagent-operator-request-…]` head names, lowercased. Projection readers
+/// strip a reserved id as a request annotation, so a head whose work IS that
+/// request reads as having no id; this recovers it for the item gates.
+pub fn reserved_request_head_id(text: &str) -> Option<String> {
+    extract_head_id(text)
+        .filter(|id| agent_doc_document::queue_projection::is_reserved_operator_action_id(id))
+        .map(|id| id.to_ascii_lowercase())
+}
+
+/// True when `head` carries the operator's input for the item it names: an
+/// inline verdict (`do [#id]: …`, `#opverifyanswered`) or an operator answer
+/// row (`[#subagent-operator-request-…]: …`, or that id with the answer nested
+/// beneath it, `#queueoperatoranswer`).
+pub fn head_answers_operator(head: &str) -> bool {
+    head_carries_operator_verdict(head)
+        || agent_doc_document::queue_projection::operator_answer_row_request_id(head).is_some()
+        || reserved_request_head_id(head).is_some_and(|id| {
+            agent_doc_document::queue_projection::operator_action_is_answered(head, &id, "do")
+        })
 }
 
 /// Active backlog ids, lowercased, carrying `[clean-session]`.
@@ -791,7 +834,7 @@ pub fn awaiting_operator_head_ids(content: &str) -> HashSet<String> {
     let gated_review = gated_review_ids(content);
     document_queue::prompts(&entries)
         .into_iter()
-        .filter(|prompt| !head_carries_operator_verdict(&prompt.text))
+        .filter(|prompt| !head_answers_operator(&prompt.text))
         .filter_map(|prompt| extract_head_id(&prompt.text))
         .map(|id| id.to_ascii_lowercase())
         // `#queueblocked`: a blocked head shows `⛔`, never `⏳`. Its agent
@@ -1218,7 +1261,17 @@ pub fn dispatchable_head_prompt_text_excluding_claimed_with_presets(
     }
     let deferred = deferred_backlog_ids_split(content, scope);
     match extract_head_id(&head) {
-        Some(id) if deferred.defers(&id, false) => None,
+        // `#gatedheadpending`: an answer row answers an operator-request
+        // item; it never defers on the request it answers.
+        Some(id)
+            if deferred.defers(
+                &id,
+                agent_doc_document::queue_projection::operator_answer_row_request_id(&head)
+                    .is_some(),
+            ) =>
+        {
+            None
+        }
         _ => Some(head),
     }
 }
@@ -1273,7 +1326,17 @@ pub fn dispatchable_head_prompt_text_for_owner(
     }
     let deferred = deferred_backlog_ids_split(content, scope);
     match extract_head_id(&head) {
-        Some(id) if deferred.defers(&id, false) => None,
+        // `#gatedheadpending`: an answer row answers an operator-request
+        // item; it never defers on the request it answers.
+        Some(id)
+            if deferred.defers(
+                &id,
+                agent_doc_document::queue_projection::operator_answer_row_request_id(&head)
+                    .is_some(),
+            ) =>
+        {
+            None
+        }
         _ => Some(head),
     }
 }
@@ -1805,7 +1868,9 @@ fn head_is_drainable(
     match tracked_head_id(text, preset_only_ids) {
         Some(id) => {
             let norm = id.to_ascii_lowercase();
-            if deferred_ids.defers(&norm, operator_answered) {
+            // `#gatedheadpending`: an answer row is the operator input an
+            // operator-request item waits for, so it never defers on it.
+            if deferred_ids.defers(&norm, operator_answered || head_answers_operator(text)) {
                 return false;
             }
             match open_backlog_ids {
@@ -3112,6 +3177,49 @@ mod tests {
     /// tag) and gated review rows wait on the operator; a plain open item, a
     /// `[focused-cycle]` item, and a head carrying an inline operator verdict
     /// do not.
+    /// `#gatedheadpending`: a tracked item that is itself an open operator
+    /// request (`[#subagent-operator-request-…]`) waits on the operator like
+    /// `[operator-verify]`: `⏳`, deferred in every drain scope, never the
+    /// drainable head. The operator's inline answer releases it.
+    #[test]
+    fn an_operator_request_item_head_awaits_the_operator() {
+        let request = "subagent-operator-request-pushchoice";
+        let content = doc_with_backlog(
+            &[&format!("do [#{request}]"), "do [#plain]"],
+            &[
+                &format!(
+                    "- [ ] [#{request}] Push the branches, or keep them local? (choices: push, keep-local)"
+                ),
+                "- [ ] [#plain] runnable",
+            ],
+        );
+        assert!(awaiting_operator_head_ids(&content).contains(request));
+        assert!(deferred_backlog_ids(&content).contains(request));
+        assert!(supervisor_deferred_backlog_ids(&content).contains(request));
+        assert_eq!(drainable_head_count(&content), 1);
+        assert_eq!(
+            drainable_head_prompt_for_scope(&content, DrainScope::Supervisor)
+                .map(|prompt| prompt.text),
+            Some("do [#plain]".to_string())
+        );
+
+        let answered = content.replace(
+            &format!("- do [#{request}]\n"),
+            &format!("- do [#{request}]: push\n"),
+        );
+        assert!(!awaiting_operator_head_ids(&answered).contains(request));
+        // A child line under the head answers it too.
+        assert!(head_answers_operator(&format!("do [#{request}]\n  - push")));
+        assert!(!head_answers_operator(&format!("do [#{request}]")));
+        let head = format!("do [#{request}]: push");
+        assert!(head_answers_operator(&head));
+        assert!(
+            !deferred_backlog_ids_split(&answered, DrainScope::Supervisor)
+                .defers(request, head_answers_operator(&head)),
+            "the answer satisfies the operator gate"
+        );
+    }
+
     #[test]
     fn awaiting_operator_head_ids_names_heads_whose_agent_work_is_done() {
         let mut content = doc_with_backlog(

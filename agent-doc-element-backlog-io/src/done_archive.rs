@@ -244,6 +244,45 @@ pub fn external_done_archive_ids(file: &Path, content: &str) -> Result<HashSet<S
     Ok(ids)
 }
 
+/// `#gatedheadpending`: the external done archive ids a blocker derivation of
+/// `content` needs, or `None` when the text-only derivation is already exact
+/// (no external archive, or no blocker clause that cites only ids absent from
+/// the document). An unreadable archive is reported and also `None`, which
+/// keeps the text-only derivation.
+pub fn blocker_archive_ids(file: &Path, content: &str) -> Option<HashSet<String>> {
+    if !agent_doc_queue::queue_blocked::QueueBlockers::from_content(content).archive_lookup_needed()
+    {
+        return None;
+    }
+    match external_done_archive_ids(file, content) {
+        Ok(ids) => Some(ids),
+        Err(err) => {
+            eprintln!(
+                "[agent-doc] could not read the done archive of {} to resolve stays-open blockers; keeping the painted blockers: {err:#}",
+                file.display()
+            );
+            None
+        }
+    }
+}
+
+/// `#gatedheadpending`: the queue blockers of `content`, with the external
+/// done archive read when a stays-open clause needs it (see
+/// [`blocker_archive_ids`]).
+pub fn queue_blockers_for_document(
+    file: &Path,
+    content: &str,
+) -> agent_doc_queue::queue_blocked::QueueBlockers {
+    match blocker_archive_ids(file, content) {
+        Some(archived) => {
+            agent_doc_queue::queue_blocked::QueueBlockers::from_content_with_archived(
+                content, &archived,
+            )
+        }
+        None => agent_doc_queue::queue_blocked::QueueBlockers::from_content(content),
+    }
+}
+
 /// Remove every archived entry whose own leading id matches `id` and recover
 /// the newest matching item as an open tracked-work item.
 ///

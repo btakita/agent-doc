@@ -4944,6 +4944,40 @@ pub enum CloseoutOwnerClaimAuthorization {
 }
 
 impl CloseoutOwnerClaimAuthorization {
+    /// `#resumemaintrace`: an exact retained continuation succeeds only a
+    /// foreground owner that has left its document apply transaction.
+    ///
+    /// A live `respond`/`write --commit` holds the document's queue apply
+    /// capability from its first mutation through response, queue lifecycle,
+    /// and commit. A continuation that took the closeout lease from it could
+    /// not mutate anything (its own apply acquisition is refused as
+    /// `queue mutation deferred`), while the displaced foreground's next fenced
+    /// effect observed a lost lease (`closeout owner lease ... was lost`,
+    /// `terminal closeout effect did not close the owned cycle`). Both sides
+    /// failed one closeout that the foreground was completing.
+    ///
+    /// `live_apply_holder_pid` is the pid of the live process that holds the
+    /// document's apply transaction, if any. When it is the incumbent
+    /// foreground owner's pid, the handoff is withheld and the continuation is
+    /// ordinary mutually-exclusive recovery again: it waits on the
+    /// foreground's release (or the cycle's terminal edge), never a lease
+    /// timer.
+    #[must_use]
+    pub fn yield_to_incumbent_apply_transaction(
+        self,
+        incumbent: Option<&CloseoutOwnerProjection>,
+        live_apply_holder_pid: Option<u32>,
+    ) -> Self {
+        let incumbent_in_transaction = incumbent.is_some_and(|owner| {
+            owner.role == CLOSEOUT_OWNER_ROLE_FOREGROUND_FINALIZE
+                && live_apply_holder_pid == Some(owner.owner_pid)
+        });
+        match self {
+            Self::RetainedContinuation { .. } if incumbent_in_transaction => Self::Exclusive,
+            other => other,
+        }
+    }
+
     fn authorizes_retained_continuation_handoff(
         &self,
         closeout: &CloseoutProjection,
@@ -7133,6 +7167,85 @@ mod tests {
                 "stale continuation identity must not displace a live owner"
             );
         }
+    }
+
+    /// `#resumemaintrace`: the exact continuation must not displace a live
+    /// foreground finalize that still holds the document apply transaction.
+    #[test]
+    fn exact_retained_continuation_yields_to_a_foreground_inside_its_apply_transaction() {
+        let foreground = CloseoutOwnerProjection {
+            cycle_id: "cycle-1".into(),
+            owner_id: "foreground-1".into(),
+            owner_token: "token-foreground".into(),
+            owner_pid: 101,
+            role: CLOSEOUT_OWNER_ROLE_FOREGROUND_FINALIZE.into(),
+            claimed_secs: 10,
+            expires_secs: 310,
+        };
+        let projection = CloseoutProjection {
+            cycle_id: Some("cycle-1".into()),
+            phase: Some(CyclePhase::WriteApplied),
+            capture_id: Some("capture-1".into()),
+            response_sha256: Some("response-1".into()),
+            owner: Some(foreground.clone()),
+            ..CloseoutProjection::default()
+        };
+        let resume = CloseoutOwnerClaimRequest {
+            expected_cycle_id: Some("cycle-1".into()),
+            owner_id: "captured-resume-1".into(),
+            owner_pid: 202,
+            role: CLOSEOUT_OWNER_ROLE_CAPTURED_FINALIZE_RESUME.into(),
+            now_secs: 20,
+            lease_secs: 30,
+            allow_dead_owner_takeover: false,
+        };
+        let exact = || CloseoutOwnerClaimAuthorization::RetainedContinuation {
+            cycle_id: "cycle-1".into(),
+            capture_id: "capture-1".into(),
+            response_sha256: "response-1".into(),
+        };
+
+        let in_transaction =
+            exact().yield_to_incumbent_apply_transaction(Some(&foreground), Some(101));
+        assert_eq!(in_transaction, CloseoutOwnerClaimAuthorization::Exclusive);
+        assert_eq!(
+            projection.decide_owner_claim_with_authorization(&resume, Some(true), &in_transaction),
+            CloseoutOwnerClaimOutcome::HeldByOther(foreground.clone()),
+            "a foreground inside its apply transaction keeps its closeout lease"
+        );
+
+        for holder in [None, Some(202), Some(303)] {
+            let authorization =
+                exact().yield_to_incumbent_apply_transaction(Some(&foreground), holder);
+            assert_eq!(
+                authorization,
+                exact(),
+                "holder {holder:?} is not the incumbent"
+            );
+            assert!(matches!(
+                projection.decide_owner_claim_with_authorization(
+                    &resume,
+                    Some(true),
+                    &authorization
+                ),
+                CloseoutOwnerClaimOutcome::Acquired(CloseoutOwnerProjection { owner_pid: 202, .. })
+            ));
+        }
+
+        let recovery = CloseoutOwnerProjection {
+            role: "session_check_recovery".into(),
+            ..foreground.clone()
+        };
+        assert_eq!(
+            exact().yield_to_incumbent_apply_transaction(Some(&recovery), Some(101)),
+            exact(),
+            "only a foreground finalize incumbent is protected by this rule"
+        );
+        assert_eq!(
+            CloseoutOwnerClaimAuthorization::Exclusive
+                .yield_to_incumbent_apply_transaction(Some(&foreground), Some(101)),
+            CloseoutOwnerClaimAuthorization::Exclusive
+        );
     }
 
     #[test]

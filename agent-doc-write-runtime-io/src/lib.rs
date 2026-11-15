@@ -3091,6 +3091,121 @@ const DEFERRED_TRACKED_WORK_CONVERGENCE_WAIT: std::time::Duration =
 const DEFERRED_TRACKED_WORK_CONVERGENCE_SLICE: std::time::Duration =
     std::time::Duration::from_secs(2);
 
+struct CrossDocumentAddWitness {
+    target: std::path::PathBuf,
+    needles: Vec<String>,
+}
+
+/// `#crossdocdefer`: `--backlog-add-to` retains the target path. The source
+/// closeout must witness that path, not only itself.
+fn cross_document_add_witness(
+    closeout: &Path,
+    message: &str,
+    pending_add_to: &[String],
+) -> Option<CrossDocumentAddWitness> {
+    let subject = agent_doc_turn::write_ownership::cross_document_retained_target(
+        message,
+        &closeout.display().to_string(),
+    )?;
+    if Path::new(subject) == closeout {
+        return None;
+    }
+    let target = std::path::PathBuf::from(subject);
+    let needles = pending_add_to
+        .chunks(2)
+        .filter_map(|pair| {
+            let [path, text] = pair else { return None };
+            if Path::new(path) != target && path != subject {
+                return None;
+            }
+            Some(
+                agent_doc_element_backlog::backlog::explicit_custom_id(text)
+                    .map(|id| format!("[#{id}]"))
+                    .unwrap_or_else(|| text.trim().to_string()),
+            )
+        })
+        .filter(|needle| !needle.is_empty())
+        .collect();
+    Some(CrossDocumentAddWitness { target, needles })
+}
+
+fn delivery_converged_for(file: &Path, budget: std::time::Duration) -> bool {
+    match agent_doc_controller_io::project_controller::await_delivery_convergence_for_file(
+        file, budget,
+    ) {
+        Ok(Some(status)) => status.converged,
+        // No relay hub: disk/authority is the whole proof.
+        Ok(None) => true,
+        Err(_) => false,
+    }
+}
+
+fn cross_document_add_unlanded(
+    witness: &CrossDocumentAddWitness,
+    force_disk: bool,
+) -> Option<bool> {
+    if witness.needles.is_empty() {
+        return None;
+    }
+    let content = if force_disk {
+        std::fs::read_to_string(&witness.target).ok()?
+    } else {
+        resolve_current_document(&witness.target, "cross_document_add_witness")
+            .ok()?
+            .into_content()
+    };
+    Some(
+        witness
+            .needles
+            .iter()
+            .any(|needle| !content.contains(needle.as_str())),
+    )
+}
+
+/// Commit a cross-document add whose target has no open cycle of its own.
+/// An open target cycle owns that commit; committing it here would close
+/// another session's in-flight turn.
+fn commit_settled_cross_document_add(target: &Path) -> Result<()> {
+    if !agent_doc_git_io::status::is_in_git_repo(target) {
+        return Ok(());
+    }
+    let open = agent_doc_cycle_state_io::load_with_closeout_projection(target)?
+        .is_some_and(|state| state.phase.is_open());
+    if open {
+        agent_doc_ops_log_io::log_op(
+            target,
+            &format!(
+                "cross_document_backlog_add_visible_uncommitted file={} reason=target_cycle_open",
+                target.display()
+            ),
+        );
+        return Ok(());
+    }
+    // A closed cycle can still carry another session's response, prompt, or
+    // steering. `commit_document_only_drift` then either refuses or falls
+    // through to a scoped commit. Visibility is the gate; only a drift that
+    // the document-only predicate already calls safe is committed here.
+    if !agent_doc_commit_io::current_document_only_drift_is_safe_to_commit(target) {
+        agent_doc_ops_log_io::log_op(
+            target,
+            &format!(
+                "cross_document_backlog_add_visible_uncommitted file={} reason=document_only_drift_unsafe",
+                target.display()
+            ),
+        );
+        return Ok(());
+    }
+    let did_commit = agent_doc_commit_io::commit_document_only_drift(target)?;
+    agent_doc_ops_log_io::log_op(
+        target,
+        &format!(
+            "cross_document_backlog_add_committed file={} did_commit={did_commit}",
+            target.display()
+        ),
+    );
+    Ok(())
+}
+
 /// `#retaineddeferwedge`: bounded await for a deferred tracked-work closeout.
 ///
 /// Returns `Ok(())` once delivery is observed converged and this cycle's
@@ -3098,40 +3213,63 @@ const DEFERRED_TRACKED_WORK_CONVERGENCE_SLICE: std::time::Duration =
 /// into queue consumption and the commit. Otherwise returns the timeout error:
 /// an uncommitted closeout must never be reported as success.
 fn await_deferred_tracked_work_commit(file: &Path, force_disk: bool) -> Result<()> {
+    await_deferred_tracked_work_commit_including(file, force_disk, None)
+}
+
+fn await_deferred_tracked_work_commit_including(
+    file: &Path,
+    force_disk: bool,
+    cross: Option<&CrossDocumentAddWitness>,
+) -> Result<()> {
     use agent_doc_turn::write_ownership::{
         DeferredTrackedWorkResolution, deferred_tracked_work_timeout_message,
-        resolve_deferred_tracked_work,
+        resolve_cross_document_deferred_tracked_work, resolve_deferred_tracked_work,
     };
     let started = std::time::Instant::now();
     let deadline = started + DEFERRED_TRACKED_WORK_CONVERGENCE_WAIT;
     loop {
         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        let slice = remaining.min(DEFERRED_TRACKED_WORK_CONVERGENCE_SLICE);
         // `Ok(None)`: the controller hosts no relay hub for the document, so
         // there is no editor delivery left to await; the landing check below
         // is then the whole proof. `Err`: the controller could not be asked —
         // unproven, keep waiting.
-        let delivery_converged =
-            match agent_doc_controller_io::project_controller::await_delivery_convergence_for_file(
-                file,
-                remaining.min(DEFERRED_TRACKED_WORK_CONVERGENCE_SLICE),
-            ) {
-                Ok(Some(status)) => status.converged,
-                Ok(None) => true,
-                Err(_) => false,
-            };
+        let delivery_converged = delivery_converged_for(file, slice);
         let unlanded = if delivery_converged {
             recorded_tracked_work_unlanded_now(file, force_disk, true)
         } else {
             None
         };
-        match resolve_deferred_tracked_work(delivery_converged, unlanded) {
+        let resolution = if let Some(cross) = cross {
+            let target_converged = delivery_converged_for(&cross.target, slice);
+            let target_unlanded = if target_converged {
+                cross_document_add_unlanded(cross, force_disk)
+            } else {
+                None
+            };
+            resolve_cross_document_deferred_tracked_work(
+                delivery_converged,
+                unlanded,
+                target_converged,
+                target_unlanded,
+            )
+        } else {
+            resolve_deferred_tracked_work(delivery_converged, unlanded)
+        };
+        match resolution {
             DeferredTrackedWorkResolution::ContinueToCommit => {
+                if let Some(cross) = cross {
+                    commit_settled_cross_document_add(&cross.target)?;
+                }
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "tracked_work_deferral_converged_continue_commit file={} waited_ms={}",
+                        "tracked_work_deferral_converged_continue_commit file={} waited_ms={} cross_target={}",
                         file.display(),
-                        started.elapsed().as_millis()
+                        started.elapsed().as_millis(),
+                        cross
+                            .map(|cross| cross.target.display().to_string())
+                            .unwrap_or_else(|| "-".to_string())
                     ),
                 );
                 return Ok(());
@@ -3142,15 +3280,27 @@ fn await_deferred_tracked_work_commit(file: &Path, force_disk: bool) -> Result<(
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "tracked_work_deferral_convergence_timeout file={} waited_ms={} delivery_converged={} unlanded={:?}",
+                    "tracked_work_deferral_convergence_timeout file={} waited_ms={} delivery_converged={} unlanded={:?} cross_target={}",
                     file.display(),
                     started.elapsed().as_millis(),
                     delivery_converged,
-                    unlanded
+                    unlanded,
+                    cross
+                        .map(|cross| cross.target.display().to_string())
+                        .unwrap_or_else(|| "-".to_string())
                 ),
             );
+            let named = cross
+                .map(|cross| {
+                    format!(
+                        "{} (cross-document target {})",
+                        file.display(),
+                        cross.target.display()
+                    )
+                })
+                .unwrap_or_else(|| file.display().to_string());
             anyhow::bail!(deferred_tracked_work_timeout_message(
-                &file.display().to_string(),
+                &named,
                 DEFERRED_TRACKED_WORK_CONVERGENCE_WAIT.as_secs()
             ));
         }
@@ -4251,7 +4401,14 @@ fn run_command_inner_within_pass(
                     // `#retaineddeferwedge`: this command is the only owner of
                     // the cycle's commit. Await convergence, then finish the
                     // ordinary closeout tail; never exit 0 uncommitted.
-                    await_deferred_tracked_work_commit(file, options.force_disk)?;
+                    // `#crossdocdefer`: a `--backlog-add-to` refusal names the
+                    // other document. Source convergence is not that landing.
+                    let cross = cross_document_add_witness(file, &message, &options.pending_add_to);
+                    await_deferred_tracked_work_commit_including(
+                        file,
+                        options.force_disk,
+                        cross.as_ref(),
+                    )?;
                     // GH #123: the retained envelope has now landed, but the
                     // apply closure stopped at the retained transaction before
                     // recording this cycle's structured outcomes. Record them

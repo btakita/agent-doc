@@ -1304,6 +1304,49 @@ pub fn resolve_deferred_tracked_work(
     }
 }
 
+/// Path named by a lazy-delivery refusal: `visible document write for {path} is retained...`.
+///
+/// `#crossdocdefer`: `--backlog-add-to` retains the target document, not the
+/// closeout file. Callers that only await the closeout file treat that
+/// refusal as landed once the source response converges.
+pub fn retained_lazy_delivery_write_path(message: &str) -> Option<&str> {
+    const PREFIX: &str = "visible document write for ";
+    const SUFFIX: &str = " is retained by the lazy delivery projection";
+    let start = message.find(PREFIX)? + PREFIX.len();
+    let rest = &message[start..];
+    let end = rest.find(SUFFIX)?;
+    let path = rest[..end].trim();
+    if path.is_empty() { None } else { Some(path) }
+}
+
+/// The retained write's path when it is a different document than `closeout`.
+pub fn cross_document_retained_target<'a>(message: &'a str, closeout: &str) -> Option<&'a str> {
+    let path = retained_lazy_delivery_write_path(message)?;
+    if path == closeout { None } else { Some(path) }
+}
+
+/// A cross-document deferral continues only when the source closeout AND the
+/// named target have both converged and landed.
+///
+/// Source convergence alone is not the target's landing. Observed 2026-11-15:
+/// sdk-dev's `--backlog-add-to` of `#crossagenthandoff` into agent-doc-bugs.md
+/// was retained (`delivery_converged=false`), then
+/// `tracked_work_deferral_converged_continue_commit waited_ms=3` because
+/// sdk-dev itself had already converged. The bugs row stayed out of HEAD.
+pub fn resolve_cross_document_deferred_tracked_work(
+    source_delivery_converged: bool,
+    source_unlanded: Option<bool>,
+    target_delivery_converged: bool,
+    target_unlanded: Option<bool>,
+) -> DeferredTrackedWorkResolution {
+    if resolve_deferred_tracked_work(source_delivery_converged, source_unlanded)
+        != DeferredTrackedWorkResolution::ContinueToCommit
+    {
+        return DeferredTrackedWorkResolution::StillRetained;
+    }
+    resolve_deferred_tracked_work(target_delivery_converged, target_unlanded)
+}
+
 /// The message a deferred closeout renders when its convergence wait expires.
 /// It names the one remedy every recovery surface agrees on: the response half
 /// is in the authority but not in HEAD, which `commit` refuses and
@@ -1467,6 +1510,41 @@ mod tests {
             "{message}"
         );
         assert!(!message.contains("agent-doc commit doc.md"), "{message}");
+    }
+
+    /// `#crossdocdefer`: a `--backlog-add-to` refusal names the target file.
+    /// Source convergence does not prove that target landed.
+    #[test]
+    fn cross_document_deferral_waits_for_the_target_document() {
+        use DeferredTrackedWorkResolution::*;
+        let refusal = "visible document write for /repo/tasks/agent-doc-bugs.md is retained \
+             by the lazy delivery projection because the editor state projection has not converged";
+        assert_eq!(
+            cross_document_retained_target(refusal, "/repo/tasks/sdk-dev.md"),
+            Some("/repo/tasks/agent-doc-bugs.md")
+        );
+        assert_eq!(
+            cross_document_retained_target(refusal, "/repo/tasks/agent-doc-bugs.md"),
+            None,
+            "a refusal of the closeout file itself stays on the source witness"
+        );
+        assert_eq!(
+            resolve_cross_document_deferred_tracked_work(true, Some(false), true, Some(false)),
+            ContinueToCommit
+        );
+        assert_eq!(
+            resolve_cross_document_deferred_tracked_work(true, Some(false), false, Some(false)),
+            StillRetained,
+            "source convergence must not continue while the target delivery is open"
+        );
+        assert_eq!(
+            resolve_cross_document_deferred_tracked_work(true, Some(false), true, Some(true)),
+            StillRetained
+        );
+        assert_eq!(
+            resolve_cross_document_deferred_tracked_work(true, Some(false), true, None),
+            StillRetained
+        );
     }
 
     /// `#retainedprojexit1`: the closeout's mutation phase must never call a

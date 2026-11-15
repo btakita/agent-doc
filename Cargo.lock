@@ -3262,6 +3262,7 @@ dependencies = [
  "agent-doc-answer-ledger",
  "agent-doc-capture-io",
  "agent-doc-closeout-runtime-io",
+ "agent-doc-commit-io",
  "agent-doc-controller-io",
  "agent-doc-crdt-relay-io",
  "agent-doc-cycle-state-io",

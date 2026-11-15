@@ -577,13 +577,14 @@ fn run_with_options_to_writer_in_pass(
     // and/or protocol boundary markers. Normalize that evidence-backed shape
     // through Lazily before the generic integrity gate; otherwise the gate
     // blocks the recovery that can safely collapse it.
-    if let Some(normalized) =
-        agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication_for_file(
+    if let Some(candidate) =
+        agent_doc_document_realtime_io::prepare_recoverable_response_replay_recovery_for_file(
             file,
             &content,
             "preflight_response_replay_dedup",
         )?
     {
+        let normalized = candidate.content.clone();
         let disk = agent_doc_document_realtime_io::resolve_disk_current_document_content(
             file,
             "preflight_response_replay_dedup_trusted_disk",
@@ -643,6 +644,7 @@ fn run_with_options_to_writer_in_pass(
                 agent_doc_hash::content_hash(&content),
             ),
         );
+        agent_doc_document_realtime_io::report_applied_response_replay_recovery(file, &candidate);
     }
     // A retired retained intent can still have one already-queued editor effect.
     // If that effect concatenates two complete committed projections, there is no

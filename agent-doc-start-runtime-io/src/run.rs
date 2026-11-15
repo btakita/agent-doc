@@ -625,20 +625,37 @@ fn document_without_matching_resume_id(
     Ok(Some(frontmatter::write_preserving(current, &fm, body)?))
 }
 
+/// The stale-resume writeback target plus the replay recovery it folds in, so
+/// the applied-recovery warning prints only once the write lands
+/// (`#probewarnrestored`).
+struct StaleResumeClearTarget {
+    content: String,
+    replay_recovery: Option<agent_doc_document_realtime_io::ResponseReplayRecoveryCandidate>,
+}
+
 fn stale_resume_clear_target(
     file: &Path,
     current: &str,
     harness: &str,
     id: &str,
-) -> Result<Option<String>> {
-    let normalized =
-        agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication_for_file(
+) -> Result<Option<StaleResumeClearTarget>> {
+    let replay_recovery =
+        agent_doc_document_realtime_io::prepare_recoverable_response_replay_recovery_for_file(
             file,
             current,
             "start_stale_resume_clear",
-        )?
-        .unwrap_or_else(|| current.to_string());
-    document_without_matching_resume_id(&normalized, harness, id)
+        )?;
+    let normalized = replay_recovery
+        .as_ref()
+        .map_or(current, |candidate| candidate.content.as_str());
+    Ok(
+        document_without_matching_resume_id(normalized, harness, id)?.map(|content| {
+            StaleResumeClearTarget {
+                content,
+                replay_recovery,
+            }
+        }),
+    )
 }
 
 fn clear_document_resume_id_if_matches(file: &Path, harness: &str, id: &str) -> Result<bool> {
@@ -651,10 +668,13 @@ fn clear_document_resume_id_if_matches(file: &Path, harness: &str, id: &str) -> 
     };
     agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
         file,
-        &updated,
+        &updated.content,
         &current,
         "start_stale_resume_clear",
     )?;
+    if let Some(candidate) = &updated.replay_recovery {
+        agent_doc_document_realtime_io::report_applied_response_replay_recovery(file, candidate);
+    }
     Ok(true)
 }
 
@@ -3690,7 +3710,8 @@ mod tests {
 
         let updated = stale_resume_clear_target(file, &corrupted, "codex", "stale-id")
             .unwrap()
-            .expect("matching stale pointer and exact suffix are repairable");
+            .expect("matching stale pointer and exact suffix are repairable")
+            .content;
         let (fm, _) = frontmatter::parse(&updated).unwrap();
         assert_eq!(fm.resume, None);
         assert_eq!(

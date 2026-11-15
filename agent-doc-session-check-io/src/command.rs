@@ -2137,19 +2137,28 @@ fn committed_historical_snapshot_drift_heal(
 
 /// `#sessioncheckread`: the response-replay canonicalization a self-healing
 /// caller would apply (to the visible document) or commit (from `HEAD`).
+///
+/// `#probewarnrestored`: this probe prepares the candidate without applying
+/// it, so it never prints the applied "restored" warning; an interrupted
+/// empty response heading is reported in the pending detail as "would restore".
 fn pending_response_replay_canonicalization(file: &Path) -> Result<Option<&'static str>> {
     let current = crate::resolve_current_document_content(
         file,
         "session_check_response_replay_dedup_pending_current",
     )?;
-    if let Some(normalized) =
-        agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication_for_file(
+    if let Some(candidate) =
+        agent_doc_document_realtime_io::prepare_recoverable_response_replay_recovery_for_file(
             file,
             &current,
             "session_check_response_replay_dedup_pending",
         )?
-        && normalized != current
+        && candidate.content != current
     {
+        if candidate.restores_interrupted_empty_shell {
+            return Ok(Some(
+                "the visible document carries an interrupted empty response heading that a self-healing check would restore (pending) from exact retained-capture and baseline evidence and commit",
+            ));
+        }
         return Ok(Some(
             "the visible document carries a recoverable same-topic response replay that would be canonicalized losslessly and committed",
         ));
@@ -4252,8 +4261,8 @@ fn self_heal_response_replay_duplication(
         file,
         "session_check_response_replay_dedup_current",
     )?;
-    let Some(normalized) =
-        agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication_for_file(
+    let Some(candidate) =
+        agent_doc_document_realtime_io::prepare_recoverable_response_replay_recovery_for_file(
             file,
             &current,
             "session_check_response_replay_dedup",
@@ -4261,6 +4270,7 @@ fn self_heal_response_replay_duplication(
     else {
         return Ok(false);
     };
+    let normalized = candidate.content.clone();
     // `#dedupnoopretain`: a "repair" byte-identical to current content is not a
     // repair. Publishing it routes a write whose target already equals the
     // authority, so there is no visible delta for an editor to acknowledge and
@@ -4357,6 +4367,7 @@ fn self_heal_response_replay_duplication(
             agent_doc_hash::content_hash(&settled),
         ),
     );
+    agent_doc_document_realtime_io::report_applied_response_replay_recovery(file, &candidate);
     Ok(true)
 }
 
@@ -7354,6 +7365,125 @@ mod terminal_convergence_tests {
         assert!(healed.contains("❯ reproduce interrupted response"));
         assert!(healed.contains("agent:boundary:latest"));
         agent_doc_lint_io::validate_structure_on_content(&file, &healed).unwrap();
+    }
+
+    /// The interrupted-empty-response fixture shared by the
+    /// `#probewarnrestored` stderr helper.
+    fn interrupted_empty_response_fixture(dir: &Path) -> std::path::PathBuf {
+        std::fs::create_dir_all(dir.join(".agent-doc")).unwrap();
+        let file = dir.join("session.md");
+        let baseline = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ reproduce interrupted response\n",
+            "<!-- agent:boundary:latest -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&file, baseline).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline)).unwrap();
+        agent_doc_capture_io::capture_response_with_current_content(
+            &file,
+            "### Re: retained response — gpt-5\n\nRecovered body.\n",
+            baseline,
+        )
+        .unwrap();
+        let interrupted = baseline.replace(
+            "<!-- agent:boundary:latest -->",
+            "### Re: retained response — gpt-5 (HEAD)\n\n<!-- agent:boundary:latest -->",
+        );
+        std::fs::write(&file, interrupted).unwrap();
+        file
+    }
+
+    const PROBE_WARN_HELPER: &str =
+        "command::terminal_convergence_tests::probe_warn_restored_stderr_helper";
+    const PROBE_WARN_MODE_ENV: &str = "AGENT_DOC_TEST_PROBE_WARN_MODE";
+    const PROBE_WARN_DIR_ENV: &str = "AGENT_DOC_TEST_PROBE_WARN_DIR";
+
+    /// Child-process body for [`plain_session_check_probe_never_prints_restored_warning`]:
+    /// libtest captures in-process `eprintln!`, so the real fd 2 is only
+    /// observable from a re-executed test binary. A no-op under a plain
+    /// `--ignored` run.
+    #[test]
+    #[ignore = "helper process for the #probewarnrestored stderr test"]
+    fn probe_warn_restored_stderr_helper() {
+        let Ok(mode) = std::env::var(PROBE_WARN_MODE_ENV) else {
+            return;
+        };
+        let dir = std::path::PathBuf::from(std::env::var(PROBE_WARN_DIR_ENV).unwrap());
+        let file = interrupted_empty_response_fixture(&dir);
+        match mode.as_str() {
+            // Exactly the read-only probe plain `session-check` runs.
+            "probe" => {
+                let before = std::fs::read_to_string(&file).unwrap();
+                let detail = pending_response_replay_canonicalization(&file)
+                    .unwrap()
+                    .expect("the interrupted shell is a pending canonicalization");
+                println!("PROBE_DETAIL={detail}");
+                assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
+            }
+            // The applying self-heal `repair --session-check-heal` runs.
+            "apply" => {
+                let heal = SessionCheckHealEffects {
+                    inner: &RepairOnlyEffects,
+                };
+                assert!(self_heal_response_replay_duplication(&file, &heal).unwrap());
+                println!("APPLIED");
+            }
+            other => panic!("unknown helper mode {other}"),
+        }
+    }
+
+    fn run_probe_warn_helper(mode: &str) -> (String, String) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                PROBE_WARN_HELPER,
+                "--ignored",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(PROBE_WARN_MODE_ENV, mode)
+            .env(PROBE_WARN_DIR_ENV, dir.path())
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(
+            output.status.success(),
+            "helper {mode} failed\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+        (stdout, stderr)
+    }
+
+    /// `#probewarnrestored`: the read-only probe plain `session-check`
+    /// (`#sessioncheckread`) runs prepared an interrupted-empty-shell
+    /// candidate and printed "restored an interrupted empty response heading"
+    /// although it applied nothing. It must report the pending wording only,
+    /// while the applying self-heal still prints the restored warning.
+    #[test]
+    fn plain_session_check_probe_never_prints_restored_warning() {
+        let (stdout, stderr) = run_probe_warn_helper("probe");
+        assert!(
+            stdout.contains("PROBE_DETAIL="),
+            "helper body did not run\nstdout:\n{stdout}"
+        );
+        assert!(
+            !stderr.contains("restored an interrupted empty response heading"),
+            "read-only probe printed an applied-recovery warning:\n{stderr}"
+        );
+        assert!(
+            stdout.contains("would restore (pending)"),
+            "probe detail must use the pending wording:\n{stdout}"
+        );
+
+        let (stdout, stderr) = run_probe_warn_helper("apply");
+        assert!(stdout.contains("APPLIED"), "stdout:\n{stdout}");
+        assert!(
+            stderr.contains("[recovery] WARNING: restored an interrupted empty response heading"),
+            "the applying self-heal must still announce the restoration:\n{stderr}"
+        );
     }
 
     #[test]

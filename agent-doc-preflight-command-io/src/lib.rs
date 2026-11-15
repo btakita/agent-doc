@@ -1297,7 +1297,7 @@ mod tests {
         for mutation in [
             "recycle_stale_supervisor_for_turn_stage",
             "ensure_controller_running_for_file",
-            "normalize_recoverable_response_replay_duplication_for_file",
+            "prepare_recoverable_response_replay_recovery_for_file",
             "retire_redundant_doubled_document_write_intents",
             "retain_preflight_controller_projection(",
             "wait_for_lazily_current_before_mutation",

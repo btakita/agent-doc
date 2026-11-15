@@ -84,7 +84,7 @@ impl std::error::Error for QueueMaintenanceEffectSuperseded {}
 /// protects; its compare-and-apply proves the canonical document authority
 /// still equals the plan's expected authority (the admitted cut, or the last
 /// cut this owner receipted).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum QueueMaintenanceEffectStep {
     /// A plain authority verification between effects.
     Verify,
@@ -127,7 +127,7 @@ impl QueueMaintenanceEffectStep {
 
 /// Receipt of one crossed plan step: which step, at which authority, and — for
 /// an effect step — the digest of the effect the adapter applied.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct QueueMaintenanceStepReceipt {
     pub step: QueueMaintenanceEffectStep,
     pub authority: String,
@@ -137,6 +137,40 @@ pub struct QueueMaintenanceStepReceipt {
 
 type PlanCore =
     EffectCasCore<PathBuf, String, QueueMaintenanceEffectStep, QueueMaintenanceStepReceipt, String>;
+
+/// Durable progress of one request's plan (`#implementlazilyowned` plan step
+/// 9): the admission it started from, the Lazily applied frontier it reached,
+/// and the receipts that carry state across a crash — every applied effect
+/// receipt and every receipted document cut, in order. Verify-only receipts
+/// change neither the authority nor any backend, so they are not retained.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct QueueMaintenancePlanProgress {
+    pub admitted: String,
+    pub applied_through: u64,
+    pub receipts: Vec<QueueMaintenanceStepReceipt>,
+}
+
+impl QueueMaintenancePlanProgress {
+    /// The authority the plan held at its last retained receipt.
+    fn authority(&self) -> &str {
+        self.receipts
+            .last()
+            .map(|receipt| receipt.authority.as_str())
+            .unwrap_or(self.admitted.as_str())
+    }
+}
+
+#[derive(Debug)]
+struct PlanState {
+    core: PlanCore,
+    /// Retained receipts of this plan, including any resumed from a crashed
+    /// predecessor.
+    progress: QueueMaintenancePlanProgress,
+    /// Resumed effect receipts not yet matched by this run. A replayable step
+    /// whose `(step, intent)` matches one is receipted without invoking its
+    /// effect again, so a resumed plan performs no receipted effect twice.
+    replay: Vec<QueueMaintenanceStepReceipt>,
+}
 
 /// Lazily-owned ordered effect plan for one admitted queue-maintenance request.
 ///
@@ -149,48 +183,94 @@ type PlanCore =
 /// without any application-owned flag. Steps are ordered and receipted, not
 /// atomic across backends: each later effect is idempotent and the plan stops
 /// at the first supersession.
+///
+/// [`QueueMaintenancePlanProgress`] is the plan's durable image: a worker that
+/// resumes the same request after a crash continues the same plan identity
+/// from the last retained receipt (a receipted cut, not the stale admission)
+/// and skips every replayable effect that already has a receipt.
 #[derive(Debug)]
 pub struct QueueMaintenanceEffectPlan {
     key: PathBuf,
     identity: String,
-    admitted: String,
-    core: Mutex<PlanCore>,
+    /// The expected authority before this run receipts any step: the
+    /// admission, or the authority of the last resumed receipt.
+    base: String,
+    /// The applied frontier a resumed plan continues from.
+    resumed_through: u64,
+    state: Mutex<PlanState>,
 }
 
 impl QueueMaintenanceEffectPlan {
     /// Start the plan for one admitted authority cut.
     pub fn admit(file: &Path, admitted_authority_hash: &str) -> Self {
+        Self::resume(file, admitted_authority_hash, None)
+    }
+
+    /// Start or resume the plan for one admitted authority cut. `progress` is
+    /// the durable image a crashed owner of the same request left; an image of
+    /// another admission is ignored, so the plan starts from its own cut.
+    pub fn resume(
+        file: &Path,
+        admitted_authority_hash: &str,
+        progress: Option<QueueMaintenancePlanProgress>,
+    ) -> Self {
+        let progress = progress
+            .filter(|progress| progress.admitted == admitted_authority_hash)
+            .unwrap_or_else(|| QueueMaintenancePlanProgress {
+                admitted: admitted_authority_hash.to_string(),
+                ..QueueMaintenancePlanProgress::default()
+            });
+        let replay = progress
+            .receipts
+            .iter()
+            .filter(|receipt| receipt.effect.is_some())
+            .cloned()
+            .collect();
         Self {
             key: file.to_path_buf(),
             identity: format!("queue-maintenance-plan:{admitted_authority_hash}"),
-            admitted: admitted_authority_hash.to_string(),
-            core: Mutex::new(PlanCore::new(GENERATION)),
+            base: progress.authority().to_string(),
+            resumed_through: progress.applied_through,
+            state: Mutex::new(PlanState {
+                core: PlanCore::new(GENERATION),
+                progress,
+                replay,
+            }),
         }
     }
 
     /// The authority the next step expects, or `None` once superseded.
     fn expected(&self, core: &PlanCore) -> Option<String> {
         match core.state(&self.key).and_then(|state| state.terminal) {
-            None => Some(self.admitted.clone()),
+            None => Some(self.base.clone()),
             Some(EffectTerminal::Applied { receipts, .. }) => receipts
                 .last()
                 .map(|receipt| receipt.authority.clone())
-                .or_else(|| Some(self.admitted.clone())),
+                .or_else(|| Some(self.base.clone())),
             Some(EffectTerminal::Superseded { .. } | EffectTerminal::Rejected { .. }) => None,
         }
     }
 
     /// The authority this owner currently holds, or `None` once superseded.
     pub fn expected_authority_hash(&self) -> Option<String> {
-        let core = self.core.lock().unwrap();
-        self.expected(&core)
+        let state = self.state.lock().unwrap();
+        self.expected(&state.core)
     }
 
-    /// Lazily's monotone applied frontier: the number of crossed steps.
+    /// Lazily's monotone applied frontier: the number of crossed steps,
+    /// counted across a resumed predecessor's steps.
     pub fn applied_through(&self) -> Option<u64> {
-        let core = self.core.lock().unwrap();
-        core.state(&self.key)
+        let state = self.state.lock().unwrap();
+        state
+            .core
+            .state(&self.key)
             .and_then(|state| state.applied_through)
+            .or((self.resumed_through > 0).then_some(self.resumed_through))
+    }
+
+    /// The plan's durable image, for persistence after a receipted step.
+    pub fn progress(&self) -> QueueMaintenancePlanProgress {
+        self.state.lock().unwrap().progress.clone()
     }
 
     /// Cross `step` against the observed canonical authority. `observe` is an
@@ -245,10 +325,45 @@ impl QueueMaintenanceEffectPlan {
         })
     }
 
+    /// Apply one replayable effect of `step`'s family: an effect fully named
+    /// by `intent` (an appended evidence line, a content-addressed write), so
+    /// repeating it can only duplicate it. When a resumed predecessor already
+    /// receipted the same `(step, intent)`, this step is receipted under the
+    /// same authority comparison without invoking `effect` again (plan step
+    /// 9: partial-plan recovery performs no receipted effect twice).
+    /// Otherwise it is exactly [`Self::apply_effect`] with `intent` as the
+    /// receipted digest.
+    pub fn apply_replayable_effect(
+        &self,
+        step: QueueMaintenanceEffectStep,
+        intent: &str,
+        observe: &dyn Fn() -> Result<String>,
+        effect: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<()> {
+        let replayed = {
+            let mut state = self.state.lock().unwrap();
+            state
+                .replay
+                .iter()
+                .position(|receipt| {
+                    receipt.step == step && receipt.effect.as_deref() == Some(intent)
+                })
+                .map(|index| state.replay.remove(index))
+                .is_some()
+        };
+        if replayed {
+            return self.apply_effect(step, observe, &mut || Ok(intent.to_string()));
+        }
+        self.apply_effect(step, observe, &mut || {
+            effect()?;
+            Ok(intent.to_string())
+        })
+    }
+
     /// The receipt of the most recently applied step, if any.
     pub fn last_receipt(&self) -> Option<QueueMaintenanceStepReceipt> {
-        let core = self.core.lock().unwrap();
-        match core.state(&self.key).and_then(|state| state.terminal) {
+        let state = self.state.lock().unwrap();
+        match state.core.state(&self.key).and_then(|state| state.terminal) {
             Some(EffectTerminal::Applied { receipts, .. }) => {
                 receipts.last().map(|receipt| receipt.receipt.clone())
             }
@@ -280,8 +395,9 @@ impl QueueMaintenanceEffectPlan {
         adapter: &StepAuthority<'_>,
         superseded: impl Fn() -> String,
     ) -> Result<()> {
-        let mut core = self.core.lock().unwrap();
-        let Some(expected) = self.expected(&core) else {
+        let mut state = self.state.lock().unwrap();
+        let PlanState { core, progress, .. } = &mut *state;
+        let Some(expected) = self.expected(core) else {
             return Err(QueueMaintenanceEffectSuperseded::new(format!(
                 "{}: the plan was already superseded",
                 superseded()
@@ -291,7 +407,7 @@ impl QueueMaintenanceEffectPlan {
         let epoch = core
             .state(&self.key)
             .and_then(|state| state.applied_through)
-            .unwrap_or(0)
+            .unwrap_or(self.resumed_through)
             + 1;
         let intent = EffectIntent {
             identity: EffectIdentity::new(format!("{}#{epoch}", self.identity))
@@ -324,7 +440,18 @@ impl QueueMaintenanceEffectPlan {
             .record_outcome(&self.key, &attempt.identity, outcome, NOW)
             .1
         {
-            EffectCasOutcome::Applied(EffectCasApplied::Completed { .. }) => Ok(()),
+            EffectCasOutcome::Applied(EffectCasApplied::Completed { applied_through }) => {
+                progress.applied_through = applied_through;
+                if let Some(EffectTerminal::Applied { receipts, .. }) =
+                    core.state(&self.key).and_then(|state| state.terminal)
+                    && let Some(receipt) = receipts.last()
+                    && (receipt.receipt.effect.is_some()
+                        || receipt.receipt.step == QueueMaintenanceEffectStep::DocumentCut)
+                {
+                    progress.receipts.push(receipt.receipt.clone());
+                }
+                Ok(())
+            }
             EffectCasOutcome::Failure(EffectCasFailure::Superseded) => {
                 Err(QueueMaintenanceEffectSuperseded::new(format!(
                     "{}: expected={expected} observed={} step={}",
@@ -882,10 +1009,10 @@ mod tests {
             plan.expected_authority_hash().as_deref(),
             Some("h-admitted")
         );
-        let core = plan.core.lock().unwrap();
+        let state = plan.state.lock().unwrap();
         let Some(EffectTerminal::Applied {
             identity, receipts, ..
-        }) = core.state(&plan.key).and_then(|state| state.terminal)
+        }) = state.core.state(&plan.key).and_then(|state| state.terminal)
         else {
             panic!("the last crossed step is an applied terminal");
         };
@@ -895,6 +1022,185 @@ mod tests {
             receipts[0].receipt.step,
             QueueMaintenanceEffectStep::Worktree
         );
+    }
+
+    /// Plan step 9: a crash after the document cut resumes from the receipted
+    /// cut, not the stale admission, under the same plan identity, and no
+    /// replayable effect that already has a receipt runs again.
+    #[test]
+    fn resumed_plan_continues_from_the_receipted_cut_without_repeating_effects() {
+        let crashed = QueueMaintenanceEffectPlan::admit(Path::new("doc.md"), "h-admitted");
+        let mut backend: Vec<String> = Vec::new();
+        let admitted = authority(&["h-admitted"]);
+        crashed
+            .apply_replayable_effect(
+                QueueMaintenanceEffectStep::Ops,
+                "ops:before-cut",
+                &admitted,
+                &mut || {
+                    backend.push("ops:before-cut".into());
+                    Ok(())
+                },
+            )
+            .unwrap();
+        crashed
+            .cross(QueueMaintenanceEffectStep::Verify, &admitted)
+            .unwrap();
+        crashed
+            .record_document_cut("h-cut".into(), &authority(&["h-cut"]))
+            .unwrap();
+        let cut = authority(&["h-cut"]);
+        crashed
+            .apply_replayable_effect(
+                QueueMaintenanceEffectStep::Snapshot,
+                "snapshot:cut",
+                &cut,
+                &mut || {
+                    backend.push("snapshot:cut".into());
+                    Ok(())
+                },
+            )
+            .unwrap();
+        let progress = crashed.progress();
+        assert_eq!(progress.applied_through, 4);
+        assert_eq!(
+            progress
+                .receipts
+                .iter()
+                .map(|receipt| receipt.step)
+                .collect::<Vec<_>>(),
+            vec![
+                QueueMaintenanceEffectStep::Ops,
+                QueueMaintenanceEffectStep::DocumentCut,
+                QueueMaintenanceEffectStep::Snapshot,
+            ],
+            "verify-only receipts are not retained"
+        );
+        drop(crashed);
+
+        // The image round-trips through its durable encoding.
+        let encoded = serde_json::to_string(&progress).unwrap();
+        let progress: QueueMaintenancePlanProgress = serde_json::from_str(&encoded).unwrap();
+        let resumed =
+            QueueMaintenanceEffectPlan::resume(Path::new("doc.md"), "h-admitted", Some(progress));
+        assert_eq!(resumed.expected_authority_hash().as_deref(), Some("h-cut"));
+        assert_eq!(resumed.applied_through(), Some(4));
+        // The stale admission no longer satisfies any step.
+        assert!(
+            resumed
+                .cross(
+                    QueueMaintenanceEffectStep::Verify,
+                    &authority(&["h-admitted"])
+                )
+                .is_err()
+        );
+
+        let resumed = QueueMaintenanceEffectPlan::resume(
+            Path::new("doc.md"),
+            "h-admitted",
+            Some(serde_json::from_str(&encoded).unwrap()),
+        );
+        resumed
+            .cross(QueueMaintenanceEffectStep::Verify, &cut)
+            .unwrap();
+        for (step, intent) in [
+            (QueueMaintenanceEffectStep::Snapshot, "snapshot:cut"),
+            (QueueMaintenanceEffectStep::Ops, "ops:before-cut"),
+            // The second identical effect has no unmatched receipt: it runs.
+            (QueueMaintenanceEffectStep::Snapshot, "snapshot:cut"),
+            (QueueMaintenanceEffectStep::Ops, "ops:after-resume"),
+        ] {
+            resumed
+                .apply_replayable_effect(step, intent, &cut, &mut || {
+                    backend.push(intent.to_string());
+                    Ok(())
+                })
+                .unwrap();
+        }
+        assert_eq!(
+            backend,
+            vec![
+                "ops:before-cut",
+                "snapshot:cut",
+                "snapshot:cut",
+                "ops:after-resume"
+            ],
+            "each receipted effect ran exactly once across the crash"
+        );
+        assert_eq!(resumed.applied_through(), Some(9));
+        let state = resumed.state.lock().unwrap();
+        let Some(EffectTerminal::Applied { identity, .. }) = state
+            .core
+            .state(&resumed.key)
+            .and_then(|state| state.terminal)
+        else {
+            panic!("the resumed plan's last step is applied");
+        };
+        assert_eq!(
+            identity.as_str(),
+            "queue-maintenance-plan:h-admitted#9",
+            "the resumed plan continues the same identity sequence"
+        );
+    }
+
+    /// A resumed replayable step still compares authority: a drifted document
+    /// supersedes it and its effect does not run.
+    #[test]
+    fn resumed_replay_still_supersedes_on_authority_drift() {
+        let crashed = QueueMaintenanceEffectPlan::admit(Path::new("doc.md"), "h-admitted");
+        crashed
+            .apply_replayable_effect(
+                QueueMaintenanceEffectStep::Ops,
+                "ops:line",
+                &authority(&["h-admitted"]),
+                &mut || Ok(()),
+            )
+            .unwrap();
+        let resumed = QueueMaintenanceEffectPlan::resume(
+            Path::new("doc.md"),
+            "h-admitted",
+            Some(crashed.progress()),
+        );
+        let mut ran = false;
+        let error = resumed
+            .apply_replayable_effect(
+                QueueMaintenanceEffectStep::Ops,
+                "ops:new-line",
+                &authority(&["h-operator"]),
+                &mut || {
+                    ran = true;
+                    Ok(())
+                },
+            )
+            .unwrap_err();
+        assert!(
+            error
+                .downcast_ref::<QueueMaintenanceEffectSuperseded>()
+                .is_some(),
+            "{error:#}"
+        );
+        assert!(!ran);
+        assert_eq!(resumed.expected_authority_hash(), None);
+    }
+
+    /// Progress of another admission is never resumed.
+    #[test]
+    fn progress_of_another_admission_is_ignored() {
+        let other = QueueMaintenanceEffectPlan::admit(Path::new("doc.md"), "h-other");
+        other
+            .record_document_cut("h-cut".into(), &authority(&["h-cut"]))
+            .unwrap();
+        let plan = QueueMaintenanceEffectPlan::resume(
+            Path::new("doc.md"),
+            "h-admitted",
+            Some(other.progress()),
+        );
+        assert_eq!(
+            plan.expected_authority_hash().as_deref(),
+            Some("h-admitted")
+        );
+        assert_eq!(plan.applied_through(), None);
+        assert!(plan.progress().receipts.is_empty());
     }
 
     /// Authority drift at each of the six effect-family barriers supersedes the

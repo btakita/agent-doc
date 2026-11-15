@@ -156,9 +156,11 @@ fn seed_snapshot(root: &Path, doc: &Path, content: &str) {
 /// a superseded worker exits; every row below is an externally visible effect
 /// that the stale admitted cut must leave untouched.
 /// Durable effect state a stale maintenance worker must not touch. The latest-wins
-/// request row and the durable Lazily claim image are the worker's own
-/// coordination state (the claim records the stale epoch as superseded), not
-/// controller/ledger effects, so both are excluded.
+/// request row, the durable Lazily claim image, and the claimed request's plan
+/// progress are the worker's own coordination state (the claim records the
+/// stale epoch as superseded; the plan progress holds only receipts of steps
+/// crossed before the supersession), not controller/ledger effects, so all
+/// three are excluded.
 fn queue_maintenance_effect_digest(root: &Path) -> Vec<String> {
     let conn = agent_doc_sqlite::state_store::open_state_db(root).unwrap();
     let mut statement = conn
@@ -167,6 +169,7 @@ fn queue_maintenance_effect_digest(root: &Path) -> Vec<String> {
              SELECT 'project_runtime_state|' || quote(state_key) || '|' || quote(payload) || '|' || updated_at_ms AS row_value \
                FROM project_runtime_state WHERE state_key NOT LIKE 'queue_maintenance_request:%' \
                AND state_key NOT LIKE 'queue_maintenance_claim:%' \
+               AND state_key NOT LIKE 'queue_maintenance_plan:%' \
              UNION ALL \
              SELECT 'document_runtime_state|' || quote(document_hash) || '|' || quote(state_kind) || '|' || quote(canonical_path) || '|' || quote(payload_json) || '|' || updated_at_ms \
                FROM document_runtime_state \

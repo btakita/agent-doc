@@ -40,6 +40,11 @@ use crate::queue_edit_owner::{
 
 const QUEUE_MAINTENANCE_CLAIM_PREFIX: &str = "queue_maintenance_claim:";
 
+/// Project-runtime key prefix of the receipted progress of the claimed
+/// request's ordered effect plan (`queue_maintenance_plan:<document>`), stored
+/// beside the claim image.
+const QUEUE_MAINTENANCE_PLAN_PREFIX: &str = "queue_maintenance_plan:";
+
 /// Logical clock for claims. A refused comparison is supersession, never a
 /// timed retry, so no claim waits on a retry time.
 const NOW: u64 = 0;
@@ -67,6 +72,15 @@ impl QueueMaintenanceRequestVersion {
             payload: String::new(),
         }
     }
+}
+
+/// The stored progress of one request's ordered effect plan: the exact request
+/// version it belongs to and the plan's opaque receipt image. A progress image
+/// of any other request version is never resumed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct StoredPlanProgress {
+    request: QueueMaintenanceRequestVersion,
+    progress: String,
 }
 
 /// The single plan step of a request epoch: consume the exact request.
@@ -139,6 +153,7 @@ pub struct QueueMaintenanceClaim {
     root: PathBuf,
     document_hash: String,
     claim_key: String,
+    plan_key: String,
     request_key: String,
     generation: u64,
 }
@@ -154,6 +169,7 @@ impl QueueMaintenanceClaim {
             file: file.to_path_buf(),
             root,
             claim_key: format!("{QUEUE_MAINTENANCE_CLAIM_PREFIX}{document_hash}"),
+            plan_key: format!("{QUEUE_MAINTENANCE_PLAN_PREFIX}{document_hash}"),
             document_hash,
             request_key,
             generation: 0,
@@ -305,7 +321,7 @@ impl QueueMaintenanceClaim {
                 EffectApply::Rejected(error) => Some(error.clone()),
                 _ => None,
             };
-            match core.record_outcome(&key, &attempt.identity, outcome, NOW).1 {
+            let consumed = match core.record_outcome(&key, &attempt.identity, outcome, NOW).1 {
                 EffectCasOutcome::Applied(EffectCasApplied::Completed { .. }) => Ok(true),
                 // A newer desired epoch already stopped this one; the request
                 // row was consumed, but the newer epoch remains desired.
@@ -318,12 +334,79 @@ impl QueueMaintenanceClaim {
                 recorded => {
                     anyhow::bail!("queue maintenance claim completion diverged: {recorded:?}")
                 }
+            }?;
+            if consumed {
+                // The consumed request's plan progress is finished work: drop
+                // it in the transaction that receipts the request epoch.
+                agent_doc_sqlite::state_store::clear_project_runtime_state_in_db(
+                    transaction,
+                    &self.plan_key,
+                )?;
             }
+            Ok(consumed)
         })?;
         if consumed {
             guard.release_consumed_apply();
         }
         Ok(consumed)
+    }
+
+    /// Persist the receipted progress of `request`'s ordered effect plan
+    /// (`#implementlazilyowned` plan step 9). The write runs in one IMMEDIATE
+    /// transaction that first proves this actor still holds `request` in
+    /// flight, so a fenced predecessor can never overwrite a successor's
+    /// progress. `progress` is the plan's opaque receipt image.
+    pub fn store_plan_progress(
+        &self,
+        request: &QueueMaintenanceRequest,
+        progress: &str,
+    ) -> Result<()> {
+        let version = QueueMaintenanceRequestVersion::of(request);
+        let mut conn = agent_doc_sqlite::state_store::open_state_db(&self.root)
+            .with_context(|| format!("open plan progress for {}", self.file.display()))?;
+        agent_doc_sqlite::state_store::update_project_runtime_state_in_transaction(
+            &mut conn,
+            &self.plan_key,
+            |transaction, _| {
+                let core = hydrate(
+                    agent_doc_sqlite::state_store::load_project_runtime_state_from_db(
+                        transaction,
+                        &self.claim_key,
+                    )?,
+                )?;
+                let attempt = self.owned_attempt(&core)?;
+                if attempt.expected != version {
+                    return Err(self.superseded(
+                        "background queue maintenance request was superseded: the claim holds another request",
+                    ));
+                }
+                let image = serde_json::to_string(&StoredPlanProgress {
+                    request: version,
+                    progress: progress.to_string(),
+                })?;
+                Ok((Some(image), ()))
+            },
+        )
+    }
+
+    /// The stored plan progress of exactly `request`, if a previous actor
+    /// receipted any step of it. Progress of another request version is not
+    /// returned: a newer admission always starts its plan from its own cut.
+    pub fn load_plan_progress(&self, request: &QueueMaintenanceRequest) -> Result<Option<String>> {
+        let conn = agent_doc_sqlite::state_store::open_state_db(&self.root)?;
+        let Some(payload) = agent_doc_sqlite::state_store::load_project_runtime_state_from_db(
+            &conn,
+            &self.plan_key,
+        )?
+        else {
+            return Ok(None);
+        };
+        let stored: StoredPlanProgress = serde_json::from_str(&payload)
+            .context("queue maintenance plan progress is unreadable")?;
+        Ok(
+            (stored.request == QueueMaintenanceRequestVersion::of(request))
+                .then_some(stored.progress),
+        )
     }
 
     /// Whether this handle is still the claim's current actor generation.
@@ -775,6 +858,75 @@ mod tests {
         assert!(!claim.retains_work().unwrap());
         drop(guard);
         assert!(fixture.holder().is_none());
+    }
+
+    /// Plan step 9 crash resume: the claimed request's receipted plan progress
+    /// survives the worker, is returned only for that exact request version,
+    /// can be written only by the actor holding it in flight, and is dropped
+    /// in the transaction that consumes the request.
+    #[test]
+    fn plan_progress_resumes_only_the_exact_claimed_request() {
+        let fixture = Fixture::new("plan-progress");
+        let request = publish_queue_maintenance_request(&fixture.file, "hash-a", false).unwrap();
+        let crashed = QueueMaintenanceClaim::reconnect(&fixture.file).unwrap();
+        crashed.claim_request(&request).unwrap();
+        assert_eq!(crashed.load_plan_progress(&request).unwrap(), None);
+        crashed
+            .store_plan_progress(&request, "receipts-through-cut")
+            .unwrap();
+
+        // A successor resumes the same request and reads the progress back.
+        let successor = QueueMaintenanceClaim::reconnect(&fixture.file).unwrap();
+        assert_eq!(
+            successor.claim_request(&request).unwrap(),
+            QueueMaintenanceClaimed::Resumed { epoch: 1 }
+        );
+        assert_eq!(
+            successor.load_plan_progress(&request).unwrap().as_deref(),
+            Some("receipts-through-cut")
+        );
+        // The fenced predecessor cannot overwrite the successor's progress.
+        let error = crashed
+            .store_plan_progress(&request, "stale-receipts")
+            .unwrap_err();
+        assert!(superseded(&error), "{error:#}");
+        assert_eq!(
+            successor.load_plan_progress(&request).unwrap().as_deref(),
+            Some("receipts-through-cut")
+        );
+        successor
+            .store_plan_progress(&request, "receipts-after-resume")
+            .unwrap();
+
+        // A newer admission never resumes the older request's progress.
+        let newer = publish_queue_maintenance_request(&fixture.file, "hash-b", false).unwrap();
+        assert_eq!(successor.load_plan_progress(&newer).unwrap(), None);
+        assert!(successor.store_plan_progress(&newer, "unclaimed").is_err());
+
+        // Completing the claimed request drops its progress atomically.
+        let mut guard = fixture.guard();
+        assert!(!successor.complete(&mut guard, &request).unwrap());
+        assert_eq!(
+            successor.load_plan_progress(&request).unwrap().as_deref(),
+            Some("receipts-after-resume"),
+            "a superseded completion consumes nothing"
+        );
+        successor.claim_request(&newer).unwrap();
+        successor
+            .store_plan_progress(&newer, "newer-receipts")
+            .unwrap();
+        assert_eq!(successor.load_plan_progress(&request).unwrap(), None);
+        assert!(successor.complete(&mut guard, &newer).unwrap());
+        assert_eq!(successor.load_plan_progress(&newer).unwrap(), None);
+        let conn = agent_doc_sqlite::state_store::open_state_db(&successor.root).unwrap();
+        assert_eq!(
+            agent_doc_sqlite::state_store::load_project_runtime_state_from_db(
+                &conn,
+                &successor.plan_key
+            )
+            .unwrap(),
+            None
+        );
     }
 
     #[test]

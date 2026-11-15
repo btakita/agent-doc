@@ -670,6 +670,39 @@ Progress (`#implementlazilyowned`):
   `Superseded`; the new key's fresh epoch owns the next attempt). 11 rows: 8
   `migrated` (the 5 delay/edge rows plus 3 new schedule methods), 3
   `deleted`.
+- Plan step 9b (per-step plan receipts for crash resume): the
+  `QueueMaintenanceEffectPlan` keeps a durable image
+  (`QueueMaintenancePlanProgress`: the admission, the Lazily applied
+  frontier, and every effect receipt and receipted document cut; verify-only
+  receipts change no state and are not retained). `BackgroundRequestEffectFence`
+  stores it in `state.db` beside the claim (`queue_maintenance_plan:<document>`)
+  after every step that applies an effect or receipts a cut, through
+  `QueueMaintenanceClaim::store_plan_progress`, whose IMMEDIATE transaction
+  first proves the writer still holds that exact request in flight (a fenced
+  predecessor cannot overwrite a successor). A worker that resumes the same
+  request reloads it (`QueueMaintenanceEffectPlan::resume`, ops line
+  `queue_maintenance_plan_resumed`): the plan continues the same identity
+  sequence and expects the last receipted cut, so a crash after the document
+  cut is resumed instead of being rejected as a superseded admission. Replayable
+  effects (ops evidence lines and content-addressed snapshot checkpoints, the
+  effects a repeat could only duplicate) cross `apply_replayable_effect`: a
+  `(step, intent)` that already has a resumed receipt is receipted under the
+  same authority comparison without running again; convergent reconciliations
+  (worktree inventory, claim/tombstone/completion reconciles, the queue-head
+  snapshot adoption) re-run, harmlessly. Progress of any other request version
+  is never resumed, and `QueueMaintenanceClaim::complete` deletes it in the
+  transaction that consumes the request. Tests:
+  `queue_maintenance_effect_cas::tests::resumed_plan_continues_from_the_receipted_cut_without_repeating_effects`,
+  `resumed_replay_still_supersedes_on_authority_drift`,
+  `progress_of_another_admission_is_ignored`,
+  `queue_maintenance_claim::tests::plan_progress_resumes_only_the_exact_claimed_request`,
+  `preflight_command_io::tests::successor_resumes_a_dead_workers_plan_from_its_receipted_cut`.
+  No ledger rows change (no new CAS/fence/lease/retry identifiers). A crash
+  between the editor CAS write and its cut receipt still resumes from the
+  previous receipt and is rejected as superseded, as before.
+- Plan step 9a (reorder so the document cut is the first plan step) is not
+  landed: see "Resume here" step 9 for the read-after-write dependencies that
+  block a behaviour-preserving reorder.
 - Not yet done (as of 2026-11-15, agent-doc `59984d315a`; triage is complete,
   0 `triage` rows): migrate the 291 reviewed `pending-migration` rows family
   by family, then delete the remaining bespoke orchestration and make the
@@ -677,11 +710,11 @@ Progress (`#implementlazilyowned`):
 
 ## Resume here
 
-Status 2026-11-15 (after family 8b): ledger = 133 `migrated`, 173 `lazily-adapter`,
+Status 2026-11-15 (after step 9b): ledger = 133 `migrated`, 173 `lazily-adapter`,
 33 `deleted`, 419 `excluded`, 0 `pending-migration`, 0 `triage`. Every
 inventoried row is migrated; work the remaining steps sequentially in ONE
 worktree, one step per pushed commit, `make check` green before each push, in
-this order (next: step 9):
+this order (next: step 9a, then step 10):
 
 1. DONE: actor-generation fenced writes (`store_actor_record_fenced_tx`,
    `delete_actor_document_fenced_tx`; 20 actor-generation rows) onto the
@@ -741,6 +774,31 @@ this order (next: step 9):
      per-outcome attempt resets as fresh Lazily epochs.
 9. Per-step plan receipts persisted for crash resume, and reorder the
    maintenance body so the document cut is literally the first plan step.
+   - 9b. DONE: per-step plan receipts in `state.db` beside the claim; a
+     resumed request continues from the last receipted cut and skips every
+     replayable effect that already has a receipt (see Progress).
+   - 9a. OPEN: the reorder. In `run_queue_maintenance_with_options_under_apply_guard`
+     (agent-doc-preflight-io) the pre-cut effects are not all deferrable,
+     because later pure computation of the successor reads back what they
+     wrote: `queue_claim::transfer_promoted_claims`,
+     `transfer_prompt_identity_admissions`, `release_closed_head`, and
+     `reconcile_completion_evidence` are read back by
+     `load_ledger_following` / `owner_selection_claims_for_content` before
+     the lifecycle markers are painted into the document;
+     `queue_tombstone::reconcile_for_file` returns the sets the backlog mirror
+     uses; `adopt_edited_queue_head_into_snapshot` is re-read through
+     `load_document_baseline` for the snapshot-drift decisions; the worktree
+     reconcile returns content the cut persists; and the Controller
+     observation publishes the admitted authority the projections read. The
+     write-only pre-cut effects (the ops evidence lines,
+     `set_skipped_queue_head_ids`, `set_projected_in_progress_queue_heads`,
+     `record_mirrored_queue_heads_in_db`) can move behind the cut as they
+     are. A literal first-step cut needs those reads to come from an
+     in-memory overlay of the pending ledger/tombstone/snapshot writes (pure
+     `*_plan` variants in agent-doc-queue-io), so the successor is computed
+     without writing and the effect phase then applies the overlay after the
+     cut receipt. The halt, time-gate, and main exits each persist a cut and
+     must flush the effect phase after it.
 10. Phase 6 rollout: delete compatibility paths and duplicate state, final
     source audit, then `make install` + recycle (coordinator only).
 

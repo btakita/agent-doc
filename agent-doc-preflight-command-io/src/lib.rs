@@ -560,6 +560,47 @@ impl BackgroundQueueMaintenanceClaim {
     ) -> Result<bool> {
         self.claim.complete(&mut self.guard, request)
     }
+
+    /// The receipted plan progress a crashed predecessor left for exactly
+    /// `request`. An unreadable image is reported and ignored: the plan then
+    /// starts from the admission, which is the pre-resume behaviour.
+    fn plan_progress(
+        &self,
+        file: &Path,
+        request: &agent_doc_queue_io::queue_edit_owner::QueueMaintenanceRequest,
+    ) -> Option<agent_doc_preflight_io::queue_maintenance_effect_cas::QueueMaintenancePlanProgress>
+    {
+        let decoded = self.claim.load_plan_progress(request).and_then(|stored| {
+            stored
+                .map(|stored| serde_json::from_str(&stored).map_err(anyhow::Error::from))
+                .transpose()
+        });
+        match decoded {
+            Ok(progress) => progress,
+            Err(error) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_maintenance_plan_progress_unreadable file={} error={}",
+                        file.display(),
+                        format!("{error:#}").replace('\n', " | "),
+                    ),
+                );
+                None
+            }
+        }
+    }
+
+    /// Persist the receipted progress of `request`'s plan, fenced by this
+    /// worker's claim on exactly that request.
+    fn store_plan_progress(
+        &self,
+        request: &agent_doc_queue_io::queue_edit_owner::QueueMaintenanceRequest,
+        progress: &agent_doc_preflight_io::queue_maintenance_effect_cas::QueueMaintenancePlanProgress,
+    ) -> Result<()> {
+        self.claim
+            .store_plan_progress(request, &serde_json::to_string(progress)?)
+    }
 }
 
 impl Drop for BackgroundQueueMaintenanceClaim {
@@ -582,6 +623,12 @@ impl Drop for BackgroundQueueMaintenanceClaim {
 /// still hold the exact request, and every effect crosses one step of the
 /// request's ordered Lazily effect plan against the canonical document
 /// authority (`#implementlazilyowned`).
+///
+/// The plan's receipted progress is persisted in `state.db` beside the claim
+/// after every step that applies an effect or receipts a document cut (plan
+/// step 9). A worker that resumes the same request after a crash reloads it:
+/// its plan expects the last receipted cut instead of the stale admission and
+/// skips every replayable effect that already has a receipt.
 struct BackgroundRequestEffectFence<'a> {
     owner: &'a BackgroundQueueMaintenanceClaim,
     request: &'a agent_doc_queue_io::queue_edit_owner::QueueMaintenanceRequest,
@@ -594,19 +641,42 @@ impl<'a> BackgroundRequestEffectFence<'a> {
         owner: &'a BackgroundQueueMaintenanceClaim,
         request: &'a agent_doc_queue_io::queue_edit_owner::QueueMaintenanceRequest,
     ) -> Self {
+        let progress = owner.plan_progress(file, request);
+        if let Some(progress) = progress
+            .as_ref()
+            .filter(|progress| progress.admitted == request.admitted_authority_hash)
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "queue_maintenance_plan_resumed file={} pid={} applied_through={} receipts={}",
+                    file.display(),
+                    std::process::id(),
+                    progress.applied_through,
+                    progress.receipts.len(),
+                ),
+            );
+        }
         Self {
             owner,
             request,
             plan:
-                agent_doc_preflight_io::queue_maintenance_effect_cas::QueueMaintenanceEffectPlan::admit(
+                agent_doc_preflight_io::queue_maintenance_effect_cas::QueueMaintenanceEffectPlan::resume(
                     file,
                     &request.admitted_authority_hash,
+                    progress,
                 ),
         }
     }
 
     fn fence_effect(&self, file: &Path) -> Result<()> {
         agent_doc_preflight_io::PendingMaintenanceEffectFence::check(self, file)
+    }
+
+    /// Persist the plan's receipted progress after a step that changed it.
+    fn store_progress(&self) -> Result<()> {
+        self.owner
+            .store_plan_progress(self.request, &self.plan.progress())
     }
 }
 
@@ -643,7 +713,23 @@ impl agent_doc_preflight_io::PendingMaintenanceEffectFence for BackgroundRequest
         self.owner.verify(self.request)?;
         let observe =
             || observe_document_authority(file, "background_queue_maintenance_effect_fence");
-        self.plan.apply_effect(step, &observe, effect)
+        self.plan.apply_effect(step, &observe, effect)?;
+        self.store_progress()
+    }
+
+    fn apply_replayable_effect_step(
+        &self,
+        file: &Path,
+        step: agent_doc_preflight_io::QueueMaintenanceEffectStep,
+        intent: &str,
+        effect: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<()> {
+        self.owner.verify(self.request)?;
+        let observe =
+            || observe_document_authority(file, "background_queue_maintenance_effect_fence");
+        self.plan
+            .apply_replayable_effect(step, intent, &observe, effect)?;
+        self.store_progress()
     }
 
     fn record_applied_content(&self, file: &Path, content: &str) -> Result<()> {
@@ -651,7 +737,8 @@ impl agent_doc_preflight_io::PendingMaintenanceEffectFence for BackgroundRequest
         let observe =
             || observe_document_authority(file, "background_queue_maintenance_applied_cut");
         self.plan
-            .record_document_cut(agent_doc_hash::content_hash(content), &observe)
+            .record_document_cut(agent_doc_hash::content_hash(content), &observe)?;
+        self.store_progress()
     }
 
     fn expected_authority_hash(&self) -> Option<String> {
@@ -1575,6 +1662,105 @@ mod tests {
         assert_eq!(
             recover_orphaned_queue_maintenance(&doc, "unit_test").unwrap(),
             OrphanedQueueMaintenanceRecovery::NotOrphaned
+        );
+    }
+
+    /// `#implementlazilyowned` plan step 9: a worker that died after its
+    /// document cut left the cut and its earlier effect receipts in
+    /// `state.db`. Its successor resumes the same request from the receipted
+    /// cut instead of rejecting it as a superseded admission, does not repeat
+    /// an effect that already has a receipt, and drops the progress when it
+    /// consumes the request.
+    #[test]
+    fn successor_resumes_a_dead_workers_plan_from_its_receipted_cut() {
+        use agent_doc_preflight_io::QueueMaintenanceEffectStep;
+        use agent_doc_preflight_io::queue_maintenance_effect_cas::QueueMaintenanceEffectPlan;
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let admitted = "body\n";
+        std::fs::write(&doc, admitted).unwrap();
+        let doc_text = doc.to_string_lossy().to_string();
+        let admitted_hash = agent_doc_hash::content_hash(admitted);
+        let request = agent_doc_queue_io::queue_edit_owner::publish_queue_maintenance_request(
+            &doc,
+            &admitted_hash,
+            false,
+        )
+        .unwrap();
+        let dead_token = format!(
+            "{}dead-worker",
+            agent_doc_queue_io::queue_edit_owner::BACKGROUND_QUEUE_EDIT_OWNER_PREFIX
+        );
+        assert!(
+            agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
+                &doc_text,
+                &dead_token,
+                4_000_000,
+            )
+            .unwrap()
+        );
+        let crashed =
+            agent_doc_queue_io::queue_maintenance_claim::QueueMaintenanceClaim::reconnect(&doc)
+                .unwrap();
+        crashed.claim_request(&request).unwrap();
+
+        // The dead worker's plan: it receipted the queue-maintenance skip
+        // evidence, then cut the document, then died before completing.
+        let skip_line = agent_doc_queue::backlog_sync::QueueMaintenanceSkip::NoQueueComponent
+            .log_line(&doc.display().to_string(), None);
+        let plan = QueueMaintenanceEffectPlan::admit(&doc, &admitted_hash);
+        let mut receipted_effect_ran = false;
+        plan.apply_replayable_effect(
+            QueueMaintenanceEffectStep::Ops,
+            &format!("ops:{}", agent_doc_hash::content_hash(&skip_line)),
+            &|| Ok(admitted_hash.clone()),
+            &mut || {
+                receipted_effect_ran = true;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(receipted_effect_ran);
+        let cut = "body\nmaintained\n";
+        std::fs::write(&doc, cut).unwrap();
+        let cut_hash = agent_doc_hash::content_hash(cut);
+        plan.record_document_cut(cut_hash.clone(), &|| Ok(cut_hash.clone()))
+            .unwrap();
+        crashed
+            .store_plan_progress(&request, &serde_json::to_string(&plan.progress()).unwrap())
+            .unwrap();
+        drop(crashed);
+
+        let outcome = recover_orphaned_queue_maintenance(&doc, "unit_test").unwrap();
+
+        assert_eq!(outcome, OrphanedQueueMaintenanceRecovery::Recovered);
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("queue_maintenance_plan_resumed")
+                && ops.contains("applied_through=2 receipts=2"),
+            "the successor must reload the dead worker's receipts: {ops}"
+        );
+        assert!(
+            ops.contains("queue_maintenance_background_completed")
+                && !ops.contains("queue_maintenance_background_superseded_authority"),
+            "the receipted cut, not the stale admission, is the resumed authority: {ops}"
+        );
+        assert!(
+            !ops.contains(&skip_line),
+            "an effect that already had a receipt ran again: {ops}"
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), cut);
+        assert!(
+            !agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_pending(&doc),
+            "the resumed request must be consumed"
+        );
+        let successor =
+            agent_doc_queue_io::queue_maintenance_claim::QueueMaintenanceClaim::reconnect(&doc)
+                .unwrap();
+        assert_eq!(
+            successor.load_plan_progress(&request).unwrap(),
+            None,
+            "consuming the request drops its plan progress"
         );
     }
 

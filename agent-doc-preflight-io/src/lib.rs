@@ -2415,6 +2415,25 @@ pub trait PendingMaintenanceEffectFence {
         self.apply_step(file, step)?;
         effect().map(|_| ())
     }
+
+    /// Apply one replayable effect of `step`'s family, fully named by
+    /// `intent` (an appended evidence line or a content-addressed write): the
+    /// owner receipts `intent` as the effect digest, and a plan resumed after
+    /// a crash receipts an already-receipted `(step, intent)` without
+    /// invoking `effect` again. Owners without a plan apply it as an ordinary
+    /// effect step.
+    fn apply_replayable_effect_step(
+        &self,
+        file: &Path,
+        step: QueueMaintenanceEffectStep,
+        intent: &str,
+        effect: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<()> {
+        self.apply_effect_step(file, step, &mut || {
+            effect()?;
+            Ok(intent.to_string())
+        })
+    }
 }
 
 impl<F> PendingMaintenanceEffectFence for F
@@ -6077,6 +6096,32 @@ fn queue_maintenance_effect<T>(
     })
 }
 
+/// Run one replayable effect of `step`'s family (fully named by `intent`)
+/// through the owner's Lazily effect plan: like [`queue_maintenance_effect`],
+/// but a plan resumed after a crash skips it when the same `(step, intent)`
+/// already has a receipt, so a repeat cannot duplicate it.
+fn queue_maintenance_replayable_effect(
+    file: &Path,
+    effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
+    step: QueueMaintenanceEffectStep,
+    intent: String,
+    effect: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    let Some(effect_fence) = effect_fence else {
+        return effect();
+    };
+    if queue_maintenance_effect_test_delay_armed(step) {
+        effect_fence.apply_step(file, step)?;
+        queue_maintenance_effect_test_delay(file, step);
+    }
+    let mut pending = Some(effect);
+    effect_fence.apply_replayable_effect_step(file, step, &intent, &mut || {
+        pending
+            .take()
+            .context("queue maintenance effect was applied twice")?()
+    })
+}
+
 fn queue_maintenance_effect_test_delay_armed(step: QueueMaintenanceEffectStep) -> bool {
     queue_maintenance_effect_test_delay_ms(step).is_some()
 }
@@ -6089,15 +6134,15 @@ fn queue_maintenance_log_op(
     effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
     message: &str,
 ) -> Result<()> {
-    queue_maintenance_effect(
+    queue_maintenance_replayable_effect(
         file,
         effect_fence,
         QueueMaintenanceEffectStep::Ops,
+        format!("ops:{}", agent_doc_hash::content_hash(message)),
         || {
             agent_doc_ops_log_io::log_op(file, message);
             Ok(())
         },
-        |()| format!("ops:{}", agent_doc_hash::content_hash(message)),
     )
 }
 
@@ -6110,10 +6155,11 @@ fn queue_maintenance_checkpoint_snapshot(
     content: &str,
     warning_label: &str,
 ) -> Result<()> {
-    queue_maintenance_effect(
+    queue_maintenance_replayable_effect(
         file,
         effect_fence,
         QueueMaintenanceEffectStep::Snapshot,
+        format!("snapshot:{}", agent_doc_hash::content_hash(content)),
         || {
             if let Err(error) = agent_doc_snapshot_io::checkpoint_document_baseline(
                 file,
@@ -6124,7 +6170,6 @@ fn queue_maintenance_checkpoint_snapshot(
             }
             Ok(())
         },
-        |()| format!("snapshot:{}", agent_doc_hash::content_hash(content)),
     )
 }
 

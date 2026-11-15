@@ -35,6 +35,17 @@
 //!   past the frozen bound fails that continue, and the same task is retried
 //!   into the freed slot (`#lostrunningcontinue`). An explicit `queue release
 //!   --requeue` also abandons the current attempt;
+//! * a worker that FINISHED but whose result is not reported yet is
+//!   **report-owed** and holds its slot (`#finishedheadrefill`). The harness
+//!   subagent-end hook freezes a worker that ended before the coordinator ran
+//!   `queue report-complete`, and that freeze records the worker's terminal
+//!   hand-back. The head is neither running nor free: the coordinator owes
+//!   `queue report-complete` for that exact generation (or a continue of the
+//!   same worker, or `queue release --requeue`), and the refill never offers
+//!   it for a new claim (live miss, 2026-11-15: three finished workers on
+//!   `agent-doc-bugs.md` were each offered as `Refill a free pool slot with
+//!   queue item "do [#X]"` between the harness's `Agent ... finished` notice
+//!   and the coordinator's report);
 //! * `Reported` attempts, unbound lapsed attempts, and attempts abandoned with
 //!   `queue release --requeue` hold no slot.
 //!
@@ -230,6 +241,10 @@ pub enum AttemptSlot {
     Unconfirmed,
     /// Evidence the worker stopped; holds no slot, keeps its claim.
     Frozen(WorkerFrozen),
+    /// The worker finished and its recorded hand-back is not reported yet
+    /// (`#finishedheadrefill`): holds a slot, owes `queue report-complete`
+    /// for this generation, and its row is never offered for a new claim.
+    ReportOwed,
 }
 
 /// Classify one attempt. Callers may pass an attempt whose expiry was already
@@ -256,6 +271,11 @@ pub fn classify_attempt(claim: &QueueClaim, now_secs: u64, frozen_secs: u64) -> 
         } else {
             AttemptSlot::Dispatching
         };
+    }
+    // `#finishedheadrefill`: a finished worker's unreported result is not a
+    // stopped worker. It keeps its slot until the coordinator reports it.
+    if crate::lost_running_recovery::report_owed(claim) {
+        return AttemptSlot::ReportOwed;
     }
     if let Some(freeze) = &claim.frozen {
         // An explicit requeue is recovery debt once the attempt has lapsed.
@@ -298,7 +318,10 @@ pub fn worker_frozen(claim: &QueueClaim, now_secs: u64, frozen_secs: u64) -> Opt
 pub fn occupies_pool_slot(claim: &QueueClaim, now_secs: u64, frozen_secs: u64) -> bool {
     matches!(
         classify_attempt(claim, now_secs, frozen_secs),
-        AttemptSlot::Dispatching | AttemptSlot::Running | AttemptSlot::Unconfirmed
+        AttemptSlot::Dispatching
+            | AttemptSlot::Running
+            | AttemptSlot::Unconfirmed
+            | AttemptSlot::ReportOwed
     )
 }
 
@@ -396,6 +419,10 @@ pub struct PoolOccupancy {
     pub unconfirmed: usize,
     /// Workers with evidence they stopped; they hold no slot.
     pub frozen: usize,
+    /// Finished workers whose result is not reported yet
+    /// (`#finishedheadrefill`); they hold a slot until `queue report-complete`.
+    #[serde(default)]
+    pub report_owed: usize,
     /// Slots a refill may fill now.
     pub free: usize,
 }
@@ -411,6 +438,7 @@ pub fn pool_occupancy<'a>(
     let mut dispatching = 0;
     let mut unconfirmed = 0;
     let mut frozen = 0;
+    let mut report_owed = 0;
     for claim in claims {
         match classify_attempt(claim, now_secs, frozen_secs) {
             AttemptSlot::Free => {}
@@ -418,6 +446,7 @@ pub fn pool_occupancy<'a>(
             AttemptSlot::Running => running += 1,
             AttemptSlot::Unconfirmed => unconfirmed += 1,
             AttemptSlot::Frozen(_) => frozen += 1,
+            AttemptSlot::ReportOwed => report_owed += 1,
         }
     }
     PoolOccupancy {
@@ -427,10 +456,11 @@ pub fn pool_occupancy<'a>(
         dispatching,
         unconfirmed,
         frozen,
+        report_owed,
         free: size
             .size
             .get()
-            .saturating_sub(running + dispatching + unconfirmed),
+            .saturating_sub(running + dispatching + unconfirmed + report_owed),
     }
 }
 
@@ -488,6 +518,26 @@ pub struct FrozenWorker {
     pub generation: u64,
     pub worker_id: String,
     pub frozen: WorkerFrozen,
+}
+
+/// A finished worker whose result the coordinator has not reported
+/// (`#finishedheadrefill`). Its head holds a slot and is never offered for a
+/// new claim; the coordinator reports the worker's hand-back for this exact
+/// generation, or explicitly abandons it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReportOwedWorker {
+    pub item: String,
+    pub owner: String,
+    pub generation: u64,
+    pub worker_id: String,
+    /// The opening of the hand-back the harness recorded at the worker's end.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub hand_back_excerpt: String,
+    /// `queue report-complete` for this exact generation; the caller fills
+    /// `--response` with the worker's complete hand-back.
+    pub report_command: String,
+    /// The explicit abandon, only when the result must be discarded.
+    pub release_command: String,
 }
 
 /// A bound worker whose heartbeat is due. The coordinator confirms it is alive
@@ -561,6 +611,10 @@ pub struct PoolRefill {
     pub refresh_due: Vec<RefreshDue>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub frozen: Vec<FrozenWorker>,
+    /// Finished workers whose result is owed a `queue report-complete`
+    /// (`#finishedheadrefill`). Their heads are never in `next_heads`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub report_owed: Vec<ReportOwedWorker>,
     /// The next heads to dispatch now, already bounded by free slots.
     /// Empty when [`Self::quota_refill_block`] withheld them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -607,6 +661,7 @@ impl PoolRefill {
         !self.unstarted.is_empty()
             || !self.refresh_due.is_empty()
             || !self.next_heads.is_empty()
+            || !self.report_owed.is_empty()
             || self.quota_refill_block.is_some()
     }
 
@@ -637,8 +692,30 @@ impl PoolRefill {
             .collect()
     }
 
+    /// One line per finished worker whose result is owed a report.
+    pub fn report_owed_steps(&self) -> Vec<String> {
+        self.report_owed
+            .iter()
+            .map(|entry| {
+                format!(
+                    "Report the finished worker of queue item {:?} (worker {}, generation {}): it \
+                     ended with a hand-back that is not reported yet, so its head is report-owed, \
+                     not a free slot. Run `{}` with the worker's complete hand-back. To resume \
+                     the same worker instead, continue it under this generation. Only to \
+                     discard its result, run `{}`. Never run `queue claim` for this item: a new \
+                     generation would redo finished work.",
+                    entry.item,
+                    entry.worker_id,
+                    entry.generation,
+                    entry.report_command,
+                    entry.release_command,
+                )
+            })
+            .collect()
+    }
+
     /// Ordered commands: unstarted spawn/start first, then due heartbeats,
-    /// then refill heads.
+    /// then refill heads, then reports owed by finished workers.
     pub fn ordered_steps(&self) -> Vec<String> {
         let mut steps = Vec::new();
         for entry in &self.unstarted {
@@ -665,13 +742,18 @@ impl PoolRefill {
                 head.item, head.claim_command, head.brief_command, head.start_command,
             ));
         }
+        steps.extend(self.report_owed_steps());
         steps
     }
 
     /// Text for a command's output or a steering context. `None` when there
     /// is neither pool work nor a pool to report.
     pub fn render(&self) -> Option<String> {
-        if self.pools.is_empty() && !self.is_actionable() && self.frozen.is_empty() {
+        if self.pools.is_empty()
+            && !self.is_actionable()
+            && self.frozen.is_empty()
+            && self.report_owed.is_empty()
+        {
             return None;
         }
         let mut out = format!(
@@ -681,13 +763,14 @@ impl PoolRefill {
         for pool in &self.pools {
             let o = pool.occupancy;
             out.push_str(&format!(
-                "\n  pool `{}`: size {} ({}), running {}, dispatching {}, unconfirmed {}, frozen {}, free {}",
+                "\n  pool `{}`: size {} ({}), running {}, dispatching {}, unconfirmed {}, report-owed {}, frozen {}, free {}",
                 pool.queue_id,
                 o.size,
                 o.source.as_str(),
                 o.running,
                 o.dispatching,
                 o.unconfirmed,
+                o.report_owed,
                 o.frozen,
                 o.free,
             ));
@@ -959,6 +1042,7 @@ mod tests {
                     reason: "wrapper ended".to_string(),
                 },
             }],
+            report_owed: Vec::new(),
             quota_refill_block: None,
             next_heads: vec![RefillHead {
                 item: "do [#b]".to_string(),
@@ -1000,6 +1084,133 @@ mod tests {
         assert!(text.contains("3 more head(s) wait"), "{text}");
     }
 
+    /// `#finishedheadrefill`: the subagent-end hook froze a worker that
+    /// finished, before the coordinator ran `queue report-complete`. Its head
+    /// is report-owed: it keeps its slot (never counted free, so the pool
+    /// line no longer reads `running 0 ... frozen 0` for it), owes no
+    /// heartbeat, and is not frozen. A stop with no captured hand-back stays
+    /// frozen and frees its slot.
+    #[test]
+    fn a_finished_worker_awaiting_its_report_holds_its_slot() {
+        let now = 10_000;
+        let frozen_secs = 600;
+        let mut finished = claim("finished", QueueClaimState::Running, Some(now - 30));
+        finished.frozen = Some(QueueWorkerFreeze {
+            frozen_at_secs: now - 5,
+            reason: crate::queue_claim::subagent_end_freeze_reason(Some(
+                "**Summary** done. **What changed** commit abc.",
+            )),
+            abandoned: false,
+        });
+        let mut no_hand_back = claim("crashed", QueueClaimState::Running, Some(now - 30));
+        no_hand_back.frozen = Some(QueueWorkerFreeze {
+            frozen_at_secs: now - 5,
+            reason: crate::queue_claim::subagent_end_freeze_reason(None),
+            abandoned: false,
+        });
+        assert_eq!(
+            classify_attempt(&finished, now, frozen_secs),
+            AttemptSlot::ReportOwed
+        );
+        assert!(occupies_pool_slot(&finished, now, frozen_secs));
+        assert!(!heartbeat_due(&finished, now, frozen_secs));
+        assert!(worker_frozen(&finished, now, frozen_secs).is_none());
+        // Long after the frozen bound, it is still owed a report.
+        assert_eq!(
+            classify_attempt(&finished, now + 100_000, frozen_secs),
+            AttemptSlot::ReportOwed
+        );
+        let mut lost = finished.clone();
+        lost.mark_lost();
+        assert_eq!(
+            classify_attempt(&lost, now, frozen_secs),
+            AttemptSlot::ReportOwed
+        );
+        assert!(matches!(
+            classify_attempt(&no_hand_back, now, frozen_secs),
+            AttemptSlot::Free | AttemptSlot::Frozen(_)
+        ));
+
+        let occupancy = pool_occupancy(
+            PoolSize {
+                size: nz(2),
+                source: PoolSizeSource::QueueCap,
+            },
+            [&finished, &no_hand_back],
+            now,
+            frozen_secs,
+        );
+        assert_eq!(occupancy.report_owed, 1, "{occupancy:?}");
+        assert_eq!(occupancy.running, 0, "{occupancy:?}");
+        assert_eq!(occupancy.free, 1, "{occupancy:?}");
+
+        let mut reported = finished.clone();
+        reported.state = QueueClaimState::Reported;
+        assert_eq!(
+            classify_attempt(&reported, now, frozen_secs),
+            AttemptSlot::Free
+        );
+    }
+
+    /// `#finishedheadrefill`: the refill tells the coordinator to report the
+    /// finished worker for its exact generation, never to claim it again.
+    #[test]
+    fn a_report_owed_refill_says_report_complete_not_claim() {
+        let refill = PoolRefill {
+            trigger: PoolRefillTrigger::Plan,
+            pools: vec![PoolStatus {
+                queue_id: "main".to_string(),
+                occupancy: PoolOccupancy {
+                    size: 8,
+                    source: PoolSizeSource::QueueCap,
+                    running: 2,
+                    dispatching: 0,
+                    unconfirmed: 0,
+                    frozen: 0,
+                    report_owed: 1,
+                    free: 5,
+                },
+            }],
+            unstarted: Vec::new(),
+            refresh_due: Vec::new(),
+            frozen: Vec::new(),
+            report_owed: vec![ReportOwedWorker {
+                item: "do [#done]".to_string(),
+                owner: "subagent:done".to_string(),
+                generation: 1,
+                worker_id: "worker-done".to_string(),
+                hand_back_excerpt: "**Summary** done.".to_string(),
+                report_command:
+                    "agent-doc queue report-complete f --item 'done' --generation 1 --response '<complete worker hand-back>'"
+                        .to_string(),
+                release_command: "agent-doc queue release f --item 'done' --generation 1 --requeue"
+                    .to_string(),
+            }],
+            next_heads: Vec::new(),
+            quota_refill_block: None,
+            waiting_for_slot: 0,
+        };
+        assert!(refill.is_actionable());
+        assert!(
+            refill.running_turn_refill().is_none(),
+            "a report is not dispatch debt for a hookless paste"
+        );
+        let steps = refill.ordered_steps();
+        assert_eq!(steps.len(), 1, "{steps:?}");
+        assert!(
+            steps[0].starts_with("Report the finished worker"),
+            "{steps:?}"
+        );
+        assert!(
+            steps[0].contains("queue report-complete f --item 'done' --generation 1"),
+            "{steps:?}"
+        );
+        assert!(steps[0].contains("Never run `queue claim`"), "{steps:?}");
+        let text = refill.render().unwrap();
+        assert!(text.contains("report-owed 1"), "{text}");
+        assert!(!text.contains("Refill a free pool slot"), "{text}");
+    }
+
     /// `#poolquotarefillgate`: a refusal is the report, not an empty pool.
     #[test]
     fn a_quota_refusal_names_the_reason_and_offers_no_head() {
@@ -1009,6 +1220,7 @@ mod tests {
             unstarted: Vec::new(),
             refresh_due: Vec::new(),
             frozen: Vec::new(),
+            report_owed: Vec::new(),
             next_heads: Vec::new(),
             quota_refill_block: Some(QuotaRefillBlock {
                 harness: Some("claude-code".to_string()),

@@ -534,14 +534,12 @@ mod tests {
         agent_doc_queue_io::lost_running::recover_lost_running_automatically(&doc, true).unwrap();
         let frozen = only_claim(&doc);
         assert!(frozen.frozen.is_some());
-        assert_eq!(
-            frozen
-                .lost_continue
-                .as_ref()
-                .map(|record| record.reason.as_str()),
-            Some("harness freeze worker is gone; continue refused")
-        );
-        assert!(agent_doc_queue::lost_running_recovery::retry_authorized(
+        // `#finishedheadrefill`: the stop recorded a hand-back, so the attempt
+        // is report-owed. Recovery neither fails its continue nor authorizes
+        // a duplicate generation while the worker may still be running.
+        assert!(frozen.lost_continue.is_none(), "{frozen:#?}");
+        assert!(agent_doc_queue::lost_running_recovery::report_owed(&frozen));
+        assert!(!agent_doc_queue::lost_running_recovery::retry_authorized(
             &frozen
         ));
 

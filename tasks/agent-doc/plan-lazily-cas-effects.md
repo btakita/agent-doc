@@ -239,7 +239,12 @@ Do not migrate:
 - pure in-memory compare-and-swap with no external effect;
 - ordered history, which stays on `TopicCell` / `DurableOutbox`;
 - backend locks required to implement one adapter's atomic operation;
-- domain validation that is not effect ownership.
+- domain validation that is not effect ownership;
+- transport, process-launch, and read-resilience retries that carry no
+  expected authority (nothing is compared-and-applied, so there is no
+  supersession for Lazily to own);
+- in-process JVM/JS compare-and-set guards in the editor plugins (once-flags,
+  single-flight scheduling of local UI work).
 
 For each migrated seam, land parity tests first, switch callers, then remove the
 old state machine and assert by source audit that no second retry/supersession
@@ -273,7 +278,12 @@ Statuses: `migrated` (orchestration runs through `lazily::EffectCasCore`),
 `lazily-adapter` (narrow `CompareAndApply` backend or its atomic primitive),
 `pending-migration` (matching seam, bespoke orchestration still live),
 `excluded` (plan's "Do not migrate" list), `triage` (inventoried with
-owning-crate defaults, semantics not yet reviewed), `deleted`.
+owning-crate defaults, semantics not yet reviewed), `deleted`. Every row is
+reviewed: the audit fails on a `triage` row, so a new callsite must be
+classified (the `lazily_adapter` column states the review reason) before it
+lands. The audit also covers production editor-plugin sources under
+`editors/` (Kotlin/Java/TypeScript definitions by keyword, members only, plus
+`compareAndSet`-family calls).
 
 Progress (`#implementlazilyowned`):
 
@@ -358,7 +368,29 @@ Progress (`#implementlazilyowned`):
   re-claimed from Lazily's retained intent, and an ignored path or fatal
   failure is `Rejected`. `pace_commit_transaction` only logs and waits the
   backoff; it never decides whether to retry.
-- Not yet done: moving the remaining `controller-ledger-sqlite` seams (actor generation,
+- Triage review: all 517 remaining `triage` rows were reviewed. 280 are
+  `excluded` with a stated reason (74 token false positives such as Markdown
+  fence parsers, 60 transport/launch/read retries, 58 lease-row primitives and
+  liveness predicates, 44 domain supersessions, 23 diagnostics, 9 authority
+  backend comparator primitives, and a few ordered-history, schedule-cadence,
+  read-only, test-support, and in-memory rows); 237 are `pending-migration`
+  matching seams grouped by family (document CAS retry loops, authority
+  observation retries, retained editor writes, tmux/layout/focus latest-wins
+  projections, actor-generation effects, dispatch/recycle owner supersession,
+  closeout/turn-fenced effects, cross-process owner leases, queue projection
+  CAS, Git closeout helpers, idle-watch effect retries).
+- Final audit extended to `editors/`: 126 editor-plugin rows inventoried and
+  reviewed (72 `excluded`: in-process compare-and-set guards, transport and
+  attach retries, notices, editor-native locks; 54 `pending-migration`: the
+  editor half of the document authority in `CrdtReplicaManager`,
+  `PatchWatcher`, and `TypingTracker`, plus retained surface/layout delivery,
+  whose retry/supersession must move behind the Rust core so Lazily owns it).
+- Not yet done: the 13 original preflight `pending-migration` rows (authority
+  observation retry `observe_current_text_with_bounded_retry_fenced` and
+  friends, `fence_pending_maintenance_effect`, `run_pending_maintenance_fenced`,
+  `fence_queue_maintenance_authority_acquisition`,
+  `QueueMaintenanceAuthoritySuperseded`), then the reviewed
+  `pending-migration` families above, moving the remaining `controller-ledger-sqlite` seams (actor generation,
   closeout lease, drain-owner claims) onto the SQLite adapter, persisting
   per-step plan receipts for crash resume inside one request (today a resumed
   request re-derives its idempotent effects), reordering the maintenance body

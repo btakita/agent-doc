@@ -9,8 +9,14 @@
 //!
 //! Audit definition (keep `tasks/agent-doc/plan-lazily-cas-effects.md` in sync):
 //! - every `*.rs` file in this repository except `target/`, `tests/`,
-//!   `benches/`, `examples/`, `fuzz/`, hidden directories, `editors/`,
-//!   `python/`, `agent-doc-test-support/`, and `agent-doc-fuzz-harness/`;
+//!   `benches/`, `examples/`, `fuzz/`, `tmp/` (gitignored scratch), hidden
+//!   directories, `editors/`, `python/`, `agent-doc-test-support/`, and
+//!   `agent-doc-fuzz-harness/`;
+//! - every production editor-plugin source under `editors/` (`*.rs`, `*.kt`,
+//!   `*.java`, `*.ts`; test sources, `*.d.ts`, and build output excluded),
+//!   whose Kotlin/Java/TypeScript definitions are matched by keyword (see
+//!   [`editor_definition`]) plus `.compareAndSet(` / `.compareAndExchange(` /
+//!   `Atomics.compareExchange(` calls;
 //! - items under `#[cfg(test)]` / `#[test]` are excluded;
 //! - a `fn`/`struct`/`enum`/`trait`/`type`/`const`/`static` definition whose
 //!   identifier has a token in [`TOKENS`], a `supersed*` token, one of the
@@ -19,7 +25,8 @@
 //!
 //! Regenerate missing rows with
 //! `AGENT_DOC_UPDATE_LAZILY_CAS_LEDGER=1 cargo test --test lazily_cas_callsite_ledger`;
-//! new rows get `triage` status with owning-crate defaults that must be reviewed.
+//! new rows get `triage` status with owning-crate defaults, and a `triage` row
+//! fails the audit until it is reviewed into another status.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -62,6 +69,7 @@ const SKIP_DIRS: &[&str] = &[
     "examples",
     "fuzz",
     "node_modules",
+    "tmp",
     "editors",
     "python",
     "agent-doc-test-support",
@@ -77,6 +85,7 @@ const STATUSES: &[&str] = &[
     // Out of scope per the plan's "Do not migrate" list.
     "excluded",
     // Inventoried with owning-crate defaults; semantics not yet reviewed.
+    // Only the regeneration mode writes it, and the audit fails on it.
     "triage",
     // Bespoke orchestration removed; the callsite must be absent.
     "deleted",
@@ -268,10 +277,252 @@ fn walk(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
+/// Editor-plugin call markers (`#implementlazilyowned` final audit): the JVM
+/// and JS compare-and-set primitives are the editor-side analog of
+/// `compare_exchange(`.
+const EDITOR_CALL_MARKERS: &[(&str, &str)] = &[
+    (".compareAndSet(", "compareAndSet"),
+    (".compareAndExchange(", "compareAndExchange"),
+    ("Atomics.compareExchange(", "Atomics.compareExchange"),
+];
+
+/// Modifiers stripped before an editor-plugin definition keyword.
+const EDITOR_MODIFIERS: &[&str] = &[
+    "public",
+    "private",
+    "protected",
+    "internal",
+    "override",
+    "open",
+    "abstract",
+    "final",
+    "suspend",
+    "inline",
+    "data",
+    "sealed",
+    "lateinit",
+    "companion",
+    "inner",
+    "value",
+    "tailrec",
+    "operator",
+    "infix",
+    "external",
+    "static",
+    "export",
+    "default",
+    "async",
+    "declare",
+    "readonly",
+    "synchronized",
+    "volatile",
+    "transient",
+];
+
+/// Definition keywords of the editor-plugin languages (Kotlin, Java, TypeScript).
+const EDITOR_KINDS: &[&str] = &[
+    "fun",
+    "class",
+    "object",
+    "interface",
+    "val",
+    "var",
+    "typealias",
+    "function",
+    "type",
+    "const",
+    "let",
+    "enum",
+];
+
+/// `(kind, identifier)` of a Kotlin/Java/TypeScript definition line. Java
+/// methods carry no keyword and are not matched; their fields and classes are.
+fn editor_definition(line: &str) -> Option<(&'static str, String)> {
+    let mut rest = line.trim_start();
+    if rest.starts_with("//") || rest.starts_with('*') || rest.starts_with("/*") {
+        return None;
+    }
+    while rest.starts_with('@') {
+        // Skip an annotation (`@Volatile`, `@JvmStatic`, `@Suppress("x")`).
+        let end = rest
+            .find(|ch: char| ch.is_whitespace())
+            .unwrap_or(rest.len());
+        rest = rest[end..].trim_start();
+    }
+    loop {
+        let mut stripped = false;
+        // Kotlin `const val` / `enum class`; a bare TypeScript `const`/`enum`
+        // is the definition keyword itself.
+        for prefix in ["const val ", "enum class "] {
+            if rest.starts_with(prefix) {
+                rest = rest[prefix.find(' ').unwrap()..].trim_start();
+                stripped = true;
+            }
+        }
+        for modifier in EDITOR_MODIFIERS {
+            if let Some(after) = rest.strip_prefix(modifier)
+                && after.starts_with(char::is_whitespace)
+            {
+                rest = after.trim_start();
+                stripped = true;
+            }
+        }
+        if !stripped {
+            break;
+        }
+    }
+    for kind in EDITOR_KINDS {
+        let Some(after) = rest.strip_prefix(kind) else {
+            continue;
+        };
+        if !after.starts_with(char::is_whitespace) {
+            continue;
+        }
+        let mut after = after.trim_start();
+        if *kind == "fun" && after.starts_with('<') {
+            // Generic function: `fun <T> name(`.
+            let close = after.find('>')?;
+            after = after[close + 1..].trim_start();
+        }
+        let mut ident: String = after
+            .chars()
+            .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_' || *ch == '.')
+            .collect();
+        if *kind == "fun" {
+            // Extension function: `fun Receiver.name(` names `name`.
+            if let Some((_, name)) = ident.rsplit_once('.') {
+                ident = name.to_string();
+            }
+        } else if ident.contains('.') {
+            return None;
+        }
+        let first = ident.chars().next()?;
+        if first.is_ascii_digit() {
+            return None;
+        }
+        return Some((kind, ident));
+    }
+    None
+}
+
+/// Production editor-plugin sources: Rust, Kotlin, Java, and TypeScript under
+/// `editors/`, excluding test sources and build output.
+fn editor_source(rel: &str) -> bool {
+    let production = !rel.contains("/src/test/")
+        && !rel.contains("/test/")
+        && !rel.contains("/tests/")
+        && !rel.contains("/__tests__/")
+        && !rel.ends_with(".test.ts")
+        && !rel.ends_with(".spec.ts")
+        && !rel.ends_with(".d.ts");
+    production
+        && [".rs", ".kt", ".java", ".ts"]
+            .iter()
+            .any(|extension| rel.ends_with(extension))
+}
+
+/// Declaration kinds whose brace opens a type body (members, not locals).
+const EDITOR_TYPE_KINDS: &[&str] = &["class", "object", "interface", "enum"];
+/// Kinds that declare a local when they appear inside a function body.
+const EDITOR_BINDING_KINDS: &[&str] = &["val", "var", "const", "let"];
+
+fn scan_editor_file(rel: &str, source: &str, rows: &mut Vec<(String, String, String)>) {
+    if rel.ends_with(".rs") {
+        scan_file(rel, source, rows);
+        return;
+    }
+    // One entry per open brace: whether it opened a type body. A binding is an
+    // audited member only at top level or directly inside a type body; inside
+    // a function or lambda it is a local, like a Rust `let`.
+    let mut blocks: Vec<bool> = Vec::new();
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("//") || trimmed.starts_with('*') || trimmed.starts_with("/*") {
+            continue;
+        }
+        let definition = editor_definition(line);
+        let in_code = blocks.last().is_some_and(|is_type| !is_type);
+        if let Some((kind, ident)) = &definition
+            && !(in_code && EDITOR_BINDING_KINDS.contains(kind))
+            && audited_identifier(ident)
+        {
+            rows.push((rel.to_string(), kind.to_string(), ident.clone()));
+        }
+        let opens_type = definition
+            .as_ref()
+            .is_some_and(|(kind, _)| EDITOR_TYPE_KINDS.contains(kind))
+            || trimmed.starts_with("companion object");
+        let delta = brace_delta(line);
+        if delta > 0 {
+            for _ in 0..delta {
+                blocks.push(opens_type);
+            }
+        } else {
+            for _ in 0..(-delta) {
+                blocks.pop();
+            }
+        }
+        for (marker, label) in EDITOR_CALL_MARKERS {
+            if line.contains(marker) {
+                rows.push((rel.to_string(), "call".to_string(), label.to_string()));
+            }
+        }
+    }
+}
+
+const EDITOR_SKIP_DIRS: &[&str] = &[
+    "target",
+    "node_modules",
+    "build",
+    "out",
+    "dist",
+    "bin",
+    "gradle",
+    "test",
+    "tests",
+];
+
+fn walk_editors(dir: &Path, root: &Path, files: &mut Vec<PathBuf>) {
+    let Ok(read) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut entries: Vec<_> = read.map(|entry| entry.unwrap().path()).collect();
+    entries.sort();
+    for path in entries {
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        if path.is_dir() {
+            if name.starts_with('.') || EDITOR_SKIP_DIRS.contains(&name.as_str()) {
+                continue;
+            }
+            walk_editors(&path, root, files);
+        } else {
+            let rel = path
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            if editor_source(&rel) {
+                files.push(path);
+            }
+        }
+    }
+}
+
 fn audited_callsites(root: &Path) -> Vec<Key> {
     let mut files = Vec::new();
     walk(root, &mut files);
+    let mut editor_files = Vec::new();
+    walk_editors(&root.join("editors"), root, &mut editor_files);
     let mut rows = Vec::new();
+    for file in editor_files {
+        let rel = file
+            .strip_prefix(root)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
+        let source = String::from_utf8_lossy(&std::fs::read(&file).unwrap()).to_string();
+        scan_editor_file(&rel, &source, &mut rows);
+    }
     for file in files {
         let rel = file
             .strip_prefix(root)
@@ -295,6 +546,9 @@ fn audited_callsites(root: &Path) -> Vec<Key> {
 
 /// Owning-crate defaults for a new `triage` row: (authority backend, adapter).
 fn triage_defaults(path: &str) -> (&'static str, &'static str) {
+    if path.starts_with("editors/") {
+        return ("editor-plugin", "none (editor plugin, review)");
+    }
     let krate = path.split('/').next().unwrap_or(path);
     let crate_name = if krate == "src" { "agent-doc" } else { krate };
     let has = |needles: &[&str]| needles.iter().any(|needle| crate_name.contains(needle));
@@ -426,6 +680,11 @@ fn lazily_cas_callsite_ledger_is_exhaustive_and_deletion_proofs_hold() {
         if !STATUSES.contains(&status) {
             failures.push(format!("unknown status {status:?} for {key:?}"));
         }
+        if status == "triage" {
+            failures.push(format!(
+                "{key:?} is unreviewed triage; classify it (see the plan's statuses)"
+            ));
+        }
         let present = observed_set.contains(&key);
         if status == "deleted" && present {
             failures.push(format!("{key:?} is marked deleted but still present"));
@@ -522,4 +781,51 @@ fn audit_skips_test_items_but_not_production_items() {
             "compare_exchange"
         ]
     );
+}
+
+#[test]
+fn audit_matches_editor_plugin_definitions_and_compare_and_set_calls() {
+    let kotlin = concat!(
+        "class PatchRetryScheduler {\n",
+        "    private val retryBackoffMs = 250L\n",
+        "    @Volatile private var leaseHolder: String? = null\n",
+        "    private fun <T> withRetry(block: () -> T): T = block()\n",
+        "    fun Editor.fenceStaleWrite() {}\n",
+        "    // fun commentedRetry() {}\n",
+        "    fun release() { if (flag.compareAndSet(false, true)) {} }\n",
+        "    const val MAX_ATTEMPTS = 3\n",
+        "}\n",
+    );
+    let mut rows = Vec::new();
+    scan_editor_file("editors/jetbrains/src/main/kotlin/X.kt", kotlin, &mut rows);
+    let found: Vec<(&str, &str)> = rows
+        .iter()
+        .map(|row| (row.1.as_str(), row.2.as_str()))
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            ("class", "PatchRetryScheduler"),
+            ("val", "retryBackoffMs"),
+            ("var", "leaseHolder"),
+            ("fun", "withRetry"),
+            ("fun", "fenceStaleWrite"),
+            ("call", "compareAndSet"),
+            ("val", "MAX_ATTEMPTS"),
+        ]
+    );
+    let typescript = concat!(
+        "export async function sendWithRetry() {}\n",
+        "export const LEASE_TTL_MS = 5000;\n",
+        "export interface FenceToken {}\n",
+        "function render() {}\n",
+    );
+    let mut rows = Vec::new();
+    scan_editor_file("editors/vscode/src/x.ts", typescript, &mut rows);
+    let symbols: Vec<&str> = rows.iter().map(|row| row.2.as_str()).collect();
+    assert_eq!(symbols, vec!["sendWithRetry", "LEASE_TTL_MS", "FenceToken"]);
+    assert!(editor_source("editors/vscode/src/x.ts"));
+    assert!(!editor_source("editors/vscode/src/test/x.test.ts"));
+    assert!(!editor_source("editors/jetbrains/src/test/kotlin/X.kt"));
+    assert!(!editor_source("editors/vscode/src/x.d.ts"));
 }

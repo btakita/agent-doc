@@ -708,22 +708,57 @@ fn stable_closeout_owner_id(prefix: &str) -> String {
 const CLOSEOUT_OWNER_CLAIM_ATTEMPTS: u32 = 3;
 
 /// Re-send a closeout-owner claim with the SAME request until the controller
-/// answers (`#netadv3` F4). Any outcome is an answer; only a transport error is
-/// retried, after `backoff(attempt)`. The claim is idempotent for one owner id,
-/// so a retry after a lost reply re-acquires rather than conflicting.
+/// answers (`#netadv3` F4), as one Lazily effect epoch
+/// (`#implementlazilyowned`): every send is a Lazily-claimed attempt, a
+/// transport error is `Retryable` and re-claimed from Lazily's retained intent
+/// after `backoff(attempt)`, any answer is the applied receipt, and the last
+/// transport error within `attempts` is a rejection. The claim is idempotent
+/// for one owner id, so a resend after a lost reply re-acquires rather than
+/// conflicting.
 fn claim_closeout_owner_until_answered<T>(
     attempts: u32,
     mut claim: impl FnMut() -> Result<T>,
     mut backoff: impl FnMut(u32),
 ) -> Result<T> {
-    let mut attempt = 1;
+    type ClaimCore = lazily::EffectCasCore<(), (), (), (), String>;
+    let mut core = ClaimCore::new(0);
+    let intent = lazily::EffectIntent {
+        identity: lazily::EffectIdentity::new("closeout-owner-claim#1")
+            .map_err(|error| anyhow::anyhow!("invalid closeout claim identity: {error:?}"))?,
+        epoch: 1,
+        key: (),
+        expected: (),
+        plan: lazily::EffectPlan::single(()),
+    };
+    match core.upsert_desired(intent).1 {
+        lazily::EffectCasUpsert::Accepted => {}
+        other => anyhow::bail!("closeout owner claim was not accepted: {other:?}"),
+    }
+    let attempts = attempts.max(1);
+    let mut now = 0;
     loop {
+        let attempt = match core.claim(&(), 0, now).1 {
+            lazily::EffectCasClaim::Claimed(attempt) => attempt.identity,
+            other => anyhow::bail!("closeout owner claim was not claimed: {other:?}"),
+        };
         match claim() {
-            Ok(answer) => return Ok(answer),
-            Err(error) if attempt >= attempts.max(1) => return Err(error),
-            Err(_) => {
-                backoff(attempt);
-                attempt += 1;
+            Ok(answer) => {
+                core.record_applied(&(), &attempt, (), ());
+                return Ok(answer);
+            }
+            Err(error) if attempt.attempt >= attempts => {
+                core.record_rejected(&(), &attempt, format!("{error:#}"));
+                return Err(error);
+            }
+            Err(error) => {
+                now += 1;
+                match core
+                    .record_retryable(&(), &attempt, format!("{error:#}"), now)
+                    .1
+                {
+                    lazily::EffectCasFailure::Retrying { .. } => backoff(attempt.attempt),
+                    other => anyhow::bail!("closeout owner claim retry diverged: {other:?}"),
+                }
             }
         }
     }

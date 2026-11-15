@@ -290,9 +290,9 @@ pub fn acquire_owner_lease<B: OwnerLeaseBackend>(
     transact(conn, &scope, |core, transaction| {
         let observed = backend.observe(transaction)?;
         if !admit(observed.as_ref()) {
-            return Ok(OwnerLeaseAcquired::Held(
-                observed.expect("an admission refusal names the grant it keeps"),
-            ));
+            return observed.map(OwnerLeaseAcquired::Held).context(
+                "owner claim admission refused an absent grant; admit must accept a free slot",
+            );
         }
         let holder = grant.holder();
         let observed_holder = observed.as_ref().map(OwnerGrant::holder);

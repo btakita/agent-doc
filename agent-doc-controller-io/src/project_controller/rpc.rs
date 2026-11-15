@@ -7830,8 +7830,9 @@ pub const CLOSEOUT_ROLE_SESSION_CHECK_RECOVERY: &str =
 ///
 /// No scalar constructor is exposed. Callers obtain this only from
 /// [`claim_closeout_owner_guard_for_file`], retain it in their owner guard,
-/// and borrow it through nested closeout effects. The shared loss flag is
-/// minted here with the claim and cannot be replaced by a downstream caller.
+/// and borrow it through nested closeout effects. The capability's Lazily
+/// tenure (`closeout_owner_tenure::CloseoutOwnerTenure`) is minted here with
+/// the claim and cannot be replaced by a downstream caller.
 pub struct CloseoutOwnerCapability {
     file: PathBuf,
     cycle_id: String,
@@ -7841,7 +7842,7 @@ pub struct CloseoutOwnerCapability {
     role: String,
     lease_secs: u64,
     actorless: bool,
-    lease_lost: Arc<AtomicBool>,
+    tenure: closeout_owner_tenure::CloseoutOwnerTenure,
     terminal_effect: closeout_terminal_effect::TerminalEffectSingleFlight,
     git_ref_landed: Arc<AtomicBool>,
     terminal_promotion_landed: Arc<AtomicBool>,
@@ -7859,7 +7860,7 @@ impl std::fmt::Debug for CloseoutOwnerCapability {
             .field("role", &self.role)
             .field("lease_secs", &self.lease_secs)
             .field("actorless", &self.actorless)
-            .field("lease_lost", &self.lease_lost.load(Ordering::SeqCst))
+            .field("tenure_superseded", &self.tenure.superseded())
             .field(
                 "terminal_effect_in_progress",
                 &self.terminal_effect.in_progress(),
@@ -7880,7 +7881,7 @@ impl CloseoutOwnerCapability {
             role: self.role.clone(),
             lease_secs: self.lease_secs,
             actorless: self.actorless,
-            lease_lost: self.lease_lost.clone(),
+            tenure: self.tenure.clone(),
             terminal_effect: self.terminal_effect.clone(),
             git_ref_landed: self.git_ref_landed.clone(),
             terminal_promotion_landed: self.terminal_promotion_landed.clone(),
@@ -8058,13 +8059,15 @@ impl CloseoutOwnerCapability {
         self.actorless
     }
 
+    /// Whether an answered refresh superseded this capability's Lazily tenure.
     pub fn lease_lost(&self) -> bool {
-        self.lease_lost.load(Ordering::SeqCst)
+        self.tenure.superseded()
     }
 
-    /// Mark an answered refresh loss on every borrow of this capability.
+    /// Record an answered refresh loss as Lazily supersession of the tenure,
+    /// visible on every borrow of this capability.
     pub fn mark_lease_lost(&self) {
-        self.lease_lost.store(true, Ordering::SeqCst);
+        self.tenure.record_superseded("answered_refresh_loss");
     }
 
     pub fn refresh(&self) -> Result<CloseoutOwnerClaimOutcome> {
@@ -8292,6 +8295,7 @@ impl Drop for ClaimedCloseoutOwnerGuard {
                 "foreground_closeout_finished",
             );
         }
+        self.capability.tenure.release();
     }
 }
 
@@ -8419,7 +8423,6 @@ pub fn claim_closeout_owner_guard_for_file(
     let owner_pid = request.owner_pid;
     let role = request.role.clone();
     let lease_secs = request.lease_secs;
-    let lease_lost = Arc::new(AtomicBool::new(false));
     let git_ref_landed = Arc::new(AtomicBool::new(false));
     let terminal_promotion_landed = Arc::new(AtomicBool::new(false));
 
@@ -8428,6 +8431,10 @@ pub fn claim_closeout_owner_guard_for_file(
             expected_cycle_id.as_deref().unwrap_or("actorless"),
             &owner_id,
         );
+        let tenure = closeout_owner_tenure::CloseoutOwnerTenure::claim(
+            expected_cycle_id.as_deref().unwrap_or("actorless"),
+            &owner_id,
+        )?;
         return Ok(CloseoutOwnerGuardClaimOutcome::Acquired(
             ClaimedCloseoutOwnerGuard::new(CloseoutOwnerCapability {
                 file: canonical_file,
@@ -8438,7 +8445,7 @@ pub fn claim_closeout_owner_guard_for_file(
                 role,
                 lease_secs,
                 actorless: true,
-                lease_lost,
+                tenure,
                 terminal_effect,
                 git_ref_landed,
                 terminal_promotion_landed,
@@ -8466,6 +8473,8 @@ pub fn claim_closeout_owner_guard_for_file(
                 &owner.cycle_id,
                 &owner_id,
             );
+            let tenure =
+                closeout_owner_tenure::CloseoutOwnerTenure::claim(&owner.cycle_id, &owner_id)?;
             Ok(CloseoutOwnerGuardClaimOutcome::Acquired(
                 ClaimedCloseoutOwnerGuard::new(CloseoutOwnerCapability {
                     file: canonical_file,
@@ -8476,7 +8485,7 @@ pub fn claim_closeout_owner_guard_for_file(
                     role,
                     lease_secs,
                     actorless: false,
-                    lease_lost,
+                    tenure,
                     terminal_effect,
                     git_ref_landed,
                     terminal_promotion_landed,
@@ -21684,6 +21693,8 @@ fn drain_predecessor_after_promotion(
     }
 }
 
+#[path = "closeout_owner_tenure.rs"]
+mod closeout_owner_tenure;
 #[path = "closeout_terminal_effect.rs"]
 mod closeout_terminal_effect;
 #[path = "pool_heartbeat.rs"]

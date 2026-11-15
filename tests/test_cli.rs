@@ -15441,7 +15441,10 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
             && controller_rpc.contains("pub struct CloseoutOwnerCapability")
             && controller_rpc.contains("pub fn claim_closeout_owner_guard_for_file(")
             && controller_rpc.contains("Acquired(ClaimedCloseoutOwnerGuard)")
-            && capability_struct.contains("lease_lost: Arc<AtomicBool>")
+            // `#implementlazilyowned`: the loss is the capability's Lazily
+            // tenure, minted with the claim, never a shared caller flag.
+            && capability_struct.contains("tenure: closeout_owner_tenure::CloseoutOwnerTenure")
+            && !capability_struct.contains("lease_lost: Arc<AtomicBool>")
             && !capability_struct
                 .lines()
                 .any(|line| line.trim_start().starts_with("pub "))

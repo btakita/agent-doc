@@ -432,6 +432,26 @@ Progress (`#implementlazilyowned`):
   `queue_maintenance_claim`), 1 `excluded` (`DocumentTurnAuthorityStreamLease`:
   an in-process RAII subscription refcount, no effect ownership), plus 11 new
   `lazily-adapter` rows.
+- Family 2b, closeout/turn-fenced effects (lzowned6): a claimed
+  `CloseoutOwnerCapability` carries a Lazily tenure
+  (`closeout_owner_tenure::CloseoutOwnerTenure`, one claimed `EffectCasCore`
+  epoch). An answered refresh loss records it `Superseded`, `lease_lost()`
+  reads that terminal record, and the guard's release receipts it. The shared
+  `lease_lost` `AtomicBool` is deleted. write-runtime's
+  `claim_closeout_owner_until_answered` resend is one Lazily epoch: each send
+  is a claimed attempt, a transport error is `Retryable` and re-claimed after
+  the unchanged backoff, the cap stays at three, and the
+  `closeout_owner_claim_retry` marker is unchanged. The turn-fenced
+  frontmatter marks (`PreflightTurnFence`, `TerminalTurnFence`,
+  `*_if_turn_fence`, `*_with_turn_fence`, `requires_turn_fence`) already carry
+  the expected `TerminalTurnAuthority` into the Lazily terminal-turn append,
+  so they are `lazily-adapter`. So are the state-backbone/controller lease TTLs
+  (the expiry of the controller-decided claim) and the write-runtime capability
+  wrappers. 37 rows: 3 `migrated` (`lease_lost`, `mark_lease_lost`,
+  `CLOSEOUT_OWNER_CLAIM_ATTEMPTS`), 33 `lazily-adapter`, 1 `excluded`
+  (`cross_session_decision_with_lease`: a pure claim gate over a lease
+  freshness bool). There are also 2 new `lazily-adapter` rows. The heartbeat
+  thread's transport-retry cadence is unchanged.
 - Not yet done (as of 2026-11-15, agent-doc `59984d315a`; triage is complete,
   0 `triage` rows): migrate the 291 reviewed `pending-migration` rows family
   by family, then delete the remaining bespoke orchestration and make the
@@ -439,22 +459,22 @@ Progress (`#implementlazilyowned`):
 
 ## Resume here
 
-Status 2026-11-15 (after family 2a): ledger = 43 `migrated`, 67 `lazily-adapter`,
-17 `deleted`, 357 `excluded`, 254 `pending-migration`, 0 `triage`. Work the
-254 rows sequentially in ONE worktree (every step edits the ledger), one family
+Status 2026-11-15 (after family 2b): ledger = 46 `migrated`, 102 `lazily-adapter`,
+17 `deleted`, 358 `excluded`, 217 `pending-migration`, 0 `triage`. Work the
+217 rows sequentially in ONE worktree (every step edits the ledger), one family
 per pushed commit, `make check` green before each push, in this order (next:
-family 2b):
+family 3):
 
 1. DONE: actor-generation fenced writes (`store_actor_record_fenced_tx`,
    `delete_actor_document_fenced_tx`; 20 actor-generation rows) onto the
    `ledger_cas` adapter shape (`ActorGenerationWrite`,
    `drive_actor_generation_decisions`).
-2. Closeout lease and drain-owner claims onto a durable Lazily claim, as
+2. DONE: closeout lease and drain-owner claims onto a durable Lazily claim, as
    `queue_maintenance_claim` does, in two pushed halves:
    - 2a. DONE: the 17 cross-process owner-lease rows (queue drain owner,
      predecessor-drain slot, orphan-drain dispatch slot) onto
      `agent_doc_sqlite::owner_lease_claim`.
-   - 2b. The 37 closeout/turn-fenced rows (`CloseoutOwnerCapability` lease
+   - 2b. DONE: the 37 closeout/turn-fenced rows (`CloseoutOwnerCapability` lease
      loss, the closeout-owner claim retry, captured-finalize resume lease,
      the `*_if_turn_fence` / `*_with_turn_fence` frontmatter marks, and the
      state-backbone lease constants) onto a Lazily claim + the ControllerLedger

@@ -3295,6 +3295,7 @@ dependencies = [
  "agent-doc-write-ipc-io",
  "anyhow",
  "fs2",
+ "lazily 0.63.0",
  "parking_lot",
  "serde_json",
  "tempfile",

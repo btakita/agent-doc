@@ -730,6 +730,23 @@ deterministic tests.
   holder and writes or clears the row only on a match. The backend rows keep
   their scopes, so heartbeat readers (orphan drain, pool heartbeat, idle watch)
   are unchanged.
+- Lazily owns a closeout owner's client-side tenure (`#implementlazilyowned`,
+  family 2b). The controller's command-plane owner actor still decides each
+  closeout-owner claim from the projection; the client side of a claimed
+  owner is Lazily's. The capability is minted with one claimed
+  `lazily::EffectCasCore` tenure
+  (`project_controller::closeout_owner_tenure::CloseoutOwnerTenure`). An
+  answered refresh naming another owner (heartbeat `HeldByOther`, a
+  mismatched acquisition, or an unreceipted `CycleSuperseded`) records the
+  tenure `Superseded`, and every borrow refuses its next durable effect.
+  This replaces the shared `lease_lost` `AtomicBool`. Releasing the guard
+  receipts the tenure, so a late loss report changes nothing. The
+  closeout-owner claim's transport resend (`#netadv3` F4) is one Lazily epoch:
+  each send is a claimed attempt, a transport error is `Retryable` and is
+  re-claimed after the unchanged backoff, any answer is the receipt, and the
+  third failure is a rejection. The turn-fenced frontmatter marks carry the
+  expected `TerminalTurnAuthority` into `ledger_cas::append_if_terminal_turn`
+  and never degrade to the local path.
 - A lifecycle transition decided from projection evidence is fenced on the
   revision too (`#bindingcallersaudit`). The route's `caller=route` lifecycle
   writes (promoting a `Starting` actor it saw at a ready prompt, recovering a

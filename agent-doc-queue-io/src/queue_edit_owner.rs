@@ -7,7 +7,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-pub(crate) const QUEUE_EDIT_OWNER_SCOPE: &str = "queue_mutation";
+pub(crate) const QUEUE_EDIT_OWNER_SCOPE: &str =
+    agent_doc_controller_io::project_controller::QUEUE_APPLY_LEASE_SCOPE;
 const QUEUE_MAINTENANCE_REQUEST_PREFIX: &str = "queue_maintenance_request:";
 const DEFAULT_QUEUE_EDIT_OWNER_TTL_SECS: u64 = 15;
 const QUEUE_EDIT_OWNER_TTL_SECS_ENV: &str = "AGENT_DOC_QUEUE_EDIT_OWNER_TTL_SECS";
@@ -423,6 +424,41 @@ impl QueueEditGuard {
     /// worker is recovered by `try_acquire` rather than consuming this bound.
     pub fn acquire_for_response(file: &Path) -> Result<Self> {
         Self::acquire_with_background_wait(file, RESPONSE_BACKGROUND_WAIT)
+    }
+
+    /// Acquire the apply capability after this command's failed closeout was
+    /// proven committed by another owner (`#resumemaintrace`).
+    ///
+    /// The owner that committed the cycle (typically the route-owned
+    /// supervisor's captured-finalize resume) is a direct holder that still
+    /// runs its post-commit tail under the apply flock for a few seconds.
+    /// `acquire` fails a direct holder closed after the short handoff grace,
+    /// which made `respond` replace a superseded closeout error with `queue
+    /// mutation deferred` and exit nonzero for a committed turn. This waits for
+    /// any holder, direct or background, up to `wait`, and only then reports
+    /// the same deferral.
+    pub fn acquire_after_committed_closeout(file: &Path, wait: Duration) -> Result<Self> {
+        Self::acquire_waiting_for_any_holder(file, wait, FOREGROUND_BACKGROUND_POLL)
+    }
+
+    pub(crate) fn acquire_waiting_for_any_holder(
+        file: &Path,
+        wait: Duration,
+        poll: Duration,
+    ) -> Result<Self> {
+        let deadline = std::time::Instant::now() + wait;
+        loop {
+            if let Some(guard) = Self::try_acquire(file)? {
+                return Ok(guard);
+            }
+            if std::time::Instant::now() >= deadline {
+                anyhow::bail!(
+                    "queue mutation deferred: another owner is applying maintenance for {}; retry after it completes",
+                    file.display()
+                );
+            }
+            std::thread::sleep(poll);
+        }
     }
 
     fn acquire_with_background_wait(file: &Path, wait: Duration) -> Result<Self> {
@@ -875,6 +911,58 @@ mod tests {
 
         drop(apply);
         QueueEditGuard::acquire(&file).expect("direct edit enters after apply guard drops");
+    }
+
+    /// `#resumemaintrace`: the owner that committed a cycle `respond` failed to
+    /// close is a direct holder in its post-commit tail. `acquire` refuses it
+    /// after the short handoff grace (the respond error), while the
+    /// committed-closeout acquisition waits for it to release, within a bound.
+    #[test]
+    fn committed_closeout_acquire_waits_out_a_direct_post_commit_holder() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+
+        let committing_owner = QueueEditGuard::acquire(&file).unwrap();
+        assert!(
+            QueueEditGuard::acquire(&file)
+                .unwrap_err()
+                .to_string()
+                .contains("queue mutation deferred"),
+            "precondition: a live direct holder fails the ordinary acquire closed"
+        );
+        let bounded = QueueEditGuard::acquire_waiting_for_any_holder(
+            &file,
+            Duration::from_millis(50),
+            Duration::from_millis(5),
+        )
+        .unwrap_err();
+        assert!(
+            bounded.to_string().contains("queue mutation deferred"),
+            "the wait is bounded: {bounded:#}"
+        );
+
+        let (released_tx, released_rx) = std::sync::mpsc::channel();
+        let holder = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            drop(committing_owner);
+            released_tx.send(()).unwrap();
+        });
+        let guard =
+            QueueEditGuard::acquire_after_committed_closeout(&file, Duration::from_secs(20))
+                .expect("waits for the committing owner to release");
+        released_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the holder released the flock the guard now holds");
+        holder.join().unwrap();
+        assert_eq!(
+            read_queue_edit_owner_lease(&file.to_string_lossy())
+                .unwrap()
+                .holder_pid,
+            std::process::id()
+        );
+        drop(guard);
     }
 
     #[test]

@@ -27145,6 +27145,24 @@ pub(crate) fn handle_document_closeout_projection(
     runtime.document_closeout_projection(&document_hash)
 }
 
+/// Coordination-lease scope of the per-document queue apply capability
+/// (`agent_doc_queue_io::queue_edit_owner::QueueEditGuard`). The queue crate
+/// publishes its lease under this scope; the controller reads it as typed
+/// evidence of an in-flight apply transaction (`#resumemaintrace`).
+pub const QUEUE_APPLY_LEASE_SCOPE: &str = "queue_mutation";
+
+/// The pid recorded by the document's current queue apply lease, if any.
+/// A live owner publishes this row while it holds the apply flock and clears
+/// it before unlocking, so a row naming a live closeout owner's pid is that
+/// owner's open apply transaction.
+fn document_apply_transaction_holder_pid(project_root: &Path, file: &Path) -> Option<u32> {
+    let document_hash = agent_doc_fs::document_state_hash(file).ok()?;
+    super::load_coordination_lease(project_root, QUEUE_APPLY_LEASE_SCOPE, &document_hash)
+        .ok()
+        .flatten()
+        .and_then(|lease| lease.holder_pid)
+}
+
 /// Shared core of closeout owner claim: decide the CAS from the live
 /// in-memory projection (`decide_owner_claim`), emit the `CloseoutOwnerClaimed`
 /// fact when acquired, and update the supervisor-recycle graph. Pure authority
@@ -27199,6 +27217,46 @@ fn run_closeout_owner_claim(
             .document(&document_hash)
             .map(|document| document.closeout.clone())
             .unwrap_or_default()
+    };
+    // `#resumemaintrace`: the continuation succeeds a foreground owner only
+    // after that owner has left its document apply transaction. While a live
+    // `respond` still holds the apply capability, the continuation could not
+    // mutate anything, and displacing it failed the foreground's own closeout.
+    let authorization = match &authorization {
+        CloseoutOwnerClaimAuthorization::RetainedContinuation { .. } => {
+            let live_apply_holder_pid = current
+                .owner
+                .as_ref()
+                .filter(|owner| {
+                    owner.role == agent_doc_state_backbone::CLOSEOUT_OWNER_ROLE_FOREGROUND_FINALIZE
+                        && super::closeout_owner_alive(owner)
+                })
+                .and_then(|owner| {
+                    document_apply_transaction_holder_pid(&bootstrap.project_root, file)
+                        .filter(|pid| *pid == owner.owner_pid)
+                });
+            let yielded = authorization.clone().yield_to_incumbent_apply_transaction(
+                current.owner.as_ref(),
+                live_apply_holder_pid,
+            );
+            if yielded != authorization
+                && let Some(owner) = current.owner.as_ref()
+            {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "closeout_owner_transition_withheld file={} cycle_id={} incumbent_owner_id={} incumbent_pid={} claimant_owner_id={} reason=incumbent_apply_transaction_active (#resumemaintrace)",
+                        file.display(),
+                        owner.cycle_id,
+                        owner.owner_id,
+                        owner.owner_pid,
+                        claim.owner_id,
+                    ),
+                );
+            }
+            yielded
+        }
+        CloseoutOwnerClaimAuthorization::Exclusive => authorization,
     };
     let current_owner_alive = current.owner.as_ref().and_then(|owner| {
         (owner.owner_id != claim.owner_id
@@ -66996,6 +67054,147 @@ mod tests {
                 ..
             }) if owner_id == "captured-resume-1"
                 && role == agent_doc_state_backbone::CLOSEOUT_OWNER_ROLE_CAPTURED_FINALIZE_RESUME
+        ));
+    }
+
+    /// `#resumemaintrace` (cycle-1794700855638, cycle-1794701236065,
+    /// cycle-1794701570600): the exact retained wake moved the closeout lease
+    /// from a live `respond` that was still inside its document apply
+    /// transaction. The resume then failed `queue mutation deferred` and
+    /// released, and the foreground's next refresh re-acquired an empty slot
+    /// under a fresh token, so `respond` exited `closeout owner lease ... was
+    /// lost` (or, in its settle path, `queue mutation deferred`). The handoff is
+    /// withheld while the incumbent holds the apply lease, and resumes once it
+    /// leaves that transaction.
+    #[test]
+    fn exact_retained_wake_does_not_displace_a_foreground_inside_its_apply_transaction() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/session.md");
+        std::fs::write(&doc, "body\n").unwrap();
+        let cycle = agent_doc_cycle_state_io::start_preflight(&doc, Some("body\n"), Some("body\n"))
+            .unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
+        let capture = agent_doc_state_backbone::StateEvent::new(
+            "capture-for-apply-transaction-handoff",
+            agent_doc_state_backbone::StateFact::ResponseCaptured {
+                document_hash: document_hash.clone(),
+                cycle_id: cycle.cycle_id.clone(),
+                capture_id: "capture-1".into(),
+                response_sha256: "response-1".into(),
+                response_body: Some("response body".into()),
+                intent_body: None,
+                mutation_plan_json: None,
+                file_hash: None,
+                snapshot_hash: None,
+                baseline_content: None,
+            },
+        );
+        append_state_event(dir.path(), &capture).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        // Liveness is proven against the claim time, so the claim must be real.
+        let now_secs = timestamp_secs();
+        let foreground_pid = std::process::id();
+
+        let foreground = run_closeout_owner_claim(
+            &bootstrap,
+            &runtime,
+            &doc,
+            CloseoutOwnerClaimRequest {
+                expected_cycle_id: Some(cycle.cycle_id.clone()),
+                owner_id: "foreground-1".into(),
+                owner_pid: foreground_pid,
+                role: agent_doc_state_backbone::CLOSEOUT_OWNER_ROLE_FOREGROUND_FINALIZE.into(),
+                now_secs,
+                lease_secs: CLOSEOUT_OWNER_LEASE_SECS,
+                allow_dead_owner_takeover: false,
+            },
+        )
+        .unwrap();
+        assert!(matches!(foreground, CloseoutOwnerClaimOutcome::Acquired(_)));
+        assert!(publish_pinned_captured_finalize_wake(
+            &runtime,
+            &document_hash,
+            &cycle.cycle_id,
+            "capture-1",
+            "response-1",
+            super::RETAINED_SETTLED_DELIVERY_REACTIVE_REASON,
+        ));
+
+        // The foreground is inside its apply transaction: it holds the
+        // document's queue apply lease under its own pid.
+        let apply_lease = agent_doc_sqlite::state_store::CoordinationLeaseRecord {
+            scope_kind: QUEUE_APPLY_LEASE_SCOPE.to_string(),
+            scope_id: agent_doc_fs::document_state_hash(&doc).unwrap(),
+            holder: format!("direct-{foreground_pid}-1-0"),
+            holder_pid: Some(foreground_pid),
+            heartbeat_secs: now_secs,
+        };
+        super::upsert_coordination_lease(dir.path(), &apply_lease).unwrap();
+
+        let captured_request = || CloseoutOwnerClaimRequest {
+            expected_cycle_id: Some(cycle.cycle_id.clone()),
+            owner_id: "captured-resume-1".into(),
+            owner_pid: foreground_pid,
+            role: agent_doc_state_backbone::CLOSEOUT_OWNER_ROLE_CAPTURED_FINALIZE_RESUME.into(),
+            now_secs: now_secs + 1,
+            lease_secs: CLOSEOUT_OWNER_LEASE_SECS,
+            allow_dead_owner_takeover: false,
+        };
+        assert!(
+            matches!(
+                run_closeout_owner_claim(&bootstrap, &runtime, &doc, captured_request()).unwrap(),
+                CloseoutOwnerClaimOutcome::HeldByOther(CloseoutOwnerProjection { ref owner_id, .. })
+                    if owner_id == "foreground-1"
+            ),
+            "a foreground inside its apply transaction keeps its closeout lease"
+        );
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops.contains("closeout_owner_transition_withheld")
+                && ops.contains("reason=incumbent_apply_transaction_active")
+                && !ops.contains("source=exact_retained_continuation"),
+            "the withheld handoff is observable and no transition was projected:\n{ops}"
+        );
+
+        // The foreground's own refresh is still its original lease.
+        let refreshed = run_closeout_owner_claim(
+            &bootstrap,
+            &runtime,
+            &doc,
+            CloseoutOwnerClaimRequest {
+                expected_cycle_id: Some(cycle.cycle_id.clone()),
+                owner_id: "foreground-1".into(),
+                owner_pid: foreground_pid,
+                role: agent_doc_state_backbone::CLOSEOUT_OWNER_ROLE_FOREGROUND_FINALIZE.into(),
+                now_secs: now_secs + 2,
+                lease_secs: CLOSEOUT_OWNER_LEASE_SECS,
+                allow_dead_owner_takeover: false,
+            },
+        )
+        .unwrap();
+        match (&foreground, &refreshed) {
+            (
+                CloseoutOwnerClaimOutcome::Acquired(original),
+                CloseoutOwnerClaimOutcome::Acquired(current),
+            ) => assert_eq!(
+                original.owner_token, current.owner_token,
+                "the foreground's lease capability is unchanged"
+            ),
+            other => panic!("foreground refresh must re-acquire its own lease: {other:?}"),
+        }
+
+        // Once the foreground leaves its apply transaction, the exact
+        // continuation succeeds it as before.
+        super::clear_coordination_lease(dir.path(), QUEUE_APPLY_LEASE_SCOPE, &apply_lease.scope_id)
+            .unwrap();
+        assert!(matches!(
+            run_closeout_owner_claim(&bootstrap, &runtime, &doc, captured_request()).unwrap(),
+            CloseoutOwnerClaimOutcome::Acquired(CloseoutOwnerProjection { ref owner_id, .. })
+                if owner_id == "captured-resume-1"
         ));
     }
 

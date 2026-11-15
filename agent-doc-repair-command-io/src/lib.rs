@@ -125,7 +125,33 @@ fn settle_failed_strict_closeout(
     // and this path reported "superseded, needs no action" while every later
     // `session-check` failed on the same committed bytes. Only a fresh
     // status-only session check that no longer interrupts supersedes the error.
-    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    //
+    // `#resumemaintrace`: the owner that committed this cycle (the route-owned
+    // supervisor's captured-finalize resume) can still hold the document apply
+    // capability for its post-commit tail. Wait for it within the settle
+    // window instead of failing closed at once: that replaced the superseded
+    // error with `queue mutation deferred` and failed a committed turn. If it
+    // never releases, nothing proves the error was superseded, so the original
+    // error stands.
+    let apply_guard =
+        match agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire_after_committed_closeout(
+            file,
+            agent_doc_session_check_io::session_check_settle_window(),
+        ) {
+            Ok(guard) => guard,
+            Err(guard_error) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "strict_closeout_error_not_superseded file={} cycle={} reason=apply_guard_unavailable detail={} (#resumemaintrace)",
+                        file.display(),
+                        closing.cycle_id,
+                        format!("{guard_error:#}").replace('\n', " ")
+                    ),
+                );
+                return Err(error);
+            }
+        };
     let session_effects =
         agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(file, &apply_guard)?;
     match recheck_committed_closeout(

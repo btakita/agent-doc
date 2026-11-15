@@ -105,6 +105,7 @@ agent-doc-controller-io/src/project_controller/rpc.rs	const	ORPHAN_DRAIN_BACKOFF
 agent-doc-controller-io/src/project_controller/rpc.rs	fn	public_controller_superseded	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
 agent-doc-controller-io/src/project_controller/rpc.rs	struct	DocumentTurnAuthorityStreamLease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
 agent-doc-controller-io/src/project_controller/rpc.rs	call	compare_exchange	4	controller-ledger-sqlite	single-flight liveness-journal compaction guard (review against Lazily single-flight)	pending	triage	none
+agent-doc-controller-io/src/project_controller/rpc.rs	const	QUEUE_APPLY_LEASE_SCOPE	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
 agent-doc-controller-io/src/project_controller/rpc.rs	fn	supervisor_report_matches_existing_lease	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
 agent-doc-controller-io/src/project_controller/rpc.rs	fn	capture_dispatch_pane_retrying_timeouts	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none
 agent-doc-controller-io/src/project_controller/rpc.rs	fn	controller_harness_turn_lease_active	1	controller-ledger-sqlite	ControllerLedgerTxnAdapter (planned)	pending	triage	none

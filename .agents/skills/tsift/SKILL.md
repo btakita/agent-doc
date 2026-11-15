@@ -3,16 +3,16 @@ name: tsift
 description: "Use tsift for token-efficient repository navigation, code search and reading, call graphs, diffs, logs, tests, session context, and workspace memory. TRIGGER: exploring or changing a codebase with tsift installed, or working on the tsift repo. SKIP: plain file-level glob, non-code web search. VERSION CHECK: compare `tsift --version` against tsift-version below before trusting any command text copied from this file."
 user-invocable: true
 argument-hint: "[query or symbol]"
-tsift-version: "0.1.103"
+tsift-version: "0.1.110"
 ---
-<!-- tsift:skill v=0.1.103 -->
+<!-- tsift:skill v=0.1.110 -->
 # tsift
 
-**Check the version first.** Run `tsift --version` and compare it to `tsift-version` in the frontmatter above. If the binary is newer, this file is stale: treat its command text as a hint, not a contract, and read the live surface from `tsift --help` / `<subcommand> --help`. `tsift init` refreshes this file and stamps both values from the installed binary, so a mismatch means the skill was never refreshed after an upgrade. `tsift audit` reports the same drift as an issue.
+**Load the current package instructions first.** Run `tsift skill` once per session from the owning repo root and follow its output. That command reads the skill bundled with the installed binary, so a package upgrade takes effect without waiting for this harness file to be regenerated. If the command is unavailable, this versioned copy is a complete fallback; compare `tsift --version` with `tsift-version` below before trusting it.
 
 ## Command surface
 
-`search`, `symbol-read`, `source-read`, `explain`, `graph`, `communities`, `path`, `index`, `status`, `locks` — search and navigation. `traverse`, `graph-db`, `convex-sync`, `conflict-matrix`, `dispatch-trace`, `dependency-dag` — graph substrate. `edit`, `edit-intents`, `ast-grep` — batch and semantic editing. `diff-digest`, `test-digest`, `log-digest`, `metric-digest`, `session-digest`, `session-cost`, `session-review`, `context-pack`, `digest-runner` — bounded digests and session context. `summarize`, `semantic`, `lint`, `audit`, `audit-tagpath` — cached analysis and drift checks. `route`, `rewrite`, `sql`, `memory`, `init`, `workflow` — tooling. Global flags: `--envelope`, `--compact`, `--terse`, `--ultra-terse`, `--schema`, `--tabular`, `--absolute`, `--pretty`.
+`search`, `symbol-read`, `source-read`, `explain`, `graph`, `communities`, `path`, `index`, `status`, `locks` — search and navigation. `traverse`, `graph-db`, `convex-sync`, `conflict-matrix`, `dispatch-trace`, `dependency-dag` — graph substrate. `edit`, `edit-intents`, `ast-grep` — batch and semantic editing. `diff-digest`, `test-digest`, `log-digest`, `metric-digest`, `session-digest`, `session-cost`, `session-review`, `context-pack`, `digest-runner` — bounded digests and session context. `summarize`, `semantic`, `lint`, `audit`, `audit-tagpath` — cached analysis and drift checks. `route`, `rewrite`, `sql`, `memory`, `skill`, `init`, `workflow` — tooling. Global flags: `--envelope`, `--compact`, `--terse`, `--ultra-terse`, `--schema`, `--tabular`, `--absolute`, `--pretty`.
 
 ## Session start
 
@@ -29,7 +29,7 @@ Prefer tsift envelopes over raw reads:
 
 **No rewrite hook? Drive the list above yourself.** Only a `PreToolUse`-equipped harness redirects `cat`/`grep`/`git diff` for you. Everywhere else nothing intercepts them, so issue these commands directly instead of waiting for a rewrite; the reference below names the one-shot equivalent and the per-harness setup, `--harness` included.
 
-Command detail lives in [`references/code-navigation.md`](references/code-navigation.md) — budgets, `tsift workflow search`, `report.scale_guard` handling, the harness rewrite path for `PreToolUse`-less harnesses, and Codex/OpenCode integration. `tsift init` writes and versions that reference alongside this skill, so it is present in every initialized checkout; read it before broad exploration instead of expanding this file.
+Current command detail is available from `tsift skill --reference`; [`references/code-navigation.md`](references/code-navigation.md) is its cached fallback. It covers budgets, `tsift workflow search`, `report.scale_guard` handling, the harness rewrite path for `PreToolUse`-less harnesses, and Codex/OpenCode integration. Read the live reference before broad exploration.
 
 For local verification, run `make check` before committing. After local changes, check the latest GitHub Actions CI run with `gh run list --limit 1` and fix any failing tests before calling the work complete.
 

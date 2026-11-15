@@ -1,9 +1,11 @@
-<!-- tsift:code-navigation-runbook v=0.1.103 -->
+<!-- tsift:code-navigation-runbook v=0.1.110 -->
 # Code Navigation
 
 Managed by `tsift init` (versioned markers) — do not hand-edit between the markers; re-run `tsift init` to refresh. Text outside the markers is preserved.
 
-This reference is the detail behind the repository-local tsift skill. `SKILL.md` carries the hot path; everything below is the full command surface.
+This generated reference is a complete fallback. Prefer `tsift skill --reference`, which reads the current reference bundled with the installed binary and therefore updates with the package.
+
+This reference is the detail behind the tsift skill. `SKILL.md` carries the hot path; everything below is the full command surface.
 
 ## Session start
 
@@ -22,7 +24,7 @@ Codex projects can install a prompt-time auto-reindex hook with `tsift init --co
 - **Editing** — `edit` (atomic JSON batch), `edit-intents` (semantic AST intents with `--verify`/`--apply`), `ast-grep` (structural search and rewrite)
 - **Digests and session context** — `diff-digest`, `test-digest`, `log-digest`, `metric-digest`, `digest-runner`, `session-digest`, `session-cost`, `session-review`, `context-pack`
 - **Cached analysis and drift checks** — `summarize`, `lint`, `audit`, `audit-tagpath`, `token-savings`, `token-gate`
-- **Tooling** — `route` (task to model tier), `rewrite`, `sql`, `memory`, `local-model`, `kg`, `init`, `workflow`
+- **Tooling** — `route` (task to model tier), `rewrite`, `sql`, `memory`, `local-model`, `kg`, `skill`, `init`, `workflow`
 
 Global flags: `--envelope`, `--compact`, `--terse`, `--ultra-terse`, `--schema`, `--tabular`, `--absolute`, `--pretty`. Subcommand flags move between releases faster than this file does, so read `tsift <subcommand> --help` for the live contract.
 
@@ -31,7 +33,7 @@ Global flags: `--envelope`, `--compact`, `--terse`, `--ultra-terse`, `--schema`,
 Use the commands listed in `tsift status`'s `use:` output:
 
 - `tsift --envelope source-read <file> --budget normal` — AST-symbol projection with span metadata and source-window expansion commands (prefer over raw cat/head/tail/sed/less reads for source files)
-- `tsift --envelope symbol-read <symbol> --budget normal` — token-budgeted symbol body, AST span metadata, child refs, and graph/source expansion commands
+- `tsift --envelope symbol-read <symbol> --budget normal` — token-budgeted symbol body, AST span metadata, child refs, and graph/source expansion commands; resolves only symbols the file *defines* — a miss with `--file` names call-site-only references (e.g. a library method like `parser.parse_args()`), lists the file's defined symbols, and prints `source-read`/`search` follow-ups, so read those instead of guessing another name
 - `tsift --envelope search <query> --budget normal` — AST-aware hybrid search preview (prefer over grep/rg)
 - `tsift --envelope explain <symbol> --budget normal` — callers, callees, community preview
 - `tsift graph <symbol> --callers` / `--callees` — call graph navigation

@@ -271,19 +271,22 @@ fn commit_sibling_with_trailer_fenced(
         );
     }
     let commit_oid = String::from_utf8_lossy(&commit.stdout).trim().to_string();
-    fence.ensure(
-        session_doc,
-        crate::transaction::CommitFencePhase::BeforeSiblingRefUpdate,
-    )?;
-    let update = Command::new("git")
-        .current_dir(sibling)
-        .args(["update-ref", "HEAD", &commit_oid, &expected])
-        .output()?;
+    // `#implementlazilyowned`: the sibling HEAD CAS is one Lazily-owned effect
+    // epoch; the fence guards the comparator after the Lazily claim. Any
+    // non-applied outcome leaves the staged sibling work for a fresh closeout.
+    let guard = || {
+        fence.ensure(
+            session_doc,
+            crate::transaction::CommitFencePhase::BeforeSiblingRefUpdate,
+        )
+    };
+    let outcome =
+        crate::ref_cas::compare_and_update_ref(sibling, "HEAD", &commit_oid, &expected, &guard)?;
     anyhow::ensure!(
-        update.status.success(),
+        matches!(outcome, crate::ref_cas::GitRefCas::Applied(_)),
         "sibling {} HEAD moved during fenced ref-CAS; staged sibling work is retained for a fresh closeout: {}",
         sibling.display(),
-        String::from_utf8_lossy(&update.stderr).trim(),
+        outcome.detail(),
     );
     fence.ref_updated(session_doc);
     Ok(commit_oid.chars().take(12).collect())

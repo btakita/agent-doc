@@ -1265,6 +1265,7 @@ dependencies = [
  "agent-doc-work-projection",
  "agent-doc-workflow",
  "anyhow",
+ "lazily 0.63.0",
  "parking_lot",
  "similar 2.7.0",
  "tempfile",

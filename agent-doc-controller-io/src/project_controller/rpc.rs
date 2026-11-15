@@ -7842,8 +7842,7 @@ pub struct CloseoutOwnerCapability {
     lease_secs: u64,
     actorless: bool,
     lease_lost: Arc<AtomicBool>,
-    terminal_effect_in_progress: Arc<AtomicBool>,
-    terminal_effect_landed: Arc<AtomicBool>,
+    terminal_effect: closeout_terminal_effect::TerminalEffectSingleFlight,
     git_ref_landed: Arc<AtomicBool>,
     terminal_promotion_landed: Arc<AtomicBool>,
 }
@@ -7863,12 +7862,9 @@ impl std::fmt::Debug for CloseoutOwnerCapability {
             .field("lease_lost", &self.lease_lost.load(Ordering::SeqCst))
             .field(
                 "terminal_effect_in_progress",
-                &self.terminal_effect_in_progress.load(Ordering::SeqCst),
+                &self.terminal_effect.in_progress(),
             )
-            .field(
-                "terminal_effect_landed",
-                &self.terminal_effect_landed.load(Ordering::SeqCst),
-            )
+            .field("terminal_effect_landed", &self.terminal_effect.landed())
             .finish()
     }
 }
@@ -7885,8 +7881,7 @@ impl CloseoutOwnerCapability {
             lease_secs: self.lease_secs,
             actorless: self.actorless,
             lease_lost: self.lease_lost.clone(),
-            terminal_effect_in_progress: self.terminal_effect_in_progress.clone(),
-            terminal_effect_landed: self.terminal_effect_landed.clone(),
+            terminal_effect: self.terminal_effect.clone(),
             git_ref_landed: self.git_ref_landed.clone(),
             terminal_promotion_landed: self.terminal_promotion_landed.clone(),
         }
@@ -8124,8 +8119,8 @@ impl CloseoutOwnerCapability {
         // causal receipt permits only that outcome: we must still perform the
         // refresh so a concurrent `HeldByOther` (or mismatched acquisition) is
         // observed synchronously at every post-commit promotion boundary.
-        let causal_terminal_promotion = self.terminal_effect_landed.load(Ordering::SeqCst)
-            || self.terminal_promotion_landed.load(Ordering::SeqCst);
+        let causal_terminal_promotion =
+            self.terminal_effect.landed() || self.terminal_promotion_landed.load(Ordering::SeqCst);
         let outcome = self.refresh()?;
         anyhow::ensure!(
             match &outcome {
@@ -8151,14 +8146,15 @@ impl CloseoutOwnerCapability {
     /// Execute the terminal commit under this exact capability and retain a
     /// receipt only when that effect closed this capability's cycle.
     pub fn run_terminal_effect<T>(&self, effect: impl FnOnce() -> Result<T>) -> Result<T> {
-        anyhow::ensure!(
-            self.terminal_effect_in_progress
-                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                .is_ok(),
-            "terminal closeout effect is already in progress for cycle {} owner {}",
-            self.cycle_id,
-            self.owner_id,
-        );
+        // `#implementlazilyowned`: Lazily owns the terminal effect's
+        // single-flight claim and its landed receipt.
+        let Some(flight) = self.terminal_effect.begin()? else {
+            anyhow::bail!(
+                "terminal closeout effect is already in progress for cycle {} owner {}",
+                self.cycle_id,
+                self.owner_id,
+            );
+        };
         self.git_ref_landed.store(false, Ordering::SeqCst);
         self.terminal_promotion_landed
             .store(false, Ordering::SeqCst);
@@ -8180,12 +8176,16 @@ impl CloseoutOwnerCapability {
                 state.cycle_id,
                 state.phase.as_str(),
             );
-            self.terminal_effect_landed.store(true, Ordering::SeqCst);
             Ok(result)
         })();
-        self.terminal_effect_in_progress
-            .store(false, Ordering::SeqCst);
-        outcome
+        match outcome {
+            Ok(result) => {
+                flight.land()?;
+                Ok(result)
+            }
+            // Dropping the unreceipted flight records the Lazily rejection.
+            Err(error) => Err(error),
+        }
     }
 }
 
@@ -8231,10 +8231,7 @@ impl ClaimedCloseoutOwnerGuard {
                     Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                 }
-                if heartbeat_capability
-                    .terminal_effect_landed
-                    .load(Ordering::SeqCst)
-                {
+                if heartbeat_capability.terminal_effect.landed() {
                     break;
                 }
                 match heartbeat_capability.refresh() {
@@ -8252,9 +8249,7 @@ impl ClaimedCloseoutOwnerGuard {
                         if heartbeat_capability
                             .terminal_promotion_landed
                             .load(Ordering::SeqCst)
-                            || heartbeat_capability
-                                .terminal_effect_landed
-                                .load(Ordering::SeqCst) =>
+                            || heartbeat_capability.terminal_effect.landed() =>
                     {
                         break;
                     }
@@ -8425,12 +8420,14 @@ pub fn claim_closeout_owner_guard_for_file(
     let role = request.role.clone();
     let lease_secs = request.lease_secs;
     let lease_lost = Arc::new(AtomicBool::new(false));
-    let terminal_effect_in_progress = Arc::new(AtomicBool::new(false));
-    let terminal_effect_landed = Arc::new(AtomicBool::new(false));
     let git_ref_landed = Arc::new(AtomicBool::new(false));
     let terminal_promotion_landed = Arc::new(AtomicBool::new(false));
 
     if agent_doc_project_root_io::project_root_containing(file).is_none() {
+        let terminal_effect = closeout_terminal_effect::TerminalEffectSingleFlight::new(
+            expected_cycle_id.as_deref().unwrap_or("actorless"),
+            &owner_id,
+        );
         return Ok(CloseoutOwnerGuardClaimOutcome::Acquired(
             ClaimedCloseoutOwnerGuard::new(CloseoutOwnerCapability {
                 file: canonical_file,
@@ -8442,8 +8439,7 @@ pub fn claim_closeout_owner_guard_for_file(
                 lease_secs,
                 actorless: true,
                 lease_lost,
-                terminal_effect_in_progress,
-                terminal_effect_landed,
+                terminal_effect,
                 git_ref_landed,
                 terminal_promotion_landed,
             }),
@@ -8466,6 +8462,10 @@ pub fn claim_closeout_owner_guard_for_file(
                 role,
                 expected_cycle_id,
             );
+            let terminal_effect = closeout_terminal_effect::TerminalEffectSingleFlight::new(
+                &owner.cycle_id,
+                &owner_id,
+            );
             Ok(CloseoutOwnerGuardClaimOutcome::Acquired(
                 ClaimedCloseoutOwnerGuard::new(CloseoutOwnerCapability {
                     file: canonical_file,
@@ -8477,8 +8477,7 @@ pub fn claim_closeout_owner_guard_for_file(
                     lease_secs,
                     actorless: false,
                     lease_lost,
-                    terminal_effect_in_progress,
-                    terminal_effect_landed,
+                    terminal_effect,
                     git_ref_landed,
                     terminal_promotion_landed,
                 }),
@@ -21685,6 +21684,8 @@ fn drain_predecessor_after_promotion(
     }
 }
 
+#[path = "closeout_terminal_effect.rs"]
+mod closeout_terminal_effect;
 #[path = "pool_heartbeat.rs"]
 mod pool_heartbeat;
 #[path = "pool_running_turn.rs"]

@@ -32077,7 +32077,8 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         ".args([\"update-index\", \"--add\", \"--cacheinfo\", cacheinfo])",
         "GIT_INDEX_FILE",
         "\"commit-tree\"",
-        "\"update-ref\", \"HEAD\"",
+        "crate::ref_cas::compare_and_update_ref(",
+        "crate::ref_cas::drive_ref_update(",
         "RetryableHeadMoved",
     ] {
         assert!(
@@ -32085,6 +32086,16 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
             "agent-doc-git-io transaction module must own commit transaction IO: {required}"
         );
     }
+    // `#implementlazilyowned`: the HEAD compare-and-swap is the Lazily Git ref
+    // adapter's atomic comparator; the transaction module never runs it itself.
+    let git_ref_cas_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/ref_cas.rs")).unwrap();
+    assert!(
+        !git_transaction_source.contains("\"update-ref\"")
+            && git_ref_cas_source.contains("\"update-ref\",")
+            && git_ref_cas_source.contains("impl CompareAndApply<GitRefKey, String, GitRefTarget, GitRefReceipt> for GitUpdateRef"),
+        "git HEAD CAS must run only through the Lazily GitUpdateRef adapter"
+    );
     assert!(
         !git_transaction_source.contains("struct CommitLock")
             && !git_transaction_source.contains("try_lock_exclusive()")

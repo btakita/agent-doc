@@ -10,6 +10,9 @@ use agent_doc_git::{
 };
 use anyhow::Context;
 
+/// Lazily attempts for the parent submodule pointer ref effect.
+const PARENT_POINTER_REF_ATTEMPTS: u32 = 3;
+
 /// After a successful commit inside a submodule, stage and partial-commit the
 /// updated submodule pointer in the superproject. Uses an explicit pathspec on
 /// the commit so any other staged files in the parent index are preserved.
@@ -77,19 +80,16 @@ fn update_parent_submodule_pointer_inner(
     );
     let temp = tempfile::tempdir()?;
     let temp_index = temp.path().join("parent-index");
-    let mut committed = false;
-    for attempt in 0..3 {
-        let expected = command_stdout(
-            Command::new("git")
-                .current_dir(super_root)
-                .args(["rev-parse", "HEAD"]),
-            "resolve parent HEAD",
-        )?;
+    // `#implementlazilyowned`: Lazily owns the parent ref effect. Each epoch's
+    // commit is prepared over the authority Lazily expects; a moved parent HEAD
+    // is a Lazily supersession that re-desires the pointer over the observed
+    // HEAD, and the fence guards every comparator call.
+    let mut prepare = |expected: &str| -> anyhow::Result<Option<String>> {
         command_success(
             Command::new("git")
                 .current_dir(super_root)
                 .env("GIT_INDEX_FILE", &temp_index)
-                .args(["read-tree", "HEAD"]),
+                .args(["read-tree", expected]),
             "seed private parent index",
         )?;
         command_success(
@@ -111,42 +111,41 @@ fn update_parent_submodule_pointer_inner(
                 .args(["write-tree"]),
             "write private parent tree",
         )?;
-        let head_tree = command_stdout(
+        let expected_tree = command_stdout(
             Command::new("git")
                 .current_dir(super_root)
-                .args(["rev-parse", "HEAD^{tree}"]),
+                .args(["rev-parse", &format!("{expected}^{{tree}}")]),
             "resolve parent HEAD tree",
         )?;
-        if tree == head_tree {
-            committed = true;
-            break;
+        if tree == expected_tree {
+            return Ok(None);
         }
-        let commit_oid = commit_tree(super_root, &tree, &expected, &parent_msg)?;
+        commit_tree(super_root, &tree, expected, &parent_msg).map(Some)
+    };
+    let guard = || -> anyhow::Result<()> {
         if let (Some(fence), Some(target)) = (fence, fence_target) {
             fence.ensure(target, CommitFencePhase::BeforeParentRefUpdate)?;
         }
-        let update = Command::new("git")
-            .current_dir(super_root)
-            .args(["update-ref", "HEAD", &commit_oid, &expected])
-            .output()?;
-        if update.status.success() {
+        Ok(())
+    };
+    match crate::ref_cas::drive_ref_update(
+        super_root,
+        "HEAD",
+        PARENT_POINTER_REF_ATTEMPTS,
+        &mut prepare,
+        &guard,
+    )? {
+        crate::ref_cas::GitRefDrive::Applied(_) => {
             if let (Some(fence), Some(target)) = (fence, fence_target) {
                 fence.ref_updated(target);
             }
-            committed = true;
-            break;
         }
-        if attempt == 2 {
-            anyhow::bail!(
-                "parent submodule pointer is not committed: parent HEAD moved during three fenced ref-CAS attempts: {}",
-                String::from_utf8_lossy(&update.stderr).trim(),
-            );
-        }
+        crate::ref_cas::GitRefDrive::Unchanged { .. } => {}
+        crate::ref_cas::GitRefDrive::Exhausted { attempts, last } => anyhow::bail!(
+            "parent submodule pointer is not committed: parent HEAD moved during {attempts} fenced ref-CAS attempts: {}",
+            last.detail()
+        ),
     }
-    anyhow::ensure!(
-        committed,
-        "parent submodule pointer transaction did not settle"
-    );
     eprintln!("[commit] parent submodule pointer updated for {}", rel_str);
     Ok(())
 }
@@ -423,25 +422,52 @@ pub fn stage_and_commit_exact_paths_once_with_fence(
         .trim()
         .to_string();
 
-    let zero_oid = "0000000000000000000000000000000000000000";
-    let expected = base.as_deref().unwrap_or(zero_oid);
-    if let Some(fence) = fence {
-        fence
-            .ensure(resolved, CommitFencePhase::BeforeRefUpdate)
-            .map_err(CommitTransactionError::Fatal)?;
-    }
-    let update_ref = Command::new("git")
-        .current_dir(git_root)
-        .args(["update-ref", "HEAD", &commit_oid, expected])
-        .output()
-        .map_err(|err| CommitTransactionError::Fatal(err.into()))?;
-    if !update_ref.status.success() {
-        let detail = render_git_process_output(&update_ref);
-        if detail.contains("expected") || detail.contains("cannot lock ref") {
+    let expected = base
+        .as_deref()
+        .unwrap_or(crate::ref_cas::ZERO_OID)
+        .to_string();
+    // `#implementlazilyowned`: the HEAD CAS is one Lazily-owned effect epoch;
+    // the fence guards the comparator after the Lazily claim.
+    let guard = || -> anyhow::Result<()> {
+        if let Some(fence) = fence {
+            fence.ensure(resolved, CommitFencePhase::BeforeRefUpdate)?;
+        }
+        Ok(())
+    };
+    let receipt = match crate::ref_cas::compare_and_update_ref(
+        git_root,
+        "HEAD",
+        &commit_oid,
+        &expected,
+        &guard,
+    )
+    .map_err(CommitTransactionError::Fatal)?
+    {
+        crate::ref_cas::GitRefCas::Applied(receipt) => receipt,
+        crate::ref_cas::GitRefCas::Superseded { detail, .. } => {
             return Err(CommitTransactionError::RetryableHeadMoved { detail });
         }
-        return git_output_or_transaction_error(update_ref, "update-ref");
-    }
+        crate::ref_cas::GitRefCas::Retryable(crate::ref_cas::GitRefFailure {
+            kind: crate::ref_cas::GitRefFailureKind::IndexLock,
+            detail,
+        }) => {
+            return Err(CommitTransactionError::RetryableIndexLock {
+                phase: crate::ref_cas::UPDATE_REF_PHASE,
+                detail,
+            });
+        }
+        crate::ref_cas::GitRefCas::Retryable(failure) => {
+            return Err(CommitTransactionError::RetryableHeadMoved {
+                detail: failure.detail,
+            });
+        }
+        crate::ref_cas::GitRefCas::Rejected(failure) => {
+            return Err(CommitTransactionError::Fatal(anyhow::anyhow!(
+                "git {} failed: {failure}",
+                crate::ref_cas::UPDATE_REF_PHASE
+            )));
+        }
+    };
     if let Some(fence) = fence {
         fence.ref_updated(resolved);
     }
@@ -460,7 +486,7 @@ pub fn stage_and_commit_exact_paths_once_with_fence(
             ),
         }
     }
-    Ok(update_ref)
+    Ok(receipt.output)
 }
 
 #[cfg(test)]

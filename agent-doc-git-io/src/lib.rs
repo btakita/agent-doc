@@ -15,6 +15,7 @@ pub mod partial_staging;
 pub mod post_closeout_push;
 pub mod post_commit_cleanup;
 pub mod pre_stage_repair;
+pub mod ref_cas;
 pub mod revision;
 pub mod sibling;
 pub mod squash;

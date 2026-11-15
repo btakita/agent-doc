@@ -308,7 +308,30 @@ Progress (`#implementlazilyowned`):
   Lazily supersession that refuses every later step. The barriers stay where
   the effects are; the plan does not yet reorder the maintenance body so the
   document CAS is literally the first step.
-- Not yet done: the Git/controller/snapshot/worktree/ops adapters, persisting
+- Git ref adapter: `agent_doc_git_io::ref_cas::GitUpdateRef` is the
+  `CompareAndApply` adapter whose only comparator is
+  `git update-ref <ref> <new> <expected>` (moved ref = `Superseded`, held
+  ref/index lock with the ref unchanged = `Retryable`, else `Rejected`).
+  `compare_and_update_ref` runs one Lazily epoch; `drive_ref_update` re-desires
+  a producer's commit over the observed ref as the next epoch and re-claims a
+  retryable lock from Lazily's retained intent. The stage-and-commit HEAD CAS,
+  the sibling HEAD CAS, and the parent submodule pointer (its
+  `for attempt in 0..3` loop is deleted) all run through it; the closeout fence
+  is the `before_apply` guard after the Lazily claim. Contract tests prove a
+  moved ref is `Superseded` and leaves the ref byte-for-byte unchanged.
+- Controller terminal effect: `CloseoutOwnerCapability::run_terminal_effect`'s
+  `terminal_effect_in_progress` `compare_exchange` flag and the separate
+  `terminal_effect_landed` flag are deleted. The terminal effect is a Lazily
+  single-flight key (`closeout_terminal_effect::TerminalEffectSingleFlight`);
+  the landed receipt is its applied frontier, and a failed or unwinding run is a
+  Lazily rejection that frees the key.
+- Not yet done: the caller-side `RetryableHeadMoved`/`RetryableIndexLock`
+  retry loops in `agent-doc-commit-io` (they now retry a Lazily `Superseded` /
+  `Retryable` outcome, but the loop itself is still application-owned; triage
+  rows), the controller/ledger SQLite transaction adapter for the remaining
+  `controller-ledger-sqlite` triage rows, true compare-and-apply snapshot /
+  worktree-cleanup / ops-evidence adapters (today these are verify-only steps of
+  `QueueMaintenanceEffectPlan` immediately before each effect), persisting
   per-step plan receipts for crash resume inside one request (today a resumed
   request re-derives its idempotent effects), reordering the maintenance body
   so the document cut is the first plan step, triage of the `triage` rows, and

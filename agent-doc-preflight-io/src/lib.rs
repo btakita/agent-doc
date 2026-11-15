@@ -7798,6 +7798,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                     } else {
                         agent_doc_queue::document_queue::QueueEntry::Completed(
                             agent_doc_queue::document_queue::QueuePrompt {
+                                note: None,
                                 text: cleaned,
                                 multiline: p.multiline,
                                 indent: p.indent,
@@ -7994,6 +7995,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                                     let annotated = format!("{head_clean} — {reason}");
                                     struck.push((m.clone(), annotated.clone()));
                                     agent_doc_queue::document_queue::QueueEntry::Completed(agent_doc_queue::document_queue::QueuePrompt {
+                                        note: None,
                                         text: annotated,
                                         multiline: p.multiline,
                                         indent: p.indent,

@@ -268,8 +268,9 @@ pub fn struck_row_work_text(text: &str) -> String {
 }
 
 /// A struck row's work text without a trailing auto-struck note
-/// ([`STRUCK_ANNOTATION_SEPARATOR`]). The outside-the-wrapper note shape is
-/// already dropped by the queue parser; this covers the note baked inside
+/// ([`STRUCK_ANNOTATION_SEPARATOR`]). The queue parser already keeps the
+/// outside-the-wrapper note out of the row text (it carries it as
+/// `QueuePrompt::note`, `#strucknotekeep`); this covers the note baked inside
 /// the wrapper.
 ///
 /// [`STRUCK_ANNOTATION_SEPARATOR`]: agent_doc_markdown_ast::overlay::STRUCK_ANNOTATION_SEPARATOR

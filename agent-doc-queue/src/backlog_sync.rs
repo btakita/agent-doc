@@ -368,7 +368,8 @@ fn project_explicit_backlog_queue_routes_scoped(
         // acknowledged row (`~~do [#id]~~ — auto-struck: acknowledged; backlog
         // #id stays open: ...`), so the one statement that the struck row is
         // the open item's queue presence vanished the first time any other id
-        // routed into the same queue.
+        // routed into the same queue. (`render` now keeps that note too,
+        // `#strucknotekeep`; insert-only still preserves every other byte.)
         let body = target.component.content(content);
         let new_body = match mode {
             // `sync` owns its canonical rows and rewrites them by design.
@@ -1485,6 +1486,7 @@ mod tests {
 
     fn prompt(text: &str) -> QueueEntry {
         QueueEntry::Prompt(crate::document_queue::QueuePrompt {
+            note: None,
             text: text.to_string(),
             multiline: false,
             indent: 0,
@@ -3015,10 +3017,49 @@ priority= rank and the filed order:\n{updated}"
             !rendered.contains("[#finished]"),
             "a struck row whose item is done is still reaped by sync:\n{rendered}"
         );
+        // `#strucknotekeep`: the full `queue=sync` re-render keeps each
+        // acknowledged row's note byte for byte.
+        for line in &ACK_STRUCK_LINES[..2] {
+            assert!(
+                rendered.contains(line),
+                "the acknowledgement note survives the sync rebuild: {line:?}\n{rendered}"
+            );
+        }
         assert!(
             document_queue::sync_backlog_into_queue(&synced, &ids, BacklogQueueSyncMode::Sync)
                 .is_none(),
             "sync is idempotent over acknowledged rows"
         );
+    }
+
+    /// `#strucknotekeep`: a `Sync`-mode route rebuilds the whole queue body
+    /// (`document_queue::render`); every acknowledged row keeps its note.
+    #[test]
+    fn sync_mode_route_keeps_acknowledgement_notes() {
+        let content = ack_fixture("priority queue=\"main\"");
+        let components = element::parse(&content).unwrap();
+        let ids: Vec<String> = ["published", "plainack", "live", "fresh"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let projection = project_explicit_backlog_queue_routes_for_ids(
+            &components,
+            &content,
+            &ids,
+            BacklogQueueSyncMode::Sync,
+        )
+        .unwrap();
+        let body = run_body(
+            &projection
+                .content
+                .expect("the sync rebuild rewrites the body"),
+        );
+        for line in &ACK_STRUCK_LINES[..2] {
+            assert!(
+                body.contains(line),
+                "the acknowledgement note survives the sync rebuild: {line:?}\n{body}"
+            );
+        }
+        assert_eq!(body.matches("do [#fresh]").count(), 1, "{body}");
     }
 }

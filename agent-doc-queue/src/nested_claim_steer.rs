@@ -171,6 +171,7 @@ fn expand_prompt(prompt: &QueuePrompt, snapshots: &[ClaimTimeSnapshot], out: &mu
     out.push(QueueEntry::Prompt(steering));
     for child in split.routable {
         let child_prompt = QueuePrompt {
+            note: None,
             text: child.head_text,
             multiline: false,
             indent: child.indent,

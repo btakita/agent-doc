@@ -401,6 +401,7 @@ mod tests {
                 .to_string(),
         );
         let completed = document_queue::QueueEntry::Completed(document_queue::QueuePrompt {
+            note: None,
             text: "do [#done]".to_string(),
             multiline: false,
             indent: 0,
@@ -436,12 +437,14 @@ mod tests {
     #[test]
     fn queue_entries_are_drained_residue_requires_non_live_entries() {
         let completed = document_queue::QueueEntry::Completed(document_queue::QueuePrompt {
+            note: None,
             text: "do [#done]".to_string(),
             multiline: false,
             indent: 0,
             ordered_marker: None,
         });
         let prompt = document_queue::QueueEntry::Prompt(document_queue::QueuePrompt {
+            note: None,
             text: "do [#live]".to_string(),
             multiline: false,
             indent: 0,

@@ -1505,7 +1505,14 @@ projection prefix (`strip_attempt_projection_prefix`): lifecycle markers
 (`[#subagent:x#1]`, legacy `⟦…⟧`), and the bare `🙋` glyph never land inside
 a strike. A row that is only projection keeps its trimmed text. The closeout
 `#ftstrike` note may follow *outside* the wrapper (`- ~~work~~ — auto-struck:
-…`). Past the projection prefix, `work` is kept byte for byte: the strike
+…`). The note is document text, not work identity: the queue parser returns it
+apart from `work` (`QueuePrompt::note`, everything after the ` — auto-struck: `
+separator, including a trailing `addressed-at` annotation), and every full
+queue-body re-render (`document_queue::render`: the preflight `queue=sync`
+rebuild, free-text admission, and any other parse → render pass) writes it
+back after the wrapper byte for byte (`#strucknotekeep`). The
+`~~~~work~~ — auto-struck: note~~` restrike artifact re-renders as the
+canonical `~~work~~ — auto-struck: note` and keeps its note. Past the projection prefix, `work` is kept byte for byte: the strike
 never escapes, re-pairs, or rewrites backticks, links, or images inside it.
 Under GFM (cmark-gfm, markdown-it in VS Code, the `intellij-markdown` parser
 in JetBrains, `pulldown-cmark`) that wrapper is exactly one strikethrough span

@@ -200,6 +200,7 @@ pub fn prepare_route_dispatch_queue_update(
                         }
                     } else {
                         let new_prompt = QueueEntry::Prompt(QueuePrompt {
+                            note: None,
                             multiline: prompt_text.contains('\n'),
                             indent: 0,
                             ordered_marker: None,
@@ -223,6 +224,7 @@ pub fn prepare_route_dispatch_queue_update(
             Err(parse_err) => {
                 unparseable_queue_error = Some(parse_err.to_string());
                 let new_rendered = render(std::slice::from_ref(&QueueEntry::Prompt(QueuePrompt {
+                    note: None,
                     multiline: prompt_text.contains('\n'),
                     indent: 0,
                     ordered_marker: None,
@@ -361,6 +363,7 @@ fn activate_queue_component_marker(content: &str) -> Result<String> {
 
 fn insert_queue_component(content: &str, prompt_text: &str) -> Result<String> {
     let body = render(&[QueueEntry::Prompt(QueuePrompt {
+        note: None,
         multiline: prompt_text.contains('\n'),
         indent: 0,
         ordered_marker: None,

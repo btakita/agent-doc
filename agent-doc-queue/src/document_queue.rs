@@ -127,6 +127,19 @@ pub struct QueuePrompt {
     /// spelling (`1.`, `2.`, ...) so parse/render remains byte-preserving while
     /// nested ordered siblings can compile to dependency edges (`#f1s3`).
     pub ordered_marker: Option<String>,
+    /// `#strucknotekeep`: the explanation a struck single-line row carries
+    /// OUTSIDE its strike wrapper, after
+    /// [`STRUCK_ANNOTATION_SEPARATOR`](agent_doc_markdown_ast::overlay::STRUCK_ANNOTATION_SEPARATOR)
+    /// (`~~do [#id]~~ — auto-struck: <note>`, `#qstrikenote`,
+    /// `#ackstrikeopenbacklog`).
+    ///
+    /// The note is document text, not work identity: [`QueuePrompt::text`]
+    /// stays the clean inner work text every identity, routing, and mirror
+    /// rule reads. It is retained only so [`render`] writes the struck row
+    /// back byte for byte; a full queue-body re-render used to drop it.
+    /// Only a [`QueueEntry::Completed`] row renders it, and parse only sets it
+    /// on one; a live [`QueueEntry::Prompt`] never carries a note.
+    pub note: Option<String>,
 }
 
 impl QueuePrompt {
@@ -137,6 +150,7 @@ impl QueuePrompt {
             multiline: false,
             indent: 0,
             ordered_marker: None,
+            note: None,
         }
     }
 
@@ -567,6 +581,7 @@ fn parse_spans_uncached(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<u
     if let Some((start_line, end_line, text)) = recover_unwrapped_fenced_prompt(&lines) {
         return Ok(vec![(
             QueueEntry::Prompt(QueuePrompt {
+                note: None,
                 text,
                 multiline: true,
                 indent: 0,
@@ -618,6 +633,7 @@ fn parse_spans_uncached(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<u
         if let Some(block) = queue_fenced_title_block(&lines, i, after_multiline_item) {
             entries.push((
                 QueueEntry::Prompt(QueuePrompt {
+                    note: None,
                     text: lines[i..=block.last_text_line].join("\n"),
                     multiline: true,
                     indent: 0,
@@ -640,6 +656,7 @@ fn parse_spans_uncached(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<u
             let end_i = i + relative_end;
             entries.push((
                 QueueEntry::Prompt(QueuePrompt {
+                    note: None,
                     text,
                     multiline: true,
                     indent: 0,
@@ -670,6 +687,7 @@ fn parse_spans_uncached(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<u
         if crate::queue_command::is_slash_command(trimmed) {
             entries.push((
                 QueueEntry::Prompt(QueuePrompt {
+                    note: None,
                     text: trimmed.to_string(),
                     multiline: false,
                     indent: 0,
@@ -753,7 +771,7 @@ fn parse_spans_uncached(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<u
                 // annotations, not runnable queue prompts. Freeform retains
                 // every authored byte through parse/render.
                 QueueEntry::Freeform(line.to_string())
-            } else if let Some(completed) = parse_completed_inline(item_content) {
+            } else if let Some((completed, note)) = parse_completed_inline_with_note(item_content) {
                 // Older documents put the navigation heading inside the strike
                 // wrapper (`~~### text~~`).  Treat it as presentation there too
                 // and let render heal the row to `### ~~text~~`.
@@ -767,6 +785,7 @@ fn parse_spans_uncached(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<u
                     multiline: false,
                     indent,
                     ordered_marker,
+                    note: note.map(str::to_string),
                 })
             } else if is_reference_directive(item_content) {
                 // Optional-`do` grammar (Stage 1): a `re [#id]` / `re #id` line
@@ -797,18 +816,20 @@ fn parse_spans_uncached(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<u
                         text.push_str(continuation);
                     }
                     // `- ~~first` + `rest~~`: the strike wraps the whole item.
-                    let entry = match parse_completed_inline(&text) {
-                        Some(completed) => QueueEntry::Completed(QueuePrompt {
+                    let entry = match parse_completed_inline_with_note(&text) {
+                        Some((completed, note)) => QueueEntry::Completed(QueuePrompt {
                             text: completed.to_string(),
                             multiline: false,
                             indent,
                             ordered_marker,
+                            note: note.map(str::to_string),
                         }),
                         None => QueueEntry::Prompt(QueuePrompt {
                             text,
                             multiline: false,
                             indent,
                             ordered_marker,
+                            note: None,
                         }),
                     };
                     entries.push((entry, span(start_i, end_i)));
@@ -817,6 +838,7 @@ fn parse_spans_uncached(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<u
                     continue;
                 }
                 QueueEntry::Prompt(QueuePrompt {
+                    note: None,
                     text: item_content.to_string(),
                     multiline: false,
                     indent,
@@ -883,6 +905,7 @@ fn parse_spans_uncached(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<u
                 let text = lines[i + 1..close_idx].join("\n");
                 if !text.trim().is_empty() {
                     let prompt = QueuePrompt {
+                        note: None,
                         text,
                         multiline: true,
                         indent: 0,
@@ -919,6 +942,7 @@ fn parse_spans_uncached(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<u
                 if !text.trim().is_empty() {
                     entries.push((
                         QueueEntry::Prompt(QueuePrompt {
+                            note: None,
                             text,
                             multiline: true,
                             indent: 0,
@@ -937,6 +961,7 @@ fn parse_spans_uncached(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<u
             if let Some(block) = queue_fenced_title_block(&lines, i + 1, true) {
                 entries.push((
                     QueueEntry::Prompt(QueuePrompt {
+                        note: None,
                         text: lines[i + 1..=block.last_text_line].join("\n"),
                         multiline: true,
                         indent: 0,
@@ -977,6 +1002,7 @@ fn parse_spans_uncached(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<u
             if !text.trim().is_empty() && (text.contains("```") || text.contains("~~~")) {
                 entries.push((
                     QueueEntry::Prompt(QueuePrompt {
+                        note: None,
                         text,
                         multiline: true,
                         indent: 0,
@@ -1010,6 +1036,7 @@ fn parse_spans_uncached(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<u
             }
             entries.push((
                 QueueEntry::Prompt(QueuePrompt {
+                    note: None,
                     text: lines[i..end_i].join("\n"),
                     multiline: true,
                     indent: 0,
@@ -1267,7 +1294,14 @@ pub fn render(entries: &[QueueEntry]) -> String {
                     out.push_str(agent_doc_element_queue::subprompts::unwrap_struck_parent(
                         head,
                     ));
-                    out.push_str("~~\n");
+                    out.push_str("~~");
+                    // `#strucknotekeep`: write the outside-the-wrapper note
+                    // back, so a full queue-body re-render keeps it.
+                    if let Some(note) = p.note.as_deref().filter(|note| !note.trim().is_empty()) {
+                        out.push_str(agent_doc_markdown_ast::overlay::STRUCK_ANNOTATION_SEPARATOR);
+                        out.push_str(note);
+                    }
+                    out.push('\n');
                     if let Some(block) = block {
                         let struck =
                             agent_doc_element_queue::subprompts::strike_subprompt_block(block);
@@ -1513,6 +1547,7 @@ pub fn heal_folded_id_per_line_prompts(entries: &[QueueEntry]) -> Option<Vec<Que
             {
                 changed = true;
                 healed.push(QueueEntry::Prompt(QueuePrompt {
+                    note: None,
                     // Verbatim text: healing re-segments lines, it never
                     // rewrites them, so an operator `do ` prefix survives.
                     text: line.trim().to_string(),
@@ -1533,6 +1568,7 @@ pub fn heal_folded_id_per_line_prompts(entries: &[QueueEntry]) -> Option<Vec<Que
 /// Build a single-line `do [#id]` queue prompt entry.
 fn do_prompt_entry(id: &str) -> QueueEntry {
     QueueEntry::Prompt(QueuePrompt {
+        note: None,
         text: format!("do [#{id}]"),
         multiline: false,
         indent: 0,
@@ -3190,6 +3226,7 @@ pub fn settle_inert_group_parents(
         updated.insert(
             end,
             QueueEntry::Prompt(QueuePrompt {
+                note: None,
                 text: child_text,
                 multiline: false,
                 indent: own_indent + 2,
@@ -3982,24 +4019,36 @@ pub fn sort_prompts_by_dag_with_operator_authored(
 }
 
 pub(crate) fn parse_completed_inline(text: &str) -> Option<&str> {
-    let trimmed = text.trim();
-    let inner = parse_completed_inline_once(trimmed)?;
-    let inner = parse_completed_inline_once(inner).unwrap_or(inner);
-    let inner = inner.trim();
-    (!inner.is_empty()).then_some(inner)
+    parse_completed_inline_with_note(text).map(|(inner, _)| inner)
 }
 
-fn parse_completed_inline_once(trimmed: &str) -> Option<&str> {
+/// [`parse_completed_inline`] plus the struck row's outside-the-wrapper note
+/// (`~~text~~ — auto-struck: <note>`), returned without the separator
+/// (`#strucknotekeep`). The `~~~~text~~ — auto-struck: note~~` restrike
+/// artifact yields the inner note, so render heals the row to the canonical
+/// shape without losing it.
+pub(crate) fn parse_completed_inline_with_note(text: &str) -> Option<(&str, Option<&str>)> {
+    let trimmed = text.trim();
+    let (inner, outer_note) = parse_completed_inline_once(trimmed)?;
+    let (inner, note) = match parse_completed_inline_once(inner) {
+        Some((inner, inner_note)) => (inner, outer_note.or(inner_note)),
+        None => (inner, outer_note),
+    };
+    let inner = inner.trim();
+    (!inner.is_empty()).then_some((inner, note))
+}
+
+fn parse_completed_inline_once(trimmed: &str) -> Option<(&str, Option<&str>)> {
     if let Some(inner) = trimmed
         .strip_prefix("~~")
         .and_then(|s| s.strip_suffix("~~"))
     {
         let inner = inner.trim();
-        return (!inner.is_empty()).then_some(inner);
+        return (!inner.is_empty()).then_some((inner, None));
     }
     if let Some(inner) = trimmed.strip_prefix('~').and_then(|s| s.strip_suffix('~')) {
         let inner = inner.trim();
-        return (!inner.is_empty()).then_some(inner);
+        return (!inner.is_empty()).then_some((inner, None));
     }
     let rest = trimmed.strip_prefix("~~")?;
     let needle = format!(
@@ -4008,7 +4057,8 @@ fn parse_completed_inline_once(trimmed: &str) -> Option<&str> {
     );
     let close = rest.find(&needle)?;
     let inner = rest[..close].trim();
-    (!inner.is_empty()).then_some(inner)
+    let note = rest[close + needle.len()..].trim_end();
+    (!inner.is_empty()).then_some((inner, (!note.trim().is_empty()).then_some(note)))
 }
 
 fn is_start_fence(line: &str) -> bool {
@@ -7118,6 +7168,7 @@ fn nested_bare_preset_identity(
     let head = agent_doc_element_queue::subprompts::head_without_subprompts(&work);
     let first = head.lines().next().unwrap_or("").trim();
     bare_id_reference_key(&QueuePrompt {
+        note: None,
         text: first.to_string(),
         multiline: false,
         indent: 0,
@@ -9695,6 +9746,7 @@ mod tests {
         // #queue-strike-on-complete: a completed single-line item renders as
         // markdown strikethrough (`~~x~~`), and round-trips through the parser.
         let entries = vec![QueueEntry::Completed(QueuePrompt {
+            note: None,
             text: "do [#x]".to_string(),
             multiline: false,
             indent: 0,
@@ -10432,6 +10484,7 @@ mod tests {
         assert_eq!(
             entries[0],
             QueueEntry::Prompt(QueuePrompt {
+                note: None,
                 text: "do #fix1".to_string(),
                 multiline: false,
                 indent: 0,
@@ -10441,6 +10494,7 @@ mod tests {
         assert_eq!(
             entries[1],
             QueueEntry::Prompt(QueuePrompt {
+                note: None,
                 text: "do #fix2".to_string(),
                 multiline: false,
                 indent: 0,
@@ -10450,6 +10504,7 @@ mod tests {
         assert_eq!(
             entries[2],
             QueueEntry::Prompt(QueuePrompt {
+                note: None,
                 text: "run tests".to_string(),
                 multiline: false,
                 indent: 0,
@@ -10466,6 +10521,7 @@ mod tests {
         assert_eq!(
             entries[0],
             QueueEntry::Prompt(QueuePrompt {
+                note: None,
                 text: "Review the changes in src/.\nCheck for edge cases.".to_string(),
                 multiline: true,
                 indent: 0,
@@ -10482,6 +10538,7 @@ mod tests {
         assert_eq!(
             entries[0],
             QueueEntry::Prompt(QueuePrompt {
+                note: None,
                 text: "Review the changes.\nThen run cargo test.".to_string(),
                 multiline: true,
                 indent: 0,
@@ -10614,6 +10671,7 @@ mod tests {
         assert_eq!(
             entries[0],
             QueueEntry::Prompt(QueuePrompt {
+                note: None,
                 text: "There is significant blocking with the sync pipeline.".to_string(),
                 multiline: false,
                 indent: 0,
@@ -10677,6 +10735,52 @@ mod tests {
             "{entries:?}"
         );
         assert_eq!(prompts(&entries).len(), 0);
+    }
+
+    /// `#strucknotekeep`: the auto-struck note outside the strike wrapper is
+    /// part of the struck row's document text. A full parse -> render of the
+    /// queue body (preflight `queue=sync` rebuild, free-text admission) must
+    /// write it back byte for byte, while the work text stays note-free.
+    #[test]
+    fn struck_row_note_survives_a_full_queue_body_rerender() {
+        let body = concat!(
+            "- ### ~~do [#a]~~ — auto-struck: acknowledged; backlog #a stays open: PR 421 is unmerged\n",
+            "- ### ~~JB `File Cache Conflict` occurrences~~ — auto-struck: answered this cycle (#ftstrike); response: [#r-0648593c3bc4]\n",
+            "  1. ~~nested child~~ — auto-struck: response: [#r-0123456789ab]\n",
+            "- ### ~~plain struck~~\n",
+            "- ### live work\n",
+        );
+        let entries = parse(body).unwrap();
+        let QueueEntry::Completed(first) = &entries[0] else {
+            panic!("{entries:?}");
+        };
+        assert_eq!(first.text, "do [#a]");
+        assert_eq!(
+            first.note.as_deref(),
+            Some("acknowledged; backlog #a stays open: PR 421 is unmerged")
+        );
+        assert!(
+            matches!(&entries[3], QueueEntry::Completed(p) if p.note.is_none()),
+            "{entries:?}"
+        );
+        assert!(
+            matches!(&entries[4], QueueEntry::Prompt(p) if p.note.is_none()),
+            "{entries:?}"
+        );
+        assert_eq!(super::render(&entries), body);
+    }
+
+    /// `#strucknotekeep`: the `~~~~text~~ — auto-struck: note~~` restrike
+    /// artifact heals to the canonical outside-the-wrapper shape and keeps
+    /// its note instead of losing it.
+    #[test]
+    fn restrike_artifact_heals_and_keeps_its_note() {
+        let body = "- ~~~~do [#a]~~ — auto-struck: answered this cycle (#ftstrike)~~\n";
+        let entries = parse(body).unwrap();
+        assert_eq!(
+            super::render(&entries),
+            "- ### ~~do [#a]~~ — auto-struck: answered this cycle (#ftstrike)\n"
+        );
     }
 
     #[test]
@@ -10965,6 +11069,7 @@ mod tests {
     #[test]
     fn render_single_line() {
         let entries = vec![QueueEntry::Prompt(QueuePrompt {
+            note: None,
             text: "do #fix1".to_string(),
             multiline: false,
             indent: 0,
@@ -10976,6 +11081,7 @@ mod tests {
     #[test]
     fn render_multiline() {
         let entries = vec![QueueEntry::Prompt(QueuePrompt {
+            note: None,
             text: "Review changes.\nRun tests.".to_string(),
             multiline: true,
             indent: 0,
@@ -11006,6 +11112,7 @@ mod tests {
     fn render_mixed() {
         let entries = vec![
             QueueEntry::Prompt(QueuePrompt {
+                note: None,
                 text: "do #fix1".to_string(),
                 multiline: false,
                 indent: 0,
@@ -11013,6 +11120,7 @@ mod tests {
             }),
             QueueEntry::StopFence,
             QueueEntry::Prompt(QueuePrompt {
+                note: None,
                 text: "do #fix2".to_string(),
                 multiline: false,
                 indent: 0,
@@ -11027,12 +11135,14 @@ mod tests {
         let entries = vec![
             QueueEntry::Preset("spec".to_string()),
             QueueEntry::Prompt(QueuePrompt {
+                note: None,
                 text: "do #fix1".to_string(),
                 multiline: false,
                 indent: 0,
                 ordered_marker: None,
             }),
             QueueEntry::Prompt(QueuePrompt {
+                note: None,
                 text: "do #fix2".to_string(),
                 multiline: false,
                 indent: 0,
@@ -11049,12 +11159,14 @@ mod tests {
         let entries = vec![
             QueueEntry::Dispatch("#spec".to_string()),
             QueueEntry::Prompt(QueuePrompt {
+                note: None,
                 text: "do #fix1".to_string(),
                 multiline: false,
                 indent: 0,
                 ordered_marker: None,
             }),
             QueueEntry::Prompt(QueuePrompt {
+                note: None,
                 text: "do #fix2".to_string(),
                 multiline: false,
                 indent: 0,
@@ -11083,6 +11195,7 @@ mod tests {
         let entries = vec![
             QueueEntry::StartFence(None),
             QueueEntry::Prompt(QueuePrompt {
+                note: None,
                 text: "task1".to_string(),
                 multiline: false,
                 indent: 0,
@@ -11090,6 +11203,7 @@ mod tests {
             }),
             QueueEntry::StopFence,
             QueueEntry::Prompt(QueuePrompt {
+                note: None,
                 text: "task2".to_string(),
                 multiline: false,
                 indent: 0,
@@ -11107,6 +11221,7 @@ mod tests {
         let entries = vec![
             QueueEntry::StartFence(None),
             QueueEntry::Prompt(QueuePrompt {
+                note: None,
                 text: "task1".to_string(),
                 multiline: false,
                 indent: 0,
@@ -11127,12 +11242,14 @@ mod tests {
         let entries = vec![
             QueueEntry::StartFence(None),
             QueueEntry::Prompt(QueuePrompt {
+                note: None,
                 text: "task1".to_string(),
                 multiline: false,
                 indent: 0,
                 ordered_marker: None,
             }),
             QueueEntry::Prompt(QueuePrompt {
+                note: None,
                 text: "task2".to_string(),
                 multiline: false,
                 indent: 0,
@@ -11153,6 +11270,7 @@ mod tests {
         assert_eq!(
             entries[0],
             QueueEntry::Prompt(QueuePrompt {
+                note: None,
                 text: "do #fix1".to_string(),
                 multiline: false,
                 indent: 0,
@@ -11172,6 +11290,7 @@ mod tests {
 
     fn make_prompt(text: &str) -> QueueEntry {
         QueueEntry::Prompt(QueuePrompt {
+            note: None,
             text: text.to_string(),
             multiline: false,
             indent: 0,
@@ -11918,6 +12037,7 @@ mod tests {
 
     fn nest_row(text: &str, indent: usize) -> QueueEntry {
         QueueEntry::Prompt(QueuePrompt {
+            note: None,
             text: text.to_string(),
             multiline: false,
             indent,
@@ -12393,10 +12513,8 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["child one", "child two"]
         );
-        assert_eq!(
-            render(&entries),
-            "- ~~parent~~\n  - child one\n  - child two\n"
-        );
+        // `#strucknotekeep`: the parent's auto-struck note survives the render.
+        assert_eq!(render(&entries), body);
         let doc = format!("<!-- agent:run -->\n{body}<!-- /agent:run -->\n");
         let nodes = agent_doc_markdown_ast::mutations::item_nodes(&doc, "queue").unwrap();
         assert_eq!(nodes.len(), 3);
@@ -13767,6 +13885,7 @@ mod tests {
 
     fn p(text: &str) -> QueueEntry {
         QueueEntry::Prompt(QueuePrompt {
+            note: None,
             text: text.to_string(),
             multiline: false,
             indent: 0,
@@ -13775,6 +13894,7 @@ mod tests {
     }
     fn c(text: &str) -> QueueEntry {
         QueueEntry::Completed(QueuePrompt {
+            note: None,
             text: text.to_string(),
             multiline: false,
             indent: 0,
@@ -14891,12 +15011,14 @@ mod tests {
             (
                 vec![
                     QueueEntry::Prompt(QueuePrompt {
+                        note: None,
                         text: ":round_pushpin: switch actor\nroute error body".into(),
                         multiline: true,
                         indent: 0,
                         ordered_marker: None,
                     }),
                     QueueEntry::Prompt(QueuePrompt {
+                        note: None,
                         text: ":round_pushpin: switch actor\nroute error body".into(),
                         multiline: true,
                         indent: 0,
@@ -15059,6 +15181,7 @@ mod tests {
         assert_eq!(
             entries[1],
             QueueEntry::Prompt(QueuePrompt {
+                note: None,
                 text: "separate work after a blank line".to_string(),
                 multiline: true,
                 indent: 0,
@@ -16393,8 +16516,9 @@ mod tests {
                 QueueEntry::Completed(prompt) => assert_eq!(prompt.text, ROW),
                 other => panic!("struck row must parse as Completed, got {other:?}"),
             }
-            // Re-rendering a parsed struck row never double-strikes it.
-            assert_eq!(render(&entries), format!("- ~~{ROW}~~\n"));
+            // Re-rendering a parsed struck row never double-strikes it, and
+            // keeps its outside-the-wrapper note (`#strucknotekeep`).
+            assert_eq!(render(&entries), struck);
         }
     }
 

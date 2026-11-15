@@ -350,6 +350,7 @@ mod tests {
 
     fn prompt(text: &str) -> QueueEntry {
         QueueEntry::Prompt(QueuePrompt {
+            note: None,
             text: text.to_string(),
             multiline: false,
             indent: 0,

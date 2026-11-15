@@ -798,6 +798,7 @@ impl PreparedFreeTextAdmission {
                         0,
                         crate::document_queue::QueueEntry::Prompt(
                             crate::document_queue::QueuePrompt {
+                                note: None,
                                 text: command,
                                 multiline: false,
                                 indent: 0,
@@ -1496,6 +1497,7 @@ mod tests {
     fn collect_actionable_free_text_prompts_dedupes_exchange_and_queue_prompts() {
         let entries = vec![crate::document_queue::QueueEntry::Prompt(
             crate::document_queue::QueuePrompt {
+                note: None,
                 text: "❯ Implement checkout setup".to_string(),
                 multiline: false,
                 indent: 0,
@@ -1650,6 +1652,7 @@ mod tests {
         let command = goal_command_for_ids(&ids);
         let entries = vec![crate::document_queue::QueueEntry::Prompt(
             crate::document_queue::QueuePrompt {
+                note: None,
                 text: command,
                 multiline: false,
                 indent: 0,
@@ -1661,6 +1664,7 @@ mod tests {
 
         let bracketed = vec![crate::document_queue::QueueEntry::Prompt(
             crate::document_queue::QueuePrompt {
+                note: None,
                 text: "/goal Implement [#abc123] and [#def456]".to_string(),
                 multiline: false,
                 indent: 0,
@@ -1735,6 +1739,40 @@ mod tests {
             crate::document_queue::QueueEntry::Prompt(prompt)
                 if prompt.text == "Implement checkout setup"
         )));
+    }
+
+    /// `#strucknotekeep`: free-text admission re-renders the whole queue
+    /// body; a struck row beside the admitted text keeps its auto-struck note.
+    #[test]
+    fn admission_keeps_the_note_of_a_struck_sibling_row() {
+        const STRUCK: &str = "- ### ~~do [#acked]~~ — auto-struck: acknowledged; backlog #acked stays open: PR 421 is unmerged\n";
+        let content = format!(
+            "<!-- agent:queue -->\n{STRUCK}- Implement checkout setup\n<!-- /agent:queue -->\n"
+        );
+        let entries = queue_entries_from_content(&content);
+        let prepared = prepare_free_text_admission(
+            &content,
+            &entries,
+            None,
+            &FreeTextAdmissionScope::All,
+            true,
+            "doc-id",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(prepared.admitted_count, 1);
+        let id = prepared.unique_ids[0].clone();
+        let admission = prepared.finish(FreeTextAdmissionExecution::Queue).unwrap();
+        assert!(
+            admission.content.contains(STRUCK),
+            "the struck row keeps its note:\n{}",
+            admission.content
+        );
+        assert!(
+            admission.content.contains(&format!("do [#{id}]")),
+            "{}",
+            admission.content
+        );
     }
 
     #[test]

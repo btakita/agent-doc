@@ -38,6 +38,8 @@ pub mod queue_claim;
 pub use agent_doc_element_queue::QueueReportState;
 pub mod followup_owner;
 pub mod handback_followups;
+#[cfg(test)]
+mod nest_leaf_select_tests;
 pub mod queue_closeout_guard;
 pub mod queue_command;
 pub mod queue_consume;

@@ -938,6 +938,7 @@ fn append_struck_removal_mismatches(
                 .or_else(|| receipt.and_then(|receipt| receipt.worker_id.clone())),
             explicit: false,
             vector: None,
+            prompt_tree: None,
             queue_mode: None,
         });
     }

@@ -1137,6 +1137,25 @@ pub fn submitted_continuation_prompt(
     submitted_queue_prompt_skipping(content, head_text, skip)
 }
 
+/// The `#nestsubmit` context that follows `head_text`'s lineage: an answered
+/// waiting item's newest-reply line and the prompt tree (`#nestleafselect`).
+///
+/// `None` for a top-level row, a slash command, or text that is not a live
+/// row: those submit no tree. Mid-turn steering appends this to a nested
+/// item's `vector:` so the running turn sees the same tree a fresh cycle
+/// would submit.
+pub fn submitted_prompt_tree_context(content: &str, head_text: &str) -> Option<String> {
+    let submitted = submitted_continuation_prompt(content, head_text, |_| false);
+    [
+        crate::document_queue::LATEST_REPLY_LABEL,
+        crate::document_queue::PROMPT_TREE_HEADER,
+    ]
+    .iter()
+    .filter_map(|label| submitted.find(&format!("\n{label}")))
+    .min()
+    .map(|at| submitted[at + 1..].to_string())
+}
+
 /// Submitted prompts for `heads` across every runnable section (`#nestsubmit`).
 ///
 /// Heads are a subsequence in document order. A plan ranges across every

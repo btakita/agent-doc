@@ -5722,8 +5722,15 @@ pub fn row_matches_submitted_head_text(
     let identity = strip_in_progress_marker(prompt.text.trim());
     // Submission/authorization treats the effect annotation as metadata;
     // durable claim identity remains exact in `lineage_claim_text`.
-    nest_vector_at(entries, index, &identity)
-        .is_some_and(|lineage| same_prompt(&lineage, head_text))
+    nest_vector_at(entries, index, &identity).is_some_and(|lineage| {
+        same_prompt(&lineage, head_text)
+            // `#nestleafselect`: the submitted vector drops binary markers.
+            || (lineage.contains("<!-- agent-doc:")
+                && same_prompt(
+                    &without_binary_markers(&lineage),
+                    &without_binary_markers(head_text),
+                ))
+    })
 }
 
 /// `true` when `ancestor_idx` is on the nest chain above `leaf_idx`.
@@ -5777,7 +5784,7 @@ pub fn submitted_prompt_at(entries: &[QueueEntry], index: usize) -> Option<Strin
         return None;
     }
     Some(match nest_vector_at(entries, index, &identity) {
-        Some(lineage) => with_prompt_tree(entries, index, &lineage),
+        Some(lineage) => with_prompt_tree(entries, index, &without_binary_markers(&lineage)),
         None => identity,
     })
 }
@@ -5806,7 +5813,9 @@ pub fn submitted_group_prompt_at(entries: &[QueueEntry], index: usize) -> Option
     if identity.trim().is_empty() {
         return None;
     }
-    let lineage = nest_vector_at(entries, index, &identity).unwrap_or(identity);
+    let lineage = nest_vector_at(entries, index, &identity)
+        .map(|vector| without_binary_markers(&vector))
+        .unwrap_or(identity);
     Some(with_prompt_tree(entries, index, &lineage))
 }
 
@@ -5820,15 +5829,73 @@ pub fn submitted_group_prompt_with_context_at(
     Some(agent_doc_prompt_context::lineage::attach(&packet, &prompt))
 }
 
-const PROMPT_TREE_HEADER: &str =
+pub const PROMPT_TREE_HEADER: &str =
     "Prompt tree (`#nestsubmit`, context only; run the lineage above):";
+
+/// Label of the line that names an answered waiting item's newest reply.
+pub const LATEST_REPLY_LABEL: &str =
+    "Operator reply to act on (newest live reply under this item; earlier replies are context):";
+
+/// Tree suffix of an answered waiting item's newest reply.
+const LATEST_REPLY_SUFFIX: &str = " (latest reply)";
+
+/// `text` without binary-owned `<!-- agent-doc:... -->` comment markers
+/// (`#nestleafselect`).
+///
+/// The markers (`<!-- agent-doc:waiting-on-you -->`,
+/// `<!-- agent-doc:waiting-item -->`) prove ownership in the document; they
+/// are noise in an agent-facing nest vector. Operator-authored comments stay.
+/// [`row_matches_submitted_head_text`] accepts the stripped vector, so a head
+/// copied from the submitted prompt still resolves its row.
+pub fn without_binary_markers(text: &str) -> String {
+    if !text.contains("<!-- agent-doc:") {
+        return text.to_string();
+    }
+    text.lines()
+        .map(|line| {
+            let mut out = String::with_capacity(line.len());
+            let mut rest = line;
+            while let Some(at) = rest.find("<!-- agent-doc:") {
+                let Some(end) = rest[at..].find("-->") else {
+                    break;
+                };
+                out.push_str(&rest[..at]);
+                rest = &rest[at + end + 3..];
+                // Only the spacing at the removed marker changes: no space
+                // before `:`/`,`/end of line, one space before other text.
+                let trimmed_len = out.trim_end().len();
+                out.truncate(trimmed_len);
+                let next = rest.trim_start();
+                if !out.is_empty() && !next.is_empty() && !next.starts_with([':', ',', '.', ')']) {
+                    out.push(' ');
+                }
+                rest = next;
+            }
+            out.push_str(rest);
+            out
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
 /// Lineage plus the prompt tree. Quoted tree lines are context: scanners that
 /// skip blockquotes do not treat a sibling `do [#id]` or question as more work.
+///
+/// `#nestleafselect`: an answered Waiting-on-you item stays the work identity
+/// (`#waitingselectboundary`), and its newest live operator reply is named on
+/// its own line after the lineage, so the agent acts on that reply rather
+/// than on an earlier one in the tree.
 fn with_prompt_tree(entries: &[QueueEntry], leaf_idx: usize, lineage: &str) -> String {
-    let tree = prompt_tree_outline(entries, leaf_idx);
+    let latest = waiting_item_has_operator_reply(entries, leaf_idx)
+        .then(|| crate::waiting_packet::latest_operator_reply(entries, leaf_idx))
+        .flatten();
+    let lineage = match &latest {
+        Some((_, reply)) => format!("{lineage}\n{LATEST_REPLY_LABEL} {reply}"),
+        None => lineage.to_string(),
+    };
+    let tree = prompt_tree_outline(entries, leaf_idx, latest.as_ref().map(|(index, _)| *index));
     if tree.is_empty() {
-        return lineage.to_string();
+        return lineage;
     }
     format!("{lineage}\n{PROMPT_TREE_HEADER}\n{tree}")
 }
@@ -5838,8 +5905,14 @@ fn with_prompt_tree(entries: &[QueueEntry], leaf_idx: usize, lineage: &str) -> S
 /// `leaf_idx` is marked `(this leaf)`. Completed rows are struck. Projection
 /// markers are not part of the outline. Each line is a blockquote so it stays
 /// context; a line that would end in `?` gains ` [context]` so it is not a
-/// second prompt target.
-fn prompt_tree_outline(entries: &[QueueEntry], leaf_idx: usize) -> String {
+/// second prompt target. `latest_reply` marks a waiting item's newest reply;
+/// an operator reply that parses inert under generated metadata is still in
+/// the tree.
+fn prompt_tree_outline(
+    entries: &[QueueEntry],
+    leaf_idx: usize,
+    latest_reply: Option<usize>,
+) -> String {
     let mut lines = Vec::new();
     let bounded_response_branch = entries.iter().enumerate().any(|(idx, entry)| {
         idx < leaf_idx
@@ -5861,6 +5934,22 @@ fn prompt_tree_outline(entries: &[QueueEntry], leaf_idx: usize) -> String {
             lines.extend(raw.trim_end().lines().map(str::to_string));
             continue;
         }
+        if let QueueEntry::Freeform(_) = entry
+            && crate::waiting_packet::is_packet_row(entries, idx)
+            && let Some(reply) = crate::waiting_packet::operator_freeform_text(entries, idx)
+        {
+            let indent = crate::waiting_packet::entry_list_indent(entry).unwrap_or(0);
+            let suffix = if latest_reply == Some(idx) {
+                LATEST_REPLY_SUFFIX
+            } else {
+                ""
+            };
+            lines.push(context_quote(&format!(
+                "{}- {reply}{suffix}",
+                " ".repeat(indent)
+            )));
+            continue;
+        }
         if let Some((indent, label)) = reference_context_row(entry) {
             lines.push(context_quote(&format!("{}- {label}", " ".repeat(indent))));
             continue;
@@ -5870,7 +5959,13 @@ fn prompt_tree_outline(entries: &[QueueEntry], leaf_idx: usize) -> String {
             QueueEntry::Completed(prompt) => (prompt, true),
             _ => continue,
         };
-        lines.extend(outline_row(prompt, completed, idx == leaf_idx));
+        let mut row = outline_row(prompt, completed, idx == leaf_idx);
+        if latest_reply == Some(idx)
+            && let Some(first) = row.first_mut()
+        {
+            first.push_str(LATEST_REPLY_SUFFIX);
+        }
+        lines.extend(row);
     }
     lines.join("\n")
 }

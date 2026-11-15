@@ -16,6 +16,15 @@ when the emitted contract says work is drainable:
 - `queue_prompts` is non-empty; and
 - `user_intent_prompt_changes` is empty.
 
+`queue_prompts` is only the raw list of live queue rows, kept for this
+non-empty check and older consumers. It carries no nest vector, prompt tree, or
+context packet, so never read it as the prompt (`#nestleafselect`). The work
+for this cycle is `selected_queue_prompts` (or the synthetic queue diff): the
+submitted `#nestsubmit` form with the vector, the prompt tree, and, for an
+answered Waiting-on-you item, the newest operator reply to act on. When
+`selected_queue_prompts` is empty, the heads went to `queue_subagent_dispatch`
+or are held; act on those fields, not on `queue_prompts`.
+
 `queue_continuation_required` and `queue_drainable_head_count` are the binary's
 in-session drainability projection (`#cleardrainsignal`, `#qchurn`). Do not loop
 when they say no work is drainable. A real exchange prompt preempts the queue;

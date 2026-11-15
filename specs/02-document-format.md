@@ -1446,7 +1446,7 @@ Claim resolution and storage use the marker-free head text: a projected lifecycl
 3. **Exchange trigger** — user writes `do queue` or `run queue` in the exchange.
 4. **Persisted state** — `queue_active: true` in frontmatter (set on activation, cleared on drain).
 
-On activation, preflight emits `queue_active: true`, `queue_prompts: [...]` (ordered prompt texts), and `queue_trigger` (how the queue was activated). The first prompt is the effective user edit for the cycle.
+On activation, preflight emits `queue_active: true`, `queue_prompts: [...]` (the raw ordered row texts of the live queue heads), `selected_queue_prompts: [...]`, and `queue_trigger` (how the queue was activated). `selected_queue_prompts` is the agent-facing prompt: each entry is the submitted `#nestsubmit` form (context packet, nest vector, prompt tree) of a head this cycle runs inline, and it is empty when every head is claimed, held, or listed under `queue_subagent_dispatch`. `queue_prompts` stays for backward compatibility (non-empty checks, older consumers) and is never the prompt (`#nestleafselect`).
 
 When the queue drains to empty: `auto` is stripped from the opening tag, `queue_active` is cleared in frontmatter.
 

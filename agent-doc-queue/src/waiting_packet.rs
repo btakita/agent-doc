@@ -261,6 +261,35 @@ pub fn packet_member_indexes(entries: &[QueueEntry], head: usize) -> Vec<usize> 
         .collect()
 }
 
+/// `entries` without the rows `drop` marks, and without each dropped waiting
+/// item's packet (`#nestleafselect`).
+///
+/// A selection filter that removes an out-of-loop waiting-item head (a claim
+/// or a pending subagent dispatch) must take the head's packet with it. With
+/// the head gone, nothing marks the operator's replies as packet rows, so
+/// they became top-level leaves of their own. The earliest reply was then
+/// selected and submitted as the leaf, while the item itself was being
+/// dispatched. Nested waiting items keep their own packets. `drop` shorter
+/// than `entries` keeps the rows past its end.
+pub fn without_rows_and_their_packets(entries: &[QueueEntry], drop: &[bool]) -> Vec<QueueEntry> {
+    let mut dropped: Vec<bool> = (0..entries.len())
+        .map(|index| drop.get(index).copied().unwrap_or(false))
+        .collect();
+    for head in 0..entries.len() {
+        if dropped[head] && is_waiting_item_head(&entries[head]) {
+            for member in packet_member_indexes(entries, head) {
+                dropped[member] = true;
+            }
+        }
+    }
+    entries
+        .iter()
+        .zip(dropped)
+        .filter(|(_, dropped)| !dropped)
+        .map(|(entry, _)| entry.clone())
+        .collect()
+}
+
 /// Classify one live packet row.
 pub fn classify_member(prompt: &QueuePrompt) -> WaitingMember {
     if let Some(
@@ -418,6 +447,34 @@ pub fn has_operator_reply(entries: &[QueueEntry], head: usize) -> bool {
             QueueEntry::Freeform(_) => operator_freeform_text(entries, index).is_some(),
             _ => false,
         })
+}
+
+/// The newest live operator reply the waiting item at `head` owns, as
+/// `(index, text)` (`#nestleafselect`).
+///
+/// Newest is last in document order, the same reply the item's `**Next:**`
+/// row names (`#waitingitemnext`). A struck (consumed) reply, generated
+/// metadata, an offered choice, and an attempt row are not replies.
+pub fn latest_operator_reply(entries: &[QueueEntry], head: usize) -> Option<(usize, String)> {
+    packet_member_indexes(entries, head)
+        .into_iter()
+        .rev()
+        .filter_map(|index| match &entries[index] {
+            QueueEntry::Prompt(prompt)
+                if classify_member(prompt) == WaitingMember::Operator
+                    && !is_agent_doc_reply_entry(entries, index) =>
+            {
+                let reply = agent_doc_element_queue::struck_work_text(&prompt.text)
+                    .trim()
+                    .to_string();
+                (!reply.is_empty() && !reply.starts_with("**")).then_some((index, reply))
+            }
+            QueueEntry::Freeform(_) => {
+                operator_freeform_text(entries, index).map(|reply| (index, reply.to_string()))
+            }
+            _ => None,
+        })
+        .next()
 }
 
 /// Whether `prompt` is the waiting item's own attempt projected onto a

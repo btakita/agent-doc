@@ -668,6 +668,7 @@ mod tests {
             worker_id: None,
             explicit: false,
             vector: None,
+            prompt_tree: None,
             queue_mode: None,
         }
     }

@@ -774,7 +774,13 @@ the vector. The prompt submitted for that leaf is that vector plus the entire pr
 tree (`#nestsubmit`): a synthetic queue diff, a plan queue prompt, a direct
 run's active-queue diff, and a subagent's submitted prompt. The tree is
 context from the parsed queue AST, including a sibling branch that is not on
-the lineage path. Walk that context as a requirements checklist, but complete
+the lineage path. Read the prompt from `selected_queue_prompts`, never from
+the raw `queue_prompts` row list. An answered Waiting-on-you item stays the
+work identity, and its submitted prompt names the newest live operator reply
+on an `Operator reply to act on` line after the vector (marked
+`(latest reply)` in the tree). Act on that reply; earlier replies are context
+(`#nestleafselect`). Mid-turn steering for a nested row prints the same tree
+after its `vector:` line. Walk that context as a requirements checklist, but complete
 only the selected executable leaf: validate that the leaf's requested outcome
 and verification requirements are actually met before reporting it done. If
 they are not, state the concrete deferral and leave the leaf live. Once every

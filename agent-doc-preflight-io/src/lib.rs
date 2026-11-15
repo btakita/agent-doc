@@ -1587,10 +1587,15 @@ pub struct PreflightOutput {
     /// Short model name for attribution in `### Re:` response headers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_model: Option<String>,
-    /// Ordered prompt texts from the `agent:queue` component.
+    /// Raw ordered row texts of the live queue heads. Kept for non-empty
+    /// checks and older consumers; it carries no nest vector, prompt tree, or
+    /// context packet, so it is never the agent's prompt (`#nestleafselect`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queue_prompts: Vec<String>,
-    /// Realtime-selected active queue prompts for this cycle.
+    /// The agent-facing prompts this cycle runs inline: each head's submitted
+    /// `#nestsubmit` form (context packet, nest vector, prompt tree, and an
+    /// answered waiting item's newest reply). Empty when every head is
+    /// claimed, held, or listed under `queue_subagent_dispatch`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub selected_queue_prompts: Vec<String>,
     /// Non-ordering document-local queue relations and their computed
@@ -4419,12 +4424,9 @@ fn entries_without_out_of_loop_heads(
             _ => false,
         })
         .collect();
-    entries
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| !claimed_at[*index])
-        .map(|(_, entry)| entry.clone())
-        .collect()
+    // `#nestleafselect`: a dropped waiting item takes its packet with it, so
+    // its operator replies never surface as orphan leaves.
+    agent_doc_queue::waiting_packet::without_rows_and_their_packets(entries, &claimed_at)
 }
 
 pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState> {
@@ -10963,6 +10965,44 @@ mod tests {
     use std::path::PathBuf;
     use std::process::Command;
     use tempfile::TempDir;
+
+    /// `#nestleafselect` (lazily, 2026-11-15 00:23): a dispatch-pending
+    /// answered waiting item left the selection filter without its packet, so
+    /// its first operator reply became the selected leaf while the item itself
+    /// was listed for subagent dispatch.
+    #[test]
+    fn dispatch_pending_waiting_item_takes_its_replies_out_of_selection() {
+        let body = concat!(
+            "- ### Waiting on you <!-- agent-doc:waiting-on-you -->\n",
+            "  - [#pick] Pick a port. <!-- agent-doc:waiting-item -->\n",
+            "    - **Response:** Pick a port. \u{25ab}\u{fe0f}\n",
+            "      - **Next actions:** \u{25ab}\u{fe0f}\n",
+            "        - use 8080\n",
+            "    - try again\n",
+            "- do [#other]\n",
+        );
+        let entries = agent_doc_queue::document_queue::parse(body).unwrap();
+        let texts = |entries: &[agent_doc_queue::document_queue::QueueEntry]| {
+            agent_doc_queue::document_queue::prompts(entries)
+                .into_iter()
+                .map(|prompt| prompt.text.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            texts(&entries),
+            vec![
+                "[#pick] Pick a port. <!-- agent-doc:waiting-item -->".to_string(),
+                "do [#other]".to_string(),
+            ]
+        );
+        let dispatch = vec!["[#pick] Pick a port. <!-- agent-doc:waiting-item -->".to_string()];
+        let filtered = entries_without_out_of_loop_heads(
+            &entries,
+            &agent_doc_queue::queue_claim::ClaimedQueueItems::none(),
+            &dispatch,
+        );
+        assert_eq!(texts(&filtered), vec!["do [#other]".to_string()]);
+    }
 
     /// Preflight admits a document whose open `agent:todo` items carry their
     /// own `[#id]` (the `--todo-add` form) and whose queue cites two of them,

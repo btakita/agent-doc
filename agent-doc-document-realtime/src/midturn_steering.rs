@@ -196,6 +196,12 @@ pub struct SteeringItem {
     /// which binds the first unclaimed row with that leaf (`#nestlistlineage`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vector: Option<String>,
+    /// The `#nestsubmit` context after a nested item's lineage: the prompt
+    /// tree, plus an answered waiting item's newest-reply line
+    /// (`#nestleafselect`). A fresh cycle submits the same tree, so a nested
+    /// steering item is never just a bare `vector:` and `verbatim:` row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_tree: Option<String>,
     /// The queue and its new subagent mode for a
     /// [`SteeringDispatch::QueueModeChanged`] item (`#queuemodesteer`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -215,6 +221,12 @@ impl SteeringItem {
 /// lineage is its own (normalized) text.
 fn nested_vector(item: &QueueItem) -> Option<String> {
     (normalize_queue_text(&item.raw) != item.norm).then(|| item.norm.clone())
+}
+
+/// The prompt tree a fresh cycle would submit for `item` in `current`
+/// (`#nestleafselect`); `None` for a top-level row, which has no tree.
+fn nested_prompt_tree(current: &str, item: &QueueItem) -> Option<String> {
+    agent_doc_queue::queue_response::submitted_prompt_tree_context(current, &item.norm)
 }
 
 /// One queue's subagent mode as the operator just set it (`#queuemodesteer`).
@@ -798,6 +810,7 @@ fn queue_mode_candidates(
                 worker_id: None,
                 explicit: false,
                 vector: None,
+                prompt_tree: None,
                 queue_mode: Some(QueueModeChange {
                     queue: queue.clone(),
                     subagents,
@@ -934,6 +947,7 @@ fn exchange_candidates(
                 worker_id: None,
                 explicit: false,
                 vector: None,
+                prompt_tree: None,
                 queue_mode: None,
             },
         });
@@ -1212,6 +1226,7 @@ fn queue_alignment(
                 worker_id: None,
                 explicit: false,
                 vector: nested_vector(item),
+                prompt_tree: nested_prompt_tree(current, item),
                 queue_mode: None,
             },
         });
@@ -1252,6 +1267,7 @@ fn queue_alignment(
                 worker_id: None,
                 explicit: false,
                 vector: nested_vector(item),
+                prompt_tree: nested_prompt_tree(current, item),
                 queue_mode: None,
             },
         });
@@ -1290,6 +1306,7 @@ fn queue_alignment(
                 worker_id: None,
                 explicit: false,
                 vector: None,
+                prompt_tree: None,
                 queue_mode: None,
             },
         });
@@ -1748,6 +1765,9 @@ pub fn render_steering_context_for_harness(
         if let Some(vector) = &item.vector {
             out.push_str(&format!("\nvector: {vector}"));
         }
+        if let Some(tree) = &item.prompt_tree {
+            out.push_str(&format!("\n{tree}"));
+        }
         if let Some(previous) = &item.previous {
             out.push_str(&format!("\nprevious: {previous}"));
         }
@@ -2014,6 +2034,7 @@ pub fn append_claimed_queue_removals(
             worker_id: claim.worker.map(|worker| worker.worker_id),
             explicit: false,
             vector: None,
+            prompt_tree: None,
             queue_mode: None,
         });
     }
@@ -2483,6 +2504,9 @@ pub fn render_closeout_steering_context_for_harness(
         ));
         if let Some(vector) = &item.vector {
             out.push_str(&format!("\nvector: {vector}"));
+        }
+        if let Some(tree) = &item.prompt_tree {
+            out.push_str(&format!("\n{tree}"));
         }
         if let Some(previous) = &item.previous {
             out.push_str(&format!("\nprevious: {previous}"));
@@ -4338,6 +4362,7 @@ mod tests {
             worker_id: None,
             explicit: false,
             vector: None,
+            prompt_tree: None,
             queue_mode: None,
         };
 
@@ -4392,6 +4417,7 @@ mod tests {
             worker_id: None,
             explicit: false,
             vector: None,
+            prompt_tree: None,
             queue_mode: None,
         };
         let mut items = vec![
@@ -4444,6 +4470,7 @@ mod tests {
             worker_id: None,
             explicit: false,
             vector: None,
+            prompt_tree: None,
             queue_mode: None,
         };
 
@@ -4486,6 +4513,7 @@ mod tests {
             worker_id: None,
             explicit: false,
             vector: None,
+            prompt_tree: None,
             queue_mode: None,
         };
         let text = render_closeout_steering_context("tasks/bugs.md", &[item], 0).unwrap();
@@ -4732,6 +4760,58 @@ mod tests {
         assert!(item.verbatim.contains("[#yeja]"), "{item:?}");
         assert!(!item.verbatim.contains("pick: a + b"), "{item:?}");
         assert!(!item.verbatim.contains("live-buffer"), "{item:?}");
+    }
+
+    /// `#nestleafselect`: a nested leaf added mid-turn reaches the agent with
+    /// its prompt tree, not just `vector:` and `verbatim:`; a top-level row
+    /// carries no tree.
+    #[test]
+    fn nested_steering_item_carries_its_prompt_tree() {
+        let owned = BTreeSet::new();
+        let baseline = doc("- do [#alpha]\n", EX);
+        let current = doc(
+            "- do [#alpha]\n- release parent\n  - publish the crate\n- plain top row\n",
+            EX,
+        );
+        let obs = observe(&seeded(&baseline, None), &current, &quiet_ctx(&owned));
+        let nested = obs
+            .ready
+            .iter()
+            .find(|item| item.verbatim.contains("publish the crate"))
+            .unwrap_or_else(|| panic!("{:#?}", obs.ready));
+        assert_eq!(
+            nested.vector.as_deref(),
+            Some("release parent: publish the crate")
+        );
+        let tree = nested
+            .prompt_tree
+            .as_deref()
+            .expect("nested item has a tree");
+        assert!(
+            tree.starts_with(agent_doc_queue::document_queue::PROMPT_TREE_HEADER),
+            "{tree}"
+        );
+        assert!(
+            tree.contains(">   - publish the crate (this leaf)"),
+            "{tree}"
+        );
+        assert!(tree.contains("> - do [#alpha]"), "{tree}");
+        let top = obs
+            .ready
+            .iter()
+            .find(|item| item.verbatim.contains("plain top row"))
+            .unwrap_or_else(|| panic!("{:#?}", obs.ready));
+        assert_eq!(top.prompt_tree, None);
+
+        let rendered = render_steering_context_for_harness("doc.md", &obs.ready, 0, "claude")
+            .expect("ready items render");
+        assert!(
+            rendered.contains(&format!(
+                "vector: release parent: publish the crate\n{}",
+                agent_doc_queue::document_queue::PROMPT_TREE_HEADER
+            )),
+            "{rendered}"
+        );
     }
 
     /// `#regressionawaitingoperat`: a head whose tracked item waits on the
@@ -5220,6 +5300,7 @@ mod tests {
                 worker_id: None,
                 explicit: false,
                 vector: None,
+                prompt_tree: None,
                 queue_mode: None,
             },
             SteeringItem {
@@ -5238,6 +5319,7 @@ mod tests {
                 worker_id: None,
                 explicit: false,
                 vector: None,
+                prompt_tree: None,
                 queue_mode: None,
             },
         ];
@@ -5386,6 +5468,7 @@ mod tests {
             worker_id,
             explicit: false,
             vector: None,
+            prompt_tree: None,
             queue_mode: None,
         }
     }
@@ -5408,6 +5491,7 @@ mod tests {
             possibly_partial: false,
             explicit: false,
             vector: None,
+            prompt_tree: None,
             presets: Vec::new(),
             queue_mode: None,
         };

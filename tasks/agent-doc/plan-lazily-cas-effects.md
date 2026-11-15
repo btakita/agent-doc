@@ -349,10 +349,16 @@ Progress (`#implementlazilyowned`):
   (`FenceChanged` = superseded). The actor-generation fenced writes
   (`store_actor_record_fenced_tx`, `delete_actor_document_fenced_tx`) are the
   next consumers of the same adapter shape.
-- Not yet done: the caller-side `RetryableHeadMoved`/`RetryableIndexLock`
-  retry loops in `agent-doc-commit-io` (they now retry a Lazily `Superseded` /
-  `Retryable` outcome, but the loop itself is still application-owned; triage
-  rows), moving the remaining `controller-ledger-sqlite` seams (actor generation,
+- Commit-transaction retries: the five caller-side
+  `RetryableHeadMoved`/`RetryableIndexLock` loops in `agent-doc-commit-io`
+  are deleted. `agent_doc_git_io::ref_cas::drive_commit_transaction` drives an
+  exact-path transaction through a Lazily core keyed by the repository HEAD:
+  a moved HEAD is `Superseded` and the still-wanted commit is re-desired over
+  the observed HEAD as the next epoch, a held lock is `Retryable` and
+  re-claimed from Lazily's retained intent, and an ignored path or fatal
+  failure is `Rejected`. `pace_commit_transaction` only logs and waits the
+  backoff; it never decides whether to retry.
+- Not yet done: moving the remaining `controller-ledger-sqlite` seams (actor generation,
   closeout lease, drain-owner claims) onto the SQLite adapter, persisting
   per-step plan receipts for crash resume inside one request (today a resumed
   request re-derives its idempotent effects), reordering the maintenance body

@@ -31027,7 +31027,9 @@ fn test_agent_doc_commit_io_marks_capture_committed_from_resolved_current_conten
         .expect("commit should resolve initial current document content");
     let stage_commit_idx = initial_current_idx
         + commit_source[initial_current_idx..]
-            .find("match stage_and_commit_exact_paths_once_with_fence(")
+            // `#implementlazilyowned`: the transaction runs inside
+            // `ref_cas::drive_commit_transaction`, which owns its retries.
+            .find("let attempt = stage_and_commit_exact_paths_once_with_fence(")
             .expect(
                 "normal commit should run a git stage/commit transaction after authority resolve",
             );

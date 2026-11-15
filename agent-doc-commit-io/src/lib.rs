@@ -1913,49 +1913,44 @@ fn commit_proven_response_replay_canonicalization_scoped(file: &Path) -> Result<
         file.display()
     );
 
-    let mut attempts = 0u32;
-    let commit_output = loop {
-        match stage_and_commit_exact_paths_once(
-            &git_root,
-            &resolved,
-            Some(&normalized_head),
-            &[],
-            &msg,
-        ) {
-            Ok(output) => break output,
-            Err(CommitTransactionError::RetryableIndexLock { phase, detail }) if attempts < 3 => {
-                attempts += 1;
-                eprintln!(
-                    "[commit] response-replay repair index.lock contention during {} (retry {}/3): {}",
-                    phase, attempts, detail
-                );
-                std::thread::sleep(commit_retry_backoff(attempts));
-            }
-            Err(CommitTransactionError::RetryableHeadMoved { detail }) if attempts < 3 => {
-                attempts += 1;
-                eprintln!(
-                    "[commit] HEAD moved during response-replay repair (retry {}/3): {}",
-                    attempts, detail
-                );
-                std::thread::sleep(commit_retry_backoff(attempts));
-            }
-            Err(CommitTransactionError::RetryableIndexLock { phase, detail }) => {
-                anyhow::bail!(
-                    "git {phase} failed after response-replay repair index.lock retries: {detail}"
-                );
-            }
-            Err(CommitTransactionError::RetryableHeadMoved { detail }) => {
-                anyhow::bail!(
-                    "response-replay repair commit failed after HEAD compare-and-swap retries: {detail}"
-                );
-            }
-            Err(CommitTransactionError::IgnoredPath { path }) => {
-                anyhow::bail!(
-                    "refusing response-replay repair commit for ignored untracked path {path}"
-                );
-            }
-            Err(CommitTransactionError::Fatal(error)) => return Err(error),
+    let commit_output = match agent_doc_git_io::ref_cas::drive_commit_transaction(
+        &git_root,
+        agent_doc_git_io::ref_cas::COMMIT_TRANSACTION_MAX_ATTEMPTS,
+        &mut || {
+            stage_and_commit_exact_paths_once(
+                &git_root,
+                &resolved,
+                Some(&normalized_head),
+                &[],
+                &msg,
+            )
+        },
+        &mut |retry, error| {
+            pace_commit_transaction(
+                "response-replay repair ",
+                "response-replay repair",
+                retry,
+                error,
+            )
+        },
+    ) {
+        Ok(output) => output,
+        Err(CommitTransactionError::RetryableIndexLock { phase, detail }) => {
+            anyhow::bail!(
+                "git {phase} failed after response-replay repair index.lock retries: {detail}"
+            );
         }
+        Err(CommitTransactionError::RetryableHeadMoved { detail }) => {
+            anyhow::bail!(
+                "response-replay repair commit failed after HEAD compare-and-swap retries: {detail}"
+            );
+        }
+        Err(CommitTransactionError::IgnoredPath { path }) => {
+            anyhow::bail!(
+                "refusing response-replay repair commit for ignored untracked path {path}"
+            );
+        }
+        Err(CommitTransactionError::Fatal(error)) => return Err(error),
     };
     anyhow::ensure!(
         commit_output.status.success(),
@@ -2238,51 +2233,44 @@ pub fn restore_and_commit_historical_response_evidence(file: &Path) -> Result<bo
             std::iter::empty(),
         );
 
-        let mut attempts = 0u32;
-        let commit_output = loop {
-            match stage_and_commit_exact_paths_once(
-                &git_root,
-                &resolved,
-                Some(&head),
-                &side_effects,
-                &msg,
-            ) {
-                Ok(output) => break output,
-                Err(CommitTransactionError::RetryableIndexLock { phase, detail })
-                    if attempts < 3 =>
-                {
-                    attempts += 1;
-                    eprintln!(
-                        "[commit] historical response recovery index.lock contention during {} (retry {}/3): {}",
-                        phase, attempts, detail
-                    );
-                    std::thread::sleep(commit_retry_backoff(attempts));
-                }
-                Err(CommitTransactionError::RetryableHeadMoved { detail }) if attempts < 3 => {
-                    attempts += 1;
-                    eprintln!(
-                        "[commit] HEAD moved during historical response recovery (retry {}/3): {}",
-                        attempts, detail
-                    );
-                    std::thread::sleep(commit_retry_backoff(attempts));
-                }
-                Err(CommitTransactionError::RetryableIndexLock { phase, detail }) => {
-                    anyhow::bail!(
-                        "git {phase} failed after historical response recovery retries: {detail}"
-                    );
-                }
-                Err(CommitTransactionError::RetryableHeadMoved { detail }) => {
-                    anyhow::bail!(
-                        "historical response recovery failed after HEAD compare-and-swap retries: {detail}"
-                    );
-                }
-                Err(CommitTransactionError::IgnoredPath { path }) => {
-                    anyhow::bail!(
-                        "refusing historical response recovery for ignored untracked path {path}"
-                    );
-                }
-                Err(CommitTransactionError::Fatal(error)) => return Err(error),
+        let commit_output = match agent_doc_git_io::ref_cas::drive_commit_transaction(
+            &git_root,
+            agent_doc_git_io::ref_cas::COMMIT_TRANSACTION_MAX_ATTEMPTS,
+            &mut || {
+                stage_and_commit_exact_paths_once(
+                    &git_root,
+                    &resolved,
+                    Some(&head),
+                    &side_effects,
+                    &msg,
+                )
+            },
+            &mut |retry, error| {
+                pace_commit_transaction(
+                    "historical response recovery ",
+                    "historical response recovery",
+                    retry,
+                    error,
+                )
+            },
+        ) {
+            Ok(output) => output,
+            Err(CommitTransactionError::RetryableIndexLock { phase, detail }) => {
+                anyhow::bail!(
+                    "git {phase} failed after historical response recovery retries: {detail}"
+                );
             }
+            Err(CommitTransactionError::RetryableHeadMoved { detail }) => {
+                anyhow::bail!(
+                    "historical response recovery failed after HEAD compare-and-swap retries: {detail}"
+                );
+            }
+            Err(CommitTransactionError::IgnoredPath { path }) => {
+                anyhow::bail!(
+                    "refusing historical response recovery for ignored untracked path {path}"
+                );
+            }
+            Err(CommitTransactionError::Fatal(error)) => return Err(error),
         };
         anyhow::ensure!(
             commit_output.status.success(),
@@ -2383,47 +2371,40 @@ pub fn canonicalize_and_commit_duplicate_queue_response_projections(file: &Path)
             response_ids.clone(),
             std::iter::empty(),
         );
-        let mut attempts = 0u32;
-        let commit_output = loop {
-            match stage_and_commit_exact_paths_once(
-                &git_root,
-                &resolved,
-                Some(&target),
-                &[],
-                &message,
-            ) {
-                Ok(output) => break output,
-                Err(CommitTransactionError::RetryableIndexLock { phase, detail })
-                    if attempts < 3 =>
-                {
-                    attempts += 1;
-                    eprintln!(
-                        "[commit] duplicate response migration index.lock contention during {} (retry {}/3): {}",
-                        phase, attempts, detail
-                    );
-                    std::thread::sleep(commit_retry_backoff(attempts));
-                }
-                Err(CommitTransactionError::RetryableHeadMoved { detail }) if attempts < 3 => {
-                    attempts += 1;
-                    eprintln!(
-                        "[commit] HEAD moved during duplicate response migration (retry {}/3): {}",
-                        attempts, detail
-                    );
-                    std::thread::sleep(commit_retry_backoff(attempts));
-                }
-                Err(CommitTransactionError::RetryableIndexLock { phase, detail }) => {
-                    anyhow::bail!(
-                        "git {phase} failed after duplicate response migration retries: {detail}"
-                    );
-                }
-                Err(CommitTransactionError::RetryableHeadMoved { detail }) => anyhow::bail!(
-                    "duplicate response migration failed after HEAD compare-and-swap retries: {detail}"
-                ),
-                Err(CommitTransactionError::IgnoredPath { path }) => anyhow::bail!(
-                    "refusing duplicate response migration for ignored untracked path {path}"
-                ),
-                Err(CommitTransactionError::Fatal(error)) => return Err(error),
+        let commit_output = match agent_doc_git_io::ref_cas::drive_commit_transaction(
+            &git_root,
+            agent_doc_git_io::ref_cas::COMMIT_TRANSACTION_MAX_ATTEMPTS,
+            &mut || {
+                stage_and_commit_exact_paths_once(
+                    &git_root,
+                    &resolved,
+                    Some(&target),
+                    &[],
+                    &message,
+                )
+            },
+            &mut |retry, error| {
+                pace_commit_transaction(
+                    "duplicate response migration ",
+                    "duplicate response migration",
+                    retry,
+                    error,
+                )
+            },
+        ) {
+            Ok(output) => output,
+            Err(CommitTransactionError::RetryableIndexLock { phase, detail }) => {
+                anyhow::bail!(
+                    "git {phase} failed after duplicate response migration retries: {detail}"
+                );
             }
+            Err(CommitTransactionError::RetryableHeadMoved { detail }) => anyhow::bail!(
+                "duplicate response migration failed after HEAD compare-and-swap retries: {detail}"
+            ),
+            Err(CommitTransactionError::IgnoredPath { path }) => anyhow::bail!(
+                "refusing duplicate response migration for ignored untracked path {path}"
+            ),
+            Err(CommitTransactionError::Fatal(error)) => return Err(error),
         };
         anyhow::ensure!(
             commit_output.status.success(),
@@ -2541,45 +2522,38 @@ pub fn detach_and_commit_orphaned_queue_response_projections(file: &Path) -> Res
             detached.clone(),
             std::iter::empty(),
         );
-        let mut attempts = 0u32;
-        let commit_output = loop {
-            match stage_and_commit_exact_paths_once(
-                &git_root,
-                &resolved,
-                Some(&target),
-                &[],
-                &message,
-            ) {
-                Ok(output) => break output,
-                Err(CommitTransactionError::RetryableIndexLock { phase, detail })
-                    if attempts < 3 =>
-                {
-                    attempts += 1;
-                    eprintln!(
-                        "[commit] orphaned response detach index.lock contention during {} (retry {}/3): {}",
-                        phase, attempts, detail
-                    );
-                    std::thread::sleep(commit_retry_backoff(attempts));
-                }
-                Err(CommitTransactionError::RetryableHeadMoved { detail }) if attempts < 3 => {
-                    attempts += 1;
-                    eprintln!(
-                        "[commit] HEAD moved during orphaned response detach (retry {}/3): {}",
-                        attempts, detail
-                    );
-                    std::thread::sleep(commit_retry_backoff(attempts));
-                }
-                Err(CommitTransactionError::RetryableIndexLock { phase, detail }) => anyhow::bail!(
-                    "git {phase} failed after orphaned response detach retries: {detail}"
-                ),
-                Err(CommitTransactionError::RetryableHeadMoved { detail }) => anyhow::bail!(
-                    "orphaned response detach failed after HEAD compare-and-swap retries: {detail}"
-                ),
-                Err(CommitTransactionError::IgnoredPath { path }) => anyhow::bail!(
-                    "refusing orphaned response detach for ignored untracked path {path}"
-                ),
-                Err(CommitTransactionError::Fatal(error)) => return Err(error),
+        let commit_output = match agent_doc_git_io::ref_cas::drive_commit_transaction(
+            &git_root,
+            agent_doc_git_io::ref_cas::COMMIT_TRANSACTION_MAX_ATTEMPTS,
+            &mut || {
+                stage_and_commit_exact_paths_once(
+                    &git_root,
+                    &resolved,
+                    Some(&target),
+                    &[],
+                    &message,
+                )
+            },
+            &mut |retry, error| {
+                pace_commit_transaction(
+                    "orphaned response detach ",
+                    "orphaned response detach",
+                    retry,
+                    error,
+                )
+            },
+        ) {
+            Ok(output) => output,
+            Err(CommitTransactionError::RetryableIndexLock { phase, detail }) => {
+                anyhow::bail!("git {phase} failed after orphaned response detach retries: {detail}")
             }
+            Err(CommitTransactionError::RetryableHeadMoved { detail }) => anyhow::bail!(
+                "orphaned response detach failed after HEAD compare-and-swap retries: {detail}"
+            ),
+            Err(CommitTransactionError::IgnoredPath { path }) => {
+                anyhow::bail!("refusing orphaned response detach for ignored untracked path {path}")
+            }
+            Err(CommitTransactionError::Fatal(error)) => return Err(error),
         };
         anyhow::ensure!(
             commit_output.status.success(),
@@ -4417,27 +4391,34 @@ where
     }
 
     let t_commit = std::time::Instant::now();
-    let mut commit_attempts = 0u32;
     let transaction_fence = ports
         .closeout_owner_fence
         .map(|capability| RuntimeCommitTransactionFence { capability });
     // `#splicectlcommit`: set when the refused ignored path is a declared
     // scratch document, so the refusal is reported as a clean skip.
     let mut ignored_scratch_skip: Option<String> = None;
-    let commit_output = {
-        loop {
-            let t_staging = std::time::Instant::now();
-            match stage_and_commit_exact_paths_once_with_fence(
-                &git_root,
-                &resolved,
-                snapshot_content.as_deref(),
-                &binary_owned_side_effects,
-                &msg,
-                transaction_fence
-                    .as_ref()
-                    .map(|fence| fence as &dyn CommitTransactionFence),
-            ) {
-                Ok(out) => {
+    // `#implementlazilyowned`: Lazily owns the transaction's retries (a moved
+    // HEAD is superseded and re-desired, a held lock is retryable).
+    let commit_output = 'commit: {
+        match agent_doc_git_io::ref_cas::drive_commit_transaction(
+            &git_root,
+            agent_doc_git_io::ref_cas::COMMIT_TRANSACTION_MAX_ATTEMPTS,
+            &mut || {
+                let t_staging = std::time::Instant::now();
+                let attempt = stage_and_commit_exact_paths_once_with_fence(
+                    &git_root,
+                    &resolved,
+                    snapshot_content.as_deref(),
+                    &binary_owned_side_effects,
+                    &msg,
+                    transaction_fence
+                        .as_ref()
+                        .map(|fence| fence as &dyn CommitTransactionFence),
+                );
+                if matches!(
+                    attempt,
+                    Ok(_) | Err(CommitTransactionError::RetryableIndexLock { .. })
+                ) {
                     let elapsed_staging = t_staging.elapsed().as_millis();
                     if elapsed_staging > 0 {
                         eprintln!(
@@ -4445,115 +4426,83 @@ where
                             elapsed_staging
                         );
                     }
-                    break Ok(out);
                 }
-                Err(CommitTransactionError::RetryableIndexLock { phase, detail })
-                    if commit_attempts < 3 =>
-                {
-                    commit_attempts += 1;
-                    let elapsed_staging = t_staging.elapsed().as_millis();
-                    if elapsed_staging > 0 {
-                        eprintln!(
-                            "[perf] commit.staging (hash_object+update-index): {}ms",
-                            elapsed_staging
-                        );
+                attempt
+            },
+            &mut |retry, error| pace_commit_transaction("", "exact-path commit", retry, error),
+        ) {
+            Ok(out) => Ok(out),
+            Err(CommitTransactionError::RetryableIndexLock { phase, detail }) => Err(
+                anyhow::anyhow!("git {} failed after index.lock retries: {}", phase, detail),
+            ),
+            Err(CommitTransactionError::RetryableHeadMoved { detail }) => Err(anyhow::anyhow!(
+                "git exact-path commit failed after HEAD compare-and-swap retries: {}",
+                detail
+            )),
+            Err(CommitTransactionError::IgnoredPath { path }) => {
+                // `#ignoredpathwedge`: refusing to commit an ignored path is
+                // correct and deliberate, but leaving the cycle at
+                // `write_applied` is not. That phase means "the write landed,
+                // a terminal commit is still expected" — and for a path
+                // `.gitignore` matches, no commit will EVER follow. The cycle
+                // then reads as INTERRUPTED forever and no recovery path can
+                // clear it: `repair` retires the retained intent and then hits
+                // this same refusal, and `reset` clears the session without
+                // touching the cycle. Observed on
+                // `.agent-doc/live-repro/xdotool-captured-splice.md`, whose
+                // whole directory is ignored by design, so every live-repro
+                // run wedged its own scratch document.
+                //
+                // Abandon is the honest terminal phase here: the write is real
+                // and stays on disk, and the cycle is closed because its
+                // commit is unreachable, not because it succeeded. The refusal
+                // itself is unchanged — same message, same error, still never
+                // committed.
+                if let Some(fence) = ports.closeout_owner_fence {
+                    maybe_pause_ignored_path_before_terminal_promotion(file)?;
+                    fence.ensure_protects(file)?;
+                    fence.ensure_still_held()?;
+                }
+                if let Err(abandon_error) = agent_doc_cycle_state_io::mark_abandoned(
+                    file,
+                    agent_doc_cycle_state_io::COMMIT_REFUSED_IGNORED_PATH_EVENT,
+                    None,
+                    None,
+                ) {
+                    if ports.closeout_owner_fence.is_some() {
+                        return Err(abandon_error).with_context(|| {
+                            format!("could not close fenced cycle for ignored path {path}")
+                        });
                     }
                     eprintln!(
-                        "[commit] index.lock contention during {} (retry {}/3): {}",
-                        phase, commit_attempts, detail
+                        "[commit] WARNING: could not close the cycle for ignored path {path}: {abandon_error:#}"
                     );
-                    std::thread::sleep(commit_retry_backoff(commit_attempts));
-                    continue;
                 }
-                Err(CommitTransactionError::RetryableIndexLock { phase, detail }) => {
-                    break Err(anyhow::anyhow!(
-                        "git {} failed after index.lock retries: {}",
-                        phase,
-                        detail
+                // `#splicectlcommit`: a document that declares itself a
+                // scratch/proof document (`agent_doc_scratch: true`) is
+                // ignored on purpose, so the same refusal is its expected
+                // terminal, not an error. The declaration is read from the
+                // exact candidate this commit would have staged, so every
+                // committing process — the CLI, session-check recovery, or
+                // the project controller handling a live-editor commit —
+                // reaches the same verdict from the document itself rather
+                // than from its own environment. Nothing is staged either way.
+                let candidate = snapshot_content.as_deref().unwrap_or(file_content.as_str());
+                if agent_doc_frontmatter::declares_scratch_document(candidate) {
+                    ignored_scratch_skip = Some(path.clone());
+                    break 'commit Err(anyhow::anyhow!(
+                        "declared scratch document {path} is ignored by .gitignore; not staged"
                     ));
                 }
-                Err(CommitTransactionError::RetryableHeadMoved { detail })
-                    if commit_attempts < 3 =>
-                {
-                    commit_attempts += 1;
-                    eprintln!(
-                        "[commit] HEAD moved during exact-path commit (retry {}/3): {}",
-                        commit_attempts, detail
-                    );
-                    std::thread::sleep(commit_retry_backoff(commit_attempts));
-                    continue;
-                }
-                Err(CommitTransactionError::RetryableHeadMoved { detail }) => {
-                    break Err(anyhow::anyhow!(
-                        "git exact-path commit failed after HEAD compare-and-swap retries: {}",
-                        detail
-                    ));
-                }
-                Err(CommitTransactionError::IgnoredPath { path }) => {
-                    // `#ignoredpathwedge`: refusing to commit an ignored path is
-                    // correct and deliberate, but leaving the cycle at
-                    // `write_applied` is not. That phase means "the write landed,
-                    // a terminal commit is still expected" — and for a path
-                    // `.gitignore` matches, no commit will EVER follow. The cycle
-                    // then reads as INTERRUPTED forever and no recovery path can
-                    // clear it: `repair` retires the retained intent and then hits
-                    // this same refusal, and `reset` clears the session without
-                    // touching the cycle. Observed on
-                    // `.agent-doc/live-repro/xdotool-captured-splice.md`, whose
-                    // whole directory is ignored by design, so every live-repro
-                    // run wedged its own scratch document.
-                    //
-                    // Abandon is the honest terminal phase here: the write is real
-                    // and stays on disk, and the cycle is closed because its
-                    // commit is unreachable, not because it succeeded. The refusal
-                    // itself is unchanged — same message, same error, still never
-                    // committed.
-                    if let Some(fence) = ports.closeout_owner_fence {
-                        maybe_pause_ignored_path_before_terminal_promotion(file)?;
-                        fence.ensure_protects(file)?;
-                        fence.ensure_still_held()?;
-                    }
-                    if let Err(abandon_error) = agent_doc_cycle_state_io::mark_abandoned(
+                break 'commit Err(
+                    agent_doc_git_io::commit_result_reporting::ignored_untracked_path_error(
+                        ports.commit_result_reporting,
                         file,
-                        agent_doc_cycle_state_io::COMMIT_REFUSED_IGNORED_PATH_EVENT,
-                        None,
-                        None,
-                    ) {
-                        if ports.closeout_owner_fence.is_some() {
-                            return Err(abandon_error).with_context(|| {
-                                format!("could not close fenced cycle for ignored path {path}")
-                            });
-                        }
-                        eprintln!(
-                            "[commit] WARNING: could not close the cycle for ignored path {path}: {abandon_error:#}"
-                        );
-                    }
-                    // `#splicectlcommit`: a document that declares itself a
-                    // scratch/proof document (`agent_doc_scratch: true`) is
-                    // ignored on purpose, so the same refusal is its expected
-                    // terminal, not an error. The declaration is read from the
-                    // exact candidate this commit would have staged, so every
-                    // committing process — the CLI, session-check recovery, or
-                    // the project controller handling a live-editor commit —
-                    // reaches the same verdict from the document itself rather
-                    // than from its own environment. Nothing is staged either way.
-                    let candidate = snapshot_content.as_deref().unwrap_or(file_content.as_str());
-                    if agent_doc_frontmatter::declares_scratch_document(candidate) {
-                        ignored_scratch_skip = Some(path.clone());
-                        break Err(anyhow::anyhow!(
-                            "declared scratch document {path} is ignored by .gitignore; not staged"
-                        ));
-                    }
-                    break Err(
-                        agent_doc_git_io::commit_result_reporting::ignored_untracked_path_error(
-                            ports.commit_result_reporting,
-                            file,
-                            &path,
-                        ),
-                    );
-                }
-                Err(CommitTransactionError::Fatal(err)) => break Err(err),
+                        &path,
+                    ),
+                );
             }
+            Err(CommitTransactionError::Fatal(err)) => Err(err),
         }
     };
     let elapsed_commit = t_commit.elapsed().as_millis();
@@ -4921,6 +4870,27 @@ fn chrono_timestamp() -> String {
         Some(o) => String::from_utf8_lossy(&o.stdout).trim().to_string(),
         None => "unknown".to_string(),
     }
+}
+
+/// Diagnostics and physical pacing before a Lazily-owned commit-transaction
+/// retry (`#implementlazilyowned`). Lazily decides whether the transaction
+/// retries; this only reports it and waits the backoff.
+fn pace_commit_transaction(
+    lock_context: &str,
+    head_context: &str,
+    retry: u32,
+    error: &CommitTransactionError,
+) {
+    match error {
+        CommitTransactionError::RetryableIndexLock { phase, detail } => eprintln!(
+            "[commit] {lock_context}index.lock contention during {phase} (retry {retry}/3): {detail}"
+        ),
+        CommitTransactionError::RetryableHeadMoved { detail } => {
+            eprintln!("[commit] HEAD moved during {head_context} (retry {retry}/3): {detail}")
+        }
+        CommitTransactionError::IgnoredPath { .. } | CommitTransactionError::Fatal(_) => {}
+    }
+    std::thread::sleep(commit_retry_backoff(retry));
 }
 
 #[cfg(test)]

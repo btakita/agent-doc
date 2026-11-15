@@ -811,6 +811,7 @@ fn claim_next_shared_leaf(
         ) {
             refuse_open_prompt_review(&chosen.target, &blocker)?;
         }
+        refuse_operator_owned_row(&chosen.target)?;
         refuse_claim_on_exhausted_harness(
             file,
             ledger,
@@ -887,6 +888,20 @@ fn refuse_open_prompt_review(
         blocker.id,
         blocker.incomplete
     )
+}
+
+/// `#humanfollowupowner`: a row whose own text carries `[operator-verify]`
+/// and no inline operator verdict is the operator's:
+/// no drain runs it and no dispatch list offers it, so a claim on it can only
+/// be a worker started on work no agent can finish. Its `🚧` then outlives the
+/// worker and holds `#transientcloseout` open. Refuse before the ledger write.
+fn refuse_operator_owned_row(target: &str) -> Result<()> {
+    if agent_doc_queue::queue_continuation::head_awaits_operator_inline(target) {
+        bail!(
+            "queue claim refused: {target:?} carries `[operator-verify]` with no operator verdict, so it waits on a person, not a worker. Leave it for the operator (preflight shows it `⏳`); once they answer inline after the tag (`[operator-verify] [#q-…]: <answer>`), the row is agent work again (#humanfollowupowner)."
+        );
+    }
+    Ok(())
 }
 
 /// `#harnessquotaexhausted`: every subagent dispatch passes through a claim,
@@ -1288,6 +1303,7 @@ pub fn claim_with_session_for_worker_harness(
     {
         refuse_open_prompt_review(&target, &blocker)?;
     }
+    refuse_operator_owned_row(&target)?;
     if visible_kept_reported_row(file, &target)?
         && let Some(restored) =
             reattach_kept_completion(file, &target, &heads, ttl_secs, owner_session.clone())?
@@ -4922,6 +4938,30 @@ mod tests {
         );
         assert!(release(&doc, "#preflightdeadline").unwrap().is_some());
         assert!(load_ledger(&doc).unwrap().claims.is_empty());
+    }
+
+    /// `#humanfollowupowner`: a human-owned follow-up row (`[operator-verify]`,
+    /// no verdict) is refused before any ledger write, by text or by its
+    /// generated id; the operator's inline answer makes it claimable again.
+    #[test]
+    fn claim_refuses_an_unanswered_operator_verify_row() {
+        let human = "follow up on an action item from `q-1`: human (reviewer): approve PR #280. [operator-verify] [#q-4837c3f0fb56]";
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &[human, "agent: rebase PR #280"]);
+        for item in [human, "#q-4837c3f0fb56"] {
+            let error = claim(&doc, item, "subagent:approve", 60).unwrap_err();
+            assert!(
+                format!("{error:#}").contains("#humanfollowupowner"),
+                "{item}: {error:#}"
+            );
+        }
+        assert!(load_ledger(&doc).unwrap().claims.is_empty());
+        claim(&doc, "agent: rebase PR #280", "subagent:rebase", 60).unwrap();
+
+        let answered_dir = tempfile::tempdir().unwrap();
+        let answered = format!("{human}: approved, merge it");
+        let answered_doc = write_doc(answered_dir.path(), &[answered.as_str()]);
+        claim(&answered_doc, &answered, "subagent:merge", 60).unwrap();
     }
 
     /// GH #304: a lifecycle marker projected onto a requeued head is runtime

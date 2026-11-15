@@ -1121,7 +1121,18 @@ fn executable_queue_items(content: &str) -> Vec<QueueItem> {
 /// it is never subagent dispatch work (`#regressionawaitingoperat`): before
 /// this, a finished `[operator-verify]` head whose worker released its claim
 /// was re-listed under `queue_subagent_dispatch` every preflight.
+///
+/// `#humanfollowupowner`: a row whose own text carries `[operator-verify]`
+/// (no inline verdict) waits on the operator too, with or without a tracked
+/// item. `queue report-complete` writes a human-owned action item this way
+/// (`#humanfollowupowner`). The id scan alone missed it: a free-text follow-up
+/// row has no backlog item to be gated, so every `subagents` queue offered
+/// "a reviewer approves PR #N" as worker dispatch, the coordinator claimed it,
+/// and the stale `🚧` then held `#transientcloseout` open.
 fn head_awaits_operator(norm: &str, awaiting_operator: &std::collections::HashSet<String>) -> bool {
+    if agent_doc_queue::queue_continuation::head_awaits_operator_inline(norm) {
+        return true;
+    }
     !awaiting_operator.is_empty()
         && agent_doc_queue::queue_continuation::extract_head_id(norm)
             .is_some_and(|id| awaiting_operator.contains(&id.to_ascii_lowercase()))
@@ -4841,6 +4852,39 @@ mod tests {
         let answered = attr.replace("- ⏳ do [#verify]", "- do [#verify]: verified, ship it");
         let (_, eligible, _) = queue_attr_subagent_heads(&answered).unwrap();
         assert_eq!(eligible.len(), 2, "{eligible:?}");
+    }
+
+    /// `#humanfollowupowner`: a free-text follow-up row that carries its own
+    /// `[operator-verify]` tag (a human-owned hand-back action item) has no
+    /// tracked item, and is still never worker dispatch until the operator
+    /// answers it inline. Observed 2026-11-15 on tasks/sdk/sdk-dev.md: "human
+    /// (tmstorm): the CHANGES_REQUESTED review … still stands" was claimed as
+    /// a `🚧` worker and held `#transientcloseout` open.
+    #[test]
+    fn inline_operator_verify_rows_are_never_dispatch_heads() {
+        let human = "follow up on an action item from `q-37985c4b3fac`: human (tmstorm): approve PR #280. [operator-verify] [#q-4837c3f0fb56]";
+        let agent = "follow up on an action item from `q-37985c4b3fac`: agent: rebase PR #280. [#q-78f6867b4ecc]";
+        let attr = doc(&format!("- {human}\n- {agent}\n"), EX)
+            .replace("<!-- agent:queue -->", "<!-- agent:queue subagents -->");
+        let (_, eligible, live) = queue_attr_subagent_heads(&attr).unwrap();
+        assert_eq!(eligible.len(), 1, "{eligible:?}");
+        assert!(
+            eligible[0].contains("agent: rebase PR #280"),
+            "{eligible:?}"
+        );
+        assert_eq!(live.len(), 2, "{live:?}");
+        let tagged = doc(&format!("- #subagents {human}\n- #subagents {agent}\n"), EX);
+        let heads = subagent_dispatch_heads(&tagged, None);
+        assert_eq!(heads.len(), 1, "{heads:?}");
+        assert!(heads[0].contains("agent: rebase PR #280"), "{heads:?}");
+        // The operator's inline verdict lifts this gate. (Whether the answered
+        // row then dispatches is `#queueoperatoranswer` routing, not this gate.)
+        let empty = std::collections::HashSet::new();
+        assert!(head_awaits_operator(human, &empty));
+        assert!(!head_awaits_operator(
+            &format!("{human}: approved, merge it"),
+            &empty
+        ));
     }
 
     /// `#queueblocked`: a head whose tracked item waits on an open blocker is

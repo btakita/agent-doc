@@ -75,6 +75,12 @@ pub fn queue_prompt_projection_rows(content: &str, entries: &[QueueEntry]) -> Ve
                         &text,
                         preset_supplies_directive,
                     )
+                    // `#personrowselect`: a row whose own text waits on a
+                    // person (`[operator-verify]` with no inline answer) is
+                    // never this turn's prompt. The id deferral below only
+                    // reads tracked items, and a free-text follow-up row has
+                    // none.
+                    && !crate::queue_continuation::head_awaits_operator_inline(&text)
                     && !deferral_id(id.as_deref(), &text).is_some_and(|id| {
                         // `#opverifyanswered`: an answered operator-verify head is
                         // live work again, so it stays projectable.
@@ -382,6 +388,48 @@ mod tests {
         assert!(!rows[0].projectable_default);
         assert!(!rows[1].projectable_default);
         assert_eq!(rows[1].id.as_deref(), Some("alpha"));
+    }
+
+    /// `#personrowselect` (haiven-dev `tasks/sdk/sdk-dev.md`, 2026-11-15):
+    /// preflight selected the free-text row `follow up on an action item from
+    /// `q-37985c4b3fac`: human (tmstorm): … [operator-verify] [#q-4837c3f0fb56]`
+    /// as the turn's queue prompt and painted it `🚧`. Only tmstorm could
+    /// advance it, so the Stop hook refused every turn end over it until the
+    /// agent struck the person's reminder. A row whose own text waits on a
+    /// person is never projectable, whatever glyph it shows; the operator's
+    /// inline answer makes it agent work again.
+    #[test]
+    fn personrowselect_a_row_that_waits_on_a_person_is_never_selected() {
+        const PERSON: &str = "follow up on an action item from `q-37985c4b3fac`: human (tmstorm): the CHANGES_REQUESTED review still stands. Only the reviewer can clear it. [operator-verify] [#q-4837c3f0fb56]";
+        let select = |body: &str| {
+            let content = format!("<!-- agent:queue go -->\n{body}<!-- /agent:queue -->\n");
+            let entries = parse(body).unwrap();
+            active_queue_prompt_projection(
+                &content,
+                &entries,
+                &HashMap::new(),
+                false,
+                &std::collections::HashSet::new(),
+            )
+            .prompts
+        };
+        for glyph in ["", "📥 ", "⏳ ", "### 📥 "] {
+            assert!(
+                select(&format!("- {glyph}{PERSON}\n")).is_empty(),
+                "{glyph:?}: a person-gated row is not this turn's prompt"
+            );
+            assert_eq!(
+                select(&format!("- {glyph}{PERSON}\n- 📥 agent: rebase PR 7\n")),
+                vec!["agent: rebase PR 7"],
+                "{glyph:?}: selection advances past the person-gated row"
+            );
+        }
+        let answered = format!("{PERSON}: tmstorm approved, merge it");
+        assert_eq!(
+            select(&format!("- 📥 {answered}\n")),
+            vec![answered.clone()],
+            "an inline operator answer hands the row back to an agent"
+        );
     }
 
     #[test]

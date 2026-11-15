@@ -10651,6 +10651,91 @@ Reported.\n\
         );
     }
 
+    /// `#personrowselect` (haiven-dev `tasks/sdk/sdk-dev.md`, 2026-11-15):
+    /// after the turn's response was committed, the Stop hook refused over
+    /// a human follow-up row that preflight had selected as the turn's prompt
+    /// and painted `🚧`, with "no heartbeat-fresh worker claim backs this
+    /// row". A turn whose only live rows wait on a person ends with no
+    /// refusal and logs `awaiting_operator=N state=waiting_on_operator`; a
+    /// pending agent row still refuses, naming only itself.
+    #[test]
+    fn claude_stop_ends_a_turn_whose_only_rows_wait_on_a_person() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        let queue_doc = |rows: &str| {
+            format!(
+                "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+## Exchange\n\n\
+<!-- agent:exchange patch=append -->\n\
+Reported.\n\
+<!-- /agent:exchange -->\n\n\
+## Queue\n\n\
+<!-- agent:queue -->\n\
+- ~~#adversarial-pr [#q-fc36a4bdbcd3]~~\n\
+{rows}\
+<!-- /agent:queue -->\n"
+            )
+        };
+        let person_rows = concat!(
+            "- ### 🚧 follow up on an action item from `q-37985c4b3fac`: human (tmstorm): the CHANGES_REQUESTED review from 6879d6ed still stands. Only the reviewer can clear it. [operator-verify] [#q-4837c3f0fb56]\n",
+            "- 📥 follow up on an action item from `q-f43eb22a9e5c`: operator: decide how #244 lands. [operator-verify] [#q-3a047c5ecd62]\n",
+        );
+        let agent_row = "- 📥 follow up on an action item from `q-976165e727f8`: agent: restack #278 onto #277's head. [#q-5de55e2dbf16]\n";
+        let input = ClaudeStopInput {
+            session_id: "codex-session".to_string(),
+            cwd: dir.path().display().to_string(),
+            stop_hook_active: false,
+            transcript_path: None,
+            reason: None,
+            subagent_type: None,
+        };
+        let no_supervisor =
+            |_: &Path| agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor;
+        let stop_over = |content: &str| {
+            fs::write(&doc, content).unwrap();
+            complete_run(&doc);
+            invalidate_stop_document_cache();
+            apply_claude_stop_with_drain_readiness(&input, no_supervisor).unwrap()
+        };
+
+        let person_only = queue_doc(person_rows);
+        fs::write(&doc, &person_only).unwrap();
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        let quiet = stop_over(&person_only);
+        assert!(
+            quiet.is_none(),
+            "rows only a person can advance must not hold the turn: {:?}",
+            quiet.map(|continuation| continuation.reason)
+        );
+        // Each document's ops lines land in its session's log file.
+        let ops = std::fs::read_dir(dir.path().join(".agent-doc/logs"))
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "log"))
+                    .map(|entry| std::fs::read_to_string(entry.path()).unwrap_or_default())
+                    .collect::<String>()
+            })
+            .unwrap_or_default();
+        assert!(ops.contains("awaiting_operator=2"), "{ops}");
+        assert!(ops.contains("state=waiting_on_operator"), "{ops}");
+
+        let mixed = queue_doc(&format!("{person_rows}{agent_row}"));
+        let refused = stop_over(&mixed).expect("a pending agent row still refuses");
+        assert!(
+            refused.reason.contains("agent: restack #278"),
+            "{}",
+            refused.reason
+        );
+        assert!(!refused.reason.contains("tmstorm"), "{}", refused.reason);
+        assert!(
+            !refused.reason.contains("decide how #244"),
+            "{}",
+            refused.reason
+        );
+    }
+
     #[test]
     fn claude_stop_rechecks_status_sync_once_at_the_final_boundary() {
         let dir = setup_project();

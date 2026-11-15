@@ -53,6 +53,12 @@
 //!   verdict is never drainable, so it is the `⏳` row preflight projects;
 //!   a pending glyph painted before that projection does not hold the turn.
 //!   `queue report-complete` writes human-owned action items this way.
+//!   `#personrowselect`: neither does a `🟡`/`🚧` an in-session selection
+//!   painted on such a row when no fresh claim backs it, no report is owed on
+//!   it, and it carries no worker attempt's `[#owner#generation]`
+//!   projection. `queue claim` refuses the row, so the glyph is not a claim
+//!   and no agent transition moves it. Preflight no longer selects the row
+//!   ([`crate::queue_projection::queue_prompt_projection_rows`]).
 //! - **Awaiting the operator by its item** (`#gatedheadpending`). A `📥`
 //!   `do [#id]` row whose tracked item waits on the operator (an open
 //!   `[operator-verify]` item, a gated review row, or an item that is itself
@@ -636,6 +642,12 @@ pub fn assess_transient_closeout(
                         assessment
                             .quiescent
                             .push(quiescent(QuiescentReason::WaitingOnClaim));
+                    } else if in_session_marker_on_person_row(&prompt.text) {
+                        // `#personrowselect`: no claim can stand behind this
+                        // glyph, so no agent transition moves it.
+                        assessment
+                            .quiescent
+                            .push(quiescent(QuiescentReason::AwaitingOperator));
                     } else {
                         assessment
                             .debts
@@ -734,6 +746,18 @@ pub fn assess_transient_closeout(
         }
     }
     Ok(assessment)
+}
+
+/// `#personrowselect`: a `🟡`/`🚧` that an in-session selection painted on a
+/// row whose own text waits on a person (`[operator-verify]`, no inline
+/// answer). `queue claim` refuses such a row (`#humanfollowupowner`), so the
+/// glyph is not a claim and no worker reports on it; the caller has already
+/// ruled out a fresh claim and a report-owed attempt. A row that carries a
+/// worker attempt's `[#owner#generation]` projection is a worker, not a
+/// selection marker, and keeps owing its worker transition.
+fn in_session_marker_on_person_row(text: &str) -> bool {
+    queue_projection::owner_projection(text).is_none()
+        && crate::queue_continuation::head_awaits_operator_inline(text)
 }
 
 /// `#integrationinflight`: the status of `record` for the reported row
@@ -1330,6 +1354,101 @@ mod tests {
         let assessment = assess_transient_closeout(&content, &CloseoutEvidence::default()).unwrap();
         assert!(assessment.debts.is_empty(), "{assessment:?}");
         assert!(assessment.quiescent.is_empty(), "{assessment:?}");
+    }
+
+    /// `#personrowselect` (haiven-dev `tasks/sdk/sdk-dev.md`, 2026-11-15):
+    /// a turn whose only live rows wait on a person ends. The `[operator-verify]`
+    /// human follow-ups pass whether they show `📥` or the `🚧`/`🟡` an
+    /// in-session selection painted on them: `queue claim` refuses such a row
+    /// (`#humanfollowupowner`), so no claim or worker stands behind that glyph
+    /// and no agent transition can move it. An agent row beside them, and a
+    /// person row with a worker attempt or a report owed, still refuse.
+    #[test]
+    fn personrowselect_rows_waiting_on_a_person_end_the_turn_and_agent_rows_still_refuse() {
+        const TMSTORM: &str = "follow up on an action item from `q-37985c4b3fac`: human (tmstorm): the CHANGES_REQUESTED review still stands. [operator-verify] [#q-4837c3f0fb56]";
+        const OPERATOR: &str = "follow up on an action item from `q-f43eb22a9e5c`: operator: decide how #244 lands. [operator-verify]";
+        for (pending, painted) in [("📥", "🚧"), ("📥", "🟡"), ("", "### 🚧")] {
+            let content = doc(&format!(
+                "- ~~#adversarial-pr [#q-fc36a4bdbcd3]~~\n- {pending} {OPERATOR}\n- {painted} {TMSTORM}\n"
+            ));
+            let assessment =
+                assess_transient_closeout(&content, &CloseoutEvidence::default()).unwrap();
+            assert!(
+                assessment.debts.is_empty(),
+                "{pending:?}/{painted:?}: {assessment:?}"
+            );
+            assert!(normal_closeout_failure(&content).unwrap().is_none());
+            let awaiting = assessment
+                .quiescent
+                .iter()
+                .filter(|row| row.reason == QuiescentReason::AwaitingOperator)
+                .count();
+            assert_eq!(
+                awaiting,
+                if pending.is_empty() { 1 } else { 2 },
+                "{assessment:?}"
+            );
+            assert_eq!(assessment.quiescent_state(), Some("waiting_on_operator"));
+        }
+
+        // A pending agent row beside them still holds the turn, and the
+        // refusal names only that row.
+        let mixed = doc(&format!(
+            "- 📥 {OPERATOR}\n- 🚧 {TMSTORM}\n- 📥 follow up on an action item from `q-1`: agent: rebase PR 7 onto main.\n"
+        ));
+        let failure = normal_closeout_failure(&mixed)
+            .unwrap()
+            .expect("a pending agent row refuses");
+        assert!(failure.contains("agent: rebase PR 7"), "{failure}");
+        assert!(
+            failure.contains("leave pending before the turn ends"),
+            "{failure}"
+        );
+        assert!(!failure.contains("tmstorm"), "{failure}");
+        assert!(!failure.contains("decide how #244"), "{failure}");
+
+        // A stale `🚧` on an agent row is still a running worker the turn owes.
+        let agent_running =
+            doc("- 🚧 follow up on an action item from `q-1`: agent: rebase PR 7.\n");
+        assert!(
+            normal_closeout_failure(&agent_running)
+                .unwrap()
+                .expect("an unbacked agent 🚧 refuses")
+                .contains("no heartbeat-fresh worker claim backs this row")
+        );
+
+        // A worker attempt on the person row (`[#owner#generation]`) is not an
+        // in-session selection marker: its lost or claimed worker still owes
+        // its transition.
+        for row in [
+            format!("- 🚧 [#subagent:approve#1] {TMSTORM}\n"),
+            format!("- 🟡 [#subagent:approve#1] {TMSTORM}\n"),
+        ] {
+            let assessment =
+                assess_transient_closeout(&doc(&row), &CloseoutEvidence::default()).unwrap();
+            assert_eq!(assessment.debts.len(), 1, "{row}: {assessment:?}");
+        }
+
+        // A report owed on the person row's attempt still names the report.
+        let content = doc(&format!("- 🚧 {TMSTORM}\n"));
+        let evidence = CloseoutEvidence {
+            report_owed: HashMap::from([(
+                identity_of(&content, "follow up on an action item"),
+                ReportOwedAttempt {
+                    item: "#q-4837c3f0fb56".to_string(),
+                    generation: 1,
+                },
+            )]),
+            ..CloseoutEvidence::default()
+        };
+        let failure = normal_closeout_failure_with(&content, &evidence)
+            .unwrap()
+            .expect("a report-owed attempt refuses");
+        assert!(failure.contains("queue report-complete"), "{failure}");
+
+        // The operator's inline answer hands the row back to an agent.
+        let answered = doc(&format!("- 🚧 {TMSTORM}: approved, merge it\n"));
+        assert!(normal_closeout_failure(&answered).unwrap().is_some());
     }
 
     /// agent-doc-bugs.md, 2026-11-13: the Stop hook refused six stops over

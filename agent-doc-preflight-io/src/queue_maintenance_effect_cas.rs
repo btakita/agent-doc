@@ -148,6 +148,22 @@ pub struct QueueMaintenancePlanProgress {
     pub admitted: String,
     pub applied_through: u64,
     pub receipts: Vec<QueueMaintenanceStepReceipt>,
+    /// The document cut this owner is writing and the effect phase that
+    /// follows it (plan step 9a), staged before the write and cleared once
+    /// the phase is applied. A worker resuming after a crash between the
+    /// write and the phase finishes the phase when the authority still equals
+    /// the staged cut.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub staged_cut: Option<StagedDocumentCut>,
+}
+
+/// A document cut staged with the effects that follow it (plan step 9a):
+/// `cut` is the content hash the owner is about to write, `effects` the
+/// serialized effect phase it applies once the cut is receipted.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct StagedDocumentCut {
+    pub cut: String,
+    pub effects: String,
 }
 
 impl QueueMaintenancePlanProgress {
@@ -358,6 +374,24 @@ impl QueueMaintenanceEffectPlan {
             effect()?;
             Ok(intent.to_string())
         })
+    }
+
+    /// Stage the document cut this owner is about to write together with the
+    /// effect phase that follows it, in the plan's durable image (plan step
+    /// 9a). Staging is not a plan step: it changes no backend and no
+    /// authority, so it takes no Lazily epoch.
+    pub fn stage_cut(&self, cut: StagedDocumentCut) {
+        self.state.lock().unwrap().progress.staged_cut = Some(cut);
+    }
+
+    /// The staged cut, if one is still pending.
+    pub fn staged_cut(&self) -> Option<StagedDocumentCut> {
+        self.state.lock().unwrap().progress.staged_cut.clone()
+    }
+
+    /// Clear the staged cut once its effect phase is applied or abandoned.
+    pub fn finish_cut(&self) {
+        self.state.lock().unwrap().progress.staged_cut = None;
     }
 
     /// The receipt of the most recently applied step, if any.

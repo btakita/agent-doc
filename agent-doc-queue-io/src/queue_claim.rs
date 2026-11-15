@@ -2608,10 +2608,11 @@ pub struct PlannedClaimLedgerOverlay {
 
 impl PlannedClaimLedgerOverlay {
     /// Install an empty overlay for `file`. A file outside any agent-doc
-    /// project has no ledger, so the overlay is inert.
-    pub fn install(file: &Path) -> Result<Self> {
-        let Some((_, document_hash, _)) = state_identity(file)? else {
-            return Ok(Self { installed: false });
+    /// project, or one whose path cannot be resolved, has no readable ledger
+    /// (every load already fails or is empty), so its overlay is inert.
+    pub fn install(file: &Path) -> Self {
+        let Ok(Some((_, document_hash, _))) = state_identity(file) else {
+            return Self { installed: false };
         };
         PLANNED_CLAIM_OVERLAYS.with(|overlays| {
             overlays.borrow_mut().push(StagedClaimOverlay {
@@ -2619,7 +2620,7 @@ impl PlannedClaimLedgerOverlay {
                 writes: Vec::new(),
             })
         });
-        Ok(Self { installed: true })
+        Self { installed: true }
     }
 
     /// Stage `write`: later loads of this document's ledger on this thread
@@ -4994,7 +4995,7 @@ mod tests {
         );
         let promotions = vec![("promote me".to_string(), "promoted".to_string())];
 
-        let overlay = PlannedClaimLedgerOverlay::install(&doc).unwrap();
+        let overlay = PlannedClaimLedgerOverlay::install(&doc);
         let transfer = plan_transfer_promoted_claims(&doc, &promotions)
             .unwrap()
             .expect("a live claim on a promoted head plans a transfer");

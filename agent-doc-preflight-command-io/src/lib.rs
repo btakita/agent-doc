@@ -744,6 +744,44 @@ impl agent_doc_preflight_io::PendingMaintenanceEffectFence for BackgroundRequest
     fn expected_authority_hash(&self) -> Option<String> {
         self.plan.expected_authority_hash()
     }
+
+    fn stage_document_cut(
+        &self,
+        _file: &Path,
+        cut: agent_doc_preflight_io::queue_maintenance_effect_cas::StagedDocumentCut,
+    ) -> Result<()> {
+        self.owner.verify(self.request)?;
+        self.plan.stage_cut(cut);
+        self.store_progress()
+    }
+
+    fn staged_document_cut(
+        &self,
+    ) -> Option<agent_doc_preflight_io::queue_maintenance_effect_cas::StagedDocumentCut> {
+        self.plan.staged_cut()
+    }
+
+    fn finish_document_cut(&self, _file: &Path) -> Result<()> {
+        if self.plan.staged_cut().is_none() {
+            return Ok(());
+        }
+        self.owner.verify(self.request)?;
+        self.plan.finish_cut();
+        self.store_progress()
+    }
+
+    fn observed_authority_hash(&self, file: &Path) -> Result<Option<String>> {
+        observe_document_authority(file, "background_queue_maintenance_staged_cut").map(Some)
+    }
+
+    fn record_applied_cut_hash(&self, file: &Path, cut_hash: &str) -> Result<()> {
+        self.owner.verify(self.request)?;
+        let observe =
+            || observe_document_authority(file, "background_queue_maintenance_staged_cut");
+        self.plan
+            .record_document_cut(cut_hash.to_string(), &observe)?;
+        self.store_progress()
+    }
 }
 
 /// Hidden child-process entrypoint for comprehensive queue reconciliation.
@@ -1046,6 +1084,13 @@ fn run_queue_maintenance_worker(
         }
         let effect_fence = BackgroundRequestEffectFence::new(file, &queue_mutation, &request);
         let result = (|| -> Result<()> {
+            // `#implementlazilyowned` plan step 9a: a predecessor that died
+            // between its document cut and the effect phase behind it left the
+            // phase staged; finish it before this worker's first step.
+            agent_doc_preflight_io::queue_maintenance_effect_phase::resume_staged_queue_maintenance_cut(
+                file,
+                &effect_fence,
+            )?;
             effect_fence.fence_effect(file)?;
             if let Some(delay) = std::env::var(TEST_BACKGROUND_PENDING_MAINTENANCE_DELAY_MS_ENV)
                 .ok()
@@ -1762,6 +1807,140 @@ mod tests {
             None,
             "consuming the request drops its plan progress"
         );
+    }
+
+    /// Publish a request and leave it claimed by a dead worker whose plan
+    /// staged `cut` with one ops evidence line and one mirror-provenance write
+    /// (`#implementlazilyowned` plan step 9a). Returns the staged line.
+    fn crash_after_staging_a_cut(doc: &Path, admitted: &str, cut: &str) -> String {
+        use agent_doc_preflight_io::queue_maintenance_effect_cas::{
+            QueueMaintenanceEffectPlan, StagedDocumentCut,
+        };
+        use agent_doc_preflight_io::queue_maintenance_effect_phase::DeferredMaintenanceEffect;
+        let doc_text = doc.to_string_lossy().to_string();
+        let admitted_hash = agent_doc_hash::content_hash(admitted);
+        let request = agent_doc_queue_io::queue_edit_owner::publish_queue_maintenance_request(
+            doc,
+            &admitted_hash,
+            false,
+        )
+        .unwrap();
+        let dead_token = format!(
+            "{}dead-worker",
+            agent_doc_queue_io::queue_edit_owner::BACKGROUND_QUEUE_EDIT_OWNER_PREFIX
+        );
+        assert!(
+            agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
+                &doc_text,
+                &dead_token,
+                4_000_000,
+            )
+            .unwrap()
+        );
+        let crashed =
+            agent_doc_queue_io::queue_maintenance_claim::QueueMaintenanceClaim::reconnect(doc)
+                .unwrap();
+        crashed.claim_request(&request).unwrap();
+        let staged_line = format!("staged_cut_effect_test file={}", doc.display());
+        let effects = vec![
+            DeferredMaintenanceEffect::Ops {
+                line: staged_line.clone(),
+            },
+            DeferredMaintenanceEffect::MirroredQueueHeads {
+                identities: vec!["stagedhead".to_string()],
+            },
+        ];
+        let plan = QueueMaintenanceEffectPlan::admit(doc, &admitted_hash);
+        plan.stage_cut(StagedDocumentCut {
+            cut: agent_doc_hash::content_hash(cut),
+            effects: serde_json::to_string(&effects).unwrap(),
+        });
+        crashed
+            .store_plan_progress(&request, &serde_json::to_string(&plan.progress()).unwrap())
+            .unwrap();
+        drop(crashed);
+        staged_line
+    }
+
+    fn staged_mirror_provenance(doc: &Path) -> std::collections::HashSet<String> {
+        let root = agent_doc_project_root_io::project_root_containing(doc).unwrap();
+        let conn = agent_doc_sqlite::state_store::open_state_db(&root).unwrap();
+        agent_doc_sqlite::state_store::load_mirrored_queue_head_identities_from_db(
+            &conn,
+            &doc.display().to_string(),
+        )
+        .unwrap()
+    }
+
+    /// `#implementlazilyowned` plan step 9a: a worker that died after writing
+    /// its document cut but before receipting it is resumed, not refused: the
+    /// authority still equals the staged cut, so the successor receipts the
+    /// cut, applies the staged effect phase once, and continues from the cut.
+    #[test]
+    fn successor_finishes_the_effect_phase_of_a_landed_unreceipted_cut() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let admitted = "body\n";
+        let cut = "body\nmaintained\n";
+        std::fs::write(&doc, admitted).unwrap();
+        let staged_line = crash_after_staging_a_cut(&doc, admitted, cut);
+        std::fs::write(&doc, cut).unwrap();
+
+        let outcome = recover_orphaned_queue_maintenance(&doc, "unit_test").unwrap();
+
+        assert_eq!(outcome, OrphanedQueueMaintenanceRecovery::Recovered);
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("queue_maintenance_plan_cut_resumed") && ops.contains("effects=2"),
+            "the successor must finish the staged phase: {ops}"
+        );
+        assert_eq!(
+            ops.matches(&staged_line).count(),
+            1,
+            "the staged evidence must land exactly once: {ops}"
+        );
+        assert!(
+            ops.contains("queue_maintenance_background_completed")
+                && !ops.contains("queue_maintenance_background_superseded_authority"),
+            "the landed cut, not the stale admission, is the resumed authority: {ops}"
+        );
+        assert!(
+            staged_mirror_provenance(&doc).contains("stagedhead"),
+            "the staged ledger effect must land"
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), cut);
+        assert!(!agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_pending(&doc));
+    }
+
+    /// `#implementlazilyowned` plan step 9a: a staged cut whose write never
+    /// landed is dropped, its effects never run, and the request runs from its
+    /// admission.
+    #[test]
+    fn successor_drops_the_effect_phase_of_a_cut_that_never_landed() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let admitted = "body\n";
+        std::fs::write(&doc, admitted).unwrap();
+        let staged_line = crash_after_staging_a_cut(&doc, admitted, "body\nmaintained\n");
+
+        let outcome = recover_orphaned_queue_maintenance(&doc, "unit_test").unwrap();
+
+        assert_eq!(outcome, OrphanedQueueMaintenanceRecovery::Recovered);
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("queue_maintenance_plan_cut_dropped") && ops.contains("landed=no"),
+            "{ops}"
+        );
+        assert!(
+            !ops.contains(&staged_line),
+            "a cut that never landed applied its staged effects: {ops}"
+        );
+        assert!(
+            ops.contains("queue_maintenance_background_completed"),
+            "{ops}"
+        );
+        assert!(!staged_mirror_provenance(&doc).contains("stagedhead"));
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), admitted);
     }
 
     /// `#deadmaintworker`: recovery never displaces a live owner; a live

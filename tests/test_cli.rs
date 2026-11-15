@@ -25571,8 +25571,9 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
         "queue tombstone IO should load/save sidecars and call focused queue tombstone policy directly"
     );
     assert!(
-        preflight_maintenance.contains("agent_doc_queue_io::queue_tombstone::reconcile_for_file("),
-        "preflight maintenance should call focused queue tombstone IO directly"
+        preflight_maintenance
+            .contains("agent_doc_queue_io::queue_tombstone::plan_reconcile_for_file("),
+        "preflight maintenance should plan tombstones through focused queue tombstone IO directly"
     );
 
     let component_attrs =

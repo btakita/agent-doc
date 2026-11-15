@@ -698,8 +698,9 @@ Progress (`#implementlazilyowned`):
   `queue_maintenance_claim::tests::plan_progress_resumes_only_the_exact_claimed_request`,
   `preflight_command_io::tests::successor_resumes_a_dead_workers_plan_from_its_receipted_cut`.
   No ledger rows change (no new CAS/fence/lease/retry identifiers). A crash
-  between the editor CAS write and its cut receipt still resumes from the
-  previous receipt and is rejected as superseded, as before.
+  between the editor CAS write and its cut receipt still resumed from the
+  previous receipt and was rejected as superseded until 9a-2 staged the cut
+  (see below).
 - Plan step 10 (phase 6 deletion and final audit): the migration never
   shipped a dogfood/compatibility switch, so there was no switch to delete.
   The duplicate state found and deleted is the captured-finalize
@@ -761,8 +762,71 @@ Progress (`#implementlazilyowned`):
   `queue_tombstone::tests::planned_reconcile_matches_the_immediate_reconcile_and_writes_nothing`,
   `agent_doc_preflight_io::tests::planned_edited_queue_head_adoption_matches_the_checkpointed_baseline`.
   No ledger rows change (no new CAS/fence/lease/retry identifiers).
-- Plan step 9a-2 (reorder so the document cut is the first plan step) is not
-  landed yet: see "Resume here" step 9.
+- Plan step 9a-2 (the document cut is the first effect of a pass): in
+  `run_queue_maintenance_with_options_under_apply_guard` every durable effect
+  between the authority observation and the document cut is staged in the
+  pass's effect phase (`agent_doc_preflight_io::queue_maintenance_effect_phase`:
+  `QueueMaintenanceEffectPhase` holding `DeferredMaintenanceEffect`s, plain
+  serializable data) instead of applied: the ops evidence lines, the claim
+  transfers / closed-head releases / completion-evidence recovery
+  (`PlannedClaimWrite`), the tombstone reconcile (`PlannedTombstoneWrite`), the
+  `#fr79` mirror provenance, the skipped-head and projected-in-progress sets,
+  and the edited-head baseline adoption. The rest of the pass reads the
+  staged values through the phase's overlays: the claim-ledger overlay (every
+  claim reader the pass calls), the planned tombstone set (the lifecycle
+  convergence), the pending mirror provenance (the `#fr79` drift strike), and
+  the planned baseline (the active-queue future-state snapshot decision). The
+  document cut is then the pass's first effect, and
+  `persist_queue_maintenance_doc_with_admitted_authority` applies the phase
+  right after the cut is written and receipted, in the original order, before
+  any later evidence (`write_authority`); each effect still crosses its
+  family's step of the owner's Lazily plan (all replayable, so a resumed plan
+  skips the receipted ones). The halt, time-gate, and main exits each apply it
+  after their cut; the time-gate and main exits without a cut apply it at the
+  exit, as before. A pass that fails or is superseded before or at its cut
+  applies none of it, so no durable state describes a successor that never
+  landed. Worktree retirement (`reconcile_maintained_under_apply_guard`, which
+  removes checkouts) moved behind the cut: the cut carries the recorded
+  inventory (`worktree_inventory::reconcile`, read-only), and a removal's
+  projection is one more cut on top (`source=queue_maintenance_worktrees`,
+  expecting the first cut). Before the cut the owner only acquires the
+  authority (`AuthorityAcquisition`) and publishes its controller observation
+  (`Controller`, `observe_authoritative_queue_state_under_apply_guard`). That
+  observation stays first by design: it is the controller's latest-wins view
+  of the authority being admitted, recording the terminal facts of struck rows
+  that the drain clear may remove. Publishing it after the cut would hand the
+  controller a stale authority after the successor. The evidence lines of the
+  exits that never cut (queue-edit-lease deferral, unavailable authority, the
+  skip lines, the test barrier marker) also stay where they are. Crash resume
+  (with 9b): before the cut write the detached owner stages the cut hash and
+  the serialized phase in its plan image (`QueueMaintenancePlanProgress::staged_cut`,
+  `PendingMaintenanceEffectFence::stage_document_cut`), cleared once the
+  phase is applied. A worker resuming that request calls
+  `resume_staged_queue_maintenance_cut` before its first step. If the
+  authority still equals the staged cut, the cut landed: the worker receipts
+  it when the predecessor died before the receipt, applies the phase once,
+  and continues from the cut. So a crash between the editor write and the
+  cut receipt now resumes instead of being refused. If the authority still
+  equals what the plan expected before the cut, the cut never landed: the
+  phase is dropped and the request runs from its admission. Anything else is
+  unprovable: the phase is dropped (`queue_maintenance_plan_cut_dropped
+  landed=unknown`) and the request supersedes as before. Tests:
+  `agent_doc_preflight_io::tests::queue_maintenance_document_cut_is_the_first_effect_of_the_pass`,
+  `refused_queue_maintenance_cut_applies_no_staged_effect`,
+  `queue_maintenance_effect_phase::tests::deferred_effects_round_trip_through_the_plan_image`,
+  `first_queue_region_adopts_like_the_whole_document`,
+  `preflight_command_io::tests::successor_finishes_the_effect_phase_of_a_landed_unreceipted_cut`,
+  `successor_drops_the_effect_phase_of_a_cut_that_never_landed`. The phase-4
+  regression gates still hold unchanged: `authority_drift_fences_every_internal_queue_maintenance_effect_family`,
+  `authority_drift_fences_edited_queue_head_snapshot_adoption`,
+  `authority_drift_before_queue_authority_acquisition_skips_recovery_effects`.
+  Known limit: an operator edit that lands between a cut and its phase still
+  supersedes the phase, as it superseded every post-cut effect before. The
+  next pass recomputes from the new authority, except for the claim transfer
+  of a promotion that already landed, which only the pass that promoted can
+  derive. That is the same window the old order had in reverse: a transfer
+  applied for a promotion whose cut was then refused. No ledger rows change
+  (no new CAS/fence/lease/retry identifiers).
 - Not yet done (as of 2026-11-15, agent-doc `59984d315a`; triage is complete,
   0 `triage` rows): migrate the 291 reviewed `pending-migration` rows family
   by family, then delete the remaining bespoke orchestration and make the
@@ -770,11 +834,12 @@ Progress (`#implementlazilyowned`):
 
 ## Resume here
 
-Status 2026-11-15 (after steps 9b, 10 and 9a-1): ledger = 133 `migrated`, 173 `lazily-adapter`,
+Status 2026-11-15 (after steps 9a and 10; migration complete): ledger = 133 `migrated`, 173 `lazily-adapter`,
 33 `deleted`, 419 `excluded`, 0 `pending-migration`, 0 `triage`. Every
-inventoried row is migrated; work the remaining steps sequentially in ONE
-worktree, one step per pushed commit, `make check` green before each push, in
-this order (next: step 9a-2; then the coordinator's `make install` + recycle):
+inventoried row is migrated and every step below is done; only the
+coordinator's `make install` + recycle remains. The steps were worked
+sequentially in ONE worktree, one step per pushed commit, `make check` green
+before each push:
 
 1. DONE: actor-generation fenced writes (`store_actor_record_fenced_tx`,
    `delete_actor_document_fenced_tx`; 20 actor-generation rows) onto the
@@ -841,28 +906,13 @@ this order (next: step 9a-2; then the coordinator's `make install` + recycle):
      edited-head snapshot read-backs, plus the claim-ledger read overlay; the
      immediate effects are `plan + apply`, so no caller changes (see
      Progress).
-   - 9a-2. OPEN: the reorder. In `run_queue_maintenance_with_options_under_apply_guard`
-     (agent-doc-preflight-io) the pre-cut effects are not all deferrable,
-     because later pure computation of the successor reads back what they
-     wrote: `queue_claim::transfer_promoted_claims`,
-     `transfer_prompt_identity_admissions`, `release_closed_head`, and
-     `reconcile_completion_evidence` are read back by
-     `load_ledger_following` / `owner_selection_claims_for_content` before
-     the lifecycle markers are painted into the document;
-     `queue_tombstone::reconcile_for_file` returns the sets the backlog mirror
-     uses; `adopt_edited_queue_head_into_snapshot` is re-read through
-     `load_document_baseline` for the snapshot-drift decisions; the worktree
-     reconcile returns content the cut persists; and the Controller
-     observation publishes the admitted authority the projections read. The
-     write-only pre-cut effects (the ops evidence lines,
-     `set_skipped_queue_head_ids`, `set_projected_in_progress_queue_heads`,
-     `record_mirrored_queue_heads_in_db`) can move behind the cut as they
-     are. A literal first-step cut needs those reads to come from an
-     in-memory overlay of the pending ledger/tombstone/snapshot writes (pure
-     `*_plan` variants in agent-doc-queue-io), so the successor is computed
-     without writing and the effect phase then applies the overlay after the
-     cut receipt. The halt, time-gate, and main exits each persist a cut and
-     must flush the effect phase after it.
+   - 9a-2. DONE: the reorder. The pass stages every pre-cut effect in its
+     effect phase and reads the staged values through overlays, so the
+     document cut is its first effect after the authority acquisition and
+     the controller's observation of the admitted authority; the phase is
+     applied right after the cut receipt at the halt, time-gate, and main
+     exits (at the exit when a pass has no cut), and a crash between the cut
+     write and the phase resumes from the staged cut (see Progress).
 10. DONE (except `make install` + recycle, coordinator only): phase 6
     rollout. No compatibility switch existed; the duplicate captured-finalize
     `needs_operator` latch is deleted; the final source audit passes; the
@@ -892,7 +942,7 @@ fence machinery under already-green behavioral regressions.
 
 ## Completion criteria
 
-Status 2026-11-15 (after steps 9b, 10 and 9a-1):
+Status 2026-11-15 (after steps 9a, 9b and 10):
 
 - MET: Lazily is the only owner of effect identity, single-flight, supersession,
   retry/coalescing policy, and receipt matching. (Exception by design until a
@@ -900,13 +950,17 @@ Status 2026-11-15 (after steps 9b, 10 and 9a-1):
 - MET: agent-doc adapters contain atomic backend operations but no effect scheduler or
   latest-wins state machine (ledger audit: 0 `pending-migration`, 0 `triage`).
 - MET: every stale or failed comparison is typed and produces no backend mutation.
-- PARTLY MET: queue maintenance resumes after crashes and authority changes without stale or
+- MET: queue maintenance resumes after crashes and authority changes without stale or
   duplicate effects. Plan receipts persist and a resumed request continues
-  from its receipted cut without repeating replayable effects (9b). Not met
-  until 9a-2 (9a-1 landed the pure plan variants it needs): pre-cut
-  ledger/controller/snapshot effects still run before the document cut, so a
-  cut superseded after them leaves those (convergent) effects describing a
-  successor that never landed.
+  from its receipted cut without repeating replayable effects (9b). The
+  document cut is each pass's first effect and its effect phase follows the
+  cut receipt, so a cut superseded or refused leaves no effect describing a
+  successor that never landed. A crash between the cut write and its phase
+  resumes from the staged cut when the authority still equals it (9a). Known
+  limits, by design: the controller observation of the admitted authority
+  stays before the cut (it is the controller's latest-wins view of that
+  authority, not a successor effect), and an edit landing between a cut and
+  its phase supersedes the phase as it supersedes every post-cut effect.
 - MET: preflight stays under five seconds because comprehensive maintenance remains a
   coalesced background effect (the plan-progress writes run only in the
   detached worker).

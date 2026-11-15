@@ -12,6 +12,7 @@ pub mod layout;
 pub mod moot_decision;
 pub mod premise_rederive;
 pub mod queue_maintenance_effect_cas;
+pub mod queue_maintenance_effect_phase;
 pub mod sweep;
 pub mod tree_status_query;
 pub mod warnings;
@@ -2394,6 +2395,40 @@ pub trait PendingMaintenanceEffectFence {
 
     fn expected_authority_hash(&self) -> Option<String> {
         None
+    }
+
+    /// Stage the document cut this owner is about to write, with the effect
+    /// phase that follows it, in the owner's durable plan image
+    /// (`#implementlazilyowned` plan step 9a). Owners without a plan keep
+    /// nothing: a crash simply loses the pass.
+    fn stage_document_cut(
+        &self,
+        _file: &Path,
+        _cut: queue_maintenance_effect_cas::StagedDocumentCut,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    /// The staged cut a crashed predecessor left, if any.
+    fn staged_document_cut(&self) -> Option<queue_maintenance_effect_cas::StagedDocumentCut> {
+        None
+    }
+
+    /// Clear the staged cut once its effect phase is applied or abandoned.
+    fn finish_document_cut(&self, _file: &Path) -> Result<()> {
+        Ok(())
+    }
+
+    /// Effect-free observation of the canonical document authority hash, or
+    /// `None` for owners that do not observe it.
+    fn observed_authority_hash(&self, _file: &Path) -> Result<Option<String>> {
+        Ok(None)
+    }
+
+    /// Receipt a cut identified by its content hash (a staged cut a crashed
+    /// predecessor wrote but never receipted).
+    fn record_applied_cut_hash(&self, _file: &Path, _cut_hash: &str) -> Result<()> {
+        Ok(())
     }
 
     /// Cross one step of the owner's ordered Lazily effect plan before an
@@ -6314,6 +6349,11 @@ fn run_queue_maintenance_with_options_under_apply_guard(
     // frontier with itself, making the supposed deletion-adoption branch dead
     // while obscuring which authority maintenance actually mutated.
     let authority_baseline = content.clone();
+    // `#implementlazilyowned` plan step 9a: every durable effect between here
+    // and the document cut is staged, not applied. Later reads of this pass
+    // see the staged values through the phase's overlays, the cut is the
+    // pass's first effect, and the phase is applied right after it.
+    let mut effect_phase = queue_maintenance_effect_phase::QueueMaintenanceEffectPhase::new(file);
     // Deterministic integration barrier inside the queue-maintenance body.
     // The detached owner already holds the per-document apply lock here, so a
     // concurrent direct mutation must fail closed rather than supersede it.
@@ -6766,11 +6806,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         .clone();
         mutated = true;
         eprintln!("[preflight] queue: operator queue edit armed `queue: go` (#queueeditgo)");
-        queue_maintenance_log_op(
-            file,
-            effect_fence,
-            &format!("queue_edit_go_inferred file={}", file.display()),
-        )?;
+        effect_phase.log_op(format!("queue_edit_go_inferred file={}", file.display()));
     }
 
     let project_root = file.canonicalize().ok().and_then(|canonical| {
@@ -6796,16 +6832,12 @@ fn run_queue_maintenance_with_options_under_apply_guard(
     let (queue_free_text_scope, held_free_text) =
         gate_free_text_admission_scope(queue_free_text_scope, &entries, coin_gate);
     if !held_free_text.is_empty() {
-        queue_maintenance_log_op(
-            file,
-            effect_fence,
-            &format!(
-                "free_text_coin_held file={} held={} observed_typing={} (#halftypedcoin)",
-                file.display(),
-                held_free_text.len(),
-                coin_gate.observed.is_some(),
-            ),
-        )?;
+        effect_phase.log_op(format!(
+            "free_text_coin_held file={} held={} observed_typing={} (#halftypedcoin)",
+            file.display(),
+            held_free_text.len(),
+            coin_gate.observed.is_some(),
+        ));
         eprintln!(
             "[preflight] queue: held {} free-text line(s) from backlog coining; still being typed (#halftypedcoin)",
             held_free_text.len()
@@ -6875,14 +6907,11 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         // keeps its owner — the claim follows the exact promotion receipt, so
         // the new id head never resurfaces as unclaimed dispatch work.
         // Best-effort: a claim-store failure must not abort maintenance.
-        queue_maintenance_effect_step(file, effect_fence, QueueMaintenanceEffectStep::Ledger)?;
-        if let Err(err) =
-            agent_doc_queue_io::queue_claim::transfer_promoted_claims(file, &promotions)
-        {
-            eprintln!(
-                "[preflight] queue: WARNING: could not carry claims onto promoted heads: {err:#}"
-            );
-        }
+        effect_phase.stage_claim_write(
+            file,
+            agent_doc_queue_io::queue_claim::plan_transfer_promoted_claims(file, &promotions),
+            queue_maintenance_effect_phase::ClaimWriteKind::PromotedClaims,
+        );
         free_text_promotions.extend(promotions);
         current_content = admission.content;
         content = current_content.clone();
@@ -7032,12 +7061,13 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                 .filter(|e| matches!(e, agent_doc_queue::document_queue::QueueEntry::Prompt(_)))
                 .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
                 .collect();
-            queue_maintenance_effect_step(file, effect_fence, QueueMaintenanceEffectStep::Ledger)?;
-            agent_doc_queue_io::queue_tombstone::reconcile_for_file(
-                file,
-                &snapshot_active_ids,
-                &current_all_ids,
-                &current_active_ids,
+            effect_phase.stage_tombstones(
+                agent_doc_queue_io::queue_tombstone::plan_reconcile_for_file(
+                    file,
+                    &snapshot_active_ids,
+                    &current_all_ids,
+                    &current_active_ids,
+                ),
             )
         };
         // #backlog-queue-sync-pending-add-amplification (decision B/C): while the
@@ -7097,15 +7127,11 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                  from backlog→queue mirror (#provauth2 tombstone)",
                 sync_plan.tombstone_suppressed_count
             );
-            queue_maintenance_log_op(
-                file,
-                effect_fence,
-                &format!(
-                    "queue_mirror_tombstone_suppressed file={} count={} (#provauth2)",
-                    file.display(),
-                    sync_plan.tombstone_suppressed_count
-                ),
-            )?;
+            effect_phase.log_op(format!(
+                "queue_mirror_tombstone_suppressed file={} count={} (#provauth2)",
+                file.display(),
+                sync_plan.tombstone_suppressed_count
+            ));
         }
         match sync_plan.active_policy {
             AutoBacklogQueueSyncPolicy::ExplicitlyStopped if sync_plan.active_held_count > 0 => {
@@ -7154,14 +7180,10 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                 if !skipped.is_empty() {
                     let session_label = if live_ipc { "live_ipc" } else { "clean" };
                     for skip in &skipped {
-                        queue_maintenance_log_op(
-                            file,
-                            effect_fence,
-                            &format!(
-                                "go_queue_mirror_deferred id=#{} reason={} session={} (#mirrorall)",
-                                skip.id, skip.reason, session_label
-                            ),
-                        )?;
+                        effect_phase.log_op(format!(
+                            "go_queue_mirror_deferred id=#{} reason={} session={} (#mirrorall)",
+                            skip.id, skip.reason, session_label
+                        ));
                     }
                     // #mirrorall (operator directive 2026-06-18): mirror ALL open
                     // `queue`-attr backlog ids into the queue, INCLUDING `[operator-verify]`
@@ -7274,29 +7296,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             .collect::<std::collections::HashSet<String>>()
             .into_iter()
             .collect();
-        if !mirror_owned.is_empty() {
-            queue_maintenance_effect_step(file, effect_fence, QueueMaintenanceEffectStep::Ledger)?;
-        }
-        if !mirror_owned.is_empty()
-            && let Err(err) = agent_doc_project_root_io::project_root_containing(file)
-                .context("queue head provenance: no project root for state.db")
-                .and_then(|root| {
-                    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
-                    agent_doc_sqlite::state_store::record_mirrored_queue_heads_in_db(
-                        &conn,
-                        &file.display().to_string(),
-                        &mirror_owned,
-                    )
-                })
-        {
-            // Provenance is an optimization for a later strike decision, never a
-            // correctness gate: a miss just leaves heads unattributed, which
-            // fails safe (never struck). Warn rather than fail the cycle.
-            eprintln!(
-                "[preflight] warning: failed to record queue head provenance for {}: {err:#}",
-                file.display()
-            );
-        }
+        effect_phase.stage_mirrored_queue_heads(mirror_owned);
     }
 
     // Queue priority ordering (#backlog-priority-attribute): when the queue
@@ -7495,14 +7495,10 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         eprintln!(
             "[preflight] queue: removed displaced struck queue item(s) below the closing marker"
         );
-        queue_maintenance_log_op(
-            file,
-            effect_fence,
-            &format!(
-                "queue_escape_repair file={} reason=struck_items_below_close_marker",
-                file.display()
-            ),
-        )?;
+        effect_phase.log_op(format!(
+            "queue_escape_repair file={} reason=struck_items_below_close_marker",
+            file.display()
+        ));
     }
 
     if let Some((deduped_content, dropped)) =
@@ -7572,7 +7568,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         agent_doc_queue::document_queue::converge_queue_via_lifecycle_with_operator_evidence(
             &activation.entries_after,
             &snapshot_queue_entries,
-            &agent_doc_queue_io::queue_tombstone::current_tombstones(file),
+            &effect_phase.current_tombstones(file),
             &operator_rearmed,
             &operator_repeat_allowances,
         )
@@ -7641,15 +7637,11 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             "[preflight] queue: {} human-owned follow-up row(s) now wait on the operator ([operator-verify], #humanfollowupowner)",
             rows.len()
         );
-        queue_maintenance_log_op(
-            file,
-            effect_fence,
-            &format!(
-                "queue_human_followup_reclassified file={} rows={} (#humanfollowupowner)",
-                file.display(),
-                rows.len()
-            ),
-        )?;
+        effect_phase.log_op(format!(
+            "queue_human_followup_reclassified file={} rows={} (#humanfollowupowner)",
+            file.display(),
+            rows.len()
+        ));
     }
 
     // Consume start fence if needed
@@ -7767,6 +7759,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             )
             .ok()
         })
+        .map(|stored| effect_phase.mirrored_head_identities(stored))
         .unwrap_or_default();
     if !mirror_created_identities.is_empty() {
         let active_tracked =
@@ -8031,27 +8024,19 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             })
             .collect();
         if predating_echo_heads > 0 {
-            queue_maintenance_log_op(
-                file,
-                effect_fence,
-                &format!(
-                    "preflight_freetext_residue_strike_skipped_echo_predates_head_entry file={} heads={predating_echo_heads} (#qheadresiduescope)",
-                    file.display(),
-                ),
-            )?;
+            effect_phase.log_op(format!(
+                "preflight_freetext_residue_strike_skipped_echo_predates_head_entry file={} heads={predating_echo_heads} (#qheadresiduescope)",
+                file.display(),
+            ));
         }
         if !loop_scope_skips.is_empty() {
-            queue_maintenance_log_op(
-                file,
-                effect_fence,
-                &format!(
-                    "preflight_freetext_residue_strike_skipped_loop_echo_outside_pass file={} queue_id={} heads={} anchors={} (GH #327)",
-                    file.display(),
-                    selected_queue_id,
-                    loop_scope_skips.len(),
-                    loop_scope_skips.join(","),
-                ),
-            )?;
+            effect_phase.log_op(format!(
+                "preflight_freetext_residue_strike_skipped_loop_echo_outside_pass file={} queue_id={} heads={} anchors={} (GH #327)",
+                file.display(),
+                selected_queue_id,
+                loop_scope_skips.len(),
+                loop_scope_skips.join(","),
+            ));
         }
         if struck_count > 0 {
             let new_body = agent_doc_queue::document_queue::render(&new_entries);
@@ -8072,29 +8057,21 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             eprintln!(
                 "[preflight] queue: auto-struck {struck_count} answered free-text head(s) by committed exchange match (#qheadresidue)"
             );
-            queue_maintenance_log_op(
-                file,
-                effect_fence,
-                &format!(
-                    "preflight_freetext_residue_strike file={} struck={struck_count}",
-                    file.display(),
-                ),
-            )?;
+            effect_phase.log_op(format!(
+                "preflight_freetext_residue_strike file={} struck={struck_count}",
+                file.display(),
+            ));
             // `#claimstrike`: the answered head's claim ends with its strike.
             // Never fatal: a claim on a closed head is inert, and closeout
             // reconciliation prunes it.
             for head in &struck_claimed_heads {
-                queue_maintenance_effect_step(
+                effect_phase.stage_claim_write(
                     file,
-                    effect_fence,
-                    QueueMaintenanceEffectStep::Ledger,
-                )?;
-                if let Err(err) = agent_doc_queue_io::queue_claim::release_closed_head(file, head) {
-                    eprintln!(
-                        "[preflight] WARNING: could not release the claim on a struck free-text head in {}: {err:#}",
-                        file.display()
-                    );
-                }
+                    Ok(Some(
+                        agent_doc_queue_io::queue_claim::plan_release_closed_head(head),
+                    )),
+                    queue_maintenance_effect_phase::ClaimWriteKind::ClosedHeadRelease,
+                );
             }
             // If the strike emptied the live head set, mirror the id-backed
             // done-strike drain-clear so the queue does not report active with an
@@ -8257,15 +8234,11 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                             display,
                         );
                     }
-                    queue_maintenance_log_op(
-                        file,
-                        effect_fence,
-                        &format!(
-                            "preflight_freetext_backlog_done_strike file={} struck={}",
-                            file.display(),
-                            struck.len(),
-                        ),
-                    )?;
+                    effect_phase.log_op(format!(
+                        "preflight_freetext_backlog_done_strike file={} struck={}",
+                        file.display(),
+                        struck.len(),
+                    ));
                     if agent_doc_queue::document_queue::prompts(&activation.entries_after)
                         .is_empty()
                     {
@@ -8298,16 +8271,12 @@ fn run_queue_maintenance_with_options_under_apply_guard(
     if struck_retirement.content != current_content {
         current_content = struck_retirement.content;
         mutated = true;
-        queue_maintenance_log_op(
-            file,
-            effect_fence,
-            &format!(
-                "preflight_struck_completion_cells_retired file={} heads={} cells={} (#strikeretires)",
-                file.display(),
-                struck_retirement.struck_heads.len(),
-                struck_retirement.retired_keys.len(),
-            ),
-        )?;
+        effect_phase.log_op(format!(
+            "preflight_struck_completion_cells_retired file={} heads={} cells={} (#strikeretires)",
+            file.display(),
+            struck_retirement.struck_heads.len(),
+            struck_retirement.retired_keys.len(),
+        ));
     }
     let struck_heads_this_pass = struck_retirement.struck_heads;
 
@@ -8331,15 +8300,14 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                 )
             })
             .collect::<Vec<_>>();
-        queue_maintenance_effect_step(file, effect_fence, QueueMaintenanceEffectStep::Ledger)?;
-        if let Err(err) = agent_doc_queue_io::queue_claim::transfer_prompt_identity_admissions(
+        effect_phase.stage_claim_write(
             file,
-            &claim_admissions,
-        ) {
-            eprintln!(
-                "[preflight] queue: WARNING: could not carry claims across stable-id admission: {err:#}"
-            );
-        }
+            agent_doc_queue_io::queue_claim::plan_transfer_prompt_identity_admissions(
+                file,
+                &claim_admissions,
+            ),
+            queue_maintenance_effect_phase::ClaimWriteKind::PromptIdentityAdmission,
+        );
         current_content = prompt_identity_projection.content;
         let comps = agent_doc_element::element::parse(&current_content)?;
         if let Some(queue) = agent_doc_queue::queue_set::component_for_id(
@@ -8397,6 +8365,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                 "queue_halt",
                 admitted_authority_hash,
                 effect_fence,
+                Some(&mut effect_phase),
             )?;
             queue_maintenance_effect_step(file, effect_fence, QueueMaintenanceEffectStep::Ledger)?;
             agent_doc_queue_io::claim_release_receipt::retire_struck_or_warn(
@@ -8491,6 +8460,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                     "queue_prompt_identity_deferred",
                     admitted_authority_hash,
                     effect_fence,
+                    Some(&mut effect_phase),
                 )?;
                 // `#humanfollowupowner`: the document was written, so record
                 // the follow-up rows this pass classified. A deferred pass
@@ -8505,6 +8475,9 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                     file,
                     &current_content,
                 );
+            } else {
+                // No cut: this exit applies the staged phase itself.
+                effect_phase.apply(file, effect_fence)?;
             }
             record_queue_worklist_state(
                 file,
@@ -8602,21 +8575,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                 eprintln!(
                     "[preflight] queue: head prompt modified in Lazily current — adopting edited head and continuing loop (#queue-no-stall-on-head-edit)"
                 );
-                queue_maintenance_effect(
-                    file,
-                    effect_fence,
-                    QueueMaintenanceEffectStep::Snapshot,
-                    || {
-                        adopt_edited_queue_head_into_snapshot(file, &current_content);
-                        Ok(())
-                    },
-                    |()| {
-                        format!(
-                            "snapshot:queue-head:{}",
-                            agent_doc_hash::content_hash(&current_content)
-                        )
-                    },
-                )?;
+                effect_phase.stage_edited_queue_head_baseline(file, &current_content);
             }
         }
     }
@@ -8910,15 +8869,11 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         .collect::<Vec<_>>();
     claims_held_after_report.sort();
     if !claims_held_after_report.is_empty() {
-        queue_maintenance_log_op(
-            file,
-            effect_fence,
-            &format!(
-                "preflight_queue_claim_held_after_report file={} ids={} (#queueawaitop)",
-                file.display(),
-                claims_held_after_report.join(","),
-            ),
-        )?;
+        effect_phase.log_op(format!(
+            "preflight_queue_claim_held_after_report file={} ids={} (#queueawaitop)",
+            file.display(),
+            claims_held_after_report.join(","),
+        ));
         queue_warnings.push(PreflightWarning {
             code: "queue_claim_held_after_report".to_string(),
             message: format!(
@@ -8994,15 +8949,11 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         if !operator_unskipped.is_empty() {
             let mut ids = operator_unskipped.iter().cloned().collect::<Vec<_>>();
             ids.sort();
-            queue_maintenance_log_op(
-                file,
-                effect_fence,
-                &format!(
-                    "preflight_queue_operator_unskip file={} ids={} (#releaseskipcarried)",
-                    file.display(),
-                    ids.join(","),
-                ),
-            )?;
+            effect_phase.log_op(format!(
+                "preflight_queue_operator_unskip file={} ids={} (#releaseskipcarried)",
+                file.display(),
+                ids.join(","),
+            ));
         }
         let mut fresh = advance_skipped_queue_head_ids(
             carried,
@@ -9016,13 +8967,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
     } else {
         std::collections::HashSet::new()
     };
-    queue_maintenance_effect_step(file, effect_fence, QueueMaintenanceEffectStep::Ledger)?;
-    if let Err(err) = agent_doc_cycle_state_io::set_skipped_queue_head_ids(
-        file,
-        &skipped_queue_head_ids.iter().cloned().collect::<Vec<_>>(),
-    ) {
-        eprintln!("[preflight] queue: failed to persist skipped-head set ({err:#})");
-    }
+    effect_phase.stage_skipped_queue_heads(skipped_queue_head_ids.iter().cloned().collect());
 
     let mut in_progress_markers_changed = false;
     // `#queueclaim`: a head whose worker is still claimed/dispatching or
@@ -9104,15 +9049,11 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         agent_doc_document::queue_projection::ActiveQueuePromptProjection::default()
     };
     if !skipped_queue_head_ids.is_empty() {
-        queue_maintenance_log_op(
-            file,
-            effect_fence,
-            &format!(
-                "preflight_queue_skip file={} skipped={} (#queueskip)",
-                file.display(),
-                skipped_queue_head_ids.len(),
-            ),
-        )?;
+        effect_phase.log_op(format!(
+            "preflight_queue_skip file={} skipped={} (#queueskip)",
+            file.display(),
+            skipped_queue_head_ids.len(),
+        ));
     }
     if active_queue_projection.retargeted {
         eprintln!(
@@ -9149,12 +9090,15 @@ fn run_queue_maintenance_with_options_under_apply_guard(
     // Durable completion cells can restore a matching attempt to Reported
     // after restart; unmatched/older-generation evidence never creates state.
     if activation.active {
-        queue_maintenance_effect_step(file, effect_fence, QueueMaintenanceEffectStep::Ledger)?;
-        if let Err(err) =
-            agent_doc_queue_io::queue_claim::reconcile_completion_evidence(file, &current_content)
-        {
-            eprintln!("[preflight] queue: completion evidence recovery failed ({err:#})");
-        }
+        effect_phase.stage_claim_write(
+            file,
+            agent_doc_queue_io::queue_claim::plan_reconcile_completion_evidence(
+                file,
+                &current_content,
+            )
+            .map(Some),
+            queue_maintenance_effect_phase::ClaimWriteKind::CompletionEvidence,
+        );
     }
     let claim_ledger = activation
         .active
@@ -9200,16 +9144,12 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             .map(|claim| claim.item_text.clone()),
     );
     if activation.active {
-        queue_maintenance_effect_step(file, effect_fence, QueueMaintenanceEffectStep::Ledger)?;
-        if let Err(err) = agent_doc_cycle_state_io::set_projected_in_progress_queue_heads(
-            file,
-            &in_progress_queue_prompt_texts
+        effect_phase.stage_projected_in_progress_queue_heads(
+            in_progress_queue_prompt_texts
                 .iter()
                 .map(|text| strip_priority_markers(text))
-                .collect::<Vec<_>>(),
-        ) {
-            eprintln!("[preflight] queue: failed to persist projected in-progress heads ({err:#})");
-        }
+                .collect(),
+        );
     }
     let marker_components = agent_doc_element::element::parse(&current_content)?;
     let marker_body = agent_doc_queue::queue_set::component_for_id(
@@ -9456,14 +9396,14 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         in_progress_markers_changed = true;
     }
     let need_sync_active_queue_future_state_snapshot = if activation.active && snapshot_was_active {
-        match agent_doc_snapshot_io::load_document_baseline(file) {
-            Ok(Some(snapshot_content)) => {
+        match effect_phase.document_baseline(file) {
+            Some(snapshot_content) => {
                 selected_queue_head_unchanged_in_snapshot(
                     &snapshot_content,
                     &activation.entries_after,
                 ) && queue_region_differs_from_snapshot(&snapshot_content, &current_content)
             }
-            _ => false,
+            None => false,
         }
     } else {
         false
@@ -9480,19 +9420,20 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         mutated = true;
         eprintln!("[preflight] active: reconciled after queue lifecycle projection");
     }
-    if let Some(reconciled) = queue_maintenance_reconcile_worktrees(file, effect_fence, || {
-        agent_doc_queue_io::worktree_inventory::reconcile_maintained_under_apply_guard(
-            file,
-            &current_content,
-            apply_guard,
-        )
-    })? {
+    // The worktree inventory as recorded; checkouts the pass retires are
+    // removed after the cut, below.
+    if let Some(reconciled) =
+        agent_doc_queue_io::worktree_inventory::reconcile(file, &current_content)?
+    {
         current_content = reconciled;
         mutated = true;
         eprintln!("[preflight] worktrees: reconciled after queue lifecycle projection");
     }
 
-    // Persist file mutations.
+    // Persist file mutations: the pass's document cut, then its staged
+    // effect phase. A pass with nothing to persist applies the phase here.
+    let mut cut_base = authority_baseline.clone();
+    let mut cut_authority = admitted_authority_hash.map(str::to_string);
     if mutated {
         queue_maintenance_effect_step(file, effect_fence, QueueMaintenanceEffectStep::Document)?;
         current_content = persist_queue_maintenance_doc_with_admitted_authority(
@@ -9503,6 +9444,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             "queue_maintenance",
             admitted_authority_hash,
             effect_fence,
+            Some(&mut effect_phase),
         )?;
         queue_maintenance_effect_step(file, effect_fence, QueueMaintenanceEffectStep::Ledger)?;
         agent_doc_queue_io::claim_release_receipt::retire_struck_or_warn(
@@ -9511,6 +9453,33 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             &current_content,
             "queue_maintenance",
         );
+        cut_base = current_content.clone();
+        cut_authority = cut_authority.map(|_| agent_doc_hash::content_hash(&current_content));
+    } else {
+        effect_phase.apply(file, effect_fence)?;
+    }
+    // Retire finished worktrees behind the cut. A removal changes the
+    // inventory the cut projected, so its projection is one more cut on top.
+    if let Some(reconciled) = queue_maintenance_reconcile_worktrees(file, effect_fence, || {
+        agent_doc_queue_io::worktree_inventory::reconcile_maintained_under_apply_guard(
+            file,
+            &current_content,
+            apply_guard,
+        )
+    })? {
+        queue_maintenance_effect_step(file, effect_fence, QueueMaintenanceEffectStep::Document)?;
+        current_content = persist_queue_maintenance_doc_with_admitted_authority(
+            file,
+            &reconciled,
+            &cut_base,
+            project_root.as_deref(),
+            "queue_maintenance_worktrees",
+            cut_authority.as_deref(),
+            effect_fence,
+            None,
+        )?;
+        mutated = true;
+        eprintln!("[preflight] worktrees: reconciled after queue lifecycle projection");
     }
 
     // Persist snapshot mutations. For newly activated queues, sync the queue
@@ -10827,9 +10796,16 @@ pub(crate) fn persist_queue_maintenance_doc(
         source,
         None,
         None,
+        None,
     )
 }
 
+/// Persist one queue-maintenance document cut. `effect_phase` is the pass's
+/// deferred effect phase (`#implementlazilyowned` plan step 9a): an admitted
+/// owner stages it with the cut in its durable plan image before the write,
+/// and every branch applies it right after the cut is written and receipted,
+/// before any later evidence. A refused or superseded cut applies nothing.
+#[allow(clippy::too_many_arguments)]
 fn persist_queue_maintenance_doc_with_admitted_authority(
     file: &Path,
     content: &str,
@@ -10838,6 +10814,7 @@ fn persist_queue_maintenance_doc_with_admitted_authority(
     source: &str,
     admitted_authority_hash: Option<&str>,
     effect_fence: Option<&dyn PendingMaintenanceEffectFence>,
+    mut effect_phase: Option<&mut queue_maintenance_effect_phase::QueueMaintenanceEffectPhase>,
 ) -> Result<String> {
     let _ = project_root;
     queue_maintenance_effect_step(file, effect_fence, QueueMaintenanceEffectStep::Document)?;
@@ -10927,6 +10904,9 @@ fn persist_queue_maintenance_doc_with_admitted_authority(
                     effect_fence,
                     QueueMaintenanceEffectStep::Document,
                 )?;
+                if let Some(phase) = effect_phase.as_deref() {
+                    phase.stage_cut(file, effect_fence, content)?;
+                }
                 let write = if embedded {
                     agent_doc_crdt_relay_io::apply_cp_write_for_file(file, &text, content, source)?
                 } else {
@@ -10940,6 +10920,9 @@ fn persist_queue_maintenance_doc_with_admitted_authority(
                 );
                 if let Some(effect_fence) = effect_fence {
                     effect_fence.record_applied_content(file, content)?;
+                }
+                if let Some(phase) = effect_phase.as_deref_mut() {
+                    phase.apply(file, effect_fence)?;
                 }
                 queue_maintenance_log_op(
                     file,
@@ -11011,6 +10994,9 @@ fn persist_queue_maintenance_doc_with_admitted_authority(
             if let Some(effect_fence) = effect_fence {
                 effect_fence.record_applied_content(file, &rebased)?;
             }
+            if let Some(phase) = effect_phase.as_deref_mut() {
+                phase.apply(file, effect_fence)?;
+            }
             queue_maintenance_log_op(
                 file,
                 effect_fence,
@@ -11054,12 +11040,18 @@ fn persist_queue_maintenance_doc_with_admitted_authority(
                 effect_fence,
                 QueueMaintenanceEffectStep::Document,
             )?;
+            if let Some(phase) = effect_phase.as_deref() {
+                phase.stage_cut(file, effect_fence, content)?;
+            }
             if disk != content {
                 std::fs::write(file, content)
                     .with_context(|| format!("{source}: failed to write {}", file.display()))?;
             }
             if let Some(effect_fence) = effect_fence {
                 effect_fence.record_applied_content(file, content)?;
+            }
+            if let Some(phase) = effect_phase {
+                phase.apply(file, effect_fence)?;
             }
             queue_maintenance_log_op(
                 file,
@@ -11076,13 +11068,6 @@ fn persist_queue_maintenance_doc_with_admitted_authority(
             anyhow::bail!("{source}: Lazily editor head is not ready for queue maintenance")
         }
     }
-}
-
-/// Update the recovery baseline after the Lazily compare-and-swap succeeds.
-pub(crate) fn adopt_edited_queue_head_into_snapshot(file: &Path, current_content: &str) {
-    checkpoint_adopted_queue_baseline(file, |snapshot| {
-        edited_queue_head_adopted_into_snapshot(snapshot, current_content)
-    });
 }
 
 /// Adopt one runnable component's region from `current_content` into the
@@ -11165,10 +11150,12 @@ fn checkpoint_adopted_queue_baseline(file: &Path, adopt: impl FnOnce(&str) -> Op
     }
 }
 
-/// The recovery baseline [`adopt_edited_queue_head_into_snapshot`] would
-/// checkpoint, computed without writing (`#implementlazilyowned` plan step
-/// 9a): `None` when the baseline already holds the edited head or either image
-/// lacks the queue component.
+/// The recovery baseline that adopts the edited queue head of
+/// `current_content` (the first `queue` component), computed without writing
+/// (`#implementlazilyowned` plan step 9a): `None` when the baseline already
+/// holds the edited head or either image lacks the queue component. The
+/// effect phase checkpoints it after the pass's document cut
+/// ([`queue_maintenance_effect_phase::DeferredMaintenanceEffect::EditedQueueHeadBaseline`]).
 pub(crate) fn edited_queue_head_adopted_into_snapshot(
     snapshot: &str,
     current_content: &str,
@@ -26459,8 +26446,204 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         enforce_no_shadow_open_backlog(&doc).unwrap();
     }
 
+    /// Records every plan step a queue-maintenance pass crosses, and refuses
+    /// the first crossing of `refuse` as a superseded authority.
+    struct RecordingEffectFence {
+        steps: std::cell::RefCell<Vec<QueueMaintenanceEffectStep>>,
+        refuse: Option<QueueMaintenanceEffectStep>,
+    }
+
+    impl RecordingEffectFence {
+        fn new(refuse: Option<QueueMaintenanceEffectStep>) -> Self {
+            Self {
+                steps: std::cell::RefCell::new(Vec::new()),
+                refuse,
+            }
+        }
+    }
+
+    impl PendingMaintenanceEffectFence for RecordingEffectFence {
+        fn check(&self, _file: &Path) -> Result<()> {
+            Ok(())
+        }
+
+        fn apply_step(&self, _file: &Path, step: QueueMaintenanceEffectStep) -> Result<()> {
+            self.steps.borrow_mut().push(step);
+            if self.refuse == Some(step) {
+                return Err(QueueMaintenanceEffectSuperseded::admitted_authority(
+                    "admitted".to_string(),
+                    "operator-newer".to_string(),
+                )
+                .into());
+            }
+            Ok(())
+        }
+    }
+
+    fn effect_ordering_fixture(dir: &Path) -> (PathBuf, String) {
+        let doc = dir.join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: effect-ordering-test\n",
+            "agent_doc_format: template\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- do [#kept]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#kept] kept work\n",
+            "- [ ] [#mirrored] newly mirrored work\n",
+            "<!-- /agent:backlog -->\n",
+        )
+        .to_string();
+        std::fs::write(&doc, &content).unwrap();
+        let snapshot = content.replace("- do [#kept]\n", "- do [#kept]\n- do [#deleted]\n");
+        agent_doc_snapshot_io::checkpoint_document_baseline(&doc, &snapshot, |_, _| {}).unwrap();
+        (doc, content)
+    }
+
+    fn durable_maintenance_state(doc: &Path) -> String {
+        let cycle = agent_doc_cycle_state_io::load(doc)
+            .ok()
+            .flatten()
+            .map(|state| {
+                (
+                    state.skipped_queue_head_ids,
+                    state.projected_in_progress_queue_heads,
+                )
+            });
+        let mirrored = agent_doc_project_root_io::project_root_containing(doc)
+            .and_then(|root| agent_doc_sqlite::state_store::open_state_db(&root).ok())
+            .and_then(|conn| {
+                agent_doc_sqlite::state_store::load_mirrored_queue_head_identities_from_db(
+                    &conn,
+                    &doc.display().to_string(),
+                )
+                .ok()
+            })
+            .map(|ids| {
+                let mut ids = ids.into_iter().collect::<Vec<_>>();
+                ids.sort();
+                ids
+            });
+        let mut tombstones = agent_doc_queue_io::queue_tombstone::current_tombstones(doc)
+            .into_iter()
+            .collect::<Vec<_>>();
+        tombstones.sort();
+        format!(
+            "cycle={cycle:?} mirrored={mirrored:?} tombstones={tombstones:?} claims={:?} baseline={:?}",
+            agent_doc_queue_io::queue_claim::load_ledger(doc).unwrap(),
+            agent_doc_snapshot_io::load_document_baseline(doc).unwrap(),
+        )
+    }
+
+    /// `#implementlazilyowned` plan step 9a: the document cut is the first
+    /// effect of an admitted pass. Before it the owner only acquires and
+    /// observes the authority; every ledger, ops, snapshot and worktree effect
+    /// follows it.
+    #[test]
+    fn queue_maintenance_document_cut_is_the_first_effect_of_the_pass() {
+        let dir = setup_project();
+        let (doc, content) = effect_ordering_fixture(dir.path());
+        let fence = RecordingEffectFence::new(None);
+        let apply_guard =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        run_queue_maintenance_for_admitted_authority_under_apply_guard(
+            &doc,
+            None,
+            &agent_doc_hash::content_hash(&content),
+            &fence,
+            &apply_guard,
+        )
+        .unwrap();
+
+        let steps = fence.steps.borrow().clone();
+        let first_cut = steps
+            .iter()
+            .position(|step| *step == QueueMaintenanceEffectStep::Document)
+            .unwrap_or_else(|| panic!("the fixture must cut the document: {steps:?}"));
+        assert!(
+            steps[..first_cut].iter().all(|step| matches!(
+                step,
+                QueueMaintenanceEffectStep::AuthorityAcquisition
+                    | QueueMaintenanceEffectStep::Controller
+                    | QueueMaintenanceEffectStep::Verify
+            )),
+            "an effect ran before the document cut: {steps:?}"
+        );
+        assert!(
+            steps[first_cut..].contains(&QueueMaintenanceEffectStep::Ledger),
+            "the staged ledger effects must follow the cut: {steps:?}"
+        );
+        assert_ne!(std::fs::read_to_string(&doc).unwrap(), content);
+        let state = durable_maintenance_state(&doc);
+        assert!(
+            state.contains("\"deleted\""),
+            "the operator-delete tombstone lands after the cut: {state}"
+        );
+        assert!(
+            state.contains("\"mirrored\""),
+            "the mirror provenance lands after the cut: {state}"
+        );
+    }
+
+    /// `#implementlazilyowned` plan step 9a: a pass whose document cut is
+    /// refused applies none of the effects it staged on the way to the cut,
+    /// so no durable state describes a successor that never landed.
+    #[test]
+    fn refused_queue_maintenance_cut_applies_no_staged_effect() {
+        let dir = setup_project();
+        let (doc, content) = effect_ordering_fixture(dir.path());
+        let before = durable_maintenance_state(&doc);
+        let ops_path = dir.path().join(".agent-doc/logs/ops.log");
+        let ops_before = std::fs::read_to_string(&ops_path).unwrap_or_default();
+        let fence = RecordingEffectFence::new(Some(QueueMaintenanceEffectStep::Document));
+        let apply_guard =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        let error = run_queue_maintenance_for_admitted_authority_under_apply_guard(
+            &doc,
+            None,
+            &agent_doc_hash::content_hash(&content),
+            &fence,
+            &apply_guard,
+        )
+        .unwrap_err();
+
+        assert!(
+            error
+                .downcast_ref::<QueueMaintenanceEffectSuperseded>()
+                .is_some(),
+            "{error:#}"
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+        assert_eq!(
+            durable_maintenance_state(&doc),
+            before,
+            "a refused cut left a staged effect behind"
+        );
+        let ops_after = std::fs::read_to_string(&ops_path).unwrap_or_default();
+        let new_ops = ops_after
+            .strip_prefix(ops_before.as_str())
+            .unwrap_or(&ops_after);
+        for staged in [
+            "queue_claim_",
+            "preflight_queue_skip",
+            "queue_mirror_tombstone_suppressed",
+            "write_authority",
+        ] {
+            assert!(
+                !new_ops.contains(staged),
+                "a refused cut emitted staged evidence `{staged}`: {new_ops}"
+            );
+        }
+    }
+
     /// `#implementlazilyowned` plan step 9a: the pure edited-head adoption is
-    /// exactly the baseline the effectful adoption checkpoints.
+    /// exactly the baseline the deferred adoption effect checkpoints.
     #[test]
     fn planned_edited_queue_head_adoption_matches_the_checkpointed_baseline() {
         let dir = setup_project();
@@ -26483,7 +26666,16 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             Some(snapshot),
             "planning must not write the baseline"
         );
-        adopt_edited_queue_head_into_snapshot(&doc, &current);
+        queue_maintenance_effect_phase::apply_deferred_effects(
+            &doc,
+            None,
+            &[
+                queue_maintenance_effect_phase::DeferredMaintenanceEffect::EditedQueueHeadBaseline {
+                    region: current[current.find("<!-- agent:queue").unwrap()..].to_string(),
+                },
+            ],
+        )
+        .unwrap();
         assert_eq!(
             agent_doc_snapshot_io::load_document_baseline(&doc).unwrap(),
             Some(planned.clone())

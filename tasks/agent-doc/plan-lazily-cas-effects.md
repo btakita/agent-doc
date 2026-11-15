@@ -625,6 +625,24 @@ Progress (`#implementlazilyowned`):
   the backend asks for (`retrySuggested`) and re-derives from. Messages, log
   markers, and paces are unchanged. 13 rows: 2 `migrated`, 5 `deleted`, 2
   `lazily-adapter`, 4 `excluded`.
+- Authority observations and Git commit/closeout helpers (plan step 8a):
+  the operator re-arm evidence read (`operator_rearm_evidence_for_merge`) and
+  the missing-replica re-registration self-heal
+  (`reobserve_missing_editor_replica_with_reregistration`) run through
+  `drive_effect_epochs`: an unreadable read and a still-missing replica are
+  `Retryable`, a served replica is the receipt, and an endpoint every live
+  route refused stops the drive (`Pace::Stop`). The commit path's two
+  deadline-bounded waits, the owned-delivery rebase
+  (`retry_rebase_until_owned_delivery`) and the controller commit ask
+  (`retry_controller_commit_awaiting_projection`), are Lazily drives too
+  (an undelivered owned target or a projection-awaiting refusal is
+  `Retryable`; the wait and re-read run between attempts; other refusals and
+  the exhausted budget are returned unchanged). The commit transaction fence,
+  the sibling fence carrier, the post-commit snapshot/HEAD witness, and the
+  commit backoff curve are `lazily-adapter`s of the existing Lazily
+  commit-transaction / `ref_cas` drives. Messages, log markers, attempt caps,
+  budgets, and paces are unchanged. 14 rows: 9 `migrated`, 5
+  `lazily-adapter`.
 - Not yet done (as of 2026-11-15, agent-doc `59984d315a`; triage is complete,
   0 `triage` rows): migrate the 291 reviewed `pending-migration` rows family
   by family, then delete the remaining bespoke orchestration and make the
@@ -632,11 +650,11 @@ Progress (`#implementlazilyowned`):
 
 ## Resume here
 
-Status 2026-11-15 (after family 7b): ledger = 116 `migrated`, 168 `lazily-adapter`,
-30 `deleted`, 419 `excluded`, 22 `pending-migration`, 0 `triage`. Work the
-22 rows sequentially in ONE worktree (every step edits the ledger), one family
+Status 2026-11-15 (after family 8a): ledger = 125 `migrated`, 173 `lazily-adapter`,
+30 `deleted`, 419 `excluded`, 8 `pending-migration`, 0 `triage`. Work the
+8 rows sequentially in ONE worktree (every step edits the ledger), one family
 per pushed commit, `make check` green before each push, in this order (next:
-family 8):
+family 8b):
 
 1. DONE: actor-generation fenced writes (`store_actor_record_fenced_tx`,
    `delete_actor_document_fenced_tx`; 20 actor-generation rows) onto the
@@ -686,10 +704,16 @@ family 8):
    - 7b. DONE: the 13 retained surface/layout delivery rows
      (`EditorTabSyncListener` `SurfaceDeliveryRetry`, `SyncLayoutAction`
      deferred sync, the 262 frontend `SurfaceIngressLease`).
-8. Remaining small families: authority observation (6), idle-watch/captured
-   finalize retry (6, plus idle-watch's `QueueProjectionSupersededRetry` /
-   `queue_projection_superseded_retry` self-heal schedule from family 3), Git
-   commit/closeout helpers around `ref_cas` (8).
+8. Remaining small families:
+   - 8a. DONE: authority observation (6) and Git commit/closeout helpers
+     around `ref_cas` (8) onto `drive_effect_epochs` / `lazily-adapter`.
+   - 8b. Idle-watch/captured finalize retry (6, plus idle-watch's
+     `QueueProjectionSupersededRetry` / `queue_projection_superseded_retry`
+     self-heal schedule from family 3): `CapturedFinalizeResumeRetry`'s
+     `attempts`/`retry_at` is a bespoke retained intent keyed by
+     `CapturedFinalizeResumeKey`; move it onto a `LatestIntentSchedule`
+     (or the `failure_ledger` count) without changing the per-outcome
+     attempt resets.
 9. Per-step plan receipts persisted for crash resume, and reorder the
    maintenance body so the document cut is literally the first plan step.
 10. Phase 6 rollout: delete compatibility paths and duplicate state, final

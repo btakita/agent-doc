@@ -4892,16 +4892,26 @@ fn operator_rearm_evidence_for_merge(
     if !agent_doc_merge::crdt::base_holds_struck_queue_item(merge_base) {
         return Ok(std::collections::HashSet::new());
     }
-    let mut attempt = 1;
-    loop {
-        match read_operator_rearm_evidence(file, merge_base) {
-            Ok(keys) => return Ok(keys),
+    // `#implementlazilyowned` (plan step 8): each evidence read is one
+    // Lazily-claimed attempt; an unreadable answer is `Retryable` (the merge
+    // base, the authority the evidence is read for, is unchanged), and the
+    // exhausted drive refuses the merge.
+    let drive = agent_doc_effect_cas::drive_effect_epochs(
+        &format!("operator-rearm-evidence:{}", file.display()),
+        agent_doc_hash::content_hash(merge_base),
+        OPERATOR_REARM_EVIDENCE_ATTEMPTS,
+        &mut |claimed| match read_operator_rearm_evidence(file, merge_base) {
+            Ok(keys) => Ok(agent_doc_effect_cas::EpochStep::Applied {
+                receipt: keys,
+                authority: claimed.expected.to_string(),
+            }),
             Err(err) => {
+                let attempt = claimed.attempt;
                 let error = format!("{err:#}").replace('\n', " ");
-                let outcome = if attempt < OPERATOR_REARM_EVIDENCE_ATTEMPTS {
-                    "retrying"
-                } else {
+                let outcome = if claimed.is_final() {
                     "refused"
+                } else {
+                    "retrying"
                 };
                 agent_doc_ops_log_io::log_op(
                     file,
@@ -4912,18 +4922,25 @@ fn operator_rearm_evidence_for_merge(
                         error,
                     ),
                 );
-                if attempt >= OPERATOR_REARM_EVIDENCE_ATTEMPTS {
-                    return Err(err.context(format!(
-                        "{source}: operator re-arm evidence for {} is unreadable after \
-                         {OPERATOR_REARM_EVIDENCE_ATTEMPTS} attempt(s); refusing to merge over a \
-                         struck queue item without it, which could re-strike an operator unstrike",
-                        file.display()
-                    )));
-                }
+                Ok(agent_doc_effect_cas::EpochStep::Retryable(err))
             }
+        },
+        &mut |_, _| {
+            std::thread::sleep(OPERATOR_REARM_EVIDENCE_RETRY_BACKOFF);
+            Ok(agent_doc_effect_cas::Pace::Continue)
+        },
+    )?;
+    match drive {
+        agent_doc_effect_cas::EpochDrive::Applied(keys) => Ok(keys),
+        agent_doc_effect_cas::EpochDrive::Exhausted { reason: err, .. }
+        | agent_doc_effect_cas::EpochDrive::Stopped { reason: err, .. } => {
+            Err(err.context(format!(
+                "{source}: operator re-arm evidence for {} is unreadable after \
+                 {OPERATOR_REARM_EVIDENCE_ATTEMPTS} attempt(s); refusing to merge over a \
+                 struck queue item without it, which could re-strike an operator unstrike",
+                file.display()
+            )))
         }
-        std::thread::sleep(OPERATOR_REARM_EVIDENCE_RETRY_BACKOFF);
-        attempt += 1;
     }
 }
 
@@ -10029,6 +10046,15 @@ fn clear_editor_replica_recovery_latches(file: &std::path::Path) {
     clear_editor_replica_accepted_unserved(file);
 }
 
+/// Why one Lazily-claimed re-registration attempt did not serve the replica.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditorReplicaReobserve {
+    /// Every live route refused: retrying is what never converged.
+    Unserved,
+    /// The replica is still missing; re-request it.
+    Missing,
+}
+
 fn reobserve_missing_editor_replica_with_reregistration(
     file: &std::path::Path,
     source: &str,
@@ -10096,25 +10122,34 @@ fn reobserve_missing_editor_replica_with_reregistration(
     // change.
     let mut no_live_routes = false;
     let mut attempts_run = 0u32;
-    for attempt in 1..=attempts {
-        attempts_run = attempt;
-        no_live_routes = false;
-        let reregister = match agent_doc_crdt_relay_io::signal_crdt_replica_event_reporting(
-            file,
-            agent_doc_crdt_relay_io::CrdtReplicaEventReason::EditorReplicaReregister,
-            0,
-        ) {
-            // Every live route answered and refused. Record the proof against the
-            // current liveness witness so the authority resolver can stop holding
-            // an attachment latch for an endpoint that will not serve this
-            // document. Retrying is what never converged.
-            Ok(outcome)
-                if outcome.notified == 0
-                    && outcome.found > 0
-                    && outcome.definitive_refusals + outcome.dead_endpoints.len()
-                        == outcome.found =>
-            {
-                let build_mismatch_refusal = outcome.build_mismatch_refusals.first().map(|refused| {
+    // `#implementlazilyowned` (plan step 8): each re-registration request and
+    // its re-observation is one Lazily-claimed attempt of the self-heal drive.
+    // A served replica is the receipt, a still-missing one is `Retryable`, and
+    // an endpoint every live route refused stops the drive.
+    let drive = agent_doc_effect_cas::drive_effect_epochs(
+        &format!("editor-replica-reregister:{}", file.display()),
+        "editor-replica-missing",
+        attempts,
+        &mut |claimed| {
+            let attempt = claimed.attempt;
+            attempts_run = attempt;
+            no_live_routes = false;
+            let reregister = match agent_doc_crdt_relay_io::signal_crdt_replica_event_reporting(
+                file,
+                agent_doc_crdt_relay_io::CrdtReplicaEventReason::EditorReplicaReregister,
+                0,
+            ) {
+                // Every live route answered and refused. Record the proof against the
+                // current liveness witness so the authority resolver can stop holding
+                // an attachment latch for an endpoint that will not serve this
+                // document. Retrying is what never converged.
+                Ok(outcome)
+                    if outcome.notified == 0
+                        && outcome.found > 0
+                        && outcome.definitive_refusals + outcome.dead_endpoints.len()
+                            == outcome.found =>
+                {
+                    let build_mismatch_refusal = outcome.build_mismatch_refusals.first().map(|refused| {
                     match refused.refusal {
                         agent_doc_ipc_io::BuildMismatchRecoveryRefusal::SenderExecutableReplaced => {
                             agent_doc_turn::authority_recovery::BuildMismatchRefusal::SenderExecutableReplaced
@@ -10124,79 +10159,111 @@ fn reobserve_missing_editor_replica_with_reregistration(
                         }
                     }
                 });
-                let editor_pids = outcome
-                    .build_mismatch_refusals
-                    .iter()
-                    .map(|refused| refused.route.editor_pid)
-                    .chain(outcome.dead_endpoints.iter().map(|route| route.editor_pid))
-                    .collect();
-                record_editor_endpoint_definitive_refusal(
-                    file,
-                    editor_replica_liveness_witness(file),
-                    build_mismatch_refusal,
-                    editor_pids,
-                );
-                answered = true;
-                definitively_unserved = true;
-                outcome.diagnosis()
+                    let editor_pids = outcome
+                        .build_mismatch_refusals
+                        .iter()
+                        .map(|refused| refused.route.editor_pid)
+                        .chain(outcome.dead_endpoints.iter().map(|route| route.editor_pid))
+                        .collect();
+                    record_editor_endpoint_definitive_refusal(
+                        file,
+                        editor_replica_liveness_witness(file),
+                        build_mismatch_refusal,
+                        editor_pids,
+                    );
+                    answered = true;
+                    definitively_unserved = true;
+                    outcome.diagnosis()
+                }
+                Ok(outcome) if outcome.found == 0 => {
+                    no_live_routes = true;
+                    "no_live_routes".to_string()
+                }
+                Ok(outcome) if outcome.notified == 0 => "not_delivered".to_string(),
+                Ok(outcome) => {
+                    answered = true;
+                    accepted_requests += outcome.notified;
+                    format!("delivered:{}", outcome.notified)
+                }
+                Err(err) => format!("failed:{}", format!("{err:#}").replace('\n', "\\n")),
+            };
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "editor_replica_reregister_attempt file={} source={} attempt={}/{} reregister={} (#bn41)",
+                    file.display(),
+                    source,
+                    attempt,
+                    attempts,
+                    reregister
+                ),
+            );
+            if definitively_unserved {
+                return Ok(agent_doc_effect_cas::EpochStep::Retryable(
+                    EditorReplicaReobserve::Unserved,
+                ));
             }
-            Ok(outcome) if outcome.found == 0 => {
-                no_live_routes = true;
-                "no_live_routes".to_string()
+            std::thread::sleep(EDITOR_REPLICA_REOBSERVE_BACKOFF);
+            let reobserved = if require_model_ensure {
+                query_live_editor_authority_after_model_ensure(file, source)
+            } else {
+                query_live_editor_authority(file, source)
+            };
+            let status = match &reobserved {
+                Ok(agent_doc_crdt_relay_io::CurrentText::Current { .. }) => "current",
+                Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => "detached",
+                Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica) => {
+                    "editor_attached_model_missing"
+                }
+                Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => {
+                    "editor_sync_pending"
+                }
+                Err(_) => "error",
+            };
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "editor_replica_reobserved file={} source={} attempt={}/{} status={} (#px82)",
+                    file.display(),
+                    source,
+                    attempt,
+                    attempts,
+                    status
+                ),
+            );
+            current = reobserved;
+            if !observation_is_missing_replica_family(file, &current) {
+                return Ok(agent_doc_effect_cas::EpochStep::Applied {
+                    receipt: (),
+                    authority: "editor-replica-served".to_string(),
+                });
             }
-            Ok(outcome) if outcome.notified == 0 => "not_delivered".to_string(),
-            Ok(outcome) => {
-                answered = true;
-                accepted_requests += outcome.notified;
-                format!("delivered:{}", outcome.notified)
-            }
-            Err(err) => format!("failed:{}", format!("{err:#}").replace('\n', "\\n")),
-        };
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "editor_replica_reregister_attempt file={} source={} attempt={}/{} reregister={} (#bn41)",
-                file.display(),
-                source,
-                attempt,
-                attempts,
-                reregister
-            ),
-        );
-        if definitively_unserved {
-            break;
-        }
-        std::thread::sleep(EDITOR_REPLICA_REOBSERVE_BACKOFF);
-        let reobserved = if require_model_ensure {
-            query_live_editor_authority_after_model_ensure(file, source)
-        } else {
-            query_live_editor_authority(file, source)
-        };
-        let status = match &reobserved {
-            Ok(agent_doc_crdt_relay_io::CurrentText::Current { .. }) => "current",
-            Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => "detached",
-            Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica) => {
-                "editor_attached_model_missing"
-            }
-            Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => "editor_sync_pending",
-            Err(_) => "error",
-        };
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "editor_replica_reobserved file={} source={} attempt={}/{} status={} (#px82)",
-                file.display(),
-                source,
-                attempt,
-                attempts,
-                status
-            ),
-        );
-        current = reobserved;
-        if !observation_is_missing_replica_family(file, &current) {
+            Ok(agent_doc_effect_cas::EpochStep::Retryable(
+                EditorReplicaReobserve::Missing,
+            ))
+        },
+        &mut |_, step| {
+            Ok(match step {
+                EditorReplicaReobserve::Unserved => agent_doc_effect_cas::Pace::Stop,
+                EditorReplicaReobserve::Missing => agent_doc_effect_cas::Pace::Continue,
+            })
+        },
+    );
+    match drive {
+        Ok(agent_doc_effect_cas::EpochDrive::Applied(())) => {
             clear_editor_replica_recovery_latches(file);
             return current;
         }
+        Ok(_) => {}
+        Err(err) => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "editor_replica_reregister_drive_failed file={} source={} error={}",
+                file.display(),
+                source,
+                format!("{err:#}").replace('\n', " "),
+            ),
+        ),
     }
     // Every attempt was spent without recovering. Remember the liveness witness
     // as of the END of the loop: a registration that landed while we were

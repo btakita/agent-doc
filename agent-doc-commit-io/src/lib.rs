@@ -706,33 +706,60 @@ fn retry_rebase_until_owned_delivery(
     mut rebase: impl FnMut(&str) -> Result<Option<String>>,
     mut wait: impl FnMut(std::time::Duration),
     mut reread: impl FnMut() -> Result<String>,
-    mut log: impl FnMut(String),
+    log: impl FnMut(String),
 ) -> Result<(Option<String>, String)> {
     let started = std::time::Instant::now();
     let deadline = started + budget;
-    let mut current = initial_current;
-    loop {
-        let err = match rebase(&current) {
-            Ok(rebased) => return Ok((rebased, current)),
-            Err(err) => err,
-        };
-        if !owned_target_undelivered(&err) {
-            return Err(err);
-        }
-        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-        if !may_wait || remaining.is_zero() {
-            log(format!(
-                "owned_delivery_wait_exhausted waited_ms={} may_wait={may_wait}",
+    let current = std::cell::RefCell::new(initial_current);
+    let log = std::cell::RefCell::new(log);
+    // `#implementlazilyowned` (plan step 8): each rebase is one Lazily-claimed
+    // attempt. An owned target that has not reached the authority yet is
+    // `Retryable`; the bounded wait and the re-read run between attempts and
+    // never decide whether to retry. Any other refusal, or the exhausted wait,
+    // is returned unchanged.
+    let drive = agent_doc_effect_cas::drive_effect_epochs(
+        "owned-delivery-commit-rebase",
+        "owned-target-undelivered",
+        u32::MAX,
+        &mut |_| {
+            let err = match rebase(&current.borrow()) {
+                Ok(rebased) => {
+                    return Ok(agent_doc_effect_cas::EpochStep::Applied {
+                        receipt: rebased,
+                        authority: "owned-target-delivered".to_string(),
+                    });
+                }
+                Err(err) => err,
+            };
+            if !owned_target_undelivered(&err) {
+                return Err(err);
+            }
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if !may_wait || remaining.is_zero() {
+                (log.borrow_mut())(format!(
+                    "owned_delivery_wait_exhausted waited_ms={} may_wait={may_wait}",
+                    started.elapsed().as_millis()
+                ));
+                return Err(err);
+            }
+            Ok(agent_doc_effect_cas::EpochStep::Retryable(remaining))
+        },
+        &mut |_, remaining| {
+            wait((*remaining).min(OWNED_DELIVERY_SLICE));
+            *current.borrow_mut() = reread()?;
+            (log.borrow_mut())(format!(
+                "owned_delivery_retry waited_ms={}",
                 started.elapsed().as_millis()
             ));
-            return Err(err);
-        }
-        wait(remaining.min(OWNED_DELIVERY_SLICE));
-        current = reread()?;
-        log(format!(
-            "owned_delivery_retry waited_ms={}",
-            started.elapsed().as_millis()
-        ));
+            Ok(agent_doc_effect_cas::Pace::Continue)
+        },
+    )?;
+    match drive {
+        agent_doc_effect_cas::EpochDrive::Applied(rebased) => Ok((rebased, current.into_inner())),
+        agent_doc_effect_cas::EpochDrive::Exhausted { attempts, .. }
+        | agent_doc_effect_cas::EpochDrive::Stopped {
+            attempt: attempts, ..
+        } => anyhow::bail!("owned delivery commit rebase stopped after {attempts} attempt(s)"),
     }
 }
 
@@ -2721,38 +2748,71 @@ fn retry_controller_commit_awaiting_projection<T>(
 ) -> ControllerCommitAttempt<T> {
     let started = std::time::Instant::now();
     let deadline = started + budget;
-    let mut asks = 0usize;
-    loop {
-        asks += 1;
-        let err = match attempt() {
-            Ok(Some(outcome)) => {
-                if asks > 1 {
-                    log(format!(
-                        "controller_commit_live_projection_landed asks={asks} waited_ms={}",
-                        started.elapsed().as_millis()
-                    ));
+    // `#implementlazilyowned` (plan step 8): each controller ask is one
+    // Lazily-claimed attempt (its attempt number is `asks`). A refusal that
+    // awaits the live projection is `Retryable`; the delivery wait runs between
+    // attempts. Any other refusal, or the exhausted budget, is the local
+    // fallback, unchanged.
+    let drive = agent_doc_effect_cas::drive_effect_epochs(
+        "controller-commit-live-projection",
+        "live-projection-pending",
+        u32::MAX,
+        &mut |claimed| {
+            let asks = claimed.attempt;
+            let err = match attempt() {
+                Ok(Some(outcome)) => {
+                    if asks > 1 {
+                        log(format!(
+                            "controller_commit_live_projection_landed asks={asks} waited_ms={}",
+                            started.elapsed().as_millis()
+                        ));
+                    }
+                    return Ok(agent_doc_effect_cas::EpochStep::Applied {
+                        receipt: ControllerCommitAttempt::Committed(outcome),
+                        authority: "live-projection-landed".to_string(),
+                    });
                 }
-                return ControllerCommitAttempt::Committed(outcome);
+                Ok(None) => {
+                    return Ok(agent_doc_effect_cas::EpochStep::Applied {
+                        receipt: ControllerCommitAttempt::Headless,
+                        authority: "headless".to_string(),
+                    });
+                }
+                Err(err) => err,
+            };
+            if !awaits_projection(&err) || !may_await {
+                return Err(err);
             }
-            Ok(None) => return ControllerCommitAttempt::Headless,
-            Err(err) => err,
-        };
-        if !awaits_projection(&err) || !may_await {
-            return ControllerCommitAttempt::Fallback(err);
-        }
-        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-        if remaining.is_zero() {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                log(format!(
+                    "controller_commit_live_projection_wait_exhausted asks={asks} waited_ms={} recovery=local_commit_then_composed_late_projection_proof",
+                    started.elapsed().as_millis()
+                ));
+                return Err(err);
+            }
             log(format!(
-                "controller_commit_live_projection_wait_exhausted asks={asks} waited_ms={} recovery=local_commit_then_composed_late_projection_proof",
+                "controller_commit_awaiting_live_projection asks={asks} waited_ms={}",
                 started.elapsed().as_millis()
             ));
-            return ControllerCommitAttempt::Fallback(err);
-        }
-        log(format!(
-            "controller_commit_awaiting_live_projection asks={asks} waited_ms={}",
-            started.elapsed().as_millis()
-        ));
-        wait(remaining.min(CONTROLLER_PROJECTION_SLICE));
+            Ok(agent_doc_effect_cas::EpochStep::Retryable(remaining))
+        },
+        &mut |_, remaining| {
+            wait((*remaining).min(CONTROLLER_PROJECTION_SLICE));
+            Ok(agent_doc_effect_cas::Pace::Continue)
+        },
+    );
+    match drive {
+        Ok(agent_doc_effect_cas::EpochDrive::Applied(outcome)) => outcome,
+        Ok(
+            agent_doc_effect_cas::EpochDrive::Exhausted { attempts, .. }
+            | agent_doc_effect_cas::EpochDrive::Stopped {
+                attempt: attempts, ..
+            },
+        ) => ControllerCommitAttempt::Fallback(anyhow::anyhow!(
+            "controller commit stopped after {attempts} ask(s)"
+        )),
+        Err(err) => ControllerCommitAttempt::Fallback(err),
     }
 }
 

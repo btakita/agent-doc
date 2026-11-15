@@ -10,6 +10,7 @@ pub mod continuation_detect;
 pub mod continuation_marker;
 pub mod continuation_request;
 pub mod controller_pause;
+pub mod cross_harness_handoff;
 pub mod drain_owner;
 pub mod followup_owner_ledger;
 pub mod followup_provenance_ledger;

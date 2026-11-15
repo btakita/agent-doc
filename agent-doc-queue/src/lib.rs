@@ -16,6 +16,7 @@ pub mod completion_cell_restore;
 pub mod component_attrs;
 pub mod control_binding;
 pub mod coordinator_drain;
+pub mod cross_harness_handoff;
 pub mod dispatch_item;
 pub mod document_queue;
 pub mod free_text_admission;

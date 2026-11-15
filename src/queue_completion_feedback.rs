@@ -1791,6 +1791,192 @@ mod tests {
         assert!(reported.appended);
     }
 
+    /// `#crossagenthandoff`: `#address then #adversarial-pr` with a landed
+    /// `FIX-ON-HEAD` is still an open goal loop when the hand-back begins with
+    /// `**Summary**`. The row is not `prose_consume`. Resume uses the agent-doc
+    /// key. A Grok conversation id does not continue the Claude worker.
+    #[test]
+    fn prose_summary_on_address_and_adversarial_pr_returns_to_the_inbox() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            concat!(
+                "---\npresets:\n",
+                "  '#address': 'Address every actionable review item on the exact current head.'\n",
+                "  '#adversarial-pr': >-\n",
+                "    /goal Bring the pull request to an independently review-clean exact\n",
+                "    remote head.\n\n",
+                "    Final states. Your final message must begin with exactly one of these\n",
+                "    lines:\n",
+                "    - `REVIEW-CLEAN <final review URL> base=<sha> head=<sha> cycles=<n>`.\n",
+                "    - `BLOCKED <single operator action> base=<sha> head=<sha> cycles=<n>`.\n",
+                "---\n",
+            ),
+        )
+        .unwrap();
+        let doc = dir.path().join("sdk-dev.md");
+        const SESSION: &str = "78c70863-fed7-40a8-b703-8261eeb8da9c";
+        const ROW: &str =
+            "https://github.com/haiven-dev/haiven-sdk/pull/286: #address then #adversarial-pr";
+        const OWNER: &str = "subagent:addr-286";
+        const WORKER: &str = "a7e8d9d85c28f8da8";
+        const GROK_CONVERSATION: &str = "01a1e0e1-6a34-7a12-bd15-5fa98f34c9e5";
+        fs::write(
+            &doc,
+            format!(
+                "---\nagent_doc_session: {SESSION}\nagent_doc_format: template\n---\n\n\
+                 <!-- agent:exchange patch=append -->\n\
+                 ### Re: prior — gpt-5\n\nDone.\n\
+                 <!-- agent:boundary:keep -->\n\
+                 <!-- /agent:exchange -->\n\n\
+                 <!-- agent:queue subagents -->\n\
+                 - {ROW}\n\
+                 <!-- /agent:queue -->\n"
+            ),
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::claim_with_session_for_worker_harness(
+            &doc,
+            ROW,
+            OWNER,
+            600,
+            Some(agent_doc_queue::queue_claim::ClaimOwnerSession {
+                harness: Some("grok".to_string()),
+                session_id: Some(GROK_CONVERSATION.to_string()),
+                pane: None,
+                pid: None,
+            }),
+            Some("claude"),
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(&doc, ROW, OWNER, WORKER, 600, 1).unwrap();
+        let prose = concat!(
+            "**Summary**\n\n",
+            "The address run landed. The adversarial loop needs a reviewer this subagent cannot spawn. ",
+            "The owning session must spawn the reviewer.\n\n",
+            "Delivery worktree: `/home/brian/work/btakita/worktrees/haiven-dev/haiven-sdk/addr-286-g2`\n",
+            "Head branch: `feat/demo-upstream-overlay`\n",
+            "Head: `177f46b753f55f7b37c22706a615ad687544a041`\n",
+            "FIX-ON-HEAD https://github.com/haiven-dev/haiven-sdk/pull/286#pullrequestreview-5912901233 head=177f46b753f55f7b37c22706a615ad687544a041\n",
+            "INLINE-THREADS-LOADED 0 head=177f46b753f55f7b37c22706a615ad687544a041\n",
+        );
+        let requeue = requeue_nonterminal_goal_hand_back(&doc, ROW, Some(1), prose)
+            .unwrap()
+            .expect("a **Summary** hand-back stays open when the goal final state is unmet");
+        assert_eq!(requeue.final_states, vec!["REVIEW-CLEAN", "BLOCKED"]);
+        assert!(!requeue.address_fix_pending);
+        assert!(!requeue.inline_threads_pending);
+        assert_ne!(
+            requeue.claim.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Reported
+        );
+        let content = fs::read_to_string(&doc).unwrap();
+        assert_eq!(content.matches(ROW).count(), 1, "{content}");
+        assert!(!content.contains("~~"), "{content}");
+        assert!(!content.contains("### Re: Subagent completed"), "{content}");
+        let ledger = agent_doc_queue_io::queue_claim::load_ledger(&doc).unwrap();
+        assert!(
+            ledger
+                .claims
+                .iter()
+                .all(|claim| !claim.state.blocks_dispatch()),
+            "{ledger:?}"
+        );
+        let attempts = agent_doc_queue_io::queue_lineage::load(&doc).unwrap();
+        assert!(
+            attempts.attempts.iter().all(|attempt| {
+                attempt.events.iter().all(|event| {
+                    event.kind
+                        != agent_doc_queue_io::queue_lineage::QueueLineageEventKind::ProseOnly
+                })
+            }),
+            "a prose hand-back is not prose_only"
+        );
+
+        let resumed = agent_doc_queue_io::cross_harness_handoff::resume_by_key(
+            &doc, &content, ROW, OWNER, 1, WORKER,
+        )
+        .unwrap();
+        match resumed {
+            agent_doc_queue_io::cross_harness_handoff::StoredResume::Recovered {
+                worktree,
+                branch,
+                head,
+                record,
+            } => {
+                assert_eq!(
+                    worktree,
+                    "/home/brian/work/btakita/worktrees/haiven-dev/haiven-sdk/addr-286-g2"
+                );
+                assert_eq!(branch, "feat/demo-upstream-overlay");
+                assert_eq!(head, "177f46b753f55f7b37c22706a615ad687544a041");
+                assert_eq!(record.key.session_id, SESSION);
+                assert_eq!(record.key.worker_id, WORKER);
+            }
+            other => panic!("the agent-doc key recovers the worktree: {other:?}"),
+        }
+        match agent_doc_queue_io::cross_harness_handoff::refuse_conversation(
+            &doc,
+            "grok",
+            GROK_CONVERSATION,
+        )
+        .unwrap()
+        {
+            agent_doc_queue_io::cross_harness_handoff::StoredResume::ConversationRefused {
+                conversation_id,
+                others,
+                ..
+            } => {
+                assert_eq!(conversation_id, GROK_CONVERSATION);
+                assert_eq!(others[0].key.worker_id, WORKER);
+                assert_eq!(others[0].worker_harness.as_deref(), Some("claude"));
+            }
+            other => panic!("the grok conversation does not continue the worker: {other:?}"),
+        }
+        let inbox = agent_doc_queue_io::cross_harness_handoff::list_inbox(&doc).unwrap();
+        assert_eq!(inbox.len(), 1);
+        assert_eq!(inbox[0].from_harness, "claude");
+        assert_eq!(inbox[0].owner_harness, "grok");
+        assert!(inbox[0].message.contains("Spawn the next worker"));
+
+        let (outcome, _) =
+            agent_doc_queue_io::queue_claim::claim(&doc, ROW, "subagent:addr-286-next", 600)
+                .expect("the requeued row is dispatchable again");
+        assert_eq!(
+            outcome,
+            agent_doc_queue::queue_claim::ClaimOutcome::Reassigned
+        );
+        let generation = agent_doc_queue_io::queue_claim::load_ledger(&doc)
+            .unwrap()
+            .claims
+            .iter()
+            .find(|claim| claim.owner == "subagent:addr-286-next")
+            .map(|claim| claim.generation)
+            .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            ROW,
+            "subagent:addr-286-next",
+            "worker:addr-286-next",
+            600,
+            generation,
+        )
+        .unwrap();
+        let clean = concat!(
+            "REVIEW-CLEAN https://github.com/haiven-dev/haiven-sdk/pull/286#pullrequestreview-5912901233 ",
+            "base=b6cfa91701ff0b482bf8d404e24b6a742d8cd0ca head=177f46b753f55f7b37c22706a615ad687544a041 cycles=2\n",
+            "FIX-ON-HEAD https://github.com/haiven-dev/haiven-sdk/pull/286#pullrequestreview-5912901233 head=177f46b753f55f7b37c22706a615ad687544a041\n",
+            "INLINE-THREADS-LOADED 0 head=177f46b753f55f7b37c22706a615ad687544a041\n",
+        );
+        assert!(
+            requeue_nonterminal_goal_hand_back(&doc, ROW, Some(generation), clean)
+                .unwrap()
+                .is_none(),
+            "REVIEW-CLEAN still takes the ordinary report path"
+        );
+    }
+
     /// `#operatororderclosed`: BLOCKED on a human review the preset already
     /// refuses to approve or dismiss stays the same open row. It is not an
     /// operator question, and it does not post another review. A later

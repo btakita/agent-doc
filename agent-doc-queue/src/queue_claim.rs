@@ -917,11 +917,13 @@ impl QueueClaim {
 /// field is optional: each one only adds a liveness signal when present.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClaimOwnerSession {
-    /// Which harness `session_id` came from (`claude`, `codex`). Session ids
-    /// are only compared within one harness.
+    /// Which harness `session_id` came from (`claude`, `codex`, `grok`). Session
+    /// ids are only compared within one harness. A conversation id does not
+    /// resume another harness's worker (`#crossagenthandoff`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub harness: Option<String>,
-    /// The harness session id (`CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`).
+    /// The harness session id (`GROK_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`,
+    /// `CODEX_THREAD_ID`).
     /// A subagent inherits its coordinator's, so a claim a subagent makes is
     /// still bound to the coordinator session.
     #[serde(default, skip_serializing_if = "Option::is_none")]

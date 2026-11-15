@@ -109,7 +109,11 @@ fn owner_session_from_env(var: impl Fn(&str) -> Option<String>) -> Option<ClaimO
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty())
     };
-    let (harness, session_id) = if let Some(id) = present("CLAUDE_CODE_SESSION_ID") {
+    // Grok wins when both are set, matching `detect_harness`. The conversation
+    // id names the owner harness. It is not a resume key (`#crossagenthandoff`).
+    let (harness, session_id) = if let Some(id) = present("GROK_SESSION_ID") {
+        (Some("grok".to_string()), Some(id))
+    } else if let Some(id) = present("CLAUDE_CODE_SESSION_ID") {
         (Some("claude".to_string()), Some(id))
     } else if let Some(id) = present("CODEX_THREAD_ID") {
         (Some("codex".to_string()), Some(id))
@@ -4552,6 +4556,23 @@ mod tests {
         assert_eq!(claude.pid, Some(4242));
         let codex = owner_session_from_env(env(&[("CODEX_THREAD_ID", "t1")])).unwrap();
         assert_eq!(codex.harness.as_deref(), Some("codex"));
+        let grok = owner_session_from_env(env(&[(
+            "GROK_SESSION_ID",
+            "01a1e0e1-6a34-7a12-bd15-5fa98f34c9e5",
+        )]))
+        .unwrap();
+        assert_eq!(grok.harness.as_deref(), Some("grok"));
+        assert_eq!(
+            grok.session_id.as_deref(),
+            Some("01a1e0e1-6a34-7a12-bd15-5fa98f34c9e5")
+        );
+        let grok_over_claude = owner_session_from_env(env(&[
+            ("GROK_SESSION_ID", "grok-session"),
+            ("CLAUDE_CODE_SESSION_ID", "claude-session"),
+        ]))
+        .unwrap();
+        assert_eq!(grok_over_claude.harness.as_deref(), Some("grok"));
+        assert_eq!(grok_over_claude.session_id.as_deref(), Some("grok-session"));
         assert_eq!(owner_session_from_env(env(&[])), None);
 
         let dir = tempfile::tempdir().unwrap();

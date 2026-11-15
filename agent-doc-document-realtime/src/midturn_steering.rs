@@ -2177,17 +2177,47 @@ fn forward_to_owner_instruction(document: &str, item: &SteeringItem, harness: &s
         shell_single_quote(item.claim_text()),
         generation,
     );
-    if grok_claimed_owner_forward(harness, item) {
-        return grok_send_subagent_message_instruction(item, &requeue);
-    }
+    let body = if grok_claimed_owner_forward(harness, item) {
+        grok_send_subagent_message_instruction(item, &requeue)
+    } else {
+        format!(
+            "{} If the harness reports that the exact worker is unavailable or has exited, the \
+             handoff did NOT happen: do not drop this operator answer/edit, claim it was forwarded, \
+             or keep routing only to the unreachable owner. Preserve `verbatim` in the queue and run \
+             `{requeue}`. That generation-fenced transition abandons only the stale attempt and makes \
+             the edited row redispatchable; let the normal queue dispatcher start its replacement \
+             under a fresh generation.",
+            instruction_for(item),
+        )
+    };
     format!(
-        "{} If the harness reports that the exact worker is unavailable or has exited, the \
-         handoff did NOT happen: do not drop this operator answer/edit, claim it was forwarded, \
-         or keep routing only to the unreachable owner. Preserve `verbatim` in the queue and run \
-         `{requeue}`. That generation-fenced transition abandons only the stale attempt and makes \
-         the edited row redispatchable; let the normal queue dispatcher start its replacement \
-         under a fresh generation.",
-        instruction_for(item),
+        "{body}{}",
+        cross_harness_control_sentence(document, item, &generation)
+    )
+}
+
+/// A helper that needs another worker reaches a different-harness owning
+/// session through `queue control` (`#crossagenthandoff`). Same-harness
+/// delivery stays on the native tool.
+fn cross_harness_control_sentence(document: &str, item: &SteeringItem, generation: &str) -> String {
+    let worker = item
+        .worker_id
+        .as_deref()
+        .filter(|worker| !worker.trim().is_empty())
+        .unwrap_or("<worker>");
+    let owner = item.owner.as_deref().unwrap_or("<owner>");
+    format!(
+        " When the queue-owning session is a different harness, that native send does not reach \
+         it (#crossagenthandoff). Record the request for that session with `agent-doc queue \
+         control {} --item {} --owner {} --generation {generation} --worker {} --from-harness \
+         <this-harness> --owner-harness <owner-harness> --message <request>`. The owning session \
+         reads it with `agent-doc queue control {} --list`. Same-harness delivery stays on the \
+         native tool and is not stored.",
+        shell_single_quote(document),
+        shell_single_quote(item.claim_text()),
+        shell_single_quote(owner),
+        shell_single_quote(worker),
+        shell_single_quote(document),
     )
 }
 
@@ -5459,6 +5489,10 @@ mod tests {
                         "{harness}: {action}"
                     );
                     assert!(
+                        action.contains("queue control") && action.contains("#crossagenthandoff"),
+                        "{harness}: {action}"
+                    );
+                    assert!(
                         action.contains("Do NOT dispatch a new subagent"),
                         "{action}"
                     );
@@ -5477,6 +5511,10 @@ mod tests {
             )
             .unwrap();
             assert!(!text.contains("send_subagent_message"), "{harness}: {text}");
+            assert!(
+                text.contains("queue control") && text.contains("#crossagenthandoff"),
+                "{harness}: {text}"
+            );
             assert!(text.contains("FORWARD the change"), "{harness}: {text}");
             assert!(text.contains("SendMessage"), "{harness}: {text}");
             assert!(text.contains("#nestedoutwardauth"), "{harness}: {text}");

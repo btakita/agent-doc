@@ -5751,6 +5751,112 @@ enum QueueAction {
         /// Claim lifetime in seconds, renewed from this acknowledgement
         #[arg(long, default_value_t = agent_doc_queue::queue_claim::DEFAULT_QUEUE_CLAIM_TTL_SECS)]
         ttl_secs: u64,
+        /// Delivery worktree recorded for a cross-harness resume
+        /// (`#crossagenthandoff`). With `--branch` and `--head`, `queue start`
+        /// records the claim key.
+        #[arg(long, value_name = "PATH")]
+        worktree: Option<PathBuf>,
+        /// Branch of `--worktree`.
+        #[arg(long)]
+        branch: Option<String>,
+        /// Head commit of `--branch`.
+        #[arg(long)]
+        head: Option<String>,
+    },
+    /// Record an in-flight claim so another harness can resume it
+    /// (`#crossagenthandoff`). The key is the agent-doc session, this document,
+    /// the queue item, the owner, the generation, and the worker id.
+    Handoff {
+        /// Path to the session document
+        file: PathBuf,
+        /// The queue item: `#id` / `do [#id]` or the queue line's text
+        #[arg(long, value_name = "ID_OR_TEXT")]
+        item: String,
+        /// Claim owner, e.g. `subagent:<label>`
+        #[arg(long)]
+        owner: String,
+        /// Exact generation printed by `queue claim`
+        #[arg(long)]
+        generation: u64,
+        /// Worker id printed by `queue start`
+        #[arg(long)]
+        worker: String,
+        /// Delivery worktree
+        #[arg(long, value_name = "PATH")]
+        worktree: PathBuf,
+        /// Branch of `--worktree`
+        #[arg(long)]
+        branch: String,
+        /// Head commit of `--branch`
+        #[arg(long)]
+        head: String,
+        /// Worker harness (`claude`, `codex`, `grok`, `opencode`, `cursor`)
+        #[arg(long)]
+        worker_harness: Option<String>,
+        /// Owner-session harness. A conversation id is not accepted here.
+        #[arg(long)]
+        owner_harness: Option<String>,
+        /// Worker conversation id, stored only so it is not used as the key
+        #[arg(long)]
+        worker_conversation: Option<String>,
+    },
+    /// Resume an in-flight claim by its agent-doc key (`#crossagenthandoff`).
+    /// `--conversation` with `--harness` always refuses: a conversation id
+    /// does not continue another harness's worker. A complete key wins when
+    /// both are supplied.
+    Resume {
+        /// Path to the session document
+        file: PathBuf,
+        /// Queue item of the recorded key
+        #[arg(long, value_name = "ID_OR_TEXT")]
+        item: Option<String>,
+        /// Claim owner of the recorded key
+        #[arg(long)]
+        owner: Option<String>,
+        /// Generation of the recorded key
+        #[arg(long)]
+        generation: Option<u64>,
+        /// Worker id of the recorded key
+        #[arg(long)]
+        worker: Option<String>,
+        /// Harness of `--conversation`. Refuses continuation.
+        #[arg(long)]
+        harness: Option<String>,
+        /// Harness conversation id. Not a resume key.
+        #[arg(long)]
+        conversation: Option<String>,
+    },
+    /// Deliver a spawn or steer request to the queue-owning session
+    /// (`#crossagenthandoff`). Same-harness delivery names the native tool and
+    /// stores nothing. A different owner harness is stored in that session's
+    /// inbox. `--list` prints the inbox.
+    Control {
+        /// Path to the session document
+        file: PathBuf,
+        /// Queue item the helper is working
+        #[arg(long, value_name = "ID_OR_TEXT")]
+        item: Option<String>,
+        /// Claim owner
+        #[arg(long)]
+        owner: Option<String>,
+        /// Claim generation
+        #[arg(long)]
+        generation: Option<u64>,
+        /// Worker id
+        #[arg(long)]
+        worker: Option<String>,
+        /// Harness of the helper sending the request
+        #[arg(long)]
+        from_harness: Option<String>,
+        /// Harness of the queue-owning session
+        #[arg(long)]
+        owner_harness: Option<String>,
+        /// Request the owning session should act on
+        #[arg(long, allow_hyphen_values = true)]
+        message: Option<String>,
+        /// Print inbox messages for this document
+        #[arg(long)]
+        list: bool,
     },
     /// Publish immediate binary-owned `agent:exchange` feedback that a claimed
     /// background subagent reported back. The claim remains active while the
@@ -7096,6 +7202,69 @@ fn is_operator_usage_error(err: &anyhow::Error) -> bool {
             || cause.is::<agent_doc_queue::queue_claim::QueueClaimTransitionRefused>()
             || cause.is::<read::UnknownReadComponent>()
     })
+}
+
+/// Print a cross-harness resume, or refuse a conversation id (`#crossagenthandoff`).
+fn print_cross_harness_resume(
+    file: &std::path::Path,
+    decision: agent_doc_queue_io::cross_harness_handoff::StoredResume,
+) -> anyhow::Result<()> {
+    use agent_doc_queue_io::cross_harness_handoff::StoredResume;
+    match decision {
+        StoredResume::Recovered {
+            worktree,
+            branch,
+            head,
+            record,
+        } => {
+            println!(
+                "session: {}\ndocument: {}\nitem: {}\nowner: {}\ngeneration: {}\nworker: {}\nworktree: {worktree}\nbranch: {branch}\nhead: {head}",
+                record.key.session_id,
+                record.key.document_path,
+                record.key.item,
+                record.key.owner,
+                record.key.generation,
+                record.key.worker_id,
+            );
+            Ok(())
+        }
+        StoredResume::Incomplete { missing, record } => {
+            anyhow::bail!(
+                "handoff for worker {} generation {} is missing {}",
+                record.key.worker_id,
+                record.key.generation,
+                missing.join(", "),
+            )
+        }
+        StoredResume::Missing => {
+            anyhow::bail!("no handoff recorded for {}", file.display())
+        }
+        StoredResume::ConversationRefused {
+            harness,
+            conversation_id,
+            others,
+        } => {
+            let mut detail = format!(
+                "a {harness} conversation id does not continue another harness's worker. conversation {conversation_id} is not a resume key."
+            );
+            for record in others {
+                detail.push_str(&format!(
+                    "\nworker {} harness {} owner {} generation {} item {:?}. resume with agent-doc queue resume {} --item {:?} --owner {} --generation {} --worker {}",
+                    record.key.worker_id,
+                    record.worker_harness.as_deref().unwrap_or("unknown"),
+                    record.key.owner,
+                    record.key.generation,
+                    record.key.item,
+                    file.display(),
+                    record.key.item,
+                    record.key.owner,
+                    record.key.generation,
+                    record.key.worker_id,
+                ));
+            }
+            anyhow::bail!(detail)
+        }
+    }
 }
 
 /// Project a quota-blocked attempt onto its row and hand the coordinator its
@@ -10202,6 +10371,9 @@ fn try_main() -> anyhow::Result<()> {
                 worker_id,
                 generation,
                 ttl_secs,
+                worktree,
+                branch,
+                head,
             } => {
                 let claim = agent_doc_queue_io::queue_claim::start_attempt(
                     &file, &item, &owner, &worker_id, ttl_secs, generation,
@@ -10213,6 +10385,26 @@ fn try_main() -> anyhow::Result<()> {
                     &claim.item_text,
                     false,
                 )?;
+                if worktree.is_some() || branch.is_some() || head.is_some() {
+                    let content =
+                        agent_doc_document_realtime_io::try_resolve_current_document_content(
+                            &file,
+                            "queue_start_handoff",
+                        )?;
+                    let recorded =
+                        agent_doc_queue_io::cross_harness_handoff::record_start_location(
+                            &file,
+                            &content,
+                            &claim,
+                            worktree.as_deref(),
+                            branch.as_deref(),
+                            head.as_deref(),
+                        )?;
+                    eprintln!(
+                        "[queue] handoff recorded session {} worker {} generation {} (#crossagenthandoff)",
+                        recorded.key.session_id, recorded.key.worker_id, recorded.key.generation,
+                    );
+                }
                 eprintln!(
                     "[queue] started {:?} for {} generation {} on worker {:?} until {} (running)",
                     claim.item_text,
@@ -10221,6 +10413,180 @@ fn try_main() -> anyhow::Result<()> {
                     worker_id,
                     claim.expires_at_secs,
                 );
+                Ok(())
+            }
+            QueueAction::Handoff {
+                file,
+                item,
+                owner,
+                generation,
+                worker,
+                worktree,
+                branch,
+                head,
+                worker_harness,
+                owner_harness,
+                worker_conversation,
+            } => {
+                let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+                    &file,
+                    "queue_handoff",
+                )?;
+                let recorded = agent_doc_queue_io::cross_harness_handoff::record(
+                    &file,
+                    &content,
+                    agent_doc_queue_io::cross_harness_handoff::HandoffInput {
+                        item,
+                        owner,
+                        generation,
+                        worker_id: worker,
+                        owner_harness,
+                        worker_harness,
+                        worker_conversation_id: worker_conversation,
+                        worktree: Some(worktree.display().to_string()),
+                        branch: Some(branch),
+                        head: Some(head),
+                    },
+                )?;
+                println!(
+                    "session: {}\ndocument: {}\nitem: {}\nowner: {}\ngeneration: {}\nworker: {}\nworktree: {}\nbranch: {}\nhead: {}",
+                    recorded.key.session_id,
+                    recorded.key.document_path,
+                    recorded.key.item,
+                    recorded.key.owner,
+                    recorded.key.generation,
+                    recorded.key.worker_id,
+                    recorded.worktree.as_deref().unwrap_or(""),
+                    recorded.branch.as_deref().unwrap_or(""),
+                    recorded.head.as_deref().unwrap_or(""),
+                );
+                Ok(())
+            }
+            QueueAction::Resume {
+                file,
+                item,
+                owner,
+                generation,
+                worker,
+                harness,
+                conversation,
+            } => {
+                let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+                    &file,
+                    "queue_resume",
+                )?;
+                let key_complete = matches!(
+                    (&item, &owner, generation, &worker),
+                    (Some(_), Some(_), Some(_), Some(_))
+                );
+                let key_absent = matches!(
+                    (&item, &owner, generation, &worker),
+                    (None, None, None, None)
+                );
+                if key_complete {
+                    let decision = agent_doc_queue_io::cross_harness_handoff::resume_by_key(
+                        &file,
+                        &content,
+                        item.as_deref().unwrap_or(""),
+                        owner.as_deref().unwrap_or(""),
+                        generation.unwrap_or(0),
+                        worker.as_deref().unwrap_or(""),
+                    )?;
+                    print_cross_harness_resume(&file, decision)?;
+                } else if !key_absent {
+                    anyhow::bail!(
+                        "queue resume needs --item --owner --generation --worker, or --conversation with --harness"
+                    );
+                } else if let (Some(harness), Some(conversation)) = (harness, conversation) {
+                    let decision = agent_doc_queue_io::cross_harness_handoff::refuse_conversation(
+                        &file,
+                        &harness,
+                        &conversation,
+                    )?;
+                    print_cross_harness_resume(&file, decision)?;
+                } else {
+                    anyhow::bail!(
+                        "queue resume needs --item --owner --generation --worker, or --conversation with --harness"
+                    );
+                }
+                Ok(())
+            }
+            QueueAction::Control {
+                file,
+                item,
+                owner,
+                generation,
+                worker,
+                from_harness,
+                owner_harness,
+                message,
+                list,
+            } => {
+                if list {
+                    let inbox = agent_doc_queue_io::cross_harness_handoff::list_inbox(&file)?;
+                    if inbox.is_empty() {
+                        println!("inbox: empty");
+                    }
+                    for message in inbox {
+                        println!(
+                            "inbox: from {} to {} owner {} generation {} worker {}\n{}",
+                            message.from_harness,
+                            message.owner_harness,
+                            message.owner,
+                            message.generation,
+                            message.worker_id,
+                            message.message,
+                        );
+                    }
+                    return Ok(());
+                }
+                let (
+                    Some(item),
+                    Some(owner),
+                    Some(generation),
+                    Some(worker),
+                    Some(from_harness),
+                    Some(owner_harness),
+                    Some(message),
+                ) = (
+                    item,
+                    owner,
+                    generation,
+                    worker,
+                    from_harness,
+                    owner_harness,
+                    message,
+                )
+                else {
+                    anyhow::bail!(
+                        "queue control needs --item --owner --generation --worker --from-harness --owner-harness --message, or --list"
+                    );
+                };
+                let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+                    &file,
+                    "queue_control",
+                )?;
+                match agent_doc_queue_io::cross_harness_handoff::post_control(
+                    &file,
+                    &content,
+                    &item,
+                    &owner,
+                    generation,
+                    &worker,
+                    &from_harness,
+                    &owner_harness,
+                    &message,
+                )? {
+                    agent_doc_queue_io::cross_harness_handoff::ControlPost::Native { tool } => {
+                        println!("native tool: {tool}. Same-harness delivery is not stored.");
+                    }
+                    agent_doc_queue_io::cross_harness_handoff::ControlPost::Stored(stored) => {
+                        println!(
+                            "inbox: stored for owning session {} from {}",
+                            stored.owner_harness, stored.from_harness
+                        );
+                    }
+                }
                 Ok(())
             }
             QueueAction::Release {
@@ -10488,7 +10854,7 @@ fn try_main() -> anyhow::Result<()> {
                         );
                     } else {
                         eprintln!(
-                            "[queue] goal-loop hand-back for {:?} (owner {}, generation {}) does not begin with a declared final state ({}); the row stays open and the attempt was requeued, so it is dispatchable again (#goalpresetterminal). Next: {} and dispatch the same row; its brief carries this hand-back. Do not close the row until a response line begins with a declared final state.",
+                            "[queue] goal-loop hand-back for {:?} (owner {}, generation {}) does not begin with REVIEW-CLEAN or BLOCKED ({}); the row stays open and the hand-back was returned to the owning session inbox, not consumed (#goalpresetterminal, #crossagenthandoff). A prose hand-back leaves the row open. It is not prose_consume. Next: {} and the owning session continues the same row; its brief carries this hand-back. Do not close the row until a response line begins with REVIEW-CLEAN or BLOCKED.",
                             requeue.claim.item_text,
                             requeue.claim.owner,
                             requeue.claim.generation,

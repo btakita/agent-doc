@@ -212,15 +212,19 @@ pub fn requeue_nonterminal_hand_back(
     let ordinary_empty = !address_run && !inline_goal && final_states.is_empty();
     let settled_inline_without_states =
         inline_goal && !inline_pending && !address_pending && final_states.is_empty();
+    // A landed `#address` receipt completes only a pure address run. A row
+    // that also declares goal final states stays open until the hand-back
+    // opens on REVIEW-CLEAN or BLOCKED (`#crossagenthandoff`).
+    let address_completes = address_lands && final_states.is_empty();
     if !address_pending
         && !inline_pending
-        && (ordinary_empty || settled_inline_without_states || completes_order || address_lands)
+        && (ordinary_empty || settled_inline_without_states || completes_order || address_completes)
     {
         let reportable = reopen_if_reportable_lost(file, &claim, generation, response)?;
         // `#lostrowreportreopen`: the recorded hand-off is the gate-requeue
         // proof a reopen needs. Retire it only once this report can land; a
         // refused report keeps it for the next attempt.
-        if reportable && (completes_order || address_lands || settled_inline_without_states) {
+        if reportable && (completes_order || address_completes || settled_inline_without_states) {
             let identity = claim.identity.clone();
             let live = agent_doc_queue::queue_continuation::live_queue_head_identities(content);
             mutate(file, |ledger| {
@@ -260,6 +264,7 @@ pub fn requeue_nonterminal_hand_back(
         }
         ledger.record(handoff);
     })?;
+    crate::cross_harness_handoff::record_goal_requeue(file, content, &claim, response)?;
     let requeued = crate::claim_release_receipt::release_attempt(
         file,
         &claim.item_text,

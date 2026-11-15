@@ -338,11 +338,22 @@ Progress (`#implementlazilyowned`):
   harmlessly. Contract tests:
   `queue_maintenance_effect_cas::tests::changed_authority_supersedes_each_effect_adapter_and_leaves_its_backend_unchanged`
   and siblings.
+- Controller/ledger SQLite adapter: `agent_doc_sqlite::ledger_cas::TerminalTurnLedgerAppend`
+  is the `CompareAndApply` adapter for the terminal closeout append. Its
+  authority is `TerminalTurnAuthority` (latest checkpointed cycle, bound actor
+  session/pane/generation, live `turn_active` lease); `compare_and_apply`
+  re-reads it inside one `BEGIN IMMEDIATE` transaction and inserts the facts
+  only on a match, so a moved cycle, rebound actor, or live turn is Lazily
+  `Superseded` and writes zero rows. `insert_state_events_if_terminal_turn_fence_in_db`
+  is now one Lazily epoch through `ledger_cas::append_if_terminal_turn`
+  (`FenceChanged` = superseded). The actor-generation fenced writes
+  (`store_actor_record_fenced_tx`, `delete_actor_document_fenced_tx`) are the
+  next consumers of the same adapter shape.
 - Not yet done: the caller-side `RetryableHeadMoved`/`RetryableIndexLock`
   retry loops in `agent-doc-commit-io` (they now retry a Lazily `Superseded` /
   `Retryable` outcome, but the loop itself is still application-owned; triage
-  rows), the controller/ledger SQLite transaction adapter for the remaining
-  `controller-ledger-sqlite` triage rows, persisting
+  rows), moving the remaining `controller-ledger-sqlite` seams (actor generation,
+  closeout lease, drain-owner claims) onto the SQLite adapter, persisting
   per-step plan receipts for crash resume inside one request (today a resumed
   request re-derives its idempotent effects), reordering the maintenance body
   so the document cut is the first plan step, triage of the `triage` rows, and

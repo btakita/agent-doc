@@ -5502,89 +5502,19 @@ pub fn insert_state_event_in_db(conn: &Connection, event: &StateEventInsert<'_>)
 }
 
 /// Append terminal closeout facts only if cycle, actor binding, and inactive
-/// turn status still match one observation. All predicates and inserts share a
-/// single `BEGIN IMMEDIATE` transaction, so actor/turn writers either land
-/// first (and defeat the fence) or wait until the terminal transition commits.
+/// turn status still match one observation (`#implementlazilyowned`).
+///
+/// This is one `lazily::EffectCasCore` epoch over the
+/// [`crate::ledger_cas::TerminalTurnLedgerAppend`] adapter: the comparison and
+/// the inserts share a single `BEGIN IMMEDIATE` transaction, so actor/turn
+/// writers either land first (and supersede the append, writing nothing) or
+/// wait until the terminal transition commits.
 pub fn insert_state_events_if_terminal_turn_fence_in_db(
     conn: &mut Connection,
     fence: &TerminalTurnFenceCheck<'_>,
     events: &[StateEventInsert<'_>],
 ) -> Result<FencedStateEventInsert> {
-    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    let checkpoint_payload: Option<String> = tx
-        .query_row(
-            "SELECT payload_json FROM state_events \
-             WHERE document_hash = ?1 AND fact_type = 'turn_intent_checkpointed' \
-             ORDER BY document_version DESC, id DESC LIMIT 1",
-            [fence.document_hash],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let current_cycle_id = checkpoint_payload
-        .as_deref()
-        .and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok())
-        .and_then(|event| {
-            event
-                .get("fact")?
-                .get("cycle_id")?
-                .as_str()
-                .map(str::to_string)
-        });
-    if current_cycle_id.as_deref() != Some(fence.expected_cycle_id) {
-        return Ok(FencedStateEventInsert::FenceChanged);
-    }
-
-    let actor: Option<(String, String, u64)> = tx
-        .query_row(
-            "SELECT session_id, pane_id, generation FROM documents WHERE document_id = ?1",
-            [fence.document_id],
-            |row| {
-                let generation: i64 = row.get(2)?;
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    u64::try_from(generation).unwrap_or_default(),
-                ))
-            },
-        )
-        .optional()?;
-    let actor_matches = match (
-        fence.session_id,
-        fence.pane_id,
-        fence.generation,
-        actor.as_ref(),
-    ) {
-        (None, None, None, None) => true,
-        (Some(session), Some(pane), Some(generation), Some(current)) => {
-            current.0 == session && current.1 == pane && current.2 == generation
-        }
-        _ => false,
-    };
-    if !actor_matches {
-        return Ok(FencedStateEventInsert::FenceChanged);
-    }
-
-    if let Some(pane) = fence.pane_id {
-        let live_turn_count: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM coordination_leases \
-             WHERE scope_kind = 'turn_active' \
-               AND heartbeat_secs > ?1 \
-               AND ((scope_id = ?2 AND holder = ?2) \
-                    OR (scope_id = 'project' AND holder = ?2))",
-            params![fence.active_after_secs as i64, pane],
-            |row| row.get(0),
-        )?;
-        if live_turn_count > 0 {
-            return Ok(FencedStateEventInsert::FenceChanged);
-        }
-    }
-
-    let inserted = events
-        .iter()
-        .map(|event| insert_state_event_in_db(&tx, event))
-        .collect::<Result<Vec<_>>>()?;
-    tx.commit()?;
-    Ok(FencedStateEventInsert::Applied(inserted))
+    crate::ledger_cas::append_if_terminal_turn(conn, fence, events)
 }
 
 /// Rekey one document's typed state history after a path rename.

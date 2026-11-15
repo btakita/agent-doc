@@ -17,6 +17,9 @@
 //! - `premise_statement_index` — per-document principle and fact statement
 //!   digests (`#firstprinciplesrederive`); a changed or removed premise puts
 //!   its derived conclusions in the cycle contract.
+//! - `ledger_cas` — Lazily-owned controller/ledger SQLite CAS adapter
+//!   (`#implementlazilyowned`): one IMMEDIATE transaction compares the
+//!   terminal-turn authority and appends closeout facts.
 //! - `op_log` — operation-log tables (actor + causal/Lamport tagging) in the sole
 //!   controller `state.db` for the operation-scoped drift model.
 //! - `steering_gate_log` — the steering typing-completion gate's decision
@@ -33,6 +36,7 @@ pub mod answer_ledger_derivations;
 pub mod answer_ledger_index;
 pub mod archive_index;
 pub mod context_injection_ledger;
+pub mod ledger_cas;
 pub mod op_log;
 pub mod premise_statement_index;
 pub mod reliable_sync_inbox;

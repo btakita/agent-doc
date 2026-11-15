@@ -1,0 +1,526 @@
+//! Lazily-owned controller/ledger SQLite CAS (`#implementlazilyowned`).
+//!
+//! The controller's typed ledger lives in `state.db`, and one
+//! `BEGIN IMMEDIATE` transaction is that backend's atomic comparator.
+//! [`TerminalTurnLedgerAppend`] is the narrow `lazily::CompareAndApply`
+//! adapter for the terminal closeout append: `observe` reads the ledger's
+//! terminal-turn authority ([`TerminalTurnAuthority`]: the latest checkpointed
+//! cycle, the bound actor, and whether that actor's turn is still live)
+//! without side effects, and `compare_and_apply` re-reads it inside one
+//! IMMEDIATE transaction and appends the closeout facts only when it equals
+//! the attempt's expected authority. A mismatch rolls the transaction back,
+//! writes zero rows, and is reported to Lazily as `Superseded { observed }`; a
+//! SQLite failure is `Rejected`. The adapter never retries and never chooses a
+//! newer intent.
+//!
+//! `lazily::EffectCasCore` owns the append's identity, expected authority,
+//! single-flight claim, and supersession: [`append_if_terminal_turn`] runs one
+//! desired epoch. A terminal closeout whose turn authority moved does not want
+//! its facts any more, so a supersession is final; nothing re-desires it.
+
+use std::cell::RefCell;
+
+use anyhow::Result;
+use lazily::{
+    CompareAndApply, EffectApply, EffectAttempt, EffectCasApplied, EffectCasClaim, EffectCasCore,
+    EffectCasFailure, EffectCasOutcome, EffectCasUpsert, EffectIdentity, EffectIntent, EffectPlan,
+};
+use rusqlite::{Connection, OptionalExtension, params};
+
+use crate::state_store::{
+    FencedStateEventInsert, StateEventInsert, TerminalTurnFenceCheck, insert_state_event_in_db,
+};
+
+/// The single actor generation of these in-process cores: every append owns
+/// its own core, so they never reconnect.
+const GENERATION: u64 = 0;
+
+/// Logical clock for claims: a terminal append never schedules a timed retry.
+const NOW: u64 = 0;
+
+/// The actor a terminal closeout is bound to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalTurnActor {
+    pub session_id: String,
+    pub pane_id: String,
+    pub generation: u64,
+}
+
+/// Opaque authority of the terminal-turn ledger for one document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalTurnAuthority {
+    /// Cycle id of the latest `turn_intent_checkpointed` fact.
+    pub cycle_id: Option<String>,
+    /// The document's bound actor (`documents` row).
+    pub actor: Option<TerminalTurnActor>,
+    /// Whether the fence pane still holds a live `turn_active` lease.
+    pub live_turn: bool,
+}
+
+impl TerminalTurnFenceCheck<'_> {
+    /// The authority a terminal append expects: the fence's cycle and actor,
+    /// with no live turn. `None` when the fence names a partial actor, which
+    /// no ledger state can equal.
+    pub fn expected_authority(&self) -> Option<TerminalTurnAuthority> {
+        let actor = match (self.session_id, self.pane_id, self.generation) {
+            (None, None, None) => None,
+            (Some(session_id), Some(pane_id), Some(generation)) => Some(TerminalTurnActor {
+                session_id: session_id.to_string(),
+                pane_id: pane_id.to_string(),
+                generation,
+            }),
+            _ => return None,
+        };
+        Some(TerminalTurnAuthority {
+            cycle_id: Some(self.expected_cycle_id.to_string()),
+            actor,
+            live_turn: false,
+        })
+    }
+}
+
+/// Effect-free read of the terminal-turn authority. Inside an IMMEDIATE
+/// transaction it is the comparator's observation; on a plain connection it is
+/// Lazily's `observe`.
+pub fn read_terminal_turn_authority(
+    conn: &Connection,
+    fence: &TerminalTurnFenceCheck<'_>,
+) -> Result<TerminalTurnAuthority> {
+    let checkpoint_payload: Option<String> = conn
+        .query_row(
+            "SELECT payload_json FROM state_events \
+             WHERE document_hash = ?1 AND fact_type = 'turn_intent_checkpointed' \
+             ORDER BY document_version DESC, id DESC LIMIT 1",
+            [fence.document_hash],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let cycle_id = checkpoint_payload
+        .as_deref()
+        .and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok())
+        .and_then(|event| {
+            event
+                .get("fact")?
+                .get("cycle_id")?
+                .as_str()
+                .map(str::to_string)
+        });
+    let actor = conn
+        .query_row(
+            "SELECT session_id, pane_id, generation FROM documents WHERE document_id = ?1",
+            [fence.document_id],
+            |row| {
+                let generation: i64 = row.get(2)?;
+                Ok(TerminalTurnActor {
+                    session_id: row.get(0)?,
+                    pane_id: row.get(1)?,
+                    generation: u64::try_from(generation).unwrap_or_default(),
+                })
+            },
+        )
+        .optional()?;
+    let live_turn = match fence.pane_id {
+        None => false,
+        Some(pane) => {
+            let live_turn_count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM coordination_leases \
+                 WHERE scope_kind = 'turn_active' \
+                   AND heartbeat_secs > ?1 \
+                   AND ((scope_id = ?2 AND holder = ?2) \
+                        OR (scope_id = 'project' AND holder = ?2))",
+                params![fence.active_after_secs as i64, pane],
+                |row| row.get(0),
+            )?;
+            live_turn_count > 0
+        }
+    };
+    Ok(TerminalTurnAuthority {
+        cycle_id,
+        actor,
+        live_turn,
+    })
+}
+
+/// Which document's terminal ledger an append targets.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TerminalTurnKey {
+    pub document_hash: String,
+}
+
+/// Payload of one terminal append: the event ids it writes (identity only;
+/// the rows themselves are borrowed by the adapter).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalTurnAppend {
+    pub event_ids: Vec<String>,
+}
+
+/// Receipt of an applied append: per event, whether it inserted a new row
+/// (`false` = the event id already existed, an idempotent repeat).
+pub type TerminalTurnReceipt = Vec<bool>;
+
+type TerminalTurnCore = EffectCasCore<
+    TerminalTurnKey,
+    TerminalTurnAuthority,
+    TerminalTurnAppend,
+    TerminalTurnReceipt,
+    String,
+>;
+
+/// `lazily::CompareAndApply` adapter: compare the terminal-turn authority and
+/// append the closeout facts in one IMMEDIATE transaction.
+pub struct TerminalTurnLedgerAppend<'c, 'f, 'e> {
+    conn: RefCell<&'c mut Connection>,
+    fence: &'f TerminalTurnFenceCheck<'f>,
+    events: &'e [StateEventInsert<'e>],
+    error: RefCell<Option<anyhow::Error>>,
+}
+
+impl<'c, 'f, 'e> TerminalTurnLedgerAppend<'c, 'f, 'e> {
+    pub fn new(
+        conn: &'c mut Connection,
+        fence: &'f TerminalTurnFenceCheck<'f>,
+        events: &'e [StateEventInsert<'e>],
+    ) -> Self {
+        Self {
+            conn: RefCell::new(conn),
+            fence,
+            events,
+            error: RefCell::new(None),
+        }
+    }
+
+    fn take_error(&self) -> Option<anyhow::Error> {
+        self.error.borrow_mut().take()
+    }
+
+    fn transact(
+        &self,
+        expected: &TerminalTurnAuthority,
+    ) -> Result<EffectApply<TerminalTurnReceipt, TerminalTurnAuthority, String>> {
+        let mut conn = self.conn.borrow_mut();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let observed = read_terminal_turn_authority(&tx, self.fence)?;
+        if &observed != expected {
+            // Dropping the transaction rolls it back: zero rows written.
+            return Ok(EffectApply::Superseded { observed });
+        }
+        let inserted = self
+            .events
+            .iter()
+            .map(|event| insert_state_event_in_db(&tx, event))
+            .collect::<Result<Vec<_>>>()?;
+        tx.commit()?;
+        Ok(EffectApply::Applied {
+            receipt: inserted,
+            authority: observed,
+        })
+    }
+}
+
+impl
+    CompareAndApply<TerminalTurnKey, TerminalTurnAuthority, TerminalTurnAppend, TerminalTurnReceipt>
+    for TerminalTurnLedgerAppend<'_, '_, '_>
+{
+    type Error = String;
+
+    fn observe(&self, _key: &TerminalTurnKey) -> Result<TerminalTurnAuthority, String> {
+        let conn = self.conn.borrow();
+        read_terminal_turn_authority(&conn, self.fence).map_err(|error| format!("{error:#}"))
+    }
+
+    fn compare_and_apply(
+        &self,
+        attempt: &EffectAttempt<
+            TerminalTurnKey,
+            TerminalTurnAuthority,
+            TerminalTurnAppend,
+            TerminalTurnReceipt,
+        >,
+    ) -> EffectApply<TerminalTurnReceipt, TerminalTurnAuthority, String> {
+        match self.transact(&attempt.expected) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                let rendered = format!("{error:#}");
+                *self.error.borrow_mut() = Some(error);
+                EffectApply::Rejected(rendered)
+            }
+        }
+    }
+}
+
+/// Append terminal closeout facts as one Lazily-owned effect epoch whose
+/// expected authority is `fence`'s cycle and actor with no live turn. A moved
+/// authority is `FenceChanged` (Lazily `Superseded`) and writes nothing.
+pub fn append_if_terminal_turn(
+    conn: &mut Connection,
+    fence: &TerminalTurnFenceCheck<'_>,
+    events: &[StateEventInsert<'_>],
+) -> Result<FencedStateEventInsert> {
+    let Some(expected) = fence.expected_authority() else {
+        return Ok(FencedStateEventInsert::FenceChanged);
+    };
+    let key = TerminalTurnKey {
+        document_hash: fence.document_hash.to_string(),
+    };
+    let event_ids = events
+        .iter()
+        .map(|event| event.event_id.to_string())
+        .collect::<Vec<_>>();
+    let identity = EffectIdentity::new(format!(
+        "terminal-turn-ledger-append:{}:{}:{}#1",
+        fence.document_hash,
+        fence.expected_cycle_id,
+        event_ids.join(",")
+    ))
+    .map_err(|error| anyhow::anyhow!("invalid terminal ledger effect identity: {error:?}"))?;
+    let mut core = TerminalTurnCore::new(GENERATION);
+    match core
+        .upsert_desired(EffectIntent {
+            identity,
+            epoch: 1,
+            key: key.clone(),
+            expected,
+            plan: EffectPlan::single(TerminalTurnAppend { event_ids }),
+        })
+        .1
+    {
+        EffectCasUpsert::Accepted => {}
+        other => anyhow::bail!("terminal ledger append was not accepted: {other:?}"),
+    }
+    let attempt = match core.claim(&key, GENERATION, NOW).1 {
+        EffectCasClaim::Claimed(attempt) => attempt,
+        other => anyhow::bail!("terminal ledger append was not claimed: {other:?}"),
+    };
+    let adapter = TerminalTurnLedgerAppend::new(conn, fence, events);
+    let outcome = adapter.compare_and_apply(&attempt);
+    let applied = match &outcome {
+        EffectApply::Applied { receipt, .. } => Some(receipt.clone()),
+        _ => None,
+    };
+    match (
+        core.record_outcome(&key, &attempt.identity, outcome, NOW).1,
+        applied,
+    ) {
+        (EffectCasOutcome::Applied(EffectCasApplied::Completed { .. }), Some(receipt)) => {
+            Ok(FencedStateEventInsert::Applied(receipt))
+        }
+        (EffectCasOutcome::Failure(EffectCasFailure::Superseded), _) => {
+            Ok(FencedStateEventInsert::FenceChanged)
+        }
+        (EffectCasOutcome::Failure(EffectCasFailure::Rejected), _) => Err(adapter
+            .take_error()
+            .unwrap_or_else(|| anyhow::anyhow!("terminal ledger append was rejected"))),
+        (recorded, _) => {
+            anyhow::bail!("terminal ledger append outcome diverged from Lazily: {recorded:?}")
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state_store::{
+        CoordinationLeaseRecord, insert_actor_transition, load_state_events_from_db, open_state_db,
+        upsert_actor_document, upsert_coordination_lease_in_db,
+    };
+    use agent_doc_controller::actor::{ActorLastTransition, ActorRecord, ActorState};
+
+    const DOCUMENT_ID: &str = "tasks/ledger-cas.md";
+    const DOCUMENT_HASH: &str = "ledger-cas-document-hash";
+
+    fn checkpoint(conn: &Connection, event_id: &str, cycle_id: &str) -> Result<()> {
+        let payload = serde_json::json!({
+            "event_id": event_id,
+            "fact": {
+                "type": "turn_intent_checkpointed",
+                "document_hash": DOCUMENT_HASH,
+                "cycle_id": cycle_id,
+                "checkpoint_sequence": 1,
+                "state_sha256": "state",
+                "state_json": "{}"
+            }
+        })
+        .to_string();
+        insert_state_event_in_db(
+            conn,
+            &StateEventInsert {
+                event_id,
+                document_hash: DOCUMENT_HASH,
+                domain: "closeout",
+                fact_type: "turn_intent_checkpointed",
+                payload_json: &payload,
+            },
+        )?;
+        Ok(())
+    }
+
+    fn bind_actor(conn: &Connection, generation: u64) -> Result<()> {
+        let actor = ActorRecord {
+            document_id: DOCUMENT_ID.to_string(),
+            session_id: "session-ledger".to_string(),
+            generation,
+            pane_id: "%88".to_string(),
+            window_id: "@8".to_string(),
+            harness: "codex".to_string(),
+            state: ActorState::Ready,
+            last_transition: ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "initial_binding".to_string(),
+                timestamp: 100,
+                prior_generation: generation.saturating_sub(1),
+                new_generation: generation,
+            },
+        };
+        let transition = insert_actor_transition(conn, None, &actor)?;
+        upsert_actor_document(conn, &actor, transition, None, None)?;
+        Ok(())
+    }
+
+    fn fence(generation: Option<u64>) -> TerminalTurnFenceCheck<'static> {
+        TerminalTurnFenceCheck {
+            document_id: DOCUMENT_ID,
+            document_hash: DOCUMENT_HASH,
+            expected_cycle_id: "cycle-1",
+            session_id: generation.map(|_| "session-ledger"),
+            pane_id: generation.map(|_| "%88"),
+            generation,
+            active_after_secs: 150,
+        }
+    }
+
+    fn terminal_payload() -> String {
+        serde_json::json!({
+            "event_id": "terminal-commit",
+            "fact": {
+                "type": "commit_observed",
+                "document_hash": DOCUMENT_HASH,
+                "cycle_id": "cycle-1",
+                "commit": "deadbeef"
+            }
+        })
+        .to_string()
+    }
+
+    fn terminal(payload: &str) -> [StateEventInsert<'_>; 1] {
+        [StateEventInsert {
+            event_id: "terminal-commit",
+            document_hash: DOCUMENT_HASH,
+            domain: "closeout",
+            fact_type: "commit_observed",
+            payload_json: payload,
+        }]
+    }
+
+    fn event_ids(conn: &Connection) -> Result<Vec<String>> {
+        Ok(load_state_events_from_db(conn, Some(DOCUMENT_HASH))?
+            .into_iter()
+            .map(|event| event.event_id)
+            .collect())
+    }
+
+    #[test]
+    fn matching_authority_applies_and_a_repeat_is_idempotent() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let mut conn = open_state_db(dir.path())?;
+        checkpoint(&conn, "checkpoint-1", "cycle-1")?;
+        bind_actor(&conn, 7)?;
+        let payload = terminal_payload();
+        assert_eq!(
+            append_if_terminal_turn(&mut conn, &fence(Some(7)), &terminal(&payload))?,
+            FencedStateEventInsert::Applied(vec![true])
+        );
+        assert_eq!(
+            append_if_terminal_turn(&mut conn, &fence(Some(7)), &terminal(&payload))?,
+            FencedStateEventInsert::Applied(vec![false]),
+            "the same event id is an idempotent repeat"
+        );
+        assert_eq!(event_ids(&conn)?, vec!["checkpoint-1", "terminal-commit"]);
+        Ok(())
+    }
+
+    /// Superseded contract: a moved cycle, a rebound actor generation, or a
+    /// live turn is Lazily `Superseded` and the ledger is unchanged.
+    #[test]
+    fn changed_authority_is_superseded_and_leaves_the_ledger_unchanged() -> Result<()> {
+        type Drift = fn(&Connection) -> Result<()>;
+        let drifts: [(&str, Drift); 3] = [
+            ("cycle", |conn| checkpoint(conn, "checkpoint-2", "cycle-2")),
+            ("actor", |conn| bind_actor(conn, 8)),
+            ("live_turn", |conn| {
+                upsert_coordination_lease_in_db(
+                    conn,
+                    &CoordinationLeaseRecord {
+                        scope_kind: "turn_active".to_string(),
+                        scope_id: "%88".to_string(),
+                        holder: "%88".to_string(),
+                        holder_pid: Some(std::process::id()),
+                        heartbeat_secs: 200,
+                    },
+                )
+            }),
+        ];
+        for (label, drift) in drifts {
+            let dir = tempfile::tempdir()?;
+            let mut conn = open_state_db(dir.path())?;
+            checkpoint(&conn, "checkpoint-1", "cycle-1")?;
+            bind_actor(&conn, 7)?;
+            let expected = fence(Some(7)).expected_authority().unwrap();
+            assert_eq!(
+                read_terminal_turn_authority(&conn, &fence(Some(7)))?,
+                expected
+            );
+            drift(&conn)?;
+            let observed = read_terminal_turn_authority(&conn, &fence(Some(7)))?;
+            assert_ne!(observed, expected, "{label}: the drift moved the authority");
+            let before = event_ids(&conn)?;
+            let payload = terminal_payload();
+            assert_eq!(
+                append_if_terminal_turn(&mut conn, &fence(Some(7)), &terminal(&payload))?,
+                FencedStateEventInsert::FenceChanged,
+                "{label}"
+            );
+            assert_eq!(event_ids(&conn)?, before, "{label}: zero rows written");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn adapter_reports_superseded_with_the_observed_authority() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let mut conn = open_state_db(dir.path())?;
+        checkpoint(&conn, "checkpoint-1", "cycle-1")?;
+        checkpoint(&conn, "checkpoint-2", "cycle-2")?;
+        let payload = terminal_payload();
+        let events = terminal(&payload);
+        let fence = fence(None);
+        let expected = fence.expected_authority().unwrap();
+        let adapter = TerminalTurnLedgerAppend::new(&mut conn, &fence, &events);
+        let key = TerminalTurnKey {
+            document_hash: DOCUMENT_HASH.to_string(),
+        };
+        let observed = adapter.observe(&key).unwrap();
+        assert_eq!(observed.cycle_id.as_deref(), Some("cycle-2"));
+        match adapter.transact(&expected)? {
+            EffectApply::Superseded { observed: reported } => assert_eq!(reported, observed),
+            other => panic!("expected Superseded, got {other:?}"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_partial_actor_fence_never_matches_and_writes_nothing() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let mut conn = open_state_db(dir.path())?;
+        checkpoint(&conn, "checkpoint-1", "cycle-1")?;
+        let mut partial = fence(None);
+        partial.pane_id = Some("%88");
+        assert_eq!(partial.expected_authority(), None);
+        let payload = terminal_payload();
+        assert_eq!(
+            append_if_terminal_turn(&mut conn, &partial, &terminal(&payload))?,
+            FencedStateEventInsert::FenceChanged
+        );
+        assert_eq!(event_ids(&conn)?, vec!["checkpoint-1"]);
+        Ok(())
+    }
+}

@@ -2452,6 +2452,7 @@ dependencies = [
  "agent-doc-topic",
  "agent-doc-turn",
  "anyhow",
+ "lazily 0.63.0",
  "parking_lot",
  "rusqlite",
  "serde",

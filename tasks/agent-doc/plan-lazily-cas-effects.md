@@ -700,6 +700,39 @@ Progress (`#implementlazilyowned`):
   No ledger rows change (no new CAS/fence/lease/retry identifiers). A crash
   between the editor CAS write and its cut receipt still resumes from the
   previous receipt and is rejected as superseded, as before.
+- Plan step 10 (phase 6 deletion and final audit): the migration never
+  shipped a dogfood/compatibility switch, so there was no switch to delete.
+  The duplicate state found and deleted is the captured-finalize
+  `needs_operator` latch in `agent_doc_supervisor::idle_watch::CapturedFinalizeResumeTriggers`:
+  it shadowed the latch on the Lazily retained intent
+  (`CapturedFinalizeResumeSchedule::needs_operator`, set from the same
+  verdict and retired by the same document edge). The schedule withholds the
+  effect-retry edge while the verdict stands, so the trigger graph needs no
+  copy; `require_operator` (which set the copy) is now the pure decision
+  `operator_verdict_latches` (`#retainconv` epoch comparison unchanged).
+  Messages, log markers, and retry caps are unchanged. Tests:
+  `agent_doc_supervisor::idle_watch::tests::a_state_edge_retires_an_operator_required_verdict`,
+  `a_verdict_with_no_pending_edge_still_latches`,
+  `a_state_edge_during_the_attempt_declines_the_operator_verdict`, and
+  `agent_doc_start_runtime_io::idle_watch::tests::retained_delivery_edge_rearms_captured_finalize_and_retires_operator_gate`
+  (the retained intent publishes no effect-retry edge an hour after the
+  verdict). Final source audit (2026-11-15): `tests/lazily_cas_callsite_ledger.rs`
+  passes with 133 `migrated`, 173 `lazily-adapter`, 33 `deleted`, 419
+  `excluded`, 0 `pending-migration`, 0 `triage`; every production
+  `for attempt in` loop is either a Lazily epoch driver
+  (`ref_cas::drive_ref_update`, `drive_commit_transaction`,
+  `queue_maintenance_effect_cas::drive_authority_observation`) or an
+  `excluded` transport / read-resilience / poll loop that compares no
+  authority (`run_supervisor_auto_install_with_retry`,
+  `coined_id_pretooluse` ledger reads, the codex-stop single opportunistic
+  resume, tmux composer proofs, focused-extract editor resume resends, the
+  auto-trigger poll), so no second application-owned retry/supersession loop
+  remains. Compatibility window kept on purpose: the JetBrains
+  `EffectFailureLedger` falls back to its previous Kotlin-side counts when
+  the loaded `libagent_doc` lacks the `agent_doc_effect_failure_record` /
+  `_clear` / `_clear_scope` symbols (first shipped after v0.35.574, the
+  latest tag). Delete that fallback once a released agent-doc carrying those
+  symbols is the plugin's minimum native library.
 - Plan step 9a (reorder so the document cut is the first plan step) is not
   landed: see "Resume here" step 9 for the read-after-write dependencies that
   block a behaviour-preserving reorder.
@@ -710,11 +743,11 @@ Progress (`#implementlazilyowned`):
 
 ## Resume here
 
-Status 2026-11-15 (after step 9b): ledger = 133 `migrated`, 173 `lazily-adapter`,
+Status 2026-11-15 (after steps 9b and 10): ledger = 133 `migrated`, 173 `lazily-adapter`,
 33 `deleted`, 419 `excluded`, 0 `pending-migration`, 0 `triage`. Every
 inventoried row is migrated; work the remaining steps sequentially in ONE
 worktree, one step per pushed commit, `make check` green before each push, in
-this order (next: step 9a, then step 10):
+this order (next: step 9a; then the coordinator's `make install` + recycle):
 
 1. DONE: actor-generation fenced writes (`store_actor_record_fenced_tx`,
    `delete_actor_document_fenced_tx`; 20 actor-generation rows) onto the
@@ -799,8 +832,11 @@ this order (next: step 9a, then step 10):
      without writing and the effect phase then applies the overlay after the
      cut receipt. The halt, time-gate, and main exits each persist a cut and
      must flush the effect phase after it.
-10. Phase 6 rollout: delete compatibility paths and duplicate state, final
-    source audit, then `make install` + recycle (coordinator only).
+10. DONE (except `make install` + recycle, coordinator only): phase 6
+    rollout. No compatibility switch existed; the duplicate captured-finalize
+    `needs_operator` latch is deleted; the final source audit passes; the
+    `EffectFailureLedger` Kotlin fallback is the recorded compatibility
+    window (see Progress).
 
 Per family: parity/`Superseded` contract test first, switch callers, delete
 the old loop, mark rows `migrated`/`deleted` with `absent:` proofs, update this
@@ -825,14 +861,22 @@ fence machinery under already-green behavioral regressions.
 
 ## Completion criteria
 
-- Lazily is the only owner of effect identity, single-flight, supersession,
-  retry/coalescing policy, and receipt matching.
-- agent-doc adapters contain atomic backend operations but no effect scheduler or
-  latest-wins state machine.
-- every stale or failed comparison is typed and produces no backend mutation.
-- queue maintenance resumes after crashes and authority changes without stale or
-  duplicate effects.
-- preflight stays under five seconds because comprehensive maintenance remains a
-  coalesced background effect.
-- source audits find no remaining agent-doc copies of the migrated orchestration
+Status 2026-11-15 (after steps 9b and 10):
+
+- MET: Lazily is the only owner of effect identity, single-flight, supersession,
+  retry/coalescing policy, and receipt matching. (Exception by design until a
+  native release ships: the JetBrains `EffectFailureLedger` Kotlin fallback.)
+- MET: agent-doc adapters contain atomic backend operations but no effect scheduler or
+  latest-wins state machine (ledger audit: 0 `pending-migration`, 0 `triage`).
+- MET: every stale or failed comparison is typed and produces no backend mutation.
+- PARTLY MET: queue maintenance resumes after crashes and authority changes without stale or
+  duplicate effects. Plan receipts persist and a resumed request continues
+  from its receipted cut without repeating replayable effects (9b). Not met
+  until 9a: pre-cut ledger/controller/snapshot effects still run before the
+  document cut, so a cut superseded after them leaves those (convergent)
+  effects describing a successor that never landed.
+- MET: preflight stays under five seconds because comprehensive maintenance remains a
+  coalesced background effect (the plan-progress writes run only in the
+  detached worker).
+- MET: source audits find no remaining agent-doc copies of the migrated orchestration
   protocol.

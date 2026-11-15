@@ -124,6 +124,12 @@ pub fn captured_finalize_resume_operator_message(file: &Path, reason_head: &str)
 /// consumes the current edge, the graph remains quiet until either the
 /// controller publishes a newer document-state edge or a genuinely failed
 /// effect's backoff expires.
+///
+/// The operator-required verdict is not held here. Its only latch is the
+/// idle watch's Lazily-owned retained intent (`CapturedFinalizeResumeSchedule`
+/// in `agent-doc-start-runtime-io`), which withholds the effect-retry edge
+/// while the verdict stands; a second copy of it in this graph was duplicate
+/// state (`#implementlazilyowned` plan step 10).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct CapturedFinalizeResumeTriggerProjection {
     operation_key: Option<String>,
@@ -131,13 +137,11 @@ struct CapturedFinalizeResumeTriggerProjection {
     consumed_state_epoch: u64,
     effect_retry_epoch: u64,
     consumed_effect_retry_epoch: u64,
-    needs_operator: bool,
 }
 
 impl CapturedFinalizeResumeTriggerProjection {
     fn ready(&self) -> bool {
         self.operation_key.is_some()
-            && !self.needs_operator
             && (self.state_epoch > self.consumed_state_epoch
                 || self.effect_retry_epoch > self.consumed_effect_retry_epoch)
     }
@@ -182,7 +186,6 @@ impl CapturedFinalizeResumeTriggers {
             return;
         }
         projection.operation_key = operation_key;
-        projection.needs_operator = false;
         projection.state_epoch = projection.state_epoch.saturating_add(1);
         projection.consumed_state_epoch = projection.state_epoch.saturating_sub(1);
         projection.consumed_effect_retry_epoch = projection.effect_retry_epoch;
@@ -191,8 +194,9 @@ impl CapturedFinalizeResumeTriggers {
 
     /// Publish a controller-owned document-state edge.
     ///
-    /// A state edge **retires** a prior `needs_operator` verdict
-    /// (`#needsoperatorstateedge`). That verdict means "this effect failed on the
+    /// A state edge re-arms the attempt, and the idle watch feeds the same edge
+    /// to its retained intent, which **retires** a prior `needs_operator`
+    /// verdict there (`#needsoperatorstateedge`). That verdict means "this effect failed on the
     /// document state as it was", not "this capture is unrecoverable forever":
     /// the classifier's default arm produces it for any error string it does not
     /// recognize, so an unfamiliar transient failure latched exactly like a real
@@ -209,15 +213,14 @@ impl CapturedFinalizeResumeTriggers {
     /// forever while `session-check` told the agent the controller owned the next
     /// closeout — a deadlock by mutual deferral.
     ///
-    /// This does not reintroduce blind retries: `observe_effect_retry_due` is
-    /// still gated on `!needs_operator` by the caller, so only a real
-    /// controller-published document transition can re-arm the attempt, and
-    /// obeying that edge feeds the same observation stream that clears it
-    /// (`#idlerevisionreactive`).
+    /// This does not reintroduce blind retries: the retained intent never
+    /// publishes `observe_effect_retry_due` while its `needs_operator` verdict
+    /// stands, so only a real controller-published document transition can
+    /// re-arm the attempt, and obeying that edge feeds the same observation
+    /// stream that clears it (`#idlerevisionreactive`).
     pub fn observe_state_edge(&self) {
         let mut projection = self.scope.ctx().get(&self.projection);
         projection.state_epoch = projection.state_epoch.saturating_add(1);
-        projection.needs_operator = false;
         self.scope.ctx().set(&self.projection, projection);
     }
 
@@ -238,11 +241,11 @@ impl CapturedFinalizeResumeTriggers {
         self.scope.ctx().set(&self.projection, projection);
     }
 
-    /// Record that the last attempt failed on evidence a blind retry cannot
-    /// change. Suppresses the effect-retry edge only; see
-    /// [`Self::observe_state_edge`] for why a document transition retires it.
-    ///
-    /// Returns whether the verdict actually latched.
+    /// Whether an operator-required verdict of the last attempt latches: the
+    /// attempt failed on evidence a blind retry cannot change. The caller
+    /// records the decision on its retained intent, which then suppresses the
+    /// effect-retry edge only; see [`Self::observe_state_edge`] for why a
+    /// document transition retires it.
     ///
     /// `#retainconv`: the verdict describes the document state the attempt ran
     /// *against*. When the controller publishes a newer state edge while that
@@ -257,20 +260,9 @@ impl CapturedFinalizeResumeTriggers {
     /// the resume latched at 18:49:17, nothing moved again, and the cycle stayed
     /// open until an operator ran `agent-doc commit`. Decline the latch so
     /// `ready()` fires on the edge that is already pending.
-    pub fn require_operator(&self) -> bool {
-        let mut projection = self.scope.ctx().get(&self.projection);
-        if projection.state_epoch > projection.consumed_state_epoch {
-            return false;
-        }
-        projection.needs_operator = true;
-        self.scope.ctx().set(&self.projection, projection);
-        true
-    }
-
-    /// Whether the last attempt latched an operator-required verdict that no
-    /// document-state edge has retired yet.
-    pub fn needs_operator(&self) -> bool {
-        self.scope.ctx().get(&self.projection).needs_operator
+    pub fn operator_verdict_latches(&self) -> bool {
+        let projection = self.scope.ctx().get(&self.projection);
+        projection.state_epoch <= projection.consumed_state_epoch
     }
 
     pub fn ready(&self) -> bool {
@@ -969,25 +961,19 @@ mod tests {
     /// evidence, so it retires the verdict and re-arms the attempt; otherwise the
     /// only thing that ever clears the flag is a different operation key, which a
     /// retained capture never gets, and the cycle stays open forever.
+    ///
+    /// The verdict itself is latched on the idle watch's retained intent (see
+    /// `agent-doc-start-runtime-io`); this graph contributes the re-arm.
     #[test]
     fn a_state_edge_retires_an_operator_required_verdict() {
         let triggers = CapturedFinalizeResumeTriggers::new();
         triggers.observe_operation(Some("cycle:capture:response".to_string()));
         triggers.consume_attempt();
 
-        triggers.require_operator();
-        assert!(triggers.needs_operator());
-        triggers.observe_effect_retry_due();
-        assert!(
-            !triggers.ready(),
-            "a blind backoff must not retry an operator-required verdict"
-        );
+        assert!(triggers.operator_verdict_latches());
+        assert!(!triggers.ready(), "a latched verdict publishes no edge");
 
         triggers.observe_state_edge();
-        assert!(
-            !triggers.needs_operator(),
-            "a document transition is new evidence and retires the verdict"
-        );
         assert!(
             triggers.ready(),
             "the controller's settled-delivery edge must re-arm the resume"
@@ -1013,10 +999,9 @@ mod tests {
         triggers.observe_state_edge();
 
         assert!(
-            !triggers.require_operator(),
+            !triggers.operator_verdict_latches(),
             "a verdict computed against a superseded document state must not latch"
         );
-        assert!(!triggers.needs_operator());
         assert!(
             triggers.ready(),
             "the edge that landed mid-attempt must still re-arm the resume"
@@ -1025,20 +1010,16 @@ mod tests {
 
     /// The decline is scoped to a genuinely pending edge — with no new evidence
     /// the verdict must still latch, or `#needsoperatorstateedge`'s blind-retry
-    /// suppression is gone.
+    /// suppression is gone. (The retained intent then withholds the
+    /// effect-retry edge; `agent-doc-start-runtime-io` asserts that half.)
     #[test]
     fn a_verdict_with_no_pending_edge_still_latches() {
         let triggers = CapturedFinalizeResumeTriggers::new();
         triggers.observe_operation(Some("cycle:capture:response".to_string()));
         triggers.consume_attempt();
 
-        assert!(triggers.require_operator());
-        assert!(triggers.needs_operator());
-        triggers.observe_effect_retry_due();
-        assert!(
-            !triggers.ready(),
-            "a blind backoff must not retry an operator-required verdict"
-        );
+        assert!(triggers.operator_verdict_latches());
+        assert!(!triggers.ready());
     }
 
     /// A hash identifies a failure; it never explains one. The diagnostic must

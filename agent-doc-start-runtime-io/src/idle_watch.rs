@@ -3299,12 +3299,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::NeedsOperator {
                             reason,
                         } => {
-                    // `#retainconv`: the triggers decline the latch when a
+                    // `#retainconv`: the verdict declines to latch when a
                     // controller state edge landed while this attempt was in
                     // flight — that edge can never retire a verdict recorded
-                    // after it. Mirror the decision here, or this second,
-                    // independent gate reproduces the deadlock on its own.
-                    let latched = resume_triggers.require_operator();
+                    // after it. The retained intent holds the only latch.
+                    let latched = resume_triggers.operator_verdict_latches();
                     // Either the operator gate owns the next attempt, or the
                     // already-pending state edge does. Neither wants a backoff
                     // edge published on top of it.
@@ -8040,13 +8039,21 @@ mod tests {
         };
         triggers.observe_operation(Some("cycle-a:capture-a:response-a".to_string()));
         triggers.consume_attempt();
-        let latched = triggers.require_operator();
+        let latched = triggers.operator_verdict_latches();
         let now = std::time::Instant::now();
         let mut retry = crate::idle_watch_schedules::CapturedFinalizeResumeSchedule::new();
         retry.observe_operation(&key);
         let attempt = retry.claim(now).expect("a fresh operation claims");
         retry.needs_operator_verdict(&attempt, &key, latched, "conflict", now);
         assert!(retry.needs_operator());
+        // The retained intent holds the only operator latch (plan step 10):
+        // it withholds the effect-retry edge however long the verdict stands,
+        // so the trigger graph stays quiet without a latch of its own.
+        assert!(
+            !retry.take_due_edge(now + std::time::Duration::from_secs(3600)),
+            "a blind backoff must not retry an operator-required verdict"
+        );
+        assert!(!triggers.ready());
 
         assert!(observe_captured_finalize_document_edge(
             &triggers, &mut retry, now,

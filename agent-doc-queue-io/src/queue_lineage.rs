@@ -84,6 +84,15 @@ pub enum QueueLineageEventKind {
     Dirty,
     Committed,
     Pushed,
+    /// Coordinator-owned, provisional (`#integrationinflight`): the worker's
+    /// source is merged into a candidate integration commit whose
+    /// verification (for example `make check` on the merged tree) is still
+    /// running. Bound to this attempt's generation, the attempt's recorded
+    /// source sha, and the candidate sha, with a deadline
+    /// ([`QueueLineageEvent::expires_at_secs`]). It is not integration proof
+    /// and contributes no repository facts; a later `integrated` receipt
+    /// supersedes it.
+    Integrating,
     Integrated,
     Released,
     Cancelled,
@@ -109,6 +118,7 @@ impl QueueLineageEventKind {
             "dirty" => Ok(Self::Dirty),
             "committed" => Ok(Self::Committed),
             "pushed" => Ok(Self::Pushed),
+            "integrating" => Ok(Self::Integrating),
             "integrated" => Ok(Self::Integrated),
             "released" => Ok(Self::Released),
             "cancelled" | "canceled" => Ok(Self::Cancelled),
@@ -116,7 +126,7 @@ impl QueueLineageEventKind {
             "removed" => Ok(Self::Removed),
             "prose-only" | "prose_only" => Ok(Self::ProseOnly),
             other => bail!(
-                "unknown lineage event {other:?}; expected created|attached|dirty|committed|pushed|integrated|released|cancelled|retained|removed|prose-only"
+                "unknown lineage event {other:?}; expected created|attached|dirty|committed|pushed|integrating|integrated|released|cancelled|retained|removed|prose-only"
             ),
         }
     }
@@ -128,6 +138,7 @@ impl QueueLineageEventKind {
             Self::Dirty => "dirty",
             Self::Committed => "committed",
             Self::Pushed => "pushed",
+            Self::Integrating => "integrating",
             Self::Integrated => "integrated",
             Self::Released => "released",
             Self::Cancelled => "cancelled",
@@ -301,7 +312,23 @@ pub struct QueueLineageEvent {
     pub release_state: Option<ReleaseState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    /// `integrating` only: the verification command running on the
+    /// candidate integration commit (`#integrationinflight`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification: Option<String>,
+    /// `integrating` only: when the in-flight record stops holding its
+    /// reported row quiescent (`#integrationinflight`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at_secs: Option<u64>,
 }
+
+/// Default lifetime of an `integrating` receipt (`#integrationinflight`):
+/// longer than a merged-tree `make check`, short enough that a forgotten
+/// record cannot quiet the closeout gate for a session.
+pub const DEFAULT_INTEGRATING_DEADLINE_SECS: u64 = 3600;
+
+/// Longest `--deadline-secs` an `integrating` receipt accepts.
+pub const MAX_INTEGRATING_DEADLINE_SECS: u64 = 4 * 3600;
 
 #[derive(Debug, Clone, Default)]
 pub struct RecordRequest {
@@ -324,6 +351,11 @@ pub struct RecordRequest {
     pub release_tag: Option<String>,
     pub release_state: Option<ReleaseState>,
     pub detail: Option<String>,
+    /// `--verification`: see [`QueueLineageEvent::verification`].
+    pub verification: Option<String>,
+    /// `--deadline-secs`: the `integrating` receipt's lifetime from its
+    /// record time ([`DEFAULT_INTEGRATING_DEADLINE_SECS`] when omitted).
+    pub deadline_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1229,9 +1261,28 @@ pub fn record_following_live_claim(
 
 fn event_from_request(request: RecordRequest) -> Result<QueueLineageEvent> {
     let nonempty = |value: Option<String>| value.filter(|v| !v.trim().is_empty());
+    let at_secs = request.at_secs.unwrap_or_else(now_secs);
+    let expires_at_secs = if request.kind == QueueLineageEventKind::Integrating {
+        let deadline = request
+            .deadline_secs
+            .unwrap_or(DEFAULT_INTEGRATING_DEADLINE_SECS);
+        if deadline == 0 || deadline > MAX_INTEGRATING_DEADLINE_SECS {
+            bail!(
+                "integrating lineage event --deadline-secs must be between 1 and {MAX_INTEGRATING_DEADLINE_SECS}"
+            );
+        }
+        Some(at_secs.saturating_add(deadline))
+    } else {
+        if request.deadline_secs.is_some() || nonempty(request.verification.clone()).is_some() {
+            bail!(
+                "--verification and --deadline-secs apply only to an `integrating` lineage event"
+            );
+        }
+        None
+    };
     let event = QueueLineageEvent {
         kind: request.kind,
-        at_secs: request.at_secs.unwrap_or_else(now_secs),
+        at_secs,
         worker_id: nonempty(request.worker_id),
         repo_path: request.repo_path.map(durable_path).transpose()?,
         source_repo_path: request.source_repo_path.map(durable_path).transpose()?,
@@ -1248,6 +1299,8 @@ fn event_from_request(request: RecordRequest) -> Result<QueueLineageEvent> {
         release_tag: nonempty(request.release_tag),
         release_state: request.release_state,
         detail: nonempty(request.detail),
+        verification: nonempty(request.verification),
+        expires_at_secs,
     };
     Ok(event)
 }
@@ -1313,6 +1366,43 @@ fn validate_transition(attempt: &QueueLineageAttempt, event: &QueueLineageEvent)
             {
                 bail!(
                     "--resolves names the source of a conflict-resolved integration; it applies only to `--method conflict-resolved`"
+                );
+            }
+        }
+        QueueLineageEventKind::Integrating => {
+            if event.source_sha.is_none()
+                || event.integration_sha.is_none()
+                || event.verification.is_none()
+            {
+                bail!(
+                    "integrating lineage event requires --source-sha, the candidate --integration-sha, and the running --verification command"
+                );
+            }
+            if event.integration_method.is_some()
+                || event.sink_ref.is_some()
+                || event.release_tag.is_some()
+                || event.release_state.is_some()
+            {
+                bail!(
+                    "integrating lineage event records only an integration in flight; --method, --sink-ref, and release facts belong to the `integrated` receipt that supersedes it"
+                );
+            }
+            if has(QueueLineageEventKind::Integrated) {
+                bail!(
+                    "queue lineage generation {} already records an integrated receipt; nothing is in flight",
+                    attempt.generation
+                );
+            }
+            let Some(recorded) = facts(attempt).source_sha else {
+                bail!(
+                    "queue lineage generation {} records no source sha; record the worker's repository work (`--event committed`) before an integration in flight",
+                    attempt.generation
+                );
+            };
+            let claimed = event.source_sha.as_deref().unwrap_or_default();
+            if !same_sha(&recorded, claimed) {
+                bail!(
+                    "integrating --source-sha {claimed} is not the source this attempt recorded ({recorded}); an integration in flight is bound to the reported source"
                 );
             }
         }
@@ -1435,7 +1525,13 @@ pub fn lineage_worktrees(ledger: &QueueLineageLedger) -> Vec<LineageWorktree> {
 
 fn facts(attempt: &QueueLineageAttempt) -> Facts {
     let mut facts = Facts::default();
-    for event in &attempt.events {
+    // `#integrationinflight`: an `integrating` receipt is provisional and
+    // carries no repository facts of its own.
+    for event in attempt
+        .events
+        .iter()
+        .filter(|event| event.kind != QueueLineageEventKind::Integrating)
+    {
         macro_rules! keep {
             ($field:ident) => {
                 if event.$field.is_some() {
@@ -1566,6 +1662,32 @@ fn verify_event(attempt: &QueueLineageAttempt, event: &QueueLineageEvent) -> Res
                     .context("missing designated sink ref")?,
             )?;
         }
+        QueueLineageEventKind::Integrating => {
+            // The candidate may live in an integration worktree or clone;
+            // `--repo` names it, else the attempt's sink repository.
+            let repo = event
+                .repo_path
+                .as_deref()
+                .or(event.sink_repo_path.as_deref())
+                .map(Path::new)
+                .or(sink_repo)
+                .context(
+                    "integrating lineage event needs the repository holding the candidate (--repo, or a recorded --sink-repo)",
+                )?;
+            let source = event.source_sha.as_deref().context("missing source SHA")?;
+            let candidate = event
+                .integration_sha
+                .as_deref()
+                .context("missing candidate integration SHA")?;
+            require_commit(repo, candidate, "candidate integration")?;
+            require_commit(repo, source, "source")?;
+            require_ancestor(
+                repo,
+                source,
+                candidate,
+                "the candidate integration commit does not contain the source",
+            )?;
+        }
         QueueLineageEventKind::Released => {
             if matches!(
                 event.release_state,
@@ -1616,6 +1738,111 @@ fn verify_event(attempt: &QueueLineageAttempt, event: &QueueLineageEvent) -> Res
         | QueueLineageEventKind::ProseOnly => {}
     }
     Ok(())
+}
+
+/// Whether two recorded shas name the same commit: equal, or one an
+/// abbreviation (at least seven hex digits) of the other.
+fn same_sha(left: &str, right: &str) -> bool {
+    let left = left.trim().to_ascii_lowercase();
+    let right = right.trim().to_ascii_lowercase();
+    let (short, long) = if left.len() <= right.len() {
+        (&left, &right)
+    } else {
+        (&right, &left)
+    };
+    short.len() >= 7 && short.chars().all(|c| c.is_ascii_hexdigit()) && long.starts_with(short)
+}
+
+/// `#integrationinflight`: the newest `integrating` receipt of `attempt`
+/// that no later `integrated`, `cancelled`, or refused-admission receipt
+/// supersedes, classified at `now_secs` against the attempt's current source.
+pub fn integration_in_flight(
+    attempt: &QueueLineageAttempt,
+    now_secs: u64,
+) -> Option<agent_doc_queue::transient_closeout::IntegrationInFlight> {
+    use agent_doc_queue::transient_closeout::{IntegrationInFlight, IntegrationInFlightStatus};
+    let index = attempt
+        .events
+        .iter()
+        .rposition(|event| event.kind == QueueLineageEventKind::Integrating)?;
+    if attempt.events[index + 1..].iter().any(|event| {
+        matches!(
+            event.kind,
+            QueueLineageEventKind::Integrated
+                | QueueLineageEventKind::Cancelled
+                | QueueLineageEventKind::AdmissionRefused
+        )
+    }) {
+        return None;
+    }
+    let event = &attempt.events[index];
+    let source_sha = event.source_sha.clone().unwrap_or_default();
+    let expires_at_secs = event.expires_at_secs.unwrap_or(event.at_secs);
+    let source_matches = facts(attempt)
+        .source_sha
+        .is_some_and(|recorded| same_sha(&recorded, &source_sha));
+    let status = if !source_matches {
+        IntegrationInFlightStatus::SourceMismatch
+    } else if now_secs >= expires_at_secs {
+        IntegrationInFlightStatus::Expired
+    } else {
+        IntegrationInFlightStatus::Live
+    };
+    Some(IntegrationInFlight {
+        generation: attempt.generation,
+        source_sha,
+        integration_sha: event.integration_sha.clone().unwrap_or_default(),
+        verification: event.verification.clone().unwrap_or_default(),
+        expires_at_secs,
+        status,
+    })
+}
+
+/// `#integrationinflight`: the integration in flight of each live `Reported`
+/// claim, read from the lineage attempt of that claim's exact owner and
+/// generation. A claim with no such attempt, an ambiguous match, or no
+/// unsuperseded `integrating` receipt is absent, so its row keeps refusing.
+pub fn integrations_in_flight_for_claims(
+    ledger: &QueueLineageLedger,
+    claims: &[QueueClaim],
+    now_secs: u64,
+) -> std::collections::HashMap<
+    QueueItemIdentity,
+    agent_doc_queue::transient_closeout::IntegrationInFlight,
+> {
+    claims
+        .iter()
+        .filter(|claim| claim.state == agent_doc_queue::queue_claim::QueueClaimState::Reported)
+        .filter_map(|claim| {
+            let mut matches = ledger.attempts.iter().filter(|attempt| {
+                attempt.generation == claim.generation
+                    && attempt.owner == claim.owner
+                    && attempt.matches_identity(&claim.identity)
+            });
+            let attempt = matches.next()?;
+            if matches.next().is_some() {
+                return None;
+            }
+            integration_in_flight(attempt, now_secs).map(|record| (claim.identity.clone(), record))
+        })
+        .collect()
+}
+
+/// [`load`] without writing: a missing project database is an empty ledger.
+pub fn load_read_only(file: &Path) -> Result<QueueLineageLedger> {
+    let (root, document_hash, _) = state_identity(file)?;
+    let empty = || QueueLineageLedger {
+        contract_version: contract_version(),
+        attempts: Vec::new(),
+    };
+    if !agent_doc_sqlite::state_store::state_db_path(&root).exists() {
+        return Ok(empty());
+    }
+    let conn = agent_doc_sqlite::state_store::open_state_db_read_only(&root)?;
+    if !agent_doc_sqlite::state_store::state_table_exists(&conn, "queue_document_state")? {
+        return Ok(empty());
+    }
+    load_from_conn(&conn, &document_hash)
 }
 
 fn require_commit(repo: &Path, sha: &str, label: &str) -> Result<()> {
@@ -2975,6 +3202,258 @@ mod tests {
             base_sha: Some(base.to_string()),
             ..RecordRequest::default()
         }
+    }
+
+    /// `#integrationinflight`: one reported repository attempt in `fixture`,
+    /// with its source commit recorded, plus a candidate commit on top of it
+    /// (the coordinator's merge). Returns `(claim, source, candidate)`.
+    fn reported_with_candidate(fixture: &RepoFixture, item: &str) -> (QueueClaim, String, String) {
+        let base = fixture.head();
+        let mut claim = make_claim(
+            &fixture.doc,
+            item,
+            "subagent:inflight",
+            Some("worker:inflight"),
+        );
+        record_started(&fixture.doc, &claim).unwrap();
+        record(
+            &fixture.doc,
+            item,
+            claim.generation,
+            attach_request(fixture, "worker:inflight", &base),
+        )
+        .unwrap();
+        let source = fixture.commit_file("work.txt", "work\n", "worker work");
+        record(
+            &fixture.doc,
+            item,
+            claim.generation,
+            RecordRequest {
+                kind: QueueLineageEventKind::Committed,
+                source_sha: Some(source.clone()),
+                ..RecordRequest::default()
+            },
+        )
+        .unwrap();
+        let candidate = fixture.commit_file("merge.txt", "merged\n", "integration candidate");
+        claim.state = QueueClaimState::Reported;
+        (claim, source, candidate)
+    }
+
+    fn integrating_request(source: &str, candidate: &str, at_secs: u64) -> RecordRequest {
+        RecordRequest {
+            kind: QueueLineageEventKind::Integrating,
+            at_secs: Some(at_secs),
+            source_sha: Some(source.to_string()),
+            integration_sha: Some(candidate.to_string()),
+            verification: Some("make check".to_string()),
+            ..RecordRequest::default()
+        }
+    }
+
+    /// 2026-11-15 `tasks/agent-doc/agent-doc-bugs.md`: a merged candidate
+    /// whose `make check` is still running is recorded as `integrating`,
+    /// live until its deadline, and `integrated` supersedes it.
+    #[test]
+    fn integrationinflight_record_is_live_until_its_deadline_and_integrated_supersedes_it() {
+        use agent_doc_queue::transient_closeout::IntegrationInFlightStatus;
+        let fixture = RepoFixture::new();
+        let item = "do [#integrationinflight]";
+        let (claim, source, candidate) = reported_with_candidate(&fixture, item);
+        let ledger = load(&fixture.doc).unwrap();
+        assert!(
+            integrations_in_flight_for_claims(&ledger, std::slice::from_ref(&claim), 1_000)
+                .is_empty(),
+            "no record, nothing in flight"
+        );
+
+        let attempt = record(
+            &fixture.doc,
+            item,
+            claim.generation,
+            integrating_request(&source, &candidate, 1_000),
+        )
+        .unwrap();
+        let event = attempt.events.last().unwrap();
+        assert_eq!(event.kind, QueueLineageEventKind::Integrating);
+        assert_eq!(
+            event.expires_at_secs,
+            Some(1_000 + DEFAULT_INTEGRATING_DEADLINE_SECS)
+        );
+        // Provisional: it adds no repository facts, so the closeout's
+        // integration proof is still owed.
+        assert!(facts(&attempt).integration_sha.is_none());
+        assert!(require_integrated_repo_work(&fixture.doc, item, claim.generation).is_err());
+
+        let ledger = load_read_only(&fixture.doc).unwrap();
+        let live = integrations_in_flight_for_claims(&ledger, std::slice::from_ref(&claim), 1_001);
+        let record_of = live
+            .get(&claim.identity)
+            .expect("the reported claim is in flight");
+        assert_eq!(record_of.status, IntegrationInFlightStatus::Live);
+        assert_eq!(record_of.generation, claim.generation);
+        assert_eq!(record_of.integration_sha, candidate);
+        assert_eq!(record_of.verification, "make check");
+
+        let expired = integrations_in_flight_for_claims(
+            &ledger,
+            std::slice::from_ref(&claim),
+            1_000 + DEFAULT_INTEGRATING_DEADLINE_SECS,
+        );
+        assert_eq!(
+            expired[&claim.identity].status,
+            IntegrationInFlightStatus::Expired
+        );
+
+        // Only a `Reported` claim's attempt counts.
+        let mut running = claim.clone();
+        running.state = QueueClaimState::Running;
+        assert!(integrations_in_flight_for_claims(&ledger, &[running], 1_001).is_empty());
+
+        // A claim of another generation (the row was re-dispatched) never
+        // reads generation 1's record.
+        let mut next = claim.clone();
+        next.generation += 1;
+        assert!(integrations_in_flight_for_claims(&ledger, &[next], 1_001).is_empty());
+
+        // `integrated` supersedes the in-flight record.
+        let branch = git_output(&fixture.root, &["branch", "--show-current"]).unwrap();
+        record(
+            &fixture.doc,
+            item,
+            claim.generation,
+            RecordRequest {
+                kind: QueueLineageEventKind::Integrated,
+                source_repo_path: Some(fixture.root.clone()),
+                sink_repo_path: Some(fixture.root.clone()),
+                source_sha: Some(source.clone()),
+                integration_sha: Some(candidate.clone()),
+                integration_method: Some(IntegrationMethod::Merge),
+                sink_ref: Some(branch),
+                ..RecordRequest::default()
+            },
+        )
+        .unwrap();
+        let ledger = load(&fixture.doc).unwrap();
+        assert!(
+            integrations_in_flight_for_claims(&ledger, std::slice::from_ref(&claim), 1_001)
+                .is_empty()
+        );
+        require_integrated_repo_work(&fixture.doc, item, claim.generation).unwrap();
+        let refused = record(
+            &fixture.doc,
+            item,
+            claim.generation,
+            integrating_request(&source, &candidate, 1_002),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            refused.contains("already records an integrated receipt"),
+            "{refused}"
+        );
+    }
+
+    #[test]
+    fn integrationinflight_record_refuses_unbound_or_unverifiable_receipts() {
+        let fixture = RepoFixture::new();
+        let item = "do [#integrationinflight]";
+        let (claim, source, candidate) = reported_with_candidate(&fixture, item);
+        let refuse = |request: RecordRequest| {
+            record(&fixture.doc, item, claim.generation, request)
+                .unwrap_err()
+                .to_string()
+        };
+
+        let mut wrong_source = integrating_request(&base_sha(&fixture), &candidate, 1_000);
+        wrong_source.repo_path = Some(fixture.root.clone());
+        let refusal = refuse(wrong_source);
+        assert!(
+            refusal.contains("is not the source this attempt recorded"),
+            "{refusal}"
+        );
+
+        let mut no_verification = integrating_request(&source, &candidate, 1_000);
+        no_verification.verification = None;
+        assert!(refuse(no_verification).contains("--verification"));
+
+        let mut too_long = integrating_request(&source, &candidate, 1_000);
+        too_long.deadline_secs = Some(MAX_INTEGRATING_DEADLINE_SECS + 1);
+        assert!(refuse(too_long).contains("--deadline-secs"));
+
+        let mut with_method = integrating_request(&source, &candidate, 1_000);
+        with_method.integration_method = Some(IntegrationMethod::Merge);
+        assert!(refuse(with_method).contains("belong to the `integrated` receipt"));
+
+        // A candidate that does not contain the source is not its merge.
+        let base = base_sha(&fixture);
+        let refusal = refuse(integrating_request(&source, &base, 1_000));
+        assert!(refusal.contains("does not contain the source"), "{refusal}");
+
+        // Verification and deadlines belong to `integrating` only.
+        let refusal = refuse(RecordRequest {
+            kind: QueueLineageEventKind::Retained,
+            verification: Some("make check".to_string()),
+            ..RecordRequest::default()
+        });
+        assert!(
+            refusal.contains("apply only to an `integrating`"),
+            "{refusal}"
+        );
+
+        // An attempt with no recorded source cannot carry one.
+        let bare = RepoFixture::new();
+        let bare_claim = make_claim(&bare.doc, item, "subagent:bare", Some("worker:bare"));
+        record_started(&bare.doc, &bare_claim).unwrap();
+        let head = bare.head();
+        let refusal = record(
+            &bare.doc,
+            item,
+            bare_claim.generation,
+            integrating_request(&head, &head, 1_000),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(refusal.contains("records no source sha"), "{refusal}");
+    }
+
+    /// A newer report records another source: the old in-flight record
+    /// describes a different integration and never quiets the gate.
+    #[test]
+    fn integrationinflight_a_newer_source_makes_the_record_stale() {
+        use agent_doc_queue::transient_closeout::IntegrationInFlightStatus;
+        let fixture = RepoFixture::new();
+        let item = "do [#integrationinflight]";
+        let (claim, source, candidate) = reported_with_candidate(&fixture, item);
+        record(
+            &fixture.doc,
+            item,
+            claim.generation,
+            integrating_request(&source, &candidate, 1_000),
+        )
+        .unwrap();
+        let newer = fixture.commit_file("work.txt", "rework\n", "worker rework");
+        record(
+            &fixture.doc,
+            item,
+            claim.generation,
+            RecordRequest {
+                kind: QueueLineageEventKind::Committed,
+                source_sha: Some(newer),
+                ..RecordRequest::default()
+            },
+        )
+        .unwrap();
+        let ledger = load(&fixture.doc).unwrap();
+        let stale = integrations_in_flight_for_claims(&ledger, std::slice::from_ref(&claim), 1_001);
+        assert_eq!(
+            stale[&claim.identity].status,
+            IntegrationInFlightStatus::SourceMismatch
+        );
+    }
+
+    fn base_sha(fixture: &RepoFixture) -> String {
+        git_output(&fixture.root, &["rev-list", "--max-parents=0", "HEAD"]).unwrap()
     }
 
     #[test]

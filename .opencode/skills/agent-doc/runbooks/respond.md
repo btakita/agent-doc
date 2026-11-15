@@ -568,7 +568,15 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      When you resolved a conflict while integrating, the patch ids differ and
      `cherry-pick`/`rebase` refuse: record `--method conflict-resolved
      --resolves <WORKER_SHA>` instead (the sink commit must touch every file
-     the worker commit touched).
+     the worker commit touched). While verification of the merged tree (for
+     example `make check`) is still running, record the integration in flight
+     so the Stop hook waits on the `☑️` row instead of refusing it
+     (`#integrationinflight`): `agent-doc queue lineage-record <FILE> --item
+     <ITEM> --generation <N> --event integrating --source-sha <WORKER_SHA>
+     --integration-sha <CANDIDATE_SHA> --verification '<COMMAND>' [--repo
+     <INTEGRATION_WORKTREE>]`. It is bound to that generation and source,
+     expires after `--deadline-secs` (default 3600), and is not integration
+     proof: `--event integrated` supersedes it once the push lands.
      You do not have to derive these closeouts by hand (`#reportedcloseout`):
      `agent-doc queue claims <FILE>` gives every reported attempt a
      `reported_closeout` (the exact ordered verify / lineage-record / consume

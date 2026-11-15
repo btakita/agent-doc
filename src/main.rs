@@ -6114,10 +6114,15 @@ enum QueueAction {
         /// Exact queue-attempt generation
         #[arg(long)]
         generation: u64,
-        /// created|attached|dirty|committed|pushed|integrated|released|cancelled|retained|removed|prose-only.
+        /// created|attached|dirty|committed|pushed|integrating|integrated|released|cancelled|retained|removed|prose-only.
         /// `prose-only` is the explicit declaration that the attempt changed
         /// no repository; without it (or repository facts) a reported row
-        /// cannot be consumed.
+        /// cannot be consumed. `integrating` (`#integrationinflight`) records
+        /// a merged candidate whose verification is still running: it takes
+        /// --source-sha (the attempt's recorded source), the candidate
+        /// --integration-sha, and --verification, lets the turn-end gate wait
+        /// on the `☑️` row until --deadline-secs passes, and is superseded by
+        /// `integrated`.
         #[arg(long)]
         event: String,
         #[arg(long)]
@@ -6165,6 +6170,14 @@ enum QueueAction {
         release_state: Option<String>,
         #[arg(long)]
         detail: Option<String>,
+        /// `--event integrating` only: the verification command running on
+        /// the candidate integration commit (for example `make check`).
+        #[arg(long, value_name = "COMMAND")]
+        verification: Option<String>,
+        /// `--event integrating` only: seconds until the in-flight record stops
+        /// holding the reported row quiescent (default 3600, at most 14400).
+        #[arg(long, value_name = "SECS")]
+        deadline_secs: Option<u64>,
         /// Emit the updated attempt as JSON
         #[arg(long)]
         json: bool,
@@ -10905,6 +10918,8 @@ fn try_main() -> anyhow::Result<()> {
                 release_tag,
                 release_state,
                 detail,
+                verification,
+                deadline_secs,
                 json,
             } => {
                 let attempt = agent_doc_queue_io::queue_lineage::record_following_live_claim(
@@ -10938,6 +10953,8 @@ fn try_main() -> anyhow::Result<()> {
                             .map(agent_doc_queue_io::queue_lineage::ReleaseState::parse)
                             .transpose()?,
                         detail,
+                        verification,
+                        deadline_secs,
                     },
                 )?;
                 if json {

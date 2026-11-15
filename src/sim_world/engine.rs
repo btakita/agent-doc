@@ -2706,13 +2706,14 @@ impl SimWorld {
         use agent_doc_controller::dispatch::{
             RECYCLE_INFLIGHT_SETTLE_TTL_SECS, RECYCLE_SUPERSEDED_OWNER_REPLACEMENT_WAIT_SECS,
             RECYCLE_SUPERSEDED_OWNER_UNBLOCKER, RecycleInflightUnsettledVerdict,
-            SupersededOwnerReplacementStep, recycle_inflight_unsettled_verdict_with_evidence,
-            superseded_owner_replacement_step,
+            SupersededOwnerReplacement, SupersededOwnerReplacementStep,
+            recycle_inflight_unsettled_verdict_with_evidence,
         };
         const SETTLE_WAIT_MS: u128 = 10_000;
         let pane_id = self.current_dispatch_pane()?;
         let mut elapsed_ms: u128 = 0;
         let mut requested_at_ms: Option<u128> = None;
+        let mut replacement = SupersededOwnerReplacement::new();
         // Bounded by construction: the TTL re-arm only applies inside the TTL,
         // and the superseded wait refuses at its bound. The cap guards the model.
         for _ in 0..64 {
@@ -2755,11 +2756,9 @@ impl SimWorld {
                     );
                 }
                 RecycleInflightUnsettledVerdict::ReplaceSupersededOwner => {
-                    match superseded_owner_replacement_step(
-                        requested_at_ms,
-                        elapsed_ms,
-                        RECYCLE_SUPERSEDED_OWNER_REPLACEMENT_WAIT_SECS,
-                    ) {
+                    match replacement
+                        .step(elapsed_ms, RECYCLE_SUPERSEDED_OWNER_REPLACEMENT_WAIT_SECS)
+                    {
                         SupersededOwnerReplacementStep::RequestReplacement => {
                             self.coverage.superseded_owner_replacement_requests += 1;
                             requested_at_ms = Some(elapsed_ms);

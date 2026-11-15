@@ -11,6 +11,7 @@ publish = false
 name = "agent_doc_supervisor"
 
 [dependencies]
+parking_lot = "0.12"
 agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.574" }
 agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.574" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.35.574" }

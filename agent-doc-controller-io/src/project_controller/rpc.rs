@@ -3515,33 +3515,33 @@ pub fn authorize_dispatch(
             diagnostic_payload: Some(request.diagnostic_payload.clone()),
             sequence: None,
         };
-        let dispatch_once = || match handle_dispatch(
-            &bootstrap,
-            None,
-            dispatch_request(request.generation),
-        ) {
-            Err(err) => {
-                // `#anw0`: a racing dispatch that lost the supersede race against a
-                // newer dispatchable generation self-heals by retrying once against
-                // the redirect target. One retry only — bounded, never a loop.
-                if let Some(target) =
+        // `#anw0`: a racing dispatch that lost the supersede race against a
+        // newer dispatchable generation self-heals by retrying once against the
+        // redirect target. The redirect is Lazily `Superseded { observed }`, so
+        // the retry is the next epoch over the observed generation.
+        let dispatch_once = || {
+            drive_dispatch_refusal_redirect(
+                &request.file,
+                request.generation,
+                |err| {
                     dispatch_error_stale_generation_redirect_target(&format!("{err:#}"))
-                {
-                    agent_doc_ops_log_io::log_op(
-                        &request.file,
-                        &format!(
-                            "dispatch_retry_after_stale_generation file={} prior_generation={} next_generation={}",
-                            request.file.display(),
-                            request.generation,
-                            target
-                        ),
-                    );
-                    handle_dispatch(&bootstrap, None, dispatch_request(target))
-                } else {
-                    Err(err)
-                }
-            }
-            ok => ok,
+                        .map(DispatchRefusalRedirect::StaleGeneration)
+                },
+                |generation| handle_dispatch(&bootstrap, None, dispatch_request(generation)),
+                |redirect| {
+                    if let DispatchRefusalRedirect::StaleGeneration(target) = redirect {
+                        agent_doc_ops_log_io::log_op(
+                            &request.file,
+                            &format!(
+                                "dispatch_retry_after_stale_generation file={} prior_generation={} next_generation={}",
+                                request.file.display(),
+                                request.generation,
+                                target
+                            ),
+                        );
+                    }
+                },
+            )
         };
         retry_once_after_recoverable_dispatch_refusal(
             &request.file,
@@ -3581,38 +3581,48 @@ pub fn authorize_dispatch(
                 &file_for_log,
             )
         };
-        let dispatch_once = || match request_dispatch(controller_request.clone()) {
-            Err(err) if err.to_string().contains("controller_binary_stale") => {
-                agent_doc_ops_log_io::log_op(
-                    &request.file,
-                    &format!(
-                        "dispatch_retry_after_stale_binary file={}",
-                        request.file.display()
+        // `#anw0`: a dispatch that lost the supersede race against a newer
+        // dispatchable generation is Lazily `Superseded { observed }` and is
+        // retried exactly once against the redirect target; a stale controller
+        // binary is Lazily `Retryable` at the same generation.
+        let dispatch_once = || {
+            drive_dispatch_refusal_redirect(
+                &request.file,
+                request.generation,
+                |err| {
+                    let message = err.to_string();
+                    if message.contains("controller_binary_stale") {
+                        Some(DispatchRefusalRedirect::StaleBinary)
+                    } else {
+                        dispatch_error_stale_generation_redirect_target(&message)
+                            .map(DispatchRefusalRedirect::StaleGeneration)
+                    }
+                },
+                |generation| {
+                    let mut targeted = controller_request.clone();
+                    targeted.generation = Some(generation);
+                    request_dispatch(targeted)
+                },
+                |redirect| match redirect {
+                    DispatchRefusalRedirect::StaleBinary => agent_doc_ops_log_io::log_op(
+                        &request.file,
+                        &format!(
+                            "dispatch_retry_after_stale_binary file={}",
+                            request.file.display()
+                        ),
                     ),
-                );
-                request_dispatch(controller_request.clone())
-            }
-            Err(err)
-                if dispatch_error_stale_generation_redirect_target(&err.to_string()).is_some() =>
-            {
-                // `#anw0`: the dispatch lost the supersede race against a newer
-                // dispatchable generation. Retry exactly once against the redirect
-                // target so racing dispatch self-heals instead of failing closed.
-                let target =
-                    dispatch_error_stale_generation_redirect_target(&err.to_string()).unwrap();
-                agent_doc_ops_log_io::log_op(
-                    &request.file,
-                    &format!(
-                        "dispatch_retry_after_stale_generation file={} next_generation={}",
-                        request.file.display(),
-                        target
-                    ),
-                );
-                let mut redirected = controller_request.clone();
-                redirected.generation = Some(target);
-                request_dispatch(redirected)
-            }
-            other => other,
+                    DispatchRefusalRedirect::StaleGeneration(target) => {
+                        agent_doc_ops_log_io::log_op(
+                            &request.file,
+                            &format!(
+                                "dispatch_retry_after_stale_generation file={} next_generation={}",
+                                request.file.display(),
+                                target
+                            ),
+                        )
+                    }
+                },
+            )
         };
         retry_once_after_recoverable_dispatch_refusal(
             &request.file,
@@ -3621,6 +3631,81 @@ pub fn authorize_dispatch(
         )
     }
 }
+
+/// `#anw0` / `#ctlstalebin`: why a dispatch refusal earns its single redirect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DispatchRefusalRedirect {
+    /// The dispatch reached a stale controller: the re-request's
+    /// `connect_or_launch` promotes the installed binary (Lazily `Retryable`,
+    /// same generation). Only the production controller transport reports it.
+    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+    StaleBinary,
+    /// A newer dispatchable generation won the supersede race (Lazily
+    /// `Superseded { observed: <generation> }`).
+    StaleGeneration(u64),
+}
+
+/// Run one dispatch request through Lazily epochs (`#implementlazilyowned`).
+///
+/// The attempt's Lazily-owned expected authority is the generation it targets,
+/// so a stale-generation redirect re-desires the dispatch over the observed
+/// generation as the next epoch and a stale binary re-claims the same one.
+/// Exactly one redirect: the second attempt's result is returned unchanged.
+fn drive_dispatch_refusal_redirect(
+    file: &Path,
+    generation: u64,
+    classify: impl Fn(&anyhow::Error) -> Option<DispatchRefusalRedirect>,
+    mut request: impl FnMut(u64) -> Result<DispatchAuthorization>,
+    mut log_redirect: impl FnMut(DispatchRefusalRedirect),
+) -> Result<DispatchAuthorization> {
+    let drive = agent_doc_effect_cas::drive_effect_epochs(
+        &format!("dispatch-refusal-redirect:{}", file.display()),
+        generation.to_string(),
+        DISPATCH_REFUSAL_REDIRECT_ATTEMPTS,
+        &mut |attempt| {
+            let generation = attempt.expected.parse::<u64>().map_err(|error| {
+                anyhow::anyhow!(
+                    "dispatch generation {:?} is not a number: {error}",
+                    attempt.expected
+                )
+            })?;
+            match request(generation) {
+                Ok(authorization) => Ok(agent_doc_effect_cas::EpochStep::Applied {
+                    receipt: authorization,
+                    authority: generation.to_string(),
+                }),
+                Err(err) if attempt.is_final() => Err(err),
+                Err(err) => match classify(&err) {
+                    Some(redirect @ DispatchRefusalRedirect::StaleBinary) => {
+                        Ok(agent_doc_effect_cas::EpochStep::Retryable((redirect, err)))
+                    }
+                    Some(redirect @ DispatchRefusalRedirect::StaleGeneration(target)) => {
+                        Ok(agent_doc_effect_cas::EpochStep::Superseded {
+                            observed: target.to_string(),
+                            reason: (redirect, err),
+                        })
+                    }
+                    None => Err(err),
+                },
+            }
+        },
+        &mut |_attempt, (redirect, _err)| {
+            log_redirect(*redirect);
+            Ok(agent_doc_effect_cas::Pace::Continue)
+        },
+    )?;
+    match drive {
+        agent_doc_effect_cas::EpochDrive::Applied(authorization) => Ok(authorization),
+        agent_doc_effect_cas::EpochDrive::Exhausted { reason, .. }
+        | agent_doc_effect_cas::EpochDrive::Stopped { reason, .. } => Err(reason.1),
+    }
+}
+
+/// One dispatch plus its single redirect (`#anw0`, `#ctlstalebin`).
+const DISPATCH_REFUSAL_REDIRECT_ATTEMPTS: u32 = 2;
+
+/// One dispatch plus its single recoverable re-dispatch (`#recoverableautoretry`).
+const DISPATCH_RECOVERABLE_ATTEMPTS: u32 = 2;
 
 /// `#recoverableautoretry`: re-dispatch exactly once, after `backoff`, when the
 /// controller refused with `ui_outcome_class=recoverable next_action=retry_dispatch`
@@ -3637,22 +3722,52 @@ pub fn authorize_dispatch(
 /// original outcome instead of re-injecting. A second refusal is returned
 /// unchanged, so the operator still sees the error UI.
 ///
-/// Why a direct retry and not a reactive edge (`#lazily-reactive-first`): this is
-/// the actorless, one-shot client boundary of a single RPC. tmux publishes no
-/// responsiveness event the client could subscribe to, and the controller's own
-/// admission decision is already the authoritative reactive fence; the retry is
-/// bounded to one extra attempt and never loops.
+/// `#implementlazilyowned`: the two attempts are one Lazily epoch. A recoverable
+/// refusal is `Retryable` (the controller's admission authority is unchanged),
+/// Lazily owns whether another attempt is claimed, and `between` holds only the
+/// log line and the physical backoff.
 fn retry_once_after_recoverable_dispatch_refusal(
     file: &Path,
     backoff: Duration,
     mut dispatch: impl FnMut() -> Result<DispatchAuthorization>,
 ) -> Result<DispatchAuthorization> {
-    match dispatch() {
-        Err(err)
-            if agent_doc_controller::dispatch::dispatch_error_is_recoverable_retry(&format!(
-                "{err:#}"
-            )) =>
-        {
+    let drive = agent_doc_effect_cas::drive_effect_epochs(
+        &format!("recoverable-dispatch:{}", file.display()),
+        "controller-admission",
+        DISPATCH_RECOVERABLE_ATTEMPTS,
+        &mut |attempt| {
+            let result = dispatch();
+            if attempt.attempt > 1 {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "dispatch_recoverable_retry_settled file={} result={}",
+                        file.display(),
+                        if result.is_ok() {
+                            "authorized"
+                        } else {
+                            "refused"
+                        },
+                    ),
+                );
+            }
+            match result {
+                Ok(authorization) => Ok(agent_doc_effect_cas::EpochStep::Applied {
+                    receipt: authorization,
+                    authority: "controller-admission".to_string(),
+                }),
+                Err(err)
+                    if !attempt.is_final()
+                        && agent_doc_controller::dispatch::dispatch_error_is_recoverable_retry(
+                            &format!("{err:#}"),
+                        ) =>
+                {
+                    Ok(agent_doc_effect_cas::EpochStep::Retryable(err))
+                }
+                Err(err) => Err(err),
+            }
+        },
+        &mut |_attempt, err| {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -3665,22 +3780,13 @@ fn retry_once_after_recoverable_dispatch_refusal(
             if !backoff.is_zero() {
                 std::thread::sleep(backoff);
             }
-            let retried = dispatch();
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "dispatch_recoverable_retry_settled file={} result={}",
-                    file.display(),
-                    if retried.is_ok() {
-                        "authorized"
-                    } else {
-                        "refused"
-                    },
-                ),
-            );
-            retried
-        }
-        other => other,
+            Ok(agent_doc_effect_cas::Pace::Continue)
+        },
+    )?;
+    match drive {
+        agent_doc_effect_cas::EpochDrive::Applied(authorization) => Ok(authorization),
+        agent_doc_effect_cas::EpochDrive::Exhausted { reason, .. }
+        | agent_doc_effect_cas::EpochDrive::Stopped { reason, .. } => Err(reason),
     }
 }
 
@@ -20898,7 +21004,14 @@ pub(crate) fn serve_with_options(
     let controller_launched_at = Instant::now();
     let recycle_grace = recycle_idle_grace();
     let mut recycle_stale_since: Option<Instant> = None;
-    let recycle_handoff_in_flight = Arc::new(AtomicBool::new(false));
+    // `#implementlazilyowned`: the self-recycle handoff is one Lazily
+    // single-flight effect key. A claimed flight moves into the handoff thread;
+    // a promotion or supersession receipts it (the key then stays landed for
+    // this process), and every other outcome releases it.
+    let recycle_handoff = agent_doc_effect_cas::single_flight::SingleFlight::new(format!(
+        "controller-self-recycle-handoff:{}",
+        project_root.display()
+    ));
     let recycle_handoff_promoted = Arc::new(AtomicBool::new(false));
     let recycle_handoff_drain_deadline_secs = Arc::new(AtomicU64::new(0));
     // #supresilience Part B — autonomous route-owned supervisor watchdog. Due on
@@ -20973,7 +21086,7 @@ pub(crate) fn serve_with_options(
                     &socket_incarnation,
                     &public_sock,
                     handoff_temp_socket.is_some(),
-                    recycle_handoff_in_flight.load(Ordering::SeqCst),
+                    recycle_handoff.claimed_or_landed(),
                     recycle_handoff_promoted.load(Ordering::SeqCst),
                 ) {
                     eprintln!(
@@ -21001,7 +21114,7 @@ pub(crate) fn serve_with_options(
                 // off to another idle controller. Only a stable public
                 // controller retires here (a replacement is the watchdog's).
                 if handoff_temp_socket.is_none()
-                    && !recycle_handoff_in_flight.load(Ordering::SeqCst)
+                    && !recycle_handoff.claimed_or_landed()
                     && idle_retire_probe_last
                         .is_none_or(|last| last.elapsed() >= IDLE_CONTROLLER_RETIRE_PROBE_INTERVAL)
                     && last_client_activity.elapsed()
@@ -21109,7 +21222,7 @@ pub(crate) fn serve_with_options(
                 }
                 if controller_self_watchdog_should_suicide(
                     &runtime,
-                    recycle_handoff_in_flight.load(Ordering::SeqCst),
+                    recycle_handoff.claimed_or_landed(),
                     recycle_handoff_promoted.load(Ordering::SeqCst),
                     timestamp_secs() < recycle_handoff_drain_deadline_secs.load(Ordering::SeqCst),
                     handoff_temp_socket.as_deref(),
@@ -21154,11 +21267,10 @@ pub(crate) fn serve_with_options(
                     )
                 };
                 recycle_stale_since = next_since;
-                if do_recycle
-                    && recycle_handoff_in_flight
-                        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                        .is_ok()
-                {
+                let handoff_flight = (do_recycle && !recycle_handoff.landed())
+                    .then(|| recycle_handoff.begin().ok().flatten())
+                    .flatten();
+                if let Some(handoff_flight) = handoff_flight {
                     // `recyclestorm`: a client-delegated stale-binary request
                     // keeps its own reason (and its not-newer gate) instead of
                     // passing as an operator force request.
@@ -21178,13 +21290,13 @@ pub(crate) fn serve_with_options(
                             last_client_activity.elapsed(),
                         )
                     {
-                        recycle_handoff_in_flight.store(false, Ordering::SeqCst);
+                        handoff_flight.release("idle_root_retired");
                         should_stop.store(true, Ordering::SeqCst);
                         break;
                     }
                     controller_self_recycle(&runtime, reason);
                     let Ok(bootstrap) = runtime.bootstrap_snapshot() else {
-                        recycle_handoff_in_flight.store(false, Ordering::SeqCst);
+                        handoff_flight.release("bootstrap_snapshot_unavailable");
                         std::thread::sleep(CONNECT_POLL);
                         continue;
                     };
@@ -21194,7 +21306,6 @@ pub(crate) fn serve_with_options(
                     let old_generation = bootstrap.controller_generation;
                     let recorded_binary = bootstrap.controller_binary.clone();
                     let recycle_reason = reason.to_string();
-                    let handoff_in_flight = Arc::clone(&recycle_handoff_in_flight);
                     let handoff_promoted = Arc::clone(&recycle_handoff_promoted);
                     let handoff_drain_deadline_secs =
                         Arc::clone(&recycle_handoff_drain_deadline_secs);
@@ -21256,7 +21367,7 @@ pub(crate) fn serve_with_options(
                                 {
                                     draining_runtime.withdraw_stale_binary_client_recycle_request();
                                 }
-                                handoff_in_flight.store(false, Ordering::SeqCst);
+                                handoff_flight.release("target_not_newer");
                                 agent_doc_ops_log_io::log_op(
                                     &handoff_root,
                                     &format!(
@@ -21308,6 +21419,14 @@ pub(crate) fn serve_with_options(
                                     Ordering::SeqCst,
                                 );
                                 handoff_promoted.store(true, Ordering::SeqCst);
+                                if let Err(error) = handoff_flight.land() {
+                                    agent_doc_ops_log_io::log_op(
+                                        &handoff_root,
+                                        &format!(
+                                            "controller_self_recycle_receipt_diverged pid={own_pid} generation={old_generation} error={error:#}"
+                                        ),
+                                    );
+                                }
                                 drain_predecessor_after_promotion(
                                     &draining_runtime,
                                     &draining_clients,
@@ -21342,7 +21461,7 @@ pub(crate) fn serve_with_options(
                                         "action=abandoned_keep_serving".to_string()
                                     }
                                 };
-                                handoff_in_flight.store(false, Ordering::SeqCst);
+                                handoff_flight.release(format!("{class:?}"));
                                 agent_doc_ops_log_io::log_op(
                                     &handoff_root,
                                     &format!(
@@ -71540,6 +71659,84 @@ mod tests {
                 )
             ))
         });
+        assert_eq!(calls, 1);
+        assert!(result.is_err());
+    }
+
+    /// `#implementlazilyowned`: a stale-generation redirect is Lazily
+    /// `Superseded { observed }` (the retry targets the observed generation), a
+    /// stale binary is `Retryable` at the same generation, and either earns
+    /// exactly one redirect.
+    #[test]
+    fn dispatch_refusal_redirect_targets_the_observed_generation_exactly_once() {
+        let file = Path::new("doc.md");
+        let classify = |err: &anyhow::Error| {
+            let message = err.to_string();
+            if message.contains("controller_binary_stale") {
+                Some(DispatchRefusalRedirect::StaleBinary)
+            } else {
+                message
+                    .strip_prefix("redirect:")
+                    .and_then(|target| target.parse().ok())
+                    .map(DispatchRefusalRedirect::StaleGeneration)
+            }
+        };
+
+        let mut targets = Vec::new();
+        let mut redirects = Vec::new();
+        let result = drive_dispatch_refusal_redirect(
+            file,
+            7,
+            classify,
+            |generation| {
+                targets.push(generation);
+                Err(anyhow::anyhow!(if generation == 7 {
+                    "redirect:9"
+                } else {
+                    "redirect:11"
+                }))
+            },
+            |redirect| redirects.push(redirect),
+        );
+        assert_eq!(
+            targets,
+            vec![7, 9],
+            "one redirect, to the observed generation"
+        );
+        assert_eq!(redirects, vec![DispatchRefusalRedirect::StaleGeneration(9)]);
+        assert_eq!(result.unwrap_err().to_string(), "redirect:11");
+
+        let mut targets = Vec::new();
+        let mut redirects = Vec::new();
+        let result = drive_dispatch_refusal_redirect(
+            file,
+            7,
+            classify,
+            |generation| {
+                targets.push(generation);
+                Err(anyhow::anyhow!("controller_binary_stale"))
+            },
+            |redirect| redirects.push(redirect),
+        );
+        assert_eq!(
+            targets,
+            vec![7, 7],
+            "a stale binary retries the same generation"
+        );
+        assert_eq!(redirects, vec![DispatchRefusalRedirect::StaleBinary]);
+        assert!(result.is_err());
+
+        let mut calls = 0;
+        let result = drive_dispatch_refusal_redirect(
+            file,
+            7,
+            classify,
+            |_generation| {
+                calls += 1;
+                Err(anyhow::anyhow!("dispatch blocked for doc.md: queue_paused"))
+            },
+            |_redirect| panic!("an unclassified refusal is never redirected"),
+        );
         assert_eq!(calls, 1);
         assert!(result.is_err());
     }

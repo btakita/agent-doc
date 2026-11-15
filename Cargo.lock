@@ -51,6 +51,7 @@ dependencies = [
  "agent-doc-dynamic-context-io",
  "agent-doc-editor-surface",
  "agent-doc-editor-surface-io",
+ "agent-doc-effect-cas",
  "agent-doc-element",
  "agent-doc-element-backlog",
  "agent-doc-element-backlog-io",
@@ -914,6 +915,7 @@ version = "0.35.574"
 dependencies = [
  "anyhow",
  "lazily 0.63.0",
+ "parking_lot",
 ]
 
 [[package]]
@@ -2710,6 +2712,7 @@ dependencies = [
  "agent-doc-tmux-commands",
  "agent-doc-turn-executor-tmux",
  "lazily 0.63.0",
+ "parking_lot",
  "proptest",
  "serde",
  "serde_json",

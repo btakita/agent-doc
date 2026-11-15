@@ -554,6 +554,36 @@ Progress (`#implementlazilyowned`):
   verdicts, and the best-effort superseded tmux session cleanups), plus 3 new
   rows (`EditorSurfaceRetryStore` `migrated`; `EDITOR_SURFACE_RETRY_EFFECT`,
   `editor_surface_retry_authority` `lazily-adapter`).
+- Dispatch/recycle retry budget and owner supersession (plan step 6): the
+  recoverable-dispatch retry and the stale-binary / stale-generation redirect
+  inside `authorize_dispatch` are two Lazily drives (`drive_effect_epochs`): a
+  stale-generation redirect is `Superseded { observed: <generation> }`, so the
+  retry targets the observed generation as the next epoch; a stale binary and
+  a recoverable refusal are `Retryable`. The self-recycle handoff's
+  `recycle_handoff_in_flight` `compare_exchange` flag is deleted: the handoff is
+  a Lazily single-flight key (`agent_doc_effect_cas::single_flight::SingleFlight`,
+  shared by future single-flight effects) whose flight moves into the handoff
+  thread, a promotion or supersession receipts it, and every other outcome
+  releases it. `superseded_owner_replacement_step` and its `requested_at_ms`
+  timer are deleted: `SupersededOwnerReplacement` is a Lazily retained intent
+  (request = desire + claim, recorded `Retryable` due `wait_secs` later; a due
+  claim is a sticky rejection), used by the dispatch-only recycle gate and the
+  SimWorld model. The busy-composer steering submit (`ROUTE_SYNC_SUBMIT_ATTEMPTS`)
+  and the context-clear resubmit loop (its `attempts_sent` counter) run through
+  `drive_effect_epochs`. `RegistryPublicationRetryState` is a Lazily
+  `EffectCasCore` retained intent with the idle tick as logical time (its
+  `PublicationReceipt` attempt/next-tick state is deleted). Messages, log
+  markers, the one-retry caps, the 750ms backoff, the 45s replacement wait, the
+  three submit attempts, and the 1..32 tick backoff are unchanged. 45 rows:
+  9 `migrated`, 11 `lazily-adapter`, 2 `deleted`, 23 `excluded` after review
+  (the readiness-poll `RetryBudget` family, the queue-claim continue/retry
+  lifecycle classifiers, the busy-pane remediation ladder, the duplicate-owner
+  process retirement and route-owned superseded-binding reap, a diagnostic
+  inject counter, and a one-shot projection compare-and-remove), plus 5 new
+  rows (`SupersededOwnerReplacement` `migrated`; 4 `lazily-adapter` identities
+  and attempt budgets). The renumbered `compare_exchange` occurrence keeps its
+  excluded review; the deleted handoff flag is
+  `compare_exchange(recycle_handoff_in_flight)`.
 - Not yet done (as of 2026-11-15, agent-doc `59984d315a`; triage is complete,
   0 `triage` rows): migrate the 291 reviewed `pending-migration` rows family
   by family, then delete the remaining bespoke orchestration and make the
@@ -561,11 +591,11 @@ Progress (`#implementlazilyowned`):
 
 ## Resume here
 
-Status 2026-11-15 (after family 5): ledger = 84 `migrated`, 149 `lazily-adapter`,
-17 `deleted`, 378 `excluded`, 121 `pending-migration`, 0 `triage`. Work the
-121 rows sequentially in ONE worktree (every step edits the ledger), one family
+Status 2026-11-15 (after family 6): ledger = 94 `migrated`, 164 `lazily-adapter`,
+19 `deleted`, 401 `excluded`, 76 `pending-migration`, 0 `triage`. Work the
+76 rows sequentially in ONE worktree (every step edits the ledger), one family
 per pushed commit, `make check` green before each push, in this order (next:
-family 6):
+family 7):
 
 1. DONE: actor-generation fenced writes (`store_actor_record_fenced_tx`,
    `delete_actor_document_fenced_tx`; 20 actor-generation rows) onto the
@@ -602,7 +632,10 @@ family 6):
    onto Lazily latest-wins keys (`LatestTmuxEffectWorkerState`,
    `TmuxEffectAttemptLedger`, the `pane_layout_desired` projector,
    `EditorSurfaceRetryStore`).
-6. Dispatch/recycle retry budget and owner supersession (44 + 1 rows).
+6. DONE: dispatch/recycle retry budget and owner supersession (44 + 1 rows
+   + 5 new) onto `drive_effect_epochs`, a Lazily retained intent
+   (`SupersededOwnerReplacement`, `RegistryPublicationRetryState`), and the
+   shared Lazily single flight (`agent_doc_effect_cas::single_flight`).
 7. The editor half of the document authority (`CrdtReplicaManager`,
    `PatchWatcher`, `TypingTracker`; 41 + 13 editor rows): move
    retry/supersession behind the Rust core (FFI) so Lazily owns it.

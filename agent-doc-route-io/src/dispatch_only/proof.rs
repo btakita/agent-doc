@@ -7,7 +7,7 @@ use agent_doc_controller::dispatch::{
     DispatchOnlyRecycleSupersededOwnerMessageFacts, DispatchOnlyReopenDelivery,
     DispatchStartProofDecision, DispatchStartProofFacts, RECYCLE_INFLIGHT_MAX_EPOCH_CHANGES,
     RECYCLE_SUPERSEDED_OWNER_UNBLOCKER, RecycleInflightUnsettledVerdict, RoutedDispatchStartProof,
-    RoutedReopenGuardReason, SupersededOwnerReplacementStep,
+    RoutedReopenGuardReason, SupersededOwnerReplacement, SupersededOwnerReplacementStep,
     accepted_only_dispatch_start_log_message, accepted_only_dispatch_start_refusal_message,
     dispatch_only_dispatch_start_proof_required as controller_dispatch_only_dispatch_start_proof_required,
     dispatch_only_recycle_inflight_message, dispatch_only_recycle_superseded_owner_message,
@@ -15,7 +15,6 @@ use agent_doc_controller::dispatch::{
     dispatch_proof_failed_event, recycle_inflight_unsettled_verdict_with_evidence,
     recycle_inflight_unsettled_verdict_with_owner,
     recycle_inflight_unsettled_verdict_with_readiness, routed_dispatch_start_timeout_for_binary,
-    superseded_owner_replacement_step,
 };
 use agent_doc_harness::HarnessConfig;
 
@@ -50,9 +49,10 @@ pub fn wait_for_dispatch_only_recycle_inflight_settle(
     // `#netadv3` RSD-1: consecutive round trips where both the settle wait and
     // the status re-read failed.
     let mut unreachable: u32 = 0;
-    // `#runfrontenderror`: when (in this gate's own elapsed time) the turn-safe
-    // replacement of a superseded owner was requested.
-    let mut superseded_replacement_requested_at_ms: Option<u128> = None;
+    // `#runfrontenderror`: the turn-safe replacement of a superseded owner, a
+    // Lazily retained intent whose due time is measured in this gate's own
+    // elapsed time (`#implementlazilyowned`).
+    let mut superseded_replacement = SupersededOwnerReplacement::new();
 
     // `#recycleinflightwedge` / `#recyclesettlewaitshort`: a recycle older than
     // the settle TTL lost its settle transition — the supervisor died between
@@ -161,11 +161,7 @@ pub fn wait_for_dispatch_only_recycle_inflight_settle(
         if verdict == RecycleInflightUnsettledVerdict::ReplaceSupersededOwner {
             let pid = superseded_owner_pid.unwrap_or_default();
             let wait_secs = recycle_superseded_owner_wait_secs();
-            match superseded_owner_replacement_step(
-                superseded_replacement_requested_at_ms,
-                started.elapsed().as_millis(),
-                wait_secs,
-            ) {
+            match superseded_replacement.step(started.elapsed().as_millis(), wait_secs) {
                 SupersededOwnerReplacementStep::RequestReplacement => {
                     // Turn-safe and idempotent: the owner recycles at its
                     // next safe boundary; a live turn is never interrupted.
@@ -174,7 +170,6 @@ pub fn wait_for_dispatch_only_recycle_inflight_settle(
                             Path::new(file_path),
                             "dispatch_only_recycle_gate",
                         );
-                    superseded_replacement_requested_at_ms = Some(started.elapsed().as_millis());
                     agent_doc_ops_log_io::log_op(
                         file,
                         &format!(

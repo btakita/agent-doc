@@ -27,6 +27,7 @@
 //! exhaustion message unchanged.
 
 pub mod latest_intent;
+pub mod single_flight;
 
 use anyhow::{Result, bail};
 use lazily::{

@@ -2715,22 +2715,106 @@ pub enum SupersededOwnerReplacementStep {
     RefuseRestartStaleSupervisor,
 }
 
-/// Classify one [`RecycleInflightUnsettledVerdict::ReplaceSupersededOwner`]
-/// observation. `requested_at_ms` is the gate's own elapsed time when it
-/// requested the replacement (`None` before it has), so the bound is measured
-/// from the request, never from the recycle mark: a 16-hour-old mark must
-/// still get its full replacement window.
-pub fn superseded_owner_replacement_step(
-    requested_at_ms: Option<u128>,
-    now_ms: u128,
-    wait_secs: u64,
-) -> SupersededOwnerReplacementStep {
-    match requested_at_ms {
-        None => SupersededOwnerReplacementStep::RequestReplacement,
-        Some(requested) if now_ms.saturating_sub(requested) >= u128::from(wait_secs) * 1_000 => {
-            SupersededOwnerReplacementStep::RefuseRestartStaleSupervisor
+/// `#runfrontenderror` / `#implementlazilyowned`: the replacement request of one
+/// superseded owner, retained as a Lazily intent.
+///
+/// The first [`RecycleInflightUnsettledVerdict::ReplaceSupersededOwner`]
+/// observation desires and claims the replacement (the caller sends the
+/// turn-safe request) and Lazily records it `Retryable` due `wait_secs` later.
+/// Until then a claim is Lazily `Waiting` and the gate keeps waiting; the first
+/// claim at or after the due time is the bounded wait's end and is recorded as a
+/// Lazily rejection, so every later observation refuses too. The bound is
+/// measured from the request (the caller's own elapsed time), never from the
+/// recycle mark: a 16-hour-old mark still gets its full replacement window.
+#[derive(Debug, Clone)]
+pub struct SupersededOwnerReplacement {
+    core: lazily::EffectCasCore<(), String, (), String, String>,
+}
+
+const SUPERSEDED_OWNER_REPLACEMENT_GENERATION: u64 = 0;
+const SUPERSEDED_OWNER_REPLACEMENT_EFFECT: &str = "superseded-owner-replacement";
+
+impl Default for SupersededOwnerReplacement {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SupersededOwnerReplacement {
+    pub fn new() -> Self {
+        Self {
+            core: lazily::EffectCasCore::new(SUPERSEDED_OWNER_REPLACEMENT_GENERATION),
         }
-        Some(_) => SupersededOwnerReplacementStep::KeepWaiting,
+    }
+
+    /// Classify one observation at the gate's elapsed `now_ms`.
+    pub fn step(&mut self, now_ms: u128, wait_secs: u64) -> SupersededOwnerReplacementStep {
+        let now = u64::try_from(now_ms).unwrap_or(u64::MAX);
+        if self.core.state(&()).is_some_and(|state| {
+            matches!(
+                state.terminal,
+                Some(lazily::EffectTerminal::Rejected { .. })
+            )
+        }) {
+            return SupersededOwnerReplacementStep::RefuseRestartStaleSupervisor;
+        }
+        match self
+            .core
+            .claim(&(), SUPERSEDED_OWNER_REPLACEMENT_GENERATION, now)
+            .1
+        {
+            lazily::EffectCasClaim::Empty | lazily::EffectCasClaim::StaleGeneration { .. } => {
+                let Some(attempt) = self.request(now) else {
+                    return SupersededOwnerReplacementStep::RefuseRestartStaleSupervisor;
+                };
+                let due = now.saturating_add(wait_secs.saturating_mul(1_000));
+                self.core.record_retryable(
+                    &(),
+                    &attempt.identity,
+                    "replacement_requested".to_string(),
+                    due,
+                );
+                SupersededOwnerReplacementStep::RequestReplacement
+            }
+            lazily::EffectCasClaim::Waiting { .. } | lazily::EffectCasClaim::Busy => {
+                SupersededOwnerReplacementStep::KeepWaiting
+            }
+            lazily::EffectCasClaim::Claimed(attempt) => {
+                self.core.record_rejected(
+                    &(),
+                    &attempt.identity,
+                    "superseded_owner_not_replaced".to_string(),
+                );
+                SupersededOwnerReplacementStep::RefuseRestartStaleSupervisor
+            }
+        }
+    }
+
+    fn request(&mut self, now: u64) -> Option<lazily::EffectAttempt<(), String, (), String>> {
+        let intent = lazily::EffectIntent {
+            identity: lazily::EffectIdentity::new(format!(
+                "{SUPERSEDED_OWNER_REPLACEMENT_EFFECT}#1"
+            ))
+            .ok()?,
+            epoch: 1,
+            key: (),
+            expected: "superseded_owner_alive".to_string(),
+            plan: lazily::EffectPlan::single(()),
+        };
+        if !matches!(
+            self.core.upsert_desired(intent).1,
+            lazily::EffectCasUpsert::Accepted
+        ) {
+            return None;
+        }
+        match self
+            .core
+            .claim(&(), SUPERSEDED_OWNER_REPLACEMENT_GENERATION, now)
+            .1
+        {
+            lazily::EffectCasClaim::Claimed(attempt) => Some(attempt),
+            _ => None,
+        }
     }
 }
 
@@ -5498,18 +5582,19 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     #[test]
     fn superseded_owner_replacement_wait_is_bounded_from_the_request() {
         let wait = RECYCLE_SUPERSEDED_OWNER_REPLACEMENT_WAIT_SECS;
+        let mut replacement = SupersededOwnerReplacement::new();
+        let requested = 10_u128;
         assert_eq!(
-            superseded_owner_replacement_step(None, 10, wait),
+            replacement.step(requested, wait),
             SupersededOwnerReplacementStep::RequestReplacement
         );
-        let requested = 10_u128;
         for now in [
             requested,
             requested + 1,
             requested + u128::from(wait) * 1_000 - 1,
         ] {
             assert_eq!(
-                superseded_owner_replacement_step(Some(requested), now, wait),
+                replacement.step(now, wait),
                 SupersededOwnerReplacementStep::KeepWaiting
             );
         }
@@ -5518,17 +5603,46 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
             requested + u128::from(wait) * 10_000,
         ] {
             assert_eq!(
-                superseded_owner_replacement_step(Some(requested), now, wait),
+                replacement.step(now, wait),
                 SupersededOwnerReplacementStep::RefuseRestartStaleSupervisor
             );
         }
         // A zero budget still requests first, then refuses on the next step.
+        let mut zero = SupersededOwnerReplacement::new();
         assert_eq!(
-            superseded_owner_replacement_step(None, 0, 0),
+            zero.step(0, 0),
             SupersededOwnerReplacementStep::RequestReplacement
         );
         assert_eq!(
-            superseded_owner_replacement_step(Some(0), 0, 0),
+            zero.step(0, 0),
+            SupersededOwnerReplacementStep::RefuseRestartStaleSupervisor
+        );
+    }
+
+    /// `#implementlazilyowned`: the request is one Lazily retained intent: it is
+    /// requested exactly once, Lazily owns its due time, and the bounded wait's
+    /// end is a sticky Lazily rejection.
+    #[test]
+    fn superseded_owner_replacement_is_requested_once_and_its_refusal_is_sticky() {
+        let mut replacement = SupersededOwnerReplacement::new();
+        let steps = (0..8_u128)
+            .map(|tick| replacement.step(tick * 10_000, 45))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            steps
+                .iter()
+                .filter(|step| **step == SupersededOwnerReplacementStep::RequestReplacement)
+                .count(),
+            1
+        );
+        assert_eq!(steps[0], SupersededOwnerReplacementStep::RequestReplacement);
+        assert_eq!(steps[4], SupersededOwnerReplacementStep::KeepWaiting);
+        assert_eq!(
+            steps[5],
+            SupersededOwnerReplacementStep::RefuseRestartStaleSupervisor
+        );
+        assert_eq!(
+            steps[7],
             SupersededOwnerReplacementStep::RefuseRestartStaleSupervisor
         );
     }

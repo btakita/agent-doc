@@ -522,7 +522,7 @@ enum RunningTurnSteeringClaim {
     NotDelivered(String),
 }
 
-const ROUTE_SYNC_SUBMIT_ATTEMPTS: usize = 3;
+const ROUTE_SYNC_SUBMIT_ATTEMPTS: u32 = 3;
 const ROUTE_SYNC_SUBMIT_POLLS_PER_ATTEMPT: usize = 3;
 const ROUTE_SYNC_SUBMIT_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
@@ -568,38 +568,71 @@ fn confirm_running_turn_submission(
     harness: &str,
     poll_interval: Duration,
 ) -> Result<usize, String> {
-    let mut last_observation = RunningTurnSubmissionObservation::Unreadable;
-    'attempts: for attempt in 1..=ROUTE_SYNC_SUBMIT_ATTEMPTS {
-        for _ in 0..ROUTE_SYNC_SUBMIT_POLLS_PER_ATTEMPT {
-            std::thread::sleep(poll_interval);
-            let capture = agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane)
-                .map_err(|err| format!("the pane could not be read ({})", one_line_error(&err)))?;
-            last_observation = running_turn_submission_observation(harness, &capture);
-            match &last_observation {
-                RunningTurnSubmissionObservation::Delivered => return Ok(attempt - 1),
-                RunningTurnSubmissionObservation::Blocked(reason) => return Err(reason.clone()),
-                RunningTurnSubmissionObservation::Draft
-                | RunningTurnSubmissionObservation::Unreadable => {}
+    // `#implementlazilyowned`: each submit attempt is one Lazily-claimed attempt
+    // of the steering delivery. A visible draft is `Retryable` (the composer
+    // still holds the same injected text), Lazily owns whether another submit
+    // is claimed, and an unreadable composer stops the drive. A retry is issued
+    // only while the injected draft is still visibly present.
+    let drive = agent_doc_effect_cas::drive_effect_epochs(
+        &format!("route-sync-submit:{pane}"),
+        "steering-draft",
+        ROUTE_SYNC_SUBMIT_ATTEMPTS,
+        &mut |attempt| {
+            if attempt.attempt > 1 {
+                agent_doc_tmux_io::send_key(tmux, pane, "Enter").map_err(|err| {
+                    anyhow::anyhow!(
+                        "tmux did not accept a follow-up submit retry ({})",
+                        one_line_error(&err)
+                    )
+                })?;
             }
-        }
-        if attempt < ROUTE_SYNC_SUBMIT_ATTEMPTS
-            && matches!(last_observation, RunningTurnSubmissionObservation::Draft)
-        {
-            agent_doc_tmux_io::send_key(tmux, pane, "Enter").map_err(|err| {
-                format!(
-                    "tmux did not accept a follow-up submit retry ({})",
-                    one_line_error(&err)
-                )
-            })?;
-        } else {
-            break 'attempts;
-        }
-    }
-    match last_observation {
-        RunningTurnSubmissionObservation::Draft => Err(format!(
+            let mut last_observation = RunningTurnSubmissionObservation::Unreadable;
+            for _ in 0..ROUTE_SYNC_SUBMIT_POLLS_PER_ATTEMPT {
+                std::thread::sleep(poll_interval);
+                let capture =
+                    agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane).map_err(|err| {
+                        anyhow::anyhow!("the pane could not be read ({})", one_line_error(&err))
+                    })?;
+                last_observation = running_turn_submission_observation(harness, &capture);
+                match &last_observation {
+                    RunningTurnSubmissionObservation::Delivered => {
+                        return Ok(agent_doc_effect_cas::EpochStep::Applied {
+                            receipt: attempt.attempt as usize - 1,
+                            authority: "composer-empty".to_string(),
+                        });
+                    }
+                    RunningTurnSubmissionObservation::Blocked(reason) => {
+                        return Err(anyhow::anyhow!("{reason}"));
+                    }
+                    RunningTurnSubmissionObservation::Draft
+                    | RunningTurnSubmissionObservation::Unreadable => {}
+                }
+            }
+            Ok(agent_doc_effect_cas::EpochStep::Retryable(last_observation))
+        },
+        &mut |_attempt, observation| {
+            Ok(
+                if matches!(observation, RunningTurnSubmissionObservation::Draft) {
+                    agent_doc_effect_cas::Pace::Continue
+                } else {
+                    agent_doc_effect_cas::Pace::Stop
+                },
+            )
+        },
+    )
+    .map_err(|err| err.to_string())?;
+    match drive {
+        agent_doc_effect_cas::EpochDrive::Applied(resubmits) => Ok(resubmits),
+        agent_doc_effect_cas::EpochDrive::Exhausted {
+            reason: RunningTurnSubmissionObservation::Draft,
+            ..
+        } => Err(format!(
             "the composer still holds the steering draft after {ROUTE_SYNC_SUBMIT_ATTEMPTS} submit attempts"
         )),
-        _ => Err("the submitted steering could not be proven in the busy composer".to_string()),
+        agent_doc_effect_cas::EpochDrive::Exhausted { .. }
+        | agent_doc_effect_cas::EpochDrive::Stopped { .. } => {
+            Err("the submitted steering could not be proven in the busy composer".to_string())
+        }
     }
 }
 

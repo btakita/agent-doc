@@ -113,6 +113,9 @@
 //!   backlinks are all resolved. A plain citation remains advisory: only the
 //!   canonical `(source: agent:<component> [#<id>])` locator or a tracked
 //!   item's `(todos: [#<todo-id>] ...)` metadata establishes a completion link.
+//! - [`check_off_owning_todo_id`] (`#todolink`) checks every open item that
+//!   owns an id. A citation is not ownership. Queue maintenance uses it when
+//!   the linked queue row is a completion strike.
 //!
 //! ## Agentic Contracts
 //! - All functions are pure: no file IO, no clock, no randomness.
@@ -1648,6 +1651,44 @@ pub fn set_todo_item_state_in_document(
         label,
         reconciled,
     })
+}
+
+/// `#todolink`: check off every open `agent:todo` item that owns `id`.
+///
+/// A citation is not ownership. Already-checked owners stay as they are.
+/// Duplicate open copies of the same own id are all checked, then folded the
+/// way `--todo-done` folds them. `Ok(None)` when no owning item changed.
+pub fn check_off_owning_todo_id(content: &str, id: &str) -> Result<Option<String>> {
+    let id = normalize_link_id(id);
+    if id.is_empty() {
+        return Ok(None);
+    }
+    let Some(todo) = find_todo_component(content)? else {
+        return Ok(None);
+    };
+    let mut body = TodoBody::parse(todo.content(content));
+    let owners: Vec<LocatedItem> = body
+        .items
+        .iter()
+        .filter(|item| item.own_id.as_deref() == Some(id.as_str()) && item.state.is_open())
+        .cloned()
+        .collect();
+    if owners.is_empty() {
+        return Ok(None);
+    }
+    for item in &owners {
+        body.rewrite_line(
+            item.line,
+            TodoState::Done,
+            item.own_id.as_deref(),
+            &item.action,
+        );
+    }
+    let (folded, _) = reconcile_todo_body(&body.render());
+    if folded == todo.content(content) {
+        return Ok(None);
+    }
+    Ok(Some(todo.replace_content(content, &folded)))
 }
 
 /// Replace one todo item's action text (`--todo-edit "id=text"`).

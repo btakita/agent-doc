@@ -2051,7 +2051,9 @@ fn persist_todo_mutation(
 
 /// `#tododone`: check one `agent:todo` item off (`[x]`) in place by its own id,
 /// a cited `#id`, or its exact text. Idempotent; folds any duplicate copy of
-/// the item (`#tododupdone`). Returns whether the document changed.
+/// the item (`#tododupdone`). `#todolink`: the same write strikes the queue row
+/// whose work identity is that todo's own id, and checks a todo whose linked
+/// row is already a completion strike. Returns whether the document changed.
 pub fn todo_done(file: &Path, selector: &str) -> Result<bool> {
     let full_content = read_command_document(file, "todo_done")?;
     let outcome = agent_doc_element::todo::set_todo_item_state_in_document(
@@ -2059,10 +2061,13 @@ pub fn todo_done(file: &Path, selector: &str) -> Result<bool> {
         selector,
         agent_doc_element::todo::TodoTransition::Done,
     )?;
-    persist_todo_mutation(file, &full_content, outcome, "todo-done")
+    let linked = agent_doc_queue::linked_todo_queue::sync_linked_todo_queue(&outcome.content)?
+        .unwrap_or_else(|| outcome.content.clone());
+    persist_todo_queue_link(file, &full_content, outcome, linked, "todo-done")
 }
 
 /// `#tododone`: uncheck one `agent:todo` item (`[ ]`) in place. Idempotent.
+/// `#todolink`: also restores the linked completion strike.
 pub fn todo_reopen(file: &Path, selector: &str) -> Result<bool> {
     let full_content = read_command_document(file, "todo_reopen")?;
     let outcome = agent_doc_element::todo::set_todo_item_state_in_document(
@@ -2070,7 +2075,46 @@ pub fn todo_reopen(file: &Path, selector: &str) -> Result<bool> {
         selector,
         agent_doc_element::todo::TodoTransition::Reopen,
     )?;
-    persist_todo_mutation(file, &full_content, outcome, "todo-reopen")
+    let linked = agent_doc_queue::linked_todo_queue::restore_linked_queue_after_todo_reopen(
+        &full_content,
+        &outcome.content,
+    )?
+    .unwrap_or_else(|| outcome.content.clone());
+    persist_todo_queue_link(file, &full_content, outcome, linked, "todo-reopen")
+}
+
+fn persist_todo_queue_link(
+    file: &Path,
+    full_content: &str,
+    outcome: agent_doc_element::todo::TodoMutationOutcome,
+    linked: String,
+    verb: &str,
+) -> Result<bool> {
+    let queue_linked = linked != outcome.content;
+    if linked == full_content {
+        pending_receipt!("[todo] {verb}: {} already up to date", outcome.label);
+        return Ok(false);
+    }
+    persist_pending_write(file, full_content, &linked)?;
+    if outcome.changed {
+        pending_receipt!(
+            "[todo] {verb}: {} in agent:todo{}",
+            outcome.label,
+            if outcome.reconciled > 0 {
+                format!(
+                    " (folded {} duplicate cop{})",
+                    outcome.reconciled,
+                    if outcome.reconciled == 1 { "y" } else { "ies" }
+                )
+            } else {
+                String::new()
+            }
+        );
+    }
+    if queue_linked {
+        pending_receipt!("[todo] {verb}: {} linked queue row updated", outcome.label);
+    }
+    Ok(true)
 }
 
 /// `#tododone`: replace one `agent:todo` item's text, keeping its id, state,

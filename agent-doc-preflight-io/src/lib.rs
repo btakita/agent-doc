@@ -7856,6 +7856,16 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         }
     }
 
+    // `#todolink`: a completion strike (no `acknowledged;` stays-open note)
+    // checks the owning todo. The strike half above already closed rows for
+    // todos that were checked before this pass. Ack rows stay open.
+    if let Some(linked) =
+        agent_doc_queue::linked_todo_queue::check_todos_for_struck_queue(&current_content)?
+    {
+        current_content = linked;
+        mutated = true;
+    }
+
     // `#qheadresidue`: free-text catch-up strike. The per-cycle `#ftstrike`
     // (`strike_answered_free_text_queue_heads`) only matches THIS cycle's
     // `response_body`, so a free-text queue head answered by a PRIOR cycle — its

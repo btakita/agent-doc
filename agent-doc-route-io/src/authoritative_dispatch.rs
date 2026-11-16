@@ -185,6 +185,10 @@ pub enum CloseoutWaitRouteOutcome {
     /// `#runsteer`: the explicit send carried no steering while a turn was
     /// already starting. Exit 0. No trigger.
     RunSteerNoop(String),
+    /// A `response_captured` or `write_applied` closeout is already owned by
+    /// retained commit recovery. Exit 0. The route does not queue a second
+    /// dispatch and does not resubmit finalize or write.
+    RetainedRecoveryOwns(String),
 }
 
 impl CloseoutWaitRouteOutcome {
@@ -194,7 +198,8 @@ impl CloseoutWaitRouteOutcome {
             | Self::Deferred(message)
             | Self::OwnerTurnBusy(message)
             | Self::SteeringEnqueued(message)
-            | Self::RunSteerNoop(message) => message,
+            | Self::RunSteerNoop(message)
+            | Self::RetainedRecoveryOwns(message) => message,
         }
     }
 
@@ -221,6 +226,16 @@ impl CloseoutWaitRouteOutcome {
                     file,
                     &format!(
                         "route_run_steer_enqueued file={} items={explicit_items} (#runsteer)",
+                        file.display()
+                    ),
+                );
+                crate::invocation::record_route_live_owner_turn(message);
+            }
+            Self::RetainedRecoveryOwns(message) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_retained_recovery_owns_closeout file={} items={explicit_items}",
                         file.display()
                     ),
                 );
@@ -512,6 +527,29 @@ pub fn closeout_wait_route_outcome(
             ))
         }
     }
+}
+
+/// Outcome when retained commit recovery already owns a captured or
+/// `write_applied` closeout and the route has nothing new to enqueue.
+///
+/// Exit 0. A second finalize or write is not part of this route.
+pub fn retained_recovery_route_outcome(
+    file: &Path,
+    blocker: &str,
+    explicit_items: usize,
+) -> CloseoutWaitRouteOutcome {
+    let fields = agent_doc_flow::outcome::user_outcome_fields(
+        agent_doc_flow::outcome::UserFacingOutcomeKind::NoDrainableWork,
+    );
+    let pending = match explicit_items {
+        0 => String::new(),
+        1 => " 1 pending steering item stays in the document.".to_string(),
+        n => format!(" {n} pending steering items stay in the document."),
+    };
+    CloseoutWaitRouteOutcome::RetainedRecoveryOwns(format!(
+        "[route] retained commit recovery owns the open closeout for {}. This route sent no second trigger and did not resubmit finalize or write.{pending} owner_turn=retained_recovery (blocker: {blocker}) {fields}",
+        file.display(),
+    ))
 }
 
 /// `#routesyncsteer`: an explicit send into any running route-owned TUI turn is
@@ -1468,6 +1506,31 @@ pub fn route_via_authoritative_actor(
                 }
                 CloseoutBlockDispatchDecision::FailClosed => {
                     let reason = decision.route_terminal_reason();
+                    if agent_doc_controller::dispatch::retained_recovery_owns_failed_closeout_block(
+                        context,
+                        &CloseoutBlockDispatchDecision::FailClosed,
+                    ) {
+                        let Some(explicit) = claimed_running_turn_steering(
+                            tmux,
+                            file,
+                            &dispatch_pane,
+                            &actor.record.harness,
+                            matches!(owner_turn, RouteOwnerTurnEvidence::Live),
+                            "route_retained_recovery_target_not_visible",
+                        ) else {
+                            return Ok(dispatch_pane);
+                        };
+                        let outcome = retained_recovery_route_outcome(file, &reason, explicit);
+                        eprintln!("{}", outcome.message());
+                        outcome.record(file, explicit);
+                        crate::invocation::report_pane_if_not_visible(
+                            tmux,
+                            file,
+                            &dispatch_pane,
+                            "route_retained_recovery_target_not_visible",
+                        );
+                        return Ok(dispatch_pane);
+                    }
                     anyhow::bail!(
                         "authoritative actor generation {} for {} owns pane {} but route could not drain the active closeout before dispatch; this route was NOT queued: {}",
                         actor.record.generation,
@@ -2858,6 +2921,40 @@ mod tests {
         assert!(message.contains("no second send is required"), "{message}");
         assert!(message.contains("ui_outcome_class=blocked"), "{message}");
         assert!(!message.contains("steering_delivered=1"), "{message}");
+    }
+
+    #[test]
+    fn write_applied_route_yields_to_retained_commit_recovery() {
+        let file = Path::new("/tmp/sdk-dev.md");
+        let blocker = "closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: resume durable checkpoint cycle=cycle-1794810168413 phase=write_applied capture_id=cycle-1794810168413; the canonical write is already applied; retained commit recovery owns the terminal boundary; do not resubmit finalize or write for /tmp/sdk-dev.md";
+        let outcome = retained_recovery_route_outcome(file, blocker, 0);
+        let CloseoutWaitRouteOutcome::RetainedRecoveryOwns(message) = &outcome else {
+            panic!("write_applied with nothing to enqueue yields: {outcome:?}");
+        };
+        for needle in [
+            "retained commit recovery owns the open closeout",
+            "did not resubmit finalize or write",
+            "owner_turn=retained_recovery",
+            "cycle-1794810168413",
+            "ui_outcome=no_drainable_work",
+            "ui_outcome_class=ok",
+        ] {
+            assert!(message.contains(needle), "missing {needle:?}: {message}");
+        }
+        for forbidden in [
+            "this route was NOT queued",
+            "cancel-turn",
+            "ui_outcome_class=blocked",
+            "recovery_command=",
+        ] {
+            assert!(!message.contains(forbidden), "{forbidden:?}: {message}");
+        }
+
+        let _ = crate::invocation::take_route_deferral();
+        let _ = crate::invocation::take_route_live_owner_turn();
+        outcome.record(file, 0);
+        assert!(crate::invocation::take_route_deferral().is_none());
+        assert!(crate::invocation::take_route_live_owner_turn().is_some());
     }
 
     #[test]

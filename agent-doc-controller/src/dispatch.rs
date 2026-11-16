@@ -4403,6 +4403,18 @@ pub fn classify_closeout_block_dispatch(
     CloseoutBlockDispatchDecision::FailClosed
 }
 
+/// A captured or `write_applied` closeout already has an owner: retained
+/// commit recovery. With no prompt to enqueue and no drainable queue head,
+/// `FailClosed` reports that the route was not queued and reads as a request
+/// to resubmit finalize or write. That recovery forbids both. Yield instead.
+pub fn retained_recovery_owns_failed_closeout_block(
+    context: RouteCloseoutBlockContext,
+    decision: &CloseoutBlockDispatchDecision,
+) -> bool {
+    matches!(context, RouteCloseoutBlockContext::CapturedFinalizeRecovery)
+        && matches!(decision, CloseoutBlockDispatchDecision::FailClosed)
+}
+
 /// `#routedrainnextaction`: format the user-facing outcome fields for a route
 /// closeout block. When route/turn recovery supplied a concrete command for a
 /// stuck cycle, surface the exact unblocker instead of the queue-behind-owner
@@ -9090,6 +9102,28 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
             }),
             CloseoutBlockDispatchDecision::FailClosed
         );
+    }
+
+    #[test]
+    fn write_applied_closeout_without_a_prompt_or_queue_yields_to_retained_recovery() {
+        assert!(retained_recovery_owns_failed_closeout_block(
+            RouteCloseoutBlockContext::CapturedFinalizeRecovery,
+            &CloseoutBlockDispatchDecision::FailClosed,
+        ));
+        assert!(!retained_recovery_owns_failed_closeout_block(
+            RouteCloseoutBlockContext::OpenEmptyPreflight,
+            &CloseoutBlockDispatchDecision::FailClosed,
+        ));
+        assert!(!retained_recovery_owns_failed_closeout_block(
+            RouteCloseoutBlockContext::LiveOwnerTurn,
+            &CloseoutBlockDispatchDecision::FailClosed,
+        ));
+        assert!(!retained_recovery_owns_failed_closeout_block(
+            RouteCloseoutBlockContext::CapturedFinalizeRecovery,
+            &CloseoutBlockDispatchDecision::WaitForActiveQueueHead {
+                head: "queue-head".to_string(),
+            },
+        ));
     }
 
     #[test]

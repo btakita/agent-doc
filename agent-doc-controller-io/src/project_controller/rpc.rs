@@ -20503,12 +20503,16 @@ fn install_controller_request_thread_context(runtime: &Arc<ControllerRuntime>) {
 #[cfg(feature = "test-support")]
 pub fn start_state_actor_for_tests(project_root: &Path) -> Result<StateActorTestHandle> {
     let sock = socket_path(project_root);
-    if sock.exists() {
-        std::fs::remove_file(&sock)
-            .with_context(|| format!("remove stale test actor socket {}", sock.display()))?;
-    }
-    if let Some(parent) = sock.parent() {
-        std::fs::create_dir_all(parent)?;
+    // A Windows controller pipe (`\\.\pipe\...`) has no filesystem parent.
+    // Creating `\\.\pipe` fails, and the pipe disappears with its listener.
+    if !agent_doc_controller::paths::is_named_pipe_path(&sock) {
+        if sock.exists() {
+            std::fs::remove_file(&sock)
+                .with_context(|| format!("remove stale test actor socket {}", sock.display()))?;
+        }
+        if let Some(parent) = sock.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
     }
     let bootstrap = write_bootstrap(project_root, LaunchMode::Lazy)?;
     let runtime = ControllerRuntime::new_arc(bootstrap)?;
@@ -20896,11 +20900,15 @@ pub(crate) fn serve_with_options(
     if let Some(reason) = agent_doc_controller::paths::resolved_socket_path_rejection(&sock) {
         anyhow::bail!(reason);
     }
-    if sock.exists() {
-        let _ = std::fs::remove_file(&sock);
-    }
-    if let Some(parent) = sock.parent() {
-        std::fs::create_dir_all(parent)?;
+    // A Windows controller pipe (`\\.\pipe\...`) has no filesystem parent.
+    // Creating `\\.\pipe` fails before interprocess can bind the name.
+    if !agent_doc_controller::paths::is_named_pipe_path(&sock) {
+        if sock.exists() {
+            let _ = std::fs::remove_file(&sock);
+        }
+        if let Some(parent) = sock.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
     }
     if !root_incarnation.still_matches(project_root) {
         let _ = std::fs::remove_file(&sock);

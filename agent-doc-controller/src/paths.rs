@@ -9,23 +9,88 @@ pub const SOCKET_FILE: &str = "controller.sock";
 ///
 /// Mirrors `agent_doc_supervisor_io::ipc::SUN_PATH_MAX`. The supervisor socket
 /// answers an overflow by relocating to a short runtime path; the controller
-/// socket cannot — see [`socket_path_rejection`].
+/// socket cannot — see [`socket_path_rejection`]. Windows named pipes are not
+/// AF_UNIX sockets, so this limit does not apply to them.
 pub const SUN_PATH_MAX: usize = 107;
 
-pub fn socket_path(project_root: &Path) -> PathBuf {
+/// Local named-pipe prefix for the Windows controller endpoint.
+///
+/// interprocess accepts a Windows local socket only as `\\.\pipe\...` (GH #432).
+const WINDOWS_CONTROLLER_PIPE_PREFIX: &str = r"\\.\pipe\agent-doc-";
+
+/// Project-local filesystem socket. Unix [`socket_path`] is this path. Windows
+/// does not bind it: NPFS rejects anything that is not a named pipe.
+pub fn filesystem_socket_path(project_root: &Path) -> PathBuf {
     project_root.join(".agent-doc").join(SOCKET_FILE)
+}
+
+/// Controller endpoint clients bind and connect.
+///
+/// Unix keeps [`filesystem_socket_path`]. JetBrains and VS Code resolve that
+/// exact path themselves, so it cannot move to a short runtime directory.
+///
+/// Windows local sockets are named pipes. A filesystem path fails in
+/// interprocess with `not a named pipe path`, and a long project root used to
+/// fail earlier on [`SUN_PATH_MAX`], which does not apply to pipes.
+/// `AGENT_DOC_SOCKET_DIR` relocates editor IPC sockets only; it does not change
+/// this endpoint. The pipe is `\\.\pipe\agent-doc-<project hash>`.
+pub fn socket_path(project_root: &Path) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(windows_controller_pipe_name(project_root))
+    } else {
+        filesystem_socket_path(project_root)
+    }
+}
+
+/// Namespaced pipe for `project_root`.
+///
+/// The hash is [`agent_doc_hash::path_string_hash`] of the canonical root when
+/// that directory exists, otherwise of the path as given, so two spellings of
+/// one on-disk root share a pipe and a missing root stays deterministic.
+pub fn windows_controller_pipe_name(project_root: &Path) -> String {
+    let canonical = project_root
+        .canonicalize()
+        .unwrap_or_else(|_| project_root.to_path_buf());
+    let key = agent_doc_hash::path_string_hash(canonical.to_string_lossy().as_ref());
+    format!("{WINDOWS_CONTROLLER_PIPE_PREFIX}{key}")
+}
+
+/// Whether `path` is a Windows named-pipe path (`\\<host>\pipe\<name>`).
+///
+/// Matches the interprocess 2.4 NPFS check. Such a path is not an AF_UNIX
+/// filesystem socket, so [`resolved_socket_path_rejection`] does not measure it
+/// against [`SUN_PATH_MAX`].
+pub fn is_named_pipe_path(path: &Path) -> bool {
+    let bytes = path.as_os_str().as_encoded_bytes();
+    const PFX1: &[u8] = br"\\";
+    const PFX2: &[u8] = br"\pipe\";
+    if bytes.len() < PFX1.len() + PFX2.len() + 1 || !bytes.starts_with(PFX1) {
+        return false;
+    }
+    let rest = &bytes[PFX1.len()..];
+    let Some(slash_at) = rest.iter().position(|byte| *byte == b'\\') else {
+        return false;
+    };
+    let host_base = PFX1.len() + slash_at;
+    let pipe_end = host_base + PFX2.len();
+    bytes.len() > pipe_end && &bytes[host_base..pipe_end] == PFX2
 }
 
 /// Why the controller socket for `project_root` can never be bound or connected,
 /// if it cannot.
 ///
-/// The controller socket path is fixed at `<root>/.agent-doc/controller.sock`
-/// because the JetBrains and VS Code plugins resolve that exact path themselves.
-/// The supervisor socket relocates to a short runtime path when it overflows
-/// `sun_path`, but doing that here would bind the controller somewhere no editor
-/// ever looks — trading a loud failure for a permanently missing editor
-/// authority. So an over-long project root is a **permanent** condition, and the
-/// only useful response is to name it immediately (`#ctrlsockpathtoolong`).
+/// On Unix the controller socket path is fixed at
+/// `<root>/.agent-doc/controller.sock` because the JetBrains and VS Code plugins
+/// resolve that exact path themselves. The supervisor socket relocates to a
+/// short runtime path when it overflows `sun_path`, but doing that here would
+/// bind the controller somewhere no editor ever looks — trading a loud failure
+/// for a permanently missing editor authority. So an over-long project root is a
+/// **permanent** condition, and the only useful response is to name it
+/// immediately (`#ctrlsockpathtoolong`).
+///
+/// Windows does not use that filesystem socket. [`socket_path`] is a named pipe,
+/// and [`resolved_socket_path_rejection`] does not apply [`SUN_PATH_MAX`] to it,
+/// so this returns `None` on Windows.
 ///
 /// Reported 2026-08-09: under a 108-byte project root, every client instead
 /// retried a bind that could never succeed until its budget ran out — a fresh
@@ -42,6 +107,11 @@ pub fn socket_path_rejection(project_root: &Path) -> Option<String> {
 /// they must measure the path they will actually bind rather than re-deriving a
 /// canonical one that may be shorter.
 pub fn resolved_socket_path_rejection(path: &Path) -> Option<String> {
+    // Named pipes are not AF_UNIX sockets. Measuring `\\.\pipe\...` against
+    // `sun_path` rejects a controller Windows can bind (GH #432).
+    if is_named_pipe_path(path) {
+        return None;
+    }
     let len = path.as_os_str().len();
     if len <= SUN_PATH_MAX {
         return None;
@@ -154,9 +224,79 @@ mod tests {
         let root = Path::new("/tmp/project");
 
         assert_eq!(
-            socket_path(root),
+            filesystem_socket_path(root),
             Path::new("/tmp/project/.agent-doc/controller.sock")
         );
+        if cfg!(windows) {
+            assert!(is_named_pipe_path(&socket_path(root)));
+        } else {
+            assert_eq!(socket_path(root), filesystem_socket_path(root));
+        }
+    }
+
+    /// GH #432: Windows binds `\\.\pipe\agent-doc-<project hash>`, not
+    /// `<root>\.agent-doc\controller.sock`, and a long root is not a `sun_path`
+    /// failure.
+    #[test]
+    fn windows_controller_pipe_name_is_a_namespaced_pipe_without_sun_path() {
+        let root = PathBuf::from(format!(r"C:\Users\{}\project", "r".repeat(180)));
+        let pipe = windows_controller_pipe_name(&root);
+        let hash = agent_doc_hash::path_string_hash(root.to_string_lossy().as_ref());
+
+        assert_eq!(pipe, format!(r"\\.\pipe\agent-doc-{hash}"));
+        assert!(is_named_pipe_path(Path::new(&pipe)));
+        assert!(
+            !pipe.contains("Users"),
+            "the project path must not be embedded in the pipe name: {pipe}"
+        );
+        assert_eq!(resolved_socket_path_rejection(Path::new(&pipe)), None);
+        assert!(
+            resolved_socket_path_rejection(&filesystem_socket_path(&root)).is_some(),
+            "the same root's filesystem socket is still over sun_path"
+        );
+
+        let long_pipe = format!(r"\\.\pipe\{}", "p".repeat(SUN_PATH_MAX + 50));
+        assert!(long_pipe.len() > SUN_PATH_MAX);
+        assert_eq!(
+            resolved_socket_path_rejection(Path::new(&long_pipe)),
+            None,
+            "a named pipe longer than sun_path is still bindable"
+        );
+
+        if cfg!(windows) {
+            assert_eq!(socket_path(&root), PathBuf::from(&pipe));
+            assert_eq!(socket_path_rejection(&root), None);
+        }
+    }
+
+    #[test]
+    fn windows_controller_pipe_name_follows_the_canonical_root() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let via_dot = dir.path().join(".");
+        assert_eq!(
+            windows_controller_pipe_name(dir.path()),
+            windows_controller_pipe_name(&via_dot),
+            "two spellings of one directory must share a pipe"
+        );
+        let canonical = dir.path().canonicalize().expect("canonical temp dir");
+        let hash = agent_doc_hash::path_string_hash(canonical.to_string_lossy().as_ref());
+        assert_eq!(
+            windows_controller_pipe_name(dir.path()),
+            format!(r"\\.\pipe\agent-doc-{hash}")
+        );
+    }
+
+    #[test]
+    fn filesystem_controller_sockets_are_not_named_pipes() {
+        assert!(!is_named_pipe_path(Path::new(
+            "/tmp/project/.agent-doc/controller.sock"
+        )));
+        assert!(!is_named_pipe_path(Path::new(
+            r"C:\project\.agent-doc\controller.sock"
+        )));
+        assert!(is_named_pipe_path(Path::new(r"\\.\pipe\agent-doc-abc")));
+        assert!(is_named_pipe_path(Path::new(r"\\HOST\pipe\agent-doc-abc")));
+        assert!(!is_named_pipe_path(Path::new(r"\\.\pipe")));
     }
 
     #[test]
@@ -170,12 +310,13 @@ mod tests {
     #[test]
     fn a_root_whose_socket_path_overflows_sun_path_is_rejected() {
         let root = PathBuf::from(format!("/{}", "r".repeat(SUN_PATH_MAX)));
+        let socket = filesystem_socket_path(&root);
         assert!(
-            socket_path_rejection(&root).is_some(),
+            resolved_socket_path_rejection(&socket).is_some(),
             "a root at the limit still overflows once the socket suffix is appended"
         );
 
-        let reason = socket_path_rejection(&root).expect("rejected");
+        let reason = resolved_socket_path_rejection(&socket).expect("rejected");
         assert!(reason.contains("sun_path"), "{reason}");
         assert!(reason.contains("controller.sock"), "{reason}");
         assert!(
@@ -188,14 +329,23 @@ mod tests {
     /// over is rejected.
     #[test]
     fn the_sun_path_boundary_is_exact() {
-        let suffix_len = socket_path(Path::new("")).as_os_str().len();
+        let suffix_len = filesystem_socket_path(Path::new("")).as_os_str().len();
         let longest_ok = PathBuf::from("/".repeat(SUN_PATH_MAX - suffix_len));
-        assert_eq!(socket_path(&longest_ok).as_os_str().len(), SUN_PATH_MAX);
-        assert_eq!(socket_path_rejection(&longest_ok), None);
+        assert_eq!(
+            filesystem_socket_path(&longest_ok).as_os_str().len(),
+            SUN_PATH_MAX
+        );
+        assert_eq!(
+            resolved_socket_path_rejection(&filesystem_socket_path(&longest_ok)),
+            None
+        );
 
         let one_over = PathBuf::from("/".repeat(SUN_PATH_MAX - suffix_len + 1));
-        assert_eq!(socket_path(&one_over).as_os_str().len(), SUN_PATH_MAX + 1);
-        assert!(socket_path_rejection(&one_over).is_some());
+        assert_eq!(
+            filesystem_socket_path(&one_over).as_os_str().len(),
+            SUN_PATH_MAX + 1
+        );
+        assert!(resolved_socket_path_rejection(&filesystem_socket_path(&one_over)).is_some());
     }
 
     /// `#handoffsockcompact`: an ordinary root keeps the canonical name.
@@ -221,10 +371,10 @@ mod tests {
         let mut boundary_checked = false;
         for root_len in 1..=SUN_PATH_MAX {
             let root = PathBuf::from(format!("/{}", "r".repeat(root_len - 1)));
-            if socket_path_rejection(&root).is_some() {
+            if resolved_socket_path_rejection(&filesystem_socket_path(&root)).is_some() {
                 continue;
             }
-            boundary_checked |= socket_path(&root).as_os_str().len() == SUN_PATH_MAX;
+            boundary_checked |= filesystem_socket_path(&root).as_os_str().len() == SUN_PATH_MAX;
             for pid in [1u32, 2038791, 4_194_304] {
                 for generation in [0u64, 1, 2, 2233, 36 * 36 * 36 * 36 - 1] {
                     let path = handoff_socket_path(&root, pid, generation);

@@ -556,6 +556,7 @@ dependencies = [
  "agent-doc-element-backlog",
  "agent-doc-flow",
  "agent-doc-fs",
+ "agent-doc-hash",
  "agent-doc-queue",
  "agent-doc-supervisor",
  "agent-doc-tmux-commands",

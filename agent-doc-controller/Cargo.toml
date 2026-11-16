@@ -21,6 +21,7 @@ agent-doc-editor-surface = { path = "../agent-doc-editor-surface", version = "0.
 agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.577" }
 agent-doc-flow = { path = "../agent-doc-flow", version = "0.35.577" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.577" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.577" }
 agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.577" }
 agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.577" }
 agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.35.577" }

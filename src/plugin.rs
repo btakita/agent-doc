@@ -9,7 +9,7 @@
 //! - `update_all_installed()` — release-watcher entry point that updates every existing agent-doc JetBrains/VS Code installation without installing into a new editor. Returns a `PluginReconcileReport` with one `PluginTargetOutcome` per target (GH #114), from which `PluginReconcileReport::summary` derives the upgrade's closing lines: separate hot-upgraded / installed / staged / restart-required / unchanged counts, each target that needs a restart by name, and no "if it does not reload on its own" hedge where a reload is known not to happen. A target whose proven platform build is outside every published package range is reported as `UnsupportedPlatform` (GH #233): left in place, one warning, no failure.
 //! - `list()` — scans JetBrains plugin directories for the versioned agent-doc JAR and queries `code --list-extensions` for the VS Code extension; prints found entries to stdout.
 //! - JetBrains plugin directories are discovered from versioned IDE data roots (`~/.local/share/JetBrains/<Product><Version>/` on Linux, `~/Library/Application Support/JetBrains/<Product><Version>/` on macOS). Config roots and unrelated JetBrains service directories are excluded. Callers can select an exact target with `--plugins-dir`; ambiguous non-interactive discovery fails with rerun guidance instead of waiting on stdin.
-//! - VS Code CLI detection order: `cursor` → `codium` → `code` (first that succeeds `--version`). Absence is reported as a missing prerequisite before any download, never discarded and re-spawned as `code`.
+//! - VS Code CLI detection order: `cursor` → `codium` → `code` (first that succeeds `--version`). On Windows, Rust's `Command` only appends `.exe`, so each name is also resolved through `PATHEXT` (and always `.cmd`): `code` finds `code.cmd`. Absence is reported as a missing prerequisite before any download, never discarded and re-spawned as `code`.
 //! - VS Code installs also reach every workspace extension host on the machine (`#vscoderemoteparity`): `code-server` on `PATH` (otherwise `~/.local/bin/code-server` or Coder's default `/tmp/code-server/bin/code-server`, labelled `code-server:<path>`, `#vscodecodersmoke`), Coder's `vscode-web` module (the Microsoft VS Code Server web build, default `/tmp/vscode-web/bin/code-server`, otherwise `~/.vscode-web/bin/code-server`, labelled `vscode-web:<path>`, installing with no `--extensions-dir` so the server CLI picks the same `$VSCODE_AGENT_FOLDER`-or-`~/.vscode-server/extensions` default its `serve-local` loads, `#vscodewebprefix`; each of this user's running `serve-local` servers is also a target, at the prefix and the extensions directory that server loads (`--extensions-dir`, else `<--server-data-dir>/extensions`, else that process's own `$VSCODE_AGENT_FOLDER/extensions`, else the CLI default), labelled `vscode-web:<path> --extensions-dir <dir>` when one is set, `#vscodewebextdir` `#vscodewebdatadir`), and the newest Remote-SSH server install under `~/.vscode-server` (or `$VSCODE_AGENT_FOLDER`), `~/.vscode-server-insiders`, `~/.vscodium-server` or `~/.cursor-server`, through that server's own CLI with `--extensions-dir <root>/extensions`. Both server layouts are probed (`bin/<commit>/bin/<cli>` and `cli/servers/<id>/server/bin/<cli>`). `install`, `update`, `update_all_installed` and `list` use the same targets; an install attempts every target before reporting failures, and fails before downloading only when no desktop CLI and no workspace host exists.
 //! - Asset selection matches complete versioned package shapes and prefers a signed variant. JetBrains targets prove their platform build from the versioned IDE data root: 242-261 select `agent-doc-jetbrains-<version>.zip`, exact 262 selects `agent-doc-jetbrains-262-<version>.zip`, and an unprovable/unsupported target fails before replacement. Local installs read the selected package's own `gradle.properties`; VS Code installs require the VSIX version to match `package.json` exactly.
 //! - Downloaded editor packages are verified before installation against the release's `EDITOR-PACKAGES.sha256` manifest, falling back to GitHub's per-asset `digest`. A declared digest that disagrees with the bytes fails closed.
@@ -35,7 +35,7 @@
 //! - install_unknown_editor: `install("emacs")` → Err containing "Unknown editor"
 //! - update_already_current: JetBrains plugin at matching version → early Ok, no download
 //! - list_no_plugins: no IDE dirs, `code` absent → stderr "No agent-doc editor plugins found", Ok
-//! - detect_code_cmd: cursor available → returns "cursor"; only code available → returns "code"; none available → `None`, and the caller fails with install guidance before downloading
+//! - detect_code_cmd: cursor available → returns "cursor"; only code available → returns "code"; on Windows, `code.cmd` via PATHEXT counts as `code`; none available → `None`, and the caller fails with install guidance before downloading
 //! - vscode_server_targets: a Remote-SSH root with servers in both layouts → one target for the newest, installing with `--extensions-dir <root>/extensions`; a non-executable CLI or empty root → no target
 //! - code_server_target: `code-server` off `PATH` but executable under `~/.local/bin` or `/tmp/code-server/bin` → a `code-server:<path>` target
 //! - vscode_web_target: an executable `/tmp/vscode-web/bin/code-server` or `~/.vscode-web/bin/code-server` → a `vscode-web:<path>` target with no leading args; a non-executable CLI → no target
@@ -1035,21 +1035,142 @@ fn install_jetbrains(plugins_dir: Option<&Path>) -> Result<JetbrainsLocalInstall
 
 // --- VS Code ---
 
+/// Desktop CLIs, in the order install and list prefer them.
+const VSCODE_FAMILY_CLI_NAMES: &[&str] = &["cursor", "codium", "code"];
+
 /// Resolve the VS Code-family CLI, or `None` when none is installed.
 ///
 /// GH #57: this used to return `"code"` after proving all three candidates
 /// absent, so the caller discarded the absence it had just measured and spawned
 /// a binary known to be missing — surfacing as a bare `No such file or
 /// directory (os error 2)` that reads like the *vsix* is missing.
-fn detect_code_cmd() -> Option<&'static str> {
+///
+/// GH #432: on Windows the VS Code shell command is `code.cmd`. `Command` only
+/// appends `.exe` while searching `PATH`, so a bare `code` misses it. PATHEXT
+/// resolution (always including `.cmd`) finds that file.
+fn detect_code_cmd() -> Option<String> {
     available_code_cmds().into_iter().next()
 }
 
-fn available_code_cmds() -> Vec<&'static str> {
-    ["cursor", "codium", "code"]
-        .into_iter()
-        .filter(|cmd| command_answers_version(cmd))
+fn available_code_cmds() -> Vec<String> {
+    VSCODE_FAMILY_CLI_NAMES
+        .iter()
+        .copied()
+        .filter_map(resolve_vscode_family_cli)
         .collect()
+}
+
+fn resolve_vscode_family_cli(name: &str) -> Option<String> {
+    // `code.exe` (and any bare name `Command` can already spawn) stays first.
+    // Rust appends only `.exe`, so this misses `code.cmd`.
+    if command_answers_version(name) {
+        return Some(name.to_string());
+    }
+    #[cfg(windows)]
+    {
+        let pathext_var = std::env::var("PATHEXT").ok();
+        let pathext = pathext_extensions_from(pathext_var.as_deref());
+        let dirs: Vec<PathBuf> =
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
+        let resolved = resolve_command_on_path(name, &dirs, &pathext, |path| {
+            command_answers_version(&path.to_string_lossy())
+        })?;
+        return Some(resolved.to_string_lossy().into_owned());
+    }
+    #[cfg(not(windows))]
+    None
+}
+
+/// Split a Windows `PATHEXT` value. `None` is the default
+/// `.COM;.EXE;.BAT;.CMD`.
+#[cfg(any(windows, test))]
+fn pathext_extensions_from(raw: Option<&str>) -> Vec<String> {
+    let raw = raw.unwrap_or(".COM;.EXE;.BAT;.CMD");
+    raw.split(';')
+        .map(normalize_pathext_entry)
+        .filter(|ext| !ext.is_empty())
+        .collect()
+}
+
+#[cfg(any(windows, test))]
+fn normalize_pathext_entry(ext: &str) -> String {
+    let ext = ext.trim();
+    if ext.is_empty() {
+        String::new()
+    } else if ext.starts_with('.') {
+        ext.to_string()
+    } else {
+        format!(".{ext}")
+    }
+}
+
+/// File names `program` can have on Windows: itself, then each PATHEXT
+/// extension, then `.cmd` when PATHEXT omitted it. VS Code installs `code.cmd`.
+#[cfg(any(windows, test))]
+fn cli_name_candidates(program: &str, pathext: &[String]) -> Vec<String> {
+    let mut names = vec![program.to_string()];
+    if Path::new(program).extension().is_some() {
+        return names;
+    }
+    for ext in pathext {
+        push_unique_cli_name(&mut names, &format!("{program}{ext}"));
+    }
+    push_unique_cli_name(&mut names, &format!("{program}.cmd"));
+    names
+}
+
+#[cfg(any(windows, test))]
+fn push_unique_cli_name(names: &mut Vec<String>, candidate: &str) {
+    if !names
+        .iter()
+        .any(|name| name.eq_ignore_ascii_case(candidate))
+    {
+        names.push(candidate.to_string());
+    }
+}
+
+/// First file under `dirs` whose name matches `program` or a PATHEXT spelling
+/// and which `accept` allows.
+///
+/// Directories are searched in order, and within a directory the PATHEXT order
+/// wins (`code.exe` before `code.cmd`). A rejected file does not hide a later
+/// spelling. Matching is ASCII case-insensitive: `PATHEXT` lists `.CMD` and
+/// the VS Code shell command on disk is `code.cmd`.
+#[cfg(any(windows, test))]
+fn resolve_command_on_path(
+    program: &str,
+    dirs: &[PathBuf],
+    pathext: &[String],
+    mut accept: impl FnMut(&Path) -> bool,
+) -> Option<PathBuf> {
+    let wanted = cli_name_candidates(program, pathext);
+    for dir in dirs {
+        let Ok(entries) = fs::read_dir(dir) else {
+            continue;
+        };
+        let files: Vec<PathBuf> = entries
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| path.is_file())
+            .collect();
+        for name in &wanted {
+            if let Some(found) = files
+                .iter()
+                .find(|path| file_name_eq_ignore_ascii_case(path, name))
+                .filter(|path| accept(path))
+            {
+                return Some(found.clone());
+            }
+        }
+    }
+    None
+}
+
+#[cfg(any(windows, test))]
+fn file_name_eq_ignore_ascii_case(path: &Path, name: &str) -> bool {
+    path.file_name()
+        .and_then(|file| file.to_str())
+        .is_some_and(|file| file.eq_ignore_ascii_case(name))
 }
 
 fn command_answers_version(program: &str) -> bool {
@@ -1340,14 +1461,16 @@ fn vscode_install_targets(
 }
 
 fn missing_code_cli_message() -> &'static str {
-    "No VS Code-family CLI or workspace extension host found: tried `cursor`, `codium`, and `code` on PATH, \
+    "No VS Code-family CLI or workspace extension host found: tried `cursor`, `codium`, and `code` on PATH \
+(including Windows PATHEXT names such as `code.cmd`), \
 `code-server` on PATH, ~/.local/bin or /tmp/code-server (Coder's default), Coder's vscode-web under /tmp/vscode-web, ~/.vscode-web or a running `serve-local`, and a Remote-SSH server under ~/.vscode-server (or $VSCODE_AGENT_FOLDER), ~/.vscodium-server, or ~/.cursor-server. \
 Install the editor's shell command (VS Code / VSCodium: run `Shell Command: Install 'code' command in PATH` from the command palette; Cursor: `Install 'cursor' command`), or put the CLI on PATH, then re-run. \
 On a Coder or Remote-SSH workspace, connect VS Code once so its server is installed, or run from a remote VS Code terminal."
 }
 
 fn require_vscode_install_targets() -> Result<Vec<VsCodeInstallTarget>> {
-    let targets = vscode_install_targets(detect_code_cmd(), vscode_workspace_targets());
+    let cli = detect_code_cmd();
+    let targets = vscode_install_targets(cli.as_deref(), vscode_workspace_targets());
     if targets.is_empty() {
         bail!(missing_code_cli_message());
     }
@@ -1365,8 +1488,8 @@ fn vscode_extension_version_from_output(output: &str) -> Option<String> {
 /// Every reachable target's `--list-extensions --show-versions` output.
 fn vscode_extension_listings() -> Vec<(VsCodeInstallTarget, Result<String>)> {
     available_code_cmds()
-        .into_iter()
-        .map(VsCodeInstallTarget::cli)
+        .iter()
+        .map(|cmd| VsCodeInstallTarget::cli(cmd))
         .chain(vscode_workspace_targets())
         .map(|target| {
             let listing = target
@@ -5661,6 +5784,131 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         install_vsix_into_all(&[target("remote-ssh:/srv", &recorder)], &vsix).unwrap();
     }
 
+    /// GH #432: Rust `Command` searches for `code.exe` only. The VS Code shell
+    /// command is `code.cmd`, which PATHEXT (and an explicit `.cmd` fallback)
+    /// must resolve.
+    #[test]
+    fn windows_pathext_lookup_resolves_code_to_code_cmd() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("code.cmd"), b"@echo off\r\n").unwrap();
+        let pathext = super::pathext_extensions_from(Some(".COM;.EXE;.BAT;.CMD"));
+        let candidates = super::cli_name_candidates("code", &pathext);
+        assert!(
+            candidates
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case("code.exe")),
+            "{candidates:?}"
+        );
+        assert!(
+            candidates
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case("code.cmd")),
+            "{candidates:?}"
+        );
+        let exe_at = candidates
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("code.exe"))
+            .unwrap();
+        let cmd_at = candidates
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("code.cmd"))
+            .unwrap();
+        assert!(exe_at < cmd_at, "{candidates:?}");
+
+        let found =
+            super::resolve_command_on_path("code", &[dir.path().to_path_buf()], &pathext, |_| true)
+                .unwrap();
+        assert_eq!(
+            found.file_name().and_then(|name| name.to_str()),
+            Some("code.cmd")
+        );
+    }
+
+    /// A PATHEXT that dropped `.CMD` still finds VS Code's shell command.
+    #[test]
+    fn windows_pathext_lookup_finds_code_cmd_when_pathext_omits_it() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("code.cmd"), b"@echo off\r\n").unwrap();
+        let pathext = super::pathext_extensions_from(Some(".COM;.EXE"));
+        let found =
+            super::resolve_command_on_path("code", &[dir.path().to_path_buf()], &pathext, |_| true)
+                .unwrap();
+        assert_eq!(
+            found.file_name().and_then(|name| name.to_str()),
+            Some("code.cmd")
+        );
+    }
+
+    /// `.CMD` in PATHEXT matches `code.cmd` on disk.
+    #[test]
+    fn windows_pathext_lookup_is_ascii_case_insensitive() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("code.cmd"), b"@echo off\r\n").unwrap();
+        let pathext = super::pathext_extensions_from(Some(".CMD"));
+        let found =
+            super::resolve_command_on_path("code", &[dir.path().to_path_buf()], &pathext, |_| true)
+                .unwrap();
+        assert_eq!(
+            found.file_name().and_then(|name| name.to_str()),
+            Some("code.cmd")
+        );
+    }
+
+    /// `cursor` is still preferred, including when it is only `cursor.cmd`.
+    #[test]
+    fn windows_cli_lookup_prefers_cursor_cmd_over_code_cmd() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("code.cmd"), b"@echo off\r\n").unwrap();
+        fs::write(dir.path().join("cursor.cmd"), b"@echo off\r\n").unwrap();
+        let pathext = super::pathext_extensions_from(None);
+        let found = super::VSCODE_FAMILY_CLI_NAMES
+            .iter()
+            .find_map(|name| {
+                super::resolve_command_on_path(name, &[dir.path().to_path_buf()], &pathext, |_| {
+                    true
+                })
+            })
+            .unwrap();
+        assert_eq!(
+            found.file_name().and_then(|name| name.to_str()),
+            Some("cursor.cmd")
+        );
+    }
+
+    /// PATHEXT order: `code.exe` wins over `code.cmd` when both exist.
+    #[test]
+    fn windows_pathext_prefers_exe_before_cmd() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("code.cmd"), b"@echo off\r\n").unwrap();
+        fs::write(dir.path().join("code.exe"), b"MZ").unwrap();
+        let pathext = super::pathext_extensions_from(Some(".COM;.EXE;.BAT;.CMD"));
+        let found =
+            super::resolve_command_on_path("code", &[dir.path().to_path_buf()], &pathext, |_| true)
+                .unwrap();
+        assert_eq!(
+            found.file_name().and_then(|name| name.to_str()),
+            Some("code.exe")
+        );
+    }
+
+    /// A bare `code` file that the caller rejects must not hide `code.cmd`.
+    #[test]
+    fn windows_pathext_lookup_continues_after_a_rejected_candidate() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("code"), b"not a cli").unwrap();
+        fs::write(dir.path().join("code.cmd"), b"@echo off\r\n").unwrap();
+        let pathext = super::pathext_extensions_from(Some(".COM;.EXE;.BAT;.CMD"));
+        let found =
+            super::resolve_command_on_path("code", &[dir.path().to_path_buf()], &pathext, |path| {
+                path.extension().and_then(|ext| ext.to_str()) == Some("cmd")
+            })
+            .unwrap();
+        assert_eq!(
+            found.file_name().and_then(|name| name.to_str()),
+            Some("code.cmd")
+        );
+    }
+
     #[test]
     fn the_missing_code_cli_message_names_the_prerequisite_not_the_vsix() {
         let message = missing_code_cli_message();
@@ -5670,6 +5918,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         assert!(message.contains("cursor"), "{message}");
         assert!(message.contains("codium"), "{message}");
         assert!(message.contains("PATH"), "{message}");
+        assert!(message.contains("code.cmd"), "{message}");
         assert!(!message.contains("No such file or directory"), "{message}");
     }
 
@@ -8699,9 +8948,9 @@ pub fn list() -> Result<()> {
     // and an absent editor simply contributes nothing. The first desktop CLI
     // prints as before; each workspace extension host names itself.
     let clis = available_code_cmds();
-    let desktop = clis.first().copied();
+    let desktop = clis.first().map(String::as_str);
     for (target, listing) in vscode_extension_listings() {
-        let is_cli = clis.contains(&target.label.as_str());
+        let is_cli = clis.iter().any(|cli| cli == &target.label);
         if is_cli && Some(target.label.as_str()) != desktop {
             continue;
         }

@@ -518,15 +518,25 @@ fn tool_admit(args: &Map<String, Value>) -> Result<Value> {
         &std::env::current_dir().context("failed to resolve MCP server working directory")?,
         agent_doc_tmux_io::current_pane_id_from_env().as_deref(),
     )?;
+    let mut admitted_content = None;
     let admit =
         agent_doc_session_check_io::midturn_steering::admit_with_steering_seed(&file, |file| {
-            Ok(agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?.content)
+            let content =
+                agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?.content;
+            admitted_content = Some(content.clone());
+            Ok(content)
         })?;
     let mut structured = json!({
         "ok": true,
         "file": file.display().to_string(),
         "admission": admit,
     });
+    if let Some(guidance) = admitted_content
+        .as_deref()
+        .and_then(agent_doc_queue::queue_sync_payload::hourglass_resolve_guidance)
+    {
+        structured["hourglass_resolve_guidance"] = json!(guidance);
+    }
     if let Some(pane) = resolved_from_pane {
         structured["resolved_from_pane"] = json!(pane);
         structured["notice"] = json!(pane_document_notice(&file, &pane));

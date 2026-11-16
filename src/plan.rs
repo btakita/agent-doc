@@ -74,6 +74,12 @@ pub struct DispatchPlan {
     /// How to execute [`Self::queue_subagent_dispatch`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_subagent_dispatch_guidance: Option<String>,
+    /// `#hourglassresolve`: set when this admitted document still has a live
+    /// durable `⏳` row. Tells this session's agent to resolve those rows from
+    /// the originating harness session. Absent when this document has none, so
+    /// the plan does not tell a coordinator to edit another document's rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hourglass_resolve_guidance: Option<String>,
     /// Claims that still need the successful spawn's worker id, or must be
     /// released for redispatch when no worker was spawned.
     /// Work-pool occupancy of each `subagents` queue (`#subagentworkpool`):
@@ -238,6 +244,9 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         "plan_command_document",
     )
     .with_context(|| format!("failed to resolve {}", file.display()))?;
+    let hourglass_resolve_guidance =
+        agent_doc_queue::queue_sync_payload::hourglass_resolve_guidance(&content)
+            .map(str::to_string);
     let (fm, _body) = agent_doc_frontmatter_io::session::parse_for_file(&content, file)
         .with_context(|| format!("failed to parse frontmatter in {}", file.display()))?;
     let effective_prompt_presets =
@@ -449,6 +458,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         return Ok(DispatchPlan {
             queue_subagent_dispatch,
             queue_subagent_dispatch_guidance,
+            hourglass_resolve_guidance,
             queue_subagent_pool,
             queue_dispatch_acknowledgement_required,
             queue_reported_closeout,
@@ -726,6 +736,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     Ok(DispatchPlan {
         queue_subagent_dispatch,
         queue_subagent_dispatch_guidance,
+        hourglass_resolve_guidance,
         queue_subagent_pool,
         queue_dispatch_acknowledgement_required,
         queue_reported_closeout,
@@ -3867,6 +3878,76 @@ Done.
                 .iter()
                 .any(|cmd| cmd.contains("livecheck")),
             "operator-verify head must never appear in plan's closeout contract: {:?}",
+            plan.required_commands
+        );
+        assert!(
+            plan.hourglass_resolve_guidance.is_none(),
+            "an unpainted [operator-verify] head is not a durable hourglass row: {:?}",
+            plan.hourglass_resolve_guidance
+        );
+    }
+
+    /// `#hourglassresolve`: plan tells the admitted session to resolve leftover
+    /// `⏳` rows on this document, and to leave `[operator-verify]` as an
+    /// operator wait. It must not name another document.
+    #[test]
+    fn build_plan_tells_the_admitted_session_to_resolve_its_hourglass_rows() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let content = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+queue_active: true
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+
+<!-- agent:queue priority go -->
+- ⏳ do [#left] leftover from the harness transition
+- ⏳ do [#gate] [operator-verify] needs a person
+<!-- /agent:queue -->
+"#;
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let plan = build(&doc).unwrap();
+        let guidance = plan
+            .hourglass_resolve_guidance
+            .as_deref()
+            .expect("plan must tell this session to resolve its own hourglass rows");
+        assert!(
+            guidance.contains("originating harness session"),
+            "{guidance}"
+        );
+        assert!(
+            guidance.contains("document this session is admitted to"),
+            "{guidance}"
+        );
+        assert!(guidance.contains("normal queue path"), "{guidance}");
+        assert!(guidance.contains("remain operator waits"), "{guidance}");
+        assert!(
+            guidance.contains("different document must not edit"),
+            "{guidance}"
+        );
+        assert!(
+            !plan
+                .required_commands
+                .iter()
+                .any(|cmd| cmd.contains("gate") || cmd.contains("left")),
+            "hourglass rows are not drainable plan work: {:?}",
             plan.required_commands
         );
     }

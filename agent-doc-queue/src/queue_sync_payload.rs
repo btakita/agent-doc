@@ -15,8 +15,43 @@ use crate::document_queue::{self, QueueEntry};
 use crate::queue_claim::{QueueClaim, QueueClaimState, claim_identity_at};
 use crate::queue_graph::QueueGraph;
 
+/// `#hourglassresolve`: leftover durable `⏳` rows belong to the session
+/// admitted to that document. Admission and plan both surface this text.
+/// `[operator-verify]` stays an operator wait, and a coordinator on another
+/// document must not edit the rows.
+pub const HOURGLASS_RESOLVE_GUIDANCE: &str = "Resolve leftover durable `⏳` queue rows on the document this session is admitted to by inspecting the originating harness session, then close each resolved row through that document's normal queue path. `[operator-verify]` rows remain operator waits. A coordinator admitted to a different document must not edit them.";
+
 /// Main-agent instructions paired with a non-empty sync payload.
-pub const QUEUE_SYNC_GUIDANCE: &str = "Beginning-of-turn queue reconciliation found incomplete work. Handle every entry before treating the turn as terminal. The main agent owns document convergence, claims, dispatch/start acknowledgement, steering, waiting, integration, and closeout. For `subagent_dispatch`, the only authorized native-spawn path is claim successfully, observe the durable claimed projection, spawn, then immediately persist the worker-bound start receipt; an absent or failed claim forbids spawn, and an absent start receipt is nonterminal dispatch debt. For `main_inline`, native spawn is forbidden: execute inline and reconcile the row. Running work must be waited on or steered; reported/checkmark work must be integrated and closed; lost work must be recovered or requeued. A `lost_running` attempt is continued automatically, including during a turn; if continue fails, retry it. Every reported or `lost_reported` / `⚠️☑️` row is urgent nonterminal coordinator debt: compare its durable outbox/report receipt and exact retained agent-history response with the root-authored exchange response. A worker report, side-worktree commit, or published side branch is completion evidence, not integration proof. Before striking the row, move the exact result into the queue item's designated sink (for example the named integration/main branch or the PR branch), verify the authorized delivery boundary and commit reachability there, and then strike it immediately in this turn. If the result cannot be integrated, keep the row live and record the exact integration command, conflict, or external blocker as its next action; never call it done. An abbreviated receipt is valid completion evidence but is not proof that the full worker result reached exchange. Materialize every `recovered_response` in the root response exactly once, integrate effects, close, and strike in this turn. `consolidated_exchange` means that exact result is already present outside binary completion cells and must not be replayed. If response history is missing, ambiguous, or unsupported, keep the row open, surface `missing_response_debt` as the concrete blocker, and never redispatch or silently strike it. Reconcile/unknown, unresolved backlog queue placement, and scan errors must be investigated; operator-gated work must remain explicitly gated. Workers never self-claim or self-close.";
+///
+/// The closing sentence is [`HOURGLASS_RESOLVE_GUIDANCE`]. A test rejects a
+/// drift between the two, because `concat!` cannot join consts.
+pub const QUEUE_SYNC_GUIDANCE: &str = "Beginning-of-turn queue reconciliation found incomplete work. Handle every entry before treating the turn as terminal. The main agent owns document convergence, claims, dispatch/start acknowledgement, steering, waiting, integration, and closeout. For `subagent_dispatch`, the only authorized native-spawn path is claim successfully, observe the durable claimed projection, spawn, then immediately persist the worker-bound start receipt; an absent or failed claim forbids spawn, and an absent start receipt is nonterminal dispatch debt. For `main_inline`, native spawn is forbidden: execute inline and reconcile the row. Running work must be waited on or steered; reported/checkmark work must be integrated and closed; lost work must be recovered or requeued. A `lost_running` attempt is continued automatically, including during a turn; if continue fails, retry it. Every reported or `lost_reported` / `⚠️☑️` row is urgent nonterminal coordinator debt: compare its durable outbox/report receipt and exact retained agent-history response with the root-authored exchange response. A worker report, side-worktree commit, or published side branch is completion evidence, not integration proof. Before striking the row, move the exact result into the queue item's designated sink (for example the named integration/main branch or the PR branch), verify the authorized delivery boundary and commit reachability there, and then strike it immediately in this turn. If the result cannot be integrated, keep the row live and record the exact integration command, conflict, or external blocker as its next action; never call it done. An abbreviated receipt is valid completion evidence but is not proof that the full worker result reached exchange. Materialize every `recovered_response` in the root response exactly once, integrate effects, close, and strike in this turn. `consolidated_exchange` means that exact result is already present outside binary completion cells and must not be replayed. If response history is missing, ambiguous, or unsupported, keep the row open, surface `missing_response_debt` as the concrete blocker, and never redispatch or silently strike it. Reconcile/unknown, unresolved backlog queue placement, and scan errors must be investigated; operator-gated work must remain explicitly gated. Workers never self-claim or self-close. Resolve leftover durable `⏳` queue rows on the document this session is admitted to by inspecting the originating harness session, then close each resolved row through that document's normal queue path. `[operator-verify]` rows remain operator waits. A coordinator admitted to a different document must not edit them.";
+
+/// Guidance for the agent admitted to `content`, when that document still has
+/// a live durable `⏳` row. `None` when it does not, so a session is not told
+/// to edit another document's rows.
+pub fn hourglass_resolve_guidance(content: &str) -> Option<&'static str> {
+    document_has_durable_hourglass(content).then_some(HOURGLASS_RESOLVE_GUIDANCE)
+}
+
+fn document_has_durable_hourglass(content: &str) -> bool {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return false;
+    };
+    let Ok(graph) = QueueGraph::parse(content, &components) else {
+        return false;
+    };
+    graph.blocks().iter().any(|block| {
+        document_queue::executable_prompt_indexes(&block.entries)
+            .into_iter()
+            .any(|index| {
+                let QueueEntry::Prompt(prompt) = &block.entries[index] else {
+                    return false;
+                };
+                agent_doc_document::queue_projection::has_awaiting_operator_marker(&prompt.text)
+            })
+    })
+}
 
 /// Normalize TTL expiry before projection. The caller supplies one clock cut so
 /// every document in an aggregate scan uses the same notion of "now".
@@ -1236,6 +1271,43 @@ mod tests {
         assert!(QUEUE_SYNC_GUIDANCE.contains("For `main_inline`, native spawn is forbidden"));
         assert!(QUEUE_SYNC_GUIDANCE.contains("only authorized native-spawn path"));
         assert!(QUEUE_SYNC_GUIDANCE.contains("start receipt is nonterminal dispatch debt"));
+    }
+
+    /// `#hourglassresolve`: the cycle-contract instruction resolves leftover
+    /// `⏳` rows only on the admitted document. `[operator-verify]` stays an
+    /// operator wait, and a struck row is not leftover work.
+    #[test]
+    fn hourglass_guidance_is_for_the_admitted_document_only() {
+        assert!(HOURGLASS_RESOLVE_GUIDANCE.contains("originating harness session"));
+        assert!(
+            HOURGLASS_RESOLVE_GUIDANCE.contains("document this session is admitted to"),
+            "{HOURGLASS_RESOLVE_GUIDANCE}"
+        );
+        assert!(HOURGLASS_RESOLVE_GUIDANCE.contains("[operator-verify]"));
+        assert!(HOURGLASS_RESOLVE_GUIDANCE.contains("remain operator waits"));
+        assert!(
+            HOURGLASS_RESOLVE_GUIDANCE.contains("different document must not edit"),
+            "{HOURGLASS_RESOLVE_GUIDANCE}"
+        );
+        assert!(
+            QUEUE_SYNC_GUIDANCE.contains(HOURGLASS_RESOLVE_GUIDANCE),
+            "admission's queue-sync guidance must carry the hourglass instruction"
+        );
+
+        let live = "<!-- agent:queue -->\n- ⏳ do [#left] leftover\n<!-- /agent:queue -->\n";
+        assert_eq!(
+            hourglass_resolve_guidance(live),
+            Some(HOURGLASS_RESOLVE_GUIDANCE)
+        );
+        let plain = "<!-- agent:queue -->\n- do [#plain] work\n<!-- /agent:queue -->\n";
+        assert_eq!(hourglass_resolve_guidance(plain), None);
+        let verify = "<!-- agent:queue -->\n- ⏳ do [#gate] [operator-verify] watch it\n<!-- /agent:queue -->\n";
+        assert_eq!(
+            hourglass_resolve_guidance(verify),
+            Some(HOURGLASS_RESOLVE_GUIDANCE)
+        );
+        let struck = "<!-- agent:queue -->\n- ~~⏳ do [#struck] done~~\n<!-- /agent:queue -->\n";
+        assert_eq!(hourglass_resolve_guidance(struck), None);
     }
 
     #[test]

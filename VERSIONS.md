@@ -2,6 +2,12 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.577
+
+- **Publish `d38f9707d805be029054eb3e7b8a3a4cca2abcf8` as `0.35.577`.** Tag `v0.35.576` remains `81ac0652a2d943bc4cf7c6b2b98b0f4ba4ea3a11`. That tip is 2 commits after the previous tag. Package manifests, internal constraints, `Cargo.lock`, `pyproject.toml`, and the bundled skill sources move to `0.35.577`. JetBrains plugin generations stay classic `0.2.998`, IDE 262 `0.2.1000`, and IDE 263 `0.2.999`. `pluginReleaseVersion` moves to `0.35.577`. VS Code stays `0.2.101`. Zed stays `0.1.8`.
+- **The admitted session resolves its own hourglass rows** (`8a9620af3e`). Queue guidance tells that session to read the originating harness session when the document has a live awaiting-operator marker. `[operator-verify]` rows stay operator waits.
+- **A `write_applied` closeout with nothing new to enqueue yields to retained commit recovery** (`d38f9707d8`). The route leaves the terminal boundary to that recovery and does not resubmit finalize or write.
+
 ## 0.35.576
 
 - **Publish `66da62894714a593c4f2adbfe1080c0dcbd0c916` as `0.35.576`.** Tag `v0.35.575` remains `e21f2c406e8cfc0228baff2e29d1247021a5969e`. That tip is 8 commits after the previous tag. Package manifests, internal constraints, `Cargo.lock`, `pyproject.toml`, and the bundled skill sources move to `0.35.576`. JetBrains plugin generations stay classic `0.2.998`, IDE 262 `0.2.1000`, and IDE 263 `0.2.999`. `pluginReleaseVersion` moves to `0.35.576`. VS Code stays `0.2.101`. Zed stays `0.1.8`.

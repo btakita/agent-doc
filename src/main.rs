@@ -10569,13 +10569,15 @@ fn try_main() -> anyhow::Result<()> {
                 match agent_doc_queue_io::cross_harness_handoff::post_control(
                     &file,
                     &content,
-                    &item,
-                    &owner,
-                    generation,
-                    &worker,
-                    &from_harness,
-                    &owner_harness,
-                    &message,
+                    agent_doc_queue_io::cross_harness_handoff::ControlInput {
+                        item,
+                        owner,
+                        generation,
+                        worker_id: worker,
+                        from_harness,
+                        owner_harness,
+                        message,
+                    },
                 )? {
                     agent_doc_queue_io::cross_harness_handoff::ControlPost::Native { tool } => {
                         println!("native tool: {tool}. Same-harness delivery is not stored.");

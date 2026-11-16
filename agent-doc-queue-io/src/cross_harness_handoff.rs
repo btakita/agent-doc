@@ -356,23 +356,25 @@ pub enum ControlPost {
     Stored(OwningSessionMessage),
 }
 
+/// Fields `queue control` posts for one spawn request.
+#[derive(Debug, Clone)]
+pub struct ControlInput {
+    pub item: String,
+    pub owner: String,
+    pub generation: u64,
+    pub worker_id: String,
+    pub from_harness: String,
+    pub owner_harness: String,
+    pub message: String,
+}
+
 /// Store a spawn request when the owning session is a different harness.
-pub fn post_control(
-    file: &Path,
-    content: &str,
-    item: &str,
-    owner: &str,
-    generation: u64,
-    worker_id: &str,
-    from_harness: &str,
-    owner_harness: &str,
-    message: &str,
-) -> Result<ControlPost> {
-    let message = message.trim();
+pub fn post_control(file: &Path, content: &str, input: ControlInput) -> Result<ControlPost> {
+    let message = input.message.trim();
     if message.is_empty() {
         bail!("queue control needs a non-empty --message");
     }
-    match spawn_delivery(owner_harness, from_harness) {
+    match spawn_delivery(&input.owner_harness, &input.from_harness) {
         SpawnDelivery::Native { tool } => Ok(ControlPost::Native { tool }),
         SpawnDelivery::OwningSessionInbox => {
             let session_id = document_session(content)?;
@@ -382,12 +384,14 @@ pub fn post_control(
             let stored = OwningSessionMessage {
                 session_id,
                 document_path,
-                item: item.trim().to_string(),
-                owner: owner.trim().to_string(),
-                generation,
-                worker_id: worker_id.trim().to_string(),
-                from_harness: agent_doc_queue::worker_quota::quota_harness_key(from_harness),
-                owner_harness: agent_doc_queue::worker_quota::quota_harness_key(owner_harness),
+                item: input.item.trim().to_string(),
+                owner: input.owner.trim().to_string(),
+                generation: input.generation,
+                worker_id: input.worker_id.trim().to_string(),
+                from_harness: agent_doc_queue::worker_quota::quota_harness_key(&input.from_harness),
+                owner_harness: agent_doc_queue::worker_quota::quota_harness_key(
+                    &input.owner_harness,
+                ),
                 message: message.to_string(),
                 recorded_at_secs: now_secs(),
             };
@@ -609,26 +613,30 @@ mod tests {
         let stored = post_control(
             &file,
             &content,
-            ITEM,
-            OWNER,
-            1,
-            WORKER,
-            "grok",
-            "claude",
-            "spawn the reviewer from the owning session",
+            ControlInput {
+                item: ITEM.to_string(),
+                owner: OWNER.to_string(),
+                generation: 1,
+                worker_id: WORKER.to_string(),
+                from_harness: "grok".to_string(),
+                owner_harness: "claude".to_string(),
+                message: "spawn the reviewer from the owning session".to_string(),
+            },
         )
         .unwrap();
         assert!(matches!(stored, ControlPost::Stored(_)));
         let native = post_control(
             &file,
             &content,
-            ITEM,
-            OWNER,
-            1,
-            WORKER,
-            "grok",
-            "grok-build",
-            "same harness stays native",
+            ControlInput {
+                item: ITEM.to_string(),
+                owner: OWNER.to_string(),
+                generation: 1,
+                worker_id: WORKER.to_string(),
+                from_harness: "grok".to_string(),
+                owner_harness: "grok-build".to_string(),
+                message: "same harness stays native".to_string(),
+            },
         )
         .unwrap();
         assert_eq!(

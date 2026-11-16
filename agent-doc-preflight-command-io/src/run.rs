@@ -1380,6 +1380,16 @@ fn run_with_options_to_writer_in_pass(
         eprintln!("[preflight] blocker disregard: not applied this pass: {err:#}");
     }
 
+    // External blocker ids settle when a linked pull request closes or a
+    // decision names the id. Best-effort, same as disregard: a failure leaves
+    // the gate in place.
+    if !options.probe
+        && let Err(err) =
+            agent_doc_preflight_io::blocker_settlement::run_blocker_settlement_maintenance(file)
+    {
+        eprintln!("[preflight] blocker settlement: not applied this pass: {err:#}");
+    }
+
     crate::progress::enter("compute_diff")?;
     // Step 4: Compute diff between snapshot and current document.
     eprintln!("[preflight] step 4: diff");

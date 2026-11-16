@@ -21,7 +21,10 @@
 //! No agent can advance such a row until that blocker resolves, so it blocks by
 //! the ids it cites (all-digit ids such as PR numbers are references, never
 //! blockers). It stays blocked until the clause changes, the cited id appears
-//! as tracked work, or the operator records a disregard (`#blockerdisregard`).
+//! as tracked work, the operator records a disregard (`#blockerdisregard`), or
+//! the decision graph records the id settled
+//! (`<!-- agent-doc:blocker-settled id -->`). A settlement releases only an
+//! external id. An open tracked item of the same id still blocks.
 //! A closed blocker the done archive moved out of the document is still known,
 //! so archival never turns a resolved tracked blocker into an external one:
 //! [`QueueBlockers::from_content_with_archived`] reads the archive ids an IO
@@ -251,6 +254,9 @@ impl QueueBlockers {
         // edges to ignore. Parsing the comment does not call back into this
         // derivation. Edges the comment does not name still block.
         let disregarded = crate::blocker_disregard::QueueDisregards::from_content(content);
+        // External ids the decision graph has already settled. Tracked open
+        // ids are not consulted here; `add` still requires the dep to be open.
+        let settled = settled_external_ids(content);
         let after_deps = crate::backlog_sync::collect_after_deps(&components, content);
         let mut by_item: BTreeMap<String, Vec<String>> = BTreeMap::new();
         let mut add = |item: &str, dep: &str| -> bool {
@@ -325,7 +331,7 @@ impl QueueBlockers {
                 {
                     continue;
                 }
-                if disregarded.ignores(&id, &dep) {
+                if disregarded.ignores(&id, &dep) || settled.contains(&dep) {
                     continue;
                 }
                 let slot = by_item.entry(id.clone()).or_default();
@@ -390,6 +396,28 @@ impl QueueBlockers {
 /// [`QueueBlockers::from_content`].
 pub fn queue_blockers(content: &str) -> QueueBlockers {
     QueueBlockers::from_content(content)
+}
+
+/// External blocker ids the decision graph has settled. The marker is written
+/// by preflight after a linked pull request closes or a decision names the id.
+fn settled_external_ids(content: &str) -> HashSet<String> {
+    const PREFIX: &str = "<!-- agent-doc:blocker-settled";
+    let mut ids = HashSet::new();
+    for line in content.lines() {
+        let Some(rest) = line.trim().strip_prefix(PREFIX) else {
+            continue;
+        };
+        let Some(body) = rest.split("-->").next() else {
+            continue;
+        };
+        for id in body.split_whitespace() {
+            let id = backlog::normalize_pending_id(id.trim_matches('#'));
+            if !id.is_empty() && !is_reference_number(&id) {
+                ids.insert(id);
+            }
+        }
+    }
+    ids
 }
 
 /// Blocker ids painted on live queue rows (`⛔ ⟦blocked by a, b⟧ do [#x]`),
@@ -617,6 +645,28 @@ mod tests {
         assert_eq!(
             queue_blockers(&disregarded).blockers_for_id("licensefix"),
             None
+        );
+    }
+
+    /// A settled external id is not a wait. The same id, once it is an open
+    /// tracked item, still blocks: the marker does not override real work.
+    #[test]
+    fn a_settlement_marker_releases_only_an_external_blocker() {
+        let doc = external_doc("");
+        let settled = format!("<!-- agent-doc:blocker-settled vendorfix -->\n{doc}");
+        assert_eq!(queue_blockers(&settled).blockers_for_id("licensefix"), None);
+        assert!(
+            !queue_blockers(&settled)
+                .deferred_ids()
+                .contains("licensefix")
+        );
+        let open = format!(
+            "<!-- agent-doc:blocker-settled vendorfix -->\n{}",
+            external_doc("<!-- agent:todo -->\n- [ ] [#vendorfix] land it\n<!-- /agent:todo -->\n")
+        );
+        assert_eq!(
+            queue_blockers(&open).blockers_for_id("licensefix"),
+            Some(&["vendorfix".to_string()][..])
         );
     }
 

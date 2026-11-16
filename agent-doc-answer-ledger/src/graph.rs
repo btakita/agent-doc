@@ -40,8 +40,12 @@ use serde::{Deserialize, Serialize};
 use crate::extract::{Observations, QuestionSource, bracket_ids};
 use crate::{EdgeKind, Ledger, RevisionRelation, id_key, text};
 
+mod blockers;
 mod registry;
 mod upstream;
+pub use blockers::{
+    BLOCKS_CLAUSE, SETTLEMENT_MARKER_PREFIX, SETTLES_CLAUSE, merge_settlement_marker,
+};
 pub use registry::{
     REGISTRY_LOCATION, RegistryCitation, RegistryDecision, registry_revision_id,
     registry_revision_location,
@@ -429,6 +433,10 @@ impl DecisionGraph {
         // `upstream_of` with clause `closes` onto the item, not the decision.
         upstream::link(&mut graph, observations, &[]);
         upstream::link_work(&mut graph, observations, &[]);
+        // External blocker ids (`#unrealpr7`, `#bossroomcopyrightowner`) are
+        // not tracked rows. Record them, the item they gate, and any pull
+        // request or decision that names them.
+        graph.link_external_blockers(observations, "");
         graph.finish();
         graph
     }
@@ -442,9 +450,13 @@ impl DecisionGraph {
             return true;
         }
         self.edges.iter().any(|edge| {
-            edge.kind == EdgeKind::UpstreamOf
-                && edge.clause.as_deref() == Some(upstream::CLOSES_CLAUSE)
-                && (edge.from == node.id || edge.to == node.id)
+            let clause = edge.clause.as_deref();
+            (edge.from == node.id || edge.to == node.id)
+                && ((edge.kind == EdgeKind::UpstreamOf
+                    && (clause == Some(upstream::CLOSES_CLAUSE)
+                        || clause == Some(BLOCKS_CLAUSE)
+                        || clause == Some(SETTLES_CLAUSE)))
+                    || (edge.kind == EdgeKind::AppliesTo && clause == Some(SETTLES_CLAUSE)))
         })
     }
 

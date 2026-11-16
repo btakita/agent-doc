@@ -151,7 +151,7 @@ impl QueueMarker {
                     "Live row with no claim, worker report, or completion evidence; ready to run."
                 }
                 QueueLifecycleMarker::Blocked => {
-                    "Its tracked item still waits on open work: a `(stays open: blocked behind #a, #b)` clause or an `after=#id` edge names an item still open in backlog, todo or review, or a stays-open blocker clause names only ids this document never tracked (an external blocker). `⟦blocked by a, b⟧` lists those ids. The row is held out of drain and subagent dispatch and returns to pending once every tracked blocker closes or the external clause changes."
+                    "Its tracked item still waits on open work: a `(stays open: blocked behind #a, #b)` clause or an `after=#id` edge names an item still open in backlog, todo or review, or a stays-open blocker clause names only ids this document never tracked (an external blocker). `⟦blocked by a, b⟧` lists those ids. The row is held out of drain and subagent dispatch and returns to pending once every tracked blocker closes, the external clause changes, or the decision graph settles that external id (its linked pull request or issue is closed, or a decision names the id)."
                 }
                 QueueLifecycleMarker::Claimed => {
                     "Reserved for a worker by `queue claim`; no spawned worker is bound yet."

@@ -4,6 +4,7 @@ pub mod admission_replica_hold;
 pub mod answer_ledger;
 pub mod answer_recall;
 pub mod blocker_disregard;
+pub mod blocker_settlement;
 pub mod debounce;
 pub mod decision_registry_graph;
 pub mod derivation_store;

@@ -387,7 +387,7 @@ fn citations(
     out
 }
 
-fn explicit_upstreams(text: &str) -> Vec<GithubUpstream> {
+pub(super) fn explicit_upstreams(text: &str) -> Vec<GithubUpstream> {
     let lower = text.to_ascii_lowercase();
     let mut out = Vec::new();
     let mut rest = lower.as_str();
@@ -738,7 +738,7 @@ fn continuation_cites_work(line: &str) -> bool {
 
 /// `github:{owner}/{repo}/issues|pull/{n}` back to the artifact. Anything else
 /// is not a closing upstream this module recorded.
-fn upstream_from_node_id(id: &str) -> Option<GithubUpstream> {
+pub(super) fn upstream_from_node_id(id: &str) -> Option<GithubUpstream> {
     let rest = id.strip_prefix("github:")?;
     let (owner, rest) = rest.split_once('/')?;
     let (repo, rest) = rest.split_once('/')?;

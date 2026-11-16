@@ -360,10 +360,10 @@ pub fn recovery_from_hand_back(response: &str) -> HandBackLocation {
                     location.branch = Some(value);
                 }
             }
-        } else if let Some(rest) = line.strip_prefix("Head:") {
-            if location.head.is_none() {
-                location.head = hex_sha(rest);
-            }
+        } else if let Some(rest) = line.strip_prefix("Head:")
+            && location.head.is_none()
+        {
+            location.head = hex_sha(rest);
         }
     }
     if location.head.is_none() {

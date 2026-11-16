@@ -205,7 +205,14 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   - `forward_to_owner` (`#claimedsteerwake`): a queue item a worker already
     claimed; `owner=subagent:<label>` names it. For an edit, FORWARD
     `previous` -> `verbatim` to that running subagent (for example with
-    SendMessage). On Grok Build, call `send_subagent_message` now with
+    SendMessage). When the queue-owning session is a different harness, that
+    native send does not reach it (`#crossagenthandoff`): record the request
+    with `agent-doc queue control <FILE> --item <ITEM> --owner <OWNER>
+    --generation <N> --worker <WORKER> --from-harness <THIS> --owner-harness
+    <OWNER-HARNESS> --message <REQUEST>`, and that session reads it with
+    `agent-doc queue control <FILE> --list`. Same-harness delivery stays on
+    SendMessage or `send_subagent_message` and is not stored. On Grok Build,
+    call `send_subagent_message` now with
     `subagent_id` equal to the steering `worker=` id (never `parent`),
     `delivery` `steer`, and a `message` that contains `previous` and
     `verbatim` so the worker sees the edit, including the nested `push` or

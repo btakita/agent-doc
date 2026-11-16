@@ -1076,9 +1076,9 @@ error naming the candidates.
 
 | Flag | Effect |
 |---|---|
-| `--todo-done <selector>` | `[ ]`/`[/]` → `[x]` in place; position, id, text, and nested sub-items kept; a repeat is a no-op. Then folds duplicate copies of the item. |
+| `--todo-done <selector>` | `[ ]`/`[/]` → `[x]` in place; position, id, text, and nested sub-items kept; a repeat is a no-op. Then folds duplicate copies of the item. `#todolink`: the same write strikes the queue row whose work identity is that todo's own id, and a completion strike checks the owning todo. |
 | `--todo-edit "<selector>=<text>"` | Replace the action text; id, state, and position kept. The text may repeat but not change the id. Multi-line text replaces the item's nested lines with its `  - <sub-item>` rows; single-line text keeps them (`#nestedtodoadd`). |
-| `--todo-reopen <selector>` | `[x]`/`[/]` → `[ ]` in place; a repeat is a no-op. |
+| `--todo-reopen <selector>` | `[x]`/`[/]` → `[ ]` in place; a repeat is a no-op. `#todolink`: restores the linked completion strike. |
 | `--todo-remove <selector>` | Delete the item and its deeper-indented continuation lines; errors when nothing matches. |
 
 Checked items stay in `agent:todo`; they are not archived to `agent:done`,

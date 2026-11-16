@@ -250,6 +250,74 @@ fn a_checked_todo_sharing_an_open_backlog_id_keeps_the_backlog_row() {
     assert!(!body.contains("~~"), "{body}");
 }
 
+/// `#todolink`: `--todo-done` strikes the linked queue row in that same write.
+#[test]
+fn todo_done_strikes_the_linked_queue_row_in_the_same_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = session(
+        dir.path(),
+        "- do [#pmq]\n- do [#other]\n",
+        "- [ ] [#pmq] Answer the PM-sync design questions\n- [ ] [#other] call the vendor\n",
+    );
+    let path = doc.to_str().unwrap();
+    assert_ok(
+        &run_agent_doc(
+            dir.path(),
+            &[
+                "write",
+                path,
+                "--force-disk",
+                "--backlog-only",
+                "--todo-done",
+                "pmq",
+            ],
+        ),
+        "todo-done",
+    );
+    let body = run_body(&doc);
+    assert!(
+        body.contains("~~do [#pmq]~~"),
+        "todo-done strikes the linked row without a later preflight:\n{body}"
+    );
+    assert!(
+        !body.contains("~~do [#other]~~"),
+        "an open todo's row stays live:\n{body}"
+    );
+    let after = fs::read_to_string(&doc).unwrap();
+    assert!(after.contains("- [x] [#pmq]"), "{after}");
+    assert!(after.contains("- [ ] [#other]"), "{after}");
+}
+
+/// `#todolink`: a committed completion strike checks the owning todo on preflight.
+#[test]
+fn a_struck_queue_row_checks_the_linked_todo_on_preflight() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = session(
+        dir.path(),
+        "- ### ~~do [#pmq]~~\n- do [#other]\n",
+        "- [ ] [#pmq] Answer the PM-sync design questions\n- [ ] [#other] call the vendor\n",
+    );
+    let path = doc.to_str().unwrap();
+    let previous_ops_len = ops_log_len(&doc);
+    assert_ok(
+        &run_agent_doc(dir.path(), &["preflight", path]),
+        "preflight",
+    );
+    wait_for_queue_maintenance(&doc, previous_ops_len);
+    let after = fs::read_to_string(&doc).unwrap();
+    assert!(
+        after.contains("- [x] [#pmq]"),
+        "the struck row checks its todo:\n{after}"
+    );
+    assert!(
+        after.contains("- [ ] [#other]"),
+        "an unstruck row leaves its todo open:\n{after}"
+    );
+    let body = run_body(&doc);
+    assert!(body.contains("~~do [#pmq]~~"), "{body}");
+    assert!(!body.contains("~~do [#other]~~"), "{body}");
+}
+
 /// `#answerbyrequestid`: the agent-free path. The operator answered a request
 /// copy of a question in a queue row that has been consumed. A plain preflight
 /// (no agent command) closes the stale request copy, keeps the decision todo

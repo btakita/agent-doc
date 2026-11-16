@@ -2,6 +2,14 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.576
+
+- **Publish `66da62894714a593c4f2adbfe1080c0dcbd0c916` as `0.35.576`.** Tag `v0.35.575` remains `e21f2c406e8cfc0228baff2e29d1247021a5969e`. That tip is 8 commits after the previous tag. Package manifests, internal constraints, `Cargo.lock`, `pyproject.toml`, and the bundled skill sources move to `0.35.576`. JetBrains plugin generations stay classic `0.2.998`, IDE 262 `0.2.1000`, and IDE 263 `0.2.999`. `pluginReleaseVersion` moves to `0.35.576`. VS Code stays `0.2.101`. Zed stays `0.1.8`.
+- **A claim can move to the harness that owns the session** (`f42e5835c6`). A different harness records the request with `agent-doc queue control` and the owning session reads it; the same harness still delivers on its native tool. A prose goal hand-back stays open.
+- **Cross-harness hand-back recovery passes clippy** (`0a9e9b9bed`, `055c5a1719`). The `Head` guard is one condition, and `post_control` takes a `ControlInput` instead of nine arguments.
+- **Bundled `respond.md` copies carry that handoff** (`66da628947`). The source runbook and the Claude, Codex, OpenCode, Grok, and Cursor copies match.
+- **Queue selection and lineage.** A person-gated row is not the turn prompt (`16f553e7ec`). A live follow-up keeps its open root item out of the backlog mirror (`6f724eb49b`). An older lineage generation that is still open can be cancelled (`165bfbf497`). A cross-document backlog add waits on the target document (`35cb379625`).
+
 ## 0.35.575
 
 - **Publish `ceb708e0ec1225555530a97f61cb40d865d10dc8` as `0.35.575`.** Tag `v0.35.574` remains `9eafbad0974de71426b6ada249cb2e16a816adea`. That tip is 88 commits after the previous tag. Package manifests, internal constraints, `Cargo.lock`, `pyproject.toml`, and the bundled skill sources move to `0.35.575`. JetBrains plugin generations are classic `0.2.998`, IDE 262 `0.2.1000`, and IDE 263 `0.2.999`. `pluginReleaseVersion` moves to `0.35.575`. VS Code is `0.2.101`. Zed is `0.1.8`.

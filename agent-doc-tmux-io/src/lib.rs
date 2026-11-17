@@ -1005,26 +1005,25 @@ pub fn send_submitted_text_logged(
     send_submitted_text_with_profile(runner, pane_id, text, profile)
 }
 
-/// Paste `text` into `pane` as one bracketed paste, then submit with Enter
-/// (`#routesyncsteer`).
+/// Paste `text` into `pane` as one bracketed paste and do not submit it.
 ///
 /// A multiline diff cannot go through `send-keys` without `-l`: a raw line
 /// feed would submit each line. The text is loaded into a private paste buffer
 /// and pasted with `-p -r`, so an application that requested bracketed paste
-/// (Grok's composer) keeps the newlines inside one draft. `settle_before_submit`
-/// waits before Enter so the composer can absorb the paste.
-pub fn paste_bracketed_text_and_submit(
+/// (Grok's composer) keeps the newlines inside one draft. Callers that must
+/// submit use [`paste_bracketed_text_and_submit`]. Restoring an unsent operator
+/// draft uses this function so the restored text does not take an Enter.
+pub fn paste_bracketed_text(
     runner: &(impl TmuxCommandRunner + ?Sized),
     pane_id: &str,
     text: &str,
-    settle_before_submit: std::time::Duration,
 ) -> Result<(), TmuxIoError> {
     let text = agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(text);
     if text.is_empty() {
         return Err(TmuxIoError::Failed {
             binary: "tmux".to_string(),
             code: None,
-            stderr: "refusing to submit an empty steering paste".to_string(),
+            stderr: "refusing to paste an empty composer buffer".to_string(),
         });
     }
     let buffer = route_sync_paste_buffer_name();
@@ -1039,7 +1038,20 @@ pub fn paste_bracketed_text_and_submit(
         runner,
         &load_buffer_command(&buffer, &path.display().to_string()),
     )?;
-    run_command(runner, &paste_buffer_bracketed(pane_id, &buffer))?;
+    run_command(runner, &paste_buffer_bracketed(pane_id, &buffer))
+}
+
+/// Paste `text` into `pane` as one bracketed paste, then submit with Enter
+/// (`#routesyncsteer`).
+///
+/// `settle_before_submit` waits before Enter so the composer can absorb the paste.
+pub fn paste_bracketed_text_and_submit(
+    runner: &(impl TmuxCommandRunner + ?Sized),
+    pane_id: &str,
+    text: &str,
+    settle_before_submit: std::time::Duration,
+) -> Result<(), TmuxIoError> {
+    paste_bracketed_text(runner, pane_id, text)?;
     if !settle_before_submit.is_zero() {
         std::thread::sleep(settle_before_submit);
     }
@@ -2092,6 +2104,33 @@ mod tests {
         assert!(
             !runner.loaded.borrow().contains("agent-doc "),
             "the paste is the diff, not a second trigger"
+        );
+    }
+
+    #[test]
+    fn bracketed_paste_without_submit_does_not_send_enter() {
+        struct ReadingRunner {
+            commands: RefCell<Vec<Vec<String>>>,
+        }
+        impl TmuxCommandRunner for ReadingRunner {
+            fn run(&self, command: &TmuxCommand) -> Result<String, TmuxIoError> {
+                self.commands.borrow_mut().push(command.args().to_vec());
+                Ok(String::new())
+            }
+        }
+        let runner = ReadingRunner {
+            commands: RefCell::new(Vec::new()),
+        };
+        paste_bracketed_text(&runner, "%9", "keep this draft\n").unwrap();
+        let commands = runner.commands.borrow().clone();
+        assert_eq!(commands.len(), 2, "{commands:?}");
+        assert_eq!(commands[0][0], "load-buffer");
+        assert_eq!(commands[1][0], "paste-buffer");
+        assert!(
+            commands
+                .iter()
+                .all(|args| args.first().map(String::as_str) != Some("send-keys")),
+            "{commands:?}"
         );
     }
 }

@@ -199,6 +199,17 @@ pub fn follow_up_composer(output: &str) -> FollowUpComposer {
     FollowUpComposer::Empty
 }
 
+/// Operator text in the box, minus ghost suggestions. `None` when the box is
+/// empty, ghost-only, or unreadable. The text is not redacted: callers that
+/// surface it must redact first. Route uses it to put an unsent draft back.
+pub fn follow_up_draft_text(output: &str) -> Option<String> {
+    let parsed = parse_grok_composer(output)?;
+    if parsed.draft.is_empty() || parsed.ghost {
+        return None;
+    }
+    Some(parsed.draft)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

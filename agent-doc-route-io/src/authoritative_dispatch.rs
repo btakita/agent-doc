@@ -555,6 +555,7 @@ pub fn retained_recovery_route_outcome(
 /// `#routesyncsteer`: an explicit send into any running route-owned TUI turn is
 /// not delivered until that pane accepts the diff. Passive hook/poll delivery
 /// remains available for document edits that were not explicitly sent.
+#[derive(Debug, PartialEq, Eq)]
 enum RunningTurnSteeringClaim {
     Count(usize),
     NotDelivered(String),
@@ -572,6 +573,16 @@ enum RunningTurnSubmissionObservation {
     Unreadable,
 }
 
+/// The compact steering line is an `[agent-doc]` notice, so a busy composer
+/// that still shows it projects as empty. Submit is proven only after that
+/// text is gone.
+fn composer_still_holds_injected_text(harness: &HarnessConfig, capture: &str) -> bool {
+    let Some(candidate) = harness.last_prompt_candidate(capture) else {
+        return false;
+    };
+    harness.is_prompt_line(&candidate) && !harness.is_dispatch_ready_prompt_line(&candidate)
+}
+
 fn running_turn_submission_observation(
     harness: &str,
     capture: &str,
@@ -582,7 +593,11 @@ fn running_turn_submission_observation(
     }
     match agent_doc_harness::steering_delivery::running_turn_follow_up_composer(harness, capture) {
         agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Empty => {
-            RunningTurnSubmissionObservation::Delivered
+            if composer_still_holds_injected_text(&harness_cfg, capture) {
+                RunningTurnSubmissionObservation::Draft
+            } else {
+                RunningTurnSubmissionObservation::Delivered
+            }
         }
         agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Draft { .. } => {
             RunningTurnSubmissionObservation::Draft
@@ -743,101 +758,366 @@ fn record_route_sync_baseline(
     }
 }
 
-/// Count, and for a busy route-owned composer submit, the explicit send.
+fn normalized_composer_stash(text: &str) -> String {
+    agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(text)
+        .trim()
+        .to_string()
+}
+
+fn same_unsent_draft(
+    harness: &str,
+    capture: &str,
+    cursor_y: Option<usize>,
+    stash: &str,
+) -> Option<bool> {
+    let text = agent_doc_harness::restorable_composer_draft_text(harness, capture, cursor_y)?;
+    Some(normalized_composer_stash(&text) == stash)
+}
+
+fn read_follow_up_composer(
+    tmux: &(impl agent_doc_tmux_io::TmuxCommandRunner + ?Sized),
+    pane: &str,
+    harness: &str,
+) -> Result<
+    (
+        String,
+        Option<usize>,
+        agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer,
+    ),
+    String,
+> {
+    let capture = agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane)
+        .map_err(|err| format!("the pane could not be read ({})", one_line_error(&err)))?;
+    let cursor_y = agent_doc_tmux_io::pane_cursor_y(tmux, pane);
+    let composer = agent_doc_harness::steering_delivery::running_turn_follow_up_composer_at_cursor(
+        harness, &capture, cursor_y,
+    );
+    Ok((capture, cursor_y, composer))
+}
+
+/// `C-u` once, then require an empty composer before any steering paste.
 ///
-/// `submit` is false when the caller has already proved the pane idle: typing
-/// there would start a turn instead of steering the one that is running.
-fn running_turn_steering_claim(
-    tmux: &Tmux,
+/// A no-op clear sends no further keys. A partial clear is put back with
+/// another `C-u` and a paste that does not submit, and still fails closed so
+/// the steering is not concatenated onto whatever remains.
+fn move_unsent_draft_aside(
+    tmux: &(impl agent_doc_tmux_io::TmuxCommandRunner + ?Sized),
+    pane: &str,
+    harness: &str,
+    stash: &str,
+    preview: &str,
+    poll_interval: Duration,
+) -> Result<(), String> {
+    agent_doc_tmux_io::send_key(tmux, pane, "C-u").map_err(|err| {
+        format!(
+            "tmux did not accept moving the unsent draft aside ({})",
+            one_line_error(&err)
+        )
+    })?;
+    let mut saw_same = false;
+    for _ in 0..ROUTE_SYNC_SUBMIT_POLLS_PER_ATTEMPT {
+        std::thread::sleep(poll_interval);
+        let (capture, cursor_y, composer) = read_follow_up_composer(tmux, pane, harness)?;
+        if agent_doc_harness::grok_enter_cancels_blocked_wait(&capture) {
+            return Err(
+                agent_doc_harness::steering_delivery::grok_blocked_wait_enter_reason().to_string(),
+            );
+        }
+        match composer {
+            agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Empty => {
+                return Ok(());
+            }
+            agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Blocked {
+                reason,
+            } => return Err(reason),
+            agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Unreadable => {}
+            agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Draft { .. } => {
+                match same_unsent_draft(harness, &capture, cursor_y, stash) {
+                    Some(true) => saw_same = true,
+                    Some(false) => {
+                        return Err(put_changed_draft_back(
+                            tmux,
+                            pane,
+                            harness,
+                            stash,
+                            preview,
+                            poll_interval,
+                        ));
+                    }
+                    None => {}
+                }
+            }
+        }
+    }
+    if saw_same {
+        return Err(format!(
+            "the composer still holds an unsent draft and it could not be moved aside without submitting it (redacted draft preview: {preview:?})"
+        ));
+    }
+    Err("the composer could not be read after moving the unsent draft aside".to_string())
+}
+
+fn put_changed_draft_back(
+    tmux: &(impl agent_doc_tmux_io::TmuxCommandRunner + ?Sized),
+    pane: &str,
+    harness: &str,
+    stash: &str,
+    preview: &str,
+    poll_interval: Duration,
+) -> String {
+    let cleared =
+        (|| {
+            agent_doc_tmux_io::send_key(tmux, pane, "C-u").map_err(|err| one_line_error(&err))?;
+            for _ in 0..ROUTE_SYNC_SUBMIT_POLLS_PER_ATTEMPT {
+                std::thread::sleep(poll_interval);
+                let (capture, _, composer) = read_follow_up_composer(tmux, pane, harness)?;
+                if agent_doc_harness::grok_enter_cancels_blocked_wait(&capture) {
+                    return Err(
+                        agent_doc_harness::steering_delivery::grok_blocked_wait_enter_reason()
+                            .to_string(),
+                    );
+                }
+                match composer {
+                agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Empty => {
+                    return Ok(());
+                }
+                agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Blocked {
+                    reason,
+                } => return Err(reason),
+                agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Draft { .. }
+                | agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Unreadable => {
+                }
+            }
+            }
+            Err("the composer did not become empty".to_string())
+        })();
+    match cleared {
+        Ok(()) => {
+            let _ = agent_doc_tmux_io::paste_bracketed_text(tmux, pane, stash);
+            format!(
+                "the unsent draft changed while it was moved aside, so the steering was not pasted and the draft was put back without submitting it (redacted draft preview: {preview:?})"
+            )
+        }
+        Err(reason)
+            if reason == agent_doc_harness::steering_delivery::grok_blocked_wait_enter_reason() =>
+        {
+            reason
+        }
+        Err(_) => format!(
+            "the unsent draft changed while it was moved aside and could not be put back without submitting it (redacted draft preview: {preview:?})"
+        ),
+    }
+}
+
+fn log_draft_restore_failed(file: &Path, pane: &str, harness: &str, preview: &str, error: &str) {
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_sync_steering_draft_restore_failed file={} pane={pane} harness={harness} draft_preview={preview:?} error={error} (#routesyncsteer)",
+            file.display(),
+        ),
+    );
+}
+
+fn restore_unsent_draft(
+    tmux: &(impl agent_doc_tmux_io::TmuxCommandRunner + ?Sized),
     file: &Path,
     pane: &str,
     harness: &str,
-    submit: bool,
-) -> RunningTurnSteeringClaim {
-    if !submit
-        || !agent_doc_harness::steering_delivery::explicit_running_turn_send_is_composer_diff(
-            harness,
-        )
-    {
-        return RunningTurnSteeringClaim::Count(pending_explicit_send_count(file));
+    stash: &str,
+    preview: &str,
+    poll_interval: Duration,
+) {
+    if let Err(err) = agent_doc_tmux_io::paste_bracketed_text(tmux, pane, stash) {
+        log_draft_restore_failed(file, pane, harness, preview, &one_line_error(&err));
+        return;
     }
-    let harness_cfg = HarnessConfig::from_agent_name(harness);
-    let capture = match agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane) {
-        Ok(capture) => capture,
-        Err(err) => {
-            return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
+    for _ in 0..ROUTE_SYNC_SUBMIT_POLLS_PER_ATTEMPT {
+        std::thread::sleep(poll_interval);
+        let Ok((capture, cursor_y, composer)) = read_follow_up_composer(tmux, pane, harness) else {
+            log_draft_restore_failed(file, pane, harness, preview, "the pane could not be read");
+            return;
+        };
+        if agent_doc_harness::grok_enter_cancels_blocked_wait(&capture) {
+            log_draft_restore_failed(
                 file,
-                &format!("the pane could not be read ({})", one_line_error(&err)),
-            ));
+                pane,
+                harness,
+                preview,
+                agent_doc_harness::steering_delivery::grok_blocked_wait_enter_reason(),
+            );
+            return;
         }
-    };
-    if !harness_cfg.has_busy_cue(&capture) {
-        return RunningTurnSteeringClaim::Count(pending_explicit_send_count(file));
-    }
-    match agent_doc_harness::steering_delivery::running_turn_follow_up_composer_at_cursor(
-        harness,
-        &capture,
-        agent_doc_tmux_io::pane_cursor_y(tmux, pane),
-    ) {
-        agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Draft { preview } => {
+        if same_unsent_draft(harness, &capture, cursor_y, stash) == Some(true) {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "route_sync_steering_not_delivered file={} pane={pane} harness={harness} reason=operator_draft draft_preview={preview:?} outcome=retained (#routesyncsteer)",
+                    "route_sync_steering_draft_restored file={} pane={pane} harness={harness} draft_preview={preview:?} unsent=true (#routesyncsteer)",
                     file.display(),
                 ),
             );
-            return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
-                file,
-                &route_sync_operator_draft_reason(&preview),
-            ));
+            return;
         }
+        if let agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Blocked {
+            reason,
+        } = composer
+        {
+            log_draft_restore_failed(file, pane, harness, preview, &reason);
+            return;
+        }
+    }
+    log_draft_restore_failed(
+        file,
+        pane,
+        harness,
+        preview,
+        "the unsent draft was not back in the composer",
+    );
+}
+
+/// After a proven-failed submit, put the stashed draft back without Enter.
+/// A blocked or unreadable composer is not typed into.
+fn restore_unsent_draft_after_rejected_submit(
+    tmux: &(impl agent_doc_tmux_io::TmuxCommandRunner + ?Sized),
+    file: &Path,
+    pane: &str,
+    harness: &str,
+    stash: &str,
+    preview: &str,
+    poll_interval: Duration,
+) {
+    let Ok((capture, _, composer)) = read_follow_up_composer(tmux, pane, harness) else {
+        log_draft_restore_failed(file, pane, harness, preview, "the pane could not be read");
+        return;
+    };
+    if agent_doc_harness::grok_enter_cancels_blocked_wait(&capture) {
+        log_draft_restore_failed(
+            file,
+            pane,
+            harness,
+            preview,
+            agent_doc_harness::steering_delivery::grok_blocked_wait_enter_reason(),
+        );
+        return;
+    }
+    let injected_text_remains =
+        composer_still_holds_injected_text(&HarnessConfig::from_agent_name(harness), &capture);
+    match composer {
         agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Blocked { reason } => {
-            return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
-                file, &reason,
-            ));
+            log_draft_restore_failed(file, pane, harness, preview, &reason);
         }
         agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Unreadable => {
-            return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
+            log_draft_restore_failed(
                 file,
+                pane,
+                harness,
+                preview,
                 "the composer could not be read",
-            ));
+            );
         }
-        agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Empty => {}
-    }
-    let prepared =
-        match agent_doc_session_check_io::midturn_steering::prepare_route_sync_steering(file) {
-            Ok(prepared) => prepared,
-            Err(err) => {
-                return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
-                    file,
-                    &format!(
-                        "the diff since the last send could not be read ({})",
-                        one_line_error(&err)
-                    ),
-                ));
+        agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Empty
+            if !injected_text_remains =>
+        {
+            restore_unsent_draft(tmux, file, pane, harness, stash, preview, poll_interval);
+        }
+        agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Empty
+        | agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Draft { .. } => {
+            if let Err(err) = agent_doc_tmux_io::send_key(tmux, pane, "C-u") {
+                log_draft_restore_failed(file, pane, harness, preview, &one_line_error(&err));
+                return;
             }
-        };
-    let Some(prepared) = prepared else {
-        return RunningTurnSteeringClaim::Count(0);
-    };
-    // A pool refill or an earlier steering paste already queued this turn's
-    // one reference. Folding the diff into that payload is the delivery.
-    if !prepared.needs_queue_paste {
-        record_route_sync_baseline(file, &prepared);
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "route_sync_steering_coalesced file={} pane={pane} harness={} items={} bytes={} cycle={} (#steercoalesce)",
-                file.display(),
-                harness_cfg.binary,
-                prepared.pending_items,
-                prepared.instructions.len(),
-                prepared.cycle_id,
-            ),
-        );
-        return RunningTurnSteeringClaim::Count(prepared.pending_items.max(1));
+            for _ in 0..ROUTE_SYNC_SUBMIT_POLLS_PER_ATTEMPT {
+                std::thread::sleep(poll_interval);
+                let Ok((capture, _, composer)) = read_follow_up_composer(tmux, pane, harness)
+                else {
+                    log_draft_restore_failed(
+                        file,
+                        pane,
+                        harness,
+                        preview,
+                        "the pane could not be read",
+                    );
+                    return;
+                };
+                if agent_doc_harness::grok_enter_cancels_blocked_wait(&capture) {
+                    log_draft_restore_failed(
+                        file,
+                        pane,
+                        harness,
+                        preview,
+                        agent_doc_harness::steering_delivery::grok_blocked_wait_enter_reason(),
+                    );
+                    return;
+                }
+                let injected_text_remains = composer_still_holds_injected_text(
+                    &HarnessConfig::from_agent_name(harness),
+                    &capture,
+                );
+                match composer {
+                    agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Empty
+                        if !injected_text_remains =>
+                    {
+                        restore_unsent_draft(
+                            tmux,
+                            file,
+                            pane,
+                            harness,
+                            stash,
+                            preview,
+                            poll_interval,
+                        );
+                        return;
+                    }
+                    agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Blocked {
+                        reason,
+                    } => {
+                        log_draft_restore_failed(file, pane, harness, preview, &reason);
+                        return;
+                    }
+                    agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Empty
+                    | agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Draft { .. }
+                    | agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Unreadable => {}
+                }
+            }
+            log_draft_restore_failed(
+                file,
+                pane,
+                harness,
+                preview,
+                "the steering draft could not be moved aside before restoring the unsent draft",
+            );
+        }
     }
+}
+
+fn retain_unreadable_operator_draft(
+    file: &Path,
+    pane: &str,
+    harness: &str,
+    preview: &str,
+) -> RunningTurnSteeringClaim {
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_sync_steering_not_delivered file={} pane={pane} harness={harness} reason=operator_draft draft_preview={preview:?} outcome=retained (#routesyncsteer)",
+            file.display(),
+        ),
+    );
+    RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
+        file,
+        &route_sync_operator_draft_reason(preview),
+    ))
+}
+
+fn submit_prepared_running_turn_steering(
+    tmux: &(impl agent_doc_tmux_io::TmuxCommandRunner + ?Sized),
+    file: &Path,
+    pane: &str,
+    harness: &str,
+    harness_cfg: &HarnessConfig,
+    prepared: &agent_doc_session_check_io::midturn_steering::RouteSyncSteering,
+    poll_interval: Duration,
+) -> RunningTurnSteeringClaim {
     if let Err(err) = agent_doc_tmux_io::paste_bracketed_text_and_submit(
         tmux,
         pane,
@@ -860,12 +1140,7 @@ fn running_turn_steering_claim(
             ),
         ));
     }
-    let submit_retries = match confirm_running_turn_submission(
-        tmux,
-        pane,
-        harness,
-        ROUTE_SYNC_SUBMIT_POLL_INTERVAL,
-    ) {
+    let submit_retries = match confirm_running_turn_submission(tmux, pane, harness, poll_interval) {
         Ok(retries) => retries,
         Err(reason) => {
             agent_doc_ops_log_io::log_op(
@@ -895,7 +1170,7 @@ fn running_turn_steering_claim(
             ),
         );
     }
-    record_route_sync_baseline(file, &prepared);
+    record_route_sync_baseline(file, prepared);
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -908,6 +1183,191 @@ fn running_turn_steering_claim(
         ),
     );
     RunningTurnSteeringClaim::Count(prepared.pending_items.max(1))
+}
+
+/// Count, and for a busy route-owned composer submit, the explicit send.
+///
+/// `submit` is false when the caller has already proved the pane idle: typing
+/// there would start a turn instead of steering the one that is running.
+fn running_turn_steering_claim(
+    tmux: &(impl agent_doc_tmux_io::TmuxCommandRunner + ?Sized),
+    file: &Path,
+    pane: &str,
+    harness: &str,
+    submit: bool,
+) -> RunningTurnSteeringClaim {
+    running_turn_steering_claim_polled(
+        tmux,
+        file,
+        pane,
+        harness,
+        submit,
+        ROUTE_SYNC_SUBMIT_POLL_INTERVAL,
+    )
+}
+
+fn running_turn_steering_claim_polled(
+    tmux: &(impl agent_doc_tmux_io::TmuxCommandRunner + ?Sized),
+    file: &Path,
+    pane: &str,
+    harness: &str,
+    submit: bool,
+    poll_interval: Duration,
+) -> RunningTurnSteeringClaim {
+    if !submit
+        || !agent_doc_harness::steering_delivery::explicit_running_turn_send_is_composer_diff(
+            harness,
+        )
+    {
+        return RunningTurnSteeringClaim::Count(pending_explicit_send_count(file));
+    }
+    let harness_cfg = HarnessConfig::from_agent_name(harness);
+    let capture = match agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane) {
+        Ok(capture) => capture,
+        Err(err) => {
+            return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
+                file,
+                &format!("the pane could not be read ({})", one_line_error(&err)),
+            ));
+        }
+    };
+    if !harness_cfg.has_busy_cue(&capture) {
+        return RunningTurnSteeringClaim::Count(pending_explicit_send_count(file));
+    }
+    let cursor_y = agent_doc_tmux_io::pane_cursor_y(tmux, pane);
+    // A readable unrelated draft is moved aside and put back unsent. A draft
+    // whose body cannot be read still fails closed, before any key.
+    let stashed =
+        match agent_doc_harness::steering_delivery::running_turn_follow_up_composer_at_cursor(
+            harness, &capture, cursor_y,
+        ) {
+            agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Draft {
+                preview,
+            } => {
+                // Draft wins over EnterCancels in the classifier. Grok's blocked
+                // wait still must not see C-u or Enter.
+                if agent_doc_harness::grok_enter_cancels_blocked_wait(&capture) {
+                    return RunningTurnSteeringClaim::NotDelivered(
+                        route_sync_steering_not_delivered(
+                            file,
+                            agent_doc_harness::steering_delivery::grok_blocked_wait_enter_reason(),
+                        ),
+                    );
+                }
+                let Some(draft) =
+                    agent_doc_harness::restorable_composer_draft_text(harness, &capture, cursor_y)
+                else {
+                    return retain_unreadable_operator_draft(file, pane, harness, &preview);
+                };
+                let stash = normalized_composer_stash(&draft);
+                if stash.is_empty() {
+                    return retain_unreadable_operator_draft(file, pane, harness, &preview);
+                }
+                Some((stash, preview))
+            }
+            agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Blocked {
+                reason,
+            } => {
+                return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
+                    file, &reason,
+                ));
+            }
+            agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Unreadable => {
+                return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
+                    file,
+                    "the composer could not be read",
+                ));
+            }
+            agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Empty => None,
+        };
+    let prepared =
+        match agent_doc_session_check_io::midturn_steering::prepare_route_sync_steering(file) {
+            Ok(prepared) => prepared,
+            Err(err) => {
+                return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
+                    file,
+                    &format!(
+                        "the diff since the last send could not be read ({})",
+                        one_line_error(&err)
+                    ),
+                ));
+            }
+        };
+    let Some(prepared) = prepared else {
+        return RunningTurnSteeringClaim::Count(0);
+    };
+    // A pool refill or an earlier steering paste already queued this turn's
+    // one reference. Folding the diff into that payload is the delivery, and
+    // the composer — including an unsent draft — is left untouched.
+    if !prepared.needs_queue_paste {
+        record_route_sync_baseline(file, &prepared);
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_sync_steering_coalesced file={} pane={pane} harness={} items={} bytes={} cycle={} (#steercoalesce)",
+                file.display(),
+                harness_cfg.binary,
+                prepared.pending_items,
+                prepared.instructions.len(),
+                prepared.cycle_id,
+            ),
+        );
+        return RunningTurnSteeringClaim::Count(prepared.pending_items.max(1));
+    }
+    if let Some((stash, preview)) = stashed.as_ref() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_sync_steering_draft_stashed file={} pane={pane} harness={harness} draft_preview={preview:?} outcome=stashed (#routesyncsteer)",
+                file.display(),
+            ),
+        );
+        if let Err(reason) =
+            move_unsent_draft_aside(tmux, pane, harness, stash, preview, poll_interval)
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_sync_steering_not_delivered file={} pane={pane} harness={harness} reason={} (#routesyncsteer)",
+                    file.display(),
+                    reason
+                ),
+            );
+            return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
+                file, &reason,
+            ));
+        }
+    }
+    match submit_prepared_running_turn_steering(
+        tmux,
+        file,
+        pane,
+        harness,
+        &harness_cfg,
+        &prepared,
+        poll_interval,
+    ) {
+        RunningTurnSteeringClaim::Count(count) => {
+            if let Some((stash, preview)) = stashed.as_ref() {
+                restore_unsent_draft(tmux, file, pane, harness, stash, preview, poll_interval);
+            }
+            RunningTurnSteeringClaim::Count(count)
+        }
+        RunningTurnSteeringClaim::NotDelivered(message) => {
+            if let Some((stash, preview)) = stashed.as_ref() {
+                restore_unsent_draft_after_rejected_submit(
+                    tmux,
+                    file,
+                    pane,
+                    harness,
+                    stash,
+                    preview,
+                    poll_interval,
+                );
+            }
+            RunningTurnSteeringClaim::NotDelivered(message)
+        }
+    }
 }
 
 /// `#steercoalesce`: the controller accepted this Run Agent Doc as steering
@@ -2805,21 +3265,24 @@ mod tests {
             "{refused}"
         );
 
-        let draft_refused = route_sync_steering_not_delivered(
+        // A readable unrelated draft is not this deferral. The behavioral
+        // tests below hand the settled diff to the running turn and leave
+        // that draft unsent. This wording stays for a draft that cannot be read.
+        let unreadable_draft = route_sync_steering_not_delivered(
             file,
-            &route_sync_operator_draft_reason("❯ keep this draft"),
+            &route_sync_operator_draft_reason("<unavailable>"),
         );
         assert!(
-            draft_refused.contains("redacted draft preview"),
-            "{draft_refused}"
+            unreadable_draft.contains("redacted draft preview"),
+            "{unreadable_draft}"
         );
         assert!(
-            draft_refused.contains("❯ keep this draft"),
-            "{draft_refused}"
+            unreadable_draft.contains("steering_delivered=0"),
+            "{unreadable_draft}"
         );
         assert!(
-            draft_refused.contains("steering_delivered=0"),
-            "{draft_refused}"
+            unreadable_draft.contains("ui_outcome=deferred_for_operator_proof"),
+            "{unreadable_draft}"
         );
 
         // Nothing pending: the existing deferral is unchanged.
@@ -2836,6 +3299,343 @@ mod tests {
             panic!("{deferred:?}");
         };
         assert!(message.contains("nothing was dispatched"), "{message}");
+    }
+
+    struct DraftComposer {
+        draft: std::sync::Mutex<String>,
+        submitted: std::sync::Mutex<Vec<String>>,
+        commands: std::sync::Mutex<Vec<Vec<String>>>,
+        loaded: std::sync::Mutex<String>,
+        clear_noop: bool,
+        enter_noop: bool,
+        cursor_y: String,
+        render: fn(&str) -> String,
+    }
+
+    impl DraftComposer {
+        fn claude(draft: &str) -> Self {
+            Self::new(draft, "2", claude_busy_frame)
+        }
+
+        fn new(draft: &str, cursor_y: &str, render: fn(&str) -> String) -> Self {
+            Self {
+                draft: std::sync::Mutex::new(draft.to_string()),
+                submitted: std::sync::Mutex::new(Vec::new()),
+                commands: std::sync::Mutex::new(Vec::new()),
+                loaded: std::sync::Mutex::new(String::new()),
+                clear_noop: false,
+                enter_noop: false,
+                cursor_y: cursor_y.to_string(),
+                render,
+            }
+        }
+
+        fn draft(&self) -> String {
+            self.draft.lock().expect("draft").clone()
+        }
+
+        fn submitted(&self) -> Vec<String> {
+            self.submitted.lock().expect("submitted").clone()
+        }
+
+        fn commands(&self) -> Vec<Vec<String>> {
+            self.commands.lock().expect("commands").clone()
+        }
+
+        fn mutating_keys(&self) -> Vec<String> {
+            self.commands()
+                .into_iter()
+                .filter_map(|args| match args.first().map(String::as_str) {
+                    Some("send-keys") => args.last().cloned(),
+                    Some("load-buffer" | "paste-buffer") => Some(args[0].clone()),
+                    _ => None,
+                })
+                .collect()
+        }
+    }
+
+    impl agent_doc_tmux_io::TmuxCommandRunner for DraftComposer {
+        fn run(
+            &self,
+            command: &agent_doc_tmux_commands::TmuxCommand,
+        ) -> std::result::Result<String, agent_doc_tmux_io::TmuxIoError> {
+            let args = command.args();
+            self.commands.lock().expect("commands").push(args.to_vec());
+            let verb = args.first().map(String::as_str);
+            match verb {
+                Some("capture-pane") => {
+                    let draft = self.draft();
+                    Ok((self.render)(&draft))
+                }
+                Some("display-message") => Ok(format!("{}\n", self.cursor_y)),
+                Some("send-keys") => {
+                    match args.last().map(String::as_str) {
+                        Some("C-u") if !self.clear_noop => {
+                            *self.draft.lock().expect("draft") = String::new();
+                        }
+                        Some("Enter") if !self.enter_noop => {
+                            let mut draft = self.draft.lock().expect("draft");
+                            if !draft.is_empty() {
+                                self.submitted
+                                    .lock()
+                                    .expect("submitted")
+                                    .push(draft.clone());
+                                draft.clear();
+                            }
+                        }
+                        _ => {}
+                    }
+                    Ok(String::new())
+                }
+                Some("load-buffer") => {
+                    let path = args.last().expect("paste path");
+                    *self.loaded.lock().expect("loaded") =
+                        std::fs::read_to_string(path).expect("paste file");
+                    Ok(String::new())
+                }
+                Some("paste-buffer") => {
+                    let text = self.loaded.lock().expect("loaded").clone();
+                    let mut draft = self.draft.lock().expect("draft");
+                    if draft.is_empty() {
+                        *draft = text;
+                    } else {
+                        draft.push_str(&text);
+                    }
+                    Ok(String::new())
+                }
+                _ => Ok(String::new()),
+            }
+        }
+    }
+
+    fn claude_busy_frame(draft: &str) -> String {
+        let composer = if draft.is_empty() {
+            "❯".to_string()
+        } else {
+            format!("❯ {draft}")
+        };
+        format!(
+            "✶ Generating… (3s · esc to interrupt)\n\
+             ────────────────────────────────────────\n\
+             {composer}\n\
+             ────────────────────────────────────────\n\
+               ⏵⏵ bypass permissions on (shift+tab to cycle)\n\
+               Opus 4.8 ctx:40% ~/work/repo main user@host\n"
+        )
+    }
+
+    fn grok_blocked_frame(draft: &str) -> String {
+        format!(
+            "Waiting for response… 1.0s [stop]\n\
+             1 command still running · send a message to interrupt\n\
+             ╭────────────────────────╮\n\
+             │ ❯ {draft} │\n\
+             ╰──── Grok 4.7 (high) ───╯\n"
+        )
+    }
+
+    fn grok_unreadable_frame(_draft: &str) -> String {
+        "Waiting for response… 1.0s [stop]\nno composer box\n".to_string()
+    }
+
+    fn settled_explicit_send() -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let baseline = "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:queue -->\n- current task\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, baseline).unwrap();
+        agent_doc_session_check_io::midturn_steering::seed_for_cycle(
+            &file,
+            "cycle-1",
+            baseline,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        agent_doc_session_check_io::midturn_steering::record_explicit_send(&file).unwrap();
+        let edited = baseline.replace("- current task\n", "- current task\n- ship the diff\n");
+        std::fs::write(&file, edited).unwrap();
+        (dir, file)
+    }
+
+    fn claim_polled(
+        runner: &DraftComposer,
+        file: &Path,
+        harness: &str,
+    ) -> RunningTurnSteeringClaim {
+        running_turn_steering_claim_polled(runner, file, "%1", harness, true, Duration::ZERO)
+    }
+
+    /// A settled explicit send is pasted into the running turn even while the
+    /// composer holds a newer unsent draft. The draft is restored, unsent.
+    #[test]
+    fn explicit_send_delivers_settled_diff_and_restores_the_unsent_draft() {
+        let (_dir, file) = settled_explicit_send();
+        let runner = DraftComposer::claude("keep this draft");
+        let claim = claim_polled(&runner, &file, "claude");
+        assert!(
+            matches!(claim, RunningTurnSteeringClaim::Count(n) if n >= 1),
+            "{claim:?}"
+        );
+        let submitted = runner.submitted();
+        assert_eq!(submitted.len(), 1, "{submitted:?}");
+        assert!(submitted[0].contains("agent-doc steering"), "{submitted:?}");
+        assert!(!submitted[0].contains("keep this draft"), "{submitted:?}");
+        assert_eq!(runner.draft(), "keep this draft");
+        let keys = runner.mutating_keys();
+        let clear_at = keys.iter().position(|key| key == "C-u").expect("C-u");
+        let enter_at = keys.iter().position(|key| key == "Enter").expect("Enter");
+        assert!(clear_at < enter_at, "{keys:?}");
+        assert_eq!(
+            keys.iter().filter(|key| key.as_str() == "Enter").count(),
+            1,
+            "{keys:?}"
+        );
+        let pastes: Vec<usize> = keys
+            .iter()
+            .enumerate()
+            .filter_map(|(index, key)| (key == "paste-buffer").then_some(index))
+            .collect();
+        assert_eq!(pastes.len(), 2, "{keys:?}");
+        assert!(pastes[0] < enter_at && enter_at < pastes[1], "{keys:?}");
+
+        let before = runner.commands().len();
+        let again = claim_polled(&runner, &file, "claude");
+        assert_eq!(again, RunningTurnSteeringClaim::Count(0));
+        assert_eq!(runner.draft(), "keep this draft");
+        assert_eq!(runner.submitted().len(), 1);
+        assert!(
+            runner.commands()[before..].iter().all(|args| !matches!(
+                args.first().map(String::as_str),
+                Some("send-keys" | "load-buffer" | "paste-buffer")
+            )),
+            "{:?}",
+            &runner.commands()[before..]
+        );
+    }
+
+    #[test]
+    fn queued_follow_up_leaves_the_unsent_draft_untouched() {
+        let (_dir, file) = settled_explicit_send();
+        let prepared =
+            agent_doc_session_check_io::midturn_steering::prepare_route_sync_steering(&file)
+                .unwrap()
+                .expect("a settled diff");
+        assert!(prepared.needs_queue_paste);
+        agent_doc_controller_io::live_turn_follow_up::mark_live_turn_follow_up_queued(
+            &file,
+            &prepared.cycle_id,
+        )
+        .unwrap();
+        let runner = DraftComposer::claude("keep this draft");
+        let claim = claim_polled(&runner, &file, "claude");
+        assert!(
+            matches!(claim, RunningTurnSteeringClaim::Count(n) if n >= 1),
+            "{claim:?}"
+        );
+        assert!(runner.submitted().is_empty());
+        assert_eq!(runner.draft(), "keep this draft");
+        assert!(
+            runner.mutating_keys().is_empty(),
+            "{:?}",
+            runner.mutating_keys()
+        );
+    }
+
+    #[test]
+    fn draft_that_cannot_be_moved_aside_is_not_concatenated_or_submitted() {
+        let (_dir, file) = settled_explicit_send();
+        let mut runner = DraftComposer::claude("keep this draft");
+        runner.clear_noop = true;
+        let claim = claim_polled(&runner, &file, "claude");
+        let RunningTurnSteeringClaim::NotDelivered(message) = claim else {
+            panic!("a draft C-u cannot move stays unsent: {claim:?}");
+        };
+        assert!(message.contains("could not be moved aside"), "{message}");
+        assert!(message.contains("steering_delivered=0"), "{message}");
+        assert!(
+            message.contains("ui_outcome=deferred_for_operator_proof"),
+            "{message}"
+        );
+        assert!(
+            !message.contains("steering_delivered_to_owner"),
+            "{message}"
+        );
+        assert_eq!(runner.draft(), "keep this draft");
+        assert!(runner.submitted().is_empty());
+        assert!(
+            !runner
+                .mutating_keys()
+                .iter()
+                .any(|key| key == "paste-buffer" || key == "Enter" || key == "load-buffer"),
+            "{:?}",
+            runner.mutating_keys()
+        );
+    }
+
+    #[test]
+    fn rejected_submit_restores_the_unsent_draft_without_submitting_it() {
+        let (_dir, file) = settled_explicit_send();
+        let mut runner = DraftComposer::claude("keep this draft");
+        runner.enter_noop = true;
+        let claim = claim_polled(&runner, &file, "claude");
+        let RunningTurnSteeringClaim::NotDelivered(message) = claim else {
+            panic!("an unproven submit is not a delivery: {claim:?}");
+        };
+        assert!(message.contains("steering draft"), "{message}");
+        assert!(message.contains("steering_delivered=0"), "{message}");
+        assert_eq!(runner.draft(), "keep this draft");
+        assert!(
+            runner.submitted().is_empty(),
+            "the operator draft was not submitted: {:?}",
+            runner.submitted()
+        );
+        assert!(!runner.draft().contains("agent-doc steering"));
+    }
+
+    #[test]
+    fn grok_blocked_wait_with_a_draft_sends_no_enter() {
+        let (_dir, file) = settled_explicit_send();
+        let runner = DraftComposer::new("keep this draft", "3", grok_blocked_frame);
+        let claim = claim_polled(&runner, &file, "grok");
+        let RunningTurnSteeringClaim::NotDelivered(message) = claim else {
+            panic!("blocked-wait Enter is not a delivery: {claim:?}");
+        };
+        assert!(message.contains("#blockedwaitentercancels"), "{message}");
+        assert!(
+            message.contains("ui_outcome=deferred_for_operator_proof"),
+            "{message}"
+        );
+        assert!(message.contains("steering_delivered=0"), "{message}");
+        assert_eq!(runner.draft(), "keep this draft");
+        assert!(
+            runner.mutating_keys().is_empty(),
+            "{:?}",
+            runner.mutating_keys()
+        );
+    }
+
+    #[test]
+    fn unreadable_running_composer_still_fails_closed() {
+        let (_dir, file) = settled_explicit_send();
+        let runner = DraftComposer::new("", "0", grok_unreadable_frame);
+        let claim = claim_polled(&runner, &file, "grok");
+        let RunningTurnSteeringClaim::NotDelivered(message) = claim else {
+            panic!("an unreadable composer is not a delivery: {claim:?}");
+        };
+        assert!(
+            message.contains("the composer could not be read"),
+            "{message}"
+        );
+        assert!(
+            message.contains("ui_outcome=deferred_for_operator_proof"),
+            "{message}"
+        );
+        assert!(
+            runner.mutating_keys().is_empty(),
+            "{:?}",
+            runner.mutating_keys()
+        );
     }
 
     #[test]

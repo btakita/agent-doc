@@ -183,6 +183,8 @@ fn paste_into_live_turn(pane: &str, harness_name: &str, text: &str) -> PasteOutc
         cursor_y,
     ) {
         agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Empty => {}
+        // A blind paste would clobber the draft. An explicit route send stashes
+        // that draft and restores it (`running_turn_steering_claim`); this refill does not.
         agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Draft { preview } => {
             return PasteOutcome::NotProven(format!(
                 "the composer holds an unsent draft (redacted draft preview: {preview:?})"

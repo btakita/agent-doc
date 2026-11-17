@@ -787,14 +787,18 @@ where
             Err(err) => IpcResponse::err(err),
         },
         // `#idleclearrestart`: a Clear at an idle, dispatch-ready prompt on a
-        // responsive child TYPES the harness-native clear, exactly like the
-        // deferred (`#clearqueuedliveturn`) delivery; restarting the child kills
-        // every background agent/shell it owns. The supervised fresh restart is
-        // kept only where typing cannot work: no live child, the supervisor's
-        // keepalive/permission prompt owns the input (`waiting_input`), or the
+        // responsive Claude or OpenCode child TYPES the harness-native clear,
+        // exactly like the deferred (`#clearqueuedliveturn`) delivery;
+        // restarting that child kills every background agent/shell it owns.
+        // The supervised fresh restart is kept where typing cannot leave
+        // exactly one harness conversation: no live child, the supervisor's
+        // keepalive/permission prompt owns the input (`waiting_input`), the
         // harness's clear exits the process (Codex, `#clear-ready-restart`: its
         // clean exit can race the route-owned completion watcher and tear the
-        // supervisor down before a replacement launches).
+        // supervisor down before a replacement launches), or typing the clear
+        // forks a second live session in the same process (Grok,
+        // `#grokclearfork`, reason `native_clear_forks_session`). Grok is never
+        // typed `/clear`, including while busy or starting.
         IpcMethod::Clear { bytes } => {
             let idle = state.actor_ready();
             match agent_doc_supervisor::lifecycle::operator_clear_delivery(

@@ -168,9 +168,10 @@ pub enum OperatorClearDelivery {
     /// the live child through the supervisor's guarded pane-input path. The
     /// child process, and every background agent/shell it owns, survives.
     TypeNativeClear,
-    /// Replace the child through the supervised fresh restart. Reserved for the
-    /// cases where there is no responsive composer to type into, or the
-    /// harness's native clear command itself terminates the process.
+    /// Replace the child through the supervised fresh restart. Used when there
+    /// is no responsive composer to type into, when the harness's native clear
+    /// terminates the process, or when typing it would leave a second live
+    /// conversation in the same process (Grok, `#grokclearfork`).
     RestartFresh(OperatorClearRestartReason),
 }
 
@@ -191,6 +192,12 @@ pub enum OperatorClearRestartReason {
     /// completion watcher and can tear the supervisor down before a replacement
     /// child launches.
     HarnessClearExitsProcess,
+    /// Grok's `/clear` is an alias of `/new`: it starts a second live session
+    /// in the same process and leaves the previous conversation running
+    /// (`#grokclearfork`). Replacing the child is what keeps one document
+    /// associated with exactly one harness conversation. The process does not
+    /// exit, so this is not [`Self::HarnessClearExitsProcess`].
+    NativeClearForksSession,
 }
 
 impl OperatorClearRestartReason {
@@ -199,30 +206,43 @@ impl OperatorClearRestartReason {
             Self::ChildNotAlive => "child_not_alive",
             Self::SupervisorWaitingInput => "supervisor_waiting_input",
             Self::HarnessClearExitsProcess => "harness_clear_exits_process",
+            Self::NativeClearForksSession => "native_clear_forks_session",
         }
     }
 }
 
-/// True when the harness's native clear command resets the conversation in
-/// place, keeping the harness process (and its background agents/shells)
-/// alive. Codex is the one harness whose `/clear` ends the process
-/// (`#clear-ready-restart`).
+/// True when the harness's native clear command resets the one live
+/// conversation in place, keeping the harness process (and its background
+/// agents/shells) alive. False for Codex, whose `/clear` ends the process
+/// (`#clear-ready-restart`), and for Grok, whose `/clear` is an alias of
+/// `/new` and starts a second live session in the same process while the
+/// previous conversation keeps running (`#grokclearfork`).
 pub fn native_clear_keeps_harness_process(harness_binary: &str) -> bool {
-    agent_doc_harness::HarnessConfig::from_agent_name(harness_binary).binary != "codex"
+    let binary = agent_doc_harness::HarnessConfig::from_agent_name(harness_binary).binary;
+    binary != "codex" && binary != "grok"
+}
+
+fn native_clear_forks_session(harness_binary: &str) -> bool {
+    agent_doc_harness::HarnessConfig::from_agent_name(harness_binary).binary == "grok"
 }
 
 /// Decide how an operator Clear reaches the harness (`#idleclearrestart`).
 ///
-/// A plain Clear at an idle, dispatch-ready prompt on a responsive child TYPES
-/// the harness-native clear command, exactly like the deferred
-/// (`#clearqueuedliveturn`) delivery: restarting the child would kill every
-/// Claude background agent and shell it owns with no report (2026-10-11 live
-/// test: a background agent stopped at 12/40 ticks). A restart is kept only
-/// where typing cannot work — no live child, the supervisor's keepalive /
-/// permission prompt owns the input, or the harness's clear exits the
-/// process. A non-idle actor (busy, starting) keeps the pre-existing typed
-/// delivery; the client-side `operator_clear` guard has already refused
-/// protected input and queued a clear behind a live turn.
+/// A plain Clear at an idle, dispatch-ready prompt on a responsive Claude or
+/// OpenCode child TYPES the harness-native clear command, exactly like the
+/// deferred (`#clearqueuedliveturn`) delivery: restarting that child would kill
+/// every background agent and shell it owns with no report (2026-10-11 live
+/// test: a background agent stopped at 12/40 ticks). A restart is kept where
+/// typing cannot leave exactly one harness conversation — no live child, the
+/// supervisor's keepalive / permission prompt owns the input, the harness's
+/// clear exits the process (Codex), or typing the clear forks a second live
+/// session in the same process (Grok, `#grokclearfork`). A non-idle actor
+/// (busy, starting) keeps the typed delivery for harnesses whose clear stays in
+/// one process; the client-side `operator_clear` guard has already refused
+/// protected input and queued a clear behind a live turn. Grok never types
+/// `/clear`, including while busy or starting: a typed clear forks, and a
+/// restart requested while the child still owns an open cycle latches until
+/// that cycle closes.
 pub fn operator_clear_delivery(
     harness_binary: &str,
     waiting_input: bool,
@@ -230,6 +250,11 @@ pub fn operator_clear_delivery(
     child_alive: bool,
 ) -> OperatorClearDelivery {
     if !(waiting_input || ready) {
+        if native_clear_forks_session(harness_binary) {
+            return OperatorClearDelivery::RestartFresh(
+                OperatorClearRestartReason::NativeClearForksSession,
+            );
+        }
         return OperatorClearDelivery::TypeNativeClear;
     }
     if !child_alive {
@@ -238,6 +263,11 @@ pub fn operator_clear_delivery(
     if waiting_input {
         return OperatorClearDelivery::RestartFresh(
             OperatorClearRestartReason::SupervisorWaitingInput,
+        );
+    }
+    if native_clear_forks_session(harness_binary) {
+        return OperatorClearDelivery::RestartFresh(
+            OperatorClearRestartReason::NativeClearForksSession,
         );
     }
     if !native_clear_keeps_harness_process(harness_binary) {
@@ -264,11 +294,26 @@ mod operator_clear_delivery_tests {
     }
 
     #[test]
-    fn idle_ready_opencode_and_grok_type_native_clear() {
-        for harness in ["opencode", "grok"] {
+    fn idle_ready_opencode_types_native_clear() {
+        assert_eq!(
+            operator_clear_delivery("opencode", false, true, true),
+            OperatorClearDelivery::TypeNativeClear
+        );
+    }
+
+    /// `#grokclearfork`: Grok `/clear` is `/new`. Typing it at an idle prompt
+    /// starts a second live session in the same process, so two harness
+    /// conversations share one pane and one actor. The idle clear replaces
+    /// the child instead.
+    #[test]
+    fn idle_ready_grok_replaces_the_child_because_clear_forks_a_session() {
+        for harness in ["grok", "grok-build"] {
+            assert!(!native_clear_keeps_harness_process(harness), "{harness}");
             assert_eq!(
                 operator_clear_delivery(harness, false, true, true),
-                OperatorClearDelivery::TypeNativeClear,
+                OperatorClearDelivery::RestartFresh(
+                    OperatorClearRestartReason::NativeClearForksSession
+                ),
                 "{harness}"
             );
         }
@@ -288,7 +333,7 @@ mod operator_clear_delivery_tests {
 
     #[test]
     fn waiting_input_keeps_fresh_restart_for_every_harness() {
-        for harness in ["claude", "codex", "opencode"] {
+        for harness in ["claude", "codex", "opencode", "grok"] {
             assert_eq!(
                 operator_clear_delivery(harness, true, false, true),
                 OperatorClearDelivery::RestartFresh(
@@ -309,8 +354,10 @@ mod operator_clear_delivery_tests {
         }
     }
 
-    /// A non-idle actor keeps the pre-existing typed delivery for every
-    /// harness; the client guard already queued or refused unsafe presses.
+    /// A non-idle actor keeps the pre-existing typed delivery for harnesses
+    /// whose clear stays in one process; the client guard already queued or
+    /// refused unsafe presses. Grok still restarts: typing `/clear` while busy
+    /// forks a second conversation (`#grokclearfork`).
     #[test]
     fn non_idle_actor_types_native_clear() {
         for harness in ["claude", "codex", "opencode"] {
@@ -321,6 +368,15 @@ mod operator_clear_delivery_tests {
                     "{harness} child_alive={child_alive}"
                 );
             }
+        }
+        for child_alive in [true, false] {
+            assert_eq!(
+                operator_clear_delivery("grok", false, false, child_alive),
+                OperatorClearDelivery::RestartFresh(
+                    OperatorClearRestartReason::NativeClearForksSession
+                ),
+                "child_alive={child_alive}"
+            );
         }
     }
 
@@ -337,6 +393,10 @@ mod operator_clear_delivery_tests {
         assert_eq!(
             OperatorClearRestartReason::HarnessClearExitsProcess.as_str(),
             "harness_clear_exits_process"
+        );
+        assert_eq!(
+            OperatorClearRestartReason::NativeClearForksSession.as_str(),
+            "native_clear_forks_session"
         );
     }
 }

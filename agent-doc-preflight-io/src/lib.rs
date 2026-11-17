@@ -9282,7 +9282,9 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             let marker = if lifecycle_state_degraded {
                 agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
             } else if let Some(claim) = claim {
-                claim.projection_marker()
+                claim.visible_projection_for_owner(
+                    agent_doc_queue_io::queue_claim::claim_owner_liveness(file, claim),
+                )
             } else if receipt.is_some() {
                 agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
             } else if completion_items.iter().any(|item| {

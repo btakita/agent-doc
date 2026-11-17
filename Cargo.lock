@@ -665,6 +665,7 @@ dependencies = [
  "agent-doc-supervisor",
  "agent-doc-template",
  "agent-doc-turn",
+ "agent-doc-turn-status-io",
  "anyhow",
  "lazily 0.63.0",
  "parking_lot",

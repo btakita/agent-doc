@@ -52,7 +52,7 @@ start` binds the replacement worker.
 | 📥 | `pending` | pending | Live row with no claim, worker report, or completion evidence; ready to run. |
 | ⛔ | `blocked` | blocked | Its tracked item still waits on open work: a `(stays open: blocked behind #a, #b)` clause or an `after=#id` edge names an item still open in backlog, todo or review, or a stays-open blocker clause names only ids this document never tracked (an external blocker). `⟦blocked by a, b⟧` lists those ids. The row is held out of drain and subagent dispatch and returns to pending once every tracked blocker closes, the external clause changes, or the decision graph settles that external id (its linked pull request or issue is closed, or a decision names the id). |
 | 🟡 | `claimed` | claimed | Reserved for a worker by `queue claim`; no spawned worker is bound yet. |
-| 🚧 | `running` | running | A spawned worker is bound to this exact claim by `queue start`. |
+| 🚧 | `running` | running | A spawned worker is bound to this exact claim by `queue start` and is still running. |
 | ☑️ | `reported` | keep: worker done | Keep this live row: the worker reported back (`queue report-complete`), but the coordinator still has to integrate, verify, and close it. Do not delete it yet. |
 | ⚠️ | `lost` | lost | The claim expired or was abandoned; retry only when durable evidence proves this exact attempt never started, otherwise reconcile it. |
 | ⚠️🟡 | `lost_claimed` | lost + claimed | The attempt was lost while reserved for dispatch; the claimed state remains visible until durable evidence proves whether it started. |

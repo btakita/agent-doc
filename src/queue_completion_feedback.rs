@@ -761,18 +761,15 @@ pub(crate) fn repair_claim_projection(
     })?;
 
     if agent_doc_document_realtime_io::pending_document_write(file).is_some() {
+        // Land a retained write when the editor can accept it. A missing
+        // native-save receipt must not defer the marker reconcile
+        // (`#markdrift`). The generation write below CAS-rebases onto current
+        // authority and returns without waiting for that receipt and without
+        // `--force-disk`.
         agent_doc_document_realtime_io::recover_retained_document_write_before_new_cycle(
             file,
             agent_doc_document_realtime_io::RetainedWriteCycleBoundary::QueueProjectionRepair,
         )?;
-    }
-    if let Some(pending) = agent_doc_document_realtime_io::pending_document_write(file) {
-        bail!(
-            "queue projection is durably retained as intent {} but no editor delivery receipt is available; open {} in the active editor/project, then rerun `agent-doc queue repair-projection {:?}`",
-            pending.intent_id,
-            file.display(),
-            file,
-        );
     }
 
     agent_doc_queue_io::queue_cmd::project_claim_runtime_state_with_effects(effects, file, None)
@@ -3537,6 +3534,66 @@ The setup pull request is the merged https://github.com/haiven-dev/haiven-sdk/pu
         assert_eq!(claims.len(), 1);
         assert_eq!(
             claims[0].state,
+            agent_doc_queue::queue_claim::QueueClaimState::Reported,
+        );
+    }
+
+    /// `#markdrift`: a retained write with no editor delivery receipt must not
+    /// bail before the marker reconcile, and must not require `--force-disk`.
+    #[test]
+    fn projection_repair_paints_reported_while_a_save_receipt_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("sdk.md");
+        let original = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:keep -->\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue subagents -->\n",
+            "- 🚧 [#subagent:sdk#1] finish sdk\n",
+            "<!-- /agent:queue -->\n",
+        );
+        fs::write(&doc, original).unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, "finish sdk", "subagent:sdk", 600).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "finish sdk",
+            "subagent:sdk",
+            "worker:sdk",
+            600,
+            1,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::report_attempt(&doc, "finish sdk", Some(1)).unwrap();
+        let retained = format!("{original}<!-- retained without a save receipt -->\n");
+        agent_doc_document_realtime_io::retain_deferred_document_write_target(
+            &doc,
+            original,
+            &retained,
+            "queue_claim_marker_drift",
+            agent_doc_document_realtime_io::DocumentWriteDeferredReason::EditorProjectionPending,
+        )
+        .expect("stage a retained write with no delivery receipt");
+        assert!(
+            agent_doc_document_realtime_io::pending_document_write(&doc).is_some(),
+            "the receipt gap is the condition that used to refuse repair"
+        );
+
+        assert!(
+            repair_claim_projection(&doc, &crate::CliQueueCommandEffects).unwrap(),
+            "marker reconcile must proceed without a native-save receipt",
+        );
+        let repaired = fs::read_to_string(&doc).unwrap();
+        assert!(
+            repaired.contains("- ☑️ [#subagent:sdk#1] finish sdk"),
+            "{repaired}"
+        );
+        assert!(!repaired.contains('🚧'), "{repaired}");
+        assert_eq!(
+            agent_doc_queue_io::queue_claim::load_ledger(&doc)
+                .unwrap()
+                .claims[0]
+                .state,
             agent_doc_queue::queue_claim::QueueClaimState::Reported,
         );
     }

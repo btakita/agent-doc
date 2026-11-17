@@ -8760,6 +8760,7 @@ fn try_main() -> anyhow::Result<()> {
             }
         }
         Commands::Admit { file } => {
+            plan::reconcile_visible_claim_markers(&file)?;
             let output = agent_doc_session_check_io::midturn_steering::admit_with_steering_seed(
                 &file,
                 |file| {

@@ -104,40 +104,14 @@ pub fn current_owner_session() -> Option<ClaimOwnerSession> {
 }
 
 fn owner_session_from_env(var: impl Fn(&str) -> Option<String>) -> Option<ClaimOwnerSession> {
-    let present = |key: &str| {
-        var(key)
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty())
-    };
     // Grok wins when both are set, matching `detect_harness`. The conversation
     // id names the owner harness. It is not a resume key (`#crossagenthandoff`).
-    let (harness, session_id) = if let Some(id) = present("GROK_SESSION_ID") {
-        (Some("grok".to_string()), Some(id))
-    } else if let Some(id) = present("CLAUDE_CODE_SESSION_ID") {
-        (Some("claude".to_string()), Some(id))
-    } else if let Some(id) = present("CODEX_THREAD_ID") {
-        (Some("codex".to_string()), Some(id))
-    } else {
-        (None, None)
-    };
-    ClaimOwnerSession {
-        harness,
-        session_id,
-        pane: present("TMUX_PANE"),
-        pid: present("CLAUDE_PID").and_then(|pid| pid.parse().ok()),
-    }
-    .non_empty()
+    ClaimOwnerSession::from_env_lookup(var)
 }
 
 #[cfg(unix)]
 fn pid_alive(pid: u32) -> bool {
-    if pid == 0 {
-        return false;
-    }
-    // Signal 0 probes existence without delivering anything; EPERM still
-    // means the process exists.
-    let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
-    rc == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    agent_doc_queue::queue_claim::owner_process_alive(pid)
 }
 
 /// Without a signal-0 probe the owner pid cannot be judged, so it is treated as
@@ -3174,11 +3148,29 @@ pub fn visible_claim_projection(
     observed: &[(agent_doc_element_queue::QueueItemIdentity, String)],
     claim: &QueueClaim,
 ) -> VisibleClaimProjection {
-    // The row projector uses `QueueClaim::projection_marker`, which keeps
-    // `⚠️🚧` when `lost_from` is Running. The state alone is only `⚠️`.
-    // Comparing those two reported a drift that repair could not clear
-    // (`#transientcloseout`).
-    let expected_visible_marker = claim.projection_marker().prefix().to_string();
+    // No session probe: a freeze still counts, an unrecorded owner does not.
+    visible_claim_projection_for_liveness(
+        observed,
+        claim,
+        agent_doc_queue::queue_claim::ClaimOwnerLiveness::Unrecorded,
+    )
+}
+
+/// [`visible_claim_projection`] against a known owner-session verdict
+/// (`#markdrift`). A `Running` attempt whose worker is not running expects
+/// `⚠️`. A `Lost` attempt still expects the composite glyph its `lost_from`
+/// records (`⚠️🚧` when that was Running). Comparing `Lost` alone (`⚠️`)
+/// with that composite reported a drift repair could not clear
+/// (`#transientcloseout`).
+pub fn visible_claim_projection_for_liveness(
+    observed: &[(agent_doc_element_queue::QueueItemIdentity, String)],
+    claim: &QueueClaim,
+    owner: agent_doc_queue::queue_claim::ClaimOwnerLiveness,
+) -> VisibleClaimProjection {
+    let expected_visible_marker = claim
+        .visible_projection_for_owner(owner)
+        .prefix()
+        .to_string();
     let observed_visible_markers = observed
         .iter()
         .filter(|(identity, _)| identity == &claim.identity)
@@ -3205,7 +3197,8 @@ pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<Claim
     Ok(claims
         .into_iter()
         .map(|claim| {
-            let (state, reason) = match claim_owner_liveness(file, &claim) {
+            let liveness = claim_owner_liveness(file, &claim);
+            let (state, reason) = match liveness {
                 ClaimOwnerLiveness::Live => ("live", None),
                 ClaimOwnerLiveness::Unrecorded => ("unrecorded", None),
                 ClaimOwnerLiveness::Ended(reason) => ("ended", Some(reason.as_str())),
@@ -3214,7 +3207,7 @@ pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<Claim
                 expected_visible_marker,
                 observed_visible_markers,
                 synchronized,
-            } = visible_claim_projection(&observed, &claim);
+            } = visible_claim_projection_for_liveness(&observed, &claim, liveness);
             let (assessment, assessment_detail) = claim_assessment(&claim, state);
             let reported_closeout = reported_claim_closeout_in(file, &claim, lineage.as_ref());
             let next_action_argv = if synchronized {

@@ -1,8 +1,9 @@
 //! # Module: plan
 //!
 //! ## Spec
-//! - `run(file)`: derives a structured planning/dispatch record for the current
-//!   session document and prints it as pretty JSON.
+//! - `run(file)`: repaints a drifted queue marker, then derives a structured
+//!   planning/dispatch record for the current session document and prints it
+//!   as pretty JSON. `build` stays a pure read.
 //! - Reads the current document and computes the current diff against the saved
 //!   snapshot via `diff::compute(file)`.
 //! - Produces an ordered record with prompt targets, execution scope, repo
@@ -226,12 +227,25 @@ pub enum ExecutionScope {
 }
 
 pub fn run(file: &Path) -> Result<()> {
+    // `#markdrift`: a Grok turn runs plan instead of preflight. Repaint before
+    // the record is read so a reported attempt shows ☑️ and a stopped worker
+    // does not stay 🚧. `build` stays a pure read.
+    reconcile_visible_claim_markers(file)?;
     let plan = build(file)?;
     println!(
         "{}",
         serde_json::to_string_pretty(&plan).context("failed to serialize dispatch plan")?
     );
     Ok(())
+}
+
+/// Repaint queue rows whose visible marker disagrees with the claim ledger
+/// (`#markdrift`). Returns whether a successor was written.
+pub fn reconcile_visible_claim_markers(file: &Path) -> Result<bool> {
+    agent_doc_queue_io::queue_cmd::reconcile_drifted_claim_markers(
+        &crate::CliQueueCommandEffects,
+        file,
+    )
 }
 
 pub fn build(file: &Path) -> Result<DispatchPlan> {

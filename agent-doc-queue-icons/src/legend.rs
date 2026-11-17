@@ -157,7 +157,7 @@ impl QueueMarker {
                     "Reserved for a worker by `queue claim`; no spawned worker is bound yet."
                 }
                 QueueLifecycleMarker::Running => {
-                    "A spawned worker is bound to this exact claim by `queue start`."
+                    "A spawned worker is bound to this exact claim by `queue start` and is still running."
                 }
                 QueueLifecycleMarker::Reported => {
                     "Keep this live row: the worker reported back (`queue report-complete`), but the coordinator still has to integrate, verify, and close it. Do not delete it yet."

@@ -104,6 +104,12 @@
 //! `queue start` with the worker identity returned by the successful spawn; or
 //! **release** it (`queue release`, so the head is dispatched again).
 //!
+//! `#markdrift`: the visible `🚧` follows that assertion. An ended owner
+//! session, or a recorded freeze, paints `⚠️` while the ledger stays
+//! `Running`, so the head is not redispatched and a `🚧` scan does not count
+//! the worker. A live or unrecorded owner keeps `🚧`. Heartbeat age does not
+//! clear it. Adopt restores a live owner, and the next projection restores `🚧`.
+//!
 //! This module is pure: no clock, no storage. The caller supplies `now`.
 
 use std::collections::{HashMap, HashSet};
@@ -649,6 +655,42 @@ impl QueueClaim {
             self.state.projection_marker()
         }
     }
+
+    /// Visible marker for this attempt (`#markdrift`).
+    ///
+    /// `worker_not_running` is positive evidence a `Running` worker has
+    /// stopped. The ledger stays `Running`, so the head is not redispatched.
+    /// The row paints `⚠️`, not `⚠️🚧`: a scan for `🚧` must not count a
+    /// stopped worker. Unknown liveness passes `false` and keeps
+    /// [`Self::projection_marker`].
+    pub fn visible_projection_marker(
+        &self,
+        worker_not_running: bool,
+    ) -> agent_doc_document::queue_projection::QueueLifecycleMarker {
+        if self.state == QueueClaimState::Running && worker_not_running {
+            agent_doc_document::queue_projection::QueueLifecycleMarker::Lost
+        } else {
+            self.projection_marker()
+        }
+    }
+
+    /// Whether a `Running` attempt's worker is positively not running.
+    ///
+    /// An ended owner session or a recorded freeze counts. A live or
+    /// unrecorded owner without a freeze does not: a long task does not
+    /// refresh continuously, and a missing probe must not clear `🚧`.
+    pub fn worker_not_running(&self, owner: ClaimOwnerLiveness) -> bool {
+        self.state == QueueClaimState::Running
+            && (self.frozen.is_some() || matches!(owner, ClaimOwnerLiveness::Ended(_)))
+    }
+
+    /// [`Self::visible_projection_marker`] for an owner-session verdict.
+    pub fn visible_projection_for_owner(
+        &self,
+        owner: ClaimOwnerLiveness,
+    ) -> agent_doc_document::queue_projection::QueueLifecycleMarker {
+        self.visible_projection_marker(self.worker_not_running(owner))
+    }
 }
 
 /// A claim's position in its queue (`#claimfollowedit`).
@@ -976,6 +1018,52 @@ impl ClaimOwnerSession {
     pub fn non_empty(self) -> Option<Self> {
         (self.session_id.is_some() || self.pane.is_some() || self.pid.is_some()).then_some(self)
     }
+
+    /// The harness session named by `var` (`#claimownerliveness`). Grok wins
+    /// when several session ids are set. A subagent inherits its coordinator's
+    /// variables, so a claim it makes stays bound to that coordinator session.
+    pub fn from_env_lookup(var: impl Fn(&str) -> Option<String>) -> Option<Self> {
+        let present = |key: &str| {
+            var(key)
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        };
+        let (harness, session_id) = if let Some(id) = present("GROK_SESSION_ID") {
+            (Some("grok".to_string()), Some(id))
+        } else if let Some(id) = present("CLAUDE_CODE_SESSION_ID") {
+            (Some("claude".to_string()), Some(id))
+        } else if let Some(id) = present("CODEX_THREAD_ID") {
+            (Some("codex".to_string()), Some(id))
+        } else {
+            (None, None)
+        };
+        Self {
+            harness,
+            session_id,
+            pane: present("TMUX_PANE"),
+            pid: present("CLAUDE_PID").and_then(|pid| pid.parse().ok()),
+        }
+        .non_empty()
+    }
+}
+
+/// Whether `pid` names a live process. Signal 0 probes existence without
+/// delivering anything; `EPERM` still means the process exists. Without a
+/// probe the caller treats the pid as alive.
+#[cfg(unix)]
+pub fn owner_process_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
+    rc == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+/// Without a signal-0 probe the owner pid cannot be judged, so it is treated
+/// as alive.
+#[cfg(not(unix))]
+pub fn owner_process_alive(pid: u32) -> bool {
+    pid != 0
 }
 
 /// What the caller can observe about a claim's owner session.
@@ -4383,6 +4471,80 @@ mod tests {
         let running = diagnose_lifecycle(claim, None, 100, DISPATCH_EVIDENCE_GRACE_SECS)
             .expect("expired running attempt needs a lost projection");
         assert_eq!(running.expected, QueueLifecycleMarker::LostRunning);
+    }
+
+    /// `#markdrift`: a stopped running worker paints `⚠️`, not `🚧` and not
+    /// `⚠️🚧`. The ledger stays `Running`. A live owner, including one whose
+    /// heartbeat is old, keeps `🚧`. Reported stays `☑️`.
+    #[test]
+    fn visible_marker_clears_running_only_when_the_worker_is_positively_stopped() {
+        use agent_doc_document::queue_projection::QueueLifecycleMarker;
+
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim("do [#markdrift]", "subagent:worker", 10, 3_600);
+        let claim = &mut ledger.claims[0];
+        claim.state = QueueClaimState::Running;
+        claim.worker = Some(QueueWorkerBinding {
+            worker_id: "worker-1".into(),
+            started_at_secs: 10,
+        });
+        claim.heartbeat_at_secs = Some(10);
+
+        assert!(
+            !claim.worker_not_running(ClaimOwnerLiveness::Live),
+            "a live owner is still running"
+        );
+        assert!(
+            !claim.worker_not_running(ClaimOwnerLiveness::Unrecorded),
+            "an unrecorded owner is not proof the worker stopped"
+        );
+        assert_eq!(
+            claim.visible_projection_for_owner(ClaimOwnerLiveness::Live),
+            QueueLifecycleMarker::Running
+        );
+        assert_eq!(
+            claim
+                .visible_projection_for_owner(ClaimOwnerLiveness::Ended(
+                    OwnerSessionEndReason::OwnerProcessExited
+                ))
+                .prefix(),
+            "⚠️"
+        );
+        assert!(
+            !claim
+                .visible_projection_for_owner(ClaimOwnerLiveness::Ended(
+                    OwnerSessionEndReason::SessionReplaced
+                ))
+                .prefix()
+                .contains('🚧'),
+            "a dead worker must not keep a running glyph"
+        );
+        assert!(claim.blocks_dispatch(11));
+
+        claim.frozen = Some(QueueWorkerFreeze {
+            frozen_at_secs: 20,
+            reason: "harness reported stopped".into(),
+            abandoned: false,
+        });
+        assert!(claim.worker_not_running(ClaimOwnerLiveness::Live));
+        assert_eq!(
+            claim
+                .visible_projection_for_owner(ClaimOwnerLiveness::Live)
+                .prefix(),
+            "⚠️"
+        );
+        assert_eq!(claim.state, QueueClaimState::Running);
+
+        claim.frozen = None;
+        claim.state = QueueClaimState::Reported;
+        assert_eq!(
+            claim
+                .visible_projection_for_owner(ClaimOwnerLiveness::Ended(
+                    OwnerSessionEndReason::OwnerProcessExited
+                ))
+                .prefix(),
+            "☑️"
+        );
     }
 
     /// `#nestlistlineage`: the contracts/162 `#rebase` child is not the

@@ -695,7 +695,9 @@ fn derive_runtime_projection_scoped(
                     let marker = if state_degraded {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
                     } else if let Some(claim) = claim {
-                        claim.projection_marker()
+                        claim.visible_projection_for_owner(crate::queue_claim::claim_owner_liveness(
+                            file, claim,
+                        ))
                     } else if let Some(receipt) = receipt {
                         if receipt.completion_recovered_after_loss {
                             agent_doc_document::queue_projection::QueueLifecycleMarker::LostReported
@@ -922,6 +924,29 @@ pub fn project_claim_runtime_state_with_effects(
     project_claim_runtime_state_under_apply_guard(effects, file, cleared_item, &apply_guard)
 }
 
+/// Repaint queue rows whose visible marker disagrees with the ledger
+/// (`#markdrift`).
+///
+/// A reported attempt paints `☑️`. A `Running` attempt whose worker is not
+/// running paints `⚠️` and stays `Running`, so the head is not redispatched.
+/// Already-matching rows are left untouched. The write is the lifecycle-owner
+/// generation converge: it CAS-rebases onto current authority and returns
+/// without waiting for an editor native-save receipt and without forcing disk.
+pub fn reconcile_drifted_claim_markers(
+    effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
+    file: &Path,
+) -> Result<bool> {
+    let current = effects.current_document_content(file, "queue_claim_marker_drift")?;
+    let reports = crate::queue_claim::claim_reports_for_content(file, &current)?;
+    if reports
+        .iter()
+        .all(|report| report.visible_projection_state == "synchronized")
+    {
+        return Ok(false);
+    }
+    project_claim_runtime_state_with_effects(effects, file, None)
+}
+
 fn project_claim_runtime_state_under_apply_guard(
     effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
     file: &Path,
@@ -1013,7 +1038,11 @@ fn verify_claim_admission_visible(
 ) -> Result<()> {
     let current = effects.current_document_content(file, "queue_claim_admission_verify")?;
     let observed = crate::queue_claim::visible_lifecycle_markers_for_content(&current)?;
-    let visible = crate::queue_claim::visible_claim_projection(&observed, claim);
+    let visible = crate::queue_claim::visible_claim_projection_for_liveness(
+        &observed,
+        claim,
+        crate::queue_claim::claim_owner_liveness(file, claim),
+    );
     if visible.synchronized {
         return Ok(());
     }
@@ -4017,6 +4046,170 @@ mod tests {
             "{released_snapshot}"
         );
         assert_eq!(released.item_text, "dispatched worker work");
+    }
+
+    /// `#markdrift`: the turn reconciles a drifted marker without
+    /// `repair-projection` and without `--force-disk`. A reported attempt
+    /// paints `☑️`. A running attempt whose owner session ended, or whose
+    /// harness reported the worker stopped, paints `⚠️` and stays `Running`.
+    /// A live owner keeps `🚧` even when its heartbeat is old.
+    #[test]
+    fn reconcile_paints_reported_and_stopped_workers_without_leaving_running() {
+        use agent_doc_queue::queue_claim::{
+            ClaimOwnerLiveness, ClaimOwnerSession, QueueClaimState, QueueWorkerFreeze,
+        };
+
+        let effects = FakeEffects::default();
+        let now = crate::queue_claim::claim_clock_now_secs();
+
+        let reported_dir = tempfile::tempdir().unwrap();
+        let reported = write_claim_projection_doc(reported_dir.path(), "- 🚧 finish the report\n");
+        crate::queue_claim::claim(&reported, "finish the report", "subagent:worker", 3_600)
+            .unwrap();
+        crate::queue_claim::start_attempt(
+            &reported,
+            "finish the report",
+            "subagent:worker",
+            "worker-reported",
+            3_600,
+            1,
+        )
+        .unwrap();
+        crate::queue_claim::report_attempt(&reported, "finish the report", Some(1)).unwrap();
+        let before = crate::queue_claim::claim_reports_for_content(
+            &reported,
+            &std::fs::read_to_string(&reported).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(before[0].visible_projection_state, "out_of_sync");
+        assert_eq!(before[0].expected_visible_marker, "☑️");
+        assert_eq!(before[0].observed_visible_markers, ["🚧"]);
+        assert!(reconcile_drifted_claim_markers(&effects, &reported).unwrap());
+        let reported_text = std::fs::read_to_string(&reported).unwrap();
+        assert!(
+            reported_text.contains("- ☑️ [#subagent:worker#1] finish the report"),
+            "{reported_text}"
+        );
+        assert!(!reported_text.contains('🚧'), "{reported_text}");
+        let reported_claim = crate::queue_claim::load_ledger(&reported).unwrap().claims;
+        assert_eq!(reported_claim[0].state, QueueClaimState::Reported);
+        assert!(!reconcile_drifted_claim_markers(&effects, &reported).unwrap());
+
+        let ended_dir = tempfile::tempdir().unwrap();
+        let ended = write_claim_projection_doc(ended_dir.path(), "- 🚧 keep the head\n");
+        crate::queue_claim::claim(&ended, "keep the head", "subagent:worker", 3_600).unwrap();
+        crate::queue_claim::start_attempt(
+            &ended,
+            "keep the head",
+            "subagent:worker",
+            "worker-ended",
+            3_600,
+            1,
+        )
+        .unwrap();
+        let mut ledger = crate::queue_claim::load_ledger(&ended).unwrap();
+        ledger.claims[0].expires_at_secs = now.saturating_add(86_400);
+        ledger.claims[0].owner_session = Some(ClaimOwnerSession {
+            harness: Some("grok".to_string()),
+            session_id: Some("ended-session".to_string()),
+            pane: Some("%markdrift".to_string()),
+            pid: Some(0),
+        });
+        crate::queue_claim::store_ledger_for_test(&ended, &ledger).unwrap();
+        let ended_before = crate::queue_claim::claim_reports_for_content(
+            &ended,
+            &std::fs::read_to_string(&ended).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(ended_before[0].owner_session_state, "ended");
+        assert_eq!(ended_before[0].expected_visible_marker, "⚠️");
+        assert_eq!(ended_before[0].observed_visible_markers, ["🚧"]);
+        assert_ne!(ended_before[0].expected_visible_marker, "⚠️🚧");
+        assert!(reconcile_drifted_claim_markers(&effects, &ended).unwrap());
+        let ended_text = std::fs::read_to_string(&ended).unwrap();
+        assert!(
+            ended_text.contains("- ⚠️ [#subagent:worker#1] keep the head"),
+            "{ended_text}"
+        );
+        assert!(!ended_text.contains('🚧'), "{ended_text}");
+        let ended_claim = crate::queue_claim::load_ledger(&ended)
+            .unwrap()
+            .claims
+            .remove(0);
+        assert_eq!(ended_claim.state, QueueClaimState::Running);
+        assert!(ended_claim.blocks_dispatch(now));
+        assert_eq!(
+            crate::queue_claim::claim_owner_liveness(&ended, &ended_claim),
+            ClaimOwnerLiveness::Ended(
+                agent_doc_queue::queue_claim::OwnerSessionEndReason::OwnerProcessExited
+            )
+        );
+
+        let frozen_dir = tempfile::tempdir().unwrap();
+        let frozen = write_claim_projection_doc(frozen_dir.path(), "- 🚧 harness stopped\n");
+        crate::queue_claim::claim(&frozen, "harness stopped", "subagent:worker", 3_600).unwrap();
+        crate::queue_claim::start_attempt(
+            &frozen,
+            "harness stopped",
+            "subagent:worker",
+            "worker-frozen",
+            3_600,
+            1,
+        )
+        .unwrap();
+        let mut ledger = crate::queue_claim::load_ledger(&frozen).unwrap();
+        ledger.claims[0].expires_at_secs = now.saturating_add(86_400);
+        let mut owner = crate::queue_claim::current_owner_session().unwrap_or_default();
+        owner.pid = Some(std::process::id());
+        ledger.claims[0].owner_session = Some(owner);
+        ledger.claims[0].frozen = Some(QueueWorkerFreeze {
+            frozen_at_secs: now,
+            reason: "harness reported stopped".to_string(),
+            abandoned: false,
+        });
+        crate::queue_claim::store_ledger_for_test(&frozen, &ledger).unwrap();
+        assert!(reconcile_drifted_claim_markers(&effects, &frozen).unwrap());
+        let frozen_text = std::fs::read_to_string(&frozen).unwrap();
+        assert!(
+            frozen_text.contains("- ⚠️ [#subagent:worker#1] harness stopped"),
+            "{frozen_text}"
+        );
+        assert!(!frozen_text.contains('🚧'), "{frozen_text}");
+        assert_eq!(
+            crate::queue_claim::load_ledger(&frozen).unwrap().claims[0].state,
+            QueueClaimState::Running
+        );
+
+        let live_dir = tempfile::tempdir().unwrap();
+        let live = write_claim_projection_doc(live_dir.path(), "- 🚧 still working\n");
+        crate::queue_claim::claim(&live, "still working", "subagent:worker", 3_600).unwrap();
+        crate::queue_claim::start_attempt(
+            &live,
+            "still working",
+            "subagent:worker",
+            "worker-live",
+            3_600,
+            1,
+        )
+        .unwrap();
+        let mut ledger = crate::queue_claim::load_ledger(&live).unwrap();
+        ledger.claims[0].expires_at_secs = now.saturating_add(86_400);
+        ledger.claims[0].heartbeat_at_secs = Some(1);
+        let mut owner = crate::queue_claim::current_owner_session().unwrap_or_default();
+        owner.pid = Some(std::process::id());
+        ledger.claims[0].owner_session = Some(owner);
+        crate::queue_claim::store_ledger_for_test(&live, &ledger).unwrap();
+        let live_before = crate::queue_claim::claim_reports_for_content(
+            &live,
+            &std::fs::read_to_string(&live).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(live_before[0].owner_session_state, "live");
+        assert_eq!(live_before[0].expected_visible_marker, "🚧");
+        assert_eq!(live_before[0].observed_visible_markers, ["🚧"]);
+        assert!(!reconcile_drifted_claim_markers(&effects, &live).unwrap());
+        let live_text = std::fs::read_to_string(&live).unwrap();
+        assert!(live_text.contains("- 🚧 still working"), "{live_text}");
     }
 
     #[test]

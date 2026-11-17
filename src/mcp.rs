@@ -518,6 +518,9 @@ fn tool_admit(args: &Map<String, Value>) -> Result<Value> {
         &std::env::current_dir().context("failed to resolve MCP server working directory")?,
         agent_doc_tmux_io::current_pane_id_from_env().as_deref(),
     )?;
+    // `#markdrift`: the model reads the document after admit. Repaint before
+    // that read so a reported attempt shows ☑️ and a stopped worker is not 🚧.
+    crate::plan::reconcile_visible_claim_markers(&file)?;
     let mut admitted_content = None;
     let admit =
         agent_doc_session_check_io::midturn_steering::admit_with_steering_seed(&file, |file| {
@@ -640,6 +643,7 @@ fn tool_preflight(args: &Map<String, Value>) -> Result<Value> {
 
 fn tool_plan(args: &Map<String, Value>) -> Result<Value> {
     let file = required_path_arg(args, "file")?;
+    crate::plan::reconcile_visible_claim_markers(&file)?;
     let plan = crate::plan::build(&file)?;
     let structured = json!({
         "ok": true,

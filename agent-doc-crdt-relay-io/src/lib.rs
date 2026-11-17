@@ -1263,6 +1263,41 @@ pub fn with_hub<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Result<T>
     Ok(result)
 }
 
+/// Owner-session verdict for a queue-marker overlay (`#markdrift`).
+///
+/// Same signals as `queue claims`: this process's harness session, the
+/// recorded pid, and the session the claim's pane last reported. A freeze is
+/// applied by [`agent_doc_queue::queue_claim::QueueClaim::worker_not_running`].
+fn owner_liveness_for_marker(
+    file: &Path,
+    claim: &agent_doc_queue::queue_claim::QueueClaim,
+) -> agent_doc_queue::queue_claim::ClaimOwnerLiveness {
+    use agent_doc_queue::queue_claim::{
+        ClaimOwnerSession, OwnerSessionObservation, owner_process_alive, owner_session_liveness,
+    };
+    let caller = ClaimOwnerSession::from_env_lookup(|key| std::env::var(key).ok());
+    let pane_session = claim
+        .owner_session
+        .as_ref()
+        .and_then(|owner| owner.pane.as_deref())
+        .and_then(|pane| agent_doc_turn_status_io::pane_harness_session_for_file(file, pane));
+    let owner_pid_alive = claim
+        .owner_session
+        .as_ref()
+        .and_then(|owner| owner.pid)
+        .map(owner_process_alive);
+    owner_session_liveness(
+        claim,
+        OwnerSessionObservation {
+            caller: caller.as_ref(),
+            owner_pid_alive,
+            pane_session: pane_session
+                .as_ref()
+                .map(|(session, at)| (session.as_str(), *at)),
+        },
+    )
+}
+
 /// Re-derive the binary-owned queue-attempt markers from their durable ledger.
 ///
 /// A controller replacement cannot inherit the predecessor's in-memory relay.
@@ -1421,8 +1456,10 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
                     } else if let Some(claim) = claim {
                         // Composite lost glyphs (`⚠️🚧`, `⚠️🟡`, `⚠️☑️`) come
-                        // from the attempt, not from `Lost` alone.
-                        claim.projection_marker()
+                        // from the attempt, not from `Lost` alone. A running
+                        // worker that is gone paints `⚠️`, not `🚧`
+                        // (`#markdrift`).
+                        claim.visible_projection_for_owner(owner_liveness_for_marker(file, claim))
                     } else if receipt.is_some() {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
                     } else if completion_evidence.iter().any(|item| {

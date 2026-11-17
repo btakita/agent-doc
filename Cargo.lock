@@ -2137,6 +2137,7 @@ dependencies = [
  "agent-doc-harness",
  "agent-doc-hash",
  "agent-doc-merge",
+ "agent-doc-op-capture-io",
  "agent-doc-ops-log-io",
  "agent-doc-preflight-io",
  "agent-doc-preflight-runtime-io",

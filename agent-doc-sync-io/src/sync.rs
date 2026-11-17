@@ -11393,7 +11393,7 @@ mod tests {
         assert!(content.contains("<!-- agent:run priority subagents clear -->"));
         assert!(!content.contains("<!-- agent:queue"));
 
-        // Sync and Claim for Tmux Pane share this generator. Parse the rendered
+        // Sync and Claim Session File share this generator. Parse the rendered
         // document so parity covers structure, balance, and canonical ordering.
         let components = agent_doc_element::element::parse(&content)
             .expect("sync scaffold must form a valid component AST");

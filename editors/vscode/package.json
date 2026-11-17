@@ -39,11 +39,11 @@
       },
       {
         "command": "agentDoc.claim",
-        "title": "Agent Doc: Claim"
+        "title": "Agent Doc: Claim Session File"
       },
       {
         "command": "agentDoc.forceClaim",
-        "title": "Agent Doc: Force Claim for Tmux Pane"
+        "title": "Agent Doc: Force Claim Session File"
       },
       {
         "command": "agentDoc.runWithJunie",

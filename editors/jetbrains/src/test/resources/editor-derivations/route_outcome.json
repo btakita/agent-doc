@@ -201,13 +201,13 @@
     {
       "name": "a route into another lane's pane succeeds with the owning lane notice",
       "input": {
-        "output": "[route] Pane %7 is alive, sending command\n[agent-doc] owned_by_other_lane: plan.md runs in pane %7 of navigation lane IU-0a1b2c3d (tmux session proj-IU-0a1b2c3d); the route dispatched it there and left this IDE's tmux layout unchanged. Use Claim for Tmux Pane to move the pane into this IDE's lane.",
+        "output": "[route] Pane %7 is alive, sending command\n[agent-doc] owned_by_other_lane: plan.md runs in pane %7 of navigation lane IU-0a1b2c3d (tmux session proj-IU-0a1b2c3d); the route dispatched it there and left this IDE's tmux layout unchanged. Use Claim Session File to move the pane into this IDE's lane.",
         "relative_path": "plan.md"
       },
       "expected": {
         "agent_switch_deferred": null,
         "kind": "persistent",
-        "owned_by_other_lane_notice": "plan.md runs in pane %7 of navigation lane IU-0a1b2c3d (tmux session proj-IU-0a1b2c3d); the route dispatched it there and left this IDE's tmux layout unchanged. Use Claim for Tmux Pane to move the pane into this IDE's lane.",
+        "owned_by_other_lane_notice": "plan.md runs in pane %7 of navigation lane IU-0a1b2c3d (tmux session proj-IU-0a1b2c3d); the route dispatched it there and left this IDE's tmux layout unchanged. Use Claim Session File to move the pane into this IDE's lane.",
         "pane_not_visible_notice": null,
         "queue_paused": null,
         "snapshot_path": "",

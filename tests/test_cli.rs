@@ -31404,14 +31404,14 @@ fn test_agent_doc_document_owns_claim_scaffold_policy() {
     .unwrap();
     assert!(
         jetbrains_claim.contains("mutableListOf(agentDoc, \"claim\", relativePath)"),
-        "JetBrains Claim for Tmux Pane must delegate template generation to agent-doc claim"
+        "JetBrains Claim Session File must delegate template generation to agent-doc claim"
     );
 
     let vscode_claim =
         fs::read_to_string(manifest_dir.join("editors/vscode/src/extension.ts")).unwrap();
     assert!(
         vscode_claim.contains("const args = ['claim', rel];"),
-        "VS Code Claim for Tmux Pane must delegate template generation to agent-doc claim"
+        "VS Code Claim Session File must delegate template generation to agent-doc claim"
     );
 }
 

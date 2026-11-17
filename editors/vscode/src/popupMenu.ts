@@ -34,7 +34,7 @@ export function buildPrimaryPopupMenuItems(): PopupMenuItem[] {
     return [
         { label: '[1] $(play) Run (Submit)', id: 'submit' },
         { label: '[2] $(new-file) Initialize Session', id: 'initSession' },
-        { label: '[3] $(link) Claim', id: 'claim' },
+        { label: '[3] $(link) Claim Session File', id: 'claim' },
         { label: '[4] $(tools) Fix Document', id: 'fixDocument' },
         { label: '[5] $(archive) Compact Exchange', id: 'compactExchange' },
         { label: '[6] $(layout) Sync Layout', id: 'syncLayout' },
@@ -55,7 +55,7 @@ export function buildOverflowPopupMenuItems(): PopupMenuItem[] {
     return [
         { label: '$(terminal) Start Agent Doc', id: 'startAgentDoc' },
         { label: '$(hubot) Run with Junie', id: 'runWithJunie' },
-        { label: '$(warning) Force Claim for Tmux Pane', id: 'forceClaim' },
+        { label: '$(warning) Force Claim Session File', id: 'forceClaim' },
         { label: '$(debug-stop) Stop Agent', id: 'stopAgent' },
         { label: '$(circle-slash) Cancel Turn', id: 'cancelTurn' },
         { label: '$(trash) Kill Supervisor', id: 'killSupervisor' },

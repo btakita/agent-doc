@@ -250,7 +250,7 @@ pub enum LaneClaim {
     #[default]
     Passive,
     /// An explicit operator request from this lane (`Sync Tmux Layout`, the
-    /// layout sync that follows `Claim for Tmux Pane`): the pane is handed
+    /// layout sync that follows `Claim Session File`): the pane is handed
     /// over to this lane (`navigation_lane_handoff`).
     Explicit,
 }
@@ -541,7 +541,7 @@ pub fn route_owned_by_other_lane_notice(
     owner_session: &str,
 ) -> String {
     format!(
-        "{ROUTE_OWNED_BY_OTHER_LANE_NOTICE_PREFIX} {document} runs in pane {pane} of navigation lane {} (tmux session {owner_session}); the route dispatched it there and left this IDE's tmux layout unchanged. Use Claim for Tmux Pane to move the pane into this IDE's lane.",
+        "{ROUTE_OWNED_BY_OTHER_LANE_NOTICE_PREFIX} {document} runs in pane {pane} of navigation lane {} (tmux session {owner_session}); the route dispatched it there and left this IDE's tmux layout unchanged. Use Claim Session File to move the pane into this IDE's lane.",
         lane_label_for_session(project_session, owner_session),
     )
 }
@@ -1283,7 +1283,7 @@ mod tests {
             "{notice}"
         );
         assert!(notice.contains("tmux session p-IU-0a1b2c3d"), "{notice}");
-        assert!(notice.contains("Claim for Tmux Pane"), "{notice}");
+        assert!(notice.contains("Claim Session File"), "{notice}");
         assert!(!notice.contains('\n'));
         assert!(
             route_owned_by_other_lane_notice("plan.md", "%7", "p", "p")

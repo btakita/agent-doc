@@ -128,7 +128,7 @@ agent_doc_write: crdt
 
 **Features built:**
 - Boundary marker response ordering (`agent-doc boundary`, FFI, plugin, CRDT-safe)
-- Claim auto-start — "Claim for Tmux Pane" now starts the Claude session automatically via `tmux send-keys`
+- Claim auto-start — "Claim Session File" now starts the Claude session automatically via `tmux send-keys`
 - VCS refresh signal — plugin triggers `markEverythingDirty()` after external commits
 - Any-level `(HEAD)` markers on all root headings in multi-section responses
 - Exchange default mode fix — plugin now defaults `exchange` -> `append` matching Rust binary

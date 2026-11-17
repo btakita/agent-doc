@@ -121,7 +121,7 @@
         </action>
         <action id="AgentDoc.Claim"
                 class="com.github.btakita.agentdoc.shell.ClaimForwarder"
-                text="Claim for Tmux Pane"
+                text="Claim Session File"
                 description="Claim this document for the currently active tmux pane">
             <keyboard-shortcut first-keystroke="ctrl shift alt C" keymap="$default"/>
             <add-to-group group-id="ToolsMenu" anchor="last"/>
@@ -138,7 +138,7 @@
         </action>
         <action id="AgentDoc.ForceClaim"
                 class="com.github.btakita.agentdoc.shell.ForceClaimForwarder"
-                text="Force Claim for Tmux Pane"
+                text="Force Claim Session File"
                 description="Force-claim this document, overriding existing pane bindings">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>

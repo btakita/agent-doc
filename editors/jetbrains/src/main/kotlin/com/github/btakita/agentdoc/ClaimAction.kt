@@ -294,7 +294,7 @@ class ClaimAction : ImplAction {
                 project,
                 "Pane ${reject.paneId} is in tmux session '${reject.paneSession}', but this project's " +
                     "configured session is '${reject.configured}'.\n\nHow do you want to claim it?",
-                "Claim for Tmux Pane — Cross-Session",
+                "Claim Session File — Cross-Session",
                 arrayOf("New Pane in This Session", "Force Claim", "Switch Project Session", "Cancel"),
                 0,
                 Messages.getQuestionIcon(),

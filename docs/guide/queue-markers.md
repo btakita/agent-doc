@@ -98,7 +98,7 @@ surfaces render it:
   Queue markers: 👀 seen · 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ keep: worker done · ⚠️ lost · ⚠️🟡 lost + claimed · ⚠️🚧 lost + running · ⚠️☑️ lost + worker done · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin · ▫️ generated row · ~~done~~ safe to delete ([legend](…/queue-markers.md#queue-markers))
   ```
 
-  New documents from the Claim for Tmux Pane template start with it. An
+  New documents from the Claim Session File template start with it. An
   existing document gets it on its next status write. Every status write
   replaces the line rather than adding another, so a document has at most one,
   and it follows your palette. To hide it, set `queue-legend=off` on the status

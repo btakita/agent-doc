@@ -1236,6 +1236,147 @@ mod tests {
         );
     }
 
+    fn bugs_document_queue(note: &str) -> String {
+        format!(
+            concat!(
+                "---\n",
+                "agent_doc_format: template\n",
+                "queue_active: true\n",
+                "---\n\n",
+                "<!-- agent:queue go -->\n",
+                "- current task\n",
+                "<!-- /agent:queue -->\n",
+                "{note}",
+            ),
+            note = note
+        )
+    }
+
+    fn explicit_send_payload(root: &std::path::Path, file: &Path) -> serde_json::Value {
+        let conn = agent_doc_sqlite::state_store::open_state_db(root).unwrap();
+        let key = agent_doc_queue_io::subagent_dispatch::midturn_steering_state_key(
+            "explicit_send",
+            file,
+        );
+        let raw = agent_doc_sqlite::state_store::load_project_runtime_state_from_db(&conn, &key)
+            .unwrap()
+            .expect("explicit send recorded");
+        serde_json::from_str(&raw).unwrap()
+    }
+
+    /// `tasks/agent-doc/agent-doc-bugs.md` (2026-11-17): Run Agent Doc recorded
+    /// the explicit send, then in-flight editor ops changed the bytes before
+    /// route queue enqueue. The enqueue must adopt that authority instead of
+    /// failing with "does not match the recorded explicit-send authority".
+    #[test]
+    fn explicit_send_enqueue_for_agent_doc_bugs_matches_recorded_authority() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        let recorded = bugs_document_queue("");
+        std::fs::write(&doc, &recorded).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &recorded,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_session_check_io::midturn_steering::record_explicit_send(&doc).unwrap();
+        let recorded_hash = explicit_send_payload(dir.path(), &doc)["content_hash"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(recorded_hash, agent_doc_hash::content_hash(&recorded));
+
+        // Post-click convergence, as on the live bugs document: the enqueue
+        // base is no longer the hash captured at the click.
+        let converged = bugs_document_queue("<!-- converged after explicit send -->\n");
+        assert_ne!(agent_doc_hash::content_hash(&converged), recorded_hash);
+        std::fs::write(&doc, &converged).unwrap();
+
+        let _force_disk_guard =
+            agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
+        let outcome = enqueue_route_dispatch_prompt(
+            &doc,
+            "Run Agent Doc on agent-doc-bugs.md",
+            "foreign_composer_draft",
+            true,
+            route_queue_effects(),
+        )
+        .expect("explicit-send enqueue must accept the converged bugs document");
+        assert!(outcome.appended, "{outcome:?}");
+        assert!(outcome.activated, "{outcome:?}");
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains("Run Agent Doc on agent-doc-bugs.md"),
+            "{updated}"
+        );
+        let send_hash = explicit_send_payload(dir.path(), &doc)["content_hash"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            send_hash,
+            agent_doc_hash::content_hash(&updated),
+            "explicit-send authority must match the enqueued bugs document"
+        );
+        assert_ne!(send_hash, recorded_hash);
+    }
+
+    #[test]
+    fn stale_explicit_send_enqueue_for_agent_doc_bugs_still_fails_closed() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        let recorded = bugs_document_queue("");
+        std::fs::write(&doc, &recorded).unwrap();
+        agent_doc_session_check_io::midturn_steering::record_explicit_send(&doc).unwrap();
+
+        let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        let key = agent_doc_queue_io::subagent_dispatch::midturn_steering_state_key(
+            "explicit_send",
+            &doc,
+        );
+        let mut send = explicit_send_payload(dir.path(), &doc);
+        let aged = send["sent_at_ms"].as_u64().unwrap().saturating_sub(
+            agent_doc_session_check_io::midturn_steering::EXPLICIT_SEND_ROUTE_ENQUEUE_REBIND_MS
+                + 1_000,
+        );
+        send["sent_at_ms"] = serde_json::json!(aged);
+        agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
+            &conn,
+            &key,
+            &send.to_string(),
+            aged,
+        )
+        .unwrap();
+        std::fs::write(
+            &doc,
+            bugs_document_queue("<!-- later edit, outside the route window -->\n"),
+        )
+        .unwrap();
+
+        let _force_disk_guard =
+            agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
+        let err = enqueue_route_dispatch_prompt(
+            &doc,
+            "Run Agent Doc on agent-doc-bugs.md",
+            "foreign_composer_draft",
+            true,
+            route_queue_effects(),
+        )
+        .expect_err("a stale explicit send must not adopt a later authority");
+        assert!(
+            err.to_string()
+                .contains("does not match the recorded explicit-send authority"),
+            "{err:#}"
+        );
+        assert!(err.to_string().contains("agent-doc-bugs.md"), "{err:#}");
+    }
+
     #[test]
     fn route_enqueue_dispatch_prompt_preserves_unparseable_queue_instead_of_crashing() {
         // Repro of "JB Run Agent Doc error: route queue dispatch: failed to parse

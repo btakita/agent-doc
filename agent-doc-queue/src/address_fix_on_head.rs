@@ -10,7 +10,11 @@
 //! ```
 //!
 //! A hand-back that omits that line, or that admits the written fix is absent
-//! or was superseded, does not complete the address run.
+//! or was superseded, does not complete the address run. When every review
+//! states no code change, the hand-back records that with `NO-WRITTEN-FIX`
+//! instead of inventing a commit. Exactly one of the two lines settles the
+//! address half, so a row that also names `#adversarial-pr` can continue to
+//! that review (`#crossagenthandoff`).
 
 use agent_doc_document::queue_projection::strip_priority_markers;
 
@@ -18,7 +22,7 @@ use agent_doc_document::queue_projection::strip_priority_markers;
 ///
 /// It overrides a reading that treats a later review, or a different behavior,
 /// as addressing a review whose written fix is not on the current head.
-pub const ADDRESS_FIX_ON_HEAD_RULE: &str = "Address run (#reviewfixonhead): a review is not addressed until its written fix is the code on the exact current head. The written fix is the code change that review states. Land that change, commit it with the repository's conventions, and publish it only to the existing pull-request head before reporting completion. A later review, a comment that the item is met, or different behavior does not replace that written fix. Do not report the review complete, and do not finish this run, while that fix is absent from the current head. The hand-back names each such review on its own line: `FIX-ON-HEAD <review-url> head=<sha>`. Emit that line only when that head's code is the written fix.";
+pub const ADDRESS_FIX_ON_HEAD_RULE: &str = "Address run (#reviewfixonhead): a review is not addressed until its written fix is the code on the exact current head. The written fix is the code change that review states. Land that change, commit it with the repository's conventions, and publish it only to the existing pull-request head before reporting completion. A later review, a comment that the item is met, or different behavior does not replace that written fix. Do not report the review complete, and do not finish this run, while that fix is absent from the current head. The hand-back names each such review on its own line: `FIX-ON-HEAD <review-url> head=<sha>`. Emit that line only when that head's code is the written fix. When every review states no code change, do not invent a commit. Finish that address half with one line `NO-WRITTEN-FIX head=<sha>`. Do not emit that line together with `FIX-ON-HEAD`, and do not emit it when any review states a code change. On a row that also names `#adversarial-pr`, that line ends the address half so the next worker posts the independent review.";
 
 const ABSENT_FIX_PHRASES: &[&str] = &[
     "written fix is not",
@@ -75,12 +79,30 @@ pub fn address_response_admits_fix_absent(response: &str) -> bool {
         .any(|phrase| prose.contains(phrase))
 }
 
-/// True when `response` lands the review's written fix on a named head.
+/// True when `response` lands the review's written fix on a named head, or
+/// records that every review states no code change.
 ///
-/// A receipt is necessary and not sufficient: admitting the fix is absent, or
-/// that the review was superseded, keeps the run incomplete.
+/// Exactly one receipt kind settles the run. Admitting the fix is absent, or
+/// that the review was superseded, keeps the run incomplete. Emitting both
+/// `FIX-ON-HEAD` and `NO-WRITTEN-FIX` does not settle it.
 pub fn address_run_lands_written_fix(response: &str) -> bool {
-    !address_response_admits_fix_absent(response) && !address_fix_receipts(response).is_empty()
+    if address_response_admits_fix_absent(response) {
+        return false;
+    }
+    let fixes = !address_fix_receipts(response).is_empty();
+    let none = !no_written_fix_receipts(response).is_empty();
+    matches!((fixes, none), (true, false) | (false, true))
+}
+
+/// True when `response` settles an address run because the reviews state no
+/// code change. A landed `FIX-ON-HEAD` is not this case.
+pub fn address_run_settled_without_written_fix(response: &str) -> bool {
+    address_run_lands_written_fix(response) && address_fix_receipts(response).is_empty()
+}
+
+/// Head shas named by `NO-WRITTEN-FIX head=<sha>` lines.
+pub fn no_written_fix_receipts(response: &str) -> Vec<String> {
+    response.lines().filter_map(line_no_written_fix).collect()
 }
 
 fn collapsed_prose(text: &str) -> String {
@@ -90,7 +112,7 @@ fn collapsed_prose(text: &str) -> String {
         .to_ascii_lowercase()
 }
 
-fn line_fix_receipt(line: &str) -> Option<(String, String)> {
+fn receipt_payload(line: &str) -> &str {
     let mut rest = line.trim();
     loop {
         let before = rest;
@@ -105,6 +127,11 @@ fn line_fix_receipt(line: &str) -> Option<(String, String)> {
             break;
         }
     }
+    rest
+}
+
+fn line_fix_receipt(line: &str) -> Option<(String, String)> {
+    let rest = receipt_payload(line);
     let rest = rest.strip_prefix("FIX-ON-HEAD")?;
     if !rest.starts_with(|ch: char| ch.is_whitespace()) {
         return None;
@@ -114,10 +141,29 @@ fn line_fix_receipt(line: &str) -> Option<(String, String)> {
     let head = parts.next()?;
     let sha = head.strip_prefix("head=")?;
     let sha = sha.trim_end_matches([',', '.', ';', ')', '`']);
-    if !(7..=40).contains(&sha.len()) || !sha.chars().all(|ch| ch.is_ascii_hexdigit()) {
+    if !is_head_sha(sha) {
         return None;
     }
     Some((url.to_string(), sha.to_string()))
+}
+
+fn line_no_written_fix(line: &str) -> Option<String> {
+    let rest = receipt_payload(line);
+    let rest = rest.strip_prefix("NO-WRITTEN-FIX")?;
+    if !rest.starts_with(|ch: char| ch.is_whitespace()) {
+        return None;
+    }
+    let head = rest.split_whitespace().next()?;
+    let sha = head.strip_prefix("head=")?;
+    let sha = sha.trim_end_matches([',', '.', ';', ')', '`']);
+    if !is_head_sha(sha) {
+        return None;
+    }
+    Some(sha.to_string())
+}
+
+fn is_head_sha(sha: &str) -> bool {
+    (7..=40).contains(&sha.len()) && sha.chars().all(|ch| ch.is_ascii_hexdigit())
 }
 
 #[cfg(test)]
@@ -182,5 +228,28 @@ mod tests {
             vec![(REVIEW.to_string(), HEAD.to_string())]
         );
         assert!(address_run_lands_written_fix(&response));
+        assert!(!address_run_settled_without_written_fix(&response));
+    }
+
+    #[test]
+    fn no_written_fix_settles_an_address_run_and_prose_does_not() {
+        let response = format!(
+            "**Summary**\n\nThe approval states no code change, so nothing was committed.\n\
+             NO-WRITTEN-FIX head={HEAD}\n"
+        );
+        assert_eq!(no_written_fix_receipts(&response), vec![HEAD.to_string()]);
+        assert!(address_run_lands_written_fix(&response));
+        assert!(address_run_settled_without_written_fix(&response));
+
+        let prose = "The approval does not ask for a code change. No FIX-ON-HEAD line, because it states no code edit.\n";
+        assert!(no_written_fix_receipts(prose).is_empty());
+        assert!(!address_run_lands_written_fix(prose));
+    }
+
+    #[test]
+    fn both_fix_receipts_together_do_not_settle() {
+        let response = format!("FIX-ON-HEAD {REVIEW} head={HEAD}\nNO-WRITTEN-FIX head={HEAD}\n");
+        assert!(!address_run_lands_written_fix(&response));
+        assert!(!address_run_settled_without_written_fix(&response));
     }
 }

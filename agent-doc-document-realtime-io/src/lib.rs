@@ -1565,10 +1565,10 @@ fn project_dropped_editor_replica_to_disk(
         );
     }
     let target_hash = agent_doc_hash::content_hash(target);
-    if let Some(pending) = pending_document_write(file) {
-        if pending.target_hash.eq_ignore_ascii_case(&target_hash) {
-            clear_deferred_document_write_intent(file, &pending.target_hash, source)?;
-        }
+    if let Some(pending) = pending_document_write(file)
+        && pending.target_hash.eq_ignore_ascii_case(&target_hash)
+    {
+        clear_deferred_document_write_intent(file, &pending.target_hash, source)?;
     }
     record_disk_replica_authority(file, source, target);
     agent_doc_ops_log_io::log_op(

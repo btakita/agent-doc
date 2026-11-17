@@ -53,8 +53,11 @@ pub struct ReplicaState {
     /// mutation invalidates them.
     cached_state_vector: RefCell<Option<Vec<u8>>>,
     /// Materializing a lazily `TextCrdt` walks and orders its complete operation
-    /// graph.  Controller idle checks ask for the same projection repeatedly, so
-    /// retain it until a real replica mutation invalidates it.
+    /// graph. Controller idle checks ask for the same projection repeatedly, so
+    /// retain it until a mutation the order cannot fold. A folded remote edit
+    /// refreshes this string from the order instead of dropping it: clearing it
+    /// made every small delivery on a large session document reorder the whole
+    /// graph inside the IDE process.
     cached_text: RefCell<Option<String>>,
     /// Codepoint count paired with `cached_text`. Keeping it separately makes
     /// repeated appends constant-time instead of rescanning the whole projection.
@@ -81,7 +84,7 @@ pub struct ReplicaState {
     /// WITHOUT `pending_local_edits`. Lets a local edit mint its ops without
     /// lazily's whole-tree `ordered_ids` projection. Remote updates are folded
     /// in as they arrive (`#replicaremoteflush`); `None` only until the next
-    /// local edit rebuilds it after a lazily-path flush or a bulk update.
+    /// graph projection or local edit rebuilds it after a declined fold.
     visible_order: RefCell<Option<OrderIndex>>,
     /// Elements whose state changed since an exact version-vector base, so
     /// `diff` answers a caught-up peer without scanning the document.
@@ -554,7 +557,11 @@ impl ReplicaState {
         self.cached_edit_anchor
             .set(Some((projected_chars, projected.len())));
         *self.cached_text.borrow_mut() = Some(projected);
-        self.verify_folded_order();
+        // The read that pays for one graph projection also rebuilds the order,
+        // so the next foldable delivery can refresh [Self::cached_text] in
+        // place. Remote-only editor replicas never take the local-edit path
+        // that used to be the only rebuild.
+        self.ensure_visible_order();
     }
 
     /// Prove an order that remote folds changed still spells lazily's
@@ -1019,12 +1026,34 @@ impl ReplicaState {
     fn apply_decoded_update(&self, update: &[u8], ops: &[TextOp]) {
         self.flush_pending_local_edits();
         if self.text.borrow_mut().apply_delta_unprojected(ops) {
-            self.fold_remote_ops(ops);
-            *self.cached_text.borrow_mut() = None;
-            self.cached_text_chars.set(None);
-            self.cached_edit_anchor.set(None);
+            if self.fold_remote_ops(ops) {
+                self.retain_folded_projection();
+            } else {
+                *self.cached_text.borrow_mut() = None;
+                self.cached_text_chars.set(None);
+                self.cached_edit_anchor.set(None);
+            }
         }
         *self.last_applied_update.borrow_mut() = Some(update.to_vec());
+    }
+
+    /// Replace the visible projection with the order a remote fold just
+    /// updated. The fold is the same placement lazily uses, so this string is
+    /// the document the editor should show, without `TextCrdt::ordered_ids`.
+    fn retain_folded_projection(&self) {
+        let (projected, chars) = {
+            let order = self.visible_order.borrow();
+            let Some(order) = order.as_ref() else {
+                *self.cached_text.borrow_mut() = None;
+                self.cached_text_chars.set(None);
+                self.cached_edit_anchor.set(None);
+                return;
+            };
+            (order.visible_text(), order.len())
+        };
+        self.cached_text_chars.set(Some(chars));
+        self.cached_edit_anchor.set(Some((chars, projected.len())));
+        *self.cached_text.borrow_mut() = Some(projected);
     }
 
     /// Fold a remote batch lazily just stored into the order, the version
@@ -1038,7 +1067,7 @@ impl ReplicaState {
     /// changed. The one way a stored id disappears is a tombstone replaced by
     /// a smaller concurrent delete; if that id may have been its peer's
     /// maximum, the frontier is re-derived instead.
-    fn fold_remote_ops(&self, ops: &[TextOp]) {
+    fn fold_remote_ops(&self, ops: &[TextOp]) -> bool {
         let effect = self
             .visible_order
             .borrow_mut()
@@ -1046,7 +1075,7 @@ impl ReplicaState {
             .and_then(|order| order.integrate_remote(ops));
         let Some(effect) = effect else {
             self.invalidate_local_indexes();
-            return;
+            return false;
         };
         {
             let mut cached_vv = self.cached_version_vector.borrow_mut();
@@ -1075,6 +1104,7 @@ impl ReplicaState {
             }
         }
         self.rebase_local_journal_if_oversized();
+        true
     }
 
     /// Project a remote update against an isolated fork without mutating this
@@ -1374,6 +1404,73 @@ mod tests {
             replica.cached_text.borrow().as_deref(),
             Some(projected.as_str())
         );
+    }
+
+    /// A live editor applies a small remote delivery on every agent write.
+    /// Folding that delivery must refresh the cached projection. Dropping the
+    /// cache forces `TextCrdt::text`, which orders the whole graph and held
+    /// IDEA's replica lock for more than a second on a ~775k session document.
+    #[test]
+    fn folded_remote_update_refreshes_projection_without_a_graph_walk() {
+        let seed = "hello world";
+        let replica =
+            ReplicaState::from_encoded(2, &ReplicaState::from_text(1, seed).encode_state())
+                .unwrap();
+        assert_eq!(
+            replica.cached_text.borrow().as_deref(),
+            Some(seed),
+            "a foldable snapshot must retain the visible projection"
+        );
+
+        let mut peer = TextCrdt::new(3);
+        peer.apply_delta(&decode_update_ops(&replica.encode_state()).unwrap());
+        let frontier = peer.version_vector();
+        peer.insert_str(6, "there ");
+        replica
+            .apply_update(&encode_update_ops(&peer.delta_since(&frontier)).unwrap())
+            .unwrap();
+        assert_eq!(
+            replica.cached_text.borrow().as_deref(),
+            Some("hello there world"),
+            "a folded remote edit must refresh the projection instead of clearing it"
+        );
+        assert_eq!(replica.text(), "hello there world");
+        assert!(
+            replica.visible_order.borrow().is_some(),
+            "the order that spelled the projection must stay available"
+        );
+
+        // Larger than the remote-fold budget on this small order. The index
+        // declines, the cache drops, and one graph read rebuilds both. The
+        // following small delivery must fold again.
+        let mut bulk = TextCrdt::new(4);
+        bulk.insert_str(0, &"y".repeat(5_000));
+        replica
+            .apply_update(&encode_update_ops(&bulk.delta_since(&TextVersionVector::new())).unwrap())
+            .unwrap();
+        assert!(
+            replica.cached_text.borrow().is_none(),
+            "a batch the order declines must drop the projection so the graph stays authoritative"
+        );
+        let mut reference = TextCrdt::new(8);
+        reference.apply_delta(&decode_update_ops(&replica.encode_state()).unwrap());
+        assert_eq!(replica.text(), reference.text());
+        assert!(
+            replica.visible_order.borrow().is_some(),
+            "the graph read must rebuild the order for the next delivery"
+        );
+
+        let frontier = reference.version_vector();
+        reference.insert_str(0, "Z");
+        replica
+            .apply_update(&encode_update_ops(&reference.delta_since(&frontier)).unwrap())
+            .unwrap();
+        assert_eq!(
+            replica.cached_text.borrow().as_deref(),
+            Some(reference.text().as_str()),
+            "after one rebuild, a small remote edit must refresh the cache again"
+        );
+        assert_eq!(replica.text(), reference.text());
     }
 
     #[test]

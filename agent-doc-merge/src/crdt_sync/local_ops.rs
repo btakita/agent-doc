@@ -246,6 +246,22 @@ impl OrderIndex {
         chars.next().is_none()
     }
 
+    /// Visible characters in projection order.
+    ///
+    /// This is the string `TextCrdt::text` would return after a fold that
+    /// tracked the graph. Callers use it so a small remote edit does not order
+    /// every retained operation just to read the document.
+    pub(super) fn visible_text(&self) -> String {
+        let mut out = String::with_capacity(self.visible);
+        for chunk in &self.chunks {
+            for elem in chunk.elems.iter().filter(|elem| elem.is_visible()) {
+                out.push(elem.ch);
+            }
+        }
+        debug_assert_eq!(out.chars().count(), self.visible);
+        out
+    }
+
     /// The position of visible element `index` (`index < len`).
     fn locate_visible(&self, index: usize) -> Pos {
         let mut remaining = index;

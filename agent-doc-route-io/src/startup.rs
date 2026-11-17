@@ -983,9 +983,7 @@ pub fn auto_start_in_session_with_lock_mode(
         }
     };
     tmux.enable_remain_on_exit(&new_pane)?;
-    if !adopted_existing_shell
-        && let Some(created) = created_panes.as_mut()
-    {
+    if !adopted_existing_shell && let Some(created) = created_panes.as_mut() {
         created.push(new_pane.clone());
     }
 

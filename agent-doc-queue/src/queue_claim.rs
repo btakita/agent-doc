@@ -859,6 +859,18 @@ impl QueueClaim {
         self.state.blocks_dispatch() && !self.is_expired(now_secs)
     }
 
+    /// Whether this attempt still owns its worker id against `start` of a
+    /// different item. [`Self::blocks_dispatch`] keeps a bound running
+    /// generation past the TTL, so `claim` cannot steal it. An expired,
+    /// non-frozen binding does not: GH #390 retires it before the new start
+    /// is stored.
+    fn blocks_worker_reuse(&self, now_secs: u64) -> bool {
+        if self.is_expired(now_secs) && !self.retains_frozen_worker_claim() {
+            return false;
+        }
+        self.blocks_dispatch(now_secs)
+    }
+
     /// A harness freeze whose worker is still bound. Expiry and a projected
     /// `Lost` do not drop it: the same attempt is revived by `queue claim
     /// --refresh`, or rebound to a continuation wrapper by `queue start`. An
@@ -1706,7 +1718,7 @@ impl QueueClaimLedger {
             .enumerate()
             .find_map(|(other_index, other)| {
                 (other_index != index
-                    && other.blocks_dispatch(now_secs)
+                    && other.blocks_worker_reuse(now_secs)
                     && other
                         .worker
                         .as_ref()
@@ -1726,7 +1738,7 @@ impl QueueClaimLedger {
         // refuses every queue operation (GH #390).
         for (other_index, other) in self.claims.iter_mut().enumerate() {
             if other_index != index
-                && !other.blocks_dispatch(now_secs)
+                && !other.blocks_worker_reuse(now_secs)
                 && other
                     .worker
                     .as_ref()

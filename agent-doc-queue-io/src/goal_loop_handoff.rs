@@ -146,6 +146,9 @@ pub struct GoalLoopRequeue {
     /// `#addressinline`: an `#address` or `#adversarial-pr` hand-back whose
     /// root inline discussion threads are not shown on the current head.
     pub inline_threads_pending: bool,
+    /// `#presetorder`: the first later preset in the item's temporal order
+    /// that this hand-back did not settle.
+    pub next_ordered_preset: Option<String>,
 }
 
 /// `#goalpresetterminal`: decide `queue report-complete` for a goal-loop row.
@@ -154,7 +157,9 @@ pub struct GoalLoopRequeue {
 /// live subagent claim, its preset declares no final states, or `response`
 /// opens on a declared final state that completes the order (which also
 /// retires the row's recorded hand-off). An already-answered human-review
-/// `BLOCKED` does not complete (`#operatororderclosed`). Otherwise the
+/// `BLOCKED` does not complete (`#operatororderclosed`). A row that names
+/// presets in temporal order stays open until each later preset is settled
+/// (`#presetorder`); `NO-WRITTEN-FIX` settles only the address half. Otherwise the
 /// hand-back is an interrupted loop: it is recorded,
 /// the exact attempt is requeued so the same row is dispatchable again, and
 /// the requeued claim is returned. The caller reprojects the claim marker.
@@ -212,12 +217,22 @@ pub fn requeue_nonterminal_hand_back(
     let ordinary_empty = !address_run && !inline_goal && final_states.is_empty();
     let settled_inline_without_states =
         inline_goal && !inline_pending && !address_pending && final_states.is_empty();
+    // `#presetorder`: a settled address half, including `NO-WRITTEN-FIX`, does
+    // not finish a row that still has a later preset. The first preset keeps
+    // its own receipt, so `#rebase then #adversarial-pr` still completes on
+    // REVIEW-CLEAN.
+    let order =
+        agent_doc_queue::preset_order::temporal_preset_order(&claim.item_text, &preset_pairs);
+    let next_ordered_preset =
+        agent_doc_queue::preset_order::first_unmet_later_preset(&order, response, &preset_pairs);
+    let later_unmet = next_ordered_preset.is_some();
     // A landed `#address` receipt completes only a pure address run. A row
     // that also declares goal final states stays open until the hand-back
     // opens on REVIEW-CLEAN or BLOCKED (`#crossagenthandoff`).
-    let address_completes = address_lands && final_states.is_empty();
+    let address_completes = address_lands && final_states.is_empty() && !later_unmet;
     if !address_pending
         && !inline_pending
+        && !later_unmet
         && (ordinary_empty || settled_inline_without_states || completes_order || address_completes)
     {
         let reportable = reopen_if_reportable_lost(file, &claim, generation, response)?;
@@ -276,6 +291,8 @@ pub fn requeue_nonterminal_hand_back(
         "#reviewfixonhead"
     } else if inline_pending {
         "#addressinline"
+    } else if later_unmet {
+        "#presetorder"
     } else {
         "#goalpresetterminal"
     };
@@ -305,6 +322,7 @@ pub fn requeue_nonterminal_hand_back(
         answered_blocked_review,
         address_fix_pending: address_pending,
         inline_threads_pending: inline_pending,
+        next_ordered_preset,
     }))
 }
 

@@ -384,6 +384,21 @@ pub fn is_transient_closeout_marker(marker: QueueLifecycleMarker) -> bool {
     )
 }
 
+/// Whether a recursive Stop must keep refusing `marker` (`#transientcloseout`).
+///
+/// `#stophookactiveguard` may end a turn over an unchanged debt set the agent
+/// did not move, but not while a row is still `📥`, `🚧`, or `⚠️🚧`. Those
+/// markers are the turn. A `☑️`, `🔄`, `❔`, or plain `⚠️` debt may still
+/// release, so Claude Code's consecutive-block cap is not the only bound.
+pub fn marker_holds_turn_through_recursive_stop(marker: QueueLifecycleMarker) -> bool {
+    matches!(
+        marker,
+        QueueLifecycleMarker::Pending
+            | QueueLifecycleMarker::Running
+            | QueueLifecycleMarker::LostRunning
+    )
+}
+
 /// The transition a normal turn still owes for `marker`.
 ///
 /// Resting markers return `None`.
@@ -949,6 +964,35 @@ mod tests {
 
     fn doc(queue: &str) -> String {
         format!("<!-- agent:queue -->\n{queue}<!-- /agent:queue -->\n")
+    }
+
+    #[test]
+    fn inbox_and_running_markers_hold_a_recursive_stop() {
+        assert!(marker_holds_turn_through_recursive_stop(
+            QueueLifecycleMarker::Pending
+        ));
+        assert!(marker_holds_turn_through_recursive_stop(
+            QueueLifecycleMarker::Running
+        ));
+        assert!(marker_holds_turn_through_recursive_stop(
+            QueueLifecycleMarker::LostRunning
+        ));
+        for marker in [
+            QueueLifecycleMarker::Claimed,
+            QueueLifecycleMarker::Reported,
+            QueueLifecycleMarker::Lost,
+            QueueLifecycleMarker::LostClaimed,
+            QueueLifecycleMarker::LostReported,
+            QueueLifecycleMarker::Reconciling,
+            QueueLifecycleMarker::Unknown,
+            QueueLifecycleMarker::Blocked,
+            QueueLifecycleMarker::AwaitingOperator,
+        ] {
+            assert!(
+                !marker_holds_turn_through_recursive_stop(marker),
+                "{marker:?} may still use the unchanged-debt release"
+            );
+        }
     }
 
     #[test]

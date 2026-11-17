@@ -2272,6 +2272,7 @@ pub fn response_defers_queue_head(content: &str, response_body: &str, head_text:
     latest_echo_cell_lacks_goal_final_state(content, response_body, head_text)
         || latest_echo_cell_omits_address_fix(content, response_body, head_text)
         || latest_echo_cell_omits_inline_threads(content, response_body, head_text)
+        || latest_echo_cell_skips_later_ordered_preset(content, response_body, head_text)
         || crate::prompt_pressure::review_blocks_prompt(content, head_text)
         || latest_echo_cell_needs_prompt_pressure(content, response_body, head_text)
         || latest_echo_cell_lacks_created_pull_request(content, response_body, head_text)
@@ -2402,6 +2403,34 @@ pub fn latest_echo_cell_omits_address_fix(content: &str, text: &str, head_text: 
         .collect::<Vec<_>>()
         .join("\n");
     !crate::address_fix_on_head::address_run_lands_written_fix(&answer)
+}
+
+/// `#presetorder`: the latest echo of a temporal preset order leaves a later
+/// preset unsettled.
+///
+/// Quote lines are the echo of the queue prompt, not the hand-back. A response
+/// that never echoes the head is unanswered, not this deferral. Returning
+/// `true` only ever prevents a strike. A `NO-WRITTEN-FIX` receipt does not
+/// settle the later preset.
+pub fn latest_echo_cell_skips_later_ordered_preset(
+    content: &str,
+    text: &str,
+    head_text: &str,
+) -> bool {
+    let presets = crate::goal_preset_terminal::effective_presets_for_content(content);
+    let order = crate::preset_order::temporal_preset_order(head_text, &presets);
+    if order.len() < 2 {
+        return false;
+    }
+    let Some(cell) = latest_echo_cell(content, text, head_text) else {
+        return false;
+    };
+    let answer: String = cell
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('>'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    crate::preset_order::later_ordered_preset_unmet(&order, &answer, &presets)
 }
 
 fn latest_echo_cell(content: &str, text: &str, head_text: &str) -> Option<String> {
@@ -2927,6 +2956,33 @@ mod tests {
         assert!(!latest_echo_cell_omits_address_fix(&doc, &landed, head));
         assert!(!latest_echo_cell_omits_inline_threads(&doc, &landed, head));
         assert!(!response_defers_queue_head(&doc, &landed, head));
+    }
+
+    #[test]
+    fn preset_order_echo_defers_until_the_later_preset_runs() {
+        let head =
+            "https://github.com/sample-org/sample-repo/pull/12: #address then #adversarial-pr";
+        let doc = format!(
+            "---\nqueue_active: true\nprompt_presets:\n  '#address': 'Address every actionable review item on the exact current head.'\n  '#adversarial-pr': 'Post one independent COMMENTED review on the current head.'\n---\n\n<!-- agent:queue auto -->\n- {head}\n<!-- /agent:queue -->\n"
+        );
+        let address_only = format!(
+            "### Re: address\n\n> **Queue prompt:** {head}\n\nNO-WRITTEN-FIX head=fa3a3f449986d565f21aeb6e0f792323bc8d1d58\nINLINE-THREADS-LOADED 0 head=fa3a3f449986d565f21aeb6e0f792323bc8d1d58\n"
+        );
+        assert!(latest_echo_cell_skips_later_ordered_preset(
+            &doc,
+            &address_only,
+            head
+        ));
+        assert!(response_defers_queue_head(&doc, &address_only, head));
+        let done = format!("{address_only}PRESET-DONE #adversarial-pr\n");
+        assert!(!latest_echo_cell_skips_later_ordered_preset(
+            &doc, &done, head
+        ));
+        assert!(!response_defers_queue_head(&doc, &done, head));
+        assert!(
+            !response_defers_queue_head(&doc, "No echo of the head.", head),
+            "an unanswered head is not this deferral"
+        );
     }
 
     #[test]

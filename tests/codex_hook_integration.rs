@@ -1791,12 +1791,12 @@ fn pretooluse_hook_refuses_killing_the_inherited_tmux_server() {
     }
 }
 
-/// `#stophookactiveguard`: every `agent-doc hook claude-stop` call is a new
-/// process, so the record that bounds the `#transientcloseout` refusal must
-/// survive between them. The first Stop refuses over a stale `🚧` row; the
-/// recursive Stop that follows (`stop_hook_active = true`) over the unchanged
-/// debt set ends the turn instead of waiting for Claude Code's
-/// consecutive-block cap, and the row stays live.
+/// `#stophookactiveguard` plus `#transientcloseout`: every `agent-doc hook
+/// claude-stop` call is a new process, so the refusal record must survive
+/// between them. The first Stop refuses over a stale `🚧` row. The recursive
+/// Stop that follows (`stop_hook_active = true`) reads that record and still
+/// refuses (`state=inbox_or_running`) instead of ending the turn. The row
+/// stays live.
 #[test]
 fn claude_stop_hook_process_bounds_an_unchanged_transient_refusal() {
     let tmp = TempDir::new().unwrap();
@@ -1831,22 +1831,26 @@ fn claude_stop_hook_process_bounds_an_unchanged_transient_refusal() {
         .unwrap_or_else(|| panic!("the first stop must refuse: {refused}"));
     assert!(context.contains("🚧 do [#held]"), "{context}");
 
-    // The recursive stop over the unchanged debt set ends the turn: no
-    // `decision` and no continuation context, only an operator-visible
-    // `systemMessage` naming the rows left live.
+    // The recursive stop reads the previous process's refusal and still
+    // refuses: a `🚧` row does not end the turn.
     let ended = stop(true);
-    let notice = ended["systemMessage"]
+    let context = ended["hookSpecificOutput"]["additionalContext"]
         .as_str()
-        .unwrap_or_else(|| panic!("the release must be visible to the operator: {ended}"));
-    assert!(notice.contains("- row 🚧 do [#held]: "), "{notice}");
-    assert_eq!(
-        ended.as_object().map(|map| map.len()),
-        Some(1),
-        "the recursive stop over the unchanged debt set must end the turn: {ended}"
-    );
+        .unwrap_or_else(|| panic!("a 🚧 row must keep the turn open: {ended}"));
+    assert!(context.contains("🚧 do [#held]"), "{context}");
+    assert!(ended.get("systemMessage").is_none(), "{ended}");
     let ops_log =
         || fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
-    assert!(ops_log().contains("state=unchanged_debts"), "{}", ops_log());
+    assert!(
+        ops_log().contains("state=inbox_or_running"),
+        "{}",
+        ops_log()
+    );
+    assert!(
+        !ops_log().contains("state=unchanged_debts"),
+        "{}",
+        ops_log()
+    );
     assert!(
         fs::read_to_string(&doc)
             .unwrap()

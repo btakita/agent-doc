@@ -3475,6 +3475,9 @@ pub struct ControllerRouteAutoStartInvocation<'a> {
     pub defer_focus_to_layout: bool,
     pub missing_pane: Option<ControllerMissingPaneObservation<'a>>,
     pub resume: Option<agent_doc_harness::ResumeRequest>,
+    /// Editor harness Restart Agent must launch because document authority has
+    /// not merged that edit. `None` for every other auto-start.
+    pub operator_restart_agent: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

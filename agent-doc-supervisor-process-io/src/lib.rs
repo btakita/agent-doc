@@ -555,6 +555,7 @@ fn strip_reexec_handoff_env(env: &mut HashMap<String, String>) {
         REEXEC_CAPABILITY_PROOF_CONTRACT_ENV,
         agent_doc_supervisor_process::REEXEC_HARNESS_ENV,
         agent_doc_supervisor_process::REEXEC_SUPERVISOR_PID_ENV,
+        agent_doc_supervisor_process::OPERATOR_RESTART_AGENT_ENV,
     ] {
         env.remove(key);
     }

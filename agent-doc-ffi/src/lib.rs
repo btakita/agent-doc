@@ -291,8 +291,8 @@ pub unsafe extern "C" fn agent_doc_merge_frontmatter(
 /// Read the `agent:` value a document's frontmatter declares.
 ///
 /// Editor plugins call this on their *visible* buffer and pass the result to
-/// `agent-doc session restart-agent --expect-agent`, so Restart Agent can refuse
-/// to relaunch from a controller authority that has not yet seen the operator's
+/// `agent-doc session restart-agent --expect-agent`, so Restart Agent launches
+/// that harness when controller authority has not yet merged the operator's
 /// `agent:` edit (`#restartagentharness`). Uses the canonical frontmatter
 /// parser, so quoting and comments resolve exactly as the binary resolves them.
 ///

@@ -2625,6 +2625,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 agent_doc_supervisor_io::config::agent_change_restart_enabled(&path);
             let launch_harness_binary = harness.binary.clone();
             let mut agent_change_logged_for: Option<String> = None;
+            // `#restartagentharness`: log the hold's suppression once per pin.
+            let mut operator_restart_hold_logged = false;
             // `#agentreloadrestart` Phase 1b — dedup the actual restart TRIGGER
             // separately from the per-harness detection log: a change can be
             // detected mid-turn (`WaitForBoundary`, logged once) and only later
@@ -4202,7 +4204,52 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         fm.agent.as_deref(),
                         global.default_agent.as_deref(),
                     );
-                    let harness_changed = resolved.binary != launch_harness_binary;
+                    // `#restartagentharness`: a Restart Agent that launched the
+                    // editor harness must not be undone by this watch while
+                    // authority is still the harness that restart left behind.
+                    // Convergence, or a newer authority, drops the hold and the
+                    // comparison below follows that read.
+                    let hold = shared.operator_restart_hold();
+                    let decision = hold.as_ref().map(|hold| {
+                        agent_doc_supervisor::harness_authority::operator_restart_hold_decision(
+                            hold,
+                            &resolved.binary,
+                        )
+                    });
+                    let suppress_stale_authority = matches!(
+                        decision,
+                        Some(
+                            agent_doc_supervisor::harness_authority::OperatorRestartHoldDecision::KeepEditor
+                        )
+                    );
+                    if matches!(
+                        decision,
+                        Some(
+                            agent_doc_supervisor::harness_authority::OperatorRestartHoldDecision::Converged
+                                | agent_doc_supervisor::harness_authority::OperatorRestartHoldDecision::FollowAuthority
+                        )
+                    ) {
+                        shared.set_operator_restart_hold(None);
+                        operator_restart_hold_logged = false;
+                    }
+                    if suppress_stale_authority && !operator_restart_hold_logged {
+                        operator_restart_hold_logged = true;
+                        let editor_binary = hold
+                            .as_ref()
+                            .map(|hold| hold.editor_binary.as_str())
+                            .unwrap_or("?");
+                        agent_doc_ops_log_io::log_op(
+                            &path,
+                            &format!(
+                                "restart_agent_editor_harness file={} editor_agent={} authority_agent={} action=hold_editor_agent #restartagentharness",
+                                path.display(),
+                                editor_binary,
+                                resolved.binary,
+                            ),
+                        );
+                    }
+                    let harness_changed =
+                        !suppress_stale_authority && resolved.binary != launch_harness_binary;
                     if harness_changed {
                         let decision = agent_change_restart_decision_from_view(
                             harness_changed,

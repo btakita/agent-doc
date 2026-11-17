@@ -53,6 +53,48 @@ impl fmt::Display for SupervisorReplacementMode {
 /// request ever reached a supervisor.
 const RESTART_AGENT_WIRE_PREFIX: &str = "agent:";
 
+/// Split a Restart Agent wire mode from the editor harness it must launch.
+///
+/// `agent:continue@grok` is continue-mode Restart Agent whose editor showed
+/// `agent: grok` while document authority still named another harness. The
+/// suffix is a harness binary (`claude`, `codex`, `opencode`, `grok`), not a
+/// second mode. Callers that rebuild the mode from parsed fields must put it
+/// back with [`restart_wire_preserving_editor_agent`] or the supervisor
+/// relaunches the authority's harness.
+pub fn split_restart_wire_editor_agent(raw: &str) -> (&str, Option<&str>) {
+    let raw = raw.trim();
+    match raw.rsplit_once('@') {
+        Some((mode, agent)) if !mode.is_empty() && is_restart_editor_agent_token(agent) => {
+            (mode, Some(agent))
+        }
+        _ => (raw, None),
+    }
+}
+
+pub fn restart_wire_editor_agent(raw: &str) -> Option<&str> {
+    split_restart_wire_editor_agent(raw).1
+}
+
+fn is_restart_editor_agent_token(agent: &str) -> bool {
+    let mut chars = agent.chars();
+    matches!(chars.next(), Some(first) if first.is_ascii_alphanumeric())
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+}
+
+/// Put the editor harness back on a mode the controller rebuilt from parsed fields.
+///
+/// Only an explicit Restart Agent carries it. A bare `continue@grok` is not one.
+pub fn restart_wire_preserving_editor_agent(
+    original: Option<&str>,
+    wire_mode: &str,
+    restart_agent: bool,
+) -> String {
+    match (restart_agent, original.and_then(restart_wire_editor_agent)) {
+        (true, Some(agent)) => format!("{wire_mode}@{agent}"),
+        _ => wire_mode.to_string(),
+    }
+}
+
 /// An operator replacement request: which conversation lineage to keep, and
 /// whether the operator explicitly asked to replace the harness child.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -66,7 +108,7 @@ pub struct SupervisorReplacementIntent {
 
 impl SupervisorReplacementIntent {
     pub fn parse(raw: &str) -> Result<Self, SupervisorReplacementParseError> {
-        let raw = raw.trim();
+        let (raw, _editor_agent) = split_restart_wire_editor_agent(raw);
         let (mode, restart_agent) = match raw.strip_prefix(RESTART_AGENT_WIRE_PREFIX) {
             Some(mode) => (mode, true),
             None => (raw, false),
@@ -777,6 +819,37 @@ mod tests {
             .unwrap();
             assert_eq!(parsed.wire_mode(), raw, "wire mode must round-trip: {raw}");
         }
+    }
+
+    /// The editor harness rides on the wire because the supervisor re-reads
+    /// document authority. Parsing must accept it, and the rebuilt mode must
+    /// put it back or the restart launches the old harness.
+    #[test]
+    fn restart_agent_wire_keeps_the_editor_harness_across_controller_parse() {
+        let raw = "agent:continue@grok";
+        let parsed = parse_supervisor_replacement_request(SupervisorReplacementRequestFields {
+            state: Some(raw),
+            reason: None,
+            diagnostic_payload: None,
+        })
+        .unwrap();
+        assert_eq!(parsed.mode, SupervisorReplacementMode::Continue);
+        assert!(parsed.restart_agent);
+        assert_eq!(parsed.wire_mode(), "agent:continue");
+        assert_eq!(
+            restart_wire_preserving_editor_agent(
+                Some(raw),
+                &parsed.wire_mode(),
+                parsed.restart_agent
+            ),
+            raw
+        );
+        assert_eq!(restart_wire_editor_agent(raw), Some("grok"));
+        assert_eq!(restart_wire_editor_agent("agent:continue"), None);
+        assert_eq!(
+            restart_wire_preserving_editor_agent(Some("continue@grok"), "continue", false),
+            "continue"
+        );
     }
 
     #[test]

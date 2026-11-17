@@ -174,6 +174,7 @@ use agent_doc_supervisor::detection::{
     AutoTriggerPromptDecision, AutoTriggerPromptSource, auto_trigger_blocking_gate,
     auto_trigger_prompt_decision,
 };
+use agent_doc_supervisor::harness_authority::OperatorRestartAgentHold;
 use agent_doc_supervisor::input::prompt_input_summary;
 use agent_doc_supervisor::ipc_protocol::submit_bytes;
 use agent_doc_supervisor::route_owned::RouteOwnedReapPolicy;
@@ -2010,6 +2011,17 @@ fn supervisor_perform_reexec(
             agent_doc_supervisor_process::REEXEC_HARNESS_ENV,
             &current_harness,
         );
+        // `#restartagentharness`: the hold is process memory. Carry the editor
+        // binary so the replacement image pins it again; the child env strip
+        // keeps the key off the harness.
+        if let Some(hold) = shared.operator_restart_hold() {
+            cmd.env(
+                agent_doc_supervisor_process::OPERATOR_RESTART_AGENT_ENV,
+                &hold.editor_binary,
+            );
+        } else {
+            cmd.env_remove(agent_doc_supervisor_process::OPERATOR_RESTART_AGENT_ENV);
+        }
         if let Some(contract) = shared.proven_capability_proof_contract() {
             cmd.env(
                 agent_doc_supervisor_process::REEXEC_CAPABILITY_PROOF_CONTRACT_ENV,
@@ -2779,6 +2791,9 @@ pub(crate) struct SupervisorShared {
     stop_agent_requested: AtomicBool,
     /// Restart mode requested via IPC ("fresh" or "continue").
     restart_mode: Mutex<String>,
+    /// Editor harness a Restart Agent launched while document authority still
+    /// named another one. Kept until that authority moves (`#restartagentharness`).
+    operator_restart_hold: Mutex<Option<OperatorRestartAgentHold>>,
     /// Flag: stdin→pty writer forwarded \x04 (Ctrl+D) to the pty.
     ctrl_d_forwarded: AtomicBool,
     /// Flag: stdin→pty writer forwarded \x03 (Ctrl+C) to the pty.
@@ -2879,6 +2894,7 @@ impl SupervisorShared {
             stop_requested: AtomicBool::new(false),
             stop_agent_requested: AtomicBool::new(false),
             restart_mode: Mutex::new("continue".to_string()),
+            operator_restart_hold: Mutex::new(None),
             ctrl_d_forwarded: AtomicBool::new(false),
             ctrl_c_forwarded: AtomicBool::new(false),
             auto_trigger_outcome: AtomicU8::new(AutoTriggerOutcome::NotNeeded as u8),
@@ -2934,6 +2950,14 @@ impl SupervisorShared {
 
     fn route_owned_dispatch_promoted(&self) -> bool {
         self.route_owned_dispatch_promoted.load(Ordering::Relaxed)
+    }
+
+    fn operator_restart_hold(&self) -> Option<OperatorRestartAgentHold> {
+        self.operator_restart_hold.lock().clone()
+    }
+
+    fn set_operator_restart_hold(&self, hold: Option<OperatorRestartAgentHold>) {
+        *self.operator_restart_hold.lock() = hold;
     }
 
     /// Current harness identity (snapshot clone). Reflects the latest in-loop

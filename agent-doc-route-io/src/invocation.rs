@@ -9,6 +9,10 @@ use std::time::{Duration, Instant};
 use tmux_router::Tmux;
 
 thread_local! {
+    /// Editor harness for a cold start that is serving Restart Agent while
+    /// document authority still names the previous harness. `None` on every
+    /// other route.
+    static OPERATOR_RESTART_AGENT: RefCell<Option<String>> = const { RefCell::new(None) };
     /// Absolute per-invocation deadline shared by every route readiness phase.
     ///
     /// A relative duration here let pane resolution, startup recovery, and the
@@ -406,6 +410,34 @@ impl LayoutOwnedByControllerGuard {
 impl Drop for LayoutOwnedByControllerGuard {
     fn drop(&mut self) {
         LAYOUT_OWNED_BY_CONTROLLER.with(|cell| cell.set(self.previous));
+    }
+}
+
+/// Cold-start scope for [`OPERATOR_RESTART_AGENT`].
+///
+/// Restart Agent's editor harness has to reach the `agent-doc start` command
+/// the route builds, without another positional argument on the startup chain.
+pub struct OperatorRestartAgentGuard {
+    previous: Option<String>,
+}
+
+impl OperatorRestartAgentGuard {
+    pub fn set(agent: Option<&str>) -> Self {
+        let previous = OPERATOR_RESTART_AGENT.with(|cell| cell.replace(agent.map(str::to_string)));
+        Self { previous }
+    }
+
+    pub fn current() -> Option<String> {
+        OPERATOR_RESTART_AGENT.with(|cell| cell.borrow().clone())
+    }
+}
+
+impl Drop for OperatorRestartAgentGuard {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        OPERATOR_RESTART_AGENT.with(|cell| {
+            *cell.borrow_mut() = previous;
+        });
     }
 }
 

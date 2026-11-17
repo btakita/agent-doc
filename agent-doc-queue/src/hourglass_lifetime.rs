@@ -195,7 +195,19 @@ fn completion_or_moot(text: &str, evidence: &Evidence) -> bool {
         return false;
     }
     if tracked.iter().any(|id| evidence.checked.contains(id)) {
-        return true;
+        // A checked reserved request answers the hold. It completes a follow-up
+        // that quotes the request, and a row whose own work is that checked
+        // action (`decide the release`). It does not complete different work
+        // that was only waiting on the decision
+        // (`Persist the session [#subagent-operator-request-…]`).
+        let annotation = !operator_request_annotation_ids(text).is_empty();
+        if !annotation || followup_action(text).is_some() {
+            return true;
+        }
+        let work = normalize_action(&row_work_beside_annotation(text));
+        if !work.is_empty() && evidence.checked_actions.contains(&work) {
+            return true;
+        }
     }
     if let Some(stable) = stable_id(text)
         && evidence.checked_sources.contains(&stable)
@@ -211,8 +223,13 @@ fn completion_or_moot(text: &str, evidence: &Evidence) -> bool {
             return true;
         }
     }
+    // A follow-up that only cites a reserved request is moot once that request
+    // is neither an open nor a checked tracked item. The request row itself
+    // (`choose repository access [#subagent-operator-request-…]`) is the wait,
+    // not a follow-up, and stays.
     let reserved = operator_request_annotation_ids(text);
-    !reserved.is_empty()
+    followup_action(text).is_some()
+        && !reserved.is_empty()
         && reserved
             .iter()
             .all(|id| !evidence.open.contains(id) && !evidence.checked.contains(id))
@@ -259,6 +276,25 @@ fn tracked_ids(text: &str, evidence: &Evidence) -> Vec<String> {
 
 fn stable_id(text: &str) -> Option<String> {
     queue_prompt_stable_id(text).map(|id| id.to_ascii_lowercase())
+}
+
+/// Work text with a trailing reserved request annotation removed.
+fn row_work_beside_annotation(text: &str) -> String {
+    let work = agent_doc_element_queue::strip_attempt_projection_prefix(text).trim();
+    let work = work.trim_matches('~').trim();
+    let Some(start) = work.rfind("[#") else {
+        return work.to_string();
+    };
+    let after = &work[start + 2..];
+    let Some(end) = after.find(']') else {
+        return work.to_string();
+    };
+    let id = &after[..end];
+    if after[end + 1..].trim().is_empty() && is_reserved_operator_action_id(id) {
+        work[..start].trim().to_string()
+    } else {
+        work.to_string()
+    }
 }
 
 fn followup_action(text: &str) -> Option<String> {

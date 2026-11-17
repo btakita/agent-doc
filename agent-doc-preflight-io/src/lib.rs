@@ -1297,6 +1297,9 @@ pub fn queue_subagent_dispatch_entries(
 }
 
 /// Guidance for a non-empty `queue_subagent_dispatch`.
+///
+/// A claimed head with no worker is spawned first. A reported closeout that is
+/// already ready is still completed in that step (`#reportedmidturn`).
 pub const QUEUE_SUBAGENT_DISPATCH_GUIDANCE: &str = concat!(
     "The operator added these queue items with \
 subagent intent. For EACH: run its `claim_command` (fill in `<label>`) and wait for it to succeed \
@@ -1338,6 +1341,7 @@ the item normally. Empty responses and placeholder-only reports are refused. Use
 (`#subagentworkpool`): the workers are a pool sized by the queue's `subagents=N` cap or the \
 machine default, and this list already fills exactly the free slots, so dispatch EVERY entry now, \
 never one at a time. Spawn and start every claimed head before integrating any reported result. \
+A reported row whose closeout is already ready is completed in that same step, before the turn ends (`#reportedmidturn`); spawning the unstarted head does not hold it until Stop. \
 Each `queue report-complete`, `queue release`, and `queue freeze` frees a slot and prints the \
 pool refill (`[queue] subagent work pool`): run its steps in order in the same turn, before \
 integrating; never wait for another operator prompt to dispatch the waiting heads. A running \
@@ -14910,6 +14914,7 @@ agent_doc_write: crdt\n\
                 "Spawn and start every claimed head before integrating any reported result"
             )
         );
+        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("#reportedmidturn"));
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("agent-doc queue freeze"));
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("is proof of life, so refresh it"));
         assert!(

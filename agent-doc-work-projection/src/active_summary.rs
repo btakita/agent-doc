@@ -6,6 +6,8 @@
 //!
 //! - The bound never cuts a bare URL: a cut that falls inside one moves to the URL's end, so
 //!   the row never links to a truncated address such as `…/merge_reque…`.
+//! - A cut that lands inside a backtick span or an HTML comment moves back to that opener,
+//!   so the row never keeps a truncated `` ` `` or `<!--` tag.
 //! - Every bare `http://` / `https://` URL is written as a CommonMark autolink `<url>`.
 //!
 //! The second rule works around IntelliJ's Markdown soft wrap (2026.2 and later,
@@ -33,6 +35,11 @@ pub(crate) fn summarize_text(text: &str) -> String {
                 break;
             }
         }
+    }
+    if cut < chars.len()
+        && let Some(start) = literal_span_start_containing(&chars, cut)
+    {
+        cut = start;
     }
     let bounded: String = chars[..cut].iter().collect();
     let delimited = delimit_bare_urls(&bounded);
@@ -109,6 +116,49 @@ fn starts_with_scheme(chars: &[char]) -> bool {
     scheme_len(chars) > 0
 }
 
+/// Start of the backtick span or HTML comment that contains `cut`, if the cut
+/// would otherwise leave that span open in the summary.
+fn literal_span_start_containing(chars: &[char], cut: usize) -> Option<usize> {
+    let mut start = None;
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '`' {
+            if let Some(open) = start.take() {
+                if open < cut && cut <= i {
+                    return Some(open);
+                }
+            } else {
+                start = Some(i);
+            }
+            i += 1;
+            continue;
+        }
+        if start.is_none() && chars[i..].starts_with(&['<', '!', '-', '-']) {
+            let mut end = chars.len();
+            let mut j = i + 4;
+            while j + 3 <= chars.len() {
+                if chars[j..].starts_with(&['-', '-', '>']) {
+                    end = j + 3;
+                    break;
+                }
+                j += 1;
+            }
+            if i < cut && cut < end {
+                return Some(i);
+            }
+            i = end;
+            continue;
+        }
+        i += 1;
+    }
+    if let Some(open) = start
+        && open < cut
+    {
+        return Some(open);
+    }
+    None
+}
+
 /// Length of `token` once trailing punctuation is dropped, as GFM's extended autolink does:
 /// `?`, `!`, `.`, `,`, `:`, `*`, `_`, `~`, quotes, `;`, the ellipsis, and a `)` the URL does
 /// not open.
@@ -172,6 +222,22 @@ mod tests {
         assert!(prefix.len() < MAX_SUMMARY_CHARS);
         assert!(prefix.len() + LONG_MR.len() > MAX_SUMMARY_CHARS);
         assert_eq!(summarize_text(&text), format!("{prefix}<{LONG_MR}>…"));
+    }
+
+    #[test]
+    fn a_cut_inside_an_html_comment_example_moves_before_the_comment() {
+        let text = "Can we have a set of in-place elements? Such as `<!-- agent:prompt the prompt -->` or `<!-- agent:sync-prompt test rest of the prompt -->`. What do you recommend as a good interface to create in-place content?";
+        let summary = summarize_text(text);
+        assert!(
+            !summary.contains("<!-- agent:sy") && !summary.contains("<!-- agent:sync"),
+            "{summary}"
+        );
+        assert_eq!(
+            summary.matches("<!--").count(),
+            summary.matches("-->").count(),
+            "{summary}"
+        );
+        assert_eq!(summary.matches('`').count() % 2, 0, "{summary}");
     }
 
     #[test]

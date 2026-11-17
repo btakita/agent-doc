@@ -8,7 +8,12 @@ use agent_doc_document::transient_markers::normalize_transient_agent_doc_markers
 use agent_doc_frontmatter::frontmatter::session_id_from_content;
 use agent_doc_git_io::revision::HeadWorktreeFallback;
 
+pub mod place_answered;
 pub mod status_sync_synced;
+pub use place_answered::{
+    load_place_answers, load_place_checkpoint, record_place_answer, record_place_answers,
+    record_place_checkpoint,
+};
 pub use status_sync_synced::{load_status_sync_synced_payload, record_status_sync_synced_payload};
 
 /// Load the content-bearing merge baseline from the durable state ledger.

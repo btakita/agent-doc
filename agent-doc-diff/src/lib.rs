@@ -227,7 +227,10 @@ pub fn strip_comments(content: &str) -> String {
     // edit. Both sides of every diff pass through this, so a pipeline-only delta
     // cancels to `no_changes`. Shared with the write-side splice so the strip and
     // the write agree byte-for-byte on the block boundary.
-    let stripped = strip_pipeline_block_lines(&element::strip_comments(content));
+    // `place:out` interiors are derived bytes. Blank them before comment
+    // stripping so writing an answer does not come back as a new prompt.
+    let blanked = agent_doc_element::place::blank_outputs(content);
+    let stripped = strip_pipeline_block_lines(&element::strip_comments(&blanked));
     neutralize_informational_component_content(&stripped)
 }
 
@@ -4198,6 +4201,21 @@ diff --git a/tests/render_test.rs b/tests/render_test.rs
     fn preserve_agent_markers() {
         let input = "<!-- agent:status -->\ncontent\n<!-- /agent:status -->\n";
         assert_eq!(strip_comments(input), input);
+    }
+
+    #[test]
+    fn place_output_bytes_are_not_a_document_diff() {
+        let previous = concat!(
+            "<!-- agent:place id=\"step-1\" -->\n",
+            "Rewrite it.\n",
+            "<!-- place:out -->\n",
+            "<!-- /place:out -->\n",
+            "<!-- /agent:place -->\n",
+        );
+        let current = previous.replace("<!-- place:out -->\n", "<!-- place:out -->\n1. Read.\n");
+        assert_eq!(strip_comments(previous), strip_comments(&current));
+        let edited = current.replace("Rewrite it.", "Summarize it.");
+        assert_ne!(strip_comments(previous), strip_comments(&edited));
     }
 
     #[test]

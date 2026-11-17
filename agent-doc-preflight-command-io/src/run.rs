@@ -733,6 +733,12 @@ fn run_with_options_to_writer_in_pass(
             ),
         );
     }
+    // An `agent:place` contract is fail-closed before recovery or queue
+    // maintenance can rewrite the document. A malformed `place:out` names
+    // `place repair`; a bad id or mode does not.
+    if let Err(fault) = assess_document_places(file, &content) {
+        return Err(place_fault(file, fault));
+    }
     // Phase 1 lossless-tree shadow projection (#lzlosstree): build the lossless
     // tree from the authoritative current text, render it, and log whether it
     // round-trips. Pure and non-blocking — the flat CRDT stays the authority and
@@ -805,6 +811,16 @@ fn run_with_options_to_writer_in_pass(
                 });
             }
         }
+    }
+    // Re-read after the document settles. Writing `place:out` is not a prompt;
+    // an unanswered prompt, a prompt edit, or a sync revert still opens a turn
+    // when the stripped diff is empty. Probe does not record seeds.
+    let place_assessment = match assess_document_places(file, &content) {
+        Ok(assessment) => assessment,
+        Err(fault) => return Err(place_fault(file, fault)),
+    };
+    if !options.probe {
+        remember_place_seeds(file, &place_assessment);
     }
     let pre_mutation_unresolved_exchange_prompt =
         agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(&content);
@@ -1710,8 +1726,9 @@ fn run_with_options_to_writer_in_pass(
             }
         };
     let absorbed_turn = !absorbed_steering_prompts.is_empty();
+    let place_turn = place_assessment.needs_turn();
     let document_no_changes = no_changes;
-    let no_changes = document_no_changes && !chat_turn && !absorbed_turn;
+    let no_changes = document_no_changes && !chat_turn && !absorbed_turn && !place_turn;
 
     crate::progress::enter("prompt_classification")?;
     // Step 4c: Annotate the diff with content-source markers.
@@ -3120,6 +3137,11 @@ fn run_with_options_to_writer_in_pass(
             .collect();
         answer_ledger_report.lookup_menu(&file.display().to_string(), &prompts)
     };
+    let places: Vec<_> = place_assessment
+        .visible()
+        .into_iter()
+        .filter(|contract| !contract.prompt.trim().is_empty())
+        .collect();
     let output = PreflightOutput {
         warnings,
         layout_issues,
@@ -3141,6 +3163,8 @@ fn run_with_options_to_writer_in_pass(
                     agent_doc_session_check_io::absorbed_steering::ABSORBED_STEERING_DIFF_TYPE
                         .to_string(),
                 )
+            } else if place_turn {
+                Some(agent_doc_document::place::PLACE_DIFF_TYPE.to_string())
             } else {
                 None
             }
@@ -3179,6 +3203,9 @@ fn run_with_options_to_writer_in_pass(
             .as_ref()
             .map(agent_doc_document::status_projection::render_status_sync_revert),
         status_sync_revert,
+        places_guidance: (!places.is_empty())
+            .then(|| agent_doc_document::place::PLACES_GUIDANCE.to_string()),
+        places,
         agent_rules,
         agent_rules_guidance,
         principles,
@@ -3286,6 +3313,73 @@ fn run_with_options_to_writer_in_pass(
 /// A file that cannot be read, or whose component markers do not parse,
 /// contributes nothing and does not fail preflight: preset resolution still
 /// fail-closes on its own read of the same file.
+fn assess_document_places(
+    file: &std::path::Path,
+    content: &str,
+) -> Result<agent_doc_document::place::PlaceAssessment, agent_doc_document::place::PlaceFault> {
+    let answers = match agent_doc_snapshot_io::load_place_answers(file) {
+        Ok(answers) => answers,
+        Err(error) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "place_answers_read_failed file={} error={error:#}",
+                    file.display()
+                ),
+            );
+            std::collections::BTreeMap::new()
+        }
+    };
+    agent_doc_document::place::assess(content, &answers)
+}
+
+fn remember_place_seeds(
+    file: &std::path::Path,
+    assessment: &agent_doc_document::place::PlaceAssessment,
+) {
+    if assessment.seed.is_empty() {
+        return;
+    }
+    let updates = assessment
+        .seed
+        .iter()
+        .map(|seed| {
+            (
+                seed.id.clone(),
+                agent_doc_document::place::PlaceAnswer {
+                    prompt_hash: seed.prompt_hash.clone(),
+                    output: seed.output.clone(),
+                },
+            )
+        })
+        .collect();
+    if let Err(error) = agent_doc_snapshot_io::record_place_answers(file, &updates) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "place_seed_record_failed file={} error={error:#}",
+                file.display()
+            ),
+        );
+    }
+}
+
+fn place_fault(
+    file: &std::path::Path,
+    fault: agent_doc_document::place::PlaceFault,
+) -> anyhow::Error {
+    match fault {
+        agent_doc_document::place::PlaceFault::Structure(message) => anyhow::anyhow!(
+            "{message}\nRecovery [place_structure]: agent-doc place repair {} \
+             (repairs place:out delimiters inside agent:place only; editor-aware, safe while the document is open)",
+            file.display()
+        ),
+        agent_doc_document::place::PlaceFault::Contract(message) => {
+            anyhow::anyhow!("invalid agent:place contract: {message}")
+        }
+    }
+}
+
 pub fn composed_rules_and_principles(
     file: &Path,
     session_content: &str,
@@ -12028,6 +12122,84 @@ mod tests {
         assert_eq!(contract["status_sync"]["mode"], "additive");
         assert_eq!(contract["status_sync"]["interval_ms"], 300_000);
         assert!(contract.get("status_sync_revert").is_none(), "{contract}");
+    }
+
+    #[test]
+    fn preflight_starts_a_turn_for_an_unanswered_place_and_not_for_its_output() {
+        let dir = setup_project();
+        let unanswered = dir.path().join("place-due.md");
+        let due = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:place id=\"step-1\" -->\n",
+            "Rewrite the paragraph above as a numbered runbook.\n",
+            "<!-- place:out -->\n",
+            "<!-- /place:out -->\n",
+            "<!-- /agent:place -->\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&unanswered, due).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &unanswered,
+            due,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let contract = probe_contract(&unanswered);
+        assert_eq!(contract["no_changes"], false, "{contract:#}");
+        assert_eq!(contract["diff_type"], "place", "{contract:#}");
+        assert_eq!(contract["places"][0]["id"], "step-1");
+        assert_eq!(contract["places"][0]["needs_write"], true);
+        assert!(
+            contract["places_guidance"]
+                .as_str()
+                .unwrap()
+                .contains("place set"),
+            "{contract:#}"
+        );
+
+        let answered = dir.path().join("place-answered.md");
+        let filled = due.replace(
+            "<!-- place:out -->\n",
+            "<!-- place:out -->\n1. Keep the service names.\n",
+        );
+        std::fs::write(&answered, &filled).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &answered,
+            &filled,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let contract = probe_contract(&answered);
+        assert_eq!(contract["no_changes"], true, "{contract:#}");
+        assert!(contract.get("places").is_none(), "{contract:#}");
+    }
+
+    #[test]
+    fn preflight_names_place_repair_for_a_missing_output_block() {
+        let dir = setup_project();
+        let doc = dir.path().join("place-broken.md");
+        let body = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:place id=\"step-1\" -->\n",
+            "Rewrite it.\n",
+            "<!-- /agent:place -->\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, body).unwrap();
+        let err = run_with_options_to_writer(
+            &doc,
+            PreflightOptions {
+                probe: true,
+                ..Default::default()
+            },
+            &mut Vec::new(),
+        )
+        .unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("place repair"), "{message}");
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), body);
     }
 
     /// `#statussyncrevert`: an editor change (2026-10-28 12:27Z, an IntelliJ

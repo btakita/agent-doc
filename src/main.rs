@@ -2078,6 +2078,34 @@ enum StatusAction {
     },
 }
 
+/// Focused `agent:place` operations. These replace only the bytes inside
+/// `place:out` and leave the response cycle open.
+#[derive(Subcommand)]
+enum PlaceAction {
+    /// Replace the `place:out` body for one place id
+    Set {
+        /// Path to the session document
+        file: PathBuf,
+        /// `id` of the `agent:place` to answer
+        #[arg(long)]
+        id: String,
+        /// Answer text. agent-doc owns the `place:out` markers
+        #[arg(long)]
+        text: String,
+        /// Bypass editor convergence and write directly to disk
+        #[arg(long)]
+        force_disk: bool,
+    },
+    /// Fold a missing, unclosed, duplicated, or orphaned `place:out` into one block
+    Repair {
+        /// Path to the session document
+        file: PathBuf,
+        /// Bypass editor convergence and write directly to disk
+        #[arg(long)]
+        force_disk: bool,
+    },
+}
+
 /// Turn lifecycle actions for `agent-doc turn-status`
 /// (#claude-busy-status-during-active-turn).
 #[derive(Subcommand)]
@@ -2758,6 +2786,11 @@ enum Commands {
     Status {
         #[command(subcommand)]
         action: StatusAction,
+    },
+    /// Answer or repair an inline `agent:place` without closing the active turn
+    Place {
+        #[command(subcommand)]
+        action: PlaceAction,
     },
     Reset {
         /// Path to the session document
@@ -7527,6 +7560,7 @@ fn try_main() -> anyhow::Result<()> {
             | Commands::Review { .. }
             | Commands::Queue { .. }
             | Commands::Status { .. }
+            | Commands::Place { .. }
     )
     .then(|| {
         agent_doc_write_converge_io::retained_cli_write::enter_binary_owned_cli_write(
@@ -7746,6 +7780,29 @@ fn try_main() -> anyhow::Result<()> {
                     ),
                     agent_doc_status_io::StatusRepairOutcome::Repaired => eprintln!(
                         "[status repair] {}: folded status:sync into one managed block",
+                        file.display()
+                    ),
+                }
+                Ok(())
+            }
+        },
+        Commands::Place { action } => match action {
+            PlaceAction::Set {
+                file,
+                id,
+                text,
+                force_disk,
+            } => agent_doc_status_io::place::set_place(&file, &id, &text, force_disk),
+            PlaceAction::Repair { file, force_disk } => {
+                match agent_doc_status_io::place::repair_place(&file, force_disk)? {
+                    agent_doc_status_io::place::PlaceRepairOutcome::AlreadyWellFormed => {
+                        eprintln!(
+                            "[place repair] {}: place:out structure already well-formed; no change",
+                            file.display()
+                        )
+                    }
+                    agent_doc_status_io::place::PlaceRepairOutcome::Repaired => eprintln!(
+                        "[place repair] {}: folded place:out into one block per agent:place",
                         file.display()
                     ),
                 }

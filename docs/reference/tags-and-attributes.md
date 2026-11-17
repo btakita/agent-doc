@@ -246,6 +246,10 @@ managed block fails closed at preflight, which names the binary-owned repair
 `agent-doc status repair <FILE>`; any status write also folds such a structure
 back to one block.
 
+## Inline place
+
+`<!-- agent:place id="step-1" -->` holds one inline prompt. The prompt is the body before a nested `place:out` block; a quoted `prompt` attribute is used only when that body is empty. `mode=once` (the default) is answered when the prompt is new or the operator edits the prompt body. `mode=sync` follows the status-sync contract for that place, including editor-undo resync, and accepts `interval` only in that mode. Write the answer with `agent-doc place set <FILE> --id <id> --text "<answer>"`, which replaces only the bytes inside `place:out`. A missing or duplicated block is repaired with `agent-doc place repair <FILE>`. The binary does not invent the answer, and writing the output does not by itself start another turn.
+
 For explicit ordinary-prose replacement, opt into the destructive mode:
 
 ```markdown

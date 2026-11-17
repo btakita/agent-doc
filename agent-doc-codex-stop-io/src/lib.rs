@@ -245,6 +245,7 @@ enum StopContinuationClass {
     Queue,
     SessionWriteback,
     StatusSync,
+    Place,
     Recovery,
 }
 
@@ -254,6 +255,7 @@ impl StopContinuationClass {
             Self::Queue => "Queue continuation, not an error: ",
             Self::SessionWriteback => "Session persistence continuation, not a refusal or error: ",
             Self::StatusSync => "Final status synchronization, not an error: ",
+            Self::Place => "Inline place checkpoint, not an error: ",
             Self::Recovery => "Recovery continuation, not a refusal or error: ",
         }
     }
@@ -809,6 +811,83 @@ fn final_status_sync_continuation(file: &Path, stop_hook_active: bool) -> Result
         .map(|evidence| format!("\n{evidence}"))
         .unwrap_or_default(),
     )))
+}
+
+/// Re-surface due `agent:place` prompts at the owner turn's final boundary.
+///
+/// `mode=once` continues only while the prompt still needs a write. `mode=sync`
+/// with a nonempty prompt is re-evaluated once, and an unchanged answer performs
+/// no write. An empty shell does not continue the turn. `stop_hook_active`
+/// passes the following Stop through.
+fn final_place_continuation(file: &Path, stop_hook_active: bool) -> Result<Option<String>> {
+    if stop_hook_active {
+        return Ok(None);
+    }
+    let content = current_document_content(file, "stop_final_place")?;
+    let answers = match agent_doc_snapshot_io::load_place_answers(file) {
+        Ok(answers) => answers,
+        Err(error) => {
+            eprintln!(
+                "[agent-doc] place checkpoint could not read answers for {}: {error:#}",
+                file.display()
+            );
+            std::collections::BTreeMap::new()
+        }
+    };
+    let assessment = match agent_doc_document::place::assess(&content, &answers) {
+        Ok(assessment) => assessment,
+        Err(error) => {
+            eprintln!(
+                "[agent-doc] place checkpoint skipped for {}: {error}",
+                file.display()
+            );
+            return Ok(None);
+        }
+    };
+    let contracts: Vec<_> = assessment
+        .visible()
+        .into_iter()
+        .filter(|contract| !contract.prompt.trim().is_empty())
+        .collect();
+    let continue_turn = assessment.contracts.iter().any(|contract| {
+        !contract.prompt.trim().is_empty()
+            && (contract.needs_write || contract.mode == agent_doc_document::place::PlaceMode::Sync)
+    });
+    if !continue_turn || contracts.is_empty() {
+        return Ok(None);
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "place_final_checkpoint_surfaced file={} source=stop_hook",
+            file.display()
+        ),
+    );
+    Ok(Some(agent_doc_document::place::render_checkpoint(
+        &file.display().to_string(),
+        &contracts,
+        "[agent-doc] inline place checkpoint",
+    )))
+}
+
+/// Status sync and place checkpoints share one Stop continuation so neither
+/// starves the other. When both are due, the status class stays so existing
+/// status text is still the continuation, and the place checkpoint is appended.
+fn final_owner_continuations(
+    file: &Path,
+    stop_hook_active: bool,
+) -> Result<Option<(StopContinuationClass, String)>> {
+    let status = final_status_sync_continuation(file, stop_hook_active)?;
+    let place = final_place_continuation(file, stop_hook_active)?;
+    Ok(match (status, place) {
+        (None, None) => None,
+        (Some(status), None) => Some((StopContinuationClass::StatusSync, status)),
+        (None, Some(place)) => Some((StopContinuationClass::Place, place)),
+        (Some(status), Some(place)) => Some((
+            StopContinuationClass::StatusSync,
+            format!("{status}\n\n{place}"),
+        )),
+    })
 }
 
 /// Header of the Claude Stop reminder for an unpersisted reported worker result.
@@ -1515,7 +1594,7 @@ fn claude_stop_answer_with_drain_readiness(
     if let Some(continuation) = claude_reported_writeback_continuation(input, &file) {
         return Ok(ClaudeStopAnswer::Continue(continuation));
     }
-    if let Some(reason) = final_status_sync_continuation(&file, input.stop_hook_active)? {
+    if let Some((_, reason)) = final_owner_continuations(&file, input.stop_hook_active)? {
         return Ok(ClaudeStopAnswer::Continue(ClaudeStopContinuation {
             reason,
         }));
@@ -2450,11 +2529,9 @@ fn apply_bound_stop(
                 return Ok(response);
             }
             stop_phase("final_status_sync");
-            if let Some(reason) = final_status_sync_continuation(file, input.stop_hook_active)? {
-                return Ok(StopResponse::ContinueTurn {
-                    class: StopContinuationClass::StatusSync,
-                    reason,
-                });
+            if let Some((class, reason)) = final_owner_continuations(file, input.stop_hook_active)?
+            {
+                return Ok(StopResponse::ContinueTurn { class, reason });
             }
             // The queue handoff is the final document-observation boundary.
             // Everything below it is state-only binding cleanup and exit.
@@ -5901,6 +5978,17 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_value(StopResponse::ContinueTurn {
+                class: StopContinuationClass::Place,
+                reason: "p".to_string(),
+            })
+            .unwrap(),
+            serde_json::json!({
+                "decision": "block",
+                "reason": "Inline place checkpoint, not an error: p"
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(StopResponse::ContinueTurn {
                 class: StopContinuationClass::Recovery,
                 reason: "x".to_string(),
             })
@@ -5976,6 +6064,69 @@ mod tests {
         );
         // The recursion bit still passes the following Stop through.
         assert_eq!(final_status_sync_continuation(&doc, true).unwrap(), None);
+    }
+
+    #[test]
+    fn final_place_checkpoint_continues_once_for_an_unanswered_prompt_only() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("session.md");
+        fs::write(
+            &doc,
+            concat!(
+                "<!-- agent:place id=\"step-1\" -->\n",
+                "Rewrite the paragraph.\n",
+                "<!-- place:out -->\n",
+                "<!-- /place:out -->\n",
+                "<!-- /agent:place -->\n",
+            ),
+        )
+        .unwrap();
+        let reason = final_place_continuation(&doc, false)
+            .unwrap()
+            .expect("an unanswered place continues");
+        assert!(reason.contains("inline place checkpoint"), "{reason}");
+        assert!(reason.contains("step-1"), "{reason}");
+        assert!(reason.contains("place set"), "{reason}");
+        assert_eq!(final_place_continuation(&doc, true).unwrap(), None);
+
+        let answered = dir.path().join("answered.md");
+        let filled = concat!(
+            "<!-- agent:place id=\"step-1\" -->\n",
+            "Rewrite the paragraph.\n",
+            "<!-- place:out -->\n",
+            "1. Read.\n",
+            "<!-- /place:out -->\n",
+            "<!-- /agent:place -->\n",
+        );
+        fs::write(&answered, filled).unwrap();
+        agent_doc_snapshot_io::record_place_answer(
+            &answered,
+            "step-1",
+            &agent_doc_document::place::PlaceAnswer {
+                prompt_hash: agent_doc_document::place::prompt_hash("Rewrite the paragraph."),
+                output: "1. Read.".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(final_place_continuation(&answered, false).unwrap(), None);
+
+        let empty = dir.path().join("empty.md");
+        fs::write(
+            &empty,
+            concat!(
+                "<!-- agent:place id=\"step-1\" mode=\"sync\" -->\n",
+                "<!-- place:out -->\n",
+                "<!-- /place:out -->\n",
+                "<!-- /agent:place -->\n",
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            final_place_continuation(&empty, false).unwrap(),
+            None,
+            "an empty sync shell must not continue every stop"
+        );
     }
 
     /// `#statussyncrevert`: on 2026-10-28 12:27Z an IntelliJ Ctrl+Z reverted the

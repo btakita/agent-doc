@@ -488,7 +488,12 @@ impl Component {
     /// Get the patch mode from inline attributes.
     ///
     /// Checks `patch=` first, falls back to `mode=` for backward compatibility.
+    ///
+    /// `agent:place` uses `mode` for `once` / `sync`, not the patch alias.
     pub fn patch_mode(&self) -> Option<&str> {
+        if self.name == "place" {
+            return self.attrs.get("patch").map(|s| s.as_str());
+        }
         self.attrs
             .get("patch")
             .map(|s| s.as_str())

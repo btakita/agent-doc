@@ -2769,6 +2769,135 @@ fn subagent_pool_checkpoint(file: &Path, observed_at_ms: u64) -> Result<Option<S
     Ok(refill.render())
 }
 
+/// Surface a due `agent:place` during an open owner turn.
+///
+/// A changed needs-write fingerprint, a sync revert, or an elapsed `interval`
+/// publishes one checkpoint. `mode=sync` without `interval` stays on preflight
+/// and Stop. The hook never writes the answer.
+fn place_checkpoint(file: &Path, observed_at_ms: u64) -> Result<Option<String>> {
+    let Some(cycle) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+        return Ok(None);
+    };
+    if !cycle_accepts_steering(&cycle, &cycle.cycle_id) {
+        return Ok(None);
+    }
+    let content = crate::resolve_current_document_content(file, "place_checkpoint")?;
+    let answers = match agent_doc_snapshot_io::load_place_answers(file) {
+        Ok(answers) => answers,
+        Err(error) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "place_answers_read_failed file={} source=midturn error={error:#}",
+                    file.display()
+                ),
+            );
+            BTreeMap::new()
+        }
+    };
+    let assessment = match agent_doc_document::place::assess(&content, &answers) {
+        Ok(assessment) => assessment,
+        Err(error) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "place_checkpoint_skipped file={} error={error}",
+                    file.display()
+                ),
+            );
+            return Ok(None);
+        }
+    };
+    if !assessment.seed.is_empty() {
+        let updates = assessment
+            .seed
+            .iter()
+            .map(|seed| {
+                (
+                    seed.id.clone(),
+                    agent_doc_document::place::PlaceAnswer {
+                        prompt_hash: seed.prompt_hash.clone(),
+                        output: seed.output.clone(),
+                    },
+                )
+            })
+            .collect();
+        if let Err(error) = agent_doc_snapshot_io::record_place_answers(file, &updates) {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "place_seed_record_failed file={} source=midturn error={error:#}",
+                    file.display()
+                ),
+            );
+        }
+    }
+    let fingerprint = assessment.needs_write_fingerprint();
+    let last = agent_doc_snapshot_io::load_place_checkpoint(file)
+        .ok()
+        .flatten();
+    let unseen_write = assessment.needs_turn()
+        && last.as_ref().map(|(seen, _)| seen.as_str()) != Some(fingerprint.as_str());
+    let nonempty_sync = assessment.contracts.iter().any(|contract| {
+        contract.mode == agent_doc_document::place::PlaceMode::Sync
+            && !contract.prompt.trim().is_empty()
+    });
+    let interval_due = nonempty_sync
+        && assessment.sync_interval_ms().is_some_and(|interval_ms| {
+            let interval_ms = interval_ms.max(agent_doc_document::place::MIN_INTERVAL_MS);
+            let cycle_started_at_ms = cycle
+                .cycle_id
+                .strip_prefix("cycle-")
+                .and_then(|value| value.parse::<u64>().ok())
+                .unwrap_or_else(|| cycle.started_at.saturating_mul(1_000));
+            let anchor = last
+                .as_ref()
+                .map(|(_, at_ms)| *at_ms)
+                .unwrap_or(cycle_started_at_ms);
+            observed_at_ms.saturating_sub(anchor) >= interval_ms
+        });
+    if !unseen_write && !interval_due {
+        return Ok(None);
+    }
+    let contracts: Vec<_> = assessment
+        .visible()
+        .into_iter()
+        .filter(|contract| !contract.prompt.trim().is_empty())
+        .collect();
+    if contracts.is_empty() {
+        return Ok(None);
+    }
+    let mark = if fingerprint.is_empty() {
+        format!("sync:{}", assessment.sync_interval_ms().unwrap_or(0))
+    } else {
+        fingerprint
+    };
+    if let Err(error) = agent_doc_snapshot_io::record_place_checkpoint(file, &mark, observed_at_ms)
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "place_checkpoint_record_failed file={} error={error:#}",
+                file.display()
+            ),
+        );
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "place_checkpoint_surfaced file={} cycle={} observed_at_ms={}",
+            file.display(),
+            cycle.cycle_id,
+            observed_at_ms,
+        ),
+    );
+    Ok(Some(agent_doc_document::place::render_checkpoint(
+        &file.display().to_string(),
+        &contracts,
+        "[agent-doc] inline place checkpoint",
+    )))
+}
+
 fn post_tool_use_response_at_with_checkpoint(
     payload: &str,
     observed_at_ms: u64,
@@ -2836,6 +2965,23 @@ fn post_tool_use_response_at_with_checkpoint(
             );
             eprintln!(
                 "[agent-doc] status-sync checkpoint skipped for {}: {err:#}",
+                file.display()
+            );
+        }
+    }
+    match place_checkpoint(&file, observed_at_ms) {
+        Ok(Some(context)) => contexts.push(context),
+        Ok(None) => {}
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                &file,
+                &format!(
+                    "place_checkpoint_error file={} error={err:#}",
+                    file.display()
+                ),
+            );
+            eprintln!(
+                "[agent-doc] place checkpoint skipped for {}: {err:#}",
                 file.display()
             );
         }

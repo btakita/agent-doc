@@ -273,6 +273,14 @@ banner.
 
 `agent-doc status repair <FILE> [--force-disk]` is the binary-owned recovery for the `agent:status` shape preflight refuses as `duplicate or nested status:sync blocks` (or an unclosed/orphaned delimiter). It folds the structure into exactly one managed block — keeping the latest innermost sync payload, moving free-form prose that leaked inside a wrapping block back outside without duplicating lines the outside prose already has, and dropping superseded payloads and orphaned delimiters — and leaves every byte outside `agent:status` unchanged. A well-formed document is a no-op (no write). It lands like `status set`: editor-aware convergence by default (safe while an editor holds the document), the status delta attributed to the agent baseline, and no capture, seal, commit, or queue mutation.
 
+## place set
+
+`agent-doc place set <FILE> --id <id> --text "<answer>" [--force-disk]` replaces only the bytes inside the `place:out` block of that `agent:place`. It uses editor-aware convergence by default, attributes the landed delta to the agent document baseline, and records the prompt hash it answered. It never captures or appends a response, seals or commits the active cycle, or mutates queue state. `--text` is the answer only and must not contain comment delimiters. Repeating the same answer is a no-op write. `--force-disk` is the explicit recovery/headless transport override.
+
+## place repair
+
+`agent-doc place repair <FILE> [--force-disk]` is the binary-owned recovery for the `agent:place` shape preflight refuses as a missing, unclosed, duplicated, or orphaned `place:out`. It folds each place into exactly one block, keeping the latest payload, and leaves every byte outside those places unchanged. A well-formed document is a no-op (no write). Nested `agent:place` regions are not unnested. It lands like `place set` except it does not record an answer: editor-aware convergence by default, the delta attributed to the agent baseline, and no capture, seal, commit, or queue mutation.
+
 ## clean
 
 `agent-doc clean <FILE>` squashes all `agent-doc:` commits for the file into one via `git reset --soft`.

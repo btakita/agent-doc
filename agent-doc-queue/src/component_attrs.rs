@@ -364,7 +364,18 @@ pub fn component_attr_warning(content: &str) -> Option<ComponentAttrWarning> {
                 compatibility_migration_count += 1;
             }
             if key == crate::queue_schedule::QUEUE_INTERVAL_ATTR {
-                if !matches!(component.name.as_str(), "queue" | "status") {
+                if component.name == "place" {
+                    let mode = component
+                        .attrs
+                        .get("mode")
+                        .map(String::as_str)
+                        .unwrap_or("");
+                    if mode != "sync" {
+                        issues.push(
+                            "`interval` on `agent:place` requires `mode=\"sync\"`".to_string(),
+                        );
+                    }
+                } else if !matches!(component.name.as_str(), "queue" | "status") {
                     issues.push(format!(
                         "`interval` is a queue-or-status attribute but appears on `agent:{}` (use it on `agent:queue`, or on `agent:status` with `sync`)",
                         component.name,
@@ -375,6 +386,18 @@ pub fn component_attr_warning(content: &str) -> Option<ComponentAttrWarning> {
                             .to_string(),
                     );
                 }
+            } else if key == "id" && component.name == "place" {
+                if value.trim().is_empty() {
+                    issues.push("`id` on `agent:place` must be a non-empty token".to_string());
+                }
+            } else if key == "prompt" && component.name != "place" {
+                issues.push(format!(
+                    "`prompt` is a place-only attribute but appears on `agent:{}` (use it on `agent:place`)",
+                    component.name
+                ));
+            } else if key == "prompt" {
+                // Quoted one-line instruction on `agent:place`. The body wins
+                // when both are present.
             } else if is_queue_only_component_attr(key) {
                 if component.name != "queue" {
                     issues.push(format!(
@@ -1106,5 +1129,48 @@ mod tests {
             body.contains("requires a non-empty `sync` instruction"),
             "{body}"
         );
+    }
+
+    #[test]
+    fn place_accepts_id_mode_interval_and_prompt() {
+        let place = "\
+<!-- agent:place id=\"step-1\" mode=\"sync\" interval=5m prompt=\"Keep it current\" -->
+<!-- place:out -->
+<!-- /place:out -->
+<!-- /agent:place -->
+";
+        assert!(component_attr_warning(place).is_none(), "{place}");
+
+        let once = "\
+<!-- agent:place id=\"step-1\" -->
+Rewrite it.
+<!-- place:out -->
+<!-- /place:out -->
+<!-- /agent:place -->
+";
+        assert!(component_attr_warning(once).is_none());
+
+        let misplaced_id = "<!-- agent:notes id=\"step-1\" -->\ntext\n<!-- /agent:notes -->\n";
+        let body = component_attr_warning(misplaced_id)
+            .expect("id on notes is queue-only")
+            .message_body();
+        assert!(body.contains("queue-only"), "{body}");
+
+        let interval = "\
+<!-- agent:place id=\"step-1\" interval=5m -->
+<!-- place:out -->
+<!-- /place:out -->
+<!-- /agent:place -->
+";
+        let body = component_attr_warning(interval)
+            .expect("interval without sync warns")
+            .message_body();
+        assert!(body.contains("requires `mode=\"sync\"`"), "{body}");
+
+        let prompt = "<!-- agent:notes prompt=\"nope\" -->\ntext\n<!-- /agent:notes -->\n";
+        let body = component_attr_warning(prompt)
+            .expect("prompt is place-only")
+            .message_body();
+        assert!(body.contains("place-only"), "{body}");
     }
 }

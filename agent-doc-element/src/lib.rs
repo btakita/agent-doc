@@ -17,6 +17,7 @@ pub mod content_memo;
 pub mod decision_stamp;
 pub mod element;
 pub mod id;
+pub mod place;
 pub mod recap;
 pub mod rules;
 #[doc(hidden)]

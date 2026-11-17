@@ -8,6 +8,8 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
+pub mod place;
+
 /// Effects required by status writeback.
 pub trait StatusWriteEffects {
     fn current_document_content(&self, file: &Path, source: &str) -> Result<String>;

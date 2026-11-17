@@ -1537,6 +1537,13 @@ pub struct PreflightOutput {
     /// Plain-language instruction for [`Self::status_sync_revert`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status_sync_revert_guidance: Option<String>,
+    /// Inline `agent:place` prompts that are due, plus every `mode=sync` place
+    /// that has a prompt. Empty shells are omitted and do not start a turn.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub places: Vec<agent_doc_document::place::PlaceContract>,
+    /// How to answer [`Self::places`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub places_guidance: Option<String>,
     /// Composed `agent:rules` for this turn, in order.
     ///
     /// Every body in each existing `.agent-doc/project.md` comes first, farthest

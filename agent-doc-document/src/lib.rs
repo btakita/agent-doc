@@ -15,6 +15,7 @@ pub mod component_exclusivity;
 pub mod component_patches;
 pub mod element_models;
 pub mod outline_projection;
+pub mod place;
 pub mod queue_projection;
 pub mod singleton_repair;
 pub mod status_projection;

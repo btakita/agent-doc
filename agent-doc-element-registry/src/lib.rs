@@ -104,6 +104,24 @@ pub const WORKTREES_DESCRIPTOR: ElementDescriptor = ElementDescriptor {
     realtime: true,
 };
 
+/// Inline prompt whose answer is written into the nested `place:out` block.
+///
+/// The prompt body is a turn trigger. The output bytes are derived and are
+/// blanked before the document diff, so writing them does not start a turn.
+pub const PLACE_DESCRIPTOR: ElementDescriptor = ElementDescriptor {
+    name: "place",
+    aliases: &[],
+    source: ElementSource::BuiltIn,
+    shape: ElementShape::Component,
+    authority: ElementAuthority::SharedOperatorAuthoritative,
+    write_policy: ElementWritePolicy::MergeOnly,
+    scheduling_role: ElementSchedulingRole::None,
+    turn_role: ElementTurnRole::Trigger,
+    realtime_model: ElementRealtimeModel::None,
+    composition_role: ElementCompositionRole::LocalOnly,
+    realtime: true,
+};
+
 pub const BUILT_IN_ELEMENTS: &[ElementDescriptor] = &[
     agent_doc_element_exchange::DESCRIPTOR,
     agent_doc_element_boundary::DESCRIPTOR,
@@ -116,6 +134,7 @@ pub const BUILT_IN_ELEMENTS: &[ElementDescriptor] = &[
     RECAP_DESCRIPTOR,
     ACTIVE_DESCRIPTOR,
     WORKTREES_DESCRIPTOR,
+    PLACE_DESCRIPTOR,
     agent_doc_element_signals::DESCRIPTOR,
     TODO_DESCRIPTOR,
     NOTES_DESCRIPTOR,
@@ -197,6 +216,7 @@ mod tests {
         assert_eq!(find_built_in("notes").unwrap().name, "notes");
         assert_eq!(find_built_in("rules").unwrap().name, "rules");
         assert_eq!(find_built_in("recap").unwrap().name, "recap");
+        assert_eq!(find_built_in("place").unwrap().name, "place");
         assert_eq!(find_built_in("unknown"), None);
     }
 
@@ -234,6 +254,24 @@ mod tests {
         assert_eq!(backlog.realtime_model, ElementRealtimeModel::TrackedItems);
         assert_eq!(queue.composition_role, ElementCompositionRole::Consumer);
         assert_eq!(queue.realtime_model, ElementRealtimeModel::Queue);
+    }
+
+    #[test]
+    fn place_is_a_realtime_trigger() {
+        let place = find_built_in("place").unwrap();
+        assert_eq!(place.turn_role, ElementTurnRole::Trigger);
+        assert_eq!(
+            place.turn_role,
+            agent_doc_element::turn_role_for_component_name("place")
+        );
+        assert_eq!(place.realtime_model, ElementRealtimeModel::None);
+        assert_eq!(
+            place.authority,
+            ElementAuthority::SharedOperatorAuthoritative
+        );
+        assert_eq!(place.write_policy, ElementWritePolicy::MergeOnly);
+        assert_eq!(place.composition_role, ElementCompositionRole::LocalOnly);
+        assert!(place.realtime);
     }
 
     #[test]

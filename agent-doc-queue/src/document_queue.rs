@@ -5581,6 +5581,39 @@ fn list_row_indent(entry: &QueueEntry) -> Option<usize> {
     None
 }
 
+/// A live prompt under `parent_index` is `claim_row` with more work appended
+/// at a whitespace boundary. Floors match a typed prefix: at least eight
+/// characters and an internal space, so a short token cannot hide a missing
+/// sibling. The scan stops at the parent's subtree, so the same sentence
+/// under another pull stays a different row (`#dupesteer`).
+fn parent_subtree_continues_claim_row(
+    entries: &[QueueEntry],
+    parent_index: usize,
+    parent_indent: usize,
+    claim_row: &str,
+) -> bool {
+    let previous = agent_doc_element_queue::strip_attempt_projection_prefix(claim_row.trim());
+    if previous.chars().count() < 8 || !previous.contains(char::is_whitespace) {
+        return false;
+    }
+    for entry in entries.iter().skip(parent_index + 1) {
+        if !list_row_remains_in_subtree(entry, parent_indent) {
+            break;
+        }
+        let QueueEntry::Prompt(prompt) = entry else {
+            continue;
+        };
+        let current = agent_doc_element_queue::strip_attempt_projection_prefix(prompt.text.trim());
+        if current
+            .strip_prefix(previous)
+            .is_some_and(|rest| !rest.is_empty() && rest.starts_with(char::is_whitespace))
+        {
+            return true;
+        }
+    }
+    false
+}
+
 /// Restore one nested executable row from the durable claim that was created
 /// while that row still existed (`#adnestedidenticalchildprojection`).
 ///
@@ -5588,6 +5621,11 @@ fn list_row_indent(entry: &QueueEntry) -> Option<usize> {
 /// its nest-vector identity must be reproducible from that row, and exactly one
 /// live parent in this queue body must match the vector's parent. The insertion
 /// is text-local so unrelated Markdown and list-marker spelling stay byte-exact.
+///
+/// A steer of that row extends the same work at a whitespace boundary
+/// (`#dupesteer`). When one live prompt in the parent's subtree is that
+/// continuation, the claim-time spelling stays absent. Restoring it would copy
+/// the previous state in as a second live row.
 pub fn restore_missing_nested_claim_row(
     body: &str,
     claim: &crate::queue_claim::QueueClaim,
@@ -5657,6 +5695,9 @@ pub fn restore_missing_nested_claim_row(
     let [(parent_index, parent_indent)] = candidates.as_slice() else {
         return Ok(None);
     };
+    if parent_subtree_continues_claim_row(&entries, *parent_index, *parent_indent, row) {
+        return Ok(None);
+    }
 
     // Freeform comment and response rows are not prompts. Treating the first
     // of them as the subtree end inserted the restored row ahead of operator
@@ -8355,6 +8396,100 @@ mod tests {
 
     fn ids(value: &[&str]) -> Vec<String> {
         value.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn nested_claim(parent: &str, row: &str) -> crate::queue_claim::QueueClaim {
+        let item_text = format!("{parent}: {row}");
+        serde_json::from_value(serde_json::json!({
+            "identity": crate::queue_claim::claim_identity(&item_text),
+            "item_text": item_text,
+            "owner": "subagent:pr291-fix-ci",
+            "claimed_at_secs": 1,
+            "expires_at_secs": 2,
+            "claim_time_row": row,
+        }))
+        .unwrap()
+    }
+
+    /// Steering a running nested prompt extends that same row. Restoring the
+    /// claim-time spelling copies the previous state in beside the steer
+    /// (`#dupesteer`, sdk-dev `pr291-fix-ci`).
+    #[test]
+    fn steering_a_running_nested_prompt_does_not_restore_its_previous_row() {
+        let parent = "https://github.com/haiven-dev/haiven-sdk/pull/291";
+        let previous = "#fix-ci the #address then #adversarial-pr";
+        let steered =
+            "#fix-ci the #address then #adversarial-pr then update the title + description";
+        let comment = "%% docs(bossroom): open contribution pull requests against sdk-dev %%";
+        let claim = nested_claim(parent, previous);
+        for body in [
+            format!("- ### {parent}\n  - {comment}\n  - {steered}\n"),
+            format!(
+                "- ### {parent}\n  - {comment}\n  - ⚠️🚧 [#subagent:pr291-fix-ci#1] {steered}\n"
+            ),
+        ] {
+            let restored = restore_missing_nested_claim_row(&body, &claim).unwrap();
+            assert!(
+                restored.is_none(),
+                "previous state copied beside the steered row:\n{}",
+                restored.unwrap_or_default()
+            );
+        }
+    }
+
+    #[test]
+    fn a_continuation_under_another_parent_still_restores_the_missing_row() {
+        let parent = "https://github.com/haiven-dev/haiven-sdk/pull/291";
+        let other = "https://github.com/haiven-dev/haiven-sdk/pull/292";
+        let previous = "#fix-ci the #address then #adversarial-pr";
+        let steered =
+            "#fix-ci the #address then #adversarial-pr then update the title + description";
+        let body = format!("- ### {other}\n  - {steered}\n- ### {parent}\n");
+        let claim = nested_claim(parent, previous);
+        let repaired = restore_missing_nested_claim_row(&body, &claim)
+            .unwrap()
+            .expect("a steer under another pull is a different row");
+        assert!(
+            repaired.contains(&format!("- ### {parent}\n  - {previous}\n")),
+            "{repaired}"
+        );
+        assert_eq!(repaired.matches(steered).count(), 1, "{repaired}");
+    }
+
+    #[test]
+    fn an_unrelated_sibling_still_restores_a_missing_nested_claim() {
+        let parent = "https://github.com/haiven-dev/haiven-sdk/pull/291";
+        let previous = "#fix-ci the #address then #adversarial-pr";
+        let sibling = "#review the release notes for the sdk promotion";
+        let body = format!("- ### {parent}\n  - {sibling}\n");
+        let claim = nested_claim(parent, previous);
+        let repaired = restore_missing_nested_claim_row(&body, &claim)
+            .unwrap()
+            .expect("an unrelated sibling is not the steered row");
+        assert!(
+            repaired.contains(&format!("  - {sibling}\n  - {previous}\n")),
+            "{repaired}"
+        );
+    }
+
+    #[test]
+    fn a_short_or_midword_extension_still_restores_the_missing_row() {
+        let parent = "https://github.com/haiven-dev/haiven-sdk/pull/291";
+        let short = "fix ci";
+        let short_longer = "fix ci the address";
+        let previous = "#fix-ci the #address then #adversarial-pr";
+        let midword = "#fix-ci the #address then #adversarial-pr0 extra";
+        for (claim_row, live) in [(short, short_longer), (previous, midword)] {
+            let body = format!("- ### {parent}\n  - {live}\n");
+            let claim = nested_claim(parent, claim_row);
+            let repaired = restore_missing_nested_claim_row(&body, &claim)
+                .unwrap()
+                .unwrap_or_else(|| panic!("missing row restored beside {live}"));
+            assert!(
+                repaired.contains(&format!("  - {claim_row}\n")),
+                "{repaired}"
+            );
+        }
     }
 
     #[test]

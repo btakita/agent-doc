@@ -215,9 +215,11 @@ pub fn requeue_nonterminal_hand_back(
         &preset_pairs,
     );
     // `#operatororderclosed`: an already-answered human-review BLOCKED does not
-    // complete. `#reviewfixonhead`: an address run stays open until the written
-    // fix is on the current head. `#addressinline`: an inline goal stays open
-    // until every root thread's written fix is on that head.
+    // complete. `#adversarialselfreview`: a REVIEW-CLEAN that admits no posted
+    // COMMENTED review does not complete. `#reviewfixonhead`: an address run
+    // stays open until the written fix is on the current head.
+    // `#addressinline`: an inline goal stays open until every root thread's
+    // written fix is on that head.
     let completes_order = !address_pending
         && !effect_unproven
         && !inline_pending

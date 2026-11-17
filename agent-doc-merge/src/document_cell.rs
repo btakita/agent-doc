@@ -1659,6 +1659,35 @@ fn compose_occurrence(
     let ours_map = to_map(ours);
     let theirs_map = to_map(theirs);
 
+    let ours_rows = ours
+        .items
+        .iter()
+        .map(|(key, value)| (node_key_identity(key), value.as_str()))
+        .collect::<Vec<_>>();
+    let theirs_rows = theirs
+        .items
+        .iter()
+        .map(|(key, value)| (node_key_identity(key), value.as_str()))
+        .collect::<Vec<_>>();
+    let ours_keys = ours_rows
+        .iter()
+        .map(|(key, _)| *key)
+        .collect::<std::collections::HashSet<_>>();
+    let theirs_keys = theirs_rows
+        .iter()
+        .map(|(key, _)| *key)
+        .collect::<std::collections::HashSet<_>>();
+    let ours_parents_required = if ours.component == "queue" {
+        crate::crdt::queue_parent_anchors_for_surviving_descendants(&ours_rows, &theirs_keys)
+    } else {
+        Default::default()
+    };
+    let theirs_parents_required = if ours.component == "queue" {
+        crate::crdt::queue_parent_anchors_for_surviving_descendants(&theirs_rows, &ours_keys)
+    } else {
+        Default::default()
+    };
+
     let identity_seq = |occ: &ComponentOccurrence| -> Vec<String> {
         occ.items
             .iter()
@@ -1778,57 +1807,70 @@ fn compose_occurrence(
             // queue line the operator explicitly removed. `exchange` remains
             // protected append-only history.
             (Some(o), None) => {
-                let authoritative_theirs_delete =
-                    policy == ConflictPolicy::TheirsWins || !ours_updated.contains(id);
-                // An ours-only `:repeat:` (or exchange `:duplicate:`) whose primary
-                // the operator still has is a replay copy, not a second operator row.
-                let replayed_duplicate_omitted_by_operator = policy == ConflictPolicy::TheirsWins
-                    && !in_b
-                    && duplicate_primary_identity(id)
-                        .is_some_and(|primary| theirs_map.contains_key(primary));
-                // The unsplittable agent body is one placeholder cell. Restoring
-                // the operator's list rows must not weave that placeholder back.
-                let agent_body_placeholder = retain_operator_items
-                    && id
-                        .rsplit_once(':')
-                        .is_some_and(|(_, item_id)| item_id == "body")
-                    && o.trim().is_empty();
-                if agent_body_placeholder
-                    || (theirs_removed.contains(id) && authoritative_theirs_delete && !is_exchange)
-                    || replayed_duplicate_omitted_by_operator
-                {
-                    None
-                } else {
+                if ours_parents_required.contains_key(id) {
                     Some(o.clone())
+                } else {
+                    let authoritative_theirs_delete =
+                        policy == ConflictPolicy::TheirsWins || !ours_updated.contains(id);
+                    // An ours-only `:repeat:` (or exchange `:duplicate:`) whose primary
+                    // the operator still has is a replay copy, not a second operator row.
+                    let replayed_duplicate_omitted_by_operator = policy
+                        == ConflictPolicy::TheirsWins
+                        && !in_b
+                        && duplicate_primary_identity(id)
+                            .is_some_and(|primary| theirs_map.contains_key(primary));
+                    // The unsplittable agent body is one placeholder cell. Restoring
+                    // the operator's list rows must not weave that placeholder back.
+                    let agent_body_placeholder = retain_operator_items
+                        && id
+                            .rsplit_once(':')
+                            .is_some_and(|(_, item_id)| item_id == "body")
+                        && o.trim().is_empty();
+                    if agent_body_placeholder
+                        || (theirs_removed.contains(id)
+                            && authoritative_theirs_delete
+                            && !is_exchange)
+                        || replayed_duplicate_omitted_by_operator
+                    {
+                        None
+                    } else {
+                        Some(o.clone())
+                    }
                 }
             }
             // Present only in theirs: symmetric.
             (None, Some(t)) => {
-                // `#keepqueueitems`: a byte-identical operator row, or the struck
-                // base under a stale unstrike, stays. GH #74 still drops a
-                // decoration-only re-key when this returns nothing.
-                let retained = retain_operator_items
-                    .then(|| base_map.get(id))
-                    .flatten()
-                    .and_then(|base| crate::crdt::retained_queue_row_after_agent_omission(base, t));
-                if let Some(kept) = retained {
-                    Some(kept.to_string())
+                if theirs_parents_required.contains_key(id) {
+                    Some(t.clone())
                 } else {
-                    // GH #74: a decoration-only theirs update (marker / strike, same
-                    // instruction text) carries no operator content and cannot veto
-                    // ours' delete — mirrors `crdt::reconcile_component_body`.
-                    let theirs_update_is_decoration_only = lifecycle_governed
-                        && base_map.get(id).is_some_and(|base| {
-                            crate::crdt::queue_instruction_text(t)
-                                == crate::crdt::queue_instruction_text(base)
+                    // `#keepqueueitems`: a byte-identical operator row, or the struck
+                    // base under a stale unstrike, stays. GH #74 still drops a
+                    // decoration-only re-key when this returns nothing.
+                    let retained = retain_operator_items
+                        .then(|| base_map.get(id))
+                        .flatten()
+                        .and_then(|base| {
+                            crate::crdt::retained_queue_row_after_agent_omission(base, t)
                         });
-                    if ours_removed.contains(id)
-                        && (!theirs_updated.contains(id) || theirs_update_is_decoration_only)
-                        && !is_exchange
-                    {
-                        None
+                    if let Some(kept) = retained {
+                        Some(kept.to_string())
                     } else {
-                        Some(t.clone())
+                        // GH #74: a decoration-only theirs update (marker / strike, same
+                        // instruction text) carries no operator content and cannot veto
+                        // ours' delete — mirrors `crdt::reconcile_component_body`.
+                        let theirs_update_is_decoration_only = lifecycle_governed
+                            && base_map.get(id).is_some_and(|base| {
+                                crate::crdt::queue_instruction_text(t)
+                                    == crate::crdt::queue_instruction_text(base)
+                            });
+                        if ours_removed.contains(id)
+                            && (!theirs_updated.contains(id) || theirs_update_is_decoration_only)
+                            && !is_exchange
+                        {
+                            None
+                        } else {
+                            Some(t.clone())
+                        }
                     }
                 }
             }
@@ -3116,6 +3158,62 @@ fn unresolved_prompt_count(value: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#queueorphansub`: a queue tree root and its descendants are one
+    /// structural deletion unit. Neither merge side may remove only the root
+    /// and leave its still-live descendants at the component edge.
+    #[test]
+    fn queue_merge_never_orphans_descendants_when_one_side_drops_the_root() {
+        let doc = |rows: &str| {
+            format!(
+                "## Contracts <!-- agent:run id=\"haiven-contracts-prs\" subagents keep -->\n{rows}<!-- /agent:run -->\n"
+            )
+        };
+        let rooted = concat!(
+            "- ### https://github.com/haiven-dev/haiven-contracts/pull/206\n",
+            "  - %% ci(promotion): keep an sdk-dev to main pull request open %%\n",
+            "  - %% closed %%\n",
+            "  - Close this PR. We will no longer have the sdk-dev branch on haiven-contracts\n",
+        );
+        let orphaned = concat!(
+            "  - %% ci(promotion): keep an sdk-dev to main pull request open %%\n",
+            "  - %% closed %%\n",
+            "  - Close this PR. We will no longer have the sdk-dev branch on haiven-contracts\n",
+        );
+        let base = doc(rooted);
+
+        for (agent, operator) in [(doc(orphaned), base.clone()), (base.clone(), doc(orphaned))] {
+            for engine in [crate::MergeEngine::Cell, crate::MergeEngine::Semantic] {
+                let outcome = crate::merge(crate::MergeRequest {
+                    base: &base,
+                    agent: &agent,
+                    operator: &operator,
+                    engine,
+                });
+                assert!(!outcome.fell_back, "fixture must exercise {engine:?}");
+                assert_eq!(
+                    outcome.merged_doc, base,
+                    "a partial root deletion must not orphan the surviving subtree ({engine:?})"
+                );
+            }
+        }
+
+        // The guard is structural, not a blanket deletion veto: removing the
+        // complete tree from the operator side still removes it.
+        for engine in [crate::MergeEngine::Cell, crate::MergeEngine::Semantic] {
+            let empty = doc("");
+            let outcome = crate::merge(crate::MergeRequest {
+                base: &base,
+                agent: &base,
+                operator: &empty,
+                engine,
+            });
+            assert_eq!(
+                outcome.merged_doc, empty,
+                "whole-tree deletion ({engine:?})"
+            );
+        }
+    }
 
     /// `#queuerowworkidentity` compatibility: the per-cell CRDT keys list
     /// children through `list_item_key`, which already skips the owner

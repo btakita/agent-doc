@@ -213,6 +213,7 @@ pub fn document_cell_merge(
         &base_comps,
         &ours_comps,
         ours_agent,
+        theirs_operator,
         &mut outcomes,
         &mut conflict_advisories,
     );
@@ -953,14 +954,91 @@ fn merge_component_item_slots(
     outcomes: &mut Vec<NodeOutcome>,
     advisories: &mut Vec<MergeConflictAdvisory>,
 ) -> Vec<(Option<usize>, String)> {
+    merge_component_item_slots_with_sources(
+        name,
+        base_comp,
+        ours_comp,
+        theirs_comp,
+        None,
+        None,
+        outcomes,
+        advisories,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn merge_component_item_slots_with_sources(
+    name: &str,
+    base_comp: Option<&Component>,
+    ours_comp: Option<&Component>,
+    theirs_comp: &Component,
+    ours_source: Option<&str>,
+    theirs_source: Option<&str>,
+    outcomes: &mut Vec<NodeOutcome>,
+    advisories: &mut Vec<MergeConflictAdvisory>,
+) -> Vec<(Option<usize>, String)> {
     let mut lines: Vec<(Option<usize>, String)> = Vec::new();
     let retain_operator_items = component_retains_queue_items(theirs_comp);
+
+    let source_line = |source: &str, item: &Item| {
+        let start = source[..item.start_byte]
+            .rfind('\n')
+            .map_or(0, |index| index + 1);
+        let end = source[item.start_byte..]
+            .find('\n')
+            .map_or(source.len(), |length| item.start_byte + length);
+        source[start..end].to_string()
+    };
+    let rows = |comp: Option<&Component>, source: Option<&str>| {
+        comp.zip(source)
+            .map(|(comp, source)| {
+                comp.items
+                    .iter()
+                    .map(|item| (item.id.clone(), source_line(source, item)))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    };
+    let ours_rows = rows(ours_comp, ours_source);
+    let theirs_rows = rows(Some(theirs_comp), theirs_source);
+    let ours_keys = ours_rows
+        .iter()
+        .map(|(key, _)| key.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let theirs_keys = theirs_rows
+        .iter()
+        .map(|(key, _)| key.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let ours_borrowed = ours_rows
+        .iter()
+        .map(|(key, text)| (key.as_str(), text.as_str()))
+        .collect::<Vec<_>>();
+    let theirs_borrowed = theirs_rows
+        .iter()
+        .map(|(key, text)| (key.as_str(), text.as_str()))
+        .collect::<Vec<_>>();
+    let ours_parents_required = if name == "queue" {
+        crate::crdt::queue_parent_anchors_for_surviving_descendants(&ours_borrowed, &theirs_keys)
+    } else {
+        Default::default()
+    };
+    let theirs_parents_required = if name == "queue" {
+        crate::crdt::queue_parent_anchors_for_surviving_descendants(&theirs_borrowed, &ours_keys)
+    } else {
+        Default::default()
+    };
 
     // 1. Walk operator items in operator order — they are the layout skeleton.
     for (t_index, t_item) in theirs_comp.items.iter().enumerate() {
         let id = &t_item.id;
         let b_item = find_item(base_comp, id);
         let o_item = find_item(ours_comp, id);
+
+        if o_item.is_none() && theirs_parents_required.contains_key(id) {
+            lines.push((Some(t_index), item_line(t_item)));
+            record(outcomes, name, id, OutcomeKind::Keep);
+            continue;
+        }
 
         let operator_changed = match b_item {
             Some(b) => !operator_left_work_unchanged(t_item, b),
@@ -1106,6 +1184,23 @@ fn merge_component_item_slots(
                 continue; // already handled in the operator walk
             }
             let b_item = find_item(base_comp, id);
+            if let Some(anchor) = ours_parents_required.get(id)
+                && let Some(anchor_index) =
+                    theirs_comp.items.iter().position(|item| &item.id == anchor)
+            {
+                let line = ours_rows
+                    .iter()
+                    .find(|(key, _)| key == id)
+                    .map(|(_, line)| line.clone())
+                    .unwrap_or_else(|| item_line(o_item));
+                let insert_at = lines
+                    .iter()
+                    .position(|(slot, _)| *slot == Some(anchor_index))
+                    .unwrap_or(lines.len());
+                lines.insert(insert_at, (Some(anchor_index), line));
+                record(outcomes, name, id, OutcomeKind::Keep);
+                continue;
+            }
             match b_item {
                 None => {
                     // Absent in base & operator, present in agent → agent add.
@@ -1528,15 +1623,56 @@ fn merge_nonexchange_inner(
         out.push_str(line);
         out.push('\n');
     };
+    let trailing_deeper_lines_start = |prefix: &str, parent_indent: usize| {
+        let mut starts = Vec::new();
+        let mut offset = 0usize;
+        for line in prefix.split_inclusive('\n') {
+            starts.push((offset, line));
+            offset += line.len();
+        }
+        let mut insertion = prefix.len();
+        for (start, line) in starts.into_iter().rev() {
+            let bare = line.trim_end_matches(['\n', '\r']);
+            if bare.trim().is_empty() {
+                insertion = start;
+                continue;
+            }
+            let indent = bare.len() - bare.trim_start_matches([' ', '\t']).len();
+            if indent <= parent_indent {
+                break;
+            }
+            insertion = start;
+        }
+        insertion
+    };
     let mut out = String::new();
     let mut cursor = 0usize;
     for (position, &(index, start, end)) in spans.iter().enumerate() {
         if start < cursor {
             continue;
         }
-        out.push_str(&text[cursor..start]);
         let span = &text[start..end];
-        for (_, line) in slots.iter().filter(|(slot, _)| *slot == Some(index)) {
+        let replacement_lines = slots
+            .iter()
+            .filter(|(slot, _)| *slot == Some(index))
+            .collect::<Vec<_>>();
+        let prefix = &text[cursor..start];
+        if replacement_lines.len() > 1 {
+            let parent_indent = replacement_lines[..replacement_lines.len() - 1]
+                .iter()
+                .map(|(_, line)| line.len() - line.trim_start_matches([' ', '\t']).len())
+                .min()
+                .unwrap_or(0);
+            let insertion = trailing_deeper_lines_start(prefix, parent_indent);
+            out.push_str(&prefix[..insertion]);
+            for (_, line) in &replacement_lines[..replacement_lines.len() - 1] {
+                push_line(&mut out, line);
+            }
+            out.push_str(&prefix[insertion..]);
+        } else {
+            out.push_str(prefix);
+        }
+        if let Some((_, line)) = replacement_lines.last() {
             let line = render_item_in_operator_slot(line, &theirs_items[index], span);
             if span.ends_with('\n') {
                 push_line(&mut out, &line);
@@ -1608,6 +1744,7 @@ fn merge_components_into_body(
     base_comps: &[Component],
     ours_comps: &[Component],
     ours_source: &str,
+    theirs_source: &str,
     outcomes: &mut Vec<NodeOutcome>,
     advisories: &mut Vec<MergeConflictAdvisory>,
 ) -> String {
@@ -1618,6 +1755,7 @@ fn merge_components_into_body(
         base_comps,
         ours_comps,
         ours_source,
+        theirs_source,
     };
     let mut out = String::new();
     // The currently-open component: its raw tag name (matched against the close
@@ -1742,6 +1880,7 @@ struct MergeSides<'a> {
     base_comps: &'a [Component],
     ours_comps: &'a [Component],
     ours_source: &'a str,
+    theirs_source: &'a str,
 }
 
 impl MergeSides<'_> {
@@ -1791,8 +1930,15 @@ impl MergeSides<'_> {
             // silently lose a free-text queue head, trip the anti-data-loss
             // gate, and decline forever (the persistent `live_prompt_drift`
             // churn).
-            let slots = merge_component_item_slots(
-                &tc.name, base_comp, ours_comp, tc, outcomes, advisories,
+            let slots = merge_component_item_slots_with_sources(
+                &tc.name,
+                base_comp,
+                ours_comp,
+                tc,
+                Some(self.ours_source),
+                Some(self.theirs_source),
+                outcomes,
+                advisories,
             );
             merge_nonexchange_inner(inner, inner_start, &tc.items, &slots)
         }

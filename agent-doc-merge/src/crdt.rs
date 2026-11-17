@@ -2445,6 +2445,32 @@ fn reconcile_component_body(
 
     let ours_keys: Vec<&str> = ours_children.iter().map(|c| c.key.as_str()).collect();
     let theirs_keys: Vec<&str> = theirs_children.iter().map(|c| c.key.as_str()).collect();
+    let ours_key_set = ours_keys
+        .iter()
+        .copied()
+        .collect::<std::collections::HashSet<_>>();
+    let theirs_key_set = theirs_keys
+        .iter()
+        .copied()
+        .collect::<std::collections::HashSet<_>>();
+    let ours_rows = ours_children
+        .iter()
+        .map(|child| (child.key.as_str(), child.text.as_str()))
+        .collect::<Vec<_>>();
+    let theirs_rows = theirs_children
+        .iter()
+        .map(|child| (child.key.as_str(), child.text.as_str()))
+        .collect::<Vec<_>>();
+    let ours_parents_required = if name == "queue" {
+        queue_parent_anchors_for_surviving_descendants(&ours_rows, &theirs_key_set)
+    } else {
+        Default::default()
+    };
+    let theirs_parents_required = if name == "queue" {
+        queue_parent_anchors_for_surviving_descendants(&theirs_rows, &ours_key_set)
+    } else {
+        Default::default()
+    };
     // Spine selection (#hap7/#qauthorder): for `exchange`, `ours` (the agent side)
     // carries the append-only committed-response history, so it stays the order
     // spine. For the operator-ordered list components (queue/backlog/review/done),
@@ -2529,6 +2555,7 @@ fn reconcile_component_body(
             // components, theirs is the live/operator side, so its delete is
             // authoritative even when ours concurrently updated or struck the item.
             (Some(o), None) => match in_b {
+                _ if ours_parents_required.contains_key(key) => Some(o.text.clone()),
                 None => Some(o.text.clone()),
                 Some(_) if lifecycle_governed => None,
                 Some(b) if protect_deletes || o.text != b.text => Some(o.text.clone()),
@@ -2536,6 +2563,7 @@ fn reconcile_component_body(
             },
             // Present only in theirs: insert by theirs, or delete by ours.
             (None, Some(t)) => match in_b {
+                _ if theirs_parents_required.contains_key(key) => Some(t.text.clone()),
                 None => Some(t.text.clone()),
                 // `#keepqueueitems`: the operator still has this row. An agent
                 // omission is not a deletion on a `keep` or `loop` queue.
@@ -3653,6 +3681,42 @@ pub(crate) fn order_list_children(spine: &[(&str, &str)], weave: &[(&str, &str)]
         present.insert(key.to_string());
     }
     result
+}
+
+/// Queue parents in `reference` whose omission from `surviving_keys` would
+/// leave at least one of their descendants behind.
+///
+/// Queue rows are merged as independently keyed cells, but Markdown nesting is
+/// structural: removing a parent without removing its entire descendant span
+/// promotes those indented rows into an orphaned component prefix. Treat a
+/// subtree as the deletion unit. A parent omission is accepted only when none
+/// of the rows beneath it survive on the other side.
+pub(crate) fn queue_parent_anchors_for_surviving_descendants(
+    reference: &[(&str, &str)],
+    surviving_keys: &std::collections::HashSet<&str>,
+) -> std::collections::HashMap<String, String> {
+    let indent = |text: &str| {
+        let first = text.lines().next()?.trim_end();
+        let body = first.trim_start_matches([' ', '\t']);
+        (body.starts_with("- ") || body == "-").then(|| first.len().saturating_sub(body.len()))
+    };
+    let mut required = std::collections::HashMap::new();
+    for (index, (key, text)) in reference.iter().enumerate() {
+        if surviving_keys.contains(key) {
+            continue;
+        }
+        let Some(parent_indent) = indent(text) else {
+            continue;
+        };
+        let surviving_descendant = reference[index + 1..]
+            .iter()
+            .take_while(|(_, child)| indent(child).is_some_and(|value| value > parent_indent))
+            .find(|(child_key, _)| surviving_keys.contains(child_key));
+        if let Some((child_key, _)) = surviving_descendant {
+            required.insert((*key).to_string(), (*child_key).to_string());
+        }
+    }
+    required
 }
 
 /// Encode `text` as a persisted node state. With the lazily rebuild-from-text

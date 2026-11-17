@@ -306,8 +306,9 @@ pub enum ReleaseKind {
     /// The worker reported back: record a receipt so the line is persisted by
     /// the coordinator and never offered to a new worker.
     Reported,
-    /// Abandoned, failed, or requeued work: no receipt. A started attempt is
-    /// retained as `Lost`; a claim with no worker is removed cleanly.
+    /// Abandoned, failed, or requeued work: no receipt. A started `Running`
+    /// attempt stays recoverable without the lost glyph. Any other started
+    /// attempt is retained as `Lost`. A claim with no worker is removed cleanly.
     Requeue,
 }
 

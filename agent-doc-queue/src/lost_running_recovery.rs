@@ -6,10 +6,12 @@
 //! it never suppresses the action. Continue fails closed when there is no
 //! worker to resume, the heartbeat is already past the frozen bound, or the
 //! attempt was abandoned for requeue. That failure authorizes a new generation
-//! in the same pass (`#transientcloseout`). An explicit requeue must not resume
-//! the abandoned worker, and it must not leave the row stuck on `⚠️🚧`. A
-//! Low-level freeze recording temporarily keeps a stopped worker with no
-//! handback `Running` as recovery evidence. The public `queue freeze` command
+//! in the same pass (`#transientcloseout`). An explicit requeue of a running
+//! claim must not resume the abandoned worker and must not paint `⚠️🚧`.
+//! The attempt stays `Running` with the abandon freeze, so a failed continue
+//! authorizes one replacement. Low-level freeze recording temporarily keeps a
+//! stopped worker with no handback `Running` as recovery evidence. The public
+//! `queue freeze` command
 //! synchronously attempts continue, records its failure because the worker is
 //! gone, and authorizes a new generation in the same pass
 //! (`#transientcloseout`). A worker that is still running is not this case.
@@ -81,9 +83,10 @@ pub fn is_lost_running_candidate(claim: &QueueClaim) -> bool {
     // the freeze must not hide that retry. At the low-level seam only, exact
     // proof may revive the ledger entry before continue runs; the public
     // freeze command performs this recovery synchronously. A frozen handback
-    // that was never report-completed is not this loss. An explicit requeue
-    // abandon still fails continue below; it is a candidate so that failure
-    // can authorize a new generation while the row shows `⚠️🚧`.
+    // that was never report-completed is not this loss. An explicit requeue of
+    // a still-`Running` attempt is [`authorized_running_requeue`], not this
+    // `⚠️🚧` candidate: continue fails on the abandon, and that failure
+    // authorizes one replacement without painting the row lost.
     let running_freeze_holds_generation = claim.state == QueueClaimState::Running
         && claim.retains_frozen_worker_claim()
         && !continue_already_failed(claim);
@@ -128,8 +131,30 @@ fn harness_freeze_worker_is_gone(claim: &QueueClaim) -> bool {
         && claim.publication_state.is_none()
 }
 
+/// An explicit `release --requeue` of a worker that had started.
+///
+/// The attempt stays [`QueueClaimState::Running`] so its projection is `🚧`,
+/// not `⚠️🚧`. Continue cannot resume the abandoned worker. The recorded
+/// failure authorizes one replacement generation. A claim that never started,
+/// and a loss that is not this requeue, stay on the lost path.
+pub fn authorized_running_requeue(claim: &QueueClaim) -> bool {
+    claim.state == QueueClaimState::Running
+        && claim.lost_from.is_none()
+        && claim
+            .worker
+            .as_ref()
+            .is_some_and(|worker| !worker.worker_id.trim().is_empty())
+        && claim
+            .frozen
+            .as_ref()
+            .is_some_and(|freeze| freeze.is_abandon())
+        && !report_owed(claim)
+}
+
 fn is_continue_retry_candidate(claim: &QueueClaim) -> bool {
-    is_lost_running_candidate(claim) || is_stopped_harness_freeze(claim)
+    is_lost_running_candidate(claim)
+        || is_stopped_harness_freeze(claim)
+        || authorized_running_requeue(claim)
 }
 
 fn continue_already_failed(claim: &QueueClaim) -> bool {
@@ -231,7 +256,9 @@ pub fn default_continue_attempt(claim: &QueueClaim, now_secs: u64) -> Result<(),
 }
 
 /// Record a continue attempt on `claim`. `Ok` restores the same generation
-/// and worker. `Err` leaves the attempt lost and authorizes retry.
+/// and worker. `Err` records the failure and authorizes retry. A still-
+/// `Running` requeue stays `Running`; a claim that was already `Lost` stays
+/// `Lost`.
 pub fn apply_continue_result(
     claim: &mut QueueClaim,
     now_secs: u64,
@@ -827,5 +854,122 @@ mod tests {
         assert_eq!(failed.claims[0].state, QueueClaimState::Claimed);
         assert!(failed.claims[0].frozen.is_none());
         assert!(failed.claims[0].lost_continue.is_none());
+    }
+
+    /// An explicit requeue of a worker that had started stays `Running` (`🚧`).
+    /// Continue fails closed and authorizes one replacement. After that
+    /// replacement is started, another claim does not open a second generation.
+    #[test]
+    fn authorized_running_requeue_stays_running_and_a_second_claim_does_not_bind() {
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim("requeue row", "subagent:first", 1_000, 3_600);
+        ledger
+            .start(
+                "requeue row",
+                "subagent:first",
+                "worker-first",
+                1_000,
+                3_600,
+                Some(1),
+            )
+            .unwrap();
+        ledger.claims[0].frozen = Some(QueueWorkerFreeze {
+            frozen_at_secs: 1_100,
+            reason: crate::queue_claim::ABANDONED_REQUEUE_REASON.to_string(),
+            abandoned: true,
+        });
+        let claim = &ledger.claims[0];
+        assert!(authorized_running_requeue(claim));
+        assert_eq!(claim.state, QueueClaimState::Running);
+        assert!(claim.lost_from.is_none());
+        assert_ne!(
+            claim.projection_marker(),
+            agent_doc_document::queue_projection::QueueLifecycleMarker::LostRunning
+        );
+        assert!(
+            !claim.blocks_dispatch(1_500),
+            "an authorized requeue is claimable without painting lost"
+        );
+
+        let mut claims = vec![claim.clone()];
+        let applied = recover_claims(&mut claims, 1_500, 3_600, false, &mut |claim| {
+            default_continue_attempt(claim, 1_500)
+        });
+        assert_eq!(applied.len(), 1);
+        assert_eq!(applied[0].action, LostRunningAction::Retry);
+        assert_eq!(claims[0].state, QueueClaimState::Running);
+        assert!(claims[0].lost_from.is_none());
+        assert_ne!(
+            claims[0].projection_marker(),
+            agent_doc_document::queue_projection::QueueLifecycleMarker::LostRunning
+        );
+        assert!(claims[0].lost_continue.as_ref().is_some_and(|record| {
+            record.failed && record.reason.contains("abandoned for requeue")
+        }));
+        assert_eq!(
+            claims[0]
+                .worker
+                .as_ref()
+                .map(|worker| worker.worker_id.as_str()),
+            Some("worker-first")
+        );
+
+        ledger.claims[0] = claims[0].clone();
+        assert_eq!(
+            ledger.claim("requeue row", "subagent:second", 1_600, 3_600),
+            ClaimOutcome::Reassigned
+        );
+        assert_eq!(ledger.claims[0].generation, 2);
+        assert_eq!(ledger.claims[0].state, QueueClaimState::Claimed);
+        ledger
+            .start(
+                "requeue row",
+                "subagent:second",
+                "worker-second",
+                1_600,
+                3_600,
+                Some(2),
+            )
+            .unwrap();
+        assert_eq!(
+            ledger.claim("requeue row", "subagent:third", 1_700, 3_600),
+            ClaimOutcome::HeldByOther
+        );
+        assert_eq!(ledger.claims[0].generation, 2);
+        assert_eq!(ledger.claims[0].state, QueueClaimState::Running);
+        assert_eq!(ledger.claims.len(), 1);
+    }
+
+    /// A running worker past its TTL, still inside the frozen heartbeat bound,
+    /// keeps its generation. `claim` does not run recovery, so it must not
+    /// reassign that generation to another owner.
+    #[test]
+    fn expired_running_worker_is_not_reassigned_before_recovery() {
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim("live row", "subagent:live", 1_000, 600);
+        ledger
+            .start(
+                "live row",
+                "subagent:live",
+                "worker-live",
+                1_000,
+                600,
+                Some(1),
+            )
+            .unwrap();
+        let now = 1_000 + 601;
+        assert!(ledger.claims[0].is_expired(now));
+        assert!(now - 1_000 < DEFAULT_WORKER_FROZEN_SECS);
+        assert!(
+            ledger.claims[0].blocks_dispatch(now),
+            "a live worker past TTL still holds its generation until recovery"
+        );
+        assert_eq!(
+            ledger.claim("live row", "subagent:other", now, 600),
+            ClaimOutcome::HeldByOther
+        );
+        assert_eq!(ledger.claims[0].generation, 1);
+        assert_eq!(ledger.claims[0].state, QueueClaimState::Running);
+        assert!(ledger.claims[0].lost_from.is_none());
     }
 }

@@ -462,9 +462,9 @@ fn queue_attr_subagent_plan_with_pools(
     // they are non-blocking for ordinary queue reconciliation. Dispatch has a
     // stricter contract, however: a started Lost attempt is unknown-effect
     // work and must remain excluded unless retry is explicitly authorized.
-    // An explicit requeue is that authorization once continue has failed: the
-    // abandoned worker is not resumed, and the row must not stay `⚠️🚧`
-    // (`#losslessqueuerecovery`). Judge those durable attempts against every
+    // An explicit requeue of a running attempt is not this Lost row: it stays
+    // `🚧`, continue fails, and that failure authorizes one replacement
+    // (`#losslessqueuerecovery`). Judge those durable Lost attempts against every
     // executable lineage directly instead of relying on
     // `claim_states_for_content`, whose live-head view intentionally omits a
     // non-blocking nested Lost claim.
@@ -2314,9 +2314,9 @@ queue: go
     }
 
     /// `#losslessqueuerecovery`: requeue of a worker that already started keeps
-    /// that attempt `⚠️🚧` and abandoned. Continue refuses to resume it, and
-    /// that failure is the new generation, so a `subagents` queue offers the
-    /// same row again instead of holding it.
+    /// that attempt `Running` and abandoned, so the row stays `🚧`. Continue
+    /// refuses to resume it, and that failure is the new generation, so a
+    /// `subagents` queue offers the same row again instead of holding it.
     #[test]
     fn started_requeue_on_a_subagents_queue_is_offered_again() {
         use crate::claim_release_receipt::{ReleaseKind, release_attempt};
@@ -2370,11 +2370,12 @@ queue: go
         assert_eq!(claim.generation, started.generation);
         assert_eq!(
             claim.state,
-            agent_doc_queue::queue_claim::QueueClaimState::Lost
+            agent_doc_queue::queue_claim::QueueClaimState::Running
         );
-        assert_eq!(
-            claim.lost_from,
-            Some(agent_doc_queue::queue_claim::QueueClaimState::Running)
+        assert!(claim.lost_from.is_none());
+        assert_ne!(
+            claim.projection_marker(),
+            agent_doc_document::queue_projection::QueueLifecycleMarker::LostRunning
         );
         let freeze = claim.frozen.as_ref().expect("requeue keeps the freeze");
         assert!(freeze.is_abandon(), "{freeze:?}");

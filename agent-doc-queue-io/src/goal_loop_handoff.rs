@@ -333,7 +333,10 @@ fn reopen_if_reportable_lost(
     generation: Option<u64>,
     response: &str,
 ) -> Result<bool> {
-    if claim.state != agent_doc_queue::queue_claim::QueueClaimState::Lost {
+    let lost = claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost;
+    let requeued_running =
+        agent_doc_queue::lost_running_recovery::authorized_running_requeue(claim);
+    if !lost && !requeued_running {
         return Ok(true);
     }
     let Some(worker_id) = claim

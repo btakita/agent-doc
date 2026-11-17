@@ -977,6 +977,119 @@ mod tests {
         );
     }
 
+    /// `release --requeue` of a started worker stays `🚧`. The head can be
+    /// claimed once. After that replacement is running, a refill and another
+    /// claim do not bind a second generation. `subagents=2` and a sibling head
+    /// keep capacity from hiding the duplicate.
+    #[test]
+    fn authorized_running_requeue_is_not_painted_lost() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = pool_doc("subagents=2", &["do [#a]", "do [#b]"]);
+        std::fs::write(&file, &content).unwrap();
+        start(&file, "do [#a]", "subagent:a");
+        crate::queue_claim::abandon_attempt(&file, "do [#a]", Some(1)).unwrap();
+
+        let abandoned = crate::queue_claim::load_ledger(&file)
+            .unwrap()
+            .claims
+            .into_iter()
+            .find(|claim| claim.item_text.contains("#a"))
+            .expect("the started attempt stays on the ledger");
+        assert_eq!(
+            abandoned.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Running
+        );
+        assert!(abandoned.lost_from.is_none());
+        assert_ne!(
+            abandoned.projection_marker(),
+            agent_doc_document::queue_projection::QueueLifecycleMarker::LostRunning
+        );
+        assert!(
+            abandoned
+                .frozen
+                .as_ref()
+                .is_some_and(|freeze| freeze.is_abandon())
+        );
+        assert_eq!(
+            abandoned
+                .worker
+                .as_ref()
+                .map(|worker| worker.worker_id.as_str()),
+            Some("worker:subagent:a")
+        );
+
+        let offered =
+            crate::subagent_dispatch::pending_subagent_dispatch_for_content(&file, &content)
+                .unwrap();
+        assert!(
+            offered.iter().any(|head| head.contains("#a")),
+            "the requeued head is recoverable, got {offered:?}"
+        );
+        let continued = crate::queue_claim::load_ledger(&file)
+            .unwrap()
+            .claims
+            .into_iter()
+            .find(|claim| claim.item_text.contains("#a"))
+            .expect("continue records the abandon on the same attempt");
+        assert_eq!(
+            continued.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Running
+        );
+        assert!(continued.lost_continue.as_ref().is_some_and(|record| {
+            record.failed && record.reason.contains("abandoned for requeue")
+        }));
+
+        let (outcome, next) =
+            crate::queue_claim::claim(&file, "do [#a]", "subagent:a2", 7200).unwrap();
+        assert_eq!(
+            outcome,
+            agent_doc_queue::queue_claim::ClaimOutcome::Reassigned
+        );
+        assert_eq!(next.generation, 2);
+        assert_eq!(
+            next.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Claimed
+        );
+        assert!(next.worker.is_none());
+        crate::queue_claim::start_attempt(
+            &file,
+            "do [#a]",
+            "subagent:a2",
+            "worker:a2",
+            7200,
+            next.generation,
+        )
+        .unwrap();
+
+        let offered =
+            crate::subagent_dispatch::pending_subagent_dispatch_for_content(&file, &content)
+                .unwrap();
+        assert!(
+            !offered.iter().any(|head| head.contains("#a")),
+            "a live replacement is not offered again, got {offered:?}"
+        );
+        let again = crate::queue_claim::claim(&file, "do [#a]", "subagent:a3", 7200);
+        let err = again.expect_err("a live replacement is not claimed again");
+        assert!(
+            err.to_string()
+                .contains("already held by subagent:a2 generation 2"),
+            "{err:#}"
+        );
+        let held = crate::queue_claim::load_ledger(&file)
+            .unwrap()
+            .claims
+            .into_iter()
+            .find(|claim| claim.item_text.contains("#a"))
+            .expect("the replacement generation is the only live attempt");
+        assert_eq!(held.generation, 2);
+        assert_eq!(
+            held.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Running
+        );
+    }
+
     fn block_on_quota(file: &Path, harness: &str) {
         crate::queue_claim::block_attempt_on_quota(
             file,

@@ -1931,7 +1931,8 @@ pub fn reconcile_completion_evidence(file: &Path, content: &str) -> Result<usize
     let recovered = mutate_ledger(file, |ledger| {
         let mut recovered = 0;
         for claim in &mut ledger.claims {
-            let was_lost = claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost;
+            let was_lost = claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost
+                || agent_doc_queue::lost_running_recovery::authorized_running_requeue(claim);
             if !matches!(
                 claim.state,
                 agent_doc_queue::queue_claim::QueueClaimState::Running
@@ -2041,9 +2042,10 @@ pub fn release_attempt(
 
 /// End dispatch ownership. A claim that never bound a worker is removed
 /// cleanly: its lineage `Created` receipt still fences the generation, but
-/// there is no uncertain execution to retain as `Lost`. Once a worker was
-/// bound, the retained `Lost` attempt preserves that execution evidence and is
-/// non-blocking for reconciliation/recovery.
+/// there is no uncertain execution to retain. A `Running` attempt that had
+/// started stays `Running` and abandoned, so the row stays `🚧` and one
+/// replacement can be claimed. Any other started attempt is retained as
+/// `Lost`.
 pub fn abandon(file: &Path, item: &str) -> Result<Option<QueueClaim>> {
     let resolved = resolve_live_claim_target(file, item, "queue_claim_abandon").ok();
     let target = resolved
@@ -2058,11 +2060,7 @@ pub fn abandon(file: &Path, item: &str) -> Result<Option<QueueClaim>> {
         }
         let released = ledger.release(&target).or_else(|| ledger.release(item));
         Ok(released.map(|mut claim| {
-            if claim.worker.is_some()
-                || claim.state != agent_doc_queue::queue_claim::QueueClaimState::Claimed
-            {
-                claim.mark_lost();
-                record_abandoned_worker(&mut claim, now);
+            if retain_requeued_attempt(&mut claim, now) {
                 ledger.claims.push(claim.clone());
             }
             claim
@@ -2115,16 +2113,33 @@ pub fn abandon_attempt(
             None => ledger.release_fenced(item, generation)?,
         };
         Ok(released.map(|mut claim| {
-            if claim.worker.is_some()
-                || claim.state != agent_doc_queue::queue_claim::QueueClaimState::Claimed
-            {
-                claim.mark_lost();
-                record_abandoned_worker(&mut claim, now);
+            if retain_requeued_attempt(&mut claim, now) {
                 ledger.claims.push(claim.clone());
             }
             claim
         }))
     })
+}
+
+/// Keep a started attempt after `release --requeue`.
+///
+/// A worker that had reached `Running` stays `Running` with the abandon
+/// freeze. Its projection stays `🚧`. Continue cannot resume it, and that
+/// failure authorizes one replacement. Every other started attempt is still
+/// retained as `Lost`. A claim that never started is not retained.
+fn retain_requeued_attempt(claim: &mut QueueClaim, now: u64) -> bool {
+    let started = claim.worker.is_some()
+        || claim.state != agent_doc_queue::queue_claim::QueueClaimState::Claimed;
+    if !started {
+        return false;
+    }
+    let keep_running = claim.state == agent_doc_queue::queue_claim::QueueClaimState::Running
+        && claim.worker.is_some();
+    if !keep_running {
+        claim.mark_lost();
+    }
+    record_abandoned_worker(claim, now);
+    true
 }
 
 /// Record that this attempt's worker stopped on a harness usage limit
@@ -4285,10 +4300,23 @@ mod tests {
 
         let reports = claim_reports_for_content(&doc, &content).unwrap();
         assert_eq!(reports.len(), 1, "{reports:#?}");
-        assert_eq!(reports[0].assessment, "lost");
+        assert_ne!(reports[0].assessment, "lost");
+        assert!(reports[0].lost_recovery.is_none(), "{reports:#?}");
         assert_eq!(
-            reports[0].lost_recovery.as_ref().unwrap().reason,
-            "attempt_abandoned_for_requeue"
+            reports[0].claim.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Running
+        );
+        assert!(reports[0].claim.lost_from.is_none());
+        assert_ne!(
+            reports[0].claim.projection_marker(),
+            agent_doc_document::queue_projection::QueueLifecycleMarker::LostRunning
+        );
+        assert!(
+            reports[0]
+                .claim
+                .frozen
+                .as_ref()
+                .is_some_and(|freeze| freeze.is_abandon())
         );
     }
 

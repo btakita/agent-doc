@@ -15021,11 +15021,12 @@ agent_doc_write: crdt\n\
         );
     }
 
-    /// A started attempt cannot be retried merely because its release receipt
-    /// requests requeue. Without durable proof that it never ran, dispatch
-    /// must fail closed so an unknown side effect is not duplicated.
+    /// `#losslessqueuerecovery`: an explicit requeue of a started nested attempt
+    /// stays recoverable. Continue refuses the abandoned worker, so the row is
+    /// offered once and is not painted lost. Starting that replacement holds
+    /// the row; a second claim does not open another running generation.
     #[test]
-    fn started_lost_subagent_is_not_redispatched_after_requeue_release() {
+    fn started_requeue_of_a_nested_subagent_is_offered_once_without_painting_lost() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let item = "re: [#grok-live-editor]: Also validate real-time steering parity";
@@ -15073,9 +15074,95 @@ agent_doc_write: crdt\n\
                 &doc, &live,
             )
             .unwrap();
+        assert_eq!(
+            dispatch,
+            vec![item.to_string()],
+            "a started requeue whose continue failed is offered once"
+        );
+        let claim = agent_doc_queue_io::queue_claim::load_ledger(&doc)
+            .unwrap()
+            .claims
+            .into_iter()
+            .find(|claim| claim.item_text.contains("real-time steering"))
+            .expect("the abandoned attempt stays on the ledger");
+        assert_eq!(claim.generation, prior.generation);
+        assert_eq!(
+            claim.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Running
+        );
+        assert!(claim.lost_from.is_none());
+        assert_ne!(
+            claim.projection_marker(),
+            agent_doc_document::queue_projection::QueueLifecycleMarker::LostRunning
+        );
         assert!(
-            dispatch.is_empty(),
-            "a started attempt has unknown effects and must not be retried: {dispatch:?}"
+            claim
+                .frozen
+                .as_ref()
+                .is_some_and(|freeze| freeze.is_abandon()),
+            "{:?}",
+            claim.frozen
+        );
+        let continued = claim
+            .lost_continue
+            .as_ref()
+            .expect("continue ran on the abandoned attempt");
+        assert!(
+            continued.failed && continued.reason.contains("abandoned for requeue"),
+            "{continued:?}"
+        );
+
+        let (outcome, next) =
+            agent_doc_queue_io::queue_claim::claim(&doc, item, "subagent:rtsteeringparity-2", 600)
+                .unwrap();
+        assert_eq!(
+            outcome,
+            agent_doc_queue::queue_claim::ClaimOutcome::Reassigned
+        );
+        assert_eq!(next.generation, prior.generation + 1);
+        assert_eq!(
+            next.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Claimed
+        );
+        assert!(next.worker.is_none(), "the replacement has no worker yet");
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            item,
+            "subagent:rtsteeringparity-2",
+            "worker:rtsteeringparity-2",
+            600,
+            next.generation,
+        )
+        .unwrap();
+        let live = std::fs::read_to_string(&doc).unwrap();
+        let again = agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_for_content(
+            &doc, &live,
+        )
+        .unwrap();
+        assert!(
+            again.is_empty(),
+            "a live replacement is not offered again: {again:?}"
+        );
+        let second =
+            agent_doc_queue_io::queue_claim::claim(&doc, item, "subagent:rtsteeringparity-3", 600);
+        let err = second.expect_err("a live replacement is not claimed again");
+        assert!(
+            err.to_string().contains(&format!(
+                "already held by subagent:rtsteeringparity-2 generation {}",
+                prior.generation + 1
+            )),
+            "{err:#}"
+        );
+        let held = agent_doc_queue_io::queue_claim::load_ledger(&doc)
+            .unwrap()
+            .claims
+            .into_iter()
+            .find(|claim| claim.item_text.contains("real-time steering"))
+            .expect("the replacement generation is the only live attempt");
+        assert_eq!(held.generation, prior.generation + 1);
+        assert_eq!(
+            held.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Running
         );
     }
 

@@ -7049,7 +7049,14 @@ mod core_tests {
             if state == QueueClaimState::Lost {
                 crate::queue_claim::abandon_attempt(&doc, &target, Some(claim.generation))
                     .unwrap()
-                    .expect("running attempt should become lost");
+                    .expect("running attempt is requeued");
+                // An authorized requeue stays Running. This iteration is the
+                // loss that is not that requeue.
+                let mut ledger = crate::queue_claim::load_ledger(&doc).unwrap();
+                for claim in &mut ledger.claims {
+                    claim.mark_lost();
+                }
+                crate::queue_claim::store_ledger_for_test(&doc, &ledger).unwrap();
             }
 
             let selector = super::AckTextSelector::Owner(

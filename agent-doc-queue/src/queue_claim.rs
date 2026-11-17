@@ -508,7 +508,10 @@ pub fn diagnose_lifecycle(
     now_secs: u64,
     dispatch_grace_secs: u64,
 ) -> Option<QueueLifecycleDiagnosis> {
-    let expected = if claim.retains_frozen_worker_claim() || claim.state == QueueClaimState::Lost {
+    let expected = if claim.retains_frozen_worker_claim()
+        || claim.state == QueueClaimState::Lost
+        || crate::lost_running_recovery::authorized_running_requeue(claim)
+    {
         claim.projection_marker()
     } else if claim.state != QueueClaimState::Reported && claim.is_expired(now_secs) {
         if claim.worker.is_some() {
@@ -829,11 +832,26 @@ impl QueueClaim {
     }
 
     pub fn blocks_dispatch(&self, now_secs: u64) -> bool {
-        // A failed continue authorized a replacement generation. That includes
-        // a stopped harness freeze that is still `Running`: the row has to be
-        // claimable, and the attempt is not marked Lost (`#transientcloseout`).
-        if crate::lost_running_recovery::retry_authorized(self) {
+        // An explicit requeue of a started worker stays `Running` and does not
+        // block: continue cannot resume it, so one replacement may be claimed
+        // without painting `⚠️🚧`. A failed continue is the same opening,
+        // including a stopped harness freeze that is still `Running`
+        // (`#transientcloseout`).
+        if crate::lost_running_recovery::authorized_running_requeue(self)
+            || crate::lost_running_recovery::retry_authorized(self)
+        {
             return false;
+        }
+        // Any other bound running worker holds its generation, including after
+        // the TTL. `claim` does not run recovery, so expiry alone must not
+        // open a second generation while this worker is still the live one.
+        if self.state == QueueClaimState::Running
+            && self
+                .worker
+                .as_ref()
+                .is_some_and(|worker| !worker.worker_id.trim().is_empty())
+        {
+            return true;
         }
         if self.retains_frozen_worker_claim() {
             return true;
@@ -907,7 +925,10 @@ impl QueueClaim {
     /// `queue freeze` command immediately runs that recovery and directs a
     /// fresh generation (`#freezefreshretry`).
     pub fn project_expiry(&mut self, now_secs: u64) {
-        if self.is_expired(now_secs) && !self.retains_frozen_worker_claim() {
+        if self.is_expired(now_secs)
+            && !self.retains_frozen_worker_claim()
+            && !crate::lost_running_recovery::authorized_running_requeue(self)
+        {
             self.mark_lost();
         }
     }
@@ -1635,6 +1656,12 @@ impl QueueClaimLedger {
             return Err(QueueClaimStartRefused::Missing);
         };
         let claim = &self.claims[index];
+        if crate::lost_running_recovery::authorized_running_requeue(claim) {
+            return Err(QueueClaimStartRefused::Terminal {
+                generation: claim.generation,
+                state: claim.state,
+            });
+        }
         let resumes_frozen = claim.retains_frozen_worker_claim();
         if (claim.is_expired(now_secs) || claim.state == QueueClaimState::Lost) && !resumes_frozen {
             return Err(QueueClaimStartRefused::Expired {
@@ -1870,6 +1897,18 @@ impl QueueClaimLedger {
         else {
             return Err(refused(RefreshRefusal::Unclaimed));
         };
+        if self.claims[index]
+            .frozen
+            .as_ref()
+            .is_some_and(QueueWorkerFreeze::is_abandon)
+        {
+            let existing = &self.claims[index];
+            return Err(refused(RefreshRefusal::Expired {
+                holder: existing.owner.clone(),
+                expired_at_secs: existing.expires_at_secs,
+                worker_bound: existing.worker_binding_holds_attempt(),
+            }));
+        }
         let lapsed = self.claims[index].is_expired(now_secs)
             || self.claims[index].state == QueueClaimState::Lost;
         let revive = lapsed
@@ -2091,7 +2130,9 @@ impl QueueClaimLedger {
         };
         let claim = &mut self.claims[index];
         validate_generation(claim, expected_generation)?;
-        if claim.state == QueueClaimState::Lost {
+        if claim.state == QueueClaimState::Lost
+            || crate::lost_running_recovery::authorized_running_requeue(claim)
+        {
             return Err(QueueClaimTransitionRefused::Terminal {
                 generation: claim.generation,
                 state: claim.state,
@@ -2114,10 +2155,11 @@ impl QueueClaimLedger {
     /// (`#inlinegatefalsereject`, `#lostrowreportreopen`).
     ///
     /// Without this, every later report of that generation is refused as
-    /// terminal, and the row stays on `⚠️🚧` until a new generation repeats
-    /// work that already finished. The attempt must be exactly `generation`
-    /// and `worker_id`, `Lost`, and not stopped on a quota (a reclaim moved
-    /// the generation, and another worker's attempt is not this one). One of
+    /// terminal, and the row stays open until a new generation repeats work
+    /// that already finished. The attempt must be exactly `generation` and
+    /// `worker_id`, either `Lost` or an authorized running requeue, and not
+    /// stopped on a quota (a reclaim moved the generation, and another
+    /// worker's attempt is not this one). One of
     /// two proofs must hold:
     ///
     /// - `gate_requeued`: a goal-loop gate (`#goalpresetterminal`,
@@ -2148,8 +2190,10 @@ impl QueueClaimLedger {
             .worker
             .as_ref()
             .is_some_and(|worker| worker.worker_id == worker_id);
+        let reportable_loss = claim.state == QueueClaimState::Lost
+            || crate::lost_running_recovery::authorized_running_requeue(claim);
         if claim.generation != generation
-            || claim.state != QueueClaimState::Lost
+            || !reportable_loss
             || !worker_matches
             || claim.quota_block.is_some()
             || claim.lost_from == Some(QueueClaimState::QuotaBlocked)
@@ -2194,7 +2238,9 @@ impl QueueClaimLedger {
                 current: current_worker,
             });
         }
-        if claim.state == QueueClaimState::Lost {
+        if claim.state == QueueClaimState::Lost
+            || crate::lost_running_recovery::authorized_running_requeue(claim)
+        {
             return Err(QueueClaimTransitionRefused::Terminal {
                 generation: claim.generation,
                 state: claim.state,

@@ -1717,7 +1717,7 @@ mod tests {
             ledger
                 .claims
                 .iter()
-                .all(|claim| !claim.state.blocks_dispatch()),
+                .all(|claim| !claim.blocks_dispatch(claim.claimed_at_secs)),
             "{ledger:?}"
         );
         let (outcome, _) =
@@ -1880,7 +1880,7 @@ mod tests {
             ledger
                 .claims
                 .iter()
-                .all(|claim| !claim.state.blocks_dispatch()),
+                .all(|claim| !claim.blocks_dispatch(claim.claimed_at_secs)),
             "{ledger:?}"
         );
         let attempts = agent_doc_queue_io::queue_lineage::load(&doc).unwrap();
@@ -2505,9 +2505,22 @@ mod tests {
                 .find(|claim| claim.owner == "subagent:adv412")
                 .unwrap()
         };
+        let requeued = lost(&doc);
         assert_eq!(
-            lost(&doc).state,
-            agent_doc_queue::queue_claim::QueueClaimState::Lost
+            requeued.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Running
+        );
+        assert!(requeued.lost_from.is_none());
+        assert_ne!(
+            requeued.projection_marker(),
+            agent_doc_document::queue_projection::QueueLifecycleMarker::LostRunning
+        );
+        assert!(
+            requeued
+                .frozen
+                .as_ref()
+                .is_some_and(|freeze| freeze.is_abandon()),
+            "{requeued:#?}"
         );
         agent_doc_queue_io::claim_release_receipt::release_attempt(
             &doc,
@@ -2681,7 +2694,12 @@ mod tests {
             let lost = pr412_claim(&doc);
             assert_eq!(
                 lost.state,
-                agent_doc_queue::queue_claim::QueueClaimState::Lost
+                agent_doc_queue::queue_claim::QueueClaimState::Running
+            );
+            assert!(lost.lost_from.is_none());
+            assert_ne!(
+                lost.projection_marker(),
+                agent_doc_document::queue_projection::QueueLifecycleMarker::LostRunning
             );
             assert!(
                 lost.frozen
@@ -2855,7 +2873,7 @@ mod tests {
         );
         let err = report_complete(&doc, PR412_ROW, Some(1), None, None, PR412_HAND_BACK)
             .expect_err("an explicit abandon without a gate verdict stays refused");
-        assert!(err.to_string().contains("terminal (Lost)"), "{err:#}");
+        assert!(err.to_string().contains("is terminal"), "{err:#}");
     }
 
     fn start_subagent(doc: &Path, row: &str, owner: &str) {

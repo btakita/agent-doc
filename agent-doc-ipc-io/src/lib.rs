@@ -1607,6 +1607,25 @@ impl BuildMismatchRecoveryRefusal {
             Self::ReloadAlreadyRequested => "reload_already_requested_for_listener_build",
         }
     }
+
+    /// The listener is still the live editor. Withholding another reload is not
+    /// proof that editor stopped serving this document.
+    ///
+    /// Counting the withhold as a definitive endpoint refusal made barrier
+    /// recovery disconnect the replica the editor had just registered
+    /// (`DropFromDeliveryCut` at `redeliveries=0`). The document then resolved
+    /// `live_editors=0` with `editor_open=true`
+    /// (`keep_editor_authority_no_live_replica`) and closeout stayed retained.
+    /// Observed 2026-11-17 on `tasks/agent-doc/agent-doc-bugs.md`:
+    /// `listener=0.35.577+e12460cd`, `client=0.35.578+20eb4f40`,
+    /// `reload_already_requested_for_listener_build`, then
+    /// `crdt_replica_dropped_from_delivery_cut`. A reload whose delivery itself
+    /// failed is a different error and stays terminal.
+    pub const fn keeps_live_editor_replica(self) -> bool {
+        match self {
+            Self::SenderExecutableReplaced | Self::ReloadAlreadyRequested => true,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -3203,6 +3222,8 @@ mod tests {
                 BuildMismatchRecoveryRefusal::ReloadAlreadyRequested,
             )
         );
+        assert!(BuildMismatchRecoveryRefusal::ReloadAlreadyRequested.keeps_live_editor_replica());
+        assert!(BuildMismatchRecoveryRefusal::SenderExecutableReplaced.keeps_live_editor_replica());
         assert_eq!(BuildMismatchReloadDecision::Reload.refusal(), None);
         assert!(
             BUILD_MISMATCH_RELOAD_COOLDOWN

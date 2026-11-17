@@ -5695,12 +5695,23 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
 /// Classify one failed send from
 /// [`agent_doc_ipc_io::send_message_to_pid_recovering_build_mismatch`].
 ///
-/// **Contract: the caller must have used the recovery-attempting send.** That
-/// function only surfaces a typed `BuildMismatch` after it has already tried the
-/// reload-only compatibility request and that request did not deliver. So the
-/// two facts together — the listener ANSWERED with a version rejection, and the
-/// one recovery for a version rejection failed — are a terminal answer. Neither
-/// version number changes by retrying the same handshake.
+/// **Contract: the caller must have used the recovery-attempting send.** A
+/// typed `BuildMismatch` whose reload delivery itself failed is terminal: the
+/// listener answered with a version rejection and the one recovery for that
+/// rejection did not deliver. Neither version number changes by retrying the
+/// same handshake.
+///
+/// A *withheld* reload is not that failure.
+/// [`agent_doc_ipc_io::BuildMismatchRecoveryRefusal::keeps_live_editor_replica`]
+/// is true when the sender must not ask the editor to reload again because a
+/// reload is already in flight, or because the sender executable is the stale
+/// side. The listener is still the live editor that registered the replica.
+/// Counting the withhold as `definitive_refusal` made `barrier_wait` disconnect
+/// that member at `redeliveries=0` (`DropFromDeliveryCut`). The document then
+/// stayed `editor_open=true` with `live_editors=0`
+/// (`keep_editor_authority_no_live_replica` /
+/// `editor_owner_without_registered_replica`) and closeout could not land.
+/// Observed 2026-11-17 on `tasks/agent-doc/agent-doc-bugs.md`.
 ///
 /// `#refusedreceiptveto`: a receipt rejection was already counted; a failed
 /// build-mismatch recovery was collected into `build_mismatches`, logged as
@@ -5718,7 +5729,11 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
 const fn recovering_send_error_is_definitive(
     receipt_rejected: bool,
     build_mismatch_recovery_failed: bool,
+    reload_withheld_while_listener_live: bool,
 ) -> bool {
+    if reload_withheld_while_listener_live {
+        return false;
+    }
     receipt_rejected || build_mismatch_recovery_failed
 }
 
@@ -8168,7 +8183,8 @@ fn signal_crdt_replica_event_counting_inner_with(
                         ),
                     );
                 }
-                if let Some(refusal) = agent_doc_ipc_io::build_mismatch_recovery_refusal(&error) {
+                let refusal = agent_doc_ipc_io::build_mismatch_recovery_refusal(&error);
+                if let Some(refusal) = refusal {
                     build_mismatch_refusals.push(ReplicaSignalBuildMismatchRefusal {
                         route: route.clone(),
                         refusal,
@@ -8178,9 +8194,15 @@ fn signal_crdt_replica_event_counting_inner_with(
                 // not a deferral. Counting it lets the authority resolver tell
                 // "the editor will not serve this document" apart from "nothing
                 // answered yet" — the distinction the strand depended on losing.
+                // A withheld reload is the opposite: the editor is still live,
+                // so disconnecting its replica is what produces
+                // `live_editors=0` while `editor_open=true`.
                 let definitive = recovering_send_error_is_definitive(
                     agent_doc_ipc_io::is_ipc_receipt_rejected_error(&error),
                     build_mismatch_recovery_failed,
+                    refusal.is_some_and(
+                        agent_doc_ipc_io::BuildMismatchRecoveryRefusal::keeps_live_editor_replica,
+                    ),
                 );
                 if definitive {
                     definitive_refusals += 1;
@@ -9034,8 +9056,58 @@ mod tests {
             recovering_send_error_is_definitive(
                 agent_doc_ipc_io::is_ipc_receipt_rejected_error(&exhausted),
                 agent_doc_ipc_io::is_ipc_build_mismatch_error(&exhausted),
+                false,
             ),
             "an answered version rejection whose reload recovery failed is terminal"
+        );
+    }
+
+    /// A reload withhold is not an exhausted endpoint. The editor still holds
+    /// the document; dropping its replica is the `live_editors=0` wedge.
+    #[test]
+    fn a_withheld_reload_does_not_drop_a_live_editor_replica() {
+        assert!(
+            !recovering_send_error_is_definitive(false, true, true),
+            "reload_already_requested / sender_executable_replaced must stay in the delivery cut"
+        );
+        assert!(
+            recovering_send_error_is_definitive(false, true, false),
+            "a reload whose delivery failed is still a definitive refusal"
+        );
+        assert!(
+            recovering_send_error_is_definitive(true, false, false),
+            "an explicit receipt rejection is still a definitive refusal"
+        );
+        for refusal in [
+            agent_doc_ipc_io::BuildMismatchRecoveryRefusal::ReloadAlreadyRequested,
+            agent_doc_ipc_io::BuildMismatchRecoveryRefusal::SenderExecutableReplaced,
+        ] {
+            assert!(
+                refusal.keeps_live_editor_replica(),
+                "{refusal:?} must not disconnect the editor that still has the document"
+            );
+        }
+        let withheld = ReplicaSignalOutcome {
+            found: 1,
+            notified: 0,
+            build_mismatches: vec![ReplicaSignalRoute {
+                editor_id: "intellij".to_string(),
+                editor_pid: 236096,
+            }],
+            build_mismatch_refusals: Vec::new(),
+            generation_mismatches: 0,
+            definitive_refusals: 0,
+            dead_endpoints: Vec::new(),
+            endpoint_unregistered: false,
+        };
+        assert_eq!(
+            withheld.nonconverging_disposition(),
+            NonconvergingReplicaDisposition::Retry,
+            "a live editor whose reload was withheld must keep its replica"
+        );
+        assert_ne!(
+            withheld.classify(),
+            ReplicaSignalClass::DefinitivelyRefusedByAll(1),
         );
     }
 
@@ -9084,6 +9156,7 @@ mod tests {
             !recovering_send_error_is_definitive(
                 agent_doc_ipc_io::is_ipc_receipt_rejected_error(&transport),
                 agent_doc_ipc_io::is_ipc_build_mismatch_error(&transport),
+                false,
             ),
             "an endpoint that never answered must stay retryable — promoting \
              silence to proof is a silent --force-disk"
@@ -9105,6 +9178,7 @@ mod tests {
         assert!(!recovering_send_error_is_definitive(
             agent_doc_ipc_io::is_ipc_receipt_rejected_error(&deferred),
             agent_doc_ipc_io::is_ipc_build_mismatch_error(&deferred),
+            false,
         ));
     }
 

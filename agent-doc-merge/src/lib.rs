@@ -379,6 +379,37 @@ mod tests {
     }
 
     #[test]
+    fn queue_merge_does_not_reintroduce_an_empty_nested_bullet() {
+        let doc = |items: &str| {
+            format!(
+                "<!-- agent:exchange -->\nQ.\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n{items}<!-- /agent:queue -->\n"
+            )
+        };
+        let items = concat!(
+            "- ### https://github.com/haiven-dev/haiven-sdk/pull/293\n",
+            "  - %% fix(promotion): skip a source target that has no sdk-dev %%\n",
+            "  - real child\n",
+        );
+        let blank = concat!(
+            "- ### https://github.com/haiven-dev/haiven-sdk/pull/293\n",
+            "  - %% fix(promotion): skip a source target that has no sdk-dev %%\n",
+            "      - \n",
+            "  - real child\n",
+        );
+        let base = doc(items);
+        let state = crate::crdt::CrdtDoc::from_text(&base).encode_state();
+        let merged = merge_contents_crdt(Some(&state), &base, &doc(blank))
+            .unwrap()
+            .0;
+        assert!(
+            !merged.lines().any(|line| line.trim() == "-"),
+            "merge must not write the blank subitem:\n{merged}"
+        );
+        assert!(merged.contains("%% fix(promotion): skip a source target that has no sdk-dev %%"));
+        assert!(merged.contains("real child"));
+    }
+
+    #[test]
     fn classified_designates_repairable_marker_corruption() {
         // A document that already carries a DUPLICATE singleton exchange block
         // (ours == theirs so the merge is identity) is designated Corrupted, and the

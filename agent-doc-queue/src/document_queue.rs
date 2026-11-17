@@ -1141,13 +1141,36 @@ fn recover_unwrapped_fenced_prompt(lines: &[&str]) -> Option<(usize, usize, Stri
 }
 
 fn line_is_empty_list_placeholder(line: &str) -> bool {
-    let trimmed = line.trim();
-    if trimmed == "-" {
-        return true;
+    agent_doc_element_queue::subprompts::is_empty_list_placeholder_line(line)
+}
+
+/// Drop empty list markers that parse does not admit as entries.
+///
+/// A runtime projection replaces only entry spans, so a gap such as `      - `
+/// used to survive the splice and get written back under the neighboring row.
+/// Lines inside a real span (a fenced payload, a comment, a prompt) stay.
+pub fn strip_unspanned_empty_list_placeholders(body: &str) -> Result<String> {
+    let spans = parse_spans(body)?;
+    let mut covered = vec![false; body.len()];
+    for (_, range) in &spans {
+        let end = range.end.min(body.len());
+        if range.start < end {
+            covered[range.start..end].fill(true);
+        }
     }
-    trimmed.strip_suffix('.').is_some_and(|digits| {
-        !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
-    })
+    let mut out = String::with_capacity(body.len());
+    let mut offset = 0usize;
+    for line in body.split_inclusive('\n') {
+        let start = offset;
+        offset += line.len();
+        let core = line.trim_end_matches(['\n', '\r']);
+        let inside = covered[start..offset].iter().any(|flag| *flag);
+        if !inside && line_is_empty_list_placeholder(core) {
+            continue;
+        }
+        out.push_str(line);
+    }
+    Ok(out)
 }
 
 fn markdown_code_fence_marker(line: &str) -> Option<&'static str> {
@@ -1229,6 +1252,11 @@ pub fn render(entries: &[QueueEntry]) -> String {
                 stray_close_text.push_str(text);
             }
             QueueEntry::Prompt(p) => {
+                if !p.multiline && p.text.trim().is_empty() {
+                    // `#blanksubitem`: an empty prompt renders as `{indent}- `.
+                    // That is an editor placeholder, not a queue row.
+                    continue;
+                }
                 if p.multiline {
                     out.push_str("---\n");
                     out.push_str(&p.text);
@@ -2676,72 +2704,87 @@ pub fn project_prompt_runtime_projections_with(
                     && rendered_top_level_group_parent(&marked_entries, index)
                         .is_some_and(|rendered| rendered != body[range.clone()])
             });
-    if marked_entries == entries && !has_group_heading_change {
-        return Ok(None);
-    }
-    validate_in_progress_marker_projection(&entries, &marked_entries)?;
-
+    let markers_changed = marked_entries != entries || has_group_heading_change;
     let mut projected = body.to_string();
-    for (index, ((before, range), after)) in spans.iter().zip(&marked_entries).enumerate().rev() {
-        let source = &body[range.clone()];
-        // An unchanged completed parent may own source-only terminal suffix
-        // evidence (auto-strike reason, response id, addressed-at receipt).
-        // Canonical rendering is safe for live parents and a real reopen, but
-        // must not erase that proof merely to add a presentation heading.
-        let canonical_group_parent = (!(matches!(before, QueueEntry::Completed(_))
-            && matches!(after, QueueEntry::Completed(_))))
-        .then(|| rendered_top_level_group_parent(&marked_entries, index))
-        .flatten()
-        .filter(|rendered| rendered != source);
-        if before != after || canonical_group_parent.is_some() {
-            let replacement = canonical_group_parent.unwrap_or_else(|| match (before, after) {
-                // `#nestedsubprompts`: a list row with sub-prompts renders
-                // byte-for-byte (its text holds the raw child lines), and the
-                // projection also retires legacy child markers below line 1.
-                (QueueEntry::Prompt(before_prompt), QueueEntry::Prompt(after_prompt))
-                | (QueueEntry::Completed(before_prompt), QueueEntry::Completed(after_prompt))
-                    if !before_prompt.multiline
-                        && !after_prompt.multiline
-                        && agent_doc_element_queue::subprompts::has_subprompts(
-                            &after_prompt.text,
-                        ) =>
-                {
-                    render(std::slice::from_ref(after))
-                }
-                // Runtime projection owns only the marker/attempt annotation in
-                // an otherwise-live row. Preserve the operator's exact source
-                // wrapper instead of canonicalizing a recovered multiline
-                // head (`---` + title + evidence fence) while the editor may
-                // also be adding a following row. Canonical rendering here can
-                // insert a synthetic closing fence and retarget that neighbor.
-                (QueueEntry::Prompt(before_prompt), QueueEntry::Prompt(after_prompt))
-                | (QueueEntry::Completed(before_prompt), QueueEntry::Completed(after_prompt))
-                    if before_prompt.text != after_prompt.text =>
-                {
-                    let before_prefix = before_prompt.text.lines().next().unwrap_or_default();
-                    let after_prefix = after_prompt.text.lines().next().unwrap_or_default();
-                    source
-                        .find(before_prefix)
-                        .map(|offset| {
-                            let mut preserved = source.to_string();
-                            preserved
-                                .replace_range(offset..offset + before_prefix.len(), after_prefix);
-                            preserved
-                        })
-                        .unwrap_or_else(|| render(std::slice::from_ref(after)))
-                }
-                _ => render(std::slice::from_ref(after)),
-            });
-            projected.replace_range(range.clone(), &replacement);
+    if markers_changed {
+        validate_in_progress_marker_projection(&entries, &marked_entries)?;
+    }
+    if markers_changed {
+        for (index, ((before, range), after)) in spans.iter().zip(&marked_entries).enumerate().rev()
+        {
+            let source = &body[range.clone()];
+            // An unchanged completed parent may own source-only terminal suffix
+            // evidence (auto-strike reason, response id, addressed-at receipt).
+            // Canonical rendering is safe for live parents and a real reopen, but
+            // must not erase that proof merely to add a presentation heading.
+            let canonical_group_parent = (!(matches!(before, QueueEntry::Completed(_))
+                && matches!(after, QueueEntry::Completed(_))))
+            .then(|| rendered_top_level_group_parent(&marked_entries, index))
+            .flatten()
+            .filter(|rendered| rendered != source);
+            if before != after || canonical_group_parent.is_some() {
+                let replacement = canonical_group_parent.unwrap_or_else(|| match (before, after) {
+                    // `#nestedsubprompts`: a list row with sub-prompts renders
+                    // byte-for-byte (its text holds the raw child lines), and the
+                    // projection also retires legacy child markers below line 1.
+                    (QueueEntry::Prompt(before_prompt), QueueEntry::Prompt(after_prompt))
+                    | (QueueEntry::Completed(before_prompt), QueueEntry::Completed(after_prompt))
+                        if !before_prompt.multiline
+                            && !after_prompt.multiline
+                            && agent_doc_element_queue::subprompts::has_subprompts(
+                                &after_prompt.text,
+                            ) =>
+                    {
+                        render(std::slice::from_ref(after))
+                    }
+                    // Runtime projection owns only the marker/attempt annotation in
+                    // an otherwise-live row. Preserve the operator's exact source
+                    // wrapper instead of canonicalizing a recovered multiline
+                    // head (`---` + title + evidence fence) while the editor may
+                    // also be adding a following row. Canonical rendering here can
+                    // insert a synthetic closing fence and retarget that neighbor.
+                    (QueueEntry::Prompt(before_prompt), QueueEntry::Prompt(after_prompt))
+                    | (QueueEntry::Completed(before_prompt), QueueEntry::Completed(after_prompt))
+                        if before_prompt.text != after_prompt.text =>
+                    {
+                        let before_prefix = before_prompt.text.lines().next().unwrap_or_default();
+                        let after_prefix = after_prompt.text.lines().next().unwrap_or_default();
+                        source
+                            .find(before_prefix)
+                            .map(|offset| {
+                                let mut preserved = source.to_string();
+                                preserved.replace_range(
+                                    offset..offset + before_prefix.len(),
+                                    after_prefix,
+                                );
+                                preserved
+                            })
+                            .unwrap_or_else(|| render(std::slice::from_ref(after)))
+                    }
+                    _ => render(std::slice::from_ref(after)),
+                });
+                projected.replace_range(range.clone(), &replacement);
+            }
         }
     }
-    let reparsed = parse(&projected)?;
-    validate_in_progress_marker_projection(&entries, &reparsed)?;
-    anyhow::ensure!(
-        reparsed == marked_entries,
-        "queue runtime projection changed non-marker row structure"
-    );
-    Ok(Some((projected, reparsed)))
+    let stripped = strip_unspanned_empty_list_placeholders(&projected)?;
+    if stripped == body && !markers_changed {
+        return Ok(None);
+    }
+    let reparsed = parse(&stripped)?;
+    if markers_changed {
+        validate_in_progress_marker_projection(&entries, &reparsed)?;
+        anyhow::ensure!(
+            reparsed == marked_entries,
+            "queue runtime projection changed non-marker row structure"
+        );
+    } else {
+        anyhow::ensure!(
+            reparsed == entries,
+            "removing an empty list placeholder changed queue structure"
+        );
+    }
+    Ok(Some((stripped, reparsed)))
 }
 
 /// Runtime projection is lossless for untouched rows, so an unchanged context
@@ -13415,6 +13458,77 @@ mod tests {
         let trailing = parse("- parent\n  - one\n  -\n").unwrap();
         assert_eq!(prompts(&trailing).len(), 1);
         assert_eq!(prompts(&trailing)[0].text, "one");
+    }
+
+    /// sdk-dev.md gained `      - ` directly under a `%%` comment while a
+    /// sibling claim was painted. The placeholder is not an entry, so a
+    /// span-only projection used to write it back. Projection removes it,
+    /// and a second pass is a no-op.
+    #[test]
+    fn runtime_projection_drops_nested_empty_list_placeholder() {
+        use agent_doc_document::queue_projection::{QueueLifecycleMarker, QueueOwnerProjection};
+
+        let body = concat!(
+            "- ### https://github.com/haiven-dev/haiven-sdk/pull/293\n",
+            "  - %% fix(promotion): skip a source target that has no sdk-dev %%\n",
+            "      - \n",
+            "  - real child\n",
+        );
+        let (projected, entries) = project_prompt_runtime_projections(body, &[])
+            .unwrap()
+            .expect("placeholder cleanup");
+        let expected = concat!(
+            "- ### https://github.com/haiven-dev/haiven-sdk/pull/293\n",
+            "  - %% fix(promotion): skip a source target that has no sdk-dev %%\n",
+            "  - real child\n",
+        );
+        assert_eq!(projected, expected);
+        assert_eq!(entries, parse(body).unwrap());
+        assert!(
+            !projected.lines().any(|line| line.trim() == "-"),
+            "{projected}"
+        );
+
+        let fenced = concat!("- keep the fence\n", "```\n", "      - \n", "```\n",);
+        assert_eq!(
+            project_prompt_runtime_projections(fenced, &[]).unwrap(),
+            None,
+            "a placeholder inside a fenced payload is payload, not a queue gap"
+        );
+
+        let targets = [QueueRowProjection {
+            identity: None,
+            text: "real child".to_string(),
+            marker: QueueLifecycleMarker::Running,
+            owner: Some(QueueOwnerProjection {
+                owner: "subagent:public-nosdkdev-pr".to_string(),
+                generation: 1,
+            }),
+            blockers: Vec::new(),
+        }];
+        let (painted, _) = project_prompt_runtime_projections(body, &targets)
+            .unwrap()
+            .expect("claim paint");
+        assert!(
+            !painted.lines().any(|line| line.trim() == "-"),
+            "painting a sibling must not keep the blank subitem:\n{painted}"
+        );
+        assert!(painted.contains("🚧 [#subagent:public-nosdkdev-pr#1] real child"));
+        assert!(painted.contains("%% fix(promotion): skip a source target that has no sdk-dev %%"));
+        assert_eq!(
+            project_prompt_runtime_projections(&painted, &targets).unwrap(),
+            None,
+            "cleanup is idempotent"
+        );
+
+        let empty = vec![QueueEntry::Prompt(QueuePrompt {
+            note: None,
+            text: String::new(),
+            multiline: false,
+            indent: 6,
+            ordered_marker: None,
+        })];
+        assert_eq!(render(&empty), "");
     }
 
     #[test]

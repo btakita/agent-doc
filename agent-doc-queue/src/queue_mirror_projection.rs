@@ -67,6 +67,12 @@ pub fn project_runtime_projections_across_queues(
             entries: &block.entries,
         });
         if targets.is_empty() {
+            let body = block.component.content(content);
+            let stripped = document_queue::strip_unspanned_empty_list_placeholders(body)?;
+            if stripped != body {
+                projected = block.component.replace_content(&projected, &stripped);
+                changed = true;
+            }
             continue;
         }
         let body = block.component.content(content);
@@ -149,6 +155,34 @@ pub fn restore_missing_nested_claim_rows_across_queues(
         }
         if block_changed {
             projected = block.component.replace_content(&projected, &body);
+            changed = true;
+        }
+    }
+    Ok(changed.then_some(projected))
+}
+
+/// Remove empty list placeholders from every queue body.
+///
+/// A retained rebase can copy an editor gap such as `      - ` back into the
+/// agent target. Those lines are not operator text. `Ok(None)` when nothing
+/// changed or the document cannot be segmented.
+pub fn strip_empty_list_placeholders_across_queues(content: &str) -> Result<Option<String>> {
+    let Ok(components) = element::parse(content) else {
+        return Ok(None);
+    };
+    let mut projected = content.to_string();
+    let mut changed = false;
+    let queues: Vec<_> = components
+        .iter()
+        .filter(|component| component.name == "queue")
+        .collect();
+    for component in queues.into_iter().rev() {
+        let body = component.content(content);
+        let Ok(stripped) = document_queue::strip_unspanned_empty_list_placeholders(body) else {
+            continue;
+        };
+        if stripped != body {
+            projected = component.replace_content(&projected, &stripped);
             changed = true;
         }
     }

@@ -812,7 +812,8 @@ pub fn merge_by_component(
     let ours_text = canonicalize_complete_document_replay("ours", ours_text)?;
     let theirs_text = canonicalize_complete_document_replay("theirs", theirs_text)?;
     if !lossless_tree_merge_enabled() {
-        return merge_by_component_authoritative(base_state, ours_text, theirs_text);
+        return merge_by_component_authoritative(base_state, ours_text, theirs_text)
+            .map(drop_queue_empty_list_placeholders);
     }
     let base_text = match base_state {
         Some(bytes) => CrdtDoc::decode_state(bytes)
@@ -825,7 +826,8 @@ pub fn merge_by_component(
     else {
         // The tree is not confident (conflict / structural or frontmatter divergence
         // / opaque markers): the causality-aware CRDT owns this merge.
-        return merge_by_component_authoritative(base_state, ours_text, theirs_text);
+        return merge_by_component_authoritative(base_state, ours_text, theirs_text)
+            .map(drop_queue_empty_list_placeholders);
     };
     // FULL flip: both sides are insertions-only over base ⇒ no deletion ⇒ no stale
     // revert is possible ⇒ the tree is the sole authority and the CRDT never runs.
@@ -836,7 +838,7 @@ pub fn merge_by_component(
             "[crdt] merge_by_component: lossless-tree authoritative, CRDT skipped (additive merged_len={})",
             tree_text.len()
         );
-        return Ok(tree_text);
+        return Ok(drop_queue_empty_list_placeholders(tree_text));
     }
     // GUARDED path: a side deleted content relative to base, so a stale-side revert
     // is possible. Compute the causality-aware CRDT; the tree wins only on byte
@@ -849,7 +851,7 @@ pub fn merge_by_component(
                 "[crdt] merge_by_component: lossless-tree authoritative (agrees, merged_len={})",
                 tree_text.len()
             );
-            return Ok(tree_text);
+            return Ok(drop_queue_empty_list_placeholders(tree_text));
         }
         eprintln!(
             "[crdt] merge_by_component: lossless_merge_divergence tree_len={} crdt_len={} (keeping CRDT — needs op causality)",
@@ -857,7 +859,65 @@ pub fn merge_by_component(
             crdt_text.len()
         );
     }
-    authoritative
+    authoritative.map(drop_queue_empty_list_placeholders)
+}
+
+/// Drop editor placeholder bullets from queue bodies after a merge.
+///
+/// An additive tree merge keeps a theirs-only `      - ` because it is an
+/// insertion. That marker is not queue content. Fenced payload lines stay.
+fn drop_queue_empty_list_placeholders(text: String) -> String {
+    let Ok(components) = agent_doc_element::element::parse(&text) else {
+        return text;
+    };
+    let edits = components
+        .iter()
+        .filter(|component| component.name == "queue")
+        .filter_map(|component| {
+            let body = component.content(&text);
+            let stripped = strip_empty_list_placeholders_outside_fences(body);
+            (stripped != body).then_some((component.open_end, component.close_start, stripped))
+        })
+        .collect::<Vec<_>>();
+    if edits.is_empty() {
+        return text;
+    }
+    let mut out = text;
+    for (start, end, body) in edits.into_iter().rev() {
+        out.replace_range(start..end, &body);
+    }
+    out
+}
+
+fn strip_empty_list_placeholders_outside_fences(body: &str) -> String {
+    let mut fence: Option<&'static str> = None;
+    let mut out = String::with_capacity(body.len());
+    for line in body.split_inclusive('\n') {
+        let core = line.trim_end_matches(['\n', '\r']);
+        let trimmed = core.trim();
+        if let Some(marker) = fence {
+            if trimmed == marker {
+                fence = None;
+            }
+            out.push_str(line);
+            continue;
+        }
+        if trimmed.starts_with("```") {
+            fence = Some("```");
+            out.push_str(line);
+            continue;
+        }
+        if trimmed.starts_with("~~~") {
+            fence = Some("~~~");
+            out.push_str(line);
+            continue;
+        }
+        if agent_doc_element_queue::subprompts::is_empty_list_placeholder_line(core) {
+            continue;
+        }
+        out.push_str(line);
+    }
+    out
 }
 
 /// Whether every line of `base` appears, in order, within `side` — i.e. `side` was
@@ -2238,7 +2298,7 @@ fn reconcile_component_body(
     };
     let mut ours_children = split(ours_body)?;
     let mut theirs_children = split(theirs_body)?;
-    let base_children = base_body.and_then(split).unwrap_or_default();
+    let mut base_children = base_body.and_then(split).unwrap_or_default();
 
     // A generated q-id is identity promotion, not insertion of another row.
     // Align both cuts to the base key before choosing the operator order spine;
@@ -2355,6 +2415,16 @@ fn reconcile_component_body(
                 });
             }
         }
+    }
+
+    if name == "queue" {
+        // `#blanksubitem`: every empty bullet shares one `txt:` key, and a
+        // keyed or flat merge would otherwise write `      - ` back into the
+        // queue. Drop the placeholder before the uniqueness gate.
+        let keep = |child: &KeyedChild| !queue_list_child_is_empty_placeholder(&child.text);
+        ours_children.retain(&keep);
+        theirs_children.retain(&keep);
+        base_children.retain(keep);
     }
 
     if !keys_unique(&ours_children)
@@ -2500,6 +2570,20 @@ fn reconcile_component_body(
         }
     }
     Some(out)
+}
+
+fn queue_list_child_is_empty_placeholder(text: &str) -> bool {
+    let mut saw_placeholder = false;
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        if !agent_doc_element_queue::subprompts::is_empty_list_placeholder_line(line) {
+            return false;
+        }
+        saw_placeholder = true;
+    }
+    saw_placeholder
 }
 
 /// Complete queue instruction revision, excluding lifecycle decoration.

@@ -75,6 +75,13 @@ pub fn list_item_content(line: &str) -> Option<&str> {
     matches!(after, "." | ")").then_some("")
 }
 
+/// An editor placeholder list marker (`-`, `*`, `+`, `N.`, `N)`) with no item
+/// text. Indentation and a trailing space still count. These rows are not
+/// operator content: queue projection must not write them back as items.
+pub fn is_empty_list_placeholder_line(line: &str) -> bool {
+    list_item_content(line).is_some_and(|content| content.trim().is_empty())
+}
+
 /// True when `line` is an indented list item: the only line shape that can
 /// open (or extend) a sub-prompt block beneath a parent row.
 pub fn is_indented_list_line(line: &str) -> bool {

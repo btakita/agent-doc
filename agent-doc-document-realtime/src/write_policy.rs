@@ -1393,16 +1393,21 @@ pub fn rebase_retained_target_over_editor_cut(
     );
     let rebase =
         rebase_agent_candidate_over_editor_cut_reconciled(merge_base, agent_target, editor_cut)?;
+    let rebased =
+        agent_doc_queue::queue_mirror_projection::strip_empty_list_placeholders_across_queues(
+            &rebase.rebased,
+        )?
+        .unwrap_or(rebase.rebased);
     let lost = operator_lines_lost(
         merge_base,
         agent_target,
         &rebase.editor_reconciled,
-        &rebase.rebased,
+        &rebased,
     );
     if !lost.is_empty() {
         return Err(OperatorTextWouldBeLost { lines: lost }.into());
     }
-    Ok(rebase.rebased)
+    Ok(rebased)
 }
 
 /// `#retainedprojectionclobber`: a retained rebase that would have deleted
@@ -1452,6 +1457,9 @@ pub fn operator_lines_lost(
             .lines()
             .map(|line| line.trim().to_string())
             .filter(|line| !line.is_empty())
+            .filter(|line| {
+                !agent_doc_element_queue::subprompts::is_empty_list_placeholder_line(line)
+            })
             .collect()
     }
     fn counts(lines: &[String]) -> std::collections::HashMap<&str, usize> {
@@ -4572,6 +4580,30 @@ mod tests {
         assert!(frontmatter.contains("\nqueue: start"), "{rebased}");
         assert_eq!(frontmatter.matches("queue:").count(), 1, "{rebased}");
         assert!(!frontmatter.contains("stop"), "{rebased}");
+    }
+
+    #[test]
+    fn empty_list_placeholder_is_not_lost_operator_text() {
+        let base = "<!-- agent:queue -->\n- keep this row\n<!-- /agent:queue -->\n";
+        let target = base;
+        let cut = "<!-- agent:queue -->\n- keep this row\n      - \n<!-- /agent:queue -->\n";
+        let rebased = base;
+        assert!(
+            operator_lines_lost(base, target, cut, rebased).is_empty(),
+            "an empty nested bullet is not operator text"
+        );
+        let cut_real =
+            "<!-- agent:queue -->\n- keep this row\n- operator note\n<!-- /agent:queue -->\n";
+        assert_eq!(
+            operator_lines_lost(base, target, cut_real, rebased),
+            vec!["- operator note".to_string()]
+        );
+        let cleaned = rebase_retained_target_over_editor_cut(base, target, cut).unwrap();
+        assert!(
+            !cleaned.lines().any(|line| line.trim() == "-"),
+            "retained rebase must not write the blank subitem back:\n{cleaned}"
+        );
+        assert!(cleaned.contains("- keep this row"));
     }
 
     #[test]

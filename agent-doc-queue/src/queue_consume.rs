@@ -4488,8 +4488,11 @@ fn response_lookup_children(
 }
 
 fn render_nested_response_content(content: &str) -> String {
-    let mut lines = content.lines();
-    let mut rendered = format!("- {}", lines.next().unwrap_or_default());
+    let mut lines = content.split('\n');
+    let Some(first) = lines.find(|line| !line.trim().is_empty()) else {
+        return String::new();
+    };
+    let mut rendered = format!("- {first}");
     for line in lines {
         rendered.push_str("\n  ");
         rendered.push_str(line);
@@ -5509,7 +5512,10 @@ fn balance_nested_details_for_response(response_body: &str) -> String {
 
 fn render_response_lookup_child(child: &str, child_indent: &str) -> String {
     let mut lines = child.split('\n');
-    let mut rendered = format!("{child_indent}- {}\n", lines.next().unwrap_or_default());
+    let Some(first) = lines.find(|line| !line.trim().is_empty()) else {
+        return String::new();
+    };
+    let mut rendered = format!("{child_indent}- {first}\n");
     let continuation_indent = format!("{child_indent}  ");
     for line in lines {
         rendered.push_str(&continuation_indent);

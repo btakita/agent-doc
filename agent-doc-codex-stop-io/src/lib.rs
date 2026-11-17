@@ -7897,7 +7897,7 @@ queue: go
             .find("active_session_prompt_requires_writeback(")
             .expect("exchange writeback check");
         let status_sync = clean_stop
-            .find("final_status_sync_continuation(")
+            .find("final_owner_continuations(")
             .expect("status sync check");
         let settlement_at = clean_stop
             .find("settle_session_binding(")

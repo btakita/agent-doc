@@ -20,6 +20,8 @@
 //! guards (`**Deferred:**`, nonterminal review prose) still apply on top.
 //! `#operatororderclosed`: `BLOCKED` does not complete an operator order when
 //! it asks for a human review the preset already refuses to approve or dismiss.
+//! `#adversarialselfreview`: a `REVIEW-CLEAN` that admits no posted review does
+//! not complete a preset that requires one plain COMMENTED review.
 //!
 //! Prompt presets are inherited from `.agent-doc/project.md`, which this pure
 //! crate cannot read. IO boundaries that run a strike, consumption, or residue
@@ -243,6 +245,107 @@ pub fn head_goal_preset_bodies(content: &str, head: &str) -> Vec<String> {
 /// operator to clear or dismiss a review, or withholds the pull-request response.
 pub const OPERATOR_ORDER_CLOSE_RULE: &str = "Operator order (#operatororderclosed): do not close this order with BLOCKED, and do not ask the operator a question the preset already answers. Do not approve or dismiss a human review. Address the review and resolve every thread that is fully addressed. A rerun does not post another human review when the current head already has one. When the run cannot progress, still write the response on the pull request, and that response says why the work is not progressing. Do not post that explanation again when it is already on the pull request for this head. Do not skip the write. These rules override a preset sentence that stays BLOCKED, withholds another address cycle, or tells the worker not to post.";
 
+/// `#adversarialselfreview`: the GitHub login may be the pull-request author.
+/// A fresh reviewer that did not implement the head still posts one plain
+/// COMMENTED review. An APPROVED review, an empty COMMENTED review, or an
+/// older SHA does not replace it. This overrides the `#operatororderclosed`
+/// sentence that a rerun does not post another human review, but only when
+/// the exact head lacks a verdict-bearing plain COMMENTED review.
+pub const INDEPENDENT_SELF_REVIEW_RULE: &str = "Independent self-review (#adversarialselfreview): #adversarial-pr posts exactly one plain COMMENTED review on the exact current remote head even when `gh api user` is the pull-request author. That author-account review counts. Independence is a fresh reviewer that did not implement the head, not a different GitHub login. Do not refuse, and do not stop a compound row before #adversarial-pr, because the login matches the author. An APPROVED review, an empty COMMENTED review, a review on an older SHA, and the fixer's review of a head it just pushed do not replace that COMMENTED review. The #operatororderclosed sentence that a rerun does not post another human review does not skip this review when the exact head lacks a plain COMMENTED review that states a verdict. When that verdict-bearing COMMENTED review is already on the exact head, do not post a duplicate, and do not say REVIEW-CLEAN for an APPROVED or empty review. A hand-back that says no review was posted, or that the author login cannot post, is not REVIEW-CLEAN.";
+
+/// True when `item` carries `#adversarial-pr` as its own token.
+pub fn item_mentions_adversarial_preset(item: &str) -> bool {
+    let text = agent_doc_document::queue_projection::strip_priority_markers(item);
+    let text = crate::queue_continuation::mask_inline_code(&text);
+    text.split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '#' | '-' | '_')))
+        .any(|token| token.eq_ignore_ascii_case("#adversarial-pr"))
+}
+
+/// True when `body` requires the worker to post one plain COMMENTED review.
+fn preset_requires_posted_commented_review(body: &str) -> bool {
+    let lower = body.to_ascii_lowercase();
+    lower.contains("plain commented")
+        && (lower.contains("exactly one") || lower.contains("must post"))
+}
+
+fn unquoted_lower(response: &str) -> String {
+    response
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('>'))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_ascii_lowercase()
+}
+
+/// A hand-back that records the required plain COMMENTED review, including one
+/// already on the exact head, is a real `REVIEW-CLEAN`.
+fn affirms_posted_commented_review(lower: &str) -> bool {
+    const POSTED: &[&str] = &[
+        "posted one plain",
+        "posted exactly one",
+        "posted a plain commented",
+        "posted one commented",
+        "plain commented review is already",
+        "plain commented review was already",
+        "already has a plain commented",
+        "already has one plain commented",
+        "verdict-bearing plain commented",
+    ];
+    POSTED.iter().any(|phrase| lower.contains(phrase))
+}
+
+/// Phrases that admit this cycle posted no review. Naming the head author is
+/// not enough; that mention withholds only together with a refusal to post.
+/// "did not post a duplicate" is not one of these phrases.
+fn withholds_posted_review(lower: &str) -> bool {
+    const NO_POST: &[&str] = &[
+        "posted nothing",
+        "nothing was posted",
+        "no review was posted",
+        "no second review was posted",
+        "did not post a review",
+        "did not post the review",
+        "didn't post a review",
+        "didn't post the review",
+        "this cycle did not post a review",
+        "cycle did not post a review",
+    ];
+    if NO_POST.iter().any(|phrase| lower.contains(phrase)) {
+        return true;
+    }
+    let mentions_author = lower.contains("head author")
+        || lower.contains("gh api user")
+        || lower.contains("author login");
+    mentions_author
+        && (lower.contains("cannot post")
+            || lower.contains("can't post")
+            || lower.contains("does not count")
+            || lower.contains("doesn't count")
+            || lower.contains("refusing"))
+}
+
+/// `#adversarialselfreview`: `REVIEW-CLEAN` admits no posted plain COMMENTED
+/// review for a preset that requires one. Quote lines are the queue prompt,
+/// not the hand-back. An affirmative posting, or a verdict-bearing plain
+/// COMMENTED review already on the head, is not a withhold.
+pub fn review_clean_withheld_independent_review(response: &str, bodies: &[String]) -> bool {
+    if !bodies
+        .iter()
+        .any(|body| preset_requires_posted_commented_review(body))
+    {
+        return false;
+    }
+    let clean = ["REVIEW-CLEAN".to_string()];
+    if !text_states_final_state(response, &clean) {
+        return false;
+    }
+    let lower = unquoted_lower(response);
+    if affirms_posted_commented_review(&lower) {
+        return false;
+    }
+    withholds_posted_review(&lower)
+}
+
 /// True when `body` is a pull-request goal loop whose `BLOCKED` state must not
 /// close an operator order on a human review the preset already decided.
 pub fn preset_requires_operator_order_rule(body: &str) -> bool {
@@ -363,8 +466,16 @@ pub fn response_published_pull_request_explanation(response: &str) -> bool {
 
 /// True when a hand-back opens on a declared final state that completes the
 /// operator order. An already-answered human-review `BLOCKED` does not.
+/// `#adversarialselfreview`: a `REVIEW-CLEAN` that admits no posted plain
+/// COMMENTED review does not complete.
 pub fn hand_back_completes_goal_loop(response: &str, states: &[String], bodies: &[String]) -> bool {
     if !hand_back_begins_with_final_state(response, states) {
+        return false;
+    }
+    let clean = ["REVIEW-CLEAN".to_string()];
+    if hand_back_begins_with_final_state(response, &clean)
+        && review_clean_withheld_independent_review(response, bodies)
+    {
         return false;
     }
     let blocked = ["BLOCKED".to_string()];
@@ -758,6 +869,79 @@ mod tests {
 
         let clean = "REVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-200 head=bbb cycles=2";
         assert!(hand_back_completes_goal_loop(clean, &declared, &bodies));
+    }
+
+    /// `#adversarialselfreview`: REVIEW-CLEAN that admits this cycle posted no
+    /// plain COMMENTED review does not complete. A posted review, a review
+    /// already on the head, a body that does not require that review, and a
+    /// BLOCKED opening still do.
+    #[test]
+    fn review_clean_that_posted_no_commented_review_does_not_complete() {
+        let bodies = vec![
+            "/goal Bring the pull request to an independently review-clean head. The fresh reviewer posts exactly one plain COMMENTED review and must post that review on the exact head. Final states. Your final message must begin with exactly one of these lines: - `REVIEW-CLEAN head=<sha>`. - `BLOCKED <action> head=<sha>`.".to_string(),
+        ];
+        let declared = states(&["REVIEW-CLEAN", "BLOCKED"]);
+        let posted_nothing = "REVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-1 head=abc cycles=1\n\n\
+             This run posted nothing because `gh api user` is the head author. An APPROVED review is already on that head.";
+        assert!(review_clean_withheld_independent_review(
+            posted_nothing,
+            &bodies
+        ));
+        assert!(!hand_back_completes_goal_loop(
+            posted_nothing,
+            &declared,
+            &bodies
+        ));
+        let no_second = "REVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/13#pullrequestreview-2 head=def cycles=2\n\n\
+             No second review was posted. This cycle did not post a review. `gh api user` is the head author.";
+        assert!(!hand_back_completes_goal_loop(
+            no_second, &declared, &bodies
+        ));
+
+        let posted = "REVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-3 head=abc cycles=1\n\n\
+             Posted one plain COMMENTED review on the exact head.";
+        assert!(hand_back_completes_goal_loop(posted, &declared, &bodies));
+        let both = "REVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-4 head=abc cycles=1\n\n\
+             This run posted nothing earlier. Posted one plain COMMENTED review on the exact head.";
+        assert!(hand_back_completes_goal_loop(both, &declared, &bodies));
+        let already = "REVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-5 head=abc cycles=2\n\n\
+             No second review was posted. The verdict-bearing plain COMMENTED review is already on the exact head.";
+        assert!(hand_back_completes_goal_loop(already, &declared, &bodies));
+        let author_only = "REVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-6 head=abc cycles=1\n\n\
+             `gh api user` is the head author.";
+        assert!(hand_back_completes_goal_loop(
+            author_only,
+            &declared,
+            &bodies
+        ));
+        let cannot_post = "REVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-7 head=abc cycles=1\n\n\
+             `gh api user` is the head author and that login cannot post.";
+        assert!(!hand_back_completes_goal_loop(
+            cannot_post,
+            &declared,
+            &bodies
+        ));
+        let refusing = "REVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-8 head=abc cycles=1\n\n\
+             Refusing the independent review because `gh api user` is the head author.";
+        assert!(!hand_back_completes_goal_loop(refusing, &declared, &bodies));
+
+        let other = vec![
+            "/goal Bring the pull request to a review-clean remote head. Do not approve or dismiss a human review. Final states. Your final message must begin with exactly one of these lines: - `REVIEW-CLEAN head=<sha>`. - `BLOCKED <action> head=<sha>`.".to_string(),
+        ];
+        assert!(hand_back_completes_goal_loop(
+            posted_nothing,
+            &declared,
+            &other
+        ));
+        let budget = "BLOCKED restore the hosted runner budget head=abc cycles=1\n\nThis run posted nothing.";
+        assert!(hand_back_completes_goal_loop(budget, &declared, &bodies));
+        assert!(item_mentions_adversarial_preset(
+            "#fix-ci the #address then #adversarial-pr"
+        ));
+        assert!(!item_mentions_adversarial_preset("#address"));
+        assert!(!item_mentions_adversarial_preset(
+            "do not run `#adversarial-pr` in this note"
+        ));
     }
 
     #[test]

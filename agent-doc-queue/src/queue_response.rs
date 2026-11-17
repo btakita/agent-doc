@@ -2329,9 +2329,12 @@ pub fn latest_echo_cell_omits_inline_threads(content: &str, text: &str, head_tex
 /// declared final state (`REVIEW-CLEAN ...`, `BLOCKED ...`) lets the row close.
 /// `#operatororderclosed`: a `BLOCKED` line that asks for a human review the
 /// preset already refuses to approve or dismiss does not close the order.
-/// The cell runs from the echo to the next `### Re:` heading or queue-prompt
-/// echo. A text that never echoes the head is not a deferral of it (the head is
-/// simply unanswered). Returning `true` only ever prevents a strike.
+/// `#adversarialselfreview`: a `REVIEW-CLEAN` line that admits no posted plain
+/// COMMENTED review does not close a preset that requires one. A `BLOCKED`
+/// line in that same cell still does. The cell runs from the echo to the next
+/// `### Re:` heading or queue-prompt echo. A text that never echoes the head
+/// is not a deferral of it (the head is simply unanswered). Returning `true`
+/// only ever prevents a strike.
 pub fn latest_echo_cell_lacks_goal_final_state(content: &str, text: &str, head_text: &str) -> bool {
     let states = crate::goal_preset_terminal::head_final_states(content, head_text);
     if states.is_empty() {
@@ -2363,7 +2366,10 @@ pub fn latest_echo_cell_lacks_goal_final_state(content: &str, text: &str, head_t
     let bodies = crate::goal_preset_terminal::head_goal_preset_bodies(content, head_text);
     let answered =
         crate::goal_preset_terminal::blocked_review_order_already_answered(&cell, &bodies);
+    let withheld =
+        crate::goal_preset_terminal::review_clean_withheld_independent_review(&cell, &bodies);
     let blocked = ["BLOCKED".to_string()];
+    let clean = ["REVIEW-CLEAN".to_string()];
     let cell_states_final = blocks[index..cell_end]
         .iter()
         .enumerate()
@@ -2375,8 +2381,12 @@ pub fn latest_echo_cell_lacks_goal_final_state(content: &str, text: &str, head_t
                 if !states_line {
                     return false;
                 }
-                // A BLOCKED human-review ask the preset already answers is not
-                // a completion. REVIEW-CLEAN in the same cell still is.
+                // A withheld REVIEW-CLEAN is not a completion. A BLOCKED line
+                // in the same cell still is, except an already-answered
+                // human-review ask.
+                if withheld && crate::goal_preset_terminal::line_states_final_state(line, &clean) {
+                    return false;
+                }
                 !(answered && crate::goal_preset_terminal::line_states_final_state(line, &blocked))
             })
         });
@@ -2927,6 +2937,40 @@ mod tests {
         assert!(!latest_echo_cell_omits_address_fix(&doc, &landed, head));
         assert!(!latest_echo_cell_omits_inline_threads(&doc, &landed, head));
         assert!(!response_defers_queue_head(&doc, &landed, head));
+    }
+
+    /// `#adversarialselfreview`: an echoed REVIEW-CLEAN that admits no posted
+    /// plain COMMENTED review does not close the row. A posted review does. A
+    /// BLOCKED line in the same cell still counts.
+    #[test]
+    fn withheld_review_clean_echo_does_not_close_the_goal_row() {
+        let head = "https://github.com/sample-org/sample-repo/pull/12: #adversarial-pr";
+        let doc = format!(
+            "---\nqueue_active: true\nprompt_presets:\n  '#adversarial-pr': >-\n    /goal Bring the pull request to an independently review-clean head. The fresh reviewer posts exactly one plain COMMENTED review.\n    Final states. Your final message must begin with exactly one of these lines:\n    - `REVIEW-CLEAN head=<sha>`.\n    - `BLOCKED <action> head=<sha>`.\n---\n\n<!-- agent:queue auto -->\n- {head}\n<!-- /agent:queue -->\n"
+        );
+        assert_eq!(
+            crate::goal_preset_terminal::head_final_states(&doc, head),
+            vec!["REVIEW-CLEAN".to_string(), "BLOCKED".to_string()]
+        );
+        let withheld = format!(
+            "### Re: review\n\n> **Queue prompt:** {head}\n\nREVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-1 head=abc cycles=1\n\nThis run posted nothing because `gh api user` is the head author.\n"
+        );
+        assert!(latest_echo_cell_lacks_goal_final_state(
+            &doc, &withheld, head
+        ));
+        assert!(response_defers_queue_head(&doc, &withheld, head));
+        let posted = format!(
+            "### Re: review\n\n> **Queue prompt:** {head}\n\nREVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-2 head=abc cycles=1\n\nPosted one plain COMMENTED review on the exact head.\n"
+        );
+        assert!(!latest_echo_cell_lacks_goal_final_state(
+            &doc, &posted, head
+        ));
+        let blocked = format!(
+            "### Re: review\n\n> **Queue prompt:** {head}\n\nREVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12 head=abc cycles=1\n\nThis run posted nothing.\n\nBLOCKED restore the hosted runner budget head=abc cycles=1\n"
+        );
+        assert!(!latest_echo_cell_lacks_goal_final_state(
+            &doc, &blocked, head
+        ));
     }
 
     #[test]

@@ -1000,6 +1000,16 @@ fn render_preamble(
     if auth
         .presets
         .iter()
+        .any(|preset| preset.name.eq_ignore_ascii_case("#adversarial-pr"))
+        || crate::goal_preset_terminal::item_mentions_adversarial_preset(&auth.item)
+    {
+        out.push_str("- ");
+        out.push_str(crate::goal_preset_terminal::INDEPENDENT_SELF_REVIEW_RULE);
+        out.push('\n');
+    }
+    if auth
+        .presets
+        .iter()
         .any(|preset| preset.name.eq_ignore_ascii_case("#address"))
         || crate::address_fix_on_head::item_mentions_address_preset(&auth.item)
     {
@@ -1091,6 +1101,10 @@ mod tests {
             !p.contains("(#operatororderclosed)"),
             "a non-goal preset must not carry the operator-order close rule"
         );
+        assert!(
+            !p.contains("(#adversarialselfreview)"),
+            "a non-goal preset must not carry the independent self-review rule"
+        );
     }
 
     #[test]
@@ -1117,6 +1131,29 @@ mod tests {
         assert!(p.contains("(#addressinline)"), "{p}");
         assert!(p.contains("gh api repos/<owner>/<repo>/pulls/<number>/comments"));
         assert!(p.contains("THREAD-FIX-ON-HEAD"));
+        assert!(p.contains("(#adversarialselfreview)"), "{p}");
+        assert!(
+            p.contains("even when `gh api user` is the pull-request author"),
+            "{p}"
+        );
+    }
+
+    #[test]
+    fn unresolved_adversarial_token_still_states_the_self_review_rule() {
+        let item = "#fix-ci the #address then #adversarial-pr";
+        let content = doc("", "subagents", &[item], &[]);
+        let preamble = subagent_authorization("prs.md", &content, item).subagent_prompt_preamble;
+        assert!(preamble.contains("(#adversarialselfreview)"), "{preamble}");
+        assert!(
+            preamble.contains("even when `gh api user` is the pull-request author"),
+            "{preamble}"
+        );
+        let address = doc("", "subagents", &["#address the notes"], &[]);
+        assert!(
+            !subagent_authorization("prs.md", &address, "#address the notes")
+                .subagent_prompt_preamble
+                .contains("(#adversarialselfreview)")
+        );
     }
 
     #[test]
@@ -1144,9 +1181,28 @@ mod tests {
             );
             assert!(preamble.contains("THREAD-FIX-ON-HEAD"), "{preamble}");
             assert!(preamble.contains("INLINE-THREADS-LOADED 0"), "{preamble}");
+            assert_eq!(
+                preamble.contains("(#adversarialselfreview)"),
+                item.contains("#adversarial-pr"),
+                "{item}\n{preamble}"
+            );
         }
         let other = doc("", "subagents", &["do [#abc]"], &[]);
         let auth = subagent_authorization("prs.md", &other, "do [#abc]");
+        assert!(
+            !auth
+                .subagent_prompt_preamble
+                .contains("(#adversarialselfreview)"),
+            "{}",
+            auth.subagent_prompt_preamble
+        );
+        assert!(
+            !auth
+                .subagent_prompt_preamble
+                .contains("(#operatororderclosed)"),
+            "{}",
+            auth.subagent_prompt_preamble
+        );
         assert!(
             !auth.subagent_prompt_preamble.contains("(#addressinline)"),
             "{}",

@@ -1251,9 +1251,12 @@ impl QueueAutoClearEffect {
 /// without losing work: Claude Code and OpenCode get their native clear typed
 /// into the SAME live process (background agents and shells survive, exactly
 /// like an idle operator Clear, `#idleclearrestart`); Codex, whose `/clear`
-/// exits the process, gets a supervised fresh restart whose relaunch
-/// re-triggers the document. Codex is never typed `/clear` — that was the
-/// June failure (`'/clear' is disabled while a task is in progress`).
+/// exits the process, and Grok, whose `/clear` is an alias of `/new` and starts
+/// a second live session in the same process (`#grokclearfork`), each get a
+/// supervised fresh restart whose relaunch re-triggers the document. Codex and
+/// Grok are never typed `/clear` — the Codex type was the June failure
+/// (`'/clear' is disabled while a task is in progress`), and the Grok type left
+/// two live conversations on one document.
 pub(crate) fn deliver_queue_auto_clear_effect(
     shared: &SupervisorShared,
     stop: &AtomicBool,
@@ -1323,11 +1326,13 @@ impl DeferredOperatorClearEffect {
 
 /// `#clearqueuedliveturn`: deliver a deferred operator clear the way an idle
 /// operator Clear reaches the same harness (`#idleclearrestart`): typed into
-/// the live child when its native clear keeps the process, otherwise (Codex,
-/// whose `/clear` exits the process, `#clear-ready-restart`) a supervised fresh
-/// restart tagged as operator-Clear provenance, so the relaunch re-triggers
-/// the document only when work is pending. Typing `/clear` into Codex here was
-/// the one delivery left that raced Codex's own exit.
+/// the live child when its native clear keeps the one conversation, otherwise
+/// a supervised fresh restart tagged as operator-Clear provenance, so the
+/// relaunch re-triggers the document only when work is pending. That restart
+/// covers Codex, whose `/clear` exits the process (`#clear-ready-restart`), and
+/// Grok, whose `/clear` forks a second live session (`#grokclearfork`). Typing
+/// `/clear` into Codex here raced Codex's own exit; typing it into Grok left
+/// the previous conversation running.
 fn deliver_deferred_operator_clear(
     shared: &SupervisorShared,
     stop: &AtomicBool,

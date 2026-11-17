@@ -643,29 +643,37 @@ idle prompt.
 - A restart-triggered reopen is derived from restart provenance and pending
   work, never hard-coded on every IPC restart (`#idlecleartriggerinject`).
 - Operator Clear Session Context (`Clear` IPC) TYPES the harness-native clear
-  command into the live child whenever a responsive composer can take it
-  (`#idleclearrestart`): a `ready` actor with a live child receives `/clear`
+  command into the live child whenever a responsive composer can take it and
+  that command resets the one live conversation (`#idleclearrestart`): a
+  `ready` Claude Code or OpenCode actor with a live child receives `/clear`
   (OpenCode `/new`) through the same guarded pane-input delivery as the
   queued/deferred clear, marks the actor `busy` (`ipc_clear`) until the prompt
   returns, and answers `restart_fresh=false delivery=native_clear`. The child
-  process, and every Claude background agent and shell it owns, survives;
+  process, and every background agent and shell it owns, survives;
   restarting it killed them with no report (2026-10-11 live test: a background
   agent stopped at 12/40 ticks). The pure decision is
   `agent_doc_supervisor::lifecycle::operator_clear_delivery`. The supervised
-  fresh restart remains only where typing cannot work, each answered with
-  `restart_fresh=true reason=<…>`: no live child (`child_not_alive`), the actor
-  is `waiting_input` so the supervisor's restart-or-quit keepalive or a harness
-  permission prompt owns the input (`supervisor_waiting_input`), or the
-  harness's native clear exits the process (Codex, `#clear-ready-restart`:
-  `harness_clear_exits_process`). Such a restart crosses an open cycle only
+  fresh restart remains where typing cannot leave exactly one harness
+  conversation, each answered with `restart_fresh=true reason=<…>`: no live
+  child (`child_not_alive`), the actor is `waiting_input` so the supervisor's
+  restart-or-quit keepalive or a harness permission prompt owns the input
+  (`supervisor_waiting_input`), the harness's native clear exits the process
+  (Codex, `#clear-ready-restart`: `harness_clear_exits_process`), or typing the
+  clear forks a second live session in the same process (Grok, `#grokclearfork`:
+  `native_clear_forks_session`; Grok's `/clear` is an alias of `/new` and the
+  previous conversation keeps running). Grok is never typed `/clear`. Such a
+  restart crosses an open cycle only
   when the actor is `Ready` and the cycle's response is durably captured
   (`#clearcapturedcycle`, see the restart-admission rules above); otherwise it
   latches until the cycle closes and the answer says so
   (`deferred_until_cycle_closes=true`). Explicit Restart Agent and
   `session restart-supervisor` are separate commands and unchanged. A busy or
-  starting actor keeps the pre-existing typed delivery; the client-side
-  `operator_clear` guard has already queued a clear behind a live turn or
-  refused protected input before IPC is contacted. A typed clear has no
+  starting Claude Code, Codex, or OpenCode actor keeps the pre-existing typed
+  delivery; the client-side `operator_clear` guard has already queued a clear
+  behind a live turn or refused protected input before IPC is contacted. A
+  busy or starting Grok actor still restarts (`native_clear_forks_session`)
+  rather than typing `/clear`, and that restart latches while the child owns
+  an open cycle. A typed clear has no
   relaunch, so it never re-triggers the document; queue continuation after it
   stays with the idle-queue watch and its clear cooldown.
 - A restart-required operator Clear encodes its provenance in the stored
@@ -1124,8 +1132,10 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   their native clear (`/clear`, `/new`) typed into the SAME live child, so
   background agents and shells survive, with a `queue_auto_clear` context-clear
   projection that the settle gate holds the next dispatch behind; Codex, whose
-  `/clear` exits the process, gets a supervised fresh restart whose relaunch
-  re-triggers the document. Codex is never typed `/clear`. Each decision is logged
+  `/clear` exits the process, and Grok, whose `/clear` is an alias of `/new` and
+  starts a second live session in the same process (`#grokclearfork`), each get
+  a supervised fresh restart whose relaunch re-triggers the document. Codex and
+  Grok are never typed `/clear`. Each decision is logged
   to `ops.log` as `queue_auto_clear ... delivery=native_clear|restart_fresh
   result=...` or `queue_auto_clear_skipped reason=...`.
   Bare `clear` positively declares this default policy and is present in generated

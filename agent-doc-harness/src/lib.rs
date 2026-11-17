@@ -621,7 +621,10 @@ impl HarnessConfig {
     /// Harness-native command that starts a fresh conversation context.
     ///
     /// Claude Code and Codex use `/clear`; OpenCode has no `/clear` command and
-    /// uses `/new` for the same operator-visible reset.
+    /// uses `/new` for the same operator-visible reset. Grok documents `/clear`
+    /// as an alias of `/new`, and typing it starts a second session in the same
+    /// process (`#grokclearfork`). Callers that own a supervisor replace the
+    /// Grok child instead of submitting this command.
     pub fn context_clear_command(&self) -> &'static str {
         if self.binary == "opencode" {
             "/new"

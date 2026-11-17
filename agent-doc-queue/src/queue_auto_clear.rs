@@ -28,7 +28,9 @@
 //!    tick. Here Codex is never typed `/clear`: its context reset is a
 //!    supervised fresh restart ([`QueueAutoClearDelivery::RestartFresh`]), and
 //!    a clear is attempted at most once per item boundary (the baseline moves
-//!    as soon as one is sent).
+//!    as soon as one is sent). Grok uses that same restart: its `/clear` is an
+//!    alias of `/new` and starts a second live session in the same process
+//!    (`#grokclearfork`).
 //! 2. Durable clear markers without provenance let a restarted supervisor
 //!    press Enter on a stale `/clear` draft. Auto-clear markers carry the
 //!    [`QUEUE_AUTO_CLEAR_SOURCE`] provenance, and the orphan-draft recovery that
@@ -407,8 +409,10 @@ pub enum QueueAutoClearDelivery {
     /// Type the harness-native clear (`/clear`, OpenCode `/new`) into the live
     /// child. The process and its background agents/shells survive.
     TypeNativeClear,
-    /// Supervised fresh restart: the harness's own clear exits the process
-    /// (Codex), so typing it would race the child's exit.
+    /// Supervised fresh restart. Codex's `/clear` exits the process, and Grok's
+    /// `/clear` (an alias of `/new`) starts a second live session in the same
+    /// process (`#grokclearfork`). Typing either leaves the document without
+    /// exactly one harness conversation.
     RestartFresh,
 }
 

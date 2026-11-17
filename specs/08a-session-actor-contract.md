@@ -32,7 +32,13 @@ Authoritative fields:
 ownership generation by themselves. This includes restarts initiated by
 `/clear` in any harness (Codex, OpenCode): the supervisor auto-restarts the
 child and the actor transitions through `Starting` → `Ready` without ever
-entering `WaitingInput` or `Closed`. Route-level clear tracking
+entering `WaitingInput` or `Closed`. A harness context clear must leave
+exactly one live harness conversation associated with the document. Grok's
+`/clear` is an alias of `/new` and starts a second session in the same process
+(`#grokclearfork`); the supervisor replaces that child instead of typing the
+command. The replacement is still a child restart inside the same owning
+supervisor and does not by itself create a new ownership generation.
+Route-level clear tracking
 (`codex_hook::record_external_prompt_for_file`) is harness-agnostic so that
 managed and dispatch-only routes can restart fresh after a tracked `/clear`
 for both Codex and OpenCode.

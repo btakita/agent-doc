@@ -985,14 +985,71 @@ mod tests {
             child.reap();
         }
     }
+
+    /// `#grokclearfork`: an idle ready Grok child must not be typed `/clear`.
+    /// That slash is `/new` and starts a second live session in the same
+    /// process. Operator Clear replaces the child (`clear:fresh`) and names
+    /// the fork reason, distinct from Codex's process-exit reason.
+    #[test]
+    fn handle_ipc_clear_at_ready_grok_prompt_restarts_without_typing_clear() {
+        let shared = Arc::new(SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            None,
+            "grok",
+            None,
+            Some(agent_doc_controller::actor::ActorState::Ready),
+            None,
+        ));
+        let mut child = LiveTestChild::spawn();
+        shared.child_pid.store(child.pid(), Ordering::Relaxed);
+        let written = Arc::new(Mutex::new(Vec::new()));
+        *shared.inject_writer.lock() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(Box::new(
+            RecordingWriter(written.clone()),
+        )))));
+
+        let clear = agent_doc_supervisor_io::ipc::handle_supervisor_ipc(
+            IpcMethod::Clear {
+                bytes: "/clear".to_string(),
+            },
+            shared.as_ref(),
+        );
+
+        assert!(
+            clear.ok,
+            "ready grok clear must arm a fresh restart: {clear:?}"
+        );
+        assert_eq!(
+            clear
+                .data
+                .as_ref()
+                .and_then(|data| data["restart_fresh"].as_bool()),
+            Some(true),
+        );
+        assert_eq!(
+            clear.data.as_ref().and_then(|data| data["reason"].as_str()),
+            Some("native_clear_forks_session"),
+        );
+        child.reap();
+        assert!(shared.restart_requested.load(Ordering::Relaxed));
+        assert_eq!(*shared.restart_mode.lock(), "clear:fresh");
+        let intent =
+            agent_doc_supervisor_io::ipc::RestartIntent::decode(shared.restart_mode.lock().clone());
+        assert_eq!(intent.mode, "fresh");
+        assert!(intent.operator_clear);
+        assert!(!intent.restart_agent);
+        assert!(written.lock().is_empty(), "must not type /clear into Grok");
+    }
+
     /// `#bgclearpolicy`: queue auto-clear types the native clear into the SAME
     /// live Claude/OpenCode child (its background agents and shells survive)
-    /// and gives Codex — whose `/clear` exits the process — a supervised fresh
-    /// restart, never a typed `/clear`.
+    /// and gives Codex — whose `/clear` exits the process — and Grok — whose
+    /// `/clear` forks a second live session (`#grokclearfork`) — a supervised
+    /// fresh restart, never a typed `/clear`.
     #[test]
     fn queue_auto_clear_types_into_claude_and_opencode_and_restarts_codex() {
         use agent_doc_queue::queue_auto_clear::QueueAutoClearDelivery;
-        for harness_name in ["claude", "opencode", "codex"] {
+        for harness_name in ["claude", "opencode", "codex", "grok"] {
             let shared = Arc::new(SupervisorShared::with_actor_runtime(
                 "test",
                 "test-instance".to_string(),
@@ -1015,14 +1072,25 @@ mod tests {
             let (delivery, effect) =
                 crate::idle_watch::deliver_queue_auto_clear_effect(&shared, &stop, &harness);
 
-            if harness_name == "codex" {
-                assert_eq!(delivery, QueueAutoClearDelivery::RestartFresh);
+            if harness_name == "codex" || harness_name == "grok" {
+                assert_eq!(
+                    delivery,
+                    QueueAutoClearDelivery::RestartFresh,
+                    "{harness_name}"
+                );
                 assert_eq!(
                     effect,
-                    crate::idle_watch::QueueAutoClearEffect::RestartRequested
+                    crate::idle_watch::QueueAutoClearEffect::RestartRequested,
+                    "{harness_name}"
                 );
-                assert!(written.lock().is_empty(), "must not type /clear into Codex");
-                assert!(shared.restart_requested.load(Ordering::Relaxed));
+                assert!(
+                    written.lock().is_empty(),
+                    "{harness_name}: must not type /clear"
+                );
+                assert!(
+                    shared.restart_requested.load(Ordering::Relaxed),
+                    "{harness_name}"
+                );
                 let intent = agent_doc_supervisor_io::ipc::RestartIntent::decode(
                     shared.restart_mode.lock().clone(),
                 );

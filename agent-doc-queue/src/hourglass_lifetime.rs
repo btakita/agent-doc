@@ -387,9 +387,7 @@ fn followup_lifetime_key(text: &str) -> Option<String> {
     let bare = strip_correlation_ids(&bare);
     let bare = bare.split_whitespace().collect::<Vec<_>>().join(" ");
     let work = agent_doc_element_queue::strip_attempt_projection_prefix(&bare);
-    if followup_owner::followup_row_action_item(work).is_none() {
-        return None;
-    }
+    followup_owner::followup_row_action_item(work)?;
     let key = bare.to_ascii_lowercase();
     (!key.is_empty()).then_some(key)
 }

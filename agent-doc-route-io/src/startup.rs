@@ -63,6 +63,7 @@ enum ExistingStartupRegistrationDecision<'a> {
 /// A proven owner wins. The actor pane is reused only when it is not another
 /// document's live supervisor; otherwise startup allocates a fresh pane and
 /// leaves that supervisor alone.
+#[cfg(test)]
 fn startup_owner_pane<'a>(
     proven_owner: Option<&'a str>,
     actor_pane: Option<&'a str>,

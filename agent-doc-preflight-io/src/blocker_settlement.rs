@@ -67,18 +67,15 @@ fn closed_upstreams(root: Option<&Path>, upstreams: &[GithubUpstream]) -> Vec<Gi
             closed.push(upstream.clone());
             continue;
         }
-        match github_is_closed(upstream) {
-            Some(true) => {
-                newly_closed.push(key);
-                closed.push(upstream.clone());
-            }
-            Some(false) | None => {}
+        if let Some(true) = github_is_closed(upstream) {
+            newly_closed.push(key);
+            closed.push(upstream.clone());
         }
     }
-    if let Some(path) = cache_path.as_ref() {
-        if !newly_closed.is_empty() {
-            remember_closed(path, &newly_closed);
-        }
+    if let Some(path) = cache_path.as_ref()
+        && !newly_closed.is_empty()
+    {
+        remember_closed(path, &newly_closed);
     }
     closed
 }

@@ -553,7 +553,10 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      (for example PR delivery versus target-branch delivery), strike it in the
      current turn. Apply that immediate closeout to every verified reported
      row already available; do not leave the rest until final status or a
-     later cycle. At the next safe admission boundary, any still-open
+     later cycle. When PostToolUse, `agent-doc steering`, or a queue command
+     prints `[agent-doc] reported queue rows are ready to close now (#reportedmidturn)`,
+     run every listed closeout in that step, before other long work and before
+     the turn ends. At the next safe admission boundary, any still-open
      `Reported` attempt or reported-release receipt blocks fresh subagent
      dispatch. Let already-running atomic operations and workers finish, keep
      later dispatch candidates out of the inline drain loop, and resume fresh

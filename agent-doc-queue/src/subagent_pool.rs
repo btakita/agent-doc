@@ -814,6 +814,7 @@ impl PoolRefill {
             } else {
                 out.push_str("\n  no head waits for a slot.");
             }
+            out.push_str(REPORTED_CLOSEOUT_SAME_STEP_NOTE);
             return Some(out);
         }
         out.push_str(
@@ -828,9 +829,14 @@ impl PoolRefill {
                 self.waiting_for_slot
             ));
         }
+        out.push_str(REPORTED_CLOSEOUT_SAME_STEP_NOTE);
         Some(out)
     }
 }
+
+/// Refill text names `#reportedmidturn` so "before integrating" is not read as
+/// holding every ready `☑️` until Stop.
+const REPORTED_CLOSEOUT_SAME_STEP_NOTE: &str = "\n  A reported row that is already ready still closes in this same step, before the turn ends (`#reportedmidturn`). Refill does not hold it until Stop.";
 
 #[cfg(test)]
 mod tests {
@@ -1081,6 +1087,7 @@ mod tests {
             text.contains("before integrating any reported result"),
             "{text}"
         );
+        assert!(text.contains("#reportedmidturn"), "{text}");
         assert!(text.contains("3 more head(s) wait"), "{text}");
     }
 

@@ -39,10 +39,17 @@ pub const CONSUMER_HOOK: &str = "hook";
 pub const CONSUMER_CLI: &str = "cli";
 /// `agent-doc steering --follow <FILE>` stream consumer.
 pub const CONSUMER_FOLLOW: &str = "follow";
+/// stderr of a queue trigger (`report-complete`, `release`, `freeze`).
+pub const CONSUMER_COMMAND: &str = "command";
 
 /// Stable prefix so agents and tests can distinguish the reminder from
 /// operator-authored mid-turn steering.
 pub const STATUS_SYNC_CHECKPOINT_MARKER: &str = "[agent-doc] status-sync checkpoint";
+
+/// Stable prefix for a ready `☑️` closeout during an open owner turn
+/// (`#reportedmidturn`). Stop remains the backstop; this is the in-turn cue.
+pub const REPORTED_CLOSEOUT_MIDTURN_MARKER: &str =
+    "[agent-doc] reported queue rows are ready to close now (#reportedmidturn)";
 
 /// A compact steering reference is intentionally short-lived. The active
 /// cycle check normally expires it first; this wall-clock ceiling also bounds
@@ -2769,6 +2776,95 @@ fn subagent_pool_checkpoint(file: &Path, observed_at_ms: u64) -> Result<Option<S
     Ok(refill.render())
 }
 
+/// `project_runtime_state` key prefix of the last surfaced reported closeout.
+const REPORTED_CLOSEOUT_MIDTURN_KEY_PREFIX: &str = "reported_closeout_midturn";
+
+fn render_reported_closeout_midturn(commands: &[String]) -> String {
+    let mut out = format!(
+        "{REPORTED_CLOSEOUT_MIDTURN_MARKER}\n\
+         Complete every listed reported (`☑️`) row in this step, before other long work and before this turn ends. \
+         Do not batch them for Stop. A claimed head that still has no worker is still spawned first; \
+         that spawn does not postpone these closeouts until the turn ends. \
+         Independent heads stay dispatchable. Stop remains the backstop while any listed row is still open.\n"
+    );
+    for (index, command) in commands.iter().enumerate() {
+        out.push_str(&format!("\n{}. {command}", index + 1));
+    }
+    out
+}
+
+/// Mid-turn reported closeout (`#reportedmidturn`).
+///
+/// While the document cycle is open, every live reported obligation whose
+/// `required_commands` is non-empty is rendered once per consumer per distinct
+/// set. A committed or abandoned cycle, or no cycle, stays silent: the idle
+/// supervisor and Stop own that debt. `record` is false for `--peek`.
+/// `AwaitingOperator` obligations contribute no commands and stay quiet.
+pub fn reported_closeout_midturn_checkpoint(
+    file: &Path,
+    consumer: &str,
+    record: bool,
+) -> Result<Option<String>> {
+    let Some(cycle) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+        return Ok(None);
+    };
+    if !cycle.phase.is_open() {
+        return Ok(None);
+    }
+    let content = crate::resolve_current_document_content(file, "reported_closeout_midturn")?;
+    let obligations =
+        agent_doc_queue_io::queue_claim::reported_closeout_obligations_for_content(file, &content)?;
+    let commands: Vec<String> = obligations
+        .iter()
+        .flat_map(|obligation| obligation.required_commands())
+        .collect();
+    let Some(root) = project_root(file) else {
+        return Ok(None);
+    };
+    let key = format!(
+        "{REPORTED_CLOSEOUT_MIDTURN_KEY_PREFIX}:{consumer}:{}",
+        agent_doc_hash::content_hash(&canonical_document(file)?)
+    );
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    if commands.is_empty() {
+        if record {
+            agent_doc_sqlite::state_store::clear_project_runtime_state_in_db(&conn, &key)?;
+        }
+        return Ok(None);
+    }
+    let fingerprint = format!(
+        "{}\n{}",
+        cycle.cycle_id,
+        agent_doc_hash::content_hash(&commands.join("\n"))
+    );
+    if record
+        && agent_doc_sqlite::state_store::load_project_runtime_state_from_db(&conn, &key)?
+            .as_deref()
+            == Some(fingerprint.as_str())
+    {
+        return Ok(None);
+    }
+    if record {
+        agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
+            &conn,
+            &key,
+            &fingerprint,
+            now_ms(),
+        )?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "reported_closeout_midturn_surfaced file={} cycle={} consumer={} rows={} (#reportedmidturn)",
+                file.display(),
+                cycle.cycle_id,
+                consumer,
+                commands.len(),
+            ),
+        );
+    }
+    Ok(Some(render_reported_closeout_midturn(&commands)))
+}
+
 /// Surface a due `agent:place` during an open owner turn.
 ///
 /// A changed needs-write fingerprint, a sync revert, or an elapsed `interval`
@@ -3000,6 +3096,20 @@ fn post_tool_use_response_at_with_checkpoint(
             );
         }
     }
+    match reported_closeout_midturn_checkpoint(&file, CONSUMER_HOOK, true) {
+        Ok(Some(context)) => contexts.push(context),
+        Ok(None) => {}
+        Err(err) => {
+            // A closeout reminder must never steal steering or fail the tool call.
+            agent_doc_ops_log_io::log_op(
+                &file,
+                &format!(
+                    "reported_closeout_midturn_error file={} error={err:#}",
+                    file.display()
+                ),
+            );
+        }
+    }
     Ok((!contexts.is_empty()).then(|| post_tool_use_output(&contexts.join("\n\n"))))
 }
 
@@ -3145,6 +3255,148 @@ mod tests {
             .expect("changed refill");
         assert!(!second.contains("URGENT"), "{second}");
         assert!(second.contains("do [#b]"), "{second}");
+    }
+
+    fn report_running(file: &Path, item: &str, owner: &str) -> u64 {
+        let clock = agent_doc_queue_io::queue_claim::claim_clock_now_secs();
+        let _pin = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(clock);
+        let (_, claim) = agent_doc_queue_io::queue_claim::claim(file, item, owner, 7200).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            file,
+            item,
+            owner,
+            &format!("worker:{owner}"),
+            7200,
+            claim.generation,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::report_attempt(file, item, Some(claim.generation))
+            .unwrap();
+        claim.generation
+    }
+
+    /// `#reportedmidturn`: an open owner turn sees each distinct ready `☑️`
+    /// set once, including after capture, and a committed cycle stays silent.
+    #[test]
+    fn reported_closeout_midturn_surfaces_each_ready_set_once() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let content = "---\nsession: sid\nagent_doc_format: template\n---\n\n<!-- agent:queue subagents=2 go -->\n- do [#a]\n- do [#b]\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, content).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&file, Some(content), Some(content)).unwrap();
+        report_running(&file, "do [#a]", "subagent:a");
+
+        let first = reported_closeout_midturn_checkpoint(&file, CONSUMER_HOOK, true)
+            .unwrap()
+            .expect("ready closeout");
+        assert!(first.contains(REPORTED_CLOSEOUT_MIDTURN_MARKER), "{first}");
+        assert!(first.contains("#reportedmidturn"), "{first}");
+        assert!(first.contains("queue item \"#a\""), "{first}");
+        assert!(first.contains("before this turn ends"), "{first}");
+        assert_eq!(
+            reported_closeout_midturn_checkpoint(&file, CONSUMER_HOOK, true).unwrap(),
+            None,
+            "the same set is surfaced once"
+        );
+        let peeked = reported_closeout_midturn_checkpoint(&file, CONSUMER_HOOK, false)
+            .unwrap()
+            .expect("peek does not consult the watermark");
+        assert!(peeked.contains("#a"), "{peeked}");
+        let other_consumer = reported_closeout_midturn_checkpoint(&file, CONSUMER_CLI, true)
+            .unwrap()
+            .expect("each consumer delivers once");
+        assert!(other_consumer.contains("#a"), "{other_consumer}");
+
+        report_running(&file, "do [#b]", "subagent:b");
+        let second = reported_closeout_midturn_checkpoint(&file, CONSUMER_HOOK, true)
+            .unwrap()
+            .expect("a new report changes the set");
+        assert!(second.contains("#b"), "{second}");
+
+        agent_doc_cycle_state_io::mark_write_applied(&file, "write", Some(content), Some(content))
+            .unwrap();
+        assert_eq!(
+            reported_closeout_midturn_checkpoint(&file, CONSUMER_HOOK, true).unwrap(),
+            None,
+            "capture does not by itself change the set"
+        );
+        agent_doc_cycle_state_io::mark_committed(&file, "commit", Some(content), Some(content))
+            .unwrap();
+        assert_eq!(
+            reported_closeout_midturn_checkpoint(&file, "fresh-consumer", true).unwrap(),
+            None,
+            "a committed cycle stays silent"
+        );
+    }
+
+    #[test]
+    fn reported_closeout_midturn_is_silent_without_a_ready_row_or_an_open_cycle() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let content = "---\nsession: sid\nagent_doc_format: template\n---\n\n<!-- agent:queue subagents=1 go -->\n- do [#a]\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, content).unwrap();
+        assert_eq!(
+            reported_closeout_midturn_checkpoint(&file, CONSUMER_HOOK, true).unwrap(),
+            None,
+            "no cycle"
+        );
+        agent_doc_cycle_state_io::start_preflight(&file, Some(content), Some(content)).unwrap();
+        let clock = agent_doc_queue_io::queue_claim::claim_clock_now_secs();
+        let _pin = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(clock);
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&file, "do [#a]", "subagent:a", 7200).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &file,
+            "do [#a]",
+            "subagent:a",
+            "worker:a",
+            7200,
+            claim.generation,
+        )
+        .unwrap();
+        assert_eq!(
+            reported_closeout_midturn_checkpoint(&file, CONSUMER_HOOK, true).unwrap(),
+            None,
+            "a running claim is not a closeout"
+        );
+    }
+
+    #[test]
+    fn post_tool_use_surfaces_a_reported_closeout_once_for_the_owner() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let file = root.join("plan.md");
+        let content = "---\nsession: sid\nagent_doc_format: template\nagent_doc_steering_debounce_ms: 0\n---\n\n<!-- agent:queue subagents=1 go -->\n- do [#a]\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, content).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(content), Some(content)).unwrap();
+        seed_for_cycle(&file, &cycle.cycle_id, content, Some("do [#a]"), Vec::new()).unwrap();
+        bind_session(root, &file, "coord");
+        report_running(&file, "do [#a]", "subagent:a");
+
+        assert_eq!(
+            post_tool_use_response(&hook_payload(root, Some("worker-1"))).unwrap(),
+            None,
+            "a subagent tool call does not consume the owner closeout"
+        );
+        let first = post_tool_use_response(&hook_payload(root, None))
+            .unwrap()
+            .expect("owner hook");
+        let context = first["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap();
+        assert!(
+            context.contains(REPORTED_CLOSEOUT_MIDTURN_MARKER),
+            "{context}"
+        );
+        assert_eq!(
+            post_tool_use_response(&hook_payload(root, None)).unwrap(),
+            None,
+            "the same set is not repeated on the next tool call"
+        );
     }
 
     /// `#finishedheadrefill`, the live PostToolUse sequence (agent-doc-bugs.md,

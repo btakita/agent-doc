@@ -7047,6 +7047,7 @@ fn emit_subagent_pool_refill(
                 "[queue] WARNING: could not read {} for the subagent work-pool refill: {err:#}. Run `agent-doc queue pool` before dispatching more work.",
                 file.display()
             );
+            emit_reported_closeout_midturn(file);
             return;
         }
     };
@@ -7054,6 +7055,24 @@ fn emit_subagent_pool_refill(
         agent_doc_queue_io::subagent_pool::render_pool_refill_or_warn(file, &content, trigger)
     {
         eprintln!("{text}");
+    }
+    emit_reported_closeout_midturn(file);
+}
+
+/// `#reportedmidturn`: a queue trigger's stderr carries ready `☑️` closeouts
+/// in the same step as the pool refill. Never fails the trigger.
+fn emit_reported_closeout_midturn(file: &std::path::Path) {
+    match agent_doc_session_check_io::midturn_steering::reported_closeout_midturn_checkpoint(
+        file,
+        agent_doc_session_check_io::midturn_steering::CONSUMER_COMMAND,
+        true,
+    ) {
+        Ok(Some(text)) => eprintln!("{text}"),
+        Ok(None) => {}
+        Err(err) => eprintln!(
+            "[agent-doc] reported closeout checkpoint skipped for {}: {err:#}",
+            file.display()
+        ),
     }
 }
 

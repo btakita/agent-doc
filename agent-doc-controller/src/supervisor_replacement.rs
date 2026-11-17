@@ -67,6 +67,11 @@ pub struct SupervisorReplacementIntent {
 impl SupervisorReplacementIntent {
     pub fn parse(raw: &str) -> Result<Self, SupervisorReplacementParseError> {
         let raw = raw.trim();
+        // `#restartagenteditor`: `agent:continue@grok` is still a continue
+        // Restart Agent. The harness token is preserved by the parsed request's
+        // wire form, not by this intent.
+        let (raw, _) =
+            agent_doc_supervisor::harness_authority::split_restart_editor_harness_suffix(raw);
         let (mode, restart_agent) = match raw.strip_prefix(RESTART_AGENT_WIRE_PREFIX) {
             Some(mode) => (mode, true),
             None => (raw, false),
@@ -108,23 +113,30 @@ impl fmt::Display for SupervisorReplacementIntent {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ParsedSupervisorReplacementRequest {
     pub mode: SupervisorReplacementMode,
     pub restart_agent: bool,
     pub force: bool,
+    /// `#restartagenteditor`: editor-visible harness on `agent:<mode>@<agent>`.
+    pub expect_agent: Option<String>,
 }
 
 impl ParsedSupervisorReplacementRequest {
-    pub const fn intent(self) -> SupervisorReplacementIntent {
+    pub const fn intent(&self) -> SupervisorReplacementIntent {
         SupervisorReplacementIntent {
             mode: self.mode,
             restart_agent: self.restart_agent,
         }
     }
 
-    pub fn wire_mode(self) -> String {
-        self.intent().wire_mode()
+    pub fn wire_mode(&self) -> String {
+        let mut wire = self.intent().wire_mode();
+        if let Some(agent) = &self.expect_agent {
+            wire.push('@');
+            wire.push_str(agent);
+        }
+        wire
     }
 }
 
@@ -425,12 +437,20 @@ pub fn parse_supervisor_replacement_request(
         .and_then(Value::as_bool)
         .unwrap_or_else(|| fields.reason.is_some_and(|reason| reason.contains("force")));
 
-    let intent = SupervisorReplacementIntent::parse(mode)?;
+    let (mode_head, expect_agent) =
+        agent_doc_supervisor::harness_authority::split_restart_editor_harness_suffix(mode);
+    let intent = SupervisorReplacementIntent::parse(mode_head)?;
+    let expect_agent = intent
+        .restart_agent
+        .then_some(expect_agent)
+        .flatten()
+        .map(str::to_string);
 
     Ok(ParsedSupervisorReplacementRequest {
         mode: intent.mode,
         restart_agent: intent.restart_agent,
         force,
+        expect_agent,
     })
 }
 
@@ -527,6 +547,7 @@ mod tests {
                 mode: SupervisorReplacementMode::Continue,
                 restart_agent: false,
                 force: false,
+                expect_agent: None,
             }
         );
     }
@@ -546,6 +567,7 @@ mod tests {
                 mode: SupervisorReplacementMode::Fresh,
                 restart_agent: false,
                 force: true,
+                expect_agent: None,
             }
         );
     }
@@ -565,6 +587,7 @@ mod tests {
                 mode: SupervisorReplacementMode::Continue,
                 restart_agent: false,
                 force: false,
+                expect_agent: None,
             }
         );
     }
@@ -584,6 +607,7 @@ mod tests {
                 mode: SupervisorReplacementMode::Fresh,
                 restart_agent: false,
                 force: false,
+                expect_agent: None,
             }
         );
     }
@@ -742,6 +766,7 @@ mod tests {
                 mode: SupervisorReplacementMode::Continue,
                 restart_agent: true,
                 force: false,
+                expect_agent: None,
             }
         );
 
@@ -759,6 +784,7 @@ mod tests {
                 mode: SupervisorReplacementMode::Fresh,
                 restart_agent: true,
                 force: false,
+                expect_agent: None,
             }
         );
     }
@@ -775,8 +801,44 @@ mod tests {
                 diagnostic_payload: None,
             })
             .unwrap();
+            assert_eq!(parsed.expect_agent, None, "{raw}");
             assert_eq!(parsed.wire_mode(), raw, "wire mode must round-trip: {raw}");
         }
+
+        let editor = parse_supervisor_replacement_request(SupervisorReplacementRequestFields {
+            state: Some("agent:continue@grok"),
+            reason: None,
+            diagnostic_payload: None,
+        })
+        .unwrap();
+        assert_eq!(editor.mode, SupervisorReplacementMode::Continue);
+        assert!(editor.restart_agent);
+        assert_eq!(editor.expect_agent.as_deref(), Some("grok"));
+        assert_eq!(editor.wire_mode(), "agent:continue@grok");
+
+        // A valid suffix on a non-restart mode is not an editor override.
+        let dropped = parse_supervisor_replacement_request(SupervisorReplacementRequestFields {
+            state: Some("continue@grok"),
+            reason: None,
+            diagnostic_payload: None,
+        })
+        .unwrap();
+        assert!(!dropped.restart_agent);
+        assert_eq!(dropped.expect_agent, None);
+        assert_eq!(dropped.wire_mode(), "continue");
+
+        let invalid = parse_supervisor_replacement_request(SupervisorReplacementRequestFields {
+            state: Some("agent:continue@grok extra"),
+            reason: None,
+            diagnostic_payload: None,
+        })
+        .expect_err("an invalid suffix stays part of the mode and fails closed");
+        assert!(
+            invalid
+                .to_string()
+                .contains("unsupported supervisor replacement mode `continue@grok extra`"),
+            "{invalid}"
+        );
     }
 
     #[test]

@@ -103,6 +103,81 @@ pub fn restart_agent_frontmatter_agreement(
     }
 }
 
+/// `#restartagenteditor`: the harness Restart Agent must launch when the
+/// editor's `agent:` has not reached document authority yet.
+///
+/// The operator's unsynced edits, including that `agent:` change, are work for
+/// the harness the editor shows. Refusing the restart leaves the old harness
+/// running them. The pin records the pre-restart authority so later child
+/// restarts and the idle agent-change watch keep the editor harness until the
+/// authority catches up or declares a different one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperatorRestartHarnessPin {
+    pub editor_agent: String,
+    pub stale_authority_agent: Option<String>,
+}
+
+/// `Some` when Restart Agent should launch `editor_agent` instead of the
+/// authority's declared harness. `None` when the two already agree, or the
+/// caller supplied no editor-visible agent.
+pub fn operator_restart_harness_choice(
+    editor_agent: Option<&str>,
+    authority_agent: Option<&str>,
+) -> Option<OperatorRestartHarnessPin> {
+    match restart_agent_frontmatter_agreement(editor_agent, authority_agent) {
+        RestartAgentFrontmatterAgreement::Agrees => None,
+        RestartAgentFrontmatterAgreement::AuthorityLagsEditor {
+            editor_agent,
+            authority_agent,
+        } => Some(OperatorRestartHarnessPin {
+            editor_agent,
+            stale_authority_agent: authority_agent,
+        }),
+    }
+}
+
+/// Whether a stored pin still names the authority the editor has not reached.
+///
+/// A catch-up (`authority` now normalizes to the editor harness) and a newer
+/// declaration (any other harness) both release the pin so authority wins.
+pub fn pinned_restart_harness_still_holds(
+    pin: &OperatorRestartHarnessPin,
+    authority_agent: Option<&str>,
+) -> bool {
+    matches!(
+        restart_agent_frontmatter_agreement(Some(&pin.editor_agent), authority_agent),
+        RestartAgentFrontmatterAgreement::AuthorityLagsEditor {
+            authority_agent, ..
+        } if authority_agent == pin.stale_authority_agent
+    )
+}
+
+/// Split a restart wire mode `agent:continue@grok` into the mode head and the
+/// editor harness token. A missing or invalid suffix leaves the mode unchanged.
+pub fn split_restart_editor_harness_suffix(raw: &str) -> (&str, Option<&str>) {
+    let Some((head, tail)) = raw.rsplit_once('@') else {
+        return (raw, None);
+    };
+    if restart_editor_harness_token(tail) {
+        (head, Some(tail))
+    } else {
+        (raw, None)
+    }
+}
+
+/// Harness token allowed on the restart wire. Normalized names (`grok`,
+/// `claude-code`) pass; `default`, empty, and anything with whitespace or `:`
+/// does not, so a bad suffix cannot be parsed as a mode.
+pub fn restart_editor_harness_token(token: &str) -> bool {
+    let mut chars = token.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    first.is_ascii_alphanumeric()
+        && token != "default"
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
+}
+
 /// Process-lifetime reactive authority used by restart and idle-watch paths.
 /// Updating an unchanged observation is inert in Lazily; an explicit document
 /// edge overrides the active actor, while an absent edge keeps that actor.
@@ -280,5 +355,61 @@ mod tests {
         state.set_active_actor_harness("claude");
         assert_eq!(state.current().agent, "claude");
         assert_eq!(state.current().source, HarnessAuthoritySource::ActiveActor);
+    }
+
+    #[test]
+    fn operator_restart_launches_the_editor_harness_until_authority_moves() {
+        let pin = operator_restart_harness_choice(Some("grok"), Some("codex"))
+            .expect("a lagging authority launches the editor harness");
+        assert_eq!(pin.editor_agent, "grok");
+        assert_eq!(pin.stale_authority_agent.as_deref(), Some("codex"));
+        assert!(pinned_restart_harness_still_holds(&pin, Some("codex")));
+        assert!(pinned_restart_harness_still_holds(&pin, Some(" codex ")));
+        assert!(
+            !pinned_restart_harness_still_holds(&pin, Some("grok")),
+            "catch-up releases the pin"
+        );
+        assert!(
+            !pinned_restart_harness_still_holds(&pin, Some("grok-build")),
+            "an alias of the editor harness is catch-up"
+        );
+        assert!(
+            !pinned_restart_harness_still_holds(&pin, Some("claude")),
+            "a newer declaration releases the pin"
+        );
+        assert!(operator_restart_harness_choice(Some("grok-build"), Some("grok")).is_none());
+        assert!(operator_restart_harness_choice(None, Some("codex")).is_none());
+
+        let unset = operator_restart_harness_choice(Some("grok"), None).expect("unset authority");
+        assert_eq!(unset.stale_authority_agent, None);
+        assert!(pinned_restart_harness_still_holds(&unset, None));
+        assert!(!pinned_restart_harness_still_holds(&unset, Some("grok")));
+    }
+
+    #[test]
+    fn restart_wire_suffix_keeps_only_a_harness_token() {
+        assert_eq!(
+            split_restart_editor_harness_suffix("agent:continue@grok"),
+            ("agent:continue", Some("grok"))
+        );
+        assert_eq!(
+            split_restart_editor_harness_suffix("agent:fresh@claude-code"),
+            ("agent:fresh", Some("claude-code"))
+        );
+        assert_eq!(
+            split_restart_editor_harness_suffix("agent:continue"),
+            ("agent:continue", None)
+        );
+        assert_eq!(
+            split_restart_editor_harness_suffix("agent:continue@"),
+            ("agent:continue@", None)
+        );
+        assert_eq!(
+            split_restart_editor_harness_suffix("agent:continue@grok extra"),
+            ("agent:continue@grok extra", None)
+        );
+        assert!(restart_editor_harness_token("claude-code"));
+        assert!(!restart_editor_harness_token("default"));
+        assert!(!restart_editor_harness_token("grok:build"));
     }
 }

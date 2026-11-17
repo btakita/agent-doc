@@ -1815,6 +1815,60 @@ pub fn run_with_reap_policy_resume_and_harness(
                     // as `resolved_from=frontmatter:<x>` hid whether the document
                     // named the harness at all.
                     let declared_agent = restart_fm.agent.clone();
+                    // `#restartagenteditor`: an explicit Restart Agent carries the
+                    // editor harness on `restart_mode` (`agent:continue@grok`).
+                    // This iteration consumes that request and drops the prefix,
+                    // so a replay cannot outrank a later authority change. Later
+                    // continue/crash recycles keep the in-process pin only while
+                    // authority still declares the pre-restart harness. An
+                    // explicit Restart Agent with no editor evidence clears it.
+                    let encoded_restart = shared.restart_mode.lock().clone();
+                    let restart_intent = agent_doc_supervisor_io::ipc::RestartIntent::decode(
+                        encoded_restart.clone(),
+                    );
+                    let pinned_editor = shared.restart_editor_harness_pin();
+                    let editor_pin = if restart_intent.restart_agent {
+                        agent_doc_supervisor::harness_authority::operator_restart_harness_choice(
+                            restart_intent.expect_agent.as_deref(),
+                            declared_agent.as_deref(),
+                        )
+                    } else {
+                        pinned_editor.filter(|pin| {
+                            agent_doc_supervisor::harness_authority::pinned_restart_harness_still_holds(
+                                pin,
+                                declared_agent.as_deref(),
+                            )
+                        })
+                    };
+                    if restart_intent.restart_agent {
+                        let mut follow_up = restart_intent.clone();
+                        follow_up.restart_agent = false;
+                        follow_up.expect_agent = None;
+                        let mut slot = shared.restart_mode.lock();
+                        if *slot == encoded_restart {
+                            *slot = follow_up.encode();
+                        }
+                    }
+                    match editor_pin {
+                        Some(pin) => {
+                            let authority_label =
+                                pin.stale_authority_agent.as_deref().unwrap_or("<unset>");
+                            agent_doc_ops_log_io::log_op(
+                                file,
+                                &format!(
+                                    "restart_agent_editor_harness_applied file={} editor_agent={} authority_agent={} action=launch_editor_agent #restartagenteditor",
+                                    file.display(),
+                                    pin.editor_agent,
+                                    authority_label,
+                                ),
+                            );
+                            restart_fm.agent = Some(pin.editor_agent.clone());
+                            shared.set_restart_editor_harness_pin(Some(pin));
+                        }
+                        None => {
+                            shared.set_restart_editor_harness_pin(None);
+                        }
+                    }
                     let authority_harness = shared.resolve_document_harness(
                         restart_fm.agent.as_deref(),
                         global_config.default_agent.as_deref(),
@@ -2762,6 +2816,7 @@ pub fn run_with_reap_policy_resume_and_harness(
                     mode,
                     restart_agent,
                     operator_clear,
+                    expect_agent: _,
                 } = agent_doc_supervisor_io::ipc::RestartIntent::decode(encoded_mode);
                 first_run = mode == "fresh";
                 refresh_resume_from_frontmatter = restart_agent && !first_run;

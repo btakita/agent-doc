@@ -2779,6 +2779,10 @@ pub(crate) struct SupervisorShared {
     stop_agent_requested: AtomicBool,
     /// Restart mode requested via IPC ("fresh" or "continue").
     restart_mode: Mutex<String>,
+    /// `#restartagenteditor`: editor harness to keep launching while document
+    /// authority still declares the pre-restart agent. In-process only.
+    restart_editor_harness_pin_slot:
+        Mutex<Option<agent_doc_supervisor::harness_authority::OperatorRestartHarnessPin>>,
     /// Flag: stdin→pty writer forwarded \x04 (Ctrl+D) to the pty.
     ctrl_d_forwarded: AtomicBool,
     /// Flag: stdin→pty writer forwarded \x03 (Ctrl+C) to the pty.
@@ -2879,6 +2883,7 @@ impl SupervisorShared {
             stop_requested: AtomicBool::new(false),
             stop_agent_requested: AtomicBool::new(false),
             restart_mode: Mutex::new("continue".to_string()),
+            restart_editor_harness_pin_slot: Mutex::new(None),
             ctrl_d_forwarded: AtomicBool::new(false),
             ctrl_c_forwarded: AtomicBool::new(false),
             auto_trigger_outcome: AtomicU8::new(AutoTriggerOutcome::NotNeeded as u8),
@@ -2942,6 +2947,19 @@ impl SupervisorShared {
     fn current_harness(&self) -> String {
         agent_doc_harness::HarnessConfig::from_agent_name(&self.harness_authority.current().agent)
             .binary
+    }
+
+    fn restart_editor_harness_pin(
+        &self,
+    ) -> Option<agent_doc_supervisor::harness_authority::OperatorRestartHarnessPin> {
+        self.restart_editor_harness_pin_slot.lock().clone()
+    }
+
+    fn set_restart_editor_harness_pin(
+        &self,
+        pin: Option<agent_doc_supervisor::harness_authority::OperatorRestartHarnessPin>,
+    ) {
+        *self.restart_editor_harness_pin_slot.lock() = pin;
     }
 
     /// Resolve a current document observation against the active actor. Missing

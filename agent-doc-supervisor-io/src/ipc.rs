@@ -431,11 +431,16 @@ pub struct RestartIntent {
     /// `#idlecleartriggerinject`): the relaunch must not re-trigger the document
     /// unless pending work exists.
     pub operator_clear: bool,
+    /// `#restartagenteditor`: normalized editor harness on
+    /// `agent:<mode>@<agent>`. Kept only for an explicit Restart Agent.
+    pub expect_agent: Option<String>,
 }
 
 impl RestartIntent {
     pub fn decode(encoded: String) -> Self {
-        let mut rest = encoded.as_str();
+        let (head, expect_agent) =
+            agent_doc_supervisor::harness_authority::split_restart_editor_harness_suffix(&encoded);
+        let mut rest = head;
         let mut restart_agent = false;
         let mut operator_clear = false;
         loop {
@@ -449,10 +454,15 @@ impl RestartIntent {
                 break;
             }
         }
+        let expect_agent = restart_agent
+            .then_some(expect_agent)
+            .flatten()
+            .map(str::to_string);
         Self {
             mode: rest.to_string(),
             restart_agent,
             operator_clear,
+            expect_agent,
         }
     }
 
@@ -465,6 +475,13 @@ impl RestartIntent {
             encoded.push_str(OPERATOR_CLEAR_MODE_PREFIX);
         }
         encoded.push_str(&self.mode);
+        if self.restart_agent
+            && let Some(agent) = &self.expect_agent
+            && agent_doc_supervisor::harness_authority::restart_editor_harness_token(agent)
+        {
+            encoded.push('@');
+            encoded.push_str(agent);
+        }
         encoded
     }
 
@@ -474,6 +491,7 @@ impl RestartIntent {
             mode: "fresh".to_string(),
             restart_agent: false,
             operator_clear: true,
+            expect_agent: None,
         }
     }
 }
@@ -522,6 +540,7 @@ where
         mode,
         restart_agent,
         operator_clear,
+        expect_agent: _,
     } = intent;
     // Refresh the IPC-visible binary projection on every restart request even
     // when the child is dead and the request will take the normal relaunch
@@ -1273,17 +1292,26 @@ mod tests {
     /// no caller ever sees `clear:fresh` as a lineage mode.
     #[test]
     fn restart_intent_round_trips_operator_clear_provenance() {
-        for (raw, mode, restart_agent, operator_clear) in [
-            ("fresh", "fresh", false, false),
-            ("continue", "continue", false, false),
-            ("agent:continue", "continue", true, false),
-            ("clear:fresh", "fresh", false, true),
-            ("agent:clear:fresh", "fresh", true, true),
+        for (raw, mode, restart_agent, operator_clear, expect_agent) in [
+            ("fresh", "fresh", false, false, None),
+            ("continue", "continue", false, false, None),
+            ("agent:continue", "continue", true, false, None),
+            ("clear:fresh", "fresh", false, true, None),
+            ("agent:clear:fresh", "fresh", true, true, None),
+            ("agent:continue@grok", "continue", true, false, Some("grok")),
+            (
+                "agent:fresh@claude-code",
+                "fresh",
+                true,
+                false,
+                Some("claude-code"),
+            ),
         ] {
             let intent = RestartIntent::decode(raw.to_string());
             assert_eq!(intent.mode, mode, "{raw}");
             assert_eq!(intent.restart_agent, restart_agent, "{raw}");
             assert_eq!(intent.operator_clear, operator_clear, "{raw}");
+            assert_eq!(intent.expect_agent.as_deref(), expect_agent, "{raw}");
             assert_eq!(intent.encode(), raw);
             assert_eq!(
                 decode_restart_intent(raw.to_string()),

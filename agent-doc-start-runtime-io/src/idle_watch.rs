@@ -2636,6 +2636,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // acted on. Separate from the two dedupes above so the eventual
             // authoritative answer still requests exactly one restart.
             let mut agent_change_restart_deferred_for: Option<String> = None;
+            // `#restartagenteditor`: log the operator-pin hold once per watch.
+            let mut operator_restart_hold_logged = false;
             // `#codexcapacityretry`: Codex can settle at a ready composer after
             // rendering a transient provider-capacity error, without producing
             // another event that would wake the stalled turn. Submit the same
@@ -4202,8 +4204,38 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         fm.agent.as_deref(),
                         global.default_agent.as_deref(),
                     );
+                    // `#restartagenteditor`: the running child was launched from
+                    // the editor harness while authority still names the
+                    // pre-restart agent. Switching back here relaunches the
+                    // harness the operator just left. Drop the pin once
+                    // authority catches up or declares a different agent, then
+                    // the ordinary change path applies.
+                    let pin = shared.restart_editor_harness_pin();
+                    let pin_holds = pin.as_ref().is_some_and(|pin| {
+                        agent_doc_supervisor::harness_authority::pinned_restart_harness_still_holds(
+                            pin,
+                            fm.agent.as_deref(),
+                        )
+                    });
+                    if pin.is_some() && !pin_holds {
+                        shared.set_restart_editor_harness_pin(None);
+                        operator_restart_hold_logged = false;
+                    }
                     let harness_changed = resolved.binary != launch_harness_binary;
-                    if harness_changed {
+                    if harness_changed && pin_holds {
+                        if !operator_restart_hold_logged {
+                            operator_restart_hold_logged = true;
+                            agent_doc_ops_log_io::log_op(
+                                &path,
+                                &format!(
+                                    "agent_restart_held file={} running={} authority={} reason=operator_editor_harness action=keep_editor_agent #restartagenteditor",
+                                    path.display(),
+                                    launch_harness_binary,
+                                    resolved.binary,
+                                ),
+                            );
+                        }
+                    } else if harness_changed {
                         let decision = agent_change_restart_decision_from_view(
                             harness_changed,
                             agent_change_restart_enabled,

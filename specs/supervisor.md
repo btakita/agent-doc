@@ -229,15 +229,9 @@ came back on the old agent" is answerable from the log instead of inferred.
 none), never the actor the resolver substituted for an absent key.
 
 Restart Agent re-resolves the harness from the controller's document
-authority, not from the editor buffer, so it cannot see an `agent:` edit the
-authority has not merged yet (`#restartagentharness`). Observed 2026-10-27 on
-`tasks/software/lazily.md`: the editor replica was fenced at 16:07:54Z
-(`crdt_document_op_delta_ingested outcome=StructuralQuarantined`, then
-`crdt_replica_update_quarantined recovery=lazy_canonical_projection`), the
-operator's later `agent: claude` → `agent: grok` edit was recorded by op capture
-but never reached the authority, and five Restart Agent invocations each logged
-`resolved_harness=claude resolved_from=frontmatter:claude` and relaunched
-Claude Code. The editor therefore sends the `agent:` it shows:
+authority, not from the editor buffer (`#restartagentharness`). The editor
+therefore sends the `agent:` it shows, and a disagreement launches that
+harness instead of refusing (`#restartagenteditor`):
 
 - `agent-doc session restart-agent <FILE> --expect-agent <AGENT>`. JetBrains
   reads the open buffer's frontmatter through the native
@@ -247,21 +241,32 @@ Claude Code. The editor therefore sends the `agent:` it shows:
   the EDT, where native calls are forbidden, so it captures only the buffer
   text there and makes the native read and the command launch on a pooled
   thread (see `editors/jetbrains/SPEC.md` **Threads**).
-- Before requesting any replacement, the CLI compares that value with the
-  authority's declared `agent:` through the pure
+- The CLI compares that value with the authority's declared `agent:` through
   `agent_doc_supervisor::harness_authority::restart_agent_frontmatter_agreement`.
   Both sides are compared as declared names after `normalize_harness_name`
   (`claude`/`claude-code` and `grok`/`grok-build` agree), not as resolved
   binaries, so an unknown name never agrees with `claude` merely because both
-  fall back to it at launch. An absent or `default` editor value is no evidence
-  and admits the restart unchanged.
-- On disagreement the restart is refused with both values named and nothing is
-  replaced; the ops log records
-  `restart_agent_refused reason=authority_lags_editor editor_agent=<x> authority_agent=<y|<unset>>`.
-  Failing closed is deliberate: honouring the editor value over the authority
-  would let the idle agent-change watch (which reads the same authority) switch
-  the harness straight back, and the remedy for the stale authority is editor
-  sync convergence, not a supervisor-side override.
+  fall back to it at launch. An absent, empty, or `default` editor value is no
+  evidence: the request stays `agent:<mode>` and the supervisor follows
+  authority. An explicit Restart Agent with no editor evidence also drops any
+  earlier editor-harness pin.
+- On disagreement the restart is not refused. The operator's still-syncing
+  edits, including the `agent:` change, are work for the harness the editor
+  shows. The wire mode is `agent:<mode>@<normalized editor agent>` (for example
+  `agent:continue@grok`). The ops log records `restart_agent_editor_harness`
+  with `editor_agent` and `authority_agent`. The live supervisor that accepts
+  the request launches that editor harness
+  (`restart_agent_editor_harness_applied`) and keeps launching it on later
+  child restarts while the authority still declares the same pre-restart
+  harness. The idle agent-change watch does not switch back to that stale
+  authority (`agent_restart_held reason=operator_editor_harness`). When the
+  authority catches up to the editor harness, or declares a different one, the
+  pin drops and authority wins.
+- The pin lives in the supervisor process that accepted the restart. A cold
+  start or re-exec that never receives the wire still selects the harness from
+  document authority. A valid harness token is an identifier of letters,
+  digits, `.`, `_`, and `-` that is not `default`; an invalid suffix is not
+  split, so the mode fails closed. A suffix on a non-restart mode is dropped.
 
 The replacement child must not auto-trigger the document while that document has
 a retained binary-owned editor delivery. The supervisor keeps resetting the

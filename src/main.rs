@@ -10859,7 +10859,7 @@ fn try_main() -> anyhow::Result<()> {
                     )?;
                     if requeue.address_fix_pending {
                         eprintln!(
-                            "[queue] address hand-back for {:?} (owner {}, generation {}) does not land the review's written fix on the current head; the row stays open and the attempt was requeued (#reviewfixonhead). Next: {} and dispatch the same row; its brief carries this hand-back. Land the written fix, then finish with `FIX-ON-HEAD <review-url> head=<sha>`. A later review does not replace that fix.",
+                            "[queue] address hand-back for {:?} (owner {}, generation {}) does not land the review's written fix on the current head; the row stays open and the attempt was requeued (#reviewfixonhead). Next: {} and dispatch the same row; its brief carries this hand-back. Land the written fix, then finish with `FIX-ON-HEAD <review-url> head=<sha>`. If every review states no code change, do not invent a commit; finish with `NO-WRITTEN-FIX head=<sha>` so a row that also names `#adversarial-pr` continues to that review. A later review does not replace that fix.",
                             requeue.claim.item_text,
                             requeue.claim.owner,
                             requeue.claim.generation,
@@ -10898,7 +10898,7 @@ fn try_main() -> anyhow::Result<()> {
                         }
                     } else if requeue.inline_threads_pending {
                         eprintln!(
-                            "[queue] hand-back for {:?} (owner {}, generation {}) left a root inline discussion thread off the current head; the row stays open and the attempt was requeued (#addressinline). Query `gh api repos/<owner>/<repo>/pulls/<number>/comments`. Land each root thread's written fix on the exact current head, address the thread, and resolve it. Do not dismiss a thread. Finish with `THREAD-FIX-ON-HEAD <discussion-url> head=<sha> resolved` for every root thread, or `INLINE-THREADS-LOADED 0 head=<sha>` when that query returned no root comments. Next: {} and dispatch the same row; its brief carries this hand-back.",
+                            "[queue] hand-back for {:?} (owner {}, generation {}) left a root inline discussion thread off the current head; the row stays open and the attempt was requeued (#addressinline). Query `gh api repos/<owner>/<repo>/pulls/<number>/comments`. Land each root thread's written fix on the exact current head, address the thread, and resolve it. Do not dismiss a thread. Finish with `THREAD-FIX-ON-HEAD <discussion-url> head=<sha> resolved` for every root thread whose written fix is on that head, or `THREAD-NO-FIX <discussion-url> head=<sha> resolved` when the root thread states no code change, or `INLINE-THREADS-LOADED 0 head=<sha>` when that query returned no root comments. Do not invent a code change. Next: {} and dispatch the same row; its brief carries this hand-back.",
                             requeue.claim.item_text,
                             requeue.claim.owner,
                             requeue.claim.generation,

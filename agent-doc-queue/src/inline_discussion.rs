@@ -21,7 +21,7 @@
 use agent_doc_document::queue_projection::strip_priority_markers;
 
 /// Binding closeout for `#address` and `#adversarial-pr` (`#addressinline`).
-pub const INLINE_DISCUSSION_RULE: &str = "Inline discussion comments (#addressinline): #address and #adversarial-pr load every inline pull-request discussion comment, not only the review body. Before review or address, query `gh api repos/<owner>/<repo>/pulls/<number>/comments`. A root comment is one with no in_reply_to_id; its html_url contains `#discussion_r`. A `#pullrequestreview` body, an issue comment, and a later reply are not that root comment. Do not dismiss a thread. The run is not complete until every root thread's written fix is the code on the exact current head and that thread is addressed and resolved. The hand-back names each root thread on its own line: `THREAD-FIX-ON-HEAD <discussion-url> head=<sha> resolved`. Emit that line only when that head's code is the written fix and the thread was loaded, addressed, and resolved. When the comments query returns no root comments, the hand-back says `INLINE-THREADS-LOADED 0 head=<sha>` and names the query. A later reply on a thread does not stand in for loading the root comment. A line that cites a reply comment's own `#discussion_r` URL opens with `Reply`, `Replies`, or `Replied`; that reply id needs no receipt, and its root thread still does.";
+pub const INLINE_DISCUSSION_RULE: &str = "Inline discussion comments (#addressinline): #address and #adversarial-pr load every inline pull-request discussion comment, not only the review body. Before review or address, query `gh api repos/<owner>/<repo>/pulls/<number>/comments`. A root comment is one with no in_reply_to_id; its html_url contains `#discussion_r`. A `#pullrequestreview` body, an issue comment, and a later reply are not that root comment. Do not dismiss a thread. The run is not complete until every root thread's written fix is the code on the exact current head and that thread is addressed and resolved. The hand-back names each root thread on its own line: `THREAD-FIX-ON-HEAD <discussion-url> head=<sha> resolved`. Emit that line only when that head's code is the written fix and the thread was loaded, addressed, and resolved. When the comments query returns no root comments, the hand-back says `INLINE-THREADS-LOADED 0 head=<sha>` and names the query. A later reply on a thread does not stand in for loading the root comment. A line that cites a reply comment's own `#discussion_r` URL opens with `Reply`, `Replies`, or `Replied`; that reply id needs no receipt, and its root thread still does. When a root thread states no code change, do not invent one. Resolve it and name it with `THREAD-NO-FIX <discussion-url> head=<sha> resolved` instead of `THREAD-FIX-ON-HEAD`.";
 
 const GOAL_NAMES: &[&str] = &["#address", "#adversarial-pr"];
 
@@ -207,7 +207,9 @@ fn inline_threads_loaded_zero(response: &str) -> bool {
 
 fn line_thread_receipt(line: &str) -> Option<ThreadReceipt> {
     let rest = line_payload(line);
-    let rest = rest.strip_prefix("THREAD-FIX-ON-HEAD")?;
+    let rest = rest
+        .strip_prefix("THREAD-FIX-ON-HEAD")
+        .or_else(|| rest.strip_prefix("THREAD-NO-FIX"))?;
     if !rest.starts_with(|ch: char| ch.is_whitespace()) {
         return None;
     }
@@ -466,6 +468,19 @@ mod tests {
             !inline_threads_settled(&root_named_later),
             "a line that does not open with a reply label still names a root thread"
         );
+    }
+
+    #[test]
+    fn a_root_thread_with_no_code_change_settles_without_a_written_fix() {
+        let response = format!("THREAD-NO-FIX {MUST} head={HEAD} resolved\n");
+        assert!(inline_threads_settled(&response));
+        let mixed = format!(
+            "THREAD-FIX-ON-HEAD {MUST} head={HEAD} resolved\n\
+             THREAD-NO-FIX {SHOULD} head={HEAD} resolved\n"
+        );
+        assert!(inline_threads_settled(&mixed));
+        let unresolved = format!("THREAD-NO-FIX {MUST} head={HEAD} open\n");
+        assert!(!inline_threads_settled(&unresolved));
     }
 
     #[test]

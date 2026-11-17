@@ -2253,6 +2253,94 @@ mod tests {
         assert!(reported.appended);
     }
 
+    /// `#reviewfixonhead`: `#address then #adversarial-pr` whose reviews state
+    /// no code change is not another fix pass. `NO-WRITTEN-FIX` plus a
+    /// `THREAD-NO-FIX` receipt settles the address half and leaves the goal
+    /// loop open for the independent review.
+    #[test]
+    fn no_written_fix_on_address_then_adversarial_pr_continues_the_review() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            concat!(
+                "---\npresets:\n",
+                "  '#address': 'Address every actionable review item on the exact current head.'\n",
+                "  '#adversarial-pr': >-\n",
+                "    /goal Bring the pull request to an independently review-clean exact\n",
+                "    remote head.\n\n",
+                "    Final states. Your final message must begin with exactly one of these\n",
+                "    lines:\n",
+                "    - `REVIEW-CLEAN <final review URL> base=<sha> head=<sha> cycles=<n>`.\n",
+                "    - `BLOCKED <single operator action> base=<sha> head=<sha> cycles=<n>`.\n",
+                "---\n",
+            ),
+        )
+        .unwrap();
+        let doc = dir.path().join("sdk-dev.md");
+        const ROW: &str =
+            "https://github.com/sample-org/sample-repo/pull/12: #address then #adversarial-pr";
+        const HEAD: &str = "fa3a3f449986d565f21aeb6e0f792323bc8d1d58";
+        fs::write(
+            &doc,
+            format!(
+                "---\nagent_doc_session: sample-sdk\nagent_doc_format: template\n---\n\n\
+                 <!-- agent:exchange patch=append -->\n\
+                 ### Re: prior — gpt-5\n\nDone.\n\
+                 <!-- agent:boundary:keep -->\n\
+                 <!-- /agent:exchange -->\n\n\
+                 <!-- agent:queue subagents -->\n\
+                 - {ROW}\n\
+                 <!-- /agent:queue -->\n"
+            ),
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, ROW, "subagent:pr12-address", 600).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            ROW,
+            "subagent:pr12-address",
+            "worker:pr12-address",
+            600,
+            1,
+        )
+        .unwrap();
+        let prose = format!(
+            "**Summary**\n\n\
+             The approval states no code change, so nothing was committed.\n\
+             NO-WRITTEN-FIX head={HEAD}\n\
+             THREAD-NO-FIX https://github.com/sample-org/sample-repo/pull/12#discussion_r4603884112 head={HEAD} resolved\n"
+        );
+        let requeue = requeue_nonterminal_goal_hand_back(&doc, ROW, Some(1), &prose)
+            .unwrap()
+            .expect("a no-fix address half stays open until REVIEW-CLEAN or BLOCKED");
+        assert!(!requeue.address_fix_pending);
+        assert!(!requeue.inline_threads_pending);
+        assert_eq!(requeue.final_states, vec!["REVIEW-CLEAN", "BLOCKED"]);
+        let (outcome, _) =
+            agent_doc_queue_io::queue_claim::claim(&doc, ROW, "subagent:pr12-review", 600)
+                .expect("the requeued row is dispatchable for the independent review");
+        assert_eq!(
+            outcome,
+            agent_doc_queue::queue_claim::ClaimOutcome::Reassigned
+        );
+        let brief =
+            agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_item(&doc, ROW)
+                .unwrap();
+        assert!(brief.subagent_prompt_preamble.contains("NO-WRITTEN-FIX"));
+        assert!(
+            brief
+                .subagent_prompt_preamble
+                .contains("Do not land a code change and do not start another address pass")
+        );
+        assert!(
+            !brief
+                .subagent_prompt_preamble
+                .contains("Prior address attempt"),
+            "a settled no-fix half must not brief another fix pass"
+        );
+    }
+
     const INLINE_MUST: &str =
         "https://github.com/haiven-dev/haiven-api/pull/869#discussion_r4532159601";
     const INLINE_SHOULD: &str =

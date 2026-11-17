@@ -7209,8 +7209,12 @@ Add new issues into the backlog + queue except issue #40 + #45.";
             claim.followed_from = vec![KOTLINFLUSH.to_string(), LOOP_WATCH.to_string()];
             claim.followed_generation = claim.generation;
         }
-        // The gen-1 attempt expires (its owner session ended); gen 2 is claimed.
+        // The gen-1 running attempt is past its TTL. `claim` keeps a bound
+        // Running worker until expiry is projected, so project it, then claim
+        // gen 2 on #380. That new attempt must not be restored onto the strike.
         let later = now + 3601;
+        ledger.claims[0].project_expiry(later);
+        assert_eq!(ledger.claims[0].state, QueueClaimState::Lost);
         assert_eq!(
             ledger.claim(GH380, "subagent:gh380", later, 3600),
             ClaimOutcome::Reassigned

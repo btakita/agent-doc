@@ -10,7 +10,8 @@
 //! follow-up.
 //!
 //! A plain `[operator-verify]` row with none of that evidence stays. Two
-//! still-open copies stay. An open todo keeps the row. A live claim
+//! still-open copies stay. An open todo or an open backlog item keeps the
+//! row. A live claim
 //! (`🟡`/`🚧`/`☑️`/`⚠️`/`⛔`) stays. The second call is a no-op.
 //!
 //! [`crate::queue_sync_payload::HOURGLASS_RESOLVE_GUIDANCE`] still tells the
@@ -25,6 +26,7 @@ use agent_doc_document::queue_projection::{
     QueueLifecycleMarker, has_awaiting_operator_marker, is_reserved_operator_action_id,
     lifecycle_marker, operator_answer_row_request_id, operator_request_annotation_ids,
 };
+use agent_doc_document::tracked_work_projection::open_backlog_ids;
 use agent_doc_element::todo::{CheckedTodo, checked_todos, open_todo_actions, open_todo_ids};
 use agent_doc_element_queue::{queue_head_identity, queue_prompt_stable_id, struck_work_text};
 
@@ -110,7 +112,12 @@ struct Evidence {
 
 impl Evidence {
     fn from_content(content: &str) -> Self {
-        let open = open_todo_ids(content);
+        let mut open = open_todo_ids(content);
+        // A `do [#subagent-operator-request-…]` head often names a backlog
+        // item, not a todo. That id is still live work.
+        for id in open_backlog_ids(content) {
+            open.insert(id.to_ascii_lowercase());
+        }
         let checked_items = checked_todos(content);
         let checked = checked_items
             .iter()

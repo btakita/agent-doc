@@ -203,7 +203,7 @@ pub fn queue_skip_diagnostic_for_response(content: &str, response: &str) -> Resu
     let queue_head_display = display_queue_prompt_text(&queue_head);
     if crate::queue_response::latest_echo_cell_omits_address_fix(content, response, &queue_head) {
         return Ok(format!(
-            "[queue] kept address head `{queue_head_display}` open. The response does not land the review's written fix on the current head (#reviewfixonhead). A later review or a different behavior does not address it. Next: land that written fix on the exact current head and finish with `FIX-ON-HEAD <review-url> head=<sha>`."
+            "[queue] kept address head `{queue_head_display}` open. The response does not land the review's written fix on the current head (#reviewfixonhead). A later review or a different behavior does not address it. Next: land that written fix on the exact current head and finish with `FIX-ON-HEAD <review-url> head=<sha>`, or finish with `NO-WRITTEN-FIX head=<sha>` when every review states no code change."
         ));
     }
     if crate::queue_response::latest_echo_cell_lacks_goal_final_state(
@@ -226,7 +226,7 @@ pub fn queue_skip_diagnostic_for_response(content: &str, response: &str) -> Resu
     if crate::queue_response::latest_echo_cell_omits_inline_threads(content, response, &queue_head)
     {
         return Ok(format!(
-            "[queue] kept head `{queue_head_display}` live because #address and #adversarial-pr load every inline pull-request discussion comment, not only the review body (#addressinline). Query `gh api repos/<owner>/<repo>/pulls/<number>/comments`. A root comment has no in_reply_to_id and its html_url contains `#discussion_r`. A later reply does not load the root. Do not dismiss a thread. The row stays open until every root thread's written fix is the code on the exact current head and the hand-back has `THREAD-FIX-ON-HEAD <discussion-url> head=<sha> resolved` for each root thread, or `INLINE-THREADS-LOADED 0 head=<sha>` when the comments query returned no root comments."
+            "[queue] kept head `{queue_head_display}` live because #address and #adversarial-pr load every inline pull-request discussion comment, not only the review body (#addressinline). Query `gh api repos/<owner>/<repo>/pulls/<number>/comments`. A root comment has no in_reply_to_id and its html_url contains `#discussion_r`. A later reply does not load the root. Do not dismiss a thread. The row stays open until every root thread is settled on the exact current head: `THREAD-FIX-ON-HEAD <discussion-url> head=<sha> resolved` when that head's code is the written fix, `THREAD-NO-FIX <discussion-url> head=<sha> resolved` when the root thread states no code change, or `INLINE-THREADS-LOADED 0 head=<sha>` when the comments query returned no root comments."
         ));
     }
     if crate::queue_response::response_defers_queue_head(content, response, &queue_head) {

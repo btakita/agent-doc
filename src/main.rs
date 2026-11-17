@@ -7047,6 +7047,7 @@ fn emit_subagent_pool_refill(
                 "[queue] WARNING: could not read {} for the subagent work-pool refill: {err:#}. Run `agent-doc queue pool` before dispatching more work.",
                 file.display()
             );
+            emit_reported_closeout_midturn(file);
             return;
         }
     };
@@ -7054,6 +7055,24 @@ fn emit_subagent_pool_refill(
         agent_doc_queue_io::subagent_pool::render_pool_refill_or_warn(file, &content, trigger)
     {
         eprintln!("{text}");
+    }
+    emit_reported_closeout_midturn(file);
+}
+
+/// `#reportedmidturn`: a queue trigger's stderr carries ready `☑️` closeouts
+/// in the same step as the pool refill. Never fails the trigger.
+fn emit_reported_closeout_midturn(file: &std::path::Path) {
+    match agent_doc_session_check_io::midturn_steering::reported_closeout_midturn_checkpoint(
+        file,
+        agent_doc_session_check_io::midturn_steering::CONSUMER_COMMAND,
+        true,
+    ) {
+        Ok(Some(text)) => eprintln!("{text}"),
+        Ok(None) => {}
+        Err(err) => eprintln!(
+            "[agent-doc] reported closeout checkpoint skipped for {}: {err:#}",
+            file.display()
+        ),
     }
 }
 
@@ -10859,7 +10878,7 @@ fn try_main() -> anyhow::Result<()> {
                     )?;
                     if requeue.address_fix_pending {
                         eprintln!(
-                            "[queue] address hand-back for {:?} (owner {}, generation {}) does not land the review's written fix on the current head; the row stays open and the attempt was requeued (#reviewfixonhead). Next: {} and dispatch the same row; its brief carries this hand-back. Land the written fix, then finish with `FIX-ON-HEAD <review-url> head=<sha>`. A later review does not replace that fix.",
+                            "[queue] address hand-back for {:?} (owner {}, generation {}) does not land the review's written fix on the current head; the row stays open and the attempt was requeued (#reviewfixonhead). Next: {} and dispatch the same row; its brief carries this hand-back. Land the written fix, then finish with `FIX-ON-HEAD <review-url> head=<sha>`. If every review states no code change, do not invent a commit; finish with `NO-WRITTEN-FIX head=<sha>` so a row that also names `#adversarial-pr` continues to that review. A later review does not replace that fix.",
                             requeue.claim.item_text,
                             requeue.claim.owner,
                             requeue.claim.generation,
@@ -10898,7 +10917,7 @@ fn try_main() -> anyhow::Result<()> {
                         }
                     } else if requeue.inline_threads_pending {
                         eprintln!(
-                            "[queue] hand-back for {:?} (owner {}, generation {}) left a root inline discussion thread off the current head; the row stays open and the attempt was requeued (#addressinline). Query `gh api repos/<owner>/<repo>/pulls/<number>/comments`. Land each root thread's written fix on the exact current head, address the thread, and resolve it. Do not dismiss a thread. Finish with `THREAD-FIX-ON-HEAD <discussion-url> head=<sha> resolved` for every root thread, or `INLINE-THREADS-LOADED 0 head=<sha>` when that query returned no root comments. Next: {} and dispatch the same row; its brief carries this hand-back.",
+                            "[queue] hand-back for {:?} (owner {}, generation {}) left a root inline discussion thread off the current head; the row stays open and the attempt was requeued (#addressinline). Query `gh api repos/<owner>/<repo>/pulls/<number>/comments`. Land each root thread's written fix on the exact current head, address the thread, and resolve it. Do not dismiss a thread. Finish with `THREAD-FIX-ON-HEAD <discussion-url> head=<sha> resolved` for every root thread whose written fix is on that head, or `THREAD-NO-FIX <discussion-url> head=<sha> resolved` when the root thread states no code change, or `INLINE-THREADS-LOADED 0 head=<sha>` when that query returned no root comments. Do not invent a code change. Next: {} and dispatch the same row; its brief carries this hand-back.",
                             requeue.claim.item_text,
                             requeue.claim.owner,
                             requeue.claim.generation,

@@ -20,12 +20,19 @@ use agent_doc_session_check_io::midturn_steering::{
     self as steering, CONSUMER_CLI, CONSUMER_FOLLOW, SteeringReport,
 };
 
-fn print_report(report: Option<SteeringReport>, json: bool) -> Result<()> {
+fn print_report(
+    report: Option<SteeringReport>,
+    reported_closeout: Option<String>,
+    json: bool,
+) -> Result<()> {
     if json {
-        let value = match report {
+        let mut value = match report {
             Some(report) => serde_json::to_value(&report)?,
             None => serde_json::json!({ "items": [], "pending": 0 }),
         };
+        if let Some(reported_closeout) = reported_closeout {
+            value["reported_closeout"] = serde_json::Value::String(reported_closeout);
+        }
         println!("{}", serde_json::to_string_pretty(&value)?);
         return Ok(());
     }
@@ -42,7 +49,23 @@ fn print_report(report: Option<SteeringReport>, json: bool) -> Result<()> {
             }
         }
     }
+    if let Some(reported_closeout) = reported_closeout {
+        println!("{reported_closeout}");
+    }
     Ok(())
+}
+
+fn reported_closeout_for(file: &Path, consumer: &str, record: bool) -> Option<String> {
+    match steering::reported_closeout_midturn_checkpoint(file, consumer, record) {
+        Ok(value) => value,
+        Err(err) => {
+            eprintln!(
+                "[agent-doc] reported closeout checkpoint skipped for {}: {err:#}",
+                file.display()
+            );
+            None
+        }
+    }
 }
 
 pub fn run(file: &Path, json: bool, peek: bool, follow: bool, token: Option<&str>) -> Result<()> {
@@ -53,7 +76,8 @@ pub fn run(file: &Path, json: bool, peek: bool, follow: bool, token: Option<&str
     }
     if !follow {
         let report = steering::observe(file, CONSUMER_CLI, !peek)?;
-        return print_report(report, json);
+        let reported_closeout = reported_closeout_for(file, CONSUMER_CLI, !peek);
+        return print_report(report, reported_closeout, json);
     }
     follow_document(file)
 }
@@ -93,6 +117,12 @@ fn follow_document(file: &Path) -> Result<()> {
             if !report.items.is_empty() {
                 println!("{}", serde_json::to_string(&report)?);
             }
+        }
+        if let Some(reported_closeout) = reported_closeout_for(&canonical, CONSUMER_FOLLOW, true) {
+            println!(
+                "{}",
+                serde_json::json!({ "reported_closeout": reported_closeout })
+            );
         }
         let wait = if pending > 0 {
             Duration::from_millis(500)

@@ -46062,6 +46062,19 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
                     }
                 }
                 let agent_doc_bin = agent_doc_supervisor_process::agent_doc_start_bin();
+                // `#shellstartpaused`: Restart Agent on a shell with no session
+                // must start that session. Dispatch is refused while queue
+                // control is paused, which left the pane at the shell.
+                let control_state =
+                    agent_doc_sqlite::state_store::load_effective_queue_control_for_path(
+                        &work.project_root,
+                        &work.file,
+                    )?
+                    .map(|control| control.state);
+                let start_purpose =
+                    agent_doc_supervisor::route_owned::explicit_operator_shell_start_purpose(
+                        control_state.as_deref(),
+                    );
                 let start_cmd =
                     agent_doc_supervisor_process::start_command::route_owned_start_command_with_options(
                         &agent_doc_bin,
@@ -46069,15 +46082,14 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
                         &agent_doc_supervisor_process::start_command::RouteOwnedStartOptions {
                             reap_policy:
                                 agent_doc_supervisor::route_owned::RouteOwnedReapPolicy::Auto,
-                            start_purpose:
-                                agent_doc_supervisor::route_owned::RouteOwnedStartPurpose::Dispatch,
+                            start_purpose,
                             resume: resume.clone(),
                         },
                     );
                 agent_doc_ops_log_io::log_op(
                     &work.file,
                     &format!(
-                        "controller_supervisor_replacement_preserve_pane mode={} resume={} session={} pane={}",
+                        "controller_supervisor_replacement_preserve_pane mode={} resume={} session={} pane={} purpose={} queue_control={}",
                         work.mode,
                         if resume.is_some() {
                             "continue"
@@ -46086,6 +46098,8 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
                         },
                         work.session_id,
                         work.pane_id,
+                        start_purpose.as_str(),
+                        control_state.as_deref().unwrap_or("none"),
                     ),
                 );
                 // `#shellstart`: respawn the pane process. Typing the start line

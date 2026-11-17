@@ -16,7 +16,7 @@ use agent_doc_controller::shell_start::{
     ClaimingShellStartDecision, decide_claiming_shell_start, sole_live_shell_skips_manual_claim,
 };
 use agent_doc_harness::HarnessConfig;
-use agent_doc_supervisor::route_owned::RouteOwnedStartPurpose;
+use agent_doc_supervisor::route_owned::explicit_operator_shell_start_purpose;
 use agent_doc_tmux::AssociatedPaneCandidate;
 
 /// The pane is an alive bare shell and no `agent-doc start` serves `file`.
@@ -81,23 +81,35 @@ pub fn ensure_claiming_shell_session(
         dispatch_only,
         agent_doc_controller_io::route_snapshot::editor_route_attempt_id().as_deref(),
     );
+    // `#shellstartpaused`: a paused queue fences autonomous Dispatch and used
+    // to make this start exit before the harness existed. Start the session
+    // anyway. LayoutProvision is the purpose the start process admits while
+    // that fence holds; the queue watcher still refuses unattended drain.
+    let control_state = agent_doc_sqlite::state_store::load_effective_queue_control_for_path(
+        &registry_base_dir,
+        file,
+    )?
+    .map(|control| control.state);
+    let start_purpose = explicit_operator_shell_start_purpose(control_state.as_deref());
     let start_cmd =
         agent_doc_supervisor_process::start_command::route_owned_start_command_with_options(
             &agent_doc_supervisor_process::agent_doc_start_bin(),
             std::path::Path::new(&start_path),
             &agent_doc_supervisor_process::start_command::RouteOwnedStartOptions {
                 reap_policy,
-                start_purpose: RouteOwnedStartPurpose::Dispatch,
+                start_purpose,
                 resume: None,
             },
         );
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "route_claiming_shell_start file={} pane={} policy={} harness={} action=start",
+            "route_claiming_shell_start file={} pane={} policy={} purpose={} queue_control={} harness={} action=start",
             file.display(),
             pane,
             reap_policy.as_str(),
+            start_purpose.as_str(),
+            control_state.as_deref().unwrap_or("none"),
             harness.binary,
         ),
     );

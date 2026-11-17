@@ -77,6 +77,8 @@ impl FromStr for RouteOwnedReapPolicy {
 /// can converge, but it never carries a prompt dispatch. Queue control therefore
 /// fences `Dispatch` while allowing `LayoutProvision`; the idle supervisor's
 /// queue watcher continues to honor the same pause before any later dispatch.
+/// An explicit operator shell start uses [`explicit_operator_shell_start_purpose`]
+/// so a paused queue still brings the harness up (`#shellstartpaused`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RouteOwnedStartPurpose {
     #[default]
@@ -159,6 +161,31 @@ pub fn route_owned_start_blocked_by_queue_control(
         // It may fence another dispatch into that owner, but it must not behave
         // like a durable pause and prevent a fresh owner from starting.
         && !matches!(control_state, "resumed" | "draining")
+}
+
+/// Purpose for Restart Agent or Run Agent Doc when the claiming pane is a shell
+/// and no session is already running (`#shellstartpaused`).
+///
+/// Queue control still fences autonomous `Dispatch`, which used to make
+/// `agent-doc start` exit immediately and leave the pane at the shell. The
+/// operator asked for the session, so a fenced control starts an idle
+/// `LayoutProvision` owner instead. The queue watcher keeps refusing
+/// unattended drain. No control, `resumed`, and `draining` stay `Dispatch`.
+pub fn explicit_operator_shell_start_purpose(
+    control_state: Option<&str>,
+) -> RouteOwnedStartPurpose {
+    match control_state {
+        Some(state)
+            if route_owned_start_blocked_by_queue_control(
+                true,
+                RouteOwnedStartAdmission::NewSession(RouteOwnedStartPurpose::Dispatch),
+                state,
+            ) =>
+        {
+            RouteOwnedStartPurpose::LayoutProvision
+        }
+        _ => RouteOwnedStartPurpose::Dispatch,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -708,6 +735,31 @@ mod tests {
             RouteOwnedStartAdmission::NewSession(RouteOwnedStartPurpose::Dispatch),
             "draining",
         ));
+    }
+
+    #[test]
+    fn explicit_operator_shell_start_comes_up_while_dispatch_is_fenced() {
+        assert_eq!(
+            explicit_operator_shell_start_purpose(Some("paused")),
+            RouteOwnedStartPurpose::LayoutProvision,
+            "a paused queue must not leave Restart Agent / Run Agent Doc at a shell"
+        );
+        assert_eq!(
+            explicit_operator_shell_start_purpose(Some("held")),
+            RouteOwnedStartPurpose::LayoutProvision
+        );
+        assert_eq!(
+            explicit_operator_shell_start_purpose(None),
+            RouteOwnedStartPurpose::Dispatch
+        );
+        assert_eq!(
+            explicit_operator_shell_start_purpose(Some("resumed")),
+            RouteOwnedStartPurpose::Dispatch
+        );
+        assert_eq!(
+            explicit_operator_shell_start_purpose(Some("draining")),
+            RouteOwnedStartPurpose::Dispatch
+        );
     }
 
     #[test]

@@ -128,6 +128,8 @@ pub fn claiming_shell_watchdog_action(
         return ClaimingShellWatchdogAction::DeferToCrashWatchdog;
     }
     if facts.queue_paused {
+        // Autonomous recovery stays fenced. Explicit Restart Agent and Run
+        // Agent Doc still start the session (`#shellstartpaused`).
         return ClaimingShellWatchdogAction::Skip {
             reason: "queue_paused",
         };

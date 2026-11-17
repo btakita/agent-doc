@@ -761,7 +761,7 @@ fn response_next_action_decision_child_end(
 /// Labels the binary renders only as response-structure rows beneath a
 /// `**Response [#r-…]**` parent (`#responserowqueuehead`). Labels that take a
 /// value end with a space; the container labels stand alone.
-const GENERATED_RESPONSE_STRUCTURE_VALUE_LABELS: [&str; 6] = [
+const GENERATED_RESPONSE_STRUCTURE_VALUE_LABELS: [&str; 12] = [
     // `#blockerfront`: the blocker reason leads the response structure and is
     // never itself a queue prompt, with or without its Response parent.
     "**Blocker:** ",
@@ -771,12 +771,24 @@ const GENERATED_RESPONSE_STRUCTURE_VALUE_LABELS: [&str; 6] = [
     "**Guidance:** ",
     // `#blockerdisregard`: a refused gesture is this note, not a queue row.
     "**Disregard:** ",
+    // `#handbackrowstructure`: a strike copies the worker hand-back onto the
+    // row. These are that structure's section rows, not new queue work. The
+    // value form of Next actions (a trailing space plus text) is distinct from
+    // the container label below.
+    "**What changed:** ",
+    "**Verification:** ",
+    "**Action items:** ",
+    "**Open items:** ",
+    "**Notes:** ",
+    "**Next actions:** ",
 ];
 const GENERATED_RESPONSE_STRUCTURE_CONTAINER_LABELS: [&str; 2] =
     ["**Choices:**", "**Next actions:**"];
 
 /// Whether a list item's content is a generated response-structure row
-/// (`**Blocker:** …`, `**Summary:** …`, `**State:** …`, `**Guidance:** …`,
+/// (`**Blocker:** …`, `**Summary:** …`, `**What changed:** …`,
+/// `**Verification:** …`, `**Action items:** …`, `**Open items:** …`,
+/// `**Notes:** …`, `**Next actions:** …`, `**State:** …`, `**Guidance:** …`,
 /// `**Timestamp:** …`, `**Choices:**`, `**Next actions:**`, `**Disregard:** …`),
 /// whatever its
 /// parent is.
@@ -2594,8 +2606,27 @@ mod tests {
         ));
         assert!(is_generated_response_structure_row("**Choices:**"));
         assert!(is_generated_response_structure_row("**Next actions:**"));
+        assert!(is_generated_response_structure_row(
+            "**What changed:** `tasks/agent-doc/claim-inline-file-plan.md`"
+        ));
+        assert!(is_generated_response_structure_row(
+            "**Verification:** Read the plan file."
+        ));
+        assert!(is_generated_response_structure_row(
+            "**Action items:** none"
+        ));
+        assert!(is_generated_response_structure_row(
+            "**Open items:** which file to keep"
+        ));
+        assert!(is_generated_response_structure_row(
+            "**Notes:** The plan stays untracked."
+        ));
+        assert!(is_generated_response_structure_row(
+            "**Next actions:** Operator reviews the plan."
+        ));
         // Empty values and ordinary operator prose are not the reserved shape.
         assert!(!is_generated_response_structure_row("**Summary:**"));
+        assert!(!is_generated_response_structure_row("**What changed:**"));
         assert!(!is_generated_response_structure_row("Summary: please do X"));
         assert!(!is_generated_response_structure_row(
             "Write a **Summary:** section"

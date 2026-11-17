@@ -6216,14 +6216,245 @@ fn stopped_response_id(row_text: &str, summary: &str) -> String {
     format!("[#r-{}]", &hash[..12])
 }
 
+fn handback_response_id(
+    row_text: &str,
+    handback: &agent_doc_document::worker_handback::WorkerHandback,
+) -> String {
+    let hash = agent_doc_hash::content_hash(&format!(
+        "handback-row\n{}\n{}",
+        row_work_heading(row_text),
+        handback.render()
+    ));
+    format!("[#r-{}]", &hash[..12])
+}
+
+/// One canonical hand-back section, collapsed to a single line so a file name
+/// survives and the row does not gain a new bullet per source line
+/// (`#handbackrowstructure`).
+fn handback_section_text(
+    handback: &agent_doc_document::worker_handback::WorkerHandback,
+    kind: agent_doc_document::worker_handback::SectionKind,
+) -> String {
+    let mut parts = Vec::new();
+    if kind == agent_doc_document::worker_handback::SectionKind::Summary
+        && !handback.preamble.is_empty()
+    {
+        parts.push(collapse_ws(&handback.preamble.join(" ")));
+    }
+    for section in handback
+        .sections
+        .iter()
+        .filter(|section| section.kind == kind)
+    {
+        let body = collapse_ws(&section.lines.join(" "));
+        if body.is_empty() {
+            continue;
+        }
+        if section.label.eq_ignore_ascii_case(kind.heading()) {
+            parts.push(body);
+        } else {
+            parts.push(format!("{}: {body}", section.label));
+        }
+    }
+    collapse_ws(&parts.join(" "))
+}
+
+fn handback_section_bodies(
+    handback: &agent_doc_document::worker_handback::WorkerHandback,
+) -> Vec<(agent_doc_document::worker_handback::SectionKind, String)> {
+    agent_doc_document::worker_handback::SectionKind::ALL
+        .into_iter()
+        .filter(|kind| *kind != agent_doc_document::worker_handback::SectionKind::Blocker)
+        .filter_map(|kind| {
+            let text = handback_section_text(handback, kind);
+            (!text.is_empty()).then_some((kind, text))
+        })
+        .collect()
+}
+
+/// The labelled worker hand-back whose completion cell names `row_text`.
+///
+/// A unique render wins. When several cells differ, the one whose What changed
+/// names a markdown file wins, and only when that file is unique. A Blocker
+/// section stays on the stopped-row path. An unstructured completion does not
+/// parse and stays bare.
+fn structured_handback_for_row(
+    document: &str,
+    response_body: &str,
+    row_text: &str,
+) -> Option<agent_doc_document::worker_handback::WorkerHandback> {
+    let mut sources = vec![document];
+    if !response_body.trim().is_empty() && response_body != document {
+        sources.push(response_body);
+    }
+    let mut renders = Vec::<(String, agent_doc_document::worker_handback::WorkerHandback)>::new();
+    for source in sources {
+        for evidence in agent_doc_document::subagent_completion::completion_evidence(source) {
+            if !completion_cell_matches_row(document, &evidence.item, row_text) {
+                continue;
+            }
+            let Some(body) =
+                agent_doc_document::subagent_completion::completion_response(source, &evidence.key)
+            else {
+                continue;
+            };
+            let Some(handback) = agent_doc_document::worker_handback::WorkerHandback::parse(&body)
+            else {
+                continue;
+            };
+            if !handback_section_text(
+                &handback,
+                agent_doc_document::worker_handback::SectionKind::Blocker,
+            )
+            .is_empty()
+            {
+                continue;
+            }
+            let render = handback.render();
+            if renders.iter().any(|(have, _)| have == &render) {
+                continue;
+            }
+            renders.push((render, handback));
+        }
+    }
+    if renders.len() == 1 {
+        return renders.pop().map(|(_, handback)| handback);
+    }
+    let mut with_markdown = renders
+        .into_iter()
+        .filter(|(_, handback)| {
+            handback_section_text(
+                handback,
+                agent_doc_document::worker_handback::SectionKind::WhatChanged,
+            )
+            .contains(".md")
+        })
+        .collect::<Vec<_>>();
+    if with_markdown.len() == 1 {
+        with_markdown.pop().map(|(_, handback)| handback)
+    } else {
+        None
+    }
+}
+
+/// The existing Response child, with the worker hand-back sections on it
+/// (`#handbackrowstructure`, `#workerresponsestructure`).
+///
+/// Summary is the hand-back's own Summary, not a truncated lead. What changed
+/// is kept whole so a created markdown file name stays on the row.
+fn handback_response_row_child(
+    row_text: &str,
+    handback: &agent_doc_document::worker_handback::WorkerHandback,
+    addressed_at: &str,
+    closure: Option<&crate::queue_tree::RowClosure>,
+) -> Option<String> {
+    let response_id = handback_response_id(row_text, handback);
+    let marker = agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(&response_id)?;
+    let bodies = handback_section_bodies(handback);
+    if bodies.is_empty() {
+        return None;
+    }
+    let summary = bodies
+        .iter()
+        .find(|(kind, _)| *kind == agent_doc_document::worker_handback::SectionKind::Summary)
+        .map(|(_, text)| text.clone())
+        .filter(|text| !text.is_empty())
+        .unwrap_or_else(|| "Completed.".to_string());
+    let mut child = format!(
+        "{marker}\n- **Timestamp:** {}\n- **Summary:** {summary}",
+        addressed_at.trim()
+    );
+    for kind in [
+        agent_doc_document::worker_handback::SectionKind::WhatChanged,
+        agent_doc_document::worker_handback::SectionKind::Verification,
+        agent_doc_document::worker_handback::SectionKind::ActionItems,
+        agent_doc_document::worker_handback::SectionKind::OpenItems,
+        agent_doc_document::worker_handback::SectionKind::Notes,
+        agent_doc_document::worker_handback::SectionKind::NextActions,
+    ] {
+        let Some((_, text)) = bodies.iter().find(|(section, _)| *section == kind) else {
+            continue;
+        };
+        child.push_str(&format!("\n- **{}:** {text}", kind.heading()));
+    }
+    let follow_up = !handback.action_items().is_empty();
+    child.push_str("\n- **State:** ");
+    child.push_str(if follow_up {
+        RESPONSE_STATE_FOLLOW_UP
+    } else {
+        RESPONSE_STATE_COMPLETE
+    });
+    child.push_str("\n- **Guidance:** ");
+    if follow_up {
+        child.push_str(
+            "More work remains. Keep this tree and follow the action items in this response.",
+        );
+    } else {
+        child.push_str(&completed_row_deletion_guidance(closure));
+    }
+    Some(child)
+}
+
+/// Section rows the existing Response child does not already show.
+fn handback_sections_missing_from_response(
+    document: &str,
+    item_end: usize,
+    scope_end: usize,
+    handback: &agent_doc_document::worker_handback::WorkerHandback,
+) -> Option<(usize, String)> {
+    let scope = document.get(item_end..scope_end)?;
+    let response_rel = scope.find("**Response [#r-")?;
+    let line_rel = scope[..response_rel]
+        .rfind('\n')
+        .map_or(0, |index| index + 1);
+    let response_line = scope[line_rel..].lines().next()?;
+    let response_indent = response_line.len() - response_line.trim_start_matches([' ', '\t']).len();
+    let response_abs = item_end + line_rel;
+    let newline = document
+        .as_bytes()
+        .get(response_abs + response_line.len())
+        .is_some_and(|byte| *byte == b'\n');
+    let response_line_end = response_abs + response_line.len() + usize::from(newline);
+    let block_end = descendant_region_end(document, response_line_end, response_indent);
+    let response_scope = document.get(response_abs..block_end).unwrap_or("");
+    let section_indent = " ".repeat(response_indent + 2);
+    let mut rendered = String::new();
+    for (kind, text) in handback_section_bodies(handback) {
+        if kind == agent_doc_document::worker_handback::SectionKind::Summary {
+            continue;
+        }
+        let label = format!("**{}:**", kind.heading());
+        if response_scope.contains(&label) {
+            continue;
+        }
+        rendered.push_str(&section_indent);
+        rendered.push_str("- ");
+        rendered.push_str(&label);
+        rendered.push(' ');
+        rendered.push_str(&text);
+        rendered.push('\n');
+    }
+    if rendered.is_empty() {
+        return None;
+    }
+    let insert_at = response_child_insert_at(document, response_line_end, block_end);
+    Some((insert_at, rendered))
+}
+
 /// Attach a response child to each newly struck row whose stop explanation is
 /// already in `after` or in a row-specific completion cell (`#stoppedstruckqueue`).
 ///
-/// Rows already struck in `before`, rows that already have a response child,
-/// and rows with no `BLOCKED` / `REVIEW-CLEAN` / Blocker explanation are left
-/// unchanged. `response_body` is scanned only when it is non-empty; callers
-/// that hold an unmaterialized capture pass `""` so that capture is not copied
-/// onto the row.
+/// A labelled worker hand-back is copied onto that same row inside the
+/// Response child (`#handbackrowstructure`, `#workerresponsestructure`):
+/// Summary, What changed, Verification, Action items, Open items, Notes, and
+/// Next actions. What changed is not truncated, so a markdown file the work
+/// created stays visible on the struck row. The copy happens in this mutation.
+/// A row already struck in `before` stays bare. A row that already has a
+/// Response child gains only the hand-back sections it does not yet show. A
+/// `BLOCKED` / `REVIEW-CLEAN` / Blocker explanation keeps the stopped child
+/// and does not also take the hand-back sections. `response_body` is scanned
+/// only when it is non-empty; callers that hold an unmaterialized capture
+/// pass `""` so that capture is not copied onto the row.
 pub fn attach_stopped_row_responses(
     before: &str,
     after: &str,
@@ -6248,6 +6479,8 @@ pub fn attach_stopped_row_responses(
         Ok(nodes) => nodes,
         Err(_) => return Ok(after.to_string()),
     };
+    let closure_tree =
+        crate::queue_tree::queue_tree(after, &crate::queue_tree::QueueTreeOptions::default()).ok();
     let mut inserts = Vec::<(usize, String)>::new();
     let mut rendered_choice_packet_ids = HashSet::new();
     for node in &nodes {
@@ -6262,27 +6495,59 @@ pub fn attach_stopped_row_responses(
             .unwrap_or("");
         let indent = raw.len() - raw.trim_start_matches([' ', '\t']).len();
         let scope_end = descendant_region_end(after, node.item.end_byte, indent);
+        let handback = structured_handback_for_row(after, response_body, &node.item.text);
         if row_has_response_child(after, node.item.end_byte, scope_end) {
+            // A stopped child already carries its explanation. A summary child
+            // from an earlier projection still needs the hand-back sections,
+            // including the markdown file named under What changed.
+            if stopped_reason_for_row(after, response_body, &node.item.text).is_some() {
+                continue;
+            }
+            if let Some(handback) = handback.as_ref()
+                && let Some(splice) = handback_sections_missing_from_response(
+                    after,
+                    node.item.end_byte,
+                    scope_end,
+                    handback,
+                )
+            {
+                inserts.push(splice);
+            }
             continue;
         }
-        let Some(reason) = stopped_reason_for_row(after, response_body, &node.item.text) else {
+        if let Some(reason) = stopped_reason_for_row(after, response_body, &node.item.text) {
+            let response_id = stopped_response_id(&node.item.text, &reason);
+            let Some(child) = response_summary_row_child(
+                &ResponseLookupContext {
+                    source_document: before,
+                    queue_item: &node.item.text,
+                    response_body: &reason,
+                    turn_body: &reason,
+                    response_id: &response_id,
+                    addressed_at,
+                    shared_batch: false,
+                    closure: None,
+                },
+                &reason,
+                &mut rendered_choice_packet_ids,
+            ) else {
+                continue;
+            };
+            let child_indent = " ".repeat(indent + 2);
+            let rendered = render_response_lookup_child(&child, &child_indent);
+            let insert_at = response_child_insert_at(after, node.item.end_byte, scope_end);
+            inserts.push((insert_at, rendered));
+            continue;
+        }
+        let Some(handback) = handback else {
             continue;
         };
-        let response_id = stopped_response_id(&node.item.text, &reason);
-        let Some(child) = response_summary_row_child(
-            &ResponseLookupContext {
-                source_document: before,
-                queue_item: &node.item.text,
-                response_body: &reason,
-                turn_body: &reason,
-                response_id: &response_id,
-                addressed_at,
-                shared_batch: false,
-                closure: None,
-            },
-            &reason,
-            &mut rendered_choice_packet_ids,
-        ) else {
+        let closure = closure_tree.as_ref().and_then(|tree| {
+            crate::queue_tree::row_closure_at_offset(tree, after, node.item.start_byte)
+        });
+        let Some(child) =
+            handback_response_row_child(&node.item.text, &handback, addressed_at, closure.as_ref())
+        else {
             continue;
         };
         let child_indent = " ".repeat(indent + 2);
@@ -11670,6 +11935,117 @@ mod tests {
         assert_eq!(
             attach_stopped_row_responses(&before, &after, plain, STOPPED_AT).unwrap(),
             after
+        );
+    }
+
+    fn plan_file_run(leaf: &str, sibling: &str, exchange: &str) -> String {
+        format!(
+            "---\nqueue_active: true\n---\n\n\
+             <!-- agent:exchange -->\n{exchange}\n<!-- /agent:exchange -->\n\n\
+             <!-- agent:run id=\"bugs\" subagents -->\n\
+             - Question with: a colon in it\n\
+             \x20 - Then another: clause\n\
+             \x20   - {leaf}\n\
+             - {sibling}\n\
+             <!-- /agent:run -->\n"
+        )
+    }
+
+    /// `#handbackrowstructure`: striking the plan-file row copies the worker
+    /// hand-back onto that row, and **What changed** names the markdown file.
+    /// An already-struck bare row is not backfilled. A sibling with no
+    /// hand-back stays bare. A summary child already on the row still gains
+    /// the file name.
+    #[test]
+    fn struck_plan_row_keeps_the_handback_markdown_filename() {
+        let work = "Create a plan md file so I can review. [#q-a317f23fc43e]";
+        let live = work;
+        let struck = format!("~~{work}~~");
+        let sibling = "do [#install]";
+        let struck_sibling = format!("~~{sibling}~~");
+        let filename = "tasks/agent-doc/claim-inline-file-plan.md";
+        let handback = format!(
+            "**Summary**\n\n\
+             Filed the review plan.\n\n\
+             **What changed**\n\n\
+             `{filename}` (untracked, no commit).\n\n\
+             **Verification**\n\n\
+             Read the plan file.\n\n\
+             **Action items**\n\n\
+             none\n\n\
+             **Notes**\n\n\
+             The plan stays untracked.\n\n\
+             **Next actions**\n\n\
+             Operator reviews the plan.\n"
+        );
+        let item = format!("Question with: a colon in it: Then another: clause: {work}");
+        let cell = agent_doc_document::subagent_completion::cell_with_response(
+            "subagent:planreview",
+            &item,
+            "plan-key",
+            &handback,
+        )
+        .unwrap();
+        let before = plan_file_run(live, sibling, &cell);
+        let after = plan_file_run(&struck, &struck_sibling, &cell);
+        let projected = attach_stopped_row_responses(&before, &after, "", STOPPED_AT).unwrap();
+        let start = projected.find(&struck).expect("struck plan row");
+        let sibling_at = projected.find(&struck_sibling).expect("sibling");
+        assert!(start < sibling_at, "{projected}");
+        let tree = &projected[start..sibling_at];
+        assert!(tree.contains("**Response [#r-"), "{tree}");
+        assert!(tree.contains("**Summary:**"), "{tree}");
+        assert!(tree.contains("**What changed:**"), "{tree}");
+        assert!(tree.contains(filename), "{tree}");
+        assert!(tree.contains("**Verification:**"), "{tree}");
+        assert!(tree.contains("**Action items:**"), "{tree}");
+        assert!(tree.contains("**Notes:**"), "{tree}");
+        assert!(tree.contains("**Next actions:**"), "{tree}");
+        assert!(tree.contains("**State:** Complete."), "{tree}");
+        assert!(
+            !projected[sibling_at..].contains("**Response [#r-"),
+            "the sibling completion stays bare:\n{projected}"
+        );
+        assert!(
+            !projected[sibling_at..].contains(filename),
+            "the file name stays on the plan row:\n{projected}"
+        );
+        assert_eq!(
+            attach_stopped_row_responses(&before, &projected, "", STOPPED_AT).unwrap(),
+            projected,
+            "replaying the attachment must not duplicate the response"
+        );
+        assert_eq!(
+            attach_stopped_row_responses(&after, &after, "", STOPPED_AT).unwrap(),
+            after,
+            "an already-struck bare row is not backfilled"
+        );
+
+        let summary_child = format!(
+            "{struck}\n\
+             \x20     - **Response [#r-0123456789ab]**\n\
+             \x20       - **Timestamp:** {STOPPED_AT}\n\
+             \x20       - **Summary:** Filed the review plan.\n\
+             \x20       - **State:** Complete.\n\
+             \x20       - **Guidance:** This row is complete.\n"
+        );
+        let annotated = plan_file_run(&summary_child, &struck_sibling, &cell);
+        let spliced = attach_stopped_row_responses(&before, &annotated, "", STOPPED_AT).unwrap();
+        let spliced_start = spliced.find(&struck).expect("struck plan row");
+        let spliced_sibling = spliced.find(&struck_sibling).expect("sibling");
+        let spliced_tree = &spliced[spliced_start..spliced_sibling];
+        assert_eq!(
+            spliced_tree.matches("**Response [#r-").count(),
+            1,
+            "the existing response child stays the only one:\n{spliced_tree}"
+        );
+        assert!(
+            spliced_tree.contains(&format!("**What changed:** `{filename}`")),
+            "{spliced_tree}"
+        );
+        assert_eq!(
+            attach_stopped_row_responses(&before, &spliced, "", STOPPED_AT).unwrap(),
+            spliced
         );
     }
 

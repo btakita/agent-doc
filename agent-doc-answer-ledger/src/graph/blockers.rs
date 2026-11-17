@@ -237,27 +237,27 @@ pub fn marker_ids(content: &str) -> BTreeSet<String> {
 }
 
 fn rewrite_marker(content: &str, line: &str) -> String {
-    if let Some(start) = content.find(SETTLEMENT_MARKER_PREFIX) {
-        if let Some(end_rel) = content[start..].find("-->") {
-            let end = start + end_rel + 3;
-            let mut out = String::new();
-            out.push_str(&content[..start]);
-            out.push_str(line);
-            out.push_str(&content[end..]);
-            return out;
-        }
+    if let Some(start) = content.find(SETTLEMENT_MARKER_PREFIX)
+        && let Some(end_rel) = content[start..].find("-->")
+    {
+        let end = start + end_rel + 3;
+        let mut out = String::new();
+        out.push_str(&content[..start]);
+        out.push_str(line);
+        out.push_str(&content[end..]);
+        return out;
     }
-    if let Some(rest) = content.strip_prefix("---\n") {
-        if let Some(close) = rest.find("\n---\n") {
-            let at = 4 + close + 5;
-            let mut out = String::new();
-            out.push_str(&content[..at]);
-            out.push('\n');
-            out.push_str(line);
-            out.push('\n');
-            out.push_str(&content[at..]);
-            return out;
-        }
+    if let Some(rest) = content.strip_prefix("---\n")
+        && let Some(close) = rest.find("\n---\n")
+    {
+        let at = 4 + close + 5;
+        let mut out = String::new();
+        out.push_str(&content[..at]);
+        out.push('\n');
+        out.push_str(line);
+        out.push('\n');
+        out.push_str(&content[at..]);
+        return out;
     }
     format!("{line}\n{content}")
 }
@@ -370,12 +370,11 @@ fn prose_pulls(document: &str) -> Vec<ProsePull> {
             let number_at = base + at + needle.len();
             let after = &lower[number_at..];
             let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
-            if let Ok(number) = digits.parse::<u64>() {
-                if let Some(upstream) = repo_before(&lower, base + at)
+            if let Ok(number) = digits.parse::<u64>()
+                && let Some(upstream) = repo_before(&lower, base + at)
                     .map(|(owner, repo)| GithubUpstream::pull_request(&owner, &repo, number))
-                {
-                    out.push(ProsePull { upstream, number });
-                }
+            {
+                out.push(ProsePull { upstream, number });
             }
             let next = at + needle.len();
             base += next;

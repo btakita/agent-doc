@@ -74,11 +74,16 @@ accretion.
   step (never one at a time), then acknowledge each returned `subagent_id`
   with the entry's generation-fenced `start_command`. Do any
   `queue_dispatch_acknowledgement_required` entries (claimed, no worker) first,
-  and finish every spawn + start before integrating a reported result. This
+  and finish every spawn + start before integrating a reported result. That
+  ordering does not hold an already-ready `☑️` closeout until the turn ends
+  (`#reportedmidturn`): when the turn prints
+  `[agent-doc] reported queue rows are ready to close now (#reportedmidturn)`,
+  complete every listed row in that step. This
   dispatch is automatic on the first admitted cycle; it never waits for a
   follow-up operator prompt asking Grok to run the workers. After each worker
   returns, run `queue report-complete` and then the refill it prints (see
-  [Work pool](#work-pool)) before integrating.
+  [Work pool](#work-pool)), then complete any ready reported closeout in the
+  same step.
 
 Both `agent_doc_queue_max_iterations` and
 `AGENT_DOC_QUEUE_MAX_ITERATIONS_HARD_CAP` (default `50`) bound the loop.
@@ -112,12 +117,15 @@ pool's running, dispatching, frozen, and free counts.
 - A claimed head with no worker holds a slot and is the most urgent debt:
   spawn it (preamble from `queue brief`) and run its `queue start` before new
   claims and before integrating any reported (`☑️`) result. Plan lists these
-  first.
+  first. After that spawn, complete every already-ready `☑️` closeout in the
+  same step (`#reportedmidturn`); do not leave them until Stop.
 - Refill triggers: `queue report-complete`, `queue release` (with or without
   `--requeue`), a lost attempt, and a frozen worker. Each trigger command prints
   `[queue] subagent work pool` with the next heads' exact claim / brief / start
-  commands; run them in that order in the same turn, before integrating. The
-  mid-turn PostToolUse steering surfaces the same refill once per change.
+  commands; run them in that order in the same turn. A refill does not postpone
+  an already-ready reported closeout until the turn ends. The
+  mid-turn PostToolUse steering surfaces the same refill once per change, and
+  surfaces ready `☑️` closeouts the same way (`#reportedmidturn`).
 - A running worker's heartbeat (start or `queue claim --refresh`) falls due
   halfway through its claim window, well before expiry. The refill and plan
   warnings list it with the exact `queue claim --refresh --generation <N>`

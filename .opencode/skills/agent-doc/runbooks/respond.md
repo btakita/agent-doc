@@ -553,7 +553,10 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      (for example PR delivery versus target-branch delivery), strike it in the
      current turn. Apply that immediate closeout to every verified reported
      row already available; do not leave the rest until final status or a
-     later cycle. At the next safe admission boundary, any still-open
+     later cycle. When PostToolUse, `agent-doc steering`, or a queue command
+     prints `[agent-doc] reported queue rows are ready to close now (#reportedmidturn)`,
+     run every listed closeout in that step, before other long work and before
+     the turn ends. At the next safe admission boundary, any still-open
      `Reported` attempt or reported-release receipt blocks fresh subagent
      dispatch. Let already-running atomic operations and workers finish, keep
      later dispatch candidates out of the inline drain loop, and resume fresh
@@ -717,9 +720,16 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   drainable `📥`, a `☑️` awaiting integration, `🔄`, and `❔` keep blocking a
   genuine turn end; a `📥` that a closed `agent:loop` window holds back is not
   due and does not. The Claude/Grok Stop hook refuses each distinct debt set
-  at least once per turn; a recursive Stop over exactly the same refused set
-  ends the turn, logs `state=unchanged_debts`, and names the rows left live to
-  the operator in a `systemMessage` (`#stophookactiveguard`). When no owed
+  at least once per turn. A recursive Stop over exactly the same refused set
+  ends the turn only when none of the rows is `📥`, `🚧`, `⚠️🚧`, or `☑️`.
+  The binary finishes a mechanical `☑️` first (the worker response is written
+  and the row is struck); a `☑️` that is still visible keeps the turn open
+  (`state=reported_open`). `📥`, `🚧`, and `⚠️🚧` keep the turn open
+  (`state=inbox_or_running`). Any other unchanged set logs
+  `state=unchanged_debts` and names the rows left live to the operator in a
+  `systemMessage` (`#stophookactiveguard`). A closed cycle that captured no
+  response still consults this gate before it allows, and does not order
+  `/loop` while those rows owe a transition (`#stopnoresponserun`). When no owed
   row can move in this turn, name each one and why in the final answer rather
   than ending on the same refusal again; the rows stay live for the next turn. Explicitly dependency/cap-held rows that are not in that
   set may wait, and subagent completion notifications resume the loop without

@@ -1063,6 +1063,61 @@ fn apply_reexec_pty_bridge_report<O>(
     }
 }
 
+fn take_operator_restart_agent_env() -> Option<String> {
+    let key = agent_doc_supervisor_process::OPERATOR_RESTART_AGENT_ENV;
+    let value = std::env::var(key).ok();
+    if value.is_some() {
+        unsafe { std::env::remove_var(key) };
+    }
+    value.filter(|agent| !agent.trim().is_empty())
+}
+
+/// Pin a cold-started Restart Agent's editor harness. Authority is the
+/// document's declared `agent:` with no active-actor fallback, because the
+/// process was already started with `--harness` set to the editor binary.
+fn install_operator_restart_hold(
+    shared: &SupervisorShared,
+    file: &Path,
+    editor_agent: Option<&str>,
+    declared_agent: Option<&str>,
+    configured_default_agent: Option<&str>,
+) {
+    let Some(editor) = editor_agent
+        .map(str::trim)
+        .filter(|agent| !agent.is_empty())
+    else {
+        return;
+    };
+    let authority = agent_doc_supervisor::harness_authority::resolve_harness_authority(
+        &agent_doc_supervisor::harness_authority::HarnessAuthorityFacts {
+            declared_document_agent: declared_agent.map(str::to_string),
+            active_actor_harness: None,
+            configured_default_agent: configured_default_agent.map(str::to_string),
+        },
+    );
+    let authority_binary =
+        agent_doc_harness::HarnessConfig::from_agent_name(&authority.agent).binary;
+    let (launch_binary, hold) =
+        agent_doc_supervisor::harness_authority::launch_binary_under_operator_restart(
+            Some(editor),
+            None,
+            &authority_binary,
+        );
+    let Some(hold) = hold else {
+        return;
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "restart_agent_editor_harness file={} editor_agent={} authority_agent={} action=launch_editor_agent #restartagentharness",
+            file.display(),
+            launch_binary,
+            declared_agent.unwrap_or("<unset>"),
+        ),
+    );
+    shared.set_operator_restart_hold(Some(hold));
+}
+
 pub fn run_with_reap_policy_resume_and_harness(
     file: &Path,
     force: bool,
@@ -1286,6 +1341,11 @@ pub fn run_with_reap_policy_resume_and_harness(
         }
         decoded
     });
+    // `#restartagentharness`: consume the editor harness before the launch spec
+    // snapshots the child environment. The hold is installed once shared state
+    // exists, so a crash or the idle watch cannot switch back to the lagging
+    // authority. The harness child must not inherit the key.
+    let operator_restart_agent = take_operator_restart_agent_env();
     if pending_adopt.is_some() {
         unsafe {
             std::env::remove_var(REEXEC_CHILD_PID_ENV);
@@ -1462,6 +1522,13 @@ pub fn run_with_reap_policy_resume_and_harness(
         Some(actor_record.state),
         Some(pane_id.clone()),
     ));
+    install_operator_restart_hold(
+        &shared,
+        file,
+        operator_restart_agent.as_deref(),
+        fm.agent.as_deref(),
+        global_config.default_agent.as_deref(),
+    );
     if let Some(target) = registry_publication_retry {
         shared.arm_registry_publication_retry(target);
     }
@@ -1645,6 +1712,9 @@ pub fn run_with_reap_policy_resume_and_harness(
     // controller recycle must keep the supervisor's already-observed lineage
     // authoritative even if editor/frontmatter projection lags.
     let mut refresh_resume_from_frontmatter = false;
+    // Editor harness from this Restart Agent's wire. Taken on the next
+    // frontmatter-readable iteration; later crashes consult the hold.
+    let mut pending_editor_agent: Option<String> = None;
 
     // `#midturn-recycle-resume` Phase B — resume according to the handoff mode.
     // Legacy/capture-backed recovery may re-dispatch once when the child died,
@@ -1819,12 +1889,38 @@ pub fn run_with_reap_policy_resume_and_harness(
                         restart_fm.agent.as_deref(),
                         global_config.default_agent.as_deref(),
                     );
+                    // `#restartagentharness`: a pending editor agent, or a hold
+                    // left by one, launches that binary while authority still
+                    // names the harness the operator restarted away from.
+                    // `declared_agent` stays the authority text for
+                    // `resolved_from=frontmatter:`. Take the pending agent only
+                    // in this readable branch so an unreadable frontmatter
+                    // retries. A crash with no new wire consults the hold.
+                    let pending = pending_editor_agent.take();
+                    let existing_hold = shared.operator_restart_hold();
+                    let (launch_binary, next_hold) = agent_doc_supervisor::harness_authority::launch_binary_under_operator_restart(
+                        pending.as_deref(),
+                        existing_hold.as_ref(),
+                        &authority_harness.binary,
+                    );
+                    if launch_binary != authority_harness.binary {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "restart_agent_editor_harness file={} editor_agent={} authority_agent={} action=launch_editor_agent #restartagentharness",
+                                file.display(),
+                                launch_binary,
+                                declared_agent.as_deref().unwrap_or("<unset>"),
+                            ),
+                        );
+                    }
+                    shared.set_operator_restart_hold(next_hold);
                     // `HarnessConfig::from_context` treats a missing `agent:` as
                     // the global/built-in default. For a live supervisor that is
                     // not a switch edge: retain the actor selected by the reactive
                     // authority graph and materialize it only for launch-spec
                     // construction.
-                    restart_fm.agent = Some(authority_harness.binary);
+                    restart_fm.agent = Some(launch_binary);
                     let mut launch_log = StartRunLaunchLog {
                         session_log: &mut session_log,
                         route_owned,
@@ -2758,11 +2854,21 @@ pub fn run_with_reap_policy_resume_and_harness(
             }
             PostChildExitAction::AutoRestart => {
                 let encoded_mode = shared.restart_mode.lock().clone();
+                let intent = agent_doc_supervisor_io::ipc::RestartIntent::decode(encoded_mode);
+                // A crash re-reads this mode. Leaving `@grok` on it would
+                // re-pin the editor harness after authority had moved on.
+                if intent.editor_agent.is_some() {
+                    let mut stripped = intent.clone();
+                    stripped.editor_agent = None;
+                    *shared.restart_mode.lock() = stripped.encode();
+                }
                 let agent_doc_supervisor_io::ipc::RestartIntent {
                     mode,
                     restart_agent,
                     operator_clear,
-                } = agent_doc_supervisor_io::ipc::RestartIntent::decode(encoded_mode);
+                    editor_agent,
+                } = intent;
+                pending_editor_agent = editor_agent;
                 first_run = mode == "fresh";
                 refresh_resume_from_frontmatter = restart_agent && !first_run;
                 if first_run {

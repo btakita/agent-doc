@@ -62,6 +62,11 @@ pub const REEXEC_ROUTE_OWNED_DISPATCH_PROMOTED_ENV: &str =
 /// admission resolves the harness. Absent from an older outgoing image: the
 /// bridge then uses the default policy.
 pub const REEXEC_HARNESS_ENV: &str = "AGENT_DOC_REEXEC_HARNESS";
+/// Editor harness a Restart Agent must launch when document authority has not
+/// merged that `agent:` edit. The cold-started supervisor consumes it once,
+/// installs the hold that keeps the idle watch from switching back, and removes
+/// it so the harness child never inherits it.
+pub const OPERATOR_RESTART_AGENT_ENV: &str = "AGENT_DOC_OPERATOR_RESTART_AGENT";
 /// PID of the outgoing supervisor image. `execve` preserves it, so the
 /// replacement proves it is that image (not a subprocess that inherited the
 /// handoff environment) before its `#reexecptybridge` touches the master fd.

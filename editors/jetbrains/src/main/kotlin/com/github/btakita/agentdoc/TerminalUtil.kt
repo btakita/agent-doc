@@ -1395,7 +1395,8 @@ object TerminalUtil {
     ) {
         // `#restartagentharness`: Restart Agent re-resolves the harness from the
         // controller's document authority, which can lag this buffer. Send the
-        // agent the operator can SEE so the binary refuses a stale relaunch.
+        // agent the operator can SEE so the binary launches that harness
+        // instead of blocking until the edit syncs or relaunching the old one.
         // This runs on the EDT (the action, and the Interrupt and
         // Restart dialog). Capture the buffer text here, which is pure Kotlin;
         // the native frontmatter read and the command launch run on a pooled thread.

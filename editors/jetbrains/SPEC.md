@@ -1120,7 +1120,8 @@ Restart Agent (the action, and the Interrupt and Restart dialog's confirmation)
 runs on the EDT. It reads only the open buffer's text there, then hands that
 text to a pooled thread (`TerminalUtil.launchRestartCommandOffEdt`), which reads
 `agent:` through the native `agent_doc_frontmatter_agent` export and launches
-`session restart-agent --expect-agent`. A failed native read, or no worker to
+`session restart-agent --expect-agent`. That flag is the harness to launch when
+document authority still names another agent. A failed native read, or no worker to
 run it, launches without `--expect-agent` (the `#restartagentharness` EDT fix). Plugin 0.2.866 made
 that native read on the EDT, so every Restart Agent threw the bridge's EDT
 guard and nothing restarted.

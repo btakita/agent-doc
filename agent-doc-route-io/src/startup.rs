@@ -500,6 +500,15 @@ pub fn auto_start_ext(
     }
 }
 
+/// Document harness, unless this cold start is carrying an operator Restart
+/// Agent whose editor harness the authority has not merged yet.
+fn harness_for_auto_start(file: &Path) -> HarnessConfig {
+    if let Some(agent) = crate::invocation::OperatorRestartAgentGuard::current() {
+        return HarnessConfig::from_agent_name(&agent);
+    }
+    resolve_harness_for_file(file)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn auto_start_ext_with_lock_mode(
     tmux: &Tmux,
@@ -513,7 +522,7 @@ pub fn auto_start_ext_with_lock_mode(
     resume: Option<ResumeRequest>,
     effects: RouteStartupEffects,
 ) -> Result<Option<String>> {
-    let harness = resolve_harness_for_file(file);
+    let harness = harness_for_auto_start(file);
     let session_name = resolve_target_session(tmux, context_session, &[], Some(file), &harness)?;
     ensure_auto_start_target_session(tmux, context_session, &session_name, &harness)?;
     auto_start_in_session_with_lock_mode(
@@ -1074,6 +1083,7 @@ pub fn auto_start_in_session_with_lock_mode(
                 reap_policy,
                 start_purpose,
                 resume: resume.clone(),
+                operator_restart_agent: crate::invocation::OperatorRestartAgentGuard::current(),
             },
         );
     agent_doc_ops_log_io::log_op(

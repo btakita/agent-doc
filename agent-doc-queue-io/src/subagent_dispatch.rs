@@ -14,9 +14,14 @@
 //! dispatch-intent window: once claimed it is excluded by the claim, and once
 //! a later cycle has seeded with it present it drains through the normal
 //! queue (a reported release means the subagent finished and the in-session
-//! loop now closes the item). A retained `Lost` attempt is offered again only
-//! when its exact lineage proves it never reached worker attachment. A started
-//! or provenance-unknown loss stays reconciliation debt.
+//! loop now closes the item). A retained `Lost` attempt is offered again when
+//! its exact lineage proves it never reached worker attachment, or when
+//! lost-running continue already failed and authorized a new generation
+//! (`#lostrunningcontinue`, `#losslessqueuerecovery`). That includes an
+//! explicit requeue of a started attempt: continue refuses to resume the
+//! abandoned worker, and that failure is the retry rather than a permanent
+//! `⚠️🚧` hold. Any other started or provenance-unknown loss stays
+//! reconciliation debt.
 //!
 //! The seed record lives in `state.db` `project_runtime_state`; the key format
 //! is shared with `agent-doc-session-check-io::midturn_steering`.
@@ -457,9 +462,12 @@ fn queue_attr_subagent_plan_with_pools(
     // they are non-blocking for ordinary queue reconciliation. Dispatch has a
     // stricter contract, however: a started Lost attempt is unknown-effect
     // work and must remain excluded unless retry is explicitly authorized.
-    // Judge those durable attempts against every executable lineage directly
-    // instead of relying on `claim_states_for_content`, whose live-head view
-    // intentionally omits a non-blocking nested Lost claim.
+    // An explicit requeue is that authorization once continue has failed: the
+    // abandoned worker is not resumed, and the row must not stay `⚠️🚧`
+    // (`#losslessqueuerecovery`). Judge those durable attempts against every
+    // executable lineage directly instead of relying on
+    // `claim_states_for_content`, whose live-head view intentionally omits a
+    // non-blocking nested Lost claim.
     let live_dispatch_identities = executable_row_keys(content)
         .into_iter()
         .map(|(_, lineage)| agent_doc_queue::queue_claim::claim_identity(&lineage))
@@ -478,16 +486,12 @@ fn queue_attr_subagent_plan_with_pools(
     let unsafe_lost = lost
         .into_iter()
         .filter(|claim| {
-            let explicit_started_requeue = claim
-                .frozen
-                .as_ref()
-                .is_some_and(agent_doc_queue::queue_claim::QueueWorkerFreeze::is_abandon);
-            // A failed continue can authorize retry after an involuntary
-            // worker loss. An explicit requeue of an attempt that did start
-            // is different: the release proves ownership ended, not that the
-            // worker produced no external effects. Keep it fail-closed.
-            (!agent_doc_queue::lost_running_recovery::retry_authorized(claim)
-                || explicit_started_requeue)
+            // Continue already ran for this observation. A failure authorizes
+            // a new generation, including when the attempt was abandoned for
+            // requeue (`#losslessqueuerecovery`). The abandoned worker is not
+            // resumed. A started loss whose continue has not failed stays
+            // excluded.
+            !agent_doc_queue::lost_running_recovery::retry_authorized(claim)
                 && !lineage.as_ref().is_some_and(|lineage| {
                     crate::queue_lineage::attempt_never_started(lineage, claim)
                 })
@@ -2306,6 +2310,114 @@ queue: go
             pending_subagent_dispatch_for_content(&file, &content).unwrap(),
             all,
             "a requeued line is dispatchable again"
+        );
+    }
+
+    /// `#losslessqueuerecovery`: requeue of a worker that already started keeps
+    /// that attempt `⚠️🚧` and abandoned. Continue refuses to resume it, and
+    /// that failure is the new generation, so a `subagents` queue offers the
+    /// same row again instead of holding it.
+    #[test]
+    fn started_requeue_on_a_subagents_queue_is_offered_again() {
+        use crate::claim_release_receipt::{ReleaseKind, release_attempt};
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let item = "ship the sample change";
+        let content = attr_doc("subagents", &[item]);
+        std::fs::write(&file, &content).unwrap();
+        assert_eq!(
+            pending_subagent_dispatch_for_content(&file, &content).unwrap(),
+            vec![item.to_string()]
+        );
+
+        let (_, started) =
+            crate::queue_claim::claim(&file, item, "subagent:sample-ship", 3600).unwrap();
+        crate::queue_claim::start_attempt(
+            &file,
+            item,
+            "subagent:sample-ship",
+            "worker-sample-ship",
+            3600,
+            started.generation,
+        )
+        .unwrap();
+        assert!(
+            pending_subagent_dispatch_for_content(&file, &content)
+                .unwrap()
+                .is_empty(),
+            "a live worker holds the row"
+        );
+        let handback = format!(
+            "{}sample change is on its branch",
+            agent_doc_queue::queue_claim::SUBAGENT_END_HANDBACK_REASON_PREFIX
+        );
+        crate::queue_claim::freeze_attempt(&file, item, Some(started.generation), &handback)
+            .unwrap();
+        release_attempt(&file, item, ReleaseKind::Requeue, Some(started.generation)).unwrap();
+
+        assert_eq!(
+            pending_subagent_dispatch_for_content(&file, &content).unwrap(),
+            vec![item.to_string()],
+            "a started requeue whose continue failed is dispatchable again"
+        );
+        let ledger = crate::queue_claim::load_ledger(&file).unwrap();
+        let claim = ledger
+            .claims
+            .iter()
+            .find(|claim| claim.item_text == item)
+            .expect("the abandoned attempt stays on the ledger");
+        assert_eq!(claim.generation, started.generation);
+        assert_eq!(
+            claim.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Lost
+        );
+        assert_eq!(
+            claim.lost_from,
+            Some(agent_doc_queue::queue_claim::QueueClaimState::Running)
+        );
+        let freeze = claim.frozen.as_ref().expect("requeue keeps the freeze");
+        assert!(freeze.is_abandon(), "{freeze:?}");
+        assert!(
+            freeze
+                .reason
+                .starts_with(agent_doc_queue::queue_claim::SUBAGENT_END_HANDBACK_REASON_PREFIX),
+            "abandon keeps the recorded hand-back: {}",
+            freeze.reason
+        );
+        let continued = claim
+            .lost_continue
+            .as_ref()
+            .expect("continue ran on the abandoned attempt");
+        assert!(continued.failed, "{continued:?}");
+        assert!(
+            continued.reason.contains("abandoned for requeue"),
+            "{}",
+            continued.reason
+        );
+        assert_eq!(
+            claim
+                .worker
+                .as_ref()
+                .map(|worker| worker.worker_id.as_str()),
+            Some("worker-sample-ship"),
+            "the offer does not resume or clear the abandoned worker"
+        );
+
+        let (outcome, next) =
+            crate::queue_claim::claim(&file, item, "subagent:sample-ship-2", 3600).unwrap();
+        assert_eq!(
+            outcome,
+            agent_doc_queue::queue_claim::ClaimOutcome::Reassigned
+        );
+        assert_eq!(next.generation, started.generation + 1);
+        assert_eq!(
+            next.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Claimed
+        );
+        assert!(
+            next.worker.is_none(),
+            "the new generation has no worker yet"
         );
     }
 

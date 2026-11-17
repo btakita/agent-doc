@@ -6379,6 +6379,7 @@ pub fn schedule_stale_editor_replica_cp_recycle(file: &Path, source: &str) -> St
             } else if matches!(
                 outcome.classify(),
                 agent_doc_crdt_relay_io::ReplicaSignalClass::DefinitivelyRefusedByAll(_)
+                    | agent_doc_crdt_relay_io::ReplicaSignalClass::DefinitivelyUnservedByAll(_)
             ) {
                 clear_editor_reregister_wait(file);
                 format!(

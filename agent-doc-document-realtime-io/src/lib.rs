@@ -1467,6 +1467,136 @@ fn await_visible_editor_projection_receipt(path: &Path, target_hash: &str) -> Re
     ))
 }
 
+/// Terminal recycle statuses from
+/// [`agent_doc_controller_io::project_controller::schedule_stale_editor_replica_cp_recycle`].
+///
+/// `no_live_editor` and `editor_endpoint_refused` mean no editor will serve
+/// this document. `editor_reregister_primary` and an escalated unanswered
+/// window are still unproven and must not write disk.
+fn editor_replica_recovery_cannot_serve(status: &str) -> bool {
+    status.contains("reason=no_live_editor") || status.contains("reason=editor_endpoint_refused")
+}
+
+fn dropped_replica_editor_edit_in_flight(
+    file: &Path,
+    relay_text: &str,
+    target: &str,
+    source: &str,
+) -> bool {
+    cp_write_editor_ops_in_flight(file, relay_text, target, source).is_some()
+        || agent_doc_reliable_sync_io::plane_document_in_flight_for_path(&file.to_string_lossy())
+            == Some(true)
+}
+
+/// Project a retained canonical target to disk after the editor replica is gone
+/// and recovery has proved it will not re-register.
+///
+/// This is the last-editor-close handoff for a replica the editor integration
+/// dropped: validate the target, refuse while an editor edit is still in
+/// flight, compare-and-swap the disk bytes, install the same bytes as the
+/// relay canonical, clear the matching deferred intent, and record disk
+/// authority. Silence and an in-budget re-register do not call it.
+fn project_dropped_editor_replica_to_disk(
+    file: &Path,
+    relay_text: &str,
+    target: &str,
+    source: &str,
+    recycle_status: &str,
+) -> Result<()> {
+    validate_canonical_document_target(file, target, source)?;
+    if dropped_replica_editor_edit_in_flight(file, relay_text, target, source) {
+        anyhow::bail!(
+            "{source}: dropped editor replica for {} still has an in-flight edit; disk was not written",
+            file.display()
+        );
+    }
+    agent_doc_crdt_relay_io::with_hub(file, |hub| -> Result<()> {
+        if hub.live_count() != 0 {
+            anyhow::bail!(
+                "{source}: editor replica returned before dropped-replica disk projection for {}",
+                file.display()
+            );
+        }
+        if !hub.quarantined_live_replicas().is_empty() {
+            anyhow::bail!(
+                "{source}: quarantined editor text blocks dropped-replica disk projection for {}",
+                file.display()
+            );
+        }
+        let current = hub.canonical_text();
+        if current != relay_text {
+            anyhow::bail!(
+                "{source}: canonical text changed before dropped-replica disk projection for {}",
+                file.display()
+            );
+        }
+        if current != target {
+            let packet = hub.apply_canonical_replace(relay_text, target)?;
+            if !packet.targets.is_empty() {
+                anyhow::bail!(
+                    "{source}: dropped-replica projection gained a live recipient for {}",
+                    file.display()
+                );
+            }
+        }
+        Ok(())
+    })??;
+    let disk_before = std::fs::read_to_string(file).unwrap_or_default();
+    let disk_at_mutation = std::fs::read_to_string(file).unwrap_or_default();
+    if disk_at_mutation != disk_before {
+        anyhow::bail!(
+            "{source}: disk changed during dropped-replica authority handoff for {}; retained intents remain available for retry",
+            file.display()
+        );
+    }
+    if disk_before != target {
+        atomic_write_authority_raw(file, target)?;
+    }
+    let final_disk = std::fs::read_to_string(file).with_context(|| {
+        format!(
+            "{source}: failed to verify {} after dropped-replica disk projection",
+            file.display()
+        )
+    })?;
+    if final_disk != target {
+        anyhow::bail!(
+            "{source}: dropped-replica disk projection verification failed for {}",
+            file.display()
+        );
+    }
+    let target_hash = agent_doc_hash::content_hash(target);
+    if let Some(pending) = pending_document_write(file) {
+        if pending.target_hash.eq_ignore_ascii_case(&target_hash) {
+            clear_deferred_document_write_intent(file, &pending.target_hash, source)?;
+        }
+    }
+    record_disk_replica_authority(file, source, target);
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "dropped_replica_closeout_disk_projection file={} content_hash={} wrote={} supervisor_recycle={} authority=disk",
+            file.display(),
+            target_hash,
+            disk_before != target,
+            recycle_status,
+        ),
+    );
+    Ok(())
+}
+
+fn dropped_replica_disk_projection_is_authoritative(
+    path: &Path,
+    relay_write: &agent_doc_crdt_relay_io::CpRelayWrite,
+) -> bool {
+    !relay_write.applied
+        && relay_write.live_editors == 0
+        && relay_write.targets == 0
+        && relay_write.delivery_converged
+        && std::fs::read_to_string(path)
+            .ok()
+            .is_some_and(|disk| agent_doc_hash::content_hash(&disk) == relay_write.content_hash)
+}
+
 fn atomic_write_rebased_through_authority_body(
     path: &Path,
     projection_base: &str,
@@ -1507,6 +1637,21 @@ fn atomic_write_rebased_through_authority_body(
             let Some(relay_write) = relay_write else {
                 break;
             };
+            if dropped_replica_disk_projection_is_authoritative(path, &relay_write) {
+                clear_deferred_document_write_intent(
+                    path,
+                    &relay_write.content_hash,
+                    "dropped_replica_closeout_disk_projection",
+                )?;
+                agent_doc_ops_log_io::log_op(
+                    path,
+                    &format!(
+                        "write_authority action=materialized transport=dropped_replica_disk_projection hash={} delivery_converged=true disk_rewritten=true post_proof_rebases={post_proof_rebases}",
+                        relay_write.content_hash,
+                    ),
+                );
+                return Ok(());
+            }
 
             let current = if relay_write.delivery_converged {
                 observe_live_editor_authority_after_model_ensure(
@@ -2966,10 +3111,39 @@ pub fn settle_retained_non_capture_projection_through_authority(
         else {
             return Ok(false);
         };
-        if live_editors == 0 || text != pending.target_content {
+        if text != pending.target_content {
             return Ok(false);
         }
-        if !canonical_editor_projection_is_persisted(
+        if live_editors == 0 {
+            let recycle_status = agent_doc_controller_io::project_controller::
+                schedule_stale_editor_replica_cp_recycle(path, source);
+            if !editor_replica_recovery_cannot_serve(&recycle_status)
+                || dropped_replica_editor_edit_in_flight(
+                    path,
+                    &text,
+                    &pending.target_content,
+                    source,
+                )
+            {
+                return Ok(false);
+            }
+            project_dropped_editor_replica_to_disk(
+                path,
+                &text,
+                &pending.target_content,
+                source,
+                &recycle_status,
+            )?;
+            disk = std::fs::read_to_string(path).with_context(|| {
+                format!(
+                    "{source}: failed to read {} after dropped-replica disk projection",
+                    path.display()
+                )
+            })?;
+            if disk != pending.target_content {
+                return Ok(false);
+            }
+        } else if !canonical_editor_projection_is_persisted(
             path,
             &pending.target_content,
             "retained_non_capture_projection_settlement",
@@ -4481,6 +4655,38 @@ pub fn apply_canonical_replace_if_attached(
                                         .flatten()
                                         .is_none();
                             if editor_delivery_worker_stale {
+                                let recycle_status = agent_doc_controller_io::project_controller::
+                                        schedule_stale_editor_replica_cp_recycle(file, source);
+                                if editor_replica_recovery_cannot_serve(&recycle_status)
+                                    && !dropped_replica_editor_edit_in_flight(
+                                        file,
+                                        &relay_text,
+                                        &effective_target,
+                                        source,
+                                    )
+                                {
+                                    ensure_deferred_document_write_intent(
+                                        file,
+                                        &relay_text,
+                                        &effective_target,
+                                        source,
+                                        DocumentWriteDeferredReason::EditorDeliveryWorkerStale,
+                                    )?;
+                                    project_dropped_editor_replica_to_disk(
+                                        file,
+                                        &relay_text,
+                                        &effective_target,
+                                        source,
+                                        &recycle_status,
+                                    )?;
+                                    return noted_relay_step(
+                                        file,
+                                        source,
+                                        content,
+                                        &effective_target,
+                                        projected_noop_relay_write(&effective_target, 0),
+                                    );
+                                }
                                 let intent_id = ensure_deferred_document_write_intent(
                                     file,
                                     &relay_text,
@@ -4488,8 +4694,6 @@ pub fn apply_canonical_replace_if_attached(
                                     source,
                                     DocumentWriteDeferredReason::EditorDeliveryWorkerStale,
                                 )?;
-                                let recycle_status = agent_doc_controller_io::project_controller::
-                                        schedule_stale_editor_replica_cp_recycle(file, source);
                                 agent_doc_ops_log_io::log_op(
                                     file,
                                     &format!(
@@ -4536,6 +4740,38 @@ pub fn apply_canonical_replace_if_attached(
                                     // never reconcile. Preserve the merged target in
                                     // the durable journal and let replica
                                     // re-registration replay it.
+                                    let recycle_status = agent_doc_controller_io::project_controller::
+                        schedule_stale_editor_replica_cp_recycle(file, source);
+                                    if editor_replica_recovery_cannot_serve(&recycle_status)
+                                        && !dropped_replica_editor_edit_in_flight(
+                                            file,
+                                            &relay_text,
+                                            &effective_target,
+                                            source,
+                                        )
+                                    {
+                                        ensure_deferred_document_write_intent(
+                                            file,
+                                            &relay_text,
+                                            &effective_target,
+                                            source,
+                                            DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
+                                        )?;
+                                        project_dropped_editor_replica_to_disk(
+                                            file,
+                                            &relay_text,
+                                            &effective_target,
+                                            source,
+                                            &recycle_status,
+                                        )?;
+                                        return noted_relay_step(
+                                            file,
+                                            source,
+                                            content,
+                                            &effective_target,
+                                            projected_noop_relay_write(&effective_target, 0),
+                                        );
+                                    }
                                     let intent_id = ensure_deferred_document_write_intent(
                                         file,
                                         &relay_text,
@@ -4543,8 +4779,6 @@ pub fn apply_canonical_replace_if_attached(
                                         source,
                                         DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
                     )?;
-                                    let recycle_status = agent_doc_controller_io::project_controller::
-                        schedule_stale_editor_replica_cp_recycle(file, source);
                                     return Err(retained_intent_refusal(
                                         file,
                                         &intent_id,
@@ -15820,6 +16054,59 @@ mod tests {
             .expect("deferred write should merge with later editor text");
         assert!(merged.contains("agent:boundary:deferred"));
         assert!(merged.contains("operator note"));
+    }
+
+    #[test]
+    fn editor_replica_recovery_cannot_serve_is_terminal_status_only() {
+        assert!(editor_replica_recovery_cannot_serve(
+            "request_skipped reason=no_live_editor editor_replica_reregister=no_live_registration"
+        ));
+        assert!(editor_replica_recovery_cannot_serve(
+            "request_skipped reason=editor_endpoint_refused editor_replica_reregister=definitively_refused_by_all:1"
+        ));
+        assert!(editor_replica_recovery_cannot_serve(
+            "request_skipped reason=editor_endpoint_refused editor_replica_reregister=definitively_unserved_by_all:1"
+        ));
+        assert!(!editor_replica_recovery_cannot_serve(
+            "request_skipped reason=editor_reregister_primary editor_replica_reregister=delivery_failed_to_all:1"
+        ));
+        assert!(!editor_replica_recovery_cannot_serve(
+            "escalated reason=editor_reregister_unanswered unanswered_secs=463 editor_replica_reregister=requested:1 fallback=none"
+        ));
+    }
+
+    #[test]
+    fn serialized_atomic_write_projects_disk_when_dropped_replica_cannot_reregister() {
+        let baseline = "# Session\n\nbody\n";
+        let target = "# Session\n\nbody\n\n<!-- agent:boundary:dropped -->\n";
+        let (dir, file, _canonical) = temp_doc(baseline);
+        let identity = "test-crdt-dropped-replica-disk";
+        seed_reliable_sync_open_without_registration(&file, identity);
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| {
+            let current = hub.canonical_text();
+            if current != baseline {
+                hub.apply_canonical_replace(&current, baseline)
+                    .expect("seed canonical to the on-disk baseline");
+            }
+        })
+        .unwrap();
+
+        atomic_write_through_authority(&file, target)
+            .expect("a dropped replica that cannot re-register must project disk");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
+        assert!(
+            pending_document_write(&file).is_none(),
+            "the retained intent must clear once disk holds the target"
+        );
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("dropped_replica_closeout_disk_projection"),
+            "{log}"
+        );
+        assert!(
+            log.contains("transport=dropped_replica_disk_projection"),
+            "{log}"
+        );
     }
 
     #[test]

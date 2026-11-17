@@ -5701,17 +5701,17 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
 /// rejection did not deliver. Neither version number changes by retrying the
 /// same handshake.
 ///
-/// A *withheld* reload is not that failure.
+/// A stale sender is not that failure.
 /// [`agent_doc_ipc_io::BuildMismatchRecoveryRefusal::keeps_live_editor_replica`]
-/// is true when the sender must not ask the editor to reload again because a
-/// reload is already in flight, or because the sender executable is the stale
-/// side. The listener is still the live editor that registered the replica.
-/// Counting the withhold as `definitive_refusal` made `barrier_wait` disconnect
-/// that member at `redeliveries=0` (`DropFromDeliveryCut`). The document then
-/// stayed `editor_open=true` with `live_editors=0`
-/// (`keep_editor_authority_no_live_replica` /
-/// `editor_owner_without_registered_replica`) and closeout could not land.
-/// Observed 2026-11-17 on `tasks/agent-doc/agent-doc-bugs.md`.
+/// is true only for `sender_executable_replaced`: this process is the outdated
+/// binary, and counting that withhold as `definitive_refusal` made
+/// `barrier_wait` disconnect the newer editor's replica at `redeliveries=0`
+/// (`DropFromDeliveryCut`). Observed 2026-11-17 on
+/// `tasks/agent-doc/agent-doc-bugs.md` (`listener=0.35.578`, `client=0.35.577`,
+/// editor pid 2860357). `reload_already_requested_for_listener_build` stays
+/// terminal: the listener already reloaded, the mismatch survived, and the
+/// write path projects the retained target to disk instead of waiting for a
+/// replica that cannot re-register.
 ///
 /// `#refusedreceiptveto`: a receipt rejection was already counted; a failed
 /// build-mismatch recovery was collected into `build_mismatches`, logged as
@@ -8194,9 +8194,9 @@ fn signal_crdt_replica_event_counting_inner_with(
                 // not a deferral. Counting it lets the authority resolver tell
                 // "the editor will not serve this document" apart from "nothing
                 // answered yet" — the distinction the strand depended on losing.
-                // A withheld reload is the opposite: the editor is still live,
-                // so disconnecting its replica is what produces
-                // `live_editors=0` while `editor_open=true`.
+                // `sender_executable_replaced` is the opposite: the sender is
+                // the stale side, so disconnecting the listener's replica is
+                // what produces `live_editors=0` while `editor_open=true`.
                 let definitive = recovering_send_error_is_definitive(
                     agent_doc_ipc_io::is_ipc_receipt_rejected_error(&error),
                     build_mismatch_recovery_failed,
@@ -9062,37 +9062,36 @@ mod tests {
         );
     }
 
-    /// A reload withhold is not an exhausted endpoint. The editor still holds
-    /// the document; dropping its replica is the `live_editors=0` wedge.
+    /// A stale sender must not drop the editor replica. A listener whose reload
+    /// already failed to clear the build mismatch is a terminal refusal.
     #[test]
-    fn a_withheld_reload_does_not_drop_a_live_editor_replica() {
+    fn a_stale_sender_does_not_drop_a_live_editor_replica() {
         assert!(
             !recovering_send_error_is_definitive(false, true, true),
-            "reload_already_requested / sender_executable_replaced must stay in the delivery cut"
+            "sender_executable_replaced must stay in the delivery cut"
         );
         assert!(
             recovering_send_error_is_definitive(false, true, false),
-            "a reload whose delivery failed is still a definitive refusal"
+            "reload_already_requested is a definitive refusal"
         );
         assert!(
             recovering_send_error_is_definitive(true, false, false),
             "an explicit receipt rejection is still a definitive refusal"
         );
-        for refusal in [
-            agent_doc_ipc_io::BuildMismatchRecoveryRefusal::ReloadAlreadyRequested,
-            agent_doc_ipc_io::BuildMismatchRecoveryRefusal::SenderExecutableReplaced,
-        ] {
-            assert!(
-                refusal.keeps_live_editor_replica(),
-                "{refusal:?} must not disconnect the editor that still has the document"
-            );
-        }
+        assert!(
+            agent_doc_ipc_io::BuildMismatchRecoveryRefusal::SenderExecutableReplaced
+                .keeps_live_editor_replica()
+        );
+        assert!(
+            !agent_doc_ipc_io::BuildMismatchRecoveryRefusal::ReloadAlreadyRequested
+                .keeps_live_editor_replica()
+        );
         let withheld = ReplicaSignalOutcome {
             found: 1,
             notified: 0,
             build_mismatches: vec![ReplicaSignalRoute {
                 editor_id: "intellij".to_string(),
-                editor_pid: 236096,
+                editor_pid: 2860357,
             }],
             build_mismatch_refusals: Vec::new(),
             generation_mismatches: 0,
@@ -9103,11 +9102,16 @@ mod tests {
         assert_eq!(
             withheld.nonconverging_disposition(),
             NonconvergingReplicaDisposition::Retry,
-            "a live editor whose reload was withheld must keep its replica"
+            "a stale sender must keep the newer editor's replica"
         );
-        assert_ne!(
-            withheld.classify(),
-            ReplicaSignalClass::DefinitivelyRefusedByAll(1),
+        let refused = ReplicaSignalOutcome {
+            definitive_refusals: 1,
+            ..withheld
+        };
+        assert_eq!(
+            refused.nonconverging_disposition(),
+            NonconvergingReplicaDisposition::DropFromDeliveryCut,
+            "a listener that will not re-register leaves the delivery cut"
         );
     }
 

@@ -47,6 +47,7 @@ fn project_pending_lifecycle(document: &str) -> String {
             .iter()
             .filter_map(|entry| match entry {
                 QueueEntry::Prompt(prompt) => Some(QueueRowProjection {
+                    identity: None,
                     text: prompt.text.clone(),
                     marker: QueueLifecycleMarker::Pending,
                     owner: None,

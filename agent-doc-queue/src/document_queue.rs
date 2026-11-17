@@ -1988,6 +1988,7 @@ fn set_prompt_lifecycle_markers_with(
     let targets = targets
         .iter()
         .map(|(text, marker)| QueueRowProjection {
+            identity: None,
             text: text.clone(),
             marker: *marker,
             owner: None,
@@ -2010,6 +2011,11 @@ pub struct QueueRowProjection {
     ///
     /// [`QueueLifecycleMarker::Blocked`]: agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
     pub blockers: Vec<String>,
+    /// Parent-qualified ledger identity (`url: #adversarial-pr`). When set,
+    /// paint matches this instead of the stripped leaf, so a bare earlier
+    /// copy cannot consume the next equal leaf's worker. `None` keeps
+    /// occurrence matching on [`Self::text`].
+    pub identity: Option<String>,
 }
 
 /// How runtime projection closes structural parents (`#keepunstrike`).
@@ -2052,10 +2058,29 @@ pub fn set_prompt_runtime_projections_with(
         let without_prefix = strip_priority_markers(cleaned.as_deref().unwrap_or(text));
         render_queue_effect_report_state_annotation(&without_prefix, None)
     };
+    // Identical leaves share stripped text. Ledger identity includes the
+    // parent pull, and a bare earlier leaf has no target: matching the next
+    // equal leaf draws that later worker onto the earlier pull.
+    let targets_carry_lineage = targets.iter().any(|target| target.identity.is_some());
+    let row_key = |index: usize, leaf: &str| -> String {
+        if targets_carry_lineage {
+            lineage_claim_text(entries, index)
+                .map(|lineage| projection_key(&lineage))
+                .filter(|key| !key.is_empty())
+                .unwrap_or_else(|| projection_key(leaf))
+        } else {
+            projection_key(leaf)
+        }
+    };
     let mut targets = targets
         .iter()
         .filter_map(|target| {
-            let key = projection_key(&target.text);
+            let key = target
+                .identity
+                .as_deref()
+                .map(projection_key)
+                .filter(|key| !key.is_empty())
+                .unwrap_or_else(|| projection_key(&target.text));
             (!key.is_empty()).then_some((key, target.clone(), false))
         })
         .collect::<Vec<_>>();
@@ -2092,7 +2117,7 @@ pub fn set_prompt_runtime_projections_with(
                 {
                     next.text = cleaned;
                 }
-                let key = projection_key(&next.text);
+                let key = row_key(index, &next.text);
                 let target = targets
                     .iter_mut()
                     .find(|(target_key, _, consumed)| target_key == &key && !*consumed)
@@ -2157,11 +2182,14 @@ pub fn set_prompt_runtime_projections_with(
                     // lifecycle projection of its own.
                     _ => return entry.clone(),
                 };
-                let parent_key = projection_key(&source.text);
+                let parent_key = row_key(index, &source.text);
                 let later_live_occurrences = entries[index + 1..]
                     .iter()
-                    .filter_map(|entry| match entry {
-                        QueueEntry::Prompt(prompt) => Some(projection_key(&prompt.text)),
+                    .enumerate()
+                    .filter_map(|(offset, entry)| match entry {
+                        QueueEntry::Prompt(prompt) => {
+                            Some(row_key(index + 1 + offset, &prompt.text))
+                        }
                         _ => None,
                     })
                     .filter(|key| key == &parent_key)
@@ -2236,7 +2264,7 @@ pub fn set_prompt_runtime_projections_with(
                     }
                     next.text =
                         agent_doc_document::queue_projection::apply_owner_projection(&next.text, None);
-                    let key = projection_key(&next.text);
+                    let key = row_key(index, &next.text);
                     if let Some((_, _, consumed)) = targets
                         .iter_mut()
                         .find(|(target_key, _, consumed)| target_key == &key && !*consumed)
@@ -2274,7 +2302,7 @@ pub fn set_prompt_runtime_projections_with(
                         {
                             probe.text = cleaned;
                         }
-                        let key = projection_key(&probe.text);
+                        let key = row_key(index, &probe.text);
                         // Repaint only when durable state says something the
                         // row does not already show; the same reported attempt
                         // keeps its row byte-for-byte.
@@ -2310,7 +2338,7 @@ pub fn set_prompt_runtime_projections_with(
                         next.text = cleaned;
                         changed = true;
                     }
-                    let key = projection_key(&next.text);
+                    let key = row_key(index, &next.text);
                     let target = targets
                         .iter_mut()
                         .find(|(target_key, _, consumed)| target_key == &key && !*consumed)
@@ -8693,6 +8721,7 @@ mod tests {
             "- live work\n",
         );
         let targets = [QueueRowProjection {
+            identity: None,
             text: "live work".to_string(),
             marker: QueueLifecycleMarker::Running,
             owner: Some(QueueOwnerProjection {
@@ -8719,6 +8748,80 @@ mod tests {
             None,
             "the source-preserving runtime projection is idempotent"
         );
+    }
+
+    /// A bare `#adversarial-pr` under an earlier pull has no target. Paint
+    /// must not give it the next pull's worker just because the leaf text matches.
+    #[test]
+    fn bare_identical_leaf_does_not_take_the_next_pulls_worker() {
+        use agent_doc_document::queue_projection::{QueueLifecycleMarker, QueueOwnerProjection};
+
+        let body = concat!(
+            "- https://example.test/pull/10\n",
+            "  - #adversarial-pr\n",
+            "- https://example.test/pull/11\n",
+            "  - #adversarial-pr\n",
+            "- https://example.test/pull/12\n",
+            "  - #adversarial-pr\n",
+        );
+        let entries = parse(body).unwrap();
+        let leaves = entries
+            .iter()
+            .enumerate()
+            .filter_map(|(index, entry)| {
+                prompt_of(entry)
+                    .is_some_and(|prompt| prompt.text.contains("#adversarial-pr"))
+                    .then_some(index)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(leaves, vec![1, 3, 5], "{entries:?}");
+        let identity = |index: usize| lineage_claim_text(&entries, index);
+        let owner = |name: &str| {
+            Some(QueueOwnerProjection {
+                owner: name.to_string(),
+                generation: 1,
+            })
+        };
+        let targets = [
+            QueueRowProjection {
+                identity: identity(leaves[1]),
+                text: "#adversarial-pr".to_string(),
+                marker: QueueLifecycleMarker::Running,
+                owner: owner("subagent:pull11"),
+                blockers: Vec::new(),
+            },
+            QueueRowProjection {
+                identity: identity(leaves[2]),
+                text: "#adversarial-pr".to_string(),
+                marker: QueueLifecycleMarker::Running,
+                owner: owner("subagent:pull12"),
+                blockers: Vec::new(),
+            },
+        ];
+        let projected = set_prompt_runtime_projections(&entries, &targets).expect("paint");
+        let text = |index: usize| prompt_of(&projected[index]).unwrap().text.clone();
+        assert_eq!(
+            text(leaves[0]),
+            "#adversarial-pr",
+            "earlier pull stays bare"
+        );
+        assert!(
+            text(leaves[1]).contains("[#subagent:pull11#1]"),
+            "{}",
+            text(leaves[1])
+        );
+        assert!(
+            text(leaves[2]).contains("[#subagent:pull12#1]"),
+            "{}",
+            text(leaves[2])
+        );
+        assert!(
+            !text(leaves[0]).contains("subagent:"),
+            "{}",
+            text(leaves[0])
+        );
+        assert!(!text(leaves[1]).contains("pull12"), "{}", text(leaves[1]));
+        assert!(!text(leaves[2]).contains("pull11"), "{}", text(leaves[2]));
     }
 
     #[test]
@@ -8900,6 +9003,7 @@ mod tests {
         use agent_doc_document::queue_projection::{QueueLifecycleMarker, QueueOwnerProjection};
         let body = "- ~~  🙋 [#subagent-operator-request-choice] fix sdk demo  ~~\n- untouched\n";
         let targets = vec![QueueRowProjection {
+            identity: None,
             text: "fix sdk demo".to_string(),
             marker: QueueLifecycleMarker::Unknown,
             owner: Some(QueueOwnerProjection {
@@ -8927,6 +9031,7 @@ mod tests {
         let body = "- ☑️ [#subagent:sdk#4] fix sdk demo\n";
         let target = |marker| {
             vec![QueueRowProjection {
+                identity: None,
                 text: "fix sdk demo".to_string(),
                 marker,
                 owner: Some(QueueOwnerProjection {
@@ -8966,6 +9071,7 @@ mod tests {
     fn terse_owner_runtime_projection_is_idempotent() {
         use agent_doc_document::queue_projection::{QueueLifecycleMarker, QueueOwnerProjection};
         let targets = vec![QueueRowProjection {
+            identity: None,
             text: "dispatched worker work".to_string(),
             marker: QueueLifecycleMarker::Claimed,
             owner: Some(QueueOwnerProjection {
@@ -8993,6 +9099,7 @@ mod tests {
     fn runtime_projection_carries_report_state_annotation_without_changing_identity() {
         use agent_doc_document::queue_projection::QueueLifecycleMarker;
         let targets = vec![QueueRowProjection {
+            identity: None,
             text: "worker work ⟦published+local⟧".to_string(),
             marker: QueueLifecycleMarker::Reported,
             owner: None,
@@ -9027,6 +9134,7 @@ mod tests {
             "```",
         );
         let targets = vec![QueueRowProjection {
+            identity: None,
             text: text.to_string(),
             marker: QueueLifecycleMarker::Claimed,
             owner: Some(QueueOwnerProjection {
@@ -12914,6 +13022,7 @@ mod tests {
         let targets = REPORTED
             .iter()
             .map(|child| QueueRowProjection {
+                identity: None,
                 text: (*child).to_string(),
                 marker: agent_doc_document::queue_projection::QueueLifecycleMarker::Reported,
                 owner: None,
@@ -13083,12 +13192,14 @@ mod tests {
         let body = "- same\n  - same\n";
         let targets = [
             QueueRowProjection {
+                identity: None,
                 text: "same".to_string(),
                 marker: QueueLifecycleMarker::Pending,
                 owner: None,
                 blockers: Vec::new(),
             },
             QueueRowProjection {
+                identity: None,
                 text: "same".to_string(),
                 marker: QueueLifecycleMarker::Reported,
                 owner: None,
@@ -13146,6 +13257,7 @@ mod tests {
         let (projected, _) = project_prompt_runtime_projections(
             &body,
             &[QueueRowProjection {
+                identity: None,
                 text: LEAF.to_string(),
                 marker: agent_doc_document::queue_projection::QueueLifecycleMarker::Running,
                 owner: None,
@@ -13170,6 +13282,7 @@ mod tests {
         let (projected, _) = project_prompt_runtime_projections(
             body,
             &[QueueRowProjection {
+                identity: None,
                 text: head,
                 marker: agent_doc_document::queue_projection::QueueLifecycleMarker::Running,
                 owner: None,
@@ -13200,6 +13313,7 @@ mod tests {
         let (projected, _) = project_prompt_runtime_projections(
             body,
             &[QueueRowProjection {
+                identity: None,
                 text: head,
                 marker: agent_doc_document::queue_projection::QueueLifecycleMarker::Pending,
                 owner: None,
@@ -13234,6 +13348,7 @@ mod tests {
             .enumerate()
             .filter_map(|(index, entry)| match entry {
                 QueueEntry::Prompt(prompt) => Some(QueueRowProjection {
+                    identity: None,
                     text: prompt.text.clone(),
                     marker: if index == 0 || index == 1 {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
@@ -13490,6 +13605,7 @@ mod tests {
         let projected = set_prompt_runtime_projections(
             &entries,
             &[QueueRowProjection {
+                identity: None,
                 text: "next task".to_string(),
                 marker: agent_doc_document::queue_projection::QueueLifecycleMarker::Running,
                 owner: None,
@@ -13784,6 +13900,7 @@ mod tests {
             .iter()
             .filter_map(|entry| match entry {
                 QueueEntry::Prompt(prompt) => Some(QueueRowProjection {
+                    identity: None,
                     text: prompt.text.clone(),
                     marker: QueueLifecycleMarker::Pending,
                     owner: None,
@@ -13837,6 +13954,7 @@ mod tests {
             .iter()
             .filter_map(|entry| match entry {
                 QueueEntry::Prompt(prompt) => Some(QueueRowProjection {
+                    identity: None,
                     text: prompt.text.clone(),
                     marker: QueueLifecycleMarker::Pending,
                     owner: None,
@@ -16633,6 +16751,7 @@ mod tests {
         let projected = set_prompt_runtime_projections(
             &annotated,
             &[QueueRowProjection {
+                identity: None,
                 text: answer,
                 marker: agent_doc_document::queue_projection::QueueLifecycleMarker::Running,
                 owner: Some(agent_doc_document::queue_projection::QueueOwnerProjection {
@@ -16660,6 +16779,7 @@ mod tests {
         let projected = set_prompt_runtime_projections(
             &entries,
             &[QueueRowProjection {
+                identity: None,
                 text: prompt.to_string(),
                 marker: agent_doc_document::queue_projection::QueueLifecycleMarker::Claimed,
                 owner: Some(agent_doc_document::queue_projection::QueueOwnerProjection {
@@ -16817,6 +16937,7 @@ mod tests {
             &body,
             &[
                 QueueRowProjection {
+                    identity: None,
                     text: paused.clone(),
                     marker: QueueLifecycleMarker::Reported,
                     owner: Some(QueueOwnerProjection {
@@ -16826,6 +16947,7 @@ mod tests {
                     blockers: Vec::new(),
                 },
                 QueueRowProjection {
+                    identity: None,
                     text: answer_row,
                     marker: QueueLifecycleMarker::Pending,
                     owner: None,

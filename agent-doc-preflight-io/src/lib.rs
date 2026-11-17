@@ -9300,6 +9300,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                     })
                 });
             Some(agent_doc_queue::document_queue::QueueRowProjection {
+                identity: None,
                 text: prompt.text.clone(),
                 blockers: if marker
                     == agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked

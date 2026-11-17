@@ -1466,6 +1466,7 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                             })
                         });
                     Some(agent_doc_queue::document_queue::QueueRowProjection {
+                        identity: None,
                         text: prompt.text.clone(),
                         blockers: if marker
                             == agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked

@@ -72,6 +72,7 @@ pub mod queue_tree;
 pub mod reported_closeout;
 pub mod restart_recovery;
 pub mod route_dispatch;
+pub mod session_trigger;
 pub mod stale_completion_evidence;
 #[cfg(test)]
 mod stray_close_text_tests;

@@ -871,16 +871,19 @@ fn foreign_draft_queued_message(
     draft_preview: &str,
     queued: &RouteQueueEnqueueOutcome,
 ) -> String {
+    let queued_as_work = queued.appended || queued.already_present || queued.superseded;
+    let disposition = if queued_as_work {
+        format!(
+            "queued pending dispatch {:?} in active agent:queue (appended={}, already_present={}, superseded={}). The supervisor will dispatch Run Agent Doc after the composer and any turn it starts drain",
+            queued.prompt_text, queued.appended, queued.already_present, queued.superseded,
+        )
+    } else {
+        "did not queue the session trigger as work because agent:queue already has other work. The supervisor submits Run Agent Doc for that work after the composer and any turn it starts drain".to_string()
+    };
     format!(
         "[route] pane {pane} composer holds an unrelated unsubmitted draft; preserved it \
-         without typing or submitting it and queued pending dispatch {:?} in active \
-         agent:queue (appended={}, already_present={}, superseded={}). The supervisor will \
-         dispatch Run Agent Doc after the composer and any turn it starts drain. Redacted \
+         without typing or submitting it and {disposition}. Redacted \
          draft preview: {:?}. {}",
-        queued.prompt_text,
-        queued.appended,
-        queued.already_present,
-        queued.superseded,
         agent_doc_secret_redact::redact(draft_preview),
         agent_doc_flow::outcome::user_outcome_fields(
             agent_doc_flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner,
@@ -917,11 +920,11 @@ fn try_pre_dispatch_stranded_draft_submit(
         // appended with no separator, and the harness submitted the single line
         // `agent-doc tasks/api.mdagent-doc /abs/.../tasks/api.md`. Preflight then
         // refused a document path that never existed. The draft is not ours to
-        // clear and appending to it can only produce a wrong path. Preserve it and
-        // move this trigger into the durable document queue: the existing idle
-        // drain re-observes the composer and dispatches only after that draft (and
-        // any turn it starts) has cleared. Repeated Run Agent Doc actions coalesce
-        // through the queue instead of growing an in-memory retry list.
+        // clear and appending to it can only produce a wrong path. Preserve it.
+        // The queue keeps this trigger only when it has no other prompt, so the
+        // idle drain can still wake after the draft clears. Other queued work
+        // already submits the trigger; that invocation is not a work head.
+        // Repeated Run Agent Doc actions coalesce instead of growing a retry list.
         let queued = enqueue_route_dispatch_prompt(
             file,
             &trigger,
@@ -1608,6 +1611,26 @@ mod tests {
         assert!(message.contains("ui_outcome=queued_behind_owner"));
         assert!(!message.contains("Submit or clear"));
         assert!(!message.contains("re-run the trigger"));
+    }
+
+    #[test]
+    fn foreign_draft_with_other_queue_work_does_not_claim_the_trigger_was_queued() {
+        let message = foreign_draft_queued_message(
+            "%10",
+            "Build anything",
+            &RouteQueueEnqueueOutcome {
+                prompt_text: TRIGGER.to_string(),
+                appended: false,
+                already_present: false,
+                superseded: false,
+                component_created: false,
+                activated: false,
+            },
+        );
+        assert!(message.contains("did not queue the session trigger as work"));
+        assert!(!message.contains("queued pending dispatch"));
+        assert!(message.contains("ui_outcome=queued_behind_owner"));
+        assert!(message.contains("preserved it without typing or submitting it"));
     }
 
     #[test]

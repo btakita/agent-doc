@@ -163,6 +163,12 @@ pub fn prepare_route_dispatch_queue_update(
         prompt_text
     };
     let prompt_identity = strip_priority_markers(&prompt_text);
+    // `#concatdraftinject`: a bare `agent-doc <file>` is the harness trigger.
+    // Keep that row only when the queue has no other prompt, so the idle
+    // supervisor still wakes after a foreign composer draft clears. Other
+    // work already submits the trigger; inserting the invocation ahead of it
+    // makes the transport text the next subagent head.
+    let session_trigger = crate::session_trigger::is_session_trigger_prompt(&prompt_text);
     let mut content = agent_doc_frontmatter::frontmatter::merge_queue_control(original, "go")?;
     let components = agent_doc_element::element::parse(&content)?;
     let mut component_created = false;
@@ -175,51 +181,70 @@ pub fn prepare_route_dispatch_queue_update(
         let body = &content[queue_component.open_end..queue_component.close_start];
         match parse(body) {
             Ok(mut entries) => {
-                already_present = document_queue::prompts(&entries)
-                    .iter()
-                    .any(|prompt| strip_priority_markers(&prompt.text) == prompt_identity);
-                if !already_present {
-                    let active_prompt_count = entries
-                        .iter()
-                        .filter(|entry| matches!(entry, QueueEntry::Prompt(_)))
-                        .count();
-                    let replace_single_auto_prompt = !priority
-                        && has_auto_attr(&queue_component.attrs)
-                        && active_prompt_count == 1;
-                    if replace_single_auto_prompt {
-                        if let Some(index) = entries
-                            .iter()
-                            .position(|entry| matches!(entry, QueueEntry::Prompt(_)))
-                        {
-                            superseded = document_queue::replace_prompt_text_in_place(
-                                &mut entries,
-                                index,
-                                prompt_text.clone(),
-                                prompt_text.contains('\n'),
-                            );
+                let other_work = entries.iter().any(|entry| match entry {
+                    QueueEntry::Prompt(prompt) => {
+                        !crate::session_trigger::is_session_trigger_prompt(&prompt.text)
+                    }
+                    _ => false,
+                });
+                if session_trigger && other_work {
+                    let before = entries.len();
+                    entries.retain(|entry| match entry {
+                        QueueEntry::Prompt(prompt) => {
+                            !crate::session_trigger::is_session_trigger_prompt(&prompt.text)
                         }
-                    } else {
-                        let new_prompt = QueueEntry::Prompt(QueuePrompt {
-                            note: None,
-                            multiline: prompt_text.contains('\n'),
-                            indent: 0,
-                            ordered_marker: None,
-                            text: prompt_text.clone(),
-                        });
-                        if priority {
-                            let insert_at = entries
+                        _ => true,
+                    });
+                    if entries.len() != before {
+                        content = queue_component.replace_content(&content, &render(&entries));
+                    }
+                } else {
+                    already_present = document_queue::prompts(&entries)
+                        .iter()
+                        .any(|prompt| strip_priority_markers(&prompt.text) == prompt_identity);
+                    if !already_present {
+                        let active_prompt_count = entries
+                            .iter()
+                            .filter(|entry| matches!(entry, QueueEntry::Prompt(_)))
+                            .count();
+                        let replace_single_auto_prompt = !priority
+                            && has_auto_attr(&queue_component.attrs)
+                            && active_prompt_count == 1;
+                        if replace_single_auto_prompt {
+                            if let Some(index) = entries
                                 .iter()
                                 .position(|entry| matches!(entry, QueueEntry::Prompt(_)))
-                                .unwrap_or(entries.len());
-                            entries.insert(insert_at, new_prompt);
+                            {
+                                superseded = document_queue::replace_prompt_text_in_place(
+                                    &mut entries,
+                                    index,
+                                    prompt_text.clone(),
+                                    prompt_text.contains('\n'),
+                                );
+                            }
                         } else {
-                            entries.push(new_prompt);
+                            let new_prompt = QueueEntry::Prompt(QueuePrompt {
+                                note: None,
+                                multiline: prompt_text.contains('\n'),
+                                indent: 0,
+                                ordered_marker: None,
+                                text: prompt_text.clone(),
+                            });
+                            if priority {
+                                let insert_at = entries
+                                    .iter()
+                                    .position(|entry| matches!(entry, QueueEntry::Prompt(_)))
+                                    .unwrap_or(entries.len());
+                                entries.insert(insert_at, new_prompt);
+                            } else {
+                                entries.push(new_prompt);
+                            }
+                            appended = true;
                         }
-                        appended = true;
                     }
+                    let rendered = render(&entries);
+                    content = queue_component.replace_content(&content, &rendered);
                 }
-                let rendered = render(&entries);
-                content = queue_component.replace_content(&content, &rendered);
             }
             Err(parse_err) => {
                 unparseable_queue_error = Some(parse_err.to_string());
@@ -597,6 +622,98 @@ mod tests {
                 .content
                 .contains("preset #spec\n- ### 📌 manual preempt\n- ### first\n- ### second")
         );
+    }
+
+    #[test]
+    fn session_trigger_is_not_inserted_ahead_of_other_work() {
+        let original = concat!(
+            "---\nqueue: go\n---\n\n",
+            "<!-- agent:run subagents go -->\n",
+            "- ### 📌 agent-doc /home/brian/work/tasks/bugs.md\n",
+            "- fix the parser\n",
+            "<!-- /agent:run -->\n",
+        );
+        let update = prepare_route_dispatch_queue_update(
+            original,
+            "agent-doc /home/brian/work/tasks/bugs.md",
+            true,
+        )
+        .unwrap();
+        assert!(!update.appended, "{update:?}");
+        assert!(!update.already_present, "{update:?}");
+        assert!(
+            !update
+                .content
+                .contains("agent-doc /home/brian/work/tasks/bugs.md"),
+            "{}",
+            update.content
+        );
+        assert!(
+            update.content.contains("fix the parser"),
+            "{}",
+            update.content
+        );
+    }
+
+    #[test]
+    fn session_trigger_wakes_an_otherwise_empty_queue() {
+        let original = "---\nqueue: pause\n---\n\n";
+        let update = prepare_route_dispatch_queue_update(
+            original,
+            "agent-doc /home/brian/work/tasks/bugs.md",
+            true,
+        )
+        .unwrap();
+        assert!(update.appended, "{update:?}");
+        assert!(update.component_created, "{update:?}");
+        assert!(
+            update
+                .content
+                .contains("agent-doc /home/brian/work/tasks/bugs.md"),
+            "{}",
+            update.content
+        );
+        assert!(update.content.contains("queue: go"), "{}", update.content);
+    }
+
+    #[test]
+    fn session_trigger_with_a_body_stays_queue_work() {
+        let original = concat!(
+            "---\nqueue: go\n---\n\n",
+            "<!-- agent:run go -->\n- existing\n<!-- /agent:run -->\n",
+        );
+        let update = prepare_route_dispatch_queue_update(
+            original,
+            "agent-doc /home/brian/work/tasks/bugs.md #bug",
+            true,
+        )
+        .unwrap();
+        assert!(update.appended, "{update:?}");
+        assert!(
+            update
+                .content
+                .contains("agent-doc /home/brian/work/tasks/bugs.md #bug"),
+            "{}",
+            update.content
+        );
+    }
+
+    #[test]
+    fn slash_session_trigger_is_not_inserted_ahead_of_other_work() {
+        let original = concat!(
+            "---\nqueue: go\n---\n\n",
+            "<!-- agent:run go -->\n- existing\n<!-- /agent:run -->\n",
+        );
+        let update =
+            prepare_route_dispatch_queue_update(original, "/agent-doc tasks/bugs.md", true)
+                .unwrap();
+        assert!(!update.appended, "{update:?}");
+        assert!(
+            !update.content.contains("/agent-doc tasks/bugs.md"),
+            "{}",
+            update.content
+        );
+        assert!(update.content.contains("existing"), "{}", update.content);
     }
 
     #[test]

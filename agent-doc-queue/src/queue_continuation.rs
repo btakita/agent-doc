@@ -1790,20 +1790,35 @@ fn first_drainable_head<'a>(
     scope: DrainScope,
     review_blocked: &HashSet<String>,
 ) -> Option<&'a QueuePrompt> {
-    document_queue::prompts(entries_after)
-        .into_iter()
-        .find(|prompt| {
-            head_is_drainable(
-                &prompt.text,
-                open_backlog_ids,
-                deferred_ids,
-                after_deps,
-                preset_only_ids,
-                preset_supplies_directive,
-                scope,
-                review_blocked,
-            )
-        })
+    let prompts = document_queue::prompts(entries_after);
+    let mut session_trigger = None;
+    for prompt in prompts {
+        if !head_is_drainable(
+            &prompt.text,
+            open_backlog_ids,
+            deferred_ids,
+            after_deps,
+            preset_only_ids,
+            preset_supplies_directive,
+            scope,
+            review_blocked,
+        ) {
+            continue;
+        }
+        // A bare session invocation wakes the supervisor only when it is the
+        // only drainable head. A later real prompt submits the same trigger.
+        if crate::session_trigger::is_session_trigger_prompt(&prompt.text) {
+            if session_trigger.is_none() {
+                session_trigger = Some(prompt);
+            }
+            continue;
+        }
+        return Some(prompt);
+    }
+    match scope {
+        DrainScope::Supervisor => session_trigger,
+        DrainScope::InSessionLoop => None,
+    }
 }
 
 #[allow(clippy::too_many_arguments)] // the review-blocked set is precomputed once per document
@@ -1823,6 +1838,14 @@ fn head_is_drainable(
     // stripping helper.
     let text = agent_doc_element_queue::strip_queue_prompt_stable_id_annotation(text);
     let text = text.as_str();
+    // A bare `agent-doc <file>` is session transport. The in-session loop must
+    // not run it. It stays drainable at the no-scope layer so `queue prune-noise`
+    // does not strike the empty-queue supervisor wake.
+    if matches!(scope, DrainScope::InSessionLoop)
+        && crate::session_trigger::is_session_trigger_prompt(text)
+    {
+        return false;
+    }
     // `#promptpressure`: an open review item whose **Prompt:** line is this
     // head is incomplete work. It stays visible and undrainable until the
     // operator resolves that review.
@@ -3347,6 +3370,38 @@ mod tests {
             tracked_head_id("#c3d4 do it", &preset_only_identity_ids(content)).as_deref(),
             Some("c3d4")
         );
+    }
+
+    #[test]
+    fn session_trigger_wakes_the_supervisor_only_when_it_is_the_only_head() {
+        let trigger = "agent-doc /home/brian/work/tasks/bugs.md";
+        let only = format!(
+            "---\nqueue: go\n---\n\n<!-- agent:queue preset=\"#spec\" go -->\n- {trigger}\n<!-- /agent:queue -->\n"
+        );
+        assert!(is_drainable_queue_head(trigger));
+        assert!(!is_noise_queue_head(trigger, true));
+        assert_eq!(drainable_head_count(&only), 0);
+        assert_eq!(
+            live_drainable_continuation_head(&only, DrainScope::Supervisor).as_deref(),
+            Some(trigger)
+        );
+        assert_eq!(
+            live_drainable_continuation_head(&only, DrainScope::InSessionLoop).as_deref(),
+            None
+        );
+
+        let with_work = format!(
+            "---\nqueue: go\n---\n\n<!-- agent:queue preset=\"#spec\" subagents go -->\n- 📌 {trigger}\n- fix the parser\n<!-- /agent:queue -->\n"
+        );
+        assert_eq!(
+            live_drainable_continuation_head(&with_work, DrainScope::Supervisor).as_deref(),
+            Some("fix the parser")
+        );
+        assert_eq!(
+            live_drainable_continuation_head(&with_work, DrainScope::InSessionLoop).as_deref(),
+            Some("fix the parser")
+        );
+        assert_eq!(drainable_head_count(&with_work), 1);
     }
 
     /// `#subpromptanswer`: a `🙋` parent is not drainable while the glyph is

@@ -1921,6 +1921,128 @@ fn cursor_scoped_prompt_content<'a>(
     std::borrow::Cow::Borrowed(content)
 }
 
+/// Operator text a route can move aside and put back, without the prompt glyph.
+///
+/// `None` unless the composer is an operator draft. Ghost suggestions, an empty
+/// box, and a draft whose body cannot be read return `None` so the caller fails
+/// closed instead of restoring a redacted or truncated preview. The text is not
+/// secret-redacted.
+pub fn restorable_composer_draft_text(
+    harness: &str,
+    output: &str,
+    cursor_y: Option<usize>,
+) -> Option<String> {
+    if !matches!(
+        steering_delivery::running_turn_follow_up_composer_at_cursor(harness, output, cursor_y),
+        steering_delivery::RunningTurnFollowUpComposer::Draft { .. }
+    ) {
+        return None;
+    }
+    let config = HarnessConfig::from_agent_name(harness);
+    let scoped = cursor_scoped_prompt_content(output, &config, cursor_y);
+    let text = match config.binary.as_str() {
+        "grok" => grok::follow_up_draft_text(scoped.as_ref())?,
+        "opencode" => opencode_restorable_draft_text(scoped.as_ref())?,
+        "claude" | "codex" => prompt_composer_restorable_draft_text(&config, scoped.as_ref())?,
+        _ => return None,
+    };
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_string())
+}
+
+fn prompt_glyph_body(trimmed: &str) -> Option<String> {
+    let mut chars = trimmed.chars();
+    match chars.next() {
+        Some('>' | '›' | '❯') => Some(chars.as_str().trim_start().to_string()),
+        _ => None,
+    }
+}
+
+fn prompt_composer_restorable_draft_text(harness: &HarnessConfig, output: &str) -> Option<String> {
+    let lines: Vec<String> = output
+        .lines()
+        .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
+        .collect();
+    let last = lines
+        .iter()
+        .rposition(|line| !harness.is_ignorable_output_line(line))?;
+    let first = if harness.binary == "codex" {
+        codex_composer_first_row(&lines, last)
+    } else {
+        claude_composer_first_row(&lines, last)
+    };
+    let head = lines[first].trim();
+    let head = if harness.binary == "claude" {
+        claude_prompt_without_context_chip(head)
+    } else {
+        std::borrow::Cow::Borrowed(head)
+    };
+    let mut body = prompt_glyph_body(head.as_ref())?;
+    if body.is_empty() {
+        return None;
+    }
+    if first < last {
+        for line in &lines[first + 1..=last] {
+            if harness.is_ignorable_output_line(line) {
+                break;
+            }
+            let cont = line.trim();
+            if !body.ends_with('\n') {
+                body.push('\n');
+            }
+            if !cont.is_empty() {
+                body.push_str(cont);
+            }
+        }
+    }
+    Some(body.trim_end_matches('\n').to_string())
+}
+
+fn opencode_restorable_draft_text(output: &str) -> Option<String> {
+    let lines: Vec<String> = output
+        .lines()
+        .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
+        .collect();
+    let mut start = None;
+    let mut end = None;
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if is_opencode_composer_draft_line(trimmed) && !is_opencode_idle_chrome_line(trimmed) {
+            if start.is_none() {
+                start = Some(index);
+            }
+            end = Some(index);
+            continue;
+        }
+        if start.is_some() {
+            let blank_in_box = trimmed.is_empty() || trimmed == "┃";
+            if blank_in_box {
+                continue;
+            }
+            break;
+        }
+    }
+    let start = start?;
+    let end = end?;
+    let mut rows = Vec::new();
+    for line in &lines[start..=end] {
+        let trimmed = line.trim();
+        if is_opencode_idle_chrome_line(trimmed) {
+            break;
+        }
+        if let Some(rest) = trimmed.strip_prefix('┃') {
+            rows.push(rest.trim().to_string());
+        } else if trimmed.is_empty() && !rows.is_empty() {
+            rows.push(String::new());
+        }
+    }
+    while rows.last().is_some_and(|row| row.is_empty()) {
+        rows.pop();
+    }
+    let text = rows.join("\n");
+    (!text.trim().is_empty()).then_some(text)
+}
+
 /// Project the cursor-scoped composer from one ANSI pane snapshot.
 pub fn project_pane_composer_at_cursor(
     content: &str,
@@ -3591,6 +3713,80 @@ mod tests {
             project_pane_composer(queued, &h),
             PaneComposerProjection::ReadyEmpty { .. }
         ));
+    }
+
+    #[test]
+    fn restorable_composer_draft_text_keeps_the_operator_body() {
+        let busy = "\
+✶ Generating… (3s · esc to interrupt)
+────────────────────────────────────────
+❯ keep this draft
+────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+  Opus 4.8 ctx:40% ~/work/repo main user@host
+";
+        assert_eq!(
+            restorable_composer_draft_text("claude", busy, Some(2)).as_deref(),
+            Some("keep this draft")
+        );
+
+        let typed =
+            "\x1b[38;5;246m❯\u{a0}\x1b[38;5;74m[⧉ In tasks/api.md] \x1b[39mkeep this draft\x1b[0m";
+        assert_eq!(
+            restorable_composer_draft_text("claude", typed, None).as_deref(),
+            Some("keep this draft")
+        );
+        let dim_hint = "\x1b[38;5;246m❯\u{a0}\x1b[38;5;74m[⧉ In tasks/api.md] \x1b[2m\x1b[39mcontinue the prior task\x1b[0m";
+        assert_eq!(
+            restorable_composer_draft_text("claude", dim_hint, None),
+            None
+        );
+        assert_eq!(restorable_composer_draft_text("claude", "❯", None), None);
+
+        let grok = "\
+╭────────────────────────╮
+│ ❯ keep this draft │
+╰──── Grok 4.6 (high) ───╯
+Shift+Tab:mode  │  Ctrl+x:shortcuts
+";
+        assert_eq!(
+            restorable_composer_draft_text("grok", grok, None).as_deref(),
+            Some("keep this draft")
+        );
+        let ghost = "\
+╭────────────────────────╮
+│ ❯ \x1b[3;38;2;88;88;88mkeep this draft\x1b[0m │
+╰──── Grok 4.6 (high) ───╯
+Shift+Tab:mode  │  Ctrl+x:shortcuts
+";
+        assert_eq!(restorable_composer_draft_text("grok", ghost, None), None);
+
+        let codex = "\
+• Working (1m 34s • esc to interrupt)
+
+› first page of steering
+  second page
+tab to queue message
+gpt-5.4 high · Context 54% used
+";
+        assert_eq!(
+            restorable_composer_draft_text("codex", codex, None).as_deref(),
+            Some("first page of steering\nsecond page")
+        );
+
+        let opencode = "\
+┃ keep this draft
+┃
+┃ Build · GLM
+";
+        assert_eq!(
+            restorable_composer_draft_text("opencode", opencode, None).as_deref(),
+            Some("keep this draft")
+        );
+        assert_eq!(
+            restorable_composer_draft_text("opencode", "┃ Build · GLM\n", None),
+            None
+        );
     }
 
     #[test]

@@ -69,6 +69,11 @@ pub fn explicit_running_turn_send_is_composer_diff(harness: &str) -> bool {
     )
 }
 
+/// `#blockedwaitentercancels`: plain Enter cancels the blocked Grok wait.
+pub fn grok_blocked_wait_enter_reason() -> &'static str {
+    "#blockedwaitentercancels: Enter cancels the blocked Grok turn and workers still bound to other rows. Steering stays pending for this turn."
+}
+
 /// Whether the busy harness composer can safely accept one explicit steering
 /// follow-up. Route calls this only after positive busy-turn evidence; `Busy`
 /// therefore means the composer is empty, while an absent/unreadable composer
@@ -113,7 +118,7 @@ pub fn running_turn_follow_up_composer_at_cursor(
             // `#blockedwaitentercancels`: route and the pool already refuse
             // to paste a Blocked composer, so this Enter is never sent.
             crate::grok::FollowUpComposer::EnterCancels => RunningTurnFollowUpComposer::Blocked {
-                reason: "#blockedwaitentercancels: Enter cancels the blocked Grok turn and workers still bound to other rows. Steering stays pending for this turn.".to_string(),
+                reason: grok_blocked_wait_enter_reason().to_string(),
             },
         };
     }

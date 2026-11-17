@@ -5259,13 +5259,17 @@ mod tests {
         assert_eq!(ledger.claims[0].owner, "subagent:a");
         assert_eq!(ledger.claims[0].expires_at_secs, 155);
 
-        // An expired claim is refused, never revived.
+        // An expired claim is refused, never revived. The bound running
+        // worker still holds the row: expiry alone does not restore drainability.
         let expired = ledger
             .refresh("do [#a]", "subagent:a", 155, 50)
             .unwrap_err();
         assert_eq!(expired.reason.kind(), "expired");
         assert_eq!(ledger.claims[0].expires_at_secs, 155);
-        assert!(!ledger.claimed_items(155, None).claims("do [#a]"));
+        assert!(
+            ledger.claimed_items(155, None).claims("do [#a]"),
+            "a bound running worker still holds the row after its TTL"
+        );
 
         // An unclaimed item is refused and no claim is created.
         let unclaimed = ledger

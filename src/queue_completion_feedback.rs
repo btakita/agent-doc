@@ -2336,6 +2336,236 @@ mod tests {
                 .contains("Prior address attempt"),
             "a settled no-fix half must not brief another fix pass"
         );
+        assert!(
+            brief
+                .subagent_prompt_preamble
+                .contains("not permission to skip"),
+            "{}",
+            brief.subagent_prompt_preamble
+        );
+    }
+
+    /// `#presetorder`: a no-change address half does not finish a later preset
+    /// that declares no goal final states. `PRESET-DONE` for that preset, after
+    /// the address receipt, takes the ordinary report path. A pure `#address`
+    /// row still completes on `NO-WRITTEN-FIX`.
+    #[test]
+    fn no_written_fix_does_not_skip_a_later_preset() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            concat!(
+                "---\npresets:\n",
+                "  '#address': 'Address every actionable review item on the exact current head.'\n",
+                "  '#adversarial-pr': 'Post one independent COMMENTED review on the current head.'\n",
+                "---\n",
+            ),
+        )
+        .unwrap();
+        let doc = dir.path().join("sdk-dev.md");
+        const ROW: &str =
+            "https://github.com/sample-org/sample-repo/pull/12: #address then #adversarial-pr";
+        const HEAD: &str = "fa3a3f449986d565f21aeb6e0f792323bc8d1d58";
+        fs::write(
+            &doc,
+            format!(
+                "---\nagent_doc_session: sample-sdk\nagent_doc_format: template\n---\n\n\
+                 <!-- agent:exchange patch=append -->\n\
+                 ### Re: prior — gpt-5\n\nDone.\n\
+                 <!-- agent:boundary:keep -->\n\
+                 <!-- /agent:exchange -->\n\n\
+                 <!-- agent:queue subagents -->\n\
+                 - {ROW}\n\
+                 <!-- /agent:queue -->\n"
+            ),
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, ROW, "subagent:pr12-address", 600).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            ROW,
+            "subagent:pr12-address",
+            "worker:pr12-address",
+            600,
+            1,
+        )
+        .unwrap();
+        let prose = format!(
+            "**Summary**\n\n\
+             The approval states no code change, so nothing was committed.\n\
+             NO-WRITTEN-FIX head={HEAD}\n\
+             INLINE-THREADS-LOADED 0 head={HEAD}\n"
+        );
+        let requeue = requeue_nonterminal_goal_hand_back(&doc, ROW, Some(1), &prose)
+            .unwrap()
+            .expect("a no-change address half does not skip the later preset");
+        assert!(!requeue.address_fix_pending);
+        assert!(!requeue.inline_threads_pending);
+        assert!(requeue.final_states.is_empty());
+        assert_eq!(
+            requeue.next_ordered_preset.as_deref(),
+            Some("#adversarial-pr")
+        );
+        let brief =
+            agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_item(&doc, ROW)
+                .unwrap();
+        let preamble = &brief.subagent_prompt_preamble;
+        assert!(preamble.contains("not permission to skip"), "{preamble}");
+        assert!(preamble.contains("#adversarial-pr"), "{preamble}");
+        assert!(
+            preamble.contains("Do not land a code change and do not start another address pass"),
+            "{preamble}"
+        );
+        assert!(!preamble.contains("Prior address attempt"), "{preamble}");
+        assert!(!preamble.contains("Land that written fix"), "{preamble}");
+
+        let (outcome, _) =
+            agent_doc_queue_io::queue_claim::claim(&doc, ROW, "subagent:pr12-review", 600)
+                .expect("the requeued row is dispatchable for the later preset");
+        assert_eq!(
+            outcome,
+            agent_doc_queue::queue_claim::ClaimOutcome::Reassigned
+        );
+        let generation = agent_doc_queue_io::queue_claim::load_ledger(&doc)
+            .unwrap()
+            .claims
+            .iter()
+            .find(|claim| claim.owner == "subagent:pr12-review")
+            .map(|claim| claim.generation)
+            .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            ROW,
+            "subagent:pr12-review",
+            "worker:pr12-review",
+            600,
+            generation,
+        )
+        .unwrap();
+        let done = format!("{prose}PRESET-DONE #adversarial-pr\n");
+        assert!(
+            requeue_nonterminal_goal_hand_back(&doc, ROW, Some(generation), &done)
+                .unwrap()
+                .is_none(),
+            "PRESET-DONE after the address receipt finishes the ordered row"
+        );
+    }
+
+    /// `#reviewfixonhead`: `NO-WRITTEN-FIX` still completes a pure address run.
+    #[test]
+    fn no_written_fix_completes_a_pure_address_run() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            concat!(
+                "---\npresets:\n",
+                "  '#address': 'Address every actionable review item on the exact current head.'\n",
+                "---\n",
+            ),
+        )
+        .unwrap();
+        let doc = dir.path().join("prs.md");
+        const ROW: &str = "https://github.com/sample-org/sample-repo/pull/12: #address";
+        const HEAD: &str = "fa3a3f449986d565f21aeb6e0f792323bc8d1d58";
+        fs::write(
+            &doc,
+            format!(
+                "---\nagent_doc_session: sample-prs\nagent_doc_format: template\n---\n\n\
+                 <!-- agent:exchange patch=append -->\n\
+                 ### Re: prior — gpt-5\n\nDone.\n\
+                 <!-- agent:boundary:keep -->\n\
+                 <!-- /agent:exchange -->\n\n\
+                 <!-- agent:queue subagents -->\n\
+                 - {ROW}\n\
+                 <!-- /agent:queue -->\n"
+            ),
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, ROW, "subagent:pr12-address", 600).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            ROW,
+            "subagent:pr12-address",
+            "worker:pr12-address",
+            600,
+            1,
+        )
+        .unwrap();
+        let prose = format!(
+            "Every review states no code change.\n\
+             NO-WRITTEN-FIX head={HEAD}\n\
+             INLINE-THREADS-LOADED 0 head={HEAD}\n"
+        );
+        assert!(
+            requeue_nonterminal_goal_hand_back(&doc, ROW, Some(1), &prose)
+                .unwrap()
+                .is_none(),
+            "a pure address run still completes on NO-WRITTEN-FIX"
+        );
+    }
+
+    /// `#presetorder`: an ungated earlier preset does not add a receipt.
+    /// `#rebase then #adversarial-pr` still completes on REVIEW-CLEAN.
+    #[test]
+    fn preset_order_review_clean_completes_rebase_then_goal() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            concat!(
+                "---\npresets:\n",
+                "  '#rebase': 'Rebase onto the base branch.'\n",
+                "  '#adversarial-pr': >-\n",
+                "    /goal Bring the pull request to an independently review-clean exact\n",
+                "    remote head.\n\n",
+                "    Final states. Your final message must begin with exactly one of these\n",
+                "    lines:\n",
+                "    - `REVIEW-CLEAN <final review URL> base=<sha> head=<sha> cycles=<n>`.\n",
+                "    - `BLOCKED <single operator action> base=<sha> head=<sha> cycles=<n>`.\n",
+                "---\n",
+            ),
+        )
+        .unwrap();
+        let doc = dir.path().join("prs.md");
+        const ROW: &str =
+            "https://github.com/sample-org/sample-repo/pull/12: #rebase then #adversarial-pr";
+        fs::write(
+            &doc,
+            format!(
+                "---\nagent_doc_session: sample-prs\nagent_doc_format: template\n---\n\n\
+                 <!-- agent:exchange patch=append -->\n\
+                 ### Re: prior — gpt-5\n\nDone.\n\
+                 <!-- agent:boundary:keep -->\n\
+                 <!-- /agent:exchange -->\n\n\
+                 <!-- agent:queue subagents -->\n\
+                 - {ROW}\n\
+                 <!-- /agent:queue -->\n"
+            ),
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, ROW, "subagent:pr12-review", 600).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            ROW,
+            "subagent:pr12-review",
+            "worker:pr12-review",
+            600,
+            1,
+        )
+        .unwrap();
+        let clean = concat!(
+            "REVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-200 ",
+            "base=cccc333 head=bbbb222 cycles=1\n",
+            "INLINE-THREADS-LOADED 0 head=bbbb222\n",
+        );
+        assert!(
+            requeue_nonterminal_goal_hand_back(&doc, ROW, Some(1), clean)
+                .unwrap()
+                .is_none(),
+            "REVIEW-CLEAN completes #rebase then #adversarial-pr"
+        );
     }
 
     const INLINE_MUST: &str =

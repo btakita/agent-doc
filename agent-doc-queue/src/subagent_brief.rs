@@ -1016,6 +1016,25 @@ fn render_preamble(
         out.push_str(crate::inline_discussion::INLINE_DISCUSSION_RULE);
         out.push('\n');
     }
+    let preset_pairs: Vec<(String, String)> = auth
+        .presets
+        .iter()
+        .filter_map(|preset| {
+            preset
+                .body
+                .as_ref()
+                .map(|body| (preset.name.clone(), body.clone()))
+        })
+        .collect();
+    let order = crate::preset_order::temporal_preset_order(&auth.item, &preset_pairs);
+    if order.len() >= 2 {
+        out.push_str("- ");
+        out.push_str(&crate::preset_order::ordered_preset_rule(
+            &order,
+            &preset_pairs,
+        ));
+        out.push('\n');
+    }
     out.push('\n');
     out.push_str(SUBAGENT_COORDINATOR_ACTION_FALLBACK_RULE);
     out.push('\n');
@@ -1177,6 +1196,38 @@ mod tests {
             !subagent_authorization("prs.md", &other, "do [#abc]")
                 .subagent_prompt_preamble
                 .contains("(#reviewfixonhead)")
+        );
+    }
+
+    #[test]
+    fn preset_order_brief_runs_address_before_the_later_preset() {
+        let frontmatter = concat!(
+            "prompt_presets:\n",
+            "  '#address': 'Address every actionable review item on the exact current head.'\n",
+            "  '#adversarial-pr': 'Post one independent COMMENTED review on the current head.'\n",
+        );
+        let item =
+            "https://github.com/sample-org/sample-repo/pull/12: #address then #adversarial-pr";
+        let content = doc(frontmatter, "subagents", &[item], &[]);
+        let preamble = subagent_authorization("prs.md", &content, item).subagent_prompt_preamble;
+        let rule_at = preamble
+            .find("(#presetorder)")
+            .expect("an ordered item carries the temporal preset rule");
+        let rule = &preamble[rule_at..];
+        let address = rule.find("#address").expect("address phase");
+        let adversarial = rule.find("#adversarial-pr").expect("later phase");
+        assert!(address < adversarial, "{rule}");
+        assert!(rule.contains("not permission to skip"), "{rule}");
+        assert!(rule.contains("PRESET-DONE"), "{rule}");
+        assert!(rule.contains("1. #address"), "{rule}");
+        assert!(rule.contains("2. #adversarial-pr"), "{rule}");
+
+        let address_only = "https://github.com/sample-org/sample-repo/pull/12: #address";
+        let address_doc = doc(frontmatter, "subagents", &[address_only], &[]);
+        assert!(
+            !subagent_authorization("prs.md", &address_doc, address_only)
+                .subagent_prompt_preamble
+                .contains("(#presetorder)")
         );
     }
 

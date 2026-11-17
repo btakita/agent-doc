@@ -10935,6 +10935,23 @@ fn try_main() -> anyhow::Result<()> {
                             &file,
                             agent_doc_queue::subagent_pool::PoolRefillTrigger::Release,
                         );
+                    } else if requeue.final_states.is_empty()
+                        && let Some(next) = requeue.next_ordered_preset.as_deref()
+                    {
+                        eprintln!(
+                            "[queue] ordered-preset hand-back for {:?} (owner {}, generation {}) left {next} unmet (#presetorder). A settled earlier preset, including a no-change address half (`NO-WRITTEN-FIX`), is not permission to skip the next preset. The row stays open and the attempt was requeued. Next: {} and dispatch the same row; its brief carries this hand-back. Run {next} before reporting complete.",
+                            requeue.claim.item_text,
+                            requeue.claim.owner,
+                            requeue.claim.generation,
+                            agent_doc_queue_io::subagent_dispatch::claim_command(
+                                &file.display().to_string(),
+                                &requeue.claim.item_text,
+                            ),
+                        );
+                        emit_subagent_pool_refill(
+                            &file,
+                            agent_doc_queue::subagent_pool::PoolRefillTrigger::Release,
+                        );
                     } else {
                         eprintln!(
                             "[queue] goal-loop hand-back for {:?} (owner {}, generation {}) does not begin with REVIEW-CLEAN or BLOCKED ({}); the row stays open and the hand-back was returned to the owning session inbox, not consumed (#goalpresetterminal, #crossagenthandoff). A prose hand-back leaves the row open. It is not prose_consume. Next: {} and the owning session continues the same row; its brief carries this hand-back. Do not close the row until a response line begins with REVIEW-CLEAN or BLOCKED.",

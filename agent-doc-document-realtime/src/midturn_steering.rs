@@ -2796,6 +2796,11 @@ impl QueueDispatchDocumentFacts {
     }
 }
 
+fn is_session_trigger_row(raw: &str, norm: &str) -> bool {
+    agent_doc_queue::session_trigger::is_session_trigger_prompt(raw)
+        || agent_doc_queue::session_trigger::is_session_trigger_prompt(norm)
+}
+
 /// [`queue_component_subagent_heads`] with document facts the caller already
 /// derived from the same `content`.
 pub fn queue_component_subagent_heads_with_facts(
@@ -2835,9 +2840,14 @@ pub fn queue_component_subagent_heads_with_facts(
         .filter(|item| !agent_doc_queue::prompt_pressure::review_blocks_prompt(content, &item.raw))
         // `#queueoperatoranswer`: an operator answer row goes to the worker that asked.
         .filter(|item| !facts.answer_rows.holds_from_dispatch(&item.raw))
+        .filter(|item| !is_session_trigger_row(&item.raw, &item.norm))
         .map(|item| item.head.clone())
         .collect();
-    let live = items.into_iter().map(|item| item.head).collect();
+    let live = items
+        .into_iter()
+        .filter(|item| !is_session_trigger_row(&item.raw, &item.norm))
+        .map(|item| item.head)
+        .collect();
     Some((mode, eligible, live))
 }
 
@@ -2983,6 +2993,7 @@ pub fn subagent_dispatch_heads_with_presets(
         .filter(|item| !head_awaits_operator(&item.norm, &awaiting_operator))
         .filter(|item| !blockers.blocks_row(&item.norm))
         .filter(|item| !answer_rows.holds_from_dispatch(&item.raw))
+        .filter(|item| !is_session_trigger_row(&item.raw, &item.norm))
         .filter(|item| {
             reference.as_ref().is_none_or(|(norms, identities)| {
                 !norms.contains(item.norm.as_str())
@@ -4603,6 +4614,21 @@ mod tests {
             "{FM}# Session\n\n<!-- agent:queue subagents=0 -->\n- do [#a]\n<!-- /agent:queue -->\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n"
         );
         assert!(subagent_dispatch_heads(&invalid, None).is_empty());
+    }
+
+    #[test]
+    fn session_trigger_is_not_a_subagent_head() {
+        let trigger = "agent-doc /home/brian/work/tasks/bugs.md";
+        let content = format!(
+            "{FM}# Session\n\n<!-- agent:queue subagents preset=\"#gh-fix\" go -->\n- ### 📌 {trigger}\n- fix the parser\n<!-- /agent:queue -->\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n"
+        );
+        let (_, eligible, live) = queue_attr_subagent_heads(&content).unwrap();
+        assert_eq!(eligible, vec!["fix the parser".to_string()], "{live:?}");
+        assert_eq!(live, vec!["fix the parser".to_string()]);
+        assert_eq!(
+            subagent_dispatch_heads(&content, None),
+            vec!["fix the parser".to_string()]
+        );
     }
 
     #[test]

@@ -622,6 +622,10 @@ fn derive_runtime_projection_scoped(
                         // their historical durable state to converge first.
                         let marker = observed?;
                         return Some(agent_doc_queue::document_queue::QueueRowProjection {
+                            identity: agent_doc_queue::document_queue::lineage_claim_text(
+                                block.entries,
+                                index,
+                            ),
                             text: agent_doc_document::queue_projection::strip_in_progress_marker(
                                 &prompt.text,
                             ),
@@ -756,6 +760,10 @@ fn derive_runtime_projection_scoped(
                             })
                         });
                     Some(agent_doc_queue::document_queue::QueueRowProjection {
+                        identity: agent_doc_queue::document_queue::lineage_claim_text(
+                            block.entries,
+                            index,
+                        ),
                         text: agent_doc_element_queue::render_queue_report_state_annotation(
                             &agent_doc_document::queue_projection::strip_in_progress_marker(
                                 &prompt.text,
@@ -4395,6 +4403,63 @@ mod tests {
             !projection
                 .target_content
                 .contains(&format!("pull/11\n  - 🚧 [#{owner10}#1]"))
+        );
+    }
+
+    /// A bare earlier `#adversarial-pr` is omitted from the lifecycle target
+    /// list. Paint must leave it bare and keep each later worker on its own pull.
+    #[test]
+    fn bare_identical_leaf_does_not_take_a_later_pulls_worker() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_claim_projection_doc(
+            dir.path(),
+            concat!(
+                "- https://example.test/pull/10\n",
+                "  - #adversarial-pr\n",
+                "- https://example.test/pull/11\n",
+                "  - #adversarial-pr\n",
+                "- https://example.test/pull/12\n",
+                "  - #adversarial-pr\n",
+            ),
+        );
+        let pull11 = "https://example.test/pull/11: #adversarial-pr";
+        let pull12 = "https://example.test/pull/12: #adversarial-pr";
+        let owner11 = "subagent:pull11";
+        let owner12 = "subagent:pull12";
+        crate::queue_claim::claim(&doc, pull11, owner11, 600).unwrap();
+        crate::queue_claim::claim(&doc, pull12, owner12, 600).unwrap();
+        crate::queue_claim::start_attempt(&doc, pull11, owner11, "/root/pull11", 600, 1).unwrap();
+        crate::queue_claim::start_attempt(&doc, pull12, owner12, "/root/pull12", 600, 1).unwrap();
+
+        assert!(
+            project_claim_runtime_state_with_effects(&FakeEffects::default(), &doc, None).unwrap()
+        );
+        let projected = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            projected.contains("- ### https://example.test/pull/10\n  - #adversarial-pr\n"),
+            "{projected}"
+        );
+        assert!(
+            projected.contains(&format!(
+                "- ### https://example.test/pull/11\n  - 🚧 [#{owner11}#1] #adversarial-pr\n"
+            )),
+            "{projected}"
+        );
+        assert!(
+            projected.contains(&format!(
+                "- ### https://example.test/pull/12\n  - 🚧 [#{owner12}#1] #adversarial-pr\n"
+            )),
+            "{projected}"
+        );
+        assert_eq!(projected.matches(owner11).count(), 1, "{projected}");
+        assert_eq!(projected.matches(owner12).count(), 1, "{projected}");
+        assert!(
+            !projected.contains(&format!("pull/10\n  - 🚧 [#{owner11}")),
+            "{projected}"
+        );
+        assert!(
+            !projected.contains(&format!("pull/11\n  - 🚧 [#{owner12}")),
+            "{projected}"
         );
     }
 

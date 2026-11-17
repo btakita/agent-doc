@@ -976,6 +976,7 @@ mod tests {
                 .iter()
                 .filter_map(|entry| match entry {
                     QueueEntry::Prompt(prompt) => Some(document_queue::QueueRowProjection {
+                        identity: None,
                         text: prompt.text.clone(),
                         marker: QueueLifecycleMarker::Pending,
                         owner: None,

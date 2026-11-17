@@ -31,6 +31,7 @@ fn targets(store: &Store) -> Vec<QueueRowProjection> {
         .zip(&store.attempts)
         .map(|(row, attempt)| match attempt {
             Some((marker, generation)) => QueueRowProjection {
+                identity: None,
                 text: row.to_string(),
                 marker: *marker,
                 owner: Some(QueueOwnerProjection {
@@ -40,6 +41,7 @@ fn targets(store: &Store) -> Vec<QueueRowProjection> {
                 blockers: Vec::new(),
             },
             None => QueueRowProjection {
+                identity: None,
                 text: row.to_string(),
                 marker: QueueLifecycleMarker::Pending,
                 owner: None,

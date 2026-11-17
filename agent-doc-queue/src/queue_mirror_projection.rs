@@ -189,6 +189,7 @@ mod tests {
                 .iter()
                 .filter_map(|entry| match entry {
                     QueueEntry::Prompt(prompt) => Some(QueueRowProjection {
+                        identity: None,
                         text: prompt.text.clone(),
                         marker: QueueLifecycleMarker::Running,
                         owner: owner("subagent:layout_liveverify", 2),
@@ -214,6 +215,7 @@ mod tests {
                     .iter()
                     .filter_map(|entry| match entry {
                         QueueEntry::Prompt(prompt) => Some(QueueRowProjection {
+                            identity: None,
                             text: prompt.text.clone(),
                             marker: QueueLifecycleMarker::Running,
                             owner: owner("subagent:layout_liveverify", 2),
@@ -241,6 +243,7 @@ mod tests {
                     .iter()
                     .filter_map(|entry| match entry {
                         QueueEntry::Prompt(prompt) => Some(QueueRowProjection {
+                            identity: None,
                             text: prompt.text.clone(),
                             marker: QueueLifecycleMarker::Pending,
                             owner: None,
@@ -345,6 +348,7 @@ mod tests {
                 .filter_map(|entry| match entry {
                     QueueEntry::Prompt(prompt) if prompt.text.ends_with("the fence") => {
                         Some(QueueRowProjection {
+                            identity: None,
                             text: prompt.text.clone(),
                             marker: QueueLifecycleMarker::Pending,
                             owner: None,
@@ -392,6 +396,7 @@ mod tests {
                     QueueEntry::Prompt(prompt) => {
                         Some(if prompt.text.contains("waitingheadingpending") {
                             QueueRowProjection {
+                                identity: None,
                                 text: prompt.text.clone(),
                                 marker: QueueLifecycleMarker::Running,
                                 owner: owner("subagent:waithead", 1),
@@ -399,6 +404,7 @@ mod tests {
                             }
                         } else {
                             QueueRowProjection {
+                                identity: None,
                                 text: prompt.text.clone(),
                                 marker: QueueLifecycleMarker::Pending,
                                 owner: None,

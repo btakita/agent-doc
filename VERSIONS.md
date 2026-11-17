@@ -2,6 +2,13 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.578
+
+- **Publish `9ead33f0b50e1bd873ba85cc91ee0991052aa35e` as `0.35.578`.** Tag `v0.35.577` remains `e339717ad7985ab0a3ff57526489f25d100a519e`. That tip is 12 commits after the previous tag. Package manifests, internal constraints, `Cargo.lock`, `pyproject.toml`, and the bundled skill sources move to `0.35.578`. JetBrains plugin generations move to classic `0.2.1001`, IDE 262 `0.2.1002`, and IDE 263 `0.2.1003`. `pluginReleaseVersion` moves to `0.35.578`. VS Code stays `0.2.101`. Zed stays `0.1.8`.
+- **Queue.** A todo id stays linked to its queue row (`51bbfa0c85`). An external blocker settles when its link closes (`25f20a1ccf`). A started requeue is offered after continue fails (`ca4712d0c4`). A steered nested prompt does not restore its previous row (`3f64bd62c9`). A worker hand-back is copied onto the struck row (`60342d20f4`). Identical leaves paint by parent pull (`65b2a39781`). An authorized requeue stays recoverable and is not painted lost (`9ead33f0b5`).
+- **Route and place.** A claiming-shell session can start while queue control is paused (`bcfea8270a`). Initialize Session starts in an ownerless shell (`be6b0a4237`). Inline prompts inside `agent:place` are answered (`ca768b3071`).
+- **Editors and Windows.** Claim for Tmux Pane is renamed to Claim Session File (`a5b109b5cd`). The controller pipe binds and `code.cmd` resolves on Windows (`121a957e91`).
+
 ## 0.35.577
 
 - **Publish `d38f9707d805be029054eb3e7b8a3a4cca2abcf8` as `0.35.577`.** Tag `v0.35.576` remains `81ac0652a2d943bc4cf7c6b2b98b0f4ba4ea3a11`. That tip is 2 commits after the previous tag. Package manifests, internal constraints, `Cargo.lock`, `pyproject.toml`, and the bundled skill sources move to `0.35.577`. JetBrains plugin generations stay classic `0.2.998`, IDE 262 `0.2.1000`, and IDE 263 `0.2.999`. `pluginReleaseVersion` moves to `0.35.577`. VS Code stays `0.2.101`. Zed stays `0.1.8`.

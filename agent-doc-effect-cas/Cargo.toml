@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-effect-cas"
-version = "0.35.577"
+version = "0.35.578"
 edition = "2024"
 description = "Lazily-owned effect epoch driver (#implementlazilyowned) shared across agent-doc crates"
 license = "Apache-2.0"

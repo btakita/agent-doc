@@ -2113,6 +2113,47 @@ impl OwnedTodoIndex {
     }
 }
 
+/// One operator-checked `agent:todo` item: every row that owns `id` is `[x]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckedTodo {
+    /// Own id, lowercased.
+    pub id: String,
+    /// The checklist action on that row, without nested continuation lines.
+    pub action: String,
+}
+
+/// Checked todos in document order.
+///
+/// The same ownership rule as [`checked_todo_own_ids`]: an id any item still
+/// holds `[ ]` or `[/]` is open, and a citation is not ownership. The first
+/// checked item supplies [`CheckedTodo::action`].
+pub fn checked_todos(content: &str) -> Vec<CheckedTodo> {
+    let Ok(Some(todo)) = find_todo_component(content) else {
+        return Vec::new();
+    };
+    let items = TodoBody::parse(todo.content(content)).items;
+    let open: std::collections::HashSet<&str> = items
+        .iter()
+        .filter(|item| item.state.is_open())
+        .filter_map(|item| item.own_id.as_deref())
+        .collect();
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for item in items.iter().filter(|item| !item.state.is_open()) {
+        let Some(id) = item.own_id.as_deref() else {
+            continue;
+        };
+        if open.contains(id) || !seen.insert(id.to_string()) {
+            continue;
+        }
+        out.push(CheckedTodo {
+            id: id.to_string(),
+            action: item.action.clone(),
+        });
+    }
+    out
+}
+
 /// `#todosync`: own ids that the operator has checked off: every `agent:todo`
 /// item owning the id is `[x]`. An id that any item still holds `[ ]`/`[/]` is
 /// open and excluded, as is an id no item owns (a citation is not identity).
@@ -2121,21 +2162,9 @@ impl OwnedTodoIndex {
 /// way an operator-checked backlog item is reaped to `agent:done` and its row
 /// struck: a checked Todo and a live queue row naming it cannot disagree.
 pub fn checked_todo_own_ids(content: &str) -> std::collections::HashSet<String> {
-    let Ok(Some(todo)) = find_todo_component(content) else {
-        return std::collections::HashSet::new();
-    };
-    let items = TodoBody::parse(todo.content(content)).items;
-    let open: std::collections::HashSet<&str> = items
-        .iter()
-        .filter(|item| item.state.is_open())
-        .filter_map(|item| item.own_id.as_deref())
-        .collect();
-    items
-        .iter()
-        .filter(|item| !item.state.is_open())
-        .filter_map(|item| item.own_id.as_deref())
-        .filter(|id| !open.contains(id))
-        .map(str::to_string)
+    checked_todos(content)
+        .into_iter()
+        .map(|item| item.id)
         .collect()
 }
 

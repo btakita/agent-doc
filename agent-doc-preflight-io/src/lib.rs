@@ -7759,6 +7759,31 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             .collect()
     };
     eligible_ids.extend(todo_checked_ids.iter().cloned());
+    // `#hourglasslifetime`: a live `⏳` / `[operator-verify]` / reserved-request
+    // row ends when the operator action it tracks is checked or gone. This
+    // runs after human-follow-up reclassification, on every queue block, and
+    // before the selected-queue done-id strike reads `entries_after`.
+    if let Some(struck) =
+        agent_doc_queue::hourglass_lifetime::strike_completed_hourglass_rows(&current_content)?
+    {
+        current_content = struck.content;
+        activation.entries_after = queue_entries_for_id(&current_content, &selected_queue_id);
+        mutated = true;
+        eprintln!(
+            "[preflight] queue: struck {} completed hourglass row(s) (#hourglasslifetime)",
+            struck.struck
+        );
+        effect_phase.log_op(format!(
+            "queue_hourglass_lifetime_struck file={} rows={} (#hourglasslifetime)",
+            file.display(),
+            struck.struck
+        ));
+        if agent_doc_queue::document_queue::prompts(&activation.entries_after).is_empty() {
+            activation.active = false;
+            activation.trigger = None;
+        }
+    }
+
     // `activation.entries_after` already reflects start-fence consumption and
     // the duplicate-prompt collapse above, so it is the authoritative current
     // entry set for the strike pass in every branch.

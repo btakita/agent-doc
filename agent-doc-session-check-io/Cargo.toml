@@ -46,6 +46,7 @@ agent-doc-git = { path = "../agent-doc-git", version = "0.35.578" }
 agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.578" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.578" }
 agent-doc-markdown-lossless = { path = "../agent-doc-markdown-lossless", version = "0.35.578" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.578" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.578" }
 agent-doc-op-capture-io = { path = "../agent-doc-op-capture-io", version = "0.35.578" }
 agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.35.578" }
@@ -72,7 +73,6 @@ anyhow = "1"
 agent-doc-closeout-runtime-io = { path = "../agent-doc-closeout-runtime-io", version = "0.35.578" }
 agent-doc-element-exchange = { path = "../agent-doc-element-exchange", version = "0.35.578" }
 agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.35.578" }
-agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.578" }
 agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.35.578" }
 agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.35.578" }
 agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.578" }

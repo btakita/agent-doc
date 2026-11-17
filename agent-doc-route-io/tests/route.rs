@@ -1265,9 +1265,8 @@ mod tests {
     }
 
     /// `tasks/agent-doc/agent-doc-bugs.md` (2026-11-17): Run Agent Doc recorded
-    /// the explicit send, then in-flight editor ops changed the bytes before
-    /// route queue enqueue. The enqueue must adopt that authority instead of
-    /// failing with "does not match the recorded explicit-send authority".
+    /// the explicit send while editor ops already in the ledger had not reached
+    /// canonical text. Enqueue onto that replay must succeed.
     #[test]
     fn explicit_send_enqueue_for_agent_doc_bugs_matches_recorded_authority() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -1276,6 +1275,18 @@ mod tests {
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         let recorded = bugs_document_queue("");
         std::fs::write(&doc, &recorded).unwrap();
+        let note = "<!-- converged after explicit send -->\n";
+        let ops = vec![agent_doc_merge::crdt::EditorOp::Insert {
+            offset: recorded.len(),
+            text: note.to_string(),
+        }];
+        let converged = agent_doc_merge::crdt::replay_editor_ops(&recorded, &ops).unwrap();
+        agent_doc_op_capture_io::record_editor_ops(
+            &doc,
+            &agent_doc_hash::content_hash(&recorded),
+            ops,
+        )
+        .unwrap();
         agent_doc_snapshot_io::checkpoint_document_baseline(
             &doc,
             &recorded,
@@ -1288,10 +1299,6 @@ mod tests {
             .unwrap()
             .to_string();
         assert_eq!(recorded_hash, agent_doc_hash::content_hash(&recorded));
-
-        // Post-click convergence, as on the live bugs document: the enqueue
-        // base is no longer the hash captured at the click.
-        let converged = bugs_document_queue("<!-- converged after explicit send -->\n");
         assert_ne!(agent_doc_hash::content_hash(&converged), recorded_hash);
         std::fs::write(&doc, &converged).unwrap();
 
@@ -1304,11 +1311,12 @@ mod tests {
             true,
             route_queue_effects(),
         )
-        .expect("explicit-send enqueue must accept the converged bugs document");
+        .expect("explicit-send enqueue must accept the in-flight bugs document");
         assert!(outcome.appended, "{outcome:?}");
         assert!(outcome.activated, "{outcome:?}");
 
         let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains(note), "{updated}");
         assert!(
             updated.contains("Run Agent Doc on agent-doc-bugs.md"),
             "{updated}"
@@ -1326,7 +1334,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_explicit_send_enqueue_for_agent_doc_bugs_still_fails_closed() {
+    fn different_explicit_send_enqueue_for_agent_doc_bugs_still_fails_closed() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs.md");
@@ -1334,28 +1342,9 @@ mod tests {
         let recorded = bugs_document_queue("");
         std::fs::write(&doc, &recorded).unwrap();
         agent_doc_session_check_io::midturn_steering::record_explicit_send(&doc).unwrap();
-
-        let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
-        let key = agent_doc_queue_io::subagent_dispatch::midturn_steering_state_key(
-            "explicit_send",
-            &doc,
-        );
-        let mut send = explicit_send_payload(dir.path(), &doc);
-        let aged = send["sent_at_ms"].as_u64().unwrap().saturating_sub(
-            agent_doc_session_check_io::midturn_steering::EXPLICIT_SEND_ROUTE_ENQUEUE_REBIND_MS
-                + 1_000,
-        );
-        send["sent_at_ms"] = serde_json::json!(aged);
-        agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
-            &conn,
-            &key,
-            &send.to_string(),
-            aged,
-        )
-        .unwrap();
         std::fs::write(
             &doc,
-            bugs_document_queue("<!-- later edit, outside the route window -->\n"),
+            bugs_document_queue("<!-- a different authority -->\n"),
         )
         .unwrap();
 
@@ -1368,7 +1357,7 @@ mod tests {
             true,
             route_queue_effects(),
         )
-        .expect_err("a stale explicit send must not adopt a later authority");
+        .expect_err("a different authority must not refresh the explicit send");
         assert!(
             err.to_string()
                 .contains("does not match the recorded explicit-send authority"),

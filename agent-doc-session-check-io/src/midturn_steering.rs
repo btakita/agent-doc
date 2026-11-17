@@ -23,8 +23,9 @@
 //! (seeded by preflight) plus one progress record per consumer (`hook`, `cli`,
 //! `follow`), so a polling CLI never steals steering from the in-turn hook.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use anyhow::{Context, Result};
 use serde::Serialize;
@@ -384,15 +385,34 @@ pub fn publish_in_progress_recap_status(file: &Path, current: &str, status: &str
 /// it: the editor may flush its buffer to disk just after the action fires.
 pub const EXPLICIT_SEND_SAVE_GRACE_MS: u64 = 5_000;
 
-/// How long after the click a route queue enqueue may adopt a pre-image that
-/// no longer hashes to the recorded send.
+/// Send-time document and the editor-op ledger already attested then.
 ///
-/// `tasks/agent-doc/agent-doc-bugs.md` recorded the send while editor delivery
-/// was still converging, then in-flight ops landed before `route_dispatch_queue`
-/// (~10s, past [`EXPLICIT_SEND_SAVE_GRACE_MS`]). Exact equality aborted the
-/// route after the queue write had already applied. Older mismatches still
-/// fail closed.
-pub const EXPLICIT_SEND_ROUTE_ENQUEUE_REBIND_MS: u64 = 60_000;
+/// The route process records the send and later refreshes it. The ledger is
+/// copied here, not into `state.db`, so a keystroke that arrives after the
+/// click is a new frontier and cannot authorize the enqueue. The text stays
+/// in process for the same reason: the proof is a replay, not a stored copy
+/// of the document.
+#[derive(Clone)]
+struct ExplicitSendAuthoritySnapshot {
+    content_hash: String,
+    content: String,
+    editor_ops: Vec<agent_doc_merge::crdt::EditorOp>,
+}
+
+fn explicit_send_authority_cache() -> &'static Mutex<HashMap<String, ExplicitSendAuthoritySnapshot>>
+{
+    static CACHE: OnceLock<Mutex<HashMap<String, ExplicitSendAuthoritySnapshot>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn with_explicit_send_authority_cache<T>(
+    body: impl FnOnce(&mut HashMap<String, ExplicitSendAuthoritySnapshot>) -> T,
+) -> T {
+    let mut guard = explicit_send_authority_cache()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    body(&mut guard)
+}
 
 /// The operator's explicit send (`#claimedsteerwake`): `Run Agent Doc` /
 /// `agent-doc route` fired at `sent_at_ms`.
@@ -445,8 +465,18 @@ pub fn record_explicit_send(file: &Path) -> Result<()> {
     let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
     let content_hash = match crate::resolve_current_document_content(file, "steering_explicit_send")
     {
-        Ok(content) => Some(core::content_hash(&content)),
+        Ok(content) => {
+            let content_hash = core::content_hash(&content);
+            let editor_ops = agent_doc_op_capture_io::load_op_capture(file)
+                .ok()
+                .flatten()
+                .map(|capture| capture.ops)
+                .unwrap_or_default();
+            remember_explicit_send_authority(file, content_hash.clone(), content, editor_ops);
+            Some(content_hash)
+        }
         Err(error) => {
+            forget_explicit_send_authority(file);
             eprintln!(
                 "[steering] warning: could not capture authoritative content for explicit send {}: {error:#}",
                 file.display()
@@ -483,15 +513,105 @@ pub fn record_explicit_send(file: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Whether `previous` is the explicit-send authority named by `recorded`.
+///
+/// Exact text is that authority. Otherwise `previous` must be a replay state
+/// of a suffix of `editor_ops_at_send` applied to `recorded`: editor ops
+/// already in the ledger when the send was recorded, which canonical delivery
+/// had not applied yet. A suffix is required because an earlier burst of the
+/// same epoch may already be inside `recorded`. Ops that do not replay onto
+/// `recorded`, an empty ledger, and a `previous` those ops do not produce are
+/// a different authority.
+pub fn explicit_send_enqueue_authority_matches(
+    recorded: &str,
+    previous: &str,
+    editor_ops_at_send: &[agent_doc_merge::crdt::EditorOp],
+) -> bool {
+    if recorded == previous {
+        return true;
+    }
+    if editor_ops_at_send.is_empty() {
+        return false;
+    }
+    let mut spent = 0usize;
+    for start in (0..editor_ops_at_send.len()).rev() {
+        let suffix = &editor_ops_at_send[start..];
+        spent = spent.saturating_add(recorded.len().saturating_mul(suffix.len() + 1));
+        if spent > agent_doc_merge::crdt::EDITOR_OPS_IN_FLIGHT_SCAN_BUDGET_BYTES {
+            return false;
+        }
+        let mut matched = false;
+        let _replayed =
+            agent_doc_merge::crdt::for_each_editor_replay_state(recorded, suffix, &mut |state| {
+                if state != recorded && state == previous {
+                    matched = true;
+                    return false;
+                }
+                true
+            });
+        if matched {
+            return true;
+        }
+    }
+    false
+}
+
+fn remember_explicit_send_authority(
+    file: &Path,
+    content_hash: String,
+    content: String,
+    editor_ops: Vec<agent_doc_merge::crdt::EditorOp>,
+) {
+    with_explicit_send_authority_cache(|cache| {
+        cache.insert(
+            explicit_send_key(file),
+            ExplicitSendAuthoritySnapshot {
+                content_hash,
+                content,
+                editor_ops,
+            },
+        );
+    });
+}
+
+fn forget_explicit_send_authority(file: &Path) {
+    with_explicit_send_authority_cache(|cache| {
+        cache.remove(&explicit_send_key(file));
+    });
+}
+
+fn inflight_explicit_send_authority_matches(
+    file: &Path,
+    recorded_hash: Option<&str>,
+    previous_content: &str,
+) -> bool {
+    let Some(recorded_hash) = recorded_hash else {
+        return false;
+    };
+    let Some(snapshot) = with_explicit_send_authority_cache(|cache| {
+        cache
+            .get(&explicit_send_key(file))
+            .filter(|snapshot| snapshot.content_hash == recorded_hash)
+            .cloned()
+    }) else {
+        return false;
+    };
+    explicit_send_enqueue_authority_matches(
+        &snapshot.content,
+        previous_content,
+        &snapshot.editor_ops,
+    )
+}
+
 /// Move the current explicit-send proof across one route-owned queue write.
 ///
-/// `Run Agent Doc` records its send before authoritative routing. The enqueue
-/// pre-image can move before that write, because the click's snapshot is taken
-/// while editor delivery is still converging. A send still inside
-/// [`EXPLICIT_SEND_ROUTE_ENQUEUE_REBIND_MS`] adopts that pre-image. The
-/// converged authority must still equal `next_content`. An older send whose
-/// hash does not name `previous_content`, or a write that did not land, fails
-/// closed. Queue writes with no explicit-send record need no refresh.
+/// `Run Agent Doc` records its send before authoritative routing. Canonical
+/// delivery may still be applying editor ops that were already in the ledger
+/// at that click, so the enqueue pre-image can be that replay without hashing
+/// to the snapshot. The converged authority must still equal `next_content`.
+/// A missing content hash, a ledger that does not replay to `previous_content`,
+/// or a write that did not land fails closed. Queue writes with no
+/// explicit-send record need no refresh.
 pub fn refresh_explicit_send_after_route_enqueue(
     file: &Path,
     previous_content: &str,
@@ -506,8 +626,11 @@ pub fn refresh_explicit_send_after_route_enqueue(
     };
     let previous_hash = core::content_hash(previous_content);
     if send.content_hash.as_deref() != Some(previous_hash.as_str()) {
-        let age_ms = now_ms().saturating_sub(send.sent_at_ms);
-        if age_ms > EXPLICIT_SEND_ROUTE_ENQUEUE_REBIND_MS {
+        if !inflight_explicit_send_authority_matches(
+            file,
+            send.content_hash.as_deref(),
+            previous_content,
+        ) {
             anyhow::bail!(
                 "route queue enqueue for {} does not match the recorded explicit-send authority",
                 file.display()
@@ -516,9 +639,8 @@ pub fn refresh_explicit_send_after_route_enqueue(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "steering_explicit_send_rebound_to_route_enqueue file={} age_ms={} recorded_hash={} enqueue_authority={} (#runsteer)",
+                "steering_explicit_send_inflight_authority file={} recorded_hash={} enqueue_authority={} (#runsteer)",
                 file.display(),
-                age_ms,
                 send.content_hash.as_deref().unwrap_or(""),
                 previous_hash,
             ),
@@ -553,6 +675,7 @@ pub fn refresh_explicit_send_after_route_enqueue(
             refreshed.sent_at_ms
         ),
     );
+    forget_explicit_send_authority(file);
     Ok(())
 }
 
@@ -5803,6 +5926,160 @@ mod tests {
         let passive = observe(&file, CONSUMER_HOOK, false).unwrap().unwrap();
         assert!(passive.items.is_empty(), "{passive:?}");
         assert_eq!(passive.pending, 1);
+    }
+
+    #[test]
+    fn explicit_send_enqueue_authority_matches_inflight_replay_only() {
+        let recorded = "hello";
+        let ops = vec![
+            agent_doc_merge::crdt::EditorOp::Delete { offset: 0, len: 1 },
+            editor_insert(0, "H"),
+        ];
+        let previous = agent_doc_merge::crdt::replay_editor_ops(recorded, &ops).unwrap();
+        assert_eq!(previous, "Hello");
+        assert!(explicit_send_enqueue_authority_matches(
+            recorded, &previous, &ops
+        ));
+        assert!(!explicit_send_enqueue_authority_matches(
+            recorded, "world", &ops
+        ));
+        assert!(!explicit_send_enqueue_authority_matches(
+            recorded,
+            &previous,
+            &[]
+        ));
+    }
+
+    fn project_file(body: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("tasks/agent-doc/agent-doc-bugs.md");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, body).unwrap();
+        (dir, file)
+    }
+
+    fn editor_insert(offset: usize, inserted: &str) -> agent_doc_merge::crdt::EditorOp {
+        agent_doc_merge::crdt::EditorOp::Insert {
+            offset,
+            text: inserted.to_string(),
+        }
+    }
+
+    /// `tasks/agent-doc/agent-doc-bugs.md` (2026-11-17): the click hashed the
+    /// canonical text while editor ops already in the ledger had not landed.
+    /// Replaying that ledger suffix onto the recorded text is the enqueue base.
+    #[test]
+    fn explicit_send_enqueue_accepts_inflight_editor_ops_recorded_before_the_send() {
+        let recorded = "alpha beta";
+        let ops = vec![
+            editor_insert(recorded.len(), " one"),
+            editor_insert(recorded.len() + " one".len(), " two"),
+        ];
+        let converged = agent_doc_merge::crdt::replay_editor_ops(recorded, &ops).unwrap();
+        assert_ne!(converged, recorded);
+        let (_dir, file) = project_file(recorded);
+        agent_doc_op_capture_io::record_editor_ops(
+            &file,
+            &core::content_hash(recorded),
+            ops.clone(),
+        )
+        .unwrap();
+        record_explicit_send(&file).unwrap();
+        std::fs::write(&file, &converged).unwrap();
+
+        refresh_explicit_send_after_route_enqueue(&file, &converged, &converged)
+            .expect("in-flight ledger suffix is the same explicit-send authority");
+
+        let partial = agent_doc_merge::crdt::replay_editor_ops(recorded, &ops[..1]).unwrap();
+        let (_dir, file) = project_file(recorded);
+        agent_doc_op_capture_io::record_editor_ops(&file, &core::content_hash(recorded), ops)
+            .unwrap();
+        record_explicit_send(&file).unwrap();
+        std::fs::write(&file, &partial).unwrap();
+        refresh_explicit_send_after_route_enqueue(&file, &partial, &partial)
+            .expect("a prefix of the in-flight burst is still that authority");
+    }
+
+    #[test]
+    fn explicit_send_enqueue_rejects_a_different_authority() {
+        let recorded = "alpha beta";
+        let (_dir, file) = project_file(recorded);
+        record_explicit_send(&file).unwrap();
+        let foreign = "unrelated authority";
+        std::fs::write(&file, foreign).unwrap();
+        let err = refresh_explicit_send_after_route_enqueue(&file, foreign, foreign)
+            .expect_err("a document the send ledger does not replay to must fail");
+        assert!(
+            err.to_string()
+                .contains("does not match the recorded explicit-send authority"),
+            "{err:#}"
+        );
+
+        let ops = vec![editor_insert(recorded.len(), " later")];
+        let later = agent_doc_merge::crdt::replay_editor_ops(recorded, &ops).unwrap();
+        let (_dir, file) = project_file(recorded);
+        record_explicit_send(&file).unwrap();
+        agent_doc_op_capture_io::record_editor_ops(&file, &core::content_hash(recorded), ops)
+            .unwrap();
+        std::fs::write(&file, &later).unwrap();
+        let err = refresh_explicit_send_after_route_enqueue(&file, &later, &later)
+            .expect_err("editor ops recorded after the click are a new frontier");
+        assert!(
+            err.to_string()
+                .contains("does not match the recorded explicit-send authority"),
+            "{err:#}"
+        );
+    }
+
+    #[test]
+    fn explicit_send_enqueue_keeps_exact_match_and_convergence_failures() {
+        let recorded = "alpha beta";
+        let (_dir, file) = project_file(recorded);
+        record_explicit_send(&file).unwrap();
+        refresh_explicit_send_after_route_enqueue(&file, recorded, recorded)
+            .expect("exact authority still refreshes");
+
+        let (_dir, file) = project_file(recorded);
+        record_explicit_send(&file).unwrap();
+        let err =
+            refresh_explicit_send_after_route_enqueue(&file, recorded, "queue wrote elsewhere")
+                .expect_err("next content must be the converged document");
+        assert!(
+            err.to_string()
+                .contains("did not converge to the authority whose send would be refreshed"),
+            "{err:#}"
+        );
+
+        let (_dir, file) = project_file(recorded);
+        let root = project_root(&file).unwrap();
+        record_explicit_send(&file).unwrap();
+        {
+            let conn = agent_doc_sqlite::state_store::open_state_db(&root).unwrap();
+            let key = explicit_send_key(&file);
+            let mut send: serde_json::Value = serde_json::from_str(
+                &agent_doc_sqlite::state_store::load_project_runtime_state_from_db(&conn, &key)
+                    .unwrap()
+                    .unwrap(),
+            )
+            .unwrap();
+            send["content_hash"] = serde_json::Value::Null;
+            agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
+                &conn,
+                &key,
+                &send.to_string(),
+                now_ms(),
+            )
+            .unwrap();
+        }
+        std::fs::write(&file, "other").unwrap();
+        let err = refresh_explicit_send_after_route_enqueue(&file, "other", "other")
+            .expect_err("a send with no content hash is not a match");
+        assert!(
+            err.to_string()
+                .contains("does not match the recorded explicit-send authority"),
+            "{err:#}"
+        );
     }
 
     /// `#claimfollowedit` (agent-doc-bugs.md, 2026-10-15): a claimed queue line

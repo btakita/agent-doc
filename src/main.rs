@@ -273,6 +273,10 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         let _focus_guard = agent_doc_route_io::invocation::DeferStartupFocusToLayoutGuard::set(
             invocation.defer_focus_to_layout,
         );
+        let _operator_restart_agent =
+            agent_doc_route_io::invocation::OperatorRestartAgentGuard::set(
+                invocation.operator_restart_agent,
+            );
         agent_doc_route_io::startup::auto_start_ext(
             invocation.tmux,
             invocation.file,
@@ -6618,9 +6622,9 @@ enum SessionAction {
         #[arg(long)]
         force: bool,
         /// The `agent:` value the caller sees in the document (editor plugins pass
-        /// their visible frontmatter). The restart is refused when the controller's
-        /// document authority still declares a different agent, instead of
-        /// relaunching the harness the operator already changed away from.
+        /// their visible frontmatter). When document authority still declares a
+        /// different agent, Restart Agent launches this one instead of blocking
+        /// until the editor edit syncs or relaunching the old harness.
         #[arg(long, value_name = "AGENT")]
         expect_agent: Option<String>,
     },

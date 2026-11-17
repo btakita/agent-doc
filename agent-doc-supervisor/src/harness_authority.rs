@@ -60,8 +60,8 @@ pub enum RestartAgentFrontmatterAgreement {
     /// resolves what the operator asked for.
     Agrees,
     /// The editor shows `editor_agent` but the authority still declares
-    /// `authority_agent` (`None` = no `agent:` key). Restarting now would
-    /// relaunch from frontmatter the operator already changed.
+    /// `authority_agent` (`None` = no `agent:` key). The operator's edit is the
+    /// harness Restart Agent must launch; waiting for sync would keep the old one.
     AuthorityLagsEditor {
         editor_agent: String,
         authority_agent: Option<String>,
@@ -73,14 +73,18 @@ pub enum RestartAgentFrontmatterAgreement {
 /// Restart Agent re-resolves the harness from the controller's document
 /// authority, never from the editor buffer. When the editor's edits have not
 /// reached that authority (a debounce race, or a fenced/quarantined editor
-/// replica), the re-read silently relaunches the OLD harness: on 2026-10-27 the
-/// operator changed `lazily.md` to `agent: grok`, and five Restart Agent
-/// invocations each relaunched Claude Code because the authority still read
-/// `agent: claude`. Both sides are compared as *declared* values after
+/// replica), that re-read is the OLD harness: on 2026-10-27 the operator
+/// changed `lazily.md` to `agent: grok`, and five Restart Agent invocations
+/// each relaunched Claude Code because the authority still read `agent: claude`.
+/// Both sides are compared as *declared* values after
 /// [`agent_doc_harness::normalize_harness_name`] (so `claude`/`claude-code` and
 /// `grok`/`grok-build` agree), not as resolved binaries, because the question is
 /// whether the authority has seen the operator's edit — an unknown name must
 /// not agree with `claude` just because both would fall back to it.
+///
+/// Disagreement is not a reason to keep the old harness. The operator changed
+/// `agent:` so the new harness would run those edits. [`restart_agent_editor_binary_override`]
+/// is the launch binary to use until the authority catches up.
 pub fn restart_agent_frontmatter_agreement(
     editor_agent: Option<&str>,
     authority_agent: Option<&str>,
@@ -101,6 +105,124 @@ pub fn restart_agent_frontmatter_agreement(
             authority_agent: authority,
         }
     }
+}
+
+/// Launch binary for an editor `agent:` the authority has not merged.
+///
+/// `None` when there is nothing to override: the names agree, the caller has
+/// no editor evidence, or both declared names launch the same binary (an
+/// unknown editor name and `claude` both fall back to Claude). The value is a
+/// [`agent_doc_harness::HarnessConfig`] binary (`claude`, `codex`, `opencode`,
+/// `grok`), which is what Restart Agent puts on the wire and what `agent-doc
+/// start --harness` accepts.
+pub fn restart_agent_editor_binary_override(
+    editor_agent: Option<&str>,
+    authority_agent: Option<&str>,
+) -> Option<String> {
+    let RestartAgentFrontmatterAgreement::AuthorityLagsEditor {
+        editor_agent,
+        authority_agent,
+    } = restart_agent_frontmatter_agreement(editor_agent, authority_agent)
+    else {
+        return None;
+    };
+    let editor_binary = agent_doc_harness::HarnessConfig::from_agent_name(&editor_agent).binary;
+    let authority_binary = authority_agent
+        .as_deref()
+        .map(|name| agent_doc_harness::HarnessConfig::from_agent_name(name).binary);
+    if authority_binary.as_deref() == Some(editor_binary.as_str()) {
+        return None;
+    }
+    Some(editor_binary)
+}
+
+/// Operator Restart Agent selected `editor_binary` while document authority
+/// still launches `authority_binary`. Held until that authority moves.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperatorRestartAgentHold {
+    pub editor_binary: String,
+    pub authority_binary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OperatorRestartLaunch {
+    /// The editor selection and the authority launch the same binary.
+    Authority,
+    /// Launch the editor binary and keep holding while authority stays put.
+    Editor(OperatorRestartAgentHold),
+}
+
+pub fn operator_restart_launch(
+    editor_binary: &str,
+    authority_binary: &str,
+) -> OperatorRestartLaunch {
+    if editor_binary == authority_binary {
+        OperatorRestartLaunch::Authority
+    } else {
+        OperatorRestartLaunch::Editor(OperatorRestartAgentHold {
+            editor_binary: editor_binary.to_string(),
+            authority_binary: authority_binary.to_string(),
+        })
+    }
+}
+
+/// What a later authority read means for an operator Restart Agent hold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperatorRestartHoldDecision {
+    /// Authority still launches the harness the operator restarted away from.
+    KeepEditor,
+    /// Authority now launches the editor harness. Drop the hold.
+    Converged,
+    /// Authority names some other harness. Drop the hold and follow it.
+    FollowAuthority,
+}
+
+pub fn operator_restart_hold_decision(
+    hold: &OperatorRestartAgentHold,
+    resolved_binary: &str,
+) -> OperatorRestartHoldDecision {
+    if resolved_binary == hold.editor_binary {
+        OperatorRestartHoldDecision::Converged
+    } else if resolved_binary == hold.authority_binary {
+        OperatorRestartHoldDecision::KeepEditor
+    } else {
+        OperatorRestartHoldDecision::FollowAuthority
+    }
+}
+
+/// Binary to launch on a restart iteration, plus the hold to store (`None` clears it).
+///
+/// A pending editor agent from this Restart Agent wins over a hold left by an
+/// earlier one. With no pending agent, the hold keeps the editor binary only
+/// while authority is still the harness that restart left behind. A crash
+/// restart must use this too: re-reading the lagging authority would otherwise
+/// switch straight back, which is the idle-watch failure the old refusal was
+/// papering over.
+pub fn launch_binary_under_operator_restart(
+    pending_editor_agent: Option<&str>,
+    existing_hold: Option<&OperatorRestartAgentHold>,
+    authority_binary: &str,
+) -> (String, Option<OperatorRestartAgentHold>) {
+    if let Some(editor) = pending_editor_agent
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let editor_binary = agent_doc_harness::HarnessConfig::from_agent_name(editor).binary;
+        return match operator_restart_launch(&editor_binary, authority_binary) {
+            OperatorRestartLaunch::Authority => (authority_binary.to_string(), None),
+            OperatorRestartLaunch::Editor(hold) => (hold.editor_binary.clone(), Some(hold)),
+        };
+    }
+    if let Some(hold) = existing_hold {
+        return match operator_restart_hold_decision(hold, authority_binary) {
+            OperatorRestartHoldDecision::KeepEditor => {
+                (hold.editor_binary.clone(), Some(hold.clone()))
+            }
+            OperatorRestartHoldDecision::Converged
+            | OperatorRestartHoldDecision::FollowAuthority => (authority_binary.to_string(), None),
+        };
+    }
+    (authority_binary.to_string(), None)
 }
 
 /// Process-lifetime reactive authority used by restart and idle-watch paths.
@@ -262,6 +384,74 @@ mod tests {
                 "editor={editor:?} authority={authority:?}",
             );
         }
+    }
+
+    #[test]
+    fn restart_agent_editor_override_is_the_binary_authority_has_not_merged() {
+        assert_eq!(
+            restart_agent_editor_binary_override(Some("grok"), Some("codex")),
+            Some("grok".to_string())
+        );
+        assert_eq!(
+            restart_agent_editor_binary_override(Some("grok"), None),
+            Some("grok".to_string())
+        );
+        assert_eq!(
+            restart_agent_editor_binary_override(Some("claude"), Some("codex")),
+            Some("claude".to_string())
+        );
+        // Aliases and absent editor evidence do not override.
+        assert_eq!(
+            restart_agent_editor_binary_override(Some("grok-build"), Some("grok")),
+            None
+        );
+        assert_eq!(
+            restart_agent_editor_binary_override(None, Some("codex")),
+            None
+        );
+        // Both declared names launch Claude, so there is no harness to switch to.
+        assert_eq!(
+            restart_agent_editor_binary_override(Some("groc"), Some("claude")),
+            None
+        );
+    }
+
+    #[test]
+    fn operator_restart_hold_keeps_the_editor_until_authority_moves() {
+        let (binary, hold) = launch_binary_under_operator_restart(Some("grok"), None, "codex");
+        let hold = hold.expect("a lagging codex authority holds the grok launch");
+        assert_eq!(binary, "grok");
+        assert_eq!(hold.authority_binary, "codex");
+        assert_eq!(
+            operator_restart_hold_decision(&hold, "codex"),
+            OperatorRestartHoldDecision::KeepEditor
+        );
+        let (still, held) = launch_binary_under_operator_restart(None, Some(&hold), "codex");
+        assert_eq!(still, "grok");
+        assert_eq!(held.as_ref(), Some(&hold));
+
+        assert_eq!(
+            operator_restart_hold_decision(&hold, "grok"),
+            OperatorRestartHoldDecision::Converged
+        );
+        let (caught_up, cleared) = launch_binary_under_operator_restart(None, Some(&hold), "grok");
+        assert_eq!(caught_up, "grok");
+        assert!(cleared.is_none());
+
+        assert_eq!(
+            operator_restart_hold_decision(&hold, "opencode"),
+            OperatorRestartHoldDecision::FollowAuthority
+        );
+        let (followed, dropped) =
+            launch_binary_under_operator_restart(None, Some(&hold), "opencode");
+        assert_eq!(followed, "opencode");
+        assert!(dropped.is_none());
+
+        // A newer Restart Agent replaces the hold instead of following the old one.
+        let (next, next_hold) =
+            launch_binary_under_operator_restart(Some("opencode"), Some(&hold), "codex");
+        assert_eq!(next, "opencode");
+        assert_eq!(next_hold.unwrap().editor_binary, "opencode");
     }
 
     #[test]

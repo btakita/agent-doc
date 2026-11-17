@@ -99,6 +99,7 @@ pub fn ensure_claiming_shell_session(
                 reap_policy,
                 start_purpose,
                 resume: None,
+                operator_restart_agent: None,
             },
         );
     agent_doc_ops_log_io::log_op(

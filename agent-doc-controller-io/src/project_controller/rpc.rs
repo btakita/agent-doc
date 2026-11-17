@@ -41293,6 +41293,7 @@ fn handle_focus_document_pane_with_policy(
                         last_known_window,
                     ),
                     resume: Some(agent_doc_harness::ResumeRequest::Latest),
+                    operator_restart_agent: None,
                 })
                 .with_context(|| {
                     format!(
@@ -45104,6 +45105,23 @@ fn supervisor_replacement_pane_start_decision(
     )
 }
 
+/// The mode string the operator sent, before parse drops `@<harness>`.
+fn supervisor_replacement_raw_mode(request: &ControllerRequest) -> Option<String> {
+    if let Some(state) = request.state.as_deref() {
+        return Some(state.trim().to_string());
+    }
+    request.diagnostic_payload.as_deref().and_then(|payload| {
+        serde_json::from_str::<serde_json::Value>(payload)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("mode")
+                    .and_then(serde_json::Value::as_str)
+                    .map(|mode| mode.trim().to_string())
+            })
+    })
+}
+
 pub(crate) fn handle_supervisor_replacement(
     bootstrap: &ControllerBootstrap,
     runtime: Option<&ControllerRuntime>,
@@ -45119,7 +45137,13 @@ pub(crate) fn handle_supervisor_replacement(
     // verbatim. The supervisor's own `decode_restart_intent` is what stops a
     // Restart Agent from being downgraded to an in-place re-exec that preserves
     // the very harness child the operator asked to replace.
-    let mode = parsed.wire_mode();
+    // `#restartagentharness`: `wire_mode()` drops `@grok`. Put it back or the
+    // supervisor relaunches the authority's harness.
+    let mode = agent_doc_controller::supervisor_replacement::restart_wire_preserving_editor_agent(
+        supervisor_replacement_raw_mode(&request).as_deref(),
+        &parsed.wire_mode(),
+        parsed.restart_agent,
+    );
     let force = parsed.force;
     let authorization = handle_operator_command(
         bootstrap,
@@ -45901,9 +45925,17 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
         ),
     };
     let (current_frontmatter, _) = agent_doc_frontmatter::frontmatter::parse(&current_document)?;
-    let document_harness = agent_doc_harness::document_harness_from_content(&current_document)
+    let mut document_harness = agent_doc_harness::document_harness_from_content(&current_document)
         .map(|name| agent_doc_harness::HarnessConfig::from_agent_name(&name).binary)
         .unwrap_or_else(|| agent_doc_harness::HarnessConfig::claude().binary);
+    // `#restartagentharness`: the wire's editor harness is the one to launch.
+    // Resume must be that harness's conversation, not the lagging authority's.
+    let editor_agent =
+        agent_doc_controller::supervisor_replacement::restart_wire_editor_agent(&work.mode)
+            .map(str::to_string);
+    if let Some(agent) = editor_agent.as_deref() {
+        document_harness = agent_doc_harness::HarnessConfig::from_agent_name(agent).binary;
+    }
     // Continue mode means this document's exact conversation for the selected
     // harness, never another harness's id, a global latest selector, or a silent
     // fresh fallback.
@@ -46084,6 +46116,7 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
                                 agent_doc_supervisor::route_owned::RouteOwnedReapPolicy::Auto,
                             start_purpose,
                             resume: resume.clone(),
+                            operator_restart_agent: editor_agent.clone(),
                         },
                     );
                 agent_doc_ops_log_io::log_op(
@@ -46232,6 +46265,7 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
             defer_focus_to_layout: false,
             missing_pane: None,
             resume,
+            operator_restart_agent: editor_agent.as_deref(),
         })
         .with_context(|| {
             format!(

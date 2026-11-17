@@ -38,6 +38,12 @@ pub struct RouteOwnedStartOptions {
     /// `restart-supervisor`'s default continue-mode: the operator asked to
     /// restart the *process*, not to discard the conversation.
     pub resume: Option<ResumeRequest>,
+    /// Editor harness to launch when document authority still names the old one.
+    ///
+    /// `None` leaves the historical command unchanged. A value adds `--harness`
+    /// and [`crate::OPERATOR_RESTART_AGENT_ENV`] so the new supervisor launches
+    /// that harness and holds it until authority catches up.
+    pub operator_restart_agent: Option<String>,
 }
 
 impl RouteOwnedStartOptions {
@@ -46,6 +52,7 @@ impl RouteOwnedStartOptions {
             reap_policy,
             start_purpose: RouteOwnedStartPurpose::Dispatch,
             resume: None,
+            operator_restart_agent: None,
         }
     }
 }
@@ -71,6 +78,10 @@ pub fn route_owned_start_command_with_options(
         cmd.push_str(" --route-owned-start-purpose ");
         cmd.push_str(&options.start_purpose.to_string());
     }
+    if let Some(agent) = options.operator_restart_agent.as_deref() {
+        cmd.push_str(" --harness ");
+        cmd.push_str(&shell_quote_arg(agent));
+    }
     // `--resume` takes an OPTIONAL value (`num_args = 0..=1`), so a bare
     // `--resume <file>` makes clap swallow the document path as the resume ID and
     // then reject the command for a missing `<FILE>`. Use the `=` form for an id
@@ -87,6 +98,13 @@ pub fn route_owned_start_command_with_options(
     }
     cmd.push(' ');
     cmd.push_str(&shell_quote_arg(&file.to_string_lossy()));
+    if let Some(agent) = options.operator_restart_agent.as_deref() {
+        cmd = format!(
+            "{}={} {cmd}",
+            crate::OPERATOR_RESTART_AGENT_ENV,
+            shell_quote_arg(agent)
+        );
+    }
     cmd
 }
 
@@ -132,6 +150,7 @@ mod tests {
                     reap_policy: RouteOwnedReapPolicy::Auto,
                     start_purpose: RouteOwnedStartPurpose::Dispatch,
                     resume: Some(ResumeRequest::Latest),
+                    operator_restart_agent: None,
                 },
             ),
             "/usr/local/bin/agent-doc start --route-owned --route-owned-reap-policy auto --resume -- tasks/doc.md"
@@ -151,6 +170,7 @@ mod tests {
                     reap_policy: RouteOwnedReapPolicy::Auto,
                     start_purpose: RouteOwnedStartPurpose::Dispatch,
                     resume: Some(ResumeRequest::Id("conv 42".into())),
+                    operator_restart_agent: None,
                 },
             ),
             "agent-doc start --route-owned --route-owned-reap-policy auto --resume='conv 42' -- tasks/doc.md"
@@ -168,6 +188,7 @@ mod tests {
                 reap_policy: RouteOwnedReapPolicy::Auto,
                 start_purpose: RouteOwnedStartPurpose::Dispatch,
                 resume: Some(ResumeRequest::Latest),
+                operator_restart_agent: None,
             },
         );
 
@@ -239,12 +260,31 @@ mod tests {
                 reap_policy: RouteOwnedReapPolicy::KeepAlive,
                 start_purpose: RouteOwnedStartPurpose::LayoutProvision,
                 resume: None,
+                operator_restart_agent: None,
             },
         );
 
         assert_eq!(
             command,
             "agent-doc start --route-owned --route-owned-reap-policy keep-alive --route-owned-start-purpose layout-provision tasks/doc.md"
+        );
+    }
+
+    #[test]
+    fn route_owned_start_command_carries_the_editor_harness_when_authority_lags() {
+        let command = route_owned_start_command_with_options(
+            "agent-doc",
+            Path::new("tasks/api.md"),
+            &RouteOwnedStartOptions {
+                reap_policy: RouteOwnedReapPolicy::Auto,
+                start_purpose: RouteOwnedStartPurpose::Dispatch,
+                resume: None,
+                operator_restart_agent: Some("grok".to_string()),
+            },
+        );
+        assert_eq!(
+            command,
+            "AGENT_DOC_OPERATOR_RESTART_AGENT=grok agent-doc start --route-owned --route-owned-reap-policy auto --harness grok tasks/api.md"
         );
     }
 }

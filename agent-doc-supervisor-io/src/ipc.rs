@@ -431,11 +431,17 @@ pub struct RestartIntent {
     /// `#idlecleartriggerinject`): the relaunch must not re-trigger the document
     /// unless pending work exists.
     pub operator_clear: bool,
+    /// Harness binary the editor showed when document authority still named
+    /// another one (`agent:continue@grok`). Absent when the authority already
+    /// agreed, or this is not a Restart Agent.
+    pub editor_agent: Option<String>,
 }
 
 impl RestartIntent {
     pub fn decode(encoded: String) -> Self {
-        let mut rest = encoded.as_str();
+        let (encoded, editor_agent) =
+            agent_doc_controller::supervisor_replacement::split_restart_wire_editor_agent(&encoded);
+        let mut rest = encoded;
         let mut restart_agent = false;
         let mut operator_clear = false;
         loop {
@@ -453,6 +459,7 @@ impl RestartIntent {
             mode: rest.to_string(),
             restart_agent,
             operator_clear,
+            editor_agent: editor_agent.map(str::to_string),
         }
     }
 
@@ -465,6 +472,10 @@ impl RestartIntent {
             encoded.push_str(OPERATOR_CLEAR_MODE_PREFIX);
         }
         encoded.push_str(&self.mode);
+        if let Some(agent) = &self.editor_agent {
+            encoded.push('@');
+            encoded.push_str(agent);
+        }
         encoded
     }
 
@@ -474,6 +485,7 @@ impl RestartIntent {
             mode: "fresh".to_string(),
             restart_agent: false,
             operator_clear: true,
+            editor_agent: None,
         }
     }
 }
@@ -522,6 +534,7 @@ where
         mode,
         restart_agent,
         operator_clear,
+        editor_agent: _,
     } = intent;
     // Refresh the IPC-visible binary projection on every restart request even
     // when the child is dead and the request will take the normal relaunch
@@ -1273,17 +1286,26 @@ mod tests {
     /// no caller ever sees `clear:fresh` as a lineage mode.
     #[test]
     fn restart_intent_round_trips_operator_clear_provenance() {
-        for (raw, mode, restart_agent, operator_clear) in [
-            ("fresh", "fresh", false, false),
-            ("continue", "continue", false, false),
-            ("agent:continue", "continue", true, false),
-            ("clear:fresh", "fresh", false, true),
-            ("agent:clear:fresh", "fresh", true, true),
+        for (raw, mode, restart_agent, operator_clear, editor_agent) in [
+            ("fresh", "fresh", false, false, None),
+            ("continue", "continue", false, false, None),
+            ("agent:continue", "continue", true, false, None),
+            ("clear:fresh", "fresh", false, true, None),
+            ("agent:clear:fresh", "fresh", true, true, None),
+            ("agent:continue@grok", "continue", true, false, Some("grok")),
+            (
+                "agent:clear:fresh@claude",
+                "fresh",
+                true,
+                true,
+                Some("claude"),
+            ),
         ] {
             let intent = RestartIntent::decode(raw.to_string());
             assert_eq!(intent.mode, mode, "{raw}");
             assert_eq!(intent.restart_agent, restart_agent, "{raw}");
             assert_eq!(intent.operator_clear, operator_clear, "{raw}");
+            assert_eq!(intent.editor_agent.as_deref(), editor_agent, "{raw}");
             assert_eq!(intent.encode(), raw);
             assert_eq!(
                 decode_restart_intent(raw.to_string()),
@@ -1320,6 +1342,32 @@ mod tests {
             assert!(!state.restart_reexec.load(Ordering::Relaxed));
             assert_eq!(state.restart_deferred.load(Ordering::Relaxed), cycle_open);
         }
+    }
+
+    /// The editor harness has to survive the child-exit boundary. Dropping
+    /// `@grok` here makes the next iteration re-read the lagging authority.
+    #[test]
+    fn restart_agent_request_preserves_the_editor_harness() {
+        let state = RestartLifecycleState {
+            cycle_open: false,
+            child_alive: true,
+            waiting_input: false,
+            binary_stale: false,
+            restart_requested: AtomicBool::new(false),
+            restart_deferred: AtomicBool::new(false),
+            restart_reexec: AtomicBool::new(false),
+            child_killed: AtomicBool::new(false),
+            prompt_woken: AtomicBool::new(false),
+            restart_mode: Mutex::new(String::new()),
+            busy_reasons: Mutex::new(Vec::new()),
+        };
+        request_supervisor_restart(&state, "agent:continue@grok".to_string())
+            .expect("restart agent with an editor harness is accepted");
+        assert_eq!(*state.restart_mode.lock().unwrap(), "agent:continue@grok");
+        let intent = RestartIntent::decode(state.restart_mode.lock().unwrap().clone());
+        assert!(intent.restart_agent);
+        assert_eq!(intent.mode, "continue");
+        assert_eq!(intent.editor_agent.as_deref(), Some("grok"));
     }
 
     /// `#haivendupsession`: an operator `session_restart` arriving while the

@@ -229,15 +229,18 @@ came back on the old agent" is answerable from the log instead of inferred.
 none), never the actor the resolver substituted for an absent key.
 
 Restart Agent re-resolves the harness from the controller's document
-authority, not from the editor buffer, so it cannot see an `agent:` edit the
-authority has not merged yet (`#restartagentharness`). Observed 2026-10-27 on
-`tasks/software/lazily.md`: the editor replica was fenced at 16:07:54Z
+authority and also receives the `agent:` the editor shows
+(`#restartagentharness`). Observed 2026-10-27 on `tasks/software/lazily.md`:
+the editor replica was fenced at 16:07:54Z
 (`crdt_document_op_delta_ingested outcome=StructuralQuarantined`, then
 `crdt_replica_update_quarantined recovery=lazy_canonical_projection`), the
 operator's later `agent: claude` → `agent: grok` edit was recorded by op capture
 but never reached the authority, and five Restart Agent invocations each logged
 `resolved_harness=claude resolved_from=frontmatter:claude` and relaunched
-Claude Code. The editor therefore sends the `agent:` it shows:
+Claude Code. Blocking on that lag kept the old harness. The operator changed
+`agent:` so the new harness would run those edits, so disagreement launches
+the editor harness and holds it until the authority catches up. The editor
+therefore sends the `agent:` it shows:
 
 - `agent-doc session restart-agent <FILE> --expect-agent <AGENT>`. JetBrains
   reads the open buffer's frontmatter through the native
@@ -254,14 +257,27 @@ Claude Code. The editor therefore sends the `agent:` it shows:
   (`claude`/`claude-code` and `grok`/`grok-build` agree), not as resolved
   binaries, so an unknown name never agrees with `claude` merely because both
   fall back to it at launch. An absent or `default` editor value is no evidence
-  and admits the restart unchanged.
-- On disagreement the restart is refused with both values named and nothing is
-  replaced; the ops log records
-  `restart_agent_refused reason=authority_lags_editor editor_agent=<x> authority_agent=<y|<unset>>`.
-  Failing closed is deliberate: honouring the editor value over the authority
-  would let the idle agent-change watch (which reads the same authority) switch
-  the harness straight back, and the remedy for the stale authority is editor
-  sync convergence, not a supervisor-side override.
+  and admits the restart unchanged. Same launch binary (an unknown editor name
+  and `claude` both launch `claude`) is also unchanged.
+- On disagreement the CLI does not refuse and does not relaunch the authority's
+  harness. It puts the editor's launch binary on the replacement wire
+  (`agent:continue@grok`, `agent:fresh@claude`). The controller keeps that
+  suffix on the mode it forwards. The supervisor launches that binary on the
+  next restart iteration and holds it: later crash restarts keep the editor
+  binary while authority still launches the harness the restart left behind,
+  drop the hold when authority declares that same harness, and follow authority
+  when it names a newer one. The ops log records
+  `restart_agent_editor_harness editor_agent=<binary> authority_agent=<y|<unset>> action=launch_editor_agent`.
+  `resolved_from=frontmatter:` stays the authority text. While the hold's
+  authority binary still matches, the idle agent-change watch does not request
+  a switch back to that stale authority (`action=hold_editor_agent`).
+- A cold start with no live supervisor carries the same binary as `--harness`
+  and `AGENT_DOC_OPERATOR_RESTART_AGENT`. The new supervisor consumes that
+  variable once, installs the hold from the document's declared `agent:` (not
+  from the `--harness` override), and removes it so the harness child never
+  inherits it. A hot-reexec carries the editor binary the same way. Cold start
+  still refuses `EditorSyncPending` and a missing replica: there is no document
+  text to recover from. The hold is not that refusal.
 
 The replacement child must not auto-trigger the document while that document has
 a retained binary-owned editor delivery. The supervisor keeps resetting the

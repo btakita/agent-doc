@@ -50,7 +50,7 @@ start` binds the replacement worker.
 | --- | --- | --- | --- |
 | 👀 | `seen` | seen | Agent-doc has seen this prompt and has not yet emitted it in the prepare step. The prefix is the seen glyph `👀`. Prepare replaces it with pending when it emits the prompt. |
 | 📥 | `pending` | pending | Live row with no claim, worker report, or completion evidence; ready to run. |
-| ⛔ | `blocked` | blocked | Its tracked item still waits on open work: a `(stays open: blocked behind #a, #b)` clause or an `after=#id` edge names an item still open in backlog, todo or review, or a stays-open blocker clause names only ids this document never tracked (an external blocker). `⟦blocked by a, b⟧` lists those ids. The row is held out of drain and subagent dispatch and returns to pending once every tracked blocker closes or the external clause changes. |
+| ⛔ | `blocked` | blocked | Its tracked item still waits on open work: a `(stays open: blocked behind #a, #b)` clause or an `after=#id` edge names an item still open in backlog, todo or review, or a stays-open blocker clause names only ids this document never tracked (an external blocker). `⟦blocked by a, b⟧` lists those ids. The row is held out of drain and subagent dispatch and returns to pending once every tracked blocker closes, the external clause changes, or the decision graph settles that external id (its linked pull request or issue is closed, or a decision names the id). |
 | 🟡 | `claimed` | claimed | Reserved for a worker by `queue claim`; no spawned worker is bound yet. |
 | 🚧 | `running` | running | A spawned worker is bound to this exact claim by `queue start`. |
 | ☑️ | `reported` | keep: worker done | Keep this live row: the worker reported back (`queue report-complete`), but the coordinator still has to integrate, verify, and close it. Do not delete it yet. |
@@ -135,7 +135,10 @@ A clause that cites no tracked id at all records an external or unknown
 blocker, such as `(stays open: blocked behind #vendorfix; the vendor PR still
 lacks the file)` written by a worker that could not finish. No agent can move
 that row, so it shows `⛔ ⟦blocked by vendorfix⟧` and stays blocked until
-someone edits the clause, the id becomes tracked work, or you disregard it.
+someone edits the clause, the id becomes tracked work, you disregard it, or
+the decision graph settles that id (its linked pull request or issue is
+closed, or a decision names the id). A settlement releases only an external
+id; an open tracked item of the same id still blocks.
 All-digit ids (PR or issue numbers) never block (`#gatedheadpending`).
 
 A claimed row also shows `⛔` when its worker stopped on a harness usage or

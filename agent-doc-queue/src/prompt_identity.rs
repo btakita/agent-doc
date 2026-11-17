@@ -120,6 +120,8 @@ pub fn project(content: &str, document_id: &str) -> QueuePromptIdentityProjectio
     for (offset, annotation) in insertions.into_iter().rev() {
         projected.insert_str(offset, &annotation);
     }
+    projected =
+        agent_doc_element_queue::repair_generated_id_before_list_marker(&projected).into_owned();
     let mut relations = relation_graph(&projected);
     relations.diagnostics.extend(identity_diagnostics);
     QueuePromptIdentityProjection {

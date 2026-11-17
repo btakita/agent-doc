@@ -2277,6 +2277,21 @@ impl RelayHub {
         Ok(())
     }
 
+    /// Put a generated queue id back after its list marker on the canonical
+    /// replica. Returns whether the visible text changed. The corrective ops
+    /// are ordinary local edits, so the next delta carries them.
+    fn repair_generated_id_before_list_marker(&mut self) -> Result<bool> {
+        let current = self.canonical.text();
+        let repaired = agent_doc_element_queue::repair_generated_id_before_list_marker(&current);
+        if repaired.as_ref() == current {
+            return Ok(false);
+        }
+        for (offset, delete_len, text) in minimal_char_span_edits(&current, repaired.as_ref())? {
+            self.canonical.apply_local_edit(offset, delete_len, &text);
+        }
+        Ok(true)
+    }
+
     /// Relay member `client_id`'s pending local ops to the hub: pull everything
     /// the member holds that the canonical replica is missing INTO canonical, then
     /// build the fan-out packet of those new op(s) for every OTHER live member,
@@ -2293,6 +2308,7 @@ impl RelayHub {
         let before = self.canonical.state_vector();
         let into_canonical = member.replica.diff(&self.canonical.state_vector())?;
         self.canonical.apply_update(&into_canonical)?;
+        let id_repaired = self.repair_generated_id_before_list_marker()?;
         let after_text = self.canonical.text();
         self.sync_live_document_projection(&before_text, &after_text);
         let update = self.canonical.diff(&before)?;
@@ -2300,7 +2316,7 @@ impl RelayHub {
             .members
             .keys()
             .copied()
-            .filter(|id| *id != client_id && self.is_live(*id))
+            .filter(|id| (id_repaired || *id != client_id) && self.is_live(*id))
             .collect();
         let packet = BroadcastPacket {
             origin: client_id,
@@ -2480,6 +2496,10 @@ impl RelayHub {
             component_isolation_reconciled = true;
             eprintln!("[crdt] displaced_attempt_projection_repaired client_id={client_id}");
         }
+        let id_repaired = self.repair_generated_id_before_list_marker()?;
+        if id_repaired {
+            eprintln!("[crdt] generated_id_before_list_marker_repaired client_id={client_id}");
+        }
         let published_text = self.canonical.text();
         self.sync_live_document_projection(&before_text, &published_text);
         let delta = self.canonical.diff(&before)?;
@@ -2493,7 +2513,10 @@ impl RelayHub {
             .members
             .keys()
             .copied()
-            .filter(|id| (component_isolation_reconciled || *id != client_id) && self.is_live(*id))
+            .filter(|id| {
+                (component_isolation_reconciled || id_repaired || *id != client_id)
+                    && self.is_live(*id)
+            })
             .collect();
         let packet = BroadcastPacket {
             origin: client_id,
@@ -2783,6 +2806,9 @@ impl RelayHub {
                 current.len()
             ));
         }
+        let content_repaired =
+            agent_doc_element_queue::repair_generated_id_before_list_marker(content);
+        let content = content_repaired.as_ref();
         let before = self.canonical.state_vector();
         let (component_scope, edits) = match scope {
             None => (

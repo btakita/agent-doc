@@ -2128,7 +2128,8 @@ fn weave_order(spine: &[String], weave: &[String]) -> Vec<String> {
 pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMergeOutcome {
     if ours_doc == theirs_doc {
         return CellMergeOutcome {
-            merged_text: ours_doc.to_string(),
+            merged_text: agent_doc_element_queue::repair_generated_id_before_list_marker(ours_doc)
+                .into_owned(),
             conflicts: Vec::new(),
             fell_back: false,
         };
@@ -2415,6 +2416,9 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
 
     // Structural safety net: the recombined document must re-segment to the same
     // top-level component name sequence (never emit malformed framing).
+    let repaired =
+        agent_doc_element_queue::repair_generated_id_before_list_marker(&out).into_owned();
+    let out = repaired;
     match parse_doc_nodes(&out) {
         Some(merged_nodes) if component_name_sequence(&merged_nodes) == ours_names => {
             log_conflicts(&all_conflicts);

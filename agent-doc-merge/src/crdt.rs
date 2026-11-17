@@ -813,7 +813,7 @@ pub fn merge_by_component(
     let theirs_text = canonicalize_complete_document_replay("theirs", theirs_text)?;
     if !lossless_tree_merge_enabled() {
         return merge_by_component_authoritative(base_state, ours_text, theirs_text)
-            .map(drop_queue_empty_list_placeholders);
+            .map(finish_component_merge);
     }
     let base_text = match base_state {
         Some(bytes) => CrdtDoc::decode_state(bytes)
@@ -827,7 +827,7 @@ pub fn merge_by_component(
         // The tree is not confident (conflict / structural or frontmatter divergence
         // / opaque markers): the causality-aware CRDT owns this merge.
         return merge_by_component_authoritative(base_state, ours_text, theirs_text)
-            .map(drop_queue_empty_list_placeholders);
+            .map(finish_component_merge);
     };
     // FULL flip: both sides are insertions-only over base ⇒ no deletion ⇒ no stale
     // revert is possible ⇒ the tree is the sole authority and the CRDT never runs.
@@ -838,7 +838,7 @@ pub fn merge_by_component(
             "[crdt] merge_by_component: lossless-tree authoritative, CRDT skipped (additive merged_len={})",
             tree_text.len()
         );
-        return Ok(drop_queue_empty_list_placeholders(tree_text));
+        return Ok(finish_component_merge(tree_text));
     }
     // GUARDED path: a side deleted content relative to base, so a stale-side revert
     // is possible. Compute the causality-aware CRDT; the tree wins only on byte
@@ -851,7 +851,7 @@ pub fn merge_by_component(
                 "[crdt] merge_by_component: lossless-tree authoritative (agrees, merged_len={})",
                 tree_text.len()
             );
-            return Ok(drop_queue_empty_list_placeholders(tree_text));
+            return Ok(finish_component_merge(tree_text));
         }
         eprintln!(
             "[crdt] merge_by_component: lossless_merge_divergence tree_len={} crdt_len={} (keeping CRDT — needs op causality)",
@@ -859,7 +859,12 @@ pub fn merge_by_component(
             crdt_text.len()
         );
     }
-    authoritative.map(drop_queue_empty_list_placeholders)
+    authoritative.map(finish_component_merge)
+}
+
+fn finish_component_merge(text: String) -> String {
+    let stripped = drop_queue_empty_list_placeholders(text);
+    agent_doc_element_queue::repair_generated_id_before_list_marker(&stripped).into_owned()
 }
 
 /// Drop editor placeholder bullets from queue bodies after a merge.
@@ -1624,6 +1629,13 @@ fn align_generated_id_progressive_revisions(
 /// Keep the live operator spelling while retaining the generated correlation
 /// id (and active-head heading) from the admitted projection.
 pub(crate) fn project_generated_id_onto_live(promoted: &str, live: &str) -> String {
+    agent_doc_element_queue::repair_generated_id_before_list_marker(
+        &project_generated_id_onto_live_unrepaired(promoted, live),
+    )
+    .into_owned()
+}
+
+fn project_generated_id_onto_live_unrepaired(promoted: &str, live: &str) -> String {
     let Some(id) = agent_doc_element_queue::queue_prompt_stable_id(promoted) else {
         return live.to_string();
     };
@@ -1664,6 +1676,12 @@ pub(crate) fn project_generated_id_onto_live(promoted: &str, live: &str) -> Stri
         {
             projected_head.insert_str(indent + 2, "### ");
         }
+    }
+    // An empty head has no work line to annotate. Emitting ` [#q-id]` here is
+    // concatenated onto the next list child (` [#q-id]- …`) when this cell has
+    // no trailing newline.
+    if projected_head.trim().is_empty() {
+        return live.to_string();
     }
     let without_report =
         agent_doc_element_queue::strip_queue_report_state_annotation(&projected_head);
@@ -2594,6 +2612,9 @@ fn reconcile_component_body(
             (None, None) => None,
         };
         if let Some(text) = resolved {
+            if !out.is_empty() && !out.ends_with('\n') && text.trim_start().starts_with("- ") {
+                out.push('\n');
+            }
             out.push_str(&text);
         }
     }
@@ -9180,5 +9201,106 @@ Second answer line three.
                 "MULTI: foreign content spliced into queue:\n{queue_body}"
             );
         }
+    }
+
+    /// A generated `[#q-…]` inserted at the list-marker origin sorts ahead of a
+    /// concurrent replacement of that marker and publishes ` [#q-id]- …`.
+    /// The row then no longer parses as a list item.
+    #[test]
+    fn generated_q_id_concurrent_with_line_replace_does_not_precede_the_list_marker() {
+        use lazily::TextCrdt;
+
+        let base = "- 🟡 [#subagent:blanksub#1] In sdk-dev.md, a blank subitem was created.\n";
+        let annotation = " [#q-4cc5f6de6590]";
+        let replacement = "- 🟡 [#subagent:orphansub#1] sdk-dev.md has some orphaned subitems. agent-doc seems to be deleting the root item and orphaning subitems.\n";
+        let base_len = base.chars().count();
+        let bump = base_len + replacement.chars().count() + 8;
+
+        let base_crdt = TextCrdt::from_str(1, base);
+        let mut agent = base_crdt.fork(2);
+        let mut editor = base_crdt.fork(3);
+        editor.delete_range(0, base_len);
+        editor.insert_str(0, replacement);
+        agent.insert_str(base_len, &"x".repeat(bump));
+        agent.delete_range(base_len, bump);
+        agent.insert_str(0, annotation);
+        agent.merge(&editor);
+        editor.merge(&agent);
+        let union = agent.text();
+        assert_eq!(union, editor.text(), "replicas diverged:\n{union}");
+        assert!(
+            union.contains(" [#q-4cc5f6de6590]-"),
+            "raw union did not place the generated id ahead of the list marker:\n{union}"
+        );
+        assert!(
+            !union.contains('x'),
+            "clock padding stayed visible:\n{union}"
+        );
+
+        let repaired = agent_doc_element_queue::repair_generated_id_before_list_marker(&union);
+        let repaired_line = repaired
+            .lines()
+            .find(|line| line.contains("orphansub"))
+            .expect("orphansub row missing");
+        assert!(
+            repaired_line.trim_start().starts_with("- "),
+            "repaired row is not a list item: {repaired_line}"
+        );
+        assert!(
+            repaired_line.trim_end().ends_with("[#q-4cc5f6de6590]"),
+            "generated id is not trailing: {repaired_line}"
+        );
+        assert!(
+            !repaired.contains(" [#q-4cc5f6de6590]-"),
+            "repair left the splice:\n{repaired}"
+        );
+
+        let mut trailing_agent = base_crdt.fork(2);
+        let mut trailing_editor = base_crdt.fork(3);
+        trailing_editor.delete_range(0, base_len);
+        trailing_editor.insert_str(0, replacement);
+        trailing_agent.insert_str(base_len, &"x".repeat(bump));
+        trailing_agent.delete_range(base_len, bump);
+        let newline_at = base_len - 1;
+        trailing_agent.insert_str(newline_at, annotation);
+        trailing_agent.merge(&trailing_editor);
+        let trailing_union = trailing_agent.text();
+        assert!(
+            !trailing_union.contains(" [#q-4cc5f6de6590]-"),
+            "an end-of-line id insert spliced ahead of the marker:\n{trailing_union}"
+        );
+        let trailing_repaired =
+            agent_doc_element_queue::repair_generated_id_before_list_marker(&trailing_union);
+        assert_eq!(trailing_repaired.as_ref(), trailing_union);
+
+        let spliced = "<!-- agent:queue -->\n [#q-4cc5f6de6590]- 🟡 [#subagent:orphansub#1] orphaned subitems\n<!-- /agent:queue -->\n";
+        let plan = crate::merge(crate::MergeRequest::cell(spliced, spliced, spliced));
+        assert!(
+            !plan.merged_doc.contains(" [#q-4cc5f6de6590]-"),
+            "cell merge published the splice:\n{}",
+            plan.merged_doc
+        );
+        assert!(
+            plan.merged_doc
+                .contains("- 🟡 [#subagent:orphansub#1] orphaned subitems [#q-4cc5f6de6590]"),
+            "cell merge dropped the repaired row:\n{}",
+            plan.merged_doc
+        );
+        let component = merge_by_component(None, spliced, spliced).expect("component merge");
+        assert!(
+            !component.contains(" [#q-4cc5f6de6590]-"),
+            "component merge published the splice:\n{component}"
+        );
+
+        let clean = "<!-- agent:queue -->\n- 🟡 work [#q-4cc5f6de6590]\n<!-- /agent:queue -->\n";
+        let kept = crate::merge(crate::MergeRequest::cell(clean, clean, clean));
+        assert_eq!(kept.merged_doc, clean);
+
+        let bare = "- blank subitem [#q-4cc5f6de6590]\n";
+        assert_eq!(
+            project_generated_id_onto_live(bare, ""),
+            "",
+            "an empty live cell must not become a bare generated-id token"
+        );
     }
 }

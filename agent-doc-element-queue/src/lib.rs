@@ -6,7 +6,7 @@ use agent_doc_element::{
 };
 use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
 use serde::{Deserialize, Serialize};
-use std::{fmt, ops::Range, str::FromStr};
+use std::{borrow::Cow, fmt, ops::Range, str::FromStr};
 
 pub mod nested_claim_steer;
 pub mod queue_identity;
@@ -429,6 +429,83 @@ fn generated_prompt_id_annotation(text: &str) -> Option<(&str, Range<usize>)> {
 
 fn trailing_generated_prompt_id(text: &str) -> Option<&str> {
     generated_prompt_id_annotation(text).map(|(id, _)| id)
+}
+
+/// Move a generated queue id that was published ahead of its list marker back
+/// to the trailing annotation slot.
+///
+/// The admitted form is ` [#{id}]` appended to the work line. Inserting that
+/// token at the list marker's origin, concurrently with a replacement that
+/// inserts a new `-` at the same origin, publishes ` [#q-id]- …` when the
+/// annotation's op sorts first. That line no longer starts with a bullet, so
+/// the row is absorbed into the previous item. A correct trailing id does not
+/// contain `]-` and is left untouched.
+pub fn repair_generated_id_before_list_marker<'a>(text: &'a str) -> Cow<'a, str> {
+    if !text.contains("]-") {
+        return Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut changed = false;
+    for line in text.split_inclusive('\n') {
+        match repair_generated_id_line(line) {
+            Some(repaired) => {
+                changed = true;
+                out.push_str(&repaired);
+            }
+            None => out.push_str(line),
+        }
+    }
+    if changed {
+        Cow::Owned(out)
+    } else {
+        Cow::Borrowed(text)
+    }
+}
+
+fn repair_generated_id_line(line: &str) -> Option<String> {
+    let ending = if line.ends_with("\r\n") {
+        "\r\n"
+    } else if line.ends_with('\n') {
+        "\n"
+    } else {
+        ""
+    };
+    let core = line.trim_end_matches(['\n', '\r']);
+    let leading = core.len() - core.trim_start().len();
+    if leading == 0 || core.as_bytes().get(leading - 1) != Some(&b' ') {
+        return None;
+    }
+    let trimmed = &core[leading..];
+    if !trimmed.starts_with("[#q-") {
+        return None;
+    }
+    let close = trimmed.find("]-")?;
+    let id = &trimmed[2..close];
+    if !id.starts_with("q-")
+        || !id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+    {
+        return None;
+    }
+    let after = &trimmed[close + 2..];
+    if !after.is_empty() && !after.starts_with([' ', '\t']) {
+        return None;
+    }
+    let indent = &core[..leading - 1];
+    let body = after.trim_start();
+    let mut restored = if body.is_empty() {
+        format!("{indent}-")
+    } else {
+        format!("{indent}- {body}")
+    };
+    let token = format!("[#{id}]");
+    if !restored.contains(&token) {
+        let insert_at = strip_queue_report_state_annotation(&restored).len();
+        restored.insert_str(insert_at, &format!(" {token}"));
+    }
+    restored.push_str(ending);
+    Some(restored)
 }
 
 fn id_prefix(text: &str) -> &str {
@@ -1074,6 +1151,37 @@ mod tests {
         assert_eq!(super::QueueReportState::Local.glyph(), "✎");
         assert_eq!(super::QueueReportState::Published.glyph(), "⇧");
         assert_eq!(super::QueueReportState::PublishedLocal.glyph(), "⇧✎");
+    }
+
+    #[test]
+    fn generated_id_ahead_of_a_list_marker_returns_to_the_trailing_slot() {
+        let spliced = " [#q-4cc5f6de6590]- 🟡 [#subagent:orphansub#1] orphaned subitems\n";
+        let repaired = super::repair_generated_id_before_list_marker(spliced);
+        assert_eq!(
+            repaired,
+            "- 🟡 [#subagent:orphansub#1] orphaned subitems [#q-4cc5f6de6590]\n"
+        );
+        assert_eq!(
+            super::repair_generated_id_before_list_marker(&repaired),
+            repaired
+        );
+        let indented = "   [#q-4cc5f6de6590]- child\n";
+        assert_eq!(
+            super::repair_generated_id_before_list_marker(indented),
+            "  - child [#q-4cc5f6de6590]\n"
+        );
+        let trailing = "- 🟡 work [#q-4cc5f6de6590]\n";
+        assert_eq!(
+            super::repair_generated_id_before_list_marker(trailing),
+            trailing
+        );
+        let prose = "- see [#q-4cc5f6de6590]-like note\n";
+        assert_eq!(super::repair_generated_id_before_list_marker(prose), prose);
+        let reported = " [#q-4cc5f6de6590]- 🟡 work ⟦local⟧\n";
+        assert_eq!(
+            super::repair_generated_id_before_list_marker(reported),
+            "- 🟡 work [#q-4cc5f6de6590] ⟦local⟧\n"
+        );
     }
 
     #[test]

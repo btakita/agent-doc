@@ -169,8 +169,10 @@ pub fn merge(request: MergeRequest<'_>) -> MergePlan {
         Some(_) => (request.operator.to_string(), true),
         None => (merged_doc, fell_back),
     };
+    let repaired_doc =
+        agent_doc_element_queue::repair_generated_id_before_list_marker(&merged_doc).into_owned();
     MergePlan {
-        merged_doc,
+        merged_doc: repaired_doc,
         conflict_advisories,
         conflicts,
         engine: request.engine,

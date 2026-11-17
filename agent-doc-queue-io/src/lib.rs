@@ -31,6 +31,7 @@ pub mod queue_maintenance_claim;
 pub mod queue_marker_audit;
 pub mod queue_schedule;
 pub mod queue_tombstone;
+pub mod reported_closeout_exec;
 pub mod reported_writeback_reminder;
 pub mod restart_journal;
 pub mod stale_completion_repair;

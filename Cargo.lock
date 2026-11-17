@@ -420,6 +420,7 @@ dependencies = [
  "agent-doc-turn",
  "agent-doc-turn-status-io",
  "agent-doc-write-command-io",
+ "agent-doc-write-converge-io",
  "agent-doc-write-runtime-io",
  "anyhow",
  "serde",

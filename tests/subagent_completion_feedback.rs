@@ -383,8 +383,12 @@ fn four_cli_reporters_serialize_without_losing_completion_feedback() {
     for item in items {
         assert_eq!(
             content.matches(item).count(),
-            3,
-            "queue + heading + worker response for {item}"
+            4,
+            "heading + consume prompt echo + worker response + struck row for {item}"
+        );
+        assert!(
+            content.contains(&format!("- ### ~~{item}~~")),
+            "a prose report is mechanical, so the binary strikes the row: {content}"
         );
         assert!(content.contains(&format!("> Completed {item}.")));
     }
@@ -695,7 +699,10 @@ fn repair_stale_completion_cli_is_dry_run_first_narrow_and_idempotent() {
 
 /// `#completioncellrestore` through the real CLI, on the 2026-11-05 shape:
 /// two workers report through `report-complete`, then a closeout deletes both
-/// completion cells while the rows stay reported. The dry run lists both and
+/// completion cells while the rows stay reported. These rows are open backlog
+/// ids with no `(stays open:)` clause, so the mechanical consume refuses
+/// (`#acknoreason`) and the attempts stay reported. A prose free-text row is
+/// struck in the same report and is not this case. The dry run lists both and
 /// writes nothing; `--apply` adds both back byte for byte from the saved
 /// responses (operator text and queue rows unchanged, session-check still
 /// passes); a rerun is a no-op, and the stale-completion repair keeps them.
@@ -704,7 +711,7 @@ fn repair_completion_cells_cli_restores_deleted_cells_from_saved_responses() {
     let dir = tempfile::tempdir().unwrap();
     fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
     let doc = dir.path().join("session.md");
-    let items = ["finish sdk", "finish dev"];
+    let items = ["do [#sdk]", "do [#dev]"];
     fs::write(
         &doc,
         concat!(
@@ -715,8 +722,11 @@ fn repair_completion_cells_cli_restores_deleted_cells_from_saved_responses() {
             "<!-- agent:boundary:keep -->\n",
             "<!-- /agent:exchange -->\n\n",
             "<!-- agent:queue subagents -->\n",
-            "- finish sdk\n- finish dev\n",
-            "<!-- /agent:queue -->\n",
+            "- do [#sdk]\n- do [#dev]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#sdk] finish sdk\n- [ ] [#dev] finish dev\n",
+            "<!-- /agent:backlog -->\n",
         ),
     )
     .unwrap();
@@ -1322,7 +1332,11 @@ fn report_complete_joins_repository_provenance_to_the_exact_attempt() {
         ],
     );
     assert_ok(&report, "report repository completion");
-    assert!(String::from_utf8_lossy(&report.stderr).contains("is not integrated"));
+    let stderr = String::from_utf8_lossy(&report.stderr);
+    assert!(
+        stderr.contains("the binary completed the mechanical closeout"),
+        "a sink that already contains the source is recorded and struck: {stderr}"
+    );
     // `#repositoryreportcell`: a repository result writes the same
     // binary-owned, digest-attested completion cell into `agent:exchange` as a
     // prose result, so the coordinator sees every worker result in exchange.
@@ -1369,7 +1383,15 @@ fn report_complete_joins_repository_provenance_to_the_exact_attempt() {
         json["attempts"][0]["sink_repo_path"],
         dir.path().to_string_lossy().as_ref()
     );
-    assert_eq!(json["attempts"][0]["state"], "committed");
+    assert_eq!(json["attempts"][0]["state"], "integrated");
+    assert_eq!(json["attempts"][0]["integration_sha"], source);
+    assert_eq!(json["attempts"][0]["verification"], "verified");
+    assert!(
+        fs::read_to_string(&doc)
+            .unwrap()
+            .contains("- ### ~~repository work~~"),
+        "the mechanical closeout strikes the row once the sink contains the source"
+    );
 }
 
 /// The `agent:run` rows of `doc`.
@@ -3199,13 +3221,22 @@ fn a_running_followup_keeps_its_open_backlog_item_out_of_the_go_mirror() {
     assert!(rows.iter().any(|row| row.contains(followup)), "{rows:#?}");
 
     // The follow-up's own action item: a follow-up of a follow-up keeps the
-    // root item.
+    // root item. The prose origin is struck in the same report, and its
+    // response (also inside the run projection) repeats the action text, so
+    // the lookup is the new follow-up row, not that response line.
     report(followup, "agent: Continue the last alpha family");
     let ledger = agent_doc_queue_io::followup_provenance_ledger::load(&doc);
     let nested = run_rows(&doc)
         .into_iter()
-        .find(|row| row.contains("Continue the last alpha family"))
+        .find(|row| {
+            row.contains("follow up on an action item")
+                && row.contains("Continue the last alpha family")
+        })
         .unwrap_or_else(|| panic!("nested row missing: {:#?}", run_rows(&doc)));
     let nested = nested.trim_start().strip_prefix("- ").unwrap_or(&nested);
-    assert_eq!(ledger.root_of_row(nested), Some("alpha"), "{ledger:?}");
+    assert_eq!(
+        ledger.root_of_row(nested),
+        Some("alpha"),
+        "row={nested:?}\nledger={ledger:?}"
+    );
 }

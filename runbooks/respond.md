@@ -721,8 +721,11 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   genuine turn end; a `📥` that a closed `agent:loop` window holds back is not
   due and does not. The Claude/Grok Stop hook refuses each distinct debt set
   at least once per turn. A recursive Stop over exactly the same refused set
-  ends the turn only when none of the rows is `📥`, `🚧`, or `⚠️🚧`; those keep
-  the turn open (`state=inbox_or_running`). Any other unchanged set logs
+  ends the turn only when none of the rows is `📥`, `🚧`, `⚠️🚧`, or `☑️`.
+  The binary finishes a mechanical `☑️` first (the worker response is written
+  and the row is struck); a `☑️` that is still visible keeps the turn open
+  (`state=reported_open`). `📥`, `🚧`, and `⚠️🚧` keep the turn open
+  (`state=inbox_or_running`). Any other unchanged set logs
   `state=unchanged_debts` and names the rows left live to the operator in a
   `systemMessage` (`#stophookactiveguard`). A closed cycle that captured no
   response still consults this gate before it allows, and does not order

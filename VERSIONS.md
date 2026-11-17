@@ -2,6 +2,10 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## Unreleased
+
+- **A mechanical `☑️` is finished before the turn can end.** The binary writes the saved worker response and strikes a prose row, an already verified integration, or a sink that already contains the source. A recursive Stop keeps the turn open while `☑️` is still visible (`state=reported_open`), the same way `📥`, `🚧`, and `⚠️🚧` stay open (`state=inbox_or_running`).
+
 ## 0.35.578
 
 - **Publish `9ead33f0b50e1bd873ba85cc91ee0991052aa35e` as `0.35.578`.** Tag `v0.35.577` remains `e339717ad7985ab0a3ff57526489f25d100a519e`. That tip is 12 commits after the previous tag. Package manifests, internal constraints, `Cargo.lock`, `pyproject.toml`, and the bundled skill sources move to `0.35.578`. JetBrains plugin generations move to classic `0.2.1001`, IDE 262 `0.2.1002`, and IDE 263 `0.2.1003`. `pluginReleaseVersion` moves to `0.35.578`. VS Code stays `0.2.101`. Zed stays `0.1.8`.

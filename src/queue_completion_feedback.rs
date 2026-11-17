@@ -744,6 +744,128 @@ fn upsert_completion_feedback(
     Ok((appended, replaced, retained_intent, followups))
 }
 
+/// Complete mechanical `☑️` closeouts now.
+///
+/// Prose, an already verified integration, and a sink that already contains
+/// the source are verified, recorded, and consumed after the saved response is
+/// in the document. A row whose visible marker has drifted is repaired once,
+/// then retried. A merge, cherry-pick, push, missing fact, operator decision,
+/// or a response that was never captured stays reported. One refusal does not
+/// fail the pass: the caller reads each [`MechanicalCloseoutOutcome`].
+pub(crate) fn close_mechanical_reported_rows(
+    file: &Path,
+    effects: &impl agent_doc_queue_io::queue_cmd::QueueCommandEffects,
+) -> Result<Vec<agent_doc_queue_io::reported_closeout_exec::MechanicalCloseoutOutcome>> {
+    use agent_doc_queue_io::reported_closeout_exec::{
+        MechanicalCloseoutResult, close_mechanical_reported_attempts,
+    };
+
+    let first = close_mechanical_reported_attempts(effects, file)?;
+    let outcomes = if first
+        .outcomes
+        .iter()
+        .any(|outcome| outcome.projection_out_of_sync())
+    {
+        match repair_claim_projection(file, effects) {
+            Ok(_) => {
+                let second = close_mechanical_reported_attempts(effects, file)?;
+                merge_closeout_passes(first.outcomes, second.outcomes)
+            }
+            Err(err) => {
+                let reason = format!("projection repair refused: {err:#}").replace('\n', " ");
+                first
+                    .outcomes
+                    .into_iter()
+                    .map(|mut outcome| {
+                        if outcome.projection_out_of_sync() {
+                            outcome.result = MechanicalCloseoutResult::LeftReported {
+                                reason: reason.clone(),
+                            };
+                        }
+                        outcome
+                    })
+                    .collect()
+            }
+        }
+    } else {
+        first.outcomes
+    };
+    for outcome in &outcomes {
+        let status = match &outcome.result {
+            MechanicalCloseoutResult::Closed => "closed".to_string(),
+            MechanicalCloseoutResult::ProjectionOutOfSync => "projection_out_of_sync".to_string(),
+            MechanicalCloseoutResult::LeftReported { reason } => {
+                format!("left_reported reason={reason}")
+            }
+        };
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "mechanical_reported_closeout file={} owner={} generation={} item_bytes={} {status}",
+                file.display(),
+                outcome.owner,
+                outcome.generation,
+                outcome.item.len(),
+            ),
+        );
+    }
+    Ok(outcomes)
+}
+
+fn merge_closeout_passes(
+    first: Vec<agent_doc_queue_io::reported_closeout_exec::MechanicalCloseoutOutcome>,
+    second: Vec<agent_doc_queue_io::reported_closeout_exec::MechanicalCloseoutOutcome>,
+) -> Vec<agent_doc_queue_io::reported_closeout_exec::MechanicalCloseoutOutcome> {
+    let mut merged: Vec<_> = first
+        .into_iter()
+        .filter(|outcome| outcome.closed())
+        .collect();
+    for outcome in second {
+        let already = merged.iter().any(|existing| {
+            existing.owner == outcome.owner && existing.generation == outcome.generation
+        });
+        if !already {
+            merged.push(outcome);
+        }
+    }
+    merged
+}
+
+pub(crate) fn print_mechanical_closeout(
+    file: &Path,
+    outcomes: &[agent_doc_queue_io::reported_closeout_exec::MechanicalCloseoutOutcome],
+) {
+    use agent_doc_queue_io::reported_closeout_exec::MechanicalCloseoutResult;
+
+    if outcomes.is_empty() {
+        eprintln!("[queue] no reported rows to close for {}", file.display());
+        return;
+    }
+    let closed = outcomes.iter().filter(|outcome| outcome.closed()).count();
+    eprintln!(
+        "[queue] mechanical reported closeout for {}: {closed} closed, {} still reported",
+        file.display(),
+        outcomes.len().saturating_sub(closed),
+    );
+    for outcome in outcomes {
+        let handle = agent_doc_queue::queue_claim::claim_item_handle(&outcome.item);
+        match &outcome.result {
+            MechanicalCloseoutResult::Closed => eprintln!(
+                "[queue] closed {handle} ({}#{})",
+                outcome.owner, outcome.generation
+            ),
+            MechanicalCloseoutResult::LeftReported { reason } => eprintln!(
+                "[queue] still reported {handle} ({}#{}): {reason}",
+                outcome.owner, outcome.generation
+            ),
+            MechanicalCloseoutResult::ProjectionOutOfSync => eprintln!(
+                "[queue] still reported {handle} ({}#{}): visible marker does not match the claim",
+                outcome.owner, outcome.generation
+            ),
+        }
+    }
+}
+
 /// Settle any retained completion successor, then rederive the queue marker
 /// from the durable claim ledger. This never releases a claim or writes behind
 /// an editor-owned buffer.

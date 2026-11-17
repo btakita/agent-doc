@@ -46,6 +46,11 @@
 //!
 //! This module is pure: no clock, no storage, no git. The caller supplies the
 //! evidence and the commit counts.
+//!
+//! [`ReportedClaimCloseout::mechanical_terminal_steps`] is the subset a binary
+//! executor can finish without a judgment: verify that the designated sink
+//! already contains the source, record that integration, and consume. A
+//! fast-forward, cherry-pick, merge, fetch, or operator decision stays `☑️`.
 
 use std::collections::HashSet;
 
@@ -339,6 +344,35 @@ impl ReportedClaimCloseout {
     /// (`#choicelesscloseout`).
     pub fn coordinator_command_only(&self) -> bool {
         self.decision.is_none() && self.next_action_argv().is_some()
+    }
+
+    /// Steps the binary can run to a struck row with no judgment.
+    ///
+    /// `Some` only when every step is concrete, shared by every branch, and
+    /// one of verify-integration, record-integration, or consume, and the
+    /// sequence ends in consume. Integrating into a sink that does not yet
+    /// contain the source, or any operator decision, returns `None`: the row
+    /// stays `☑️` until a coordinator finishes it.
+    pub fn mechanical_terminal_steps(&self) -> Option<&[ReportedCloseoutStep]> {
+        if self.decision.is_some() || !self.missing_facts.is_empty() {
+            return None;
+        }
+        let ends_in_consume = self
+            .steps
+            .last()
+            .is_some_and(|step| step.action == ReportedCloseoutAction::Consume);
+        let mechanical = ends_in_consume
+            && self.steps.iter().all(|step| {
+                step.concrete
+                    && step.alternative.is_none()
+                    && matches!(
+                        step.action,
+                        ReportedCloseoutAction::VerifyIntegration
+                            | ReportedCloseoutAction::RecordIntegration
+                            | ReportedCloseoutAction::Consume
+                    )
+            });
+        mechanical.then_some(self.steps.as_slice())
     }
 }
 
@@ -1915,6 +1949,54 @@ mod tests {
             ])
         );
         assert!(closeout.steps.iter().all(|step| step.concrete));
+        assert!(closeout.mechanical_terminal_steps().is_some());
+    }
+
+    #[test]
+    fn mechanical_terminal_steps_are_only_verify_record_and_consume() {
+        let claim = reported("review the pull request", "subagent:review");
+        let prose = reported_claim_closeout(DOC, &claim, &ReportedRepoEvidence::ProseOnly).unwrap();
+        assert_eq!(
+            prose.mechanical_terminal_steps().map(|steps| steps.len()),
+            Some(1)
+        );
+        let integrated =
+            reported_claim_closeout(DOC, &claim, &ReportedRepoEvidence::IntegratedVerified)
+                .unwrap();
+        assert!(integrated.mechanical_terminal_steps().is_some());
+
+        let ahead = reported_claim_closeout(
+            DOC,
+            &claim,
+            &ReportedRepoEvidence::Unintegrated {
+                facts: facts(),
+                sink: Some(SinkContainment::DoesNotContain {
+                    fast_forward: true,
+                    checked_out_worktree: None,
+                }),
+            },
+        )
+        .unwrap();
+        assert!(
+            ahead.mechanical_terminal_steps().is_none(),
+            "a fast-forward into the sink is a coordinator integration, not a strike"
+        );
+
+        let undeclared =
+            reported_claim_closeout(DOC, &claim, &ReportedRepoEvidence::Undeclared).unwrap();
+        assert!(undeclared.mechanical_terminal_steps().is_none());
+
+        let stale = reported_claim_closeout(
+            DOC,
+            &claim,
+            &ReportedRepoEvidence::IntegratedUnverified {
+                facts: facts(),
+                reason: "patch changed".to_string(),
+                patch_id_mismatch: false,
+            },
+        )
+        .unwrap();
+        assert!(stale.mechanical_terminal_steps().is_none());
     }
 
     #[test]

@@ -6079,13 +6079,16 @@ fn respond_does_not_supersede_a_session_check_refusal_that_survives_its_commit()
 
 /// `#reportedrelease`: src/haiven-dev/tasks/docs.md, 2026-10-15. The
 /// operator added a free-text queue question after the coordinator's cycle had
-/// committed; the coordinator claimed it for a subagent and released the claim
-/// when the worker reported. `queue release` must hand back the exact
-/// persist-now closeout (the attempt-fenced strike, `#closeoutguidanceagree`),
-/// and a late finalize (auto-reopened from a HEAD that predates the line)
-/// carrying the `> **Queue prompt:**` echo must still strike the line and end
-/// its release receipt, so nothing re-serves or re-dispatches the answered
-/// question.
+/// committed; the coordinator claimed it for a subagent and the worker
+/// reported. A prose report with a captured response is mechanical: the
+/// binary writes that response and strikes the row before the command
+/// returns, so `queue release` finds no claim left. A late finalize
+/// (auto-reopened from a HEAD that predates the line) carrying the
+/// `> **Queue prompt:**` echo must not resurrect or re-dispatch the answered
+/// question, and it must keep the unrelated setup row and the receipt.
+/// A still-reported release whose response never reached the document still
+/// hands back the persist-now strike; that path is
+/// `committed_reported_release_names_the_unpersisted_worker_result_and_strike`.
 #[test]
 fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
     let (tmp, doc) = setup_session_stream_doc();
@@ -6224,6 +6227,18 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         ])
         .assert()
         .success();
+    let reported_projection = fs::read_to_string(&doc).unwrap();
+    assert!(
+        reported_projection.contains(worker_response)
+            && reported_projection.contains(&format!("~~{question}")),
+        "a prose report writes the response and strikes the row:\n{reported_projection}"
+    );
+    assert!(
+        reported_projection.contains(&format!("- 🚧 [#subagent:setup#1] {setup}\n"))
+            && !reported_projection
+                .contains(&format!("- ☑️ [#subagent:page-status-enum#1] {question}\n")),
+        "the setup head stays and the prose question does not stay reported:\n{reported_projection}"
+    );
     let released = agent_doc_at_claim_clock(claim_clock)
         .current_dir(tmp.path())
         .args([
@@ -6239,21 +6254,15 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         .success();
     let released = String::from_utf8_lossy(&released.get_output().stderr).into_owned();
     assert!(
-        released.contains("subagent:page-status-enum already reported")
-            && released.contains("write the result to `agent:exchange`")
-            && released.contains(&format!(
-                "--ack-text '{question}' --ack-owner 'subagent:page-status-enum#1'"
-            ))
-            && released.contains("Do NOT dispatch a new subagent"),
-        "release must hand back the persist-now closeout:\n{released}"
+        released.contains("nothing to release"),
+        "the mechanical strike already retired the claim:\n{released}"
     );
     let released_projection = fs::read_to_string(&doc).unwrap();
     assert!(
         released_projection.contains(&format!("- 🚧 [#subagent:setup#1] {setup}\n"))
-            && released_projection
-                .contains(&format!("- ☑️ [#subagent:page-status-enum#1] {question}\n"))
+            && released_projection.contains(&format!("~~{question}"))
             && !released_projection.contains(&format!("- 🟡 {question}\n")),
-        "reported release must retain a distinct awaiting-integration marker:\n{released_projection}"
+        "release must not resurrect the struck question:\n{released_projection}"
     );
     assert_eq!(
         agent_doc_queue_io::claim_release_receipt::load(&doc)

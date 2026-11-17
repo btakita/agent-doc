@@ -43,6 +43,7 @@ agent-doc-template = { path = "../agent-doc-template", version = "0.35.578" }
 agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.578" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.578" }
 agent-doc-turn-status-io = { path = "../agent-doc-turn-status-io", version = "0.35.578" }
+agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.35.578" }
 agent-doc-write-runtime-io = { path = "../agent-doc-write-runtime-io", version = "0.35.578" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

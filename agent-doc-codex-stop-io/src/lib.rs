@@ -625,7 +625,9 @@ pub fn handle_claude_stop() -> Result<Option<SubagentQuotaBlockApplied>> {
 /// * the `#transientcloseout` gate is bounded by `stop_hook_active` plus the
 ///   durable record of its previous refusal (`#stophookactiveguard`): a
 ///   recursive Stop over an unchanged debt set ends the turn only when no
-///   refused row is `📥`, `🚧`, or `⚠️🚧`; those keep refusing;
+///   refused row is `📥`, `🚧`, `⚠️🚧`, or `☑️`. The hook finishes a
+///   mechanical `☑️` (response written, row struck) before that decision;
+///   a `☑️` that is still visible keeps refusing, and so do the other three;
 /// * a hook error is bounded by `stop_hook_active` — errors here are
 ///   overwhelmingly persistent (an unreadable document, a refused authority
 ///   resolve, a state ledger that will not open), so re-blocking re-runs the
@@ -1482,6 +1484,205 @@ fn status_sync_synced_payload_for_checkpoint(
     Some(synced)
 }
 
+struct StopQueueCommandEffects;
+
+impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for StopQueueCommandEffects {
+    fn current_document_content(&self, file: &Path, source: &str) -> Result<String> {
+        // Uncached: a restore inside this pass must be visible to the consume
+        // that follows it. The Stop memo is dropped after the pass when the
+        // document changed.
+        resolve_document_content_uncached(file, source)
+    }
+
+    fn converge_document_or_disk(
+        &self,
+        file: &Path,
+        target_content: &str,
+        source_content: &str,
+        reason: &str,
+    ) -> Result<()> {
+        agent_doc_write_converge_io::converge_document_or_disk(
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
+            file,
+            target_content,
+            source_content,
+            reason,
+        )?;
+        agent_doc_document_realtime_io::invalidate_current_document_projection(file);
+        Ok(())
+    }
+
+    fn consume_free_text_queue_prompts_force_disk(
+        &self,
+        _file: &Path,
+        _count: usize,
+        _apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
+        anyhow::bail!("mechanical reported closeout does not consume a free-text head by count")
+    }
+
+    fn consume_free_text_queue_prompts_with_outcome(
+        &self,
+        _file: &Path,
+        _count: usize,
+        _apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
+        anyhow::bail!("mechanical reported closeout does not consume a free-text head by count")
+    }
+
+    fn strike_orphan_id_backed_queue_head(
+        &self,
+        _file: &Path,
+        _id: &str,
+        _apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> Result<bool> {
+        anyhow::bail!("mechanical reported closeout does not strike an orphan head")
+    }
+
+    fn acknowledge_open_id_backed_queue_head(
+        &self,
+        file: &Path,
+        id: &str,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> Result<bool> {
+        self.acknowledge_open_id_backed_queue_head_for_attempt(file, id, None, apply_guard)
+    }
+
+    fn acknowledge_open_id_backed_queue_head_for_attempt(
+        &self,
+        file: &Path,
+        id: &str,
+        attempt: Option<&agent_doc_document::queue_projection::QueueOwnerProjection>,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> Result<bool> {
+        agent_doc_queue_io::queue_consume::acknowledge_open_id_backed_queue_head_under_apply_guard(
+            file,
+            id,
+            attempt,
+            &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
+            apply_guard,
+        )
+    }
+
+    fn acknowledge_paused_free_text_queue_head(
+        &self,
+        file: &Path,
+        expected_head: &str,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
+        self.acknowledge_paused_free_text_queue_head_with_selector(
+            file,
+            expected_head,
+            None,
+            apply_guard,
+        )
+    }
+
+    fn acknowledge_paused_free_text_queue_head_with_selector(
+        &self,
+        file: &Path,
+        expected_head: &str,
+        selector: Option<&agent_doc_queue_io::queue_consume::AckTextSelector>,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
+        agent_doc_queue_io::queue_consume::acknowledge_paused_free_text_queue_head_under_apply_guard(
+            file,
+            expected_head,
+            selector,
+            &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
+            apply_guard,
+        )
+        .map(|outcome| {
+            outcome.map(|outcome| agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome {
+                consumed_text: outcome.consumed_text,
+                consumed_count: outcome.consumed_count,
+                remaining: outcome.remaining,
+                drained: outcome.drained,
+            })
+        })
+    }
+
+    fn prune_noise_queue_heads(
+        &self,
+        _file: &Path,
+        _apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> Result<usize> {
+        anyhow::bail!("mechanical reported closeout does not prune noise heads")
+    }
+}
+
+fn one_line_error(err: &anyhow::Error) -> String {
+    format!("{err:#}").replace('\n', " | ")
+}
+
+/// Finish a visible mechanical `☑️` before this Stop decides the turn.
+///
+/// A document with no reported glyph does not open the claim ledger. A
+/// closeout error is logged and the turn decision continues, so a row that
+/// stayed `☑️` still holds the turn. Observe-only stops return before this.
+fn finish_visible_reported_rows(file: &Path) {
+    let content = match current_document_content(file, "mechanical_reported_closeout") {
+        Ok(content) => content,
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "mechanical_reported_closeout_failed file={} error={}",
+                    file.display(),
+                    one_line_error(&err),
+                ),
+            );
+            return;
+        }
+    };
+    if !content.contains('☑') && !content.contains('📫') && !content.contains('📤') {
+        return;
+    }
+    match agent_doc_queue_io::reported_closeout_exec::close_mechanical_reported_attempts(
+        &StopQueueCommandEffects,
+        file,
+    ) {
+        Ok(pass) => {
+            if pass.document_changed || pass.outcomes.iter().any(|outcome| outcome.closed()) {
+                invalidate_stop_document_cache();
+            }
+            for outcome in &pass.outcomes {
+                let status = match &outcome.result {
+                    agent_doc_queue_io::reported_closeout_exec::MechanicalCloseoutResult::Closed => {
+                        "closed".to_string()
+                    }
+                    agent_doc_queue_io::reported_closeout_exec::MechanicalCloseoutResult::ProjectionOutOfSync => {
+                        "projection_out_of_sync".to_string()
+                    }
+                    agent_doc_queue_io::reported_closeout_exec::MechanicalCloseoutResult::LeftReported { reason } => {
+                        format!("left_reported reason={reason}")
+                    }
+                };
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "mechanical_reported_closeout file={} owner={} generation={} item_bytes={} {status}",
+                        file.display(),
+                        outcome.owner,
+                        outcome.generation,
+                        outcome.item.len(),
+                    ),
+                );
+            }
+        }
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "mechanical_reported_closeout_failed file={} error={}",
+                    file.display(),
+                    one_line_error(&err),
+                ),
+            );
+        }
+    }
+}
+
 /// [`claude_stop_answer`] with the supervisor drain-readiness probe injected.
 fn claude_stop_answer_with_drain_readiness(
     input: &ClaudeStopInput,
@@ -1517,6 +1718,11 @@ fn claude_stop_answer_with_drain_readiness(
             "claude_stop_transient_closeout_refusal_cleared reason=turn_first_stop (#stophookactiveguard)",
         );
     }
+
+    // Finish a mechanical `☑️` before any cycle or writeback decision. Striking
+    // the row, with its response in the document, is what lets the turn end.
+    // A row that stays `☑️` is held below. An error here does not fail the hook.
+    finish_visible_reported_rows(&file);
 
     // `#stopneedsclosedcycle`: the marker and the stall projection are both
     // document-level and OUTLIVE the cycle that wrote them, so neither one
@@ -1644,8 +1850,10 @@ fn unchanged_debts_system_message(
 /// record of the previous refusal. A recursive Stop that finds exactly the
 /// debt set this gate last refused for the same harness session allows the
 /// final answer (`state=unchanged_debts`) only when no refused row is `📥`,
-/// `🚧`, or `⚠️🚧`. Those markers keep refusing (`state=inbox_or_running`):
-/// a normal turn does not end on them. Any other unchanged debt set allows,
+/// `🚧`, `⚠️🚧`, or `☑️`. `📥`, `🚧`, and `⚠️🚧` keep refusing
+/// (`state=inbox_or_running`). A hold that is only `☑️` keeps refusing
+/// (`state=reported_open`): the turn ends once that row's response is written
+/// and the row is struck. Any other unchanged debt set allows,
 /// names the rows to the operator in a `systemMessage`, and leaves them live;
 /// the agent was told once and nothing it did moved them. A changed debt set
 /// refuses again, a first Stop (`stop_hook_active = false`) always refuses,
@@ -1716,10 +1924,20 @@ fn transient_turn_end_continuation(
     );
     // A load failure on a recursive Stop propagates: the hook-error path
     // allows the final answer while `stop_hook_active` is true.
-    // `#transientcloseout`: `📥`, `🚧`, and `⚠️🚧` are not released. The
-    // unchanged-debt allow is only for debts the agent may be unable to move.
-    let holds_inbox_or_running = assessment.debts.iter().any(|debt| {
+    // `#transientcloseout`: `📥`, `🚧`, `⚠️🚧`, and `☑️` are not released.
+    // The unchanged-debt allow is only for debts the agent may be unable to move.
+    // `state=inbox_or_running` stays the token when any inbox or running row is
+    // in the set. A checkmark-only hold uses `state=reported_open`.
+    let holds_turn = assessment.debts.iter().any(|debt| {
         agent_doc_queue::transient_closeout::marker_holds_turn_through_recursive_stop(debt.marker)
+    });
+    let holds_inbox_or_running = assessment.debts.iter().any(|debt| {
+        matches!(
+            debt.marker,
+            agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+                | agent_doc_document::queue_projection::QueueLifecycleMarker::Running
+                | agent_doc_document::queue_projection::QueueLifecycleMarker::LostRunning
+        )
     });
     let repeats = input.stop_hook_active
         && agent_doc_queue_io::transient_closeout_refusal::repeats_previous_refusal(
@@ -1727,11 +1945,16 @@ fn transient_turn_end_continuation(
             &input.session_id,
             &fingerprint,
         )?;
-    if repeats && holds_inbox_or_running {
+    if repeats && holds_turn {
+        let state = if holds_inbox_or_running {
+            "inbox_or_running"
+        } else {
+            "reported_open"
+        };
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "claude_stop_transient_closeout_inbox_or_running debts={} fingerprint={} action=block_final_answer state=inbox_or_running (#transientcloseout)",
+                "claude_stop_transient_closeout_inbox_or_running debts={} fingerprint={} action=block_final_answer state={state} (#transientcloseout)",
                 assessment.debts.len(),
                 fingerprint,
             ),
@@ -11244,14 +11467,224 @@ Reported.\n\
         );
         assert!(ops.contains("result_recorded=0"), "{ops}");
 
-        // Bounded: the recursive stop passes through.
+        // This fixture's row has no visible `☑️`, so the transient hold does
+        // not apply. A painted `☑️` that the binary cannot strike stays open.
         input.stop_hook_active = true;
         assert!(
             apply_claude_stop_with_drain_readiness(&input, no_supervisor)
                 .unwrap()
                 .is_none(),
-            "the reminder is shown once per stop"
+            "the reminder is shown once per stop when the row is not visibly reported"
         );
+    }
+
+    /// A visible `☑️` whose response was never captured is not mechanical.
+    /// The row stays live, and a recursive Stop does not end the turn.
+    #[test]
+    fn claude_stop_keeps_a_visible_reported_row_from_ending_the_turn() {
+        let _claim_clock = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(
+            agent_doc_queue_io::queue_claim::claim_clock_now_secs(),
+        );
+        let dir = setup_project();
+        let doc = write_claimed_subagent_queue_doc(&dir, "Waiting on the reported row.");
+        init_git_repo(dir.path(), &doc);
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&doc, "do [#held]", "subagent:held", 3600)
+                .unwrap();
+        let started = agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "do [#held]",
+            "subagent:held",
+            "worker:held",
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_lineage::record_prose_only(&doc, &started, "prose result")
+            .unwrap();
+        agent_doc_queue_io::queue_claim::report_attempt(&doc, "do [#held]", Some(claim.generation))
+            .unwrap();
+        track_doc(&dir, &doc, "");
+        complete_run(&doc);
+        let current = fs::read_to_string(&doc)
+            .unwrap()
+            .replace("- do [#held]", "- ☑️ do [#held]");
+        fs::write(&doc, &current).unwrap();
+        invalidate_stop_document_cache();
+        let mut input = ClaudeStopInput {
+            session_id: "codex-session".to_string(),
+            cwd: dir.path().display().to_string(),
+            stop_hook_active: false,
+            transcript_path: None,
+            reason: None,
+            subagent_type: None,
+        };
+        let no_supervisor =
+            |_: &Path| agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor;
+        let first = apply_claude_stop_with_drain_readiness(&input, no_supervisor)
+            .unwrap()
+            .expect("a visible reported row holds the first stop");
+        assert!(
+            first.reason.contains("☑️") || first.reason.contains("do [#held]"),
+            "{}",
+            first.reason
+        );
+        input.stop_hook_active = true;
+        let again = apply_claude_stop_with_drain_readiness(&input, no_supervisor)
+            .unwrap()
+            .expect("a recursive stop does not end on a visible ☑️");
+        assert!(
+            again.reason.contains("do [#held]") || again.reason.contains("☑️"),
+            "{}",
+            again.reason
+        );
+        let updated = fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("- ☑️ do [#held]"), "{updated}");
+        assert!(
+            !updated.contains("~~do [#held]~~") && !updated.contains("~~☑️"),
+            "{updated}"
+        );
+        let third = apply_claude_stop_with_drain_readiness(&input, no_supervisor)
+            .unwrap()
+            .expect("the same visible ☑️ keeps the next stop open");
+        assert!(
+            third.reason.contains("do [#held]") || third.reason.contains("☑️"),
+            "{}",
+            third.reason
+        );
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("state=reported_open"), "{log}");
+        assert!(!log.contains("state=unchanged_debts"), "{log}");
+    }
+
+    /// A prose `☑️` whose response was captured is struck, with that response
+    /// written, before the turn is allowed to end.
+    #[test]
+    fn claude_stop_finishes_a_mechanical_reported_row_before_the_turn_ends() {
+        let _claim_clock = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(
+            agent_doc_queue_io::queue_claim::claim_clock_now_secs(),
+        );
+        let dir = setup_project();
+        let prompt = "review the pull request";
+        let doc = dir.path().join("task.md");
+        let content = format!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+## Exchange\n\n\
+<!-- agent:exchange patch=append -->\n\
+### Re: recovered response\n\n\
+Waiting on the reported row.\n\
+<!-- /agent:exchange -->\n\n\
+## Queue\n\n\
+<!-- agent:queue -->\n\
+- {prompt}\n\
+<!-- /agent:queue -->\n"
+        );
+        fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&doc, prompt, "subagent:review", 3600).unwrap();
+        let started = agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            prompt,
+            "subagent:review",
+            "worker:review",
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_lineage::record_prose_only(&doc, &started, "prose result")
+            .unwrap();
+        agent_doc_queue_io::claim_release_receipt::capture_response_for_attempt(
+            &doc,
+            prompt,
+            started.generation,
+            "The discussion is already resolved.",
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::report_attempt(&doc, prompt, Some(claim.generation))
+            .unwrap();
+        agent_doc_queue_io::queue_cmd::project_claim_runtime_state_with_effects(
+            &StopQueueCommandEffects,
+            &doc,
+            None,
+        )
+        .unwrap();
+        track_doc(&dir, &doc, "");
+        complete_run(&doc);
+        invalidate_stop_document_cache();
+        let input = ClaudeStopInput {
+            session_id: "codex-session".to_string(),
+            cwd: dir.path().display().to_string(),
+            stop_hook_active: false,
+            transcript_path: None,
+            reason: None,
+            subagent_type: None,
+        };
+        let no_supervisor =
+            |_: &Path| agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor;
+        let held = apply_claude_stop_with_drain_readiness(&input, no_supervisor).unwrap();
+        let updated_now = fs::read_to_string(&doc).unwrap();
+        let log_now =
+            fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            held.is_none(),
+            "a finished mechanical row lets the turn end\nheld={held:?}\n{updated_now}\n{log_now}"
+        );
+        let updated = fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains("The discussion is already resolved."),
+            "{updated}"
+        );
+        assert!(updated.contains("### Re: Subagent completed"), "{updated}");
+        assert!(updated.contains("~~"), "{updated}");
+        assert!(!updated.contains('☑'), "{updated}");
+    }
+
+    /// A painted `☑️` with no claim is not consumed, and the turn stays open.
+    #[test]
+    fn claude_stop_does_not_strike_a_checkmark_that_has_no_claim() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        fs::write(
+            &doc,
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+## Queue\n\n\
+<!-- agent:queue -->\n\
+- ☑️ still reported\n\
+<!-- /agent:queue -->\n",
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        complete_run(&doc);
+        invalidate_stop_document_cache();
+        let input = |stop_hook_active: bool| ClaudeStopInput {
+            session_id: "codex-session".to_string(),
+            cwd: dir.path().display().to_string(),
+            stop_hook_active,
+            transcript_path: None,
+            reason: None,
+            subagent_type: None,
+        };
+        let first = apply_claude_stop(&input(false))
+            .unwrap()
+            .expect("a visible checkmark with no claim holds the turn");
+        assert!(first.reason.contains("☑️"), "{}", first.reason);
+        let again = apply_claude_stop(&input(true))
+            .unwrap()
+            .expect("a recursive stop does not end on a visible checkmark");
+        assert!(again.reason.contains("still reported"), "{}", again.reason);
+        let updated = fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("- ☑️ still reported"), "{updated}");
+        assert!(!updated.contains("~~"), "{updated}");
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("state=reported_open"), "{log}");
     }
 
     #[test]

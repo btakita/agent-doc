@@ -723,8 +723,8 @@ fn claim_owners(dir: &std::path::Path, path: &str) -> Vec<String> {
         .collect()
 }
 
-/// A full-tree echo can answer every executable leaf, while the parent remains
-/// context and a reported leaf's claim ends with that leaf's strike.
+/// A prose leaf is struck when its response is recorded. A later full-tree
+/// echo still leaves the parent as context and does not strike a sibling.
 #[test]
 fn a_verbatim_nested_echo_closes_the_reported_leaf_not_the_parent() {
     let dir = tempfile::tempdir().unwrap();
@@ -735,10 +735,19 @@ fn a_verbatim_nested_echo_closes_the_reported_leaf_not_the_parent() {
     let doc = closeout_session(dir.path(), &rows, "- [ ] call the vendor\n");
     let path = doc.to_str().unwrap();
     dispatch_and_report(dir.path(), path, CHILDREN[0], "subagent:pmsync");
+    let reported = run_body(&doc, "run");
     assert!(
-        run_body(&doc, "run").contains(&format!("  - ☑️ [#subagent:pmsync#1] {}\n", CHILDREN[0])),
-        "{}",
-        run_body(&doc, "run")
+        reported.contains(&format!("  - ~~{}~~", CHILDREN[0])),
+        "a prose leaf is struck once its response is recorded:\n{reported}"
+    );
+    assert!(
+        !reported.contains(&format!("~~{PARENT}~~")),
+        "the parent is not struck with the leaf:\n{reported}"
+    );
+    let document = fs::read_to_string(&doc).unwrap();
+    assert!(
+        document.contains("Part 1 shipped; Part 2 is a design doc."),
+        "the worker response is in the document:\n{document}"
     );
 
     preflight_json(dir.path(), &doc);
@@ -750,7 +759,13 @@ fn a_verbatim_nested_echo_closes_the_reported_leaf_not_the_parent() {
                 .lines()
                 .find(|line| line.contains(child))
                 .unwrap_or_else(|| panic!("missing admitted child {child}:\n{admitted}"));
-            format!(">   - {child} {}\n", admitted_queue_id_annotation(line))
+            // The reported leaf is already struck, so it no longer carries a
+            // generated `[#q-…]` id. Live siblings still do.
+            if line.contains("[#q-") {
+                format!(">   - {child} {}\n", admitted_queue_id_annotation(line))
+            } else {
+                format!(">   - {child}\n")
+            }
         })
         .collect();
     let response = format!(

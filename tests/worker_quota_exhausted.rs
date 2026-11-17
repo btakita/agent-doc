@@ -301,10 +301,31 @@ fn a_real_report_that_quotes_a_limit_is_still_a_report() {
             REAL_REPORT,
         ],
     );
+    let rendered = fs::read_to_string(&doc).unwrap();
+    assert!(
+        rendered.contains("Fixed quota detection"),
+        "the worker response is in the document: {rendered}"
+    );
+    assert!(
+        rendered.contains("~~finish sdk"),
+        "a real prose report strikes the row: {rendered}"
+    );
+    assert!(
+        !rendered.contains("⛔"),
+        "quoting a limit inside a real report is not a quota block: {rendered}"
+    );
     let claims = claims(dir.path(), &doc);
-    let report = claim_for(&claims, ITEM);
-    let claim = report.get("claim").unwrap_or(report);
-    assert_eq!(claim["state"], "reported");
+    let reports = claims
+        .as_array()
+        .or_else(|| claims.get("claims").and_then(|claims| claims.as_array()))
+        .expect("claims array");
+    assert!(
+        reports.iter().all(|report| {
+            let claim = report.get("claim").unwrap_or(report);
+            claim["item_text"].as_str() != Some(ITEM) && claim["state"] != "quota_blocked"
+        }),
+        "the completed row is not left quota-blocked: {claims}"
+    );
 }
 
 #[test]

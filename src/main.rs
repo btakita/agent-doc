@@ -5896,8 +5896,12 @@ enum QueueAction {
         list: bool,
     },
     /// Publish immediate binary-owned `agent:exchange` feedback that a claimed
-    /// background subagent reported back. The claim remains active while the
-    /// coordinator integrates and verifies the result.
+    /// background subagent reported back, then complete a mechanical closeout
+    /// in this command. Prose, an already verified integration, and a sink
+    /// that already contains the source are verified, recorded, and consumed
+    /// once the response is in the document. A merge, cherry-pick, push,
+    /// missing fact, or operator decision leaves the claim reported for the
+    /// coordinator.
     #[command(name = "report-complete", after_help = agent_doc_frontmatter::frontmatter::queue_marker_legend_help())]
     ReportComplete {
         /// Path to the session document
@@ -6118,6 +6122,15 @@ enum QueueAction {
     /// receive a safe delivery/save receipt before this reports success.
     #[command(name = "repair-projection", after_help = agent_doc_frontmatter::frontmatter::queue_marker_legend_help())]
     RepairProjection {
+        /// Path to the session document
+        file: PathBuf,
+    },
+    /// Complete mechanical `☑️` closeouts now: prose, an already verified
+    /// integration, and a sink that already contains the source, once the
+    /// worker response is in the document. Rows that still need a merge,
+    /// cherry-pick, push, or an operator decision stay reported.
+    #[command(name = "close-reported", after_help = agent_doc_frontmatter::frontmatter::queue_marker_legend_help())]
+    CloseReported {
         /// Path to the session document
         file: PathBuf,
     },
@@ -8749,6 +8762,33 @@ fn try_main() -> anyhow::Result<()> {
             commit_queue_maintenance,
         } => {
             if queue_maintenance_only {
+                // The child runs this before it takes the maintenance lock, so
+                // a long coordinator turn does not leave mechanical ☑️ rows
+                // open until the model reaches closeout. Admission has already
+                // returned; this does not extend it.
+                match queue_completion_feedback::close_mechanical_reported_rows(
+                    &file,
+                    &CliQueueCommandEffects,
+                ) {
+                    Ok(outcomes) if outcomes.iter().any(|outcome| outcome.closed()) => {
+                        queue_completion_feedback::print_mechanical_closeout(&file, &outcomes);
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        eprintln!(
+                            "[queue] mechanical reported closeout did not run for {}: {error:#}",
+                            file.display()
+                        );
+                        agent_doc_ops_log_io::log_op(
+                            &file,
+                            &format!(
+                                "mechanical_reported_closeout_failed file={} error={}",
+                                file.display(),
+                                format!("{error:#}").replace('\n', " | "),
+                            ),
+                        );
+                    }
+                }
                 agent_doc_preflight_command_io::run_background_queue_maintenance(
                     &file,
                     commit_queue_maintenance,
@@ -11067,6 +11107,24 @@ fn try_main() -> anyhow::Result<()> {
                         repository.as_ref(),
                         &response,
                     )?;
+                    let mechanical = match queue_completion_feedback::close_mechanical_reported_rows(
+                        &file,
+                        &CliQueueCommandEffects,
+                    ) {
+                        Ok(outcomes) => outcomes,
+                        Err(error) => {
+                            eprintln!(
+                                "[queue] mechanical reported closeout did not run for {}: {error:#}",
+                                file.display()
+                            );
+                            Vec::new()
+                        }
+                    };
+                    let this_closed = mechanical.iter().any(|row| {
+                        row.closed()
+                            && row.owner == outcome.claim.owner
+                            && row.generation == outcome.claim.generation
+                    });
                     // `#closeoutguidanceagree`: the same strike session-check and
                     // the Stop hook name for this exact attempt.
                     let closeout =
@@ -11089,33 +11147,49 @@ fn try_main() -> anyhow::Result<()> {
                         &outcome.claim.item_text,
                         &outcome.followups,
                     );
-                    eprintln!(
-                        "[queue] subagent completion feedback {} for {:?} (owner {}, generation {}); awaiting integration. A worker report, side-worktree commit, or published side branch is not terminal completion; verify the authorized delivery boundary and commit reachability.{followups} Next: {}{}",
-                        if outcome.appended {
-                            "accepted"
-                        } else if outcome.replaced {
-                            "updated"
-                        } else {
-                            "already present"
-                        },
-                        outcome.claim.item_text,
-                        outcome.claim.owner,
-                        outcome.claim.generation,
-                        next,
-                        if outcome.projection_pending {
-                            format!(
-                                "; visible projection pending{} — open the document in the active editor/project, then run `agent-doc queue repair-projection {:?}`",
-                                outcome
-                                    .intent_id
-                                    .as_deref()
-                                    .map(|intent| format!(" (intent {intent})"))
-                                    .unwrap_or_default(),
-                                file,
-                            )
-                        } else {
-                            String::new()
-                        },
-                    );
+                    if this_closed {
+                        eprintln!(
+                            "[queue] subagent completion feedback {} for {:?} (owner {}, generation {}); the binary completed the mechanical closeout. The response is in the document and the row is no longer reported.{followups}",
+                            if outcome.appended {
+                                "accepted"
+                            } else if outcome.replaced {
+                                "updated"
+                            } else {
+                                "already present"
+                            },
+                            outcome.claim.item_text,
+                            outcome.claim.owner,
+                            outcome.claim.generation,
+                        );
+                    } else {
+                        eprintln!(
+                            "[queue] subagent completion feedback {} for {:?} (owner {}, generation {}); awaiting integration. A worker report, side-worktree commit, or published side branch is not terminal completion; verify the authorized delivery boundary and commit reachability.{followups} Next: {}{}",
+                            if outcome.appended {
+                                "accepted"
+                            } else if outcome.replaced {
+                                "updated"
+                            } else {
+                                "already present"
+                            },
+                            outcome.claim.item_text,
+                            outcome.claim.owner,
+                            outcome.claim.generation,
+                            next,
+                            if outcome.projection_pending {
+                                format!(
+                                    "; visible projection pending{} — open the document in the active editor/project, then run `agent-doc queue repair-projection {:?}`",
+                                    outcome
+                                        .intent_id
+                                        .as_deref()
+                                        .map(|intent| format!(" (intent {intent})"))
+                                        .unwrap_or_default(),
+                                    file,
+                                )
+                            } else {
+                                String::new()
+                            },
+                        );
+                    }
                     // `#subagentworkpool`: the report freed a pool slot; hand
                     // the coordinator the refill before it starts integrating.
                     emit_subagent_pool_refill(
@@ -11247,6 +11321,14 @@ fn try_main() -> anyhow::Result<()> {
                 let report =
                     queue_completion_feedback::restore_completion_cells(&file, apply, &keys)?;
                 queue_completion_feedback::print_completion_cell_restore_report(&report);
+                Ok(())
+            }
+            QueueAction::CloseReported { file } => {
+                let outcomes = queue_completion_feedback::close_mechanical_reported_rows(
+                    &file,
+                    &CliQueueCommandEffects,
+                )?;
+                queue_completion_feedback::print_mechanical_closeout(&file, &outcomes);
                 Ok(())
             }
             QueueAction::RepairProjection { file } => {

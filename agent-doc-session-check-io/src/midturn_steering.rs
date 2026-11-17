@@ -384,6 +384,16 @@ pub fn publish_in_progress_recap_status(file: &Path, current: &str, status: &str
 /// it: the editor may flush its buffer to disk just after the action fires.
 pub const EXPLICIT_SEND_SAVE_GRACE_MS: u64 = 5_000;
 
+/// How long after the click a route queue enqueue may adopt a pre-image that
+/// no longer hashes to the recorded send.
+///
+/// `tasks/agent-doc/agent-doc-bugs.md` recorded the send while editor delivery
+/// was still converging, then in-flight ops landed before `route_dispatch_queue`
+/// (~10s, past [`EXPLICIT_SEND_SAVE_GRACE_MS`]). Exact equality aborted the
+/// route after the queue write had already applied. Older mismatches still
+/// fail closed.
+pub const EXPLICIT_SEND_ROUTE_ENQUEUE_REBIND_MS: u64 = 60_000;
+
 /// The operator's explicit send (`#claimedsteerwake`): `Run Agent Doc` /
 /// `agent-doc route` fired at `sent_at_ms`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
@@ -475,14 +485,13 @@ pub fn record_explicit_send(file: &Path) -> Result<()> {
 
 /// Move the current explicit-send proof across one route-owned queue write.
 ///
-/// `Run Agent Doc` records its send before authoritative routing. A starting
-/// owner may then accept that same send by appending its prompt to
-/// `agent:queue`, which intentionally changes the authoritative bytes. Keep
-/// the proof exact by requiring any existing record to name `previous_content`
-/// and the converged authority to equal `next_content` before replacing the
-/// hash. Queue writes that did not originate from an explicit route have no
-/// record and need no refresh; a stale send or concurrent authority change
-/// fails closed.
+/// `Run Agent Doc` records its send before authoritative routing. The enqueue
+/// pre-image can move before that write, because the click's snapshot is taken
+/// while editor delivery is still converging. A send still inside
+/// [`EXPLICIT_SEND_ROUTE_ENQUEUE_REBIND_MS`] adopts that pre-image. The
+/// converged authority must still equal `next_content`. An older send whose
+/// hash does not name `previous_content`, or a write that did not land, fails
+/// closed. Queue writes with no explicit-send record need no refresh.
 pub fn refresh_explicit_send_after_route_enqueue(
     file: &Path,
     previous_content: &str,
@@ -497,9 +506,22 @@ pub fn refresh_explicit_send_after_route_enqueue(
     };
     let previous_hash = core::content_hash(previous_content);
     if send.content_hash.as_deref() != Some(previous_hash.as_str()) {
-        anyhow::bail!(
-            "route queue enqueue for {} does not match the recorded explicit-send authority",
-            file.display()
+        let age_ms = now_ms().saturating_sub(send.sent_at_ms);
+        if age_ms > EXPLICIT_SEND_ROUTE_ENQUEUE_REBIND_MS {
+            anyhow::bail!(
+                "route queue enqueue for {} does not match the recorded explicit-send authority",
+                file.display()
+            );
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "steering_explicit_send_rebound_to_route_enqueue file={} age_ms={} recorded_hash={} enqueue_authority={} (#runsteer)",
+                file.display(),
+                age_ms,
+                send.content_hash.as_deref().unwrap_or(""),
+                previous_hash,
+            ),
         );
     }
 

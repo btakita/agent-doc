@@ -28,7 +28,7 @@ Common behavior required of all `agent-doc` editor plugins.
 ## 2a. Initialize Session
 
 - **Availability:** Active-editor and project/explorer context menus for `.md` files.
-- **Behavior:** Save the selected file and run `agent-doc init-session <relative-path>`. The binary initializes a plain file as a template session using a filename-derived title, preserves existing markdown in the exchange, and starts it. If the file already has a session ID, the binary claims it instead of scaffolding it again.
+- **Behavior:** Save the selected file and run `agent-doc init-session <relative-path>`. The binary initializes a plain file as a template session using a filename-derived title, preserves existing markdown in the exchange, and starts it. If the file already has a session ID, the binary claims it instead of scaffolding it again. A claim whose pane is dead, or alive with only a bare shell, is not a live session. Initialize Session replaces that stale claim and starts the harness in the recorded ownerless shell pane instead of reporting the binding as already provisioned or allocating a second pane. A paused queue does not block that start: the harness comes up idle, and the queue watcher still refuses unattended drain.
 
 ## 3. Sync Tmux Layout
 

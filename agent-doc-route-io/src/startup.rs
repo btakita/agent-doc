@@ -78,6 +78,53 @@ fn startup_owner_pane<'a>(
     }
 }
 
+/// How startup treats panes already recorded for the document.
+///
+/// `proven_owner` and `actor_pane` are alive panes. `*_owns_live_agent` is
+/// `pane_owns_live_agent`: false for a known bare shell, true for an agent or
+/// an unsampled foreground command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StartupOwnerClass<'a> {
+    /// The pane still runs an agent. Reuse it; do not start a second session.
+    LiveAgent(&'a str),
+    /// The recorded pane is an alive bare shell. Start the harness there.
+    OwnerlessShell(&'a str),
+    /// The actor pane belongs to another document. Leave it alone.
+    ForeignActor,
+    /// No recorded pane to reuse or start in.
+    NoOwner,
+}
+
+/// A live agent is already provisioned. An alive bare shell is not: Initialize
+/// Session replaces a stale claim and must start in that shell instead of
+/// returning success or allocating a second pane (`#staleinitshell`).
+fn classify_startup_owner<'a>(
+    proven_owner: Option<&'a str>,
+    proven_owns_live_agent: bool,
+    actor_pane: Option<&'a str>,
+    actor_owns_live_agent: bool,
+    actor_runs_other_document: bool,
+) -> StartupOwnerClass<'a> {
+    if let Some(owner) = proven_owner.filter(|_| proven_owns_live_agent) {
+        return StartupOwnerClass::LiveAgent(owner);
+    }
+    if let Some(actor) = actor_pane.filter(|_| !actor_runs_other_document) {
+        return if actor_owns_live_agent {
+            StartupOwnerClass::LiveAgent(actor)
+        } else {
+            StartupOwnerClass::OwnerlessShell(actor)
+        };
+    }
+    if let Some(owner) = proven_owner.filter(|_| !proven_owns_live_agent) {
+        return StartupOwnerClass::OwnerlessShell(owner);
+    }
+    if actor_runs_other_document {
+        StartupOwnerClass::ForeignActor
+    } else {
+        StartupOwnerClass::NoOwner
+    }
+}
+
 fn decide_existing_startup_registration<'a>(
     existing_pane: Option<&'a str>,
     existing_alive: bool,
@@ -691,38 +738,72 @@ pub fn auto_start_in_session_with_lock_mode(
             ),
         );
     }
-    let live_owner = startup_owner_pane(
+    let proven_owns_live_agent = proven_owner.as_deref().is_some_and(|pane| {
+        agent_doc_supervisor_process::session_liveness::pane_owns_live_agent(tmux, pane)
+    });
+    let actor_owns_live_agent = actor_owner.as_deref().is_some_and(|pane| {
+        agent_doc_supervisor_process::session_liveness::pane_owns_live_agent(tmux, pane)
+    });
+    let owner_class = classify_startup_owner(
         proven_owner.as_deref(),
+        proven_owns_live_agent,
         actor_owner.as_deref(),
+        actor_owns_live_agent,
         actor_pane_runs_other_document,
     );
-    match decide_existing_startup_registration(
-        existing_registration.as_deref(),
-        existing_alive,
-        live_owner,
-    ) {
-        ExistingStartupRegistrationDecision::Reuse(existing) => {
+    let adopted_ownerless_shell = match owner_class {
+        StartupOwnerClass::LiveAgent(owner) => {
             eprintln!(
                 "[route] startup already provisioned live owner pane {} for {} while waiting on locks",
-                existing, file_path
+                owner, file_path
             );
-            return Ok(Some(existing.to_string()));
+            return Ok(Some(owner.to_string()));
         }
-        ExistingStartupRegistrationDecision::IgnoreStale(existing) => {
+        StartupOwnerClass::OwnerlessShell(shell) => {
             eprintln!(
-                "[route] ignoring alive registry pane {} for {} during startup because it is not a proven live owner; creating a fresh pane",
-                existing, file_path
+                "[route] ownerless shell pane {} for {} has no live agent; starting the session in that pane",
+                shell, file_path
             );
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "route_startup_ignoring_unowned_registry_pane file={} pane={}",
-                    file_path, existing
+                    "route_startup_ownerless_shell file={} pane={} action=start_in_pane",
+                    file_path, shell
                 ),
             );
+            Some(shell.to_string())
         }
-        ExistingStartupRegistrationDecision::None => {}
-    }
+        StartupOwnerClass::ForeignActor | StartupOwnerClass::NoOwner => {
+            match decide_existing_startup_registration(
+                existing_registration.as_deref(),
+                existing_alive,
+                None,
+            ) {
+                ExistingStartupRegistrationDecision::Reuse(existing) => {
+                    eprintln!(
+                        "[route] startup already provisioned live owner pane {} for {} while waiting on locks",
+                        existing, file_path
+                    );
+                    return Ok(Some(existing.to_string()));
+                }
+                ExistingStartupRegistrationDecision::IgnoreStale(existing) => {
+                    eprintln!(
+                        "[route] ignoring alive registry pane {} for {} during startup because it is not a proven live owner; creating a fresh pane",
+                        existing, file_path
+                    );
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "route_startup_ignoring_unowned_registry_pane file={} pane={}",
+                            file_path, existing
+                        ),
+                    );
+                }
+                ExistingStartupRegistrationDecision::None => {}
+            }
+            None
+        }
+    };
 
     // Use the document's own submodule root as the pane cwd when applicable,
     // so `/agent-doc` invocations on submodule-hosted documents spawn panes
@@ -824,7 +905,12 @@ pub fn auto_start_in_session_with_lock_mode(
     };
     let split_flag = if split_before { "-dbh" } else { "-dh" };
     let layout_owned_start = skip_wait || crate::invocation::defer_startup_focus_to_layout();
-    let new_pane = if navigation_lane_start {
+    // The shell already existed. Recording it as created would let a failed
+    // route kill the operator's pane.
+    let adopted_existing_shell = adopted_ownerless_shell.is_some();
+    let new_pane = if let Some(shell) = adopted_ownerless_shell {
+        shell
+    } else if navigation_lane_start {
         let pane = stage_startup_pane(tmux, session_name, &cwd)?;
         agent_doc_ops_log_io::log_op(
             file,
@@ -897,7 +983,9 @@ pub fn auto_start_in_session_with_lock_mode(
         }
     };
     tmux.enable_remain_on_exit(&new_pane)?;
-    if let Some(created) = created_panes.as_mut() {
+    if !adopted_existing_shell
+        && let Some(created) = created_panes.as_mut()
+    {
         created.push(new_pane.clone());
     }
 
@@ -1707,6 +1795,47 @@ mod tests {
         assert_eq!(startup_owner_pane(None, Some("%2"), true), None);
         assert_eq!(startup_owner_pane(None, Some("%2"), false), Some("%2"));
         assert_eq!(startup_owner_pane(None, None, true), None);
+    }
+
+    /// Initialize Session on a document whose registry claim is stale and whose
+    /// actor pane is an alive bare shell must start in that pane. Reusing it as
+    /// an already-provisioned live owner leaves the shell in place.
+    #[test]
+    fn startup_owner_starts_in_ownerless_shell_instead_of_reusing_stale_claim() {
+        assert_eq!(
+            classify_startup_owner(Some("%4"), false, Some("%4"), false, false),
+            StartupOwnerClass::OwnerlessShell("%4")
+        );
+        assert_eq!(
+            classify_startup_owner(None, false, Some("%4"), false, false),
+            StartupOwnerClass::OwnerlessShell("%4")
+        );
+        assert_eq!(
+            classify_startup_owner(Some("%4"), false, None, false, false),
+            StartupOwnerClass::OwnerlessShell("%4")
+        );
+        assert_eq!(
+            classify_startup_owner(Some("%9"), true, Some("%4"), false, false),
+            StartupOwnerClass::LiveAgent("%9"),
+            "a proven live agent still wins over the stale shell"
+        );
+        assert_eq!(
+            classify_startup_owner(None, false, Some("%2"), true, false),
+            StartupOwnerClass::LiveAgent("%2")
+        );
+        assert_eq!(
+            classify_startup_owner(None, false, Some("%2"), false, true),
+            StartupOwnerClass::ForeignActor
+        );
+        assert_eq!(
+            classify_startup_owner(Some("%4"), false, Some("%2"), false, true),
+            StartupOwnerClass::OwnerlessShell("%4"),
+            "a foreign actor pane is left alone; this document's shell is started"
+        );
+        assert_eq!(
+            classify_startup_owner(None, false, None, false, false),
+            StartupOwnerClass::NoOwner
+        );
     }
 
     #[test]

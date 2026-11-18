@@ -2802,6 +2802,7 @@ pub struct QueueDispatchDocumentFacts {
     /// one `awaiting_operator` reads.
     operator_gated: std::collections::HashSet<String>,
     blockers: agent_doc_queue::queue_blocked::QueueBlockers,
+    review_blockers: agent_doc_queue::prompt_pressure::ReviewBlockedPrompts,
     answer_rows: agent_doc_queue::queue_continuation::AnswerRowRouting,
 }
 
@@ -2839,6 +2840,7 @@ impl QueueDispatchDocumentFacts {
             // `#gatedheadpending`) is not dispatchable, so it never fills a
             // subagent slot.
             blockers,
+            review_blockers: agent_doc_queue::prompt_pressure::review_blocked_prompts(content),
             answer_rows: agent_doc_queue::queue_continuation::AnswerRowRouting::for_content(
                 content,
             ),
@@ -2896,7 +2898,10 @@ pub fn queue_component_subagent_heads_with_facts(
         .filter(|item| !facts.blockers.blocks_row(&item.norm))
         // `#promptpressure`: a free-text head held by an open review item is
         // not a worker head until the operator resolves that review.
-        .filter(|item| !agent_doc_queue::prompt_pressure::review_blocks_prompt(content, &item.raw))
+        .filter(|item| {
+            !facts.review_blockers.holds_legacy(&item.raw)
+                && !facts.review_blockers.holds_external(&item.head)
+        })
         // `#queueoperatoranswer`: an operator answer row goes to the worker that asked.
         .filter(|item| !facts.answer_rows.holds_from_dispatch(&item.raw))
         .filter(|item| !is_session_trigger_row(&item.raw, &item.norm))
@@ -3043,6 +3048,7 @@ pub fn subagent_dispatch_heads_with_presets(
     let awaiting_operator =
         agent_doc_queue::queue_continuation::awaiting_operator_head_ids(content);
     let blockers = agent_doc_queue::queue_blocked::queue_blockers(content);
+    let review_blockers = agent_doc_queue::prompt_pressure::review_blocked_prompts(content);
     let answer_rows = agent_doc_queue::queue_continuation::AnswerRowRouting::for_content(content);
     executable_queue_items(content)
         .into_iter()
@@ -3051,6 +3057,11 @@ pub fn subagent_dispatch_heads_with_presets(
         })
         .filter(|item| !head_awaits_operator(&item.norm, &awaiting_operator))
         .filter(|item| !blockers.blocks_row(&item.norm))
+        .filter(|item| {
+            !review_blockers.holds_legacy(&item.raw)
+                && !review_blockers.holds_external(&item.norm)
+                && !review_blockers.holds_external(&item.raw)
+        })
         .filter(|item| !answer_rows.holds_from_dispatch(&item.raw))
         .filter(|item| !is_session_trigger_row(&item.raw, &item.norm))
         .filter(|item| {

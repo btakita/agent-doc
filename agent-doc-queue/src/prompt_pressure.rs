@@ -19,6 +19,7 @@ use agent_doc_element_backlog::backlog::{self, PendingItem, PendingListMarker, P
 pub const OPEN_MARKER: &str = "<!-- agent-doc:prompt-blocker -->";
 /// Closes a prompt-blocker review block.
 pub const CLOSE_MARKER: &str = "<!-- /agent-doc:prompt-blocker -->";
+const EXTERNAL_HOLD_PREFIX: &str = "<!-- agent-doc:blocked_until_evidence_hash_changes=";
 
 /// The incomplete work, the step that finishes it, and the queue prompt it holds.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +32,29 @@ pub struct PromptBlocker {
     pub complete_by: String,
     /// The queue prompt this blocker holds open.
     pub prompt: String,
+    /// A concrete external observation whose change permits another attempt.
+    pub evidence: Option<String>,
+}
+
+impl PromptBlocker {
+    pub fn matches_prompt(&self, head: &str) -> bool {
+        if self.evidence.is_some() {
+            crate::queue_claim::claim_identity(&self.prompt)
+                == crate::queue_claim::claim_identity(head)
+        } else {
+            normalize_prompt_text(&self.prompt) == normalize_prompt_text(head)
+        }
+    }
+
+    /// Bind a worker-supplied external blocker to the actual claimed row.
+    pub fn bind_external_hold(&mut self, head: &str) {
+        let identity = match crate::queue_claim::claim_identity(head) {
+            agent_doc_element_queue::QueueItemIdentity::Id(id) => format!("id:{id}"),
+            agent_doc_element_queue::QueueItemIdentity::FreeText(text) => format!("text:{text}"),
+        };
+        self.id = format!("prompt-blocker-{}", short_hash(&identity));
+        self.prompt = one_line(head);
+    }
 }
 
 /// Parse one prompt-blocker review structure from a worker hand-back.
@@ -710,7 +734,7 @@ pub fn open_review_blocking_prompt(content: &str, head: &str) -> Option<PromptBl
     }
     open_prompt_blockers(content)
         .into_iter()
-        .find(|blocker| normalize_prompt_text(&blocker.prompt) == want)
+        .find(|blocker| blocker.matches_prompt(head))
 }
 
 /// True when an open review item holds `head` until the operator resolves it.
@@ -719,12 +743,43 @@ pub fn review_blocks_prompt(content: &str, head: &str) -> bool {
 }
 
 /// Normalized prompts held by open prompt-blocker review items.
-pub fn review_blocked_prompts(content: &str) -> HashSet<String> {
-    open_prompt_blockers(content)
-        .into_iter()
-        .map(|blocker| normalize_prompt_text(&blocker.prompt))
-        .filter(|prompt| !prompt.is_empty())
-        .collect()
+#[derive(Debug, Clone, Default)]
+pub struct ReviewBlockedPrompts {
+    legacy: HashSet<String>,
+    external: HashSet<agent_doc_element_queue::QueueItemIdentity>,
+}
+
+impl ReviewBlockedPrompts {
+    pub fn contains(&self, head: &str) -> bool {
+        self.holds_legacy(head) || self.holds_external(head)
+    }
+
+    pub fn holds_legacy(&self, head: &str) -> bool {
+        !self.legacy.is_empty() && self.legacy.contains(&normalize_prompt_text(head))
+    }
+
+    pub fn holds_external(&self, head: &str) -> bool {
+        !self.external.is_empty()
+            && self
+                .external
+                .contains(&crate::queue_claim::claim_identity(head))
+    }
+}
+
+pub fn review_blocked_prompts(content: &str) -> ReviewBlockedPrompts {
+    let mut blocked = ReviewBlockedPrompts::default();
+    for blocker in open_prompt_blockers(content) {
+        if blocker.evidence.is_some() {
+            blocked
+                .external
+                .insert(crate::queue_claim::claim_identity(&blocker.prompt));
+        } else {
+            blocked
+                .legacy
+                .insert(normalize_prompt_text(&blocker.prompt));
+        }
+    }
+    blocked
 }
 
 /// Insert or replace `blocker` as the first `agent:review` item.
@@ -751,6 +806,7 @@ fn parse_blocker_body(body: &str) -> Option<PromptBlocker> {
     let mut id = None;
     let mut complete_by = None;
     let mut prompt = None;
+    let mut evidence = None;
     for line in body.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with("<!--") {
@@ -765,6 +821,8 @@ fn parse_blocker_body(body: &str) -> Option<PromptBlocker> {
             complete_by = Some(one_line(&value));
         } else if let Some(value) = field_value(trimmed, "prompt") {
             prompt = Some(one_line(&value));
+        } else if let Some(value) = field_value(trimmed, "evidence") {
+            evidence = Some(one_line(&value));
         }
     }
     let incomplete = incomplete.filter(|text| !text.is_empty())?;
@@ -775,6 +833,7 @@ fn parse_blocker_body(body: &str) -> Option<PromptBlocker> {
         incomplete,
         complete_by,
         prompt,
+        evidence,
     })
 }
 
@@ -966,11 +1025,27 @@ fn open_prompt_blockers(content: &str) -> Vec<PromptBlocker> {
             let Some(complete_by) = field_value_in(&item.continuation, "complete by") else {
                 continue;
             };
+            let recorded_hash = item.continuation.lines().find_map(|line| {
+                line.trim()
+                    .strip_prefix(EXTERNAL_HOLD_PREFIX)?
+                    .strip_suffix(" -->")
+            });
+            let evidence = match recorded_hash {
+                Some(hash) => match field_value_in(&item.continuation, "evidence")
+                    .map(|value| one_line(&value))
+                {
+                    Some(value) if agent_doc_hash::content_hash(&value) == hash => Some(value),
+                    Some(_) => continue,
+                    None => Some("recorded external evidence is missing".to_string()),
+                },
+                None => None,
+            };
             blockers.push(PromptBlocker {
                 id: item.id,
                 incomplete: one_line(&item.text),
                 complete_by,
                 prompt,
+                evidence,
             });
         }
     }
@@ -1014,16 +1089,24 @@ fn upsert_blocker_body(body: &str, blocker: &PromptBlocker) -> String {
 }
 
 fn render_block(blocker: &PromptBlocker) -> String {
+    let mut continuation = format!(
+        "  - **Complete by:** {}\n  - **Prompt:** {}\n",
+        blocker.complete_by, blocker.prompt
+    );
+    if let Some(evidence) = &blocker.evidence {
+        let evidence = one_line(evidence);
+        let hash = agent_doc_hash::content_hash(&evidence);
+        continuation.push_str(&format!(
+            "  - **Evidence:** {evidence}\n  {EXTERNAL_HOLD_PREFIX}{hash} -->\n"
+        ));
+    }
     let item = PendingItem {
         marker: PendingListMarker::Bullet,
         id: blocker.id.clone(),
         state: PendingState::Gated,
         gate_type: None,
         text: blocker.incomplete.clone(),
-        continuation: format!(
-            "  - **Complete by:** {}\n  - **Prompt:** {}\n",
-            blocker.complete_by, blocker.prompt
-        ),
+        continuation,
     };
     format!(
         "{OPEN_MARKER}\n{}\n{CLOSE_MARKER}\n",

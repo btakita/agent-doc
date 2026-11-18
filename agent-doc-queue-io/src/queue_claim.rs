@@ -866,6 +866,13 @@ fn refuse_open_prompt_review(
     target: &str,
     blocker: &agent_doc_queue::prompt_pressure::PromptBlocker,
 ) -> Result<()> {
+    if let Some(evidence) = &blocker.evidence {
+        bail!(
+            "queue worker dispatch refused: {target:?} is held by external blocker #{}. Current evidence: {evidence}. Complete by: {}. This attempt stays blocked until that evidence changes.",
+            blocker.id,
+            blocker.complete_by,
+        );
+    }
     let complete_by = if blocker.complete_by.trim().is_empty() {
         format!("resolve review #{} and finish the prompt", blocker.id)
     } else {
@@ -876,6 +883,17 @@ fn refuse_open_prompt_review(
         blocker.id,
         blocker.incomplete
     )
+}
+
+fn refuse_external_blocker(file: &Path, target: &str) -> Result<()> {
+    if let Some(blocker) = agent_doc_queue::prompt_pressure::open_review_blocking_prompt(
+        &claim_view_text(file)?,
+        target,
+    ) && blocker.evidence.is_some()
+    {
+        refuse_open_prompt_review(target, &blocker)?;
+    }
+    Ok(())
 }
 
 /// `#humanfollowupowner`: a row whose own text carries `[operator-verify]`
@@ -1434,6 +1452,7 @@ pub fn start_attempt_with_owner_session(
         bail!("queue start needs a non-empty --worker-id from the successful harness dispatch");
     }
     let (target, heads) = resolve_live_claim_target(file, item, "queue_claim_start")?;
+    refuse_external_blocker(file, &target)?;
     let now = now_secs();
     let outcome = mutate_ledger(file, |ledger| {
         // Resolution follows edits on a read-only ledger copy. Persist that
@@ -1533,6 +1552,7 @@ fn refresh_attempt_at(
     // Same resolution as `claim`, so `--item #id` refreshes a
     // `#subagents do [#id]` head and a closed head is a typed miss.
     let (target, heads) = resolve_live_claim_target(file, item, "queue_claim_refresh")?;
+    refuse_external_blocker(file, &target)?;
     // `#claimownerliveness`: a refresh also adopts the claim into the
     // caller's session, so a post-`/clear` coordinator that still hears from
     // the subagent makes the claim live again.

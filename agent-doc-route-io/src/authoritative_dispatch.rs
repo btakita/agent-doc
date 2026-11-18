@@ -563,6 +563,7 @@ enum RunningTurnSteeringClaim {
 
 const ROUTE_SYNC_SUBMIT_ATTEMPTS: u32 = 3;
 const ROUTE_SYNC_SUBMIT_POLLS_PER_ATTEMPT: usize = 3;
+const ROUTE_SYNC_SUBMIT_SETTLE_POLLS_PER_ATTEMPT: usize = 12;
 const ROUTE_SYNC_SUBMIT_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -640,7 +641,11 @@ fn confirm_running_turn_submission(
                 })?;
             }
             let mut last_observation = RunningTurnSubmissionObservation::Unreadable;
-            for _ in 0..ROUTE_SYNC_SUBMIT_POLLS_PER_ATTEMPT {
+            // A successful Codex follow-up can repaint through several frames
+            // without its busy cue. Keep observing that ambiguous state without
+            // claiming another Enter. A visible steering draft may authorize a
+            // retry after the normal poll budget; unreadable frames never do.
+            for poll in 0..ROUTE_SYNC_SUBMIT_SETTLE_POLLS_PER_ATTEMPT {
                 std::thread::sleep(poll_interval);
                 let capture =
                     agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane).map_err(|err| {
@@ -656,6 +661,13 @@ fn confirm_running_turn_submission(
                     }
                     RunningTurnSubmissionObservation::Blocked(reason) => {
                         return Err(anyhow::anyhow!("{reason}"));
+                    }
+                    RunningTurnSubmissionObservation::Draft
+                        if poll + 1 >= ROUTE_SYNC_SUBMIT_POLLS_PER_ATTEMPT =>
+                    {
+                        return Ok(agent_doc_effect_cas::EpochStep::Retryable(
+                            RunningTurnSubmissionObservation::Draft,
+                        ));
                     }
                     RunningTurnSubmissionObservation::Draft
                     | RunningTurnSubmissionObservation::Unreadable => {}
@@ -3179,7 +3191,10 @@ mod tests {
 
     #[test]
     fn unreadable_post_submit_capture_never_authorizes_an_enter_retry() {
-        let tmux = ScriptedTmux::new(["redrawing", "redrawing", "redrawing"]);
+        let tmux = ScriptedTmux::new(std::iter::repeat_n(
+            "redrawing",
+            ROUTE_SYNC_SUBMIT_SETTLE_POLLS_PER_ATTEMPT,
+        ));
 
         let error = confirm_running_turn_submission(&tmux, "%1", "claude", Duration::ZERO)
             .expect_err("unreadable composer fails closed");
@@ -3306,6 +3321,7 @@ mod tests {
         submitted: std::sync::Mutex<Vec<String>>,
         commands: std::sync::Mutex<Vec<Vec<String>>>,
         loaded: std::sync::Mutex<String>,
+        post_submit_unreadable_captures: std::sync::Mutex<usize>,
         clear_noop: bool,
         enter_noop: bool,
         cursor_y: String,
@@ -3323,6 +3339,7 @@ mod tests {
                 submitted: std::sync::Mutex::new(Vec::new()),
                 commands: std::sync::Mutex::new(Vec::new()),
                 loaded: std::sync::Mutex::new(String::new()),
+                post_submit_unreadable_captures: std::sync::Mutex::new(0),
                 clear_noop: false,
                 enter_noop: false,
                 cursor_y: cursor_y.to_string(),
@@ -3364,6 +3381,14 @@ mod tests {
             let verb = args.first().map(String::as_str);
             match verb {
                 Some("capture-pane") => {
+                    let mut unreadable = self
+                        .post_submit_unreadable_captures
+                        .lock()
+                        .expect("post-submit unreadable captures");
+                    if !self.submitted.lock().expect("submitted").is_empty() && *unreadable > 0 {
+                        *unreadable -= 1;
+                        return Ok("redrawing".to_string());
+                    }
                     let draft = self.draft();
                     Ok((self.render)(&draft))
                 }
@@ -3511,6 +3536,66 @@ mod tests {
             )),
             "{:?}",
             &runner.commands()[before..]
+        );
+    }
+
+    /// Codex can briefly repaint without its busy cue after accepting a
+    /// follow-up. That ambiguity is observed through, never submitted again,
+    /// and the explicit route remains a delivery rather than an operator-proof
+    /// deferral once the busy empty composer is visible again.
+    #[test]
+    fn explicit_send_settles_after_transient_unreadable_post_submit_frames() {
+        let (_dir, file) = settled_explicit_send();
+        let runner = DraftComposer::claude("");
+        *runner
+            .post_submit_unreadable_captures
+            .lock()
+            .expect("post-submit unreadable captures") = ROUTE_SYNC_SUBMIT_POLLS_PER_ATTEMPT;
+
+        let claim = claim_polled(&runner, &file, "claude");
+        let RunningTurnSteeringClaim::Count(delivered) = claim else {
+            panic!("transient repaint must settle as delivered: {claim:?}");
+        };
+        assert!(delivered >= 1);
+        assert_eq!(runner.submitted().len(), 1, "one follow-up was delivered");
+        assert_eq!(
+            runner
+                .mutating_keys()
+                .iter()
+                .filter(|key| key.as_str() == "Enter")
+                .count(),
+            1,
+            "an unreadable repaint never authorizes a duplicate submit"
+        );
+
+        let fields = agent_doc_controller::dispatch::route_closeout_user_outcome_fields(
+            None,
+            RouteOwnerTurnEvidence::Live,
+        );
+        let outcome = closeout_wait_route_outcome(
+            &file,
+            "current task",
+            "the owner turn is still live",
+            &fields,
+            delivered,
+            RouteOwnerTurnEvidence::Live,
+            RouteCloseoutBlockContext::LiveOwnerTurn,
+        );
+        let CloseoutWaitRouteOutcome::SteeringDelivered(message) = outcome else {
+            panic!("explicit steering must have a delivered route outcome: {outcome:?}");
+        };
+        assert!(message.contains("no second turn was started"), "{message}");
+        assert!(
+            message.contains(&format!("steering_delivered={delivered} sent=explicit")),
+            "{message}"
+        );
+        assert!(
+            message.contains("ui_outcome=steering_delivered_to_owner"),
+            "{message}"
+        );
+        assert!(
+            !message.contains("deferred_for_operator_proof"),
+            "{message}"
         );
     }
 

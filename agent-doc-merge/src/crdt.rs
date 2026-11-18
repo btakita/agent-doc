@@ -3233,6 +3233,63 @@ pub(crate) fn merge_operator_deleted_struck_queue_items(
         })
     }
 
+    fn list_indent(child: &KeyedChild) -> usize {
+        child
+            .text
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .chars()
+            .take_while(|ch| matches!(ch, ' ' | '\t'))
+            .count()
+    }
+
+    fn removed_struck_roots(base_body: &str, operator_body: &str) -> Option<Vec<(String, usize)>> {
+        let base_children = split_list_children(base_body)?;
+        let operator_children = children_including_empty(operator_body);
+        if !keys_unique(&base_children) || !keys_unique(&operator_children) {
+            return None;
+        }
+        let operator_map: std::collections::HashMap<&str, &KeyedChild> = operator_children
+            .iter()
+            .map(|child| (child.key.as_str(), child))
+            .collect();
+        let mut expected_operator_keys = Vec::new();
+        let mut roots = Vec::new();
+        let mut removed_parent_indent = None;
+        for base_child in &base_children {
+            let indent = list_indent(base_child);
+            if removed_parent_indent.is_some_and(|parent| indent <= parent) {
+                removed_parent_indent = None;
+            }
+            if let Some(operator_child) = operator_map.get(base_child.key.as_str()) {
+                // A descendant cannot survive after its parent tree was
+                // deleted. Any other operator change is outside this narrow
+                // semantic merge and must take the normal conflict path.
+                if removed_parent_indent.is_some() || operator_child.text != base_child.text {
+                    return None;
+                }
+                expected_operator_keys.push(base_child.key.as_str());
+            } else if removed_parent_indent.is_some_and(|parent| indent > parent) {
+                // The whole subtree under a struck prompt is operator-deleted;
+                // response metadata need not itself carry a strike marker.
+            } else {
+                if base_child.key == PREAMBLE_KEY
+                    || QueueItemLifecycle::classify(&base_child.text) != QueueItemLifecycle::Struck
+                {
+                    return None;
+                }
+                roots.push((base_child.key.clone(), indent));
+                removed_parent_indent = Some(indent);
+            }
+        }
+        let actual_operator_keys: Vec<&str> = operator_children
+            .iter()
+            .map(|child| child.key.as_str())
+            .collect();
+        (actual_operator_keys == expected_operator_keys).then_some(roots)
+    }
+
     let base_nodes = segment_into_nodes(base).ok()?;
     let operator_nodes = segment_into_nodes(operator).ok()?;
     if base_nodes.len() != operator_nodes.len() {
@@ -3279,43 +3336,9 @@ pub(crate) fn merge_operator_deleted_struck_queue_items(
                 if base_open != operator_open || base_close != operator_close {
                     return None;
                 }
-
-                let base_children = split_list_children(base_body)?;
-                let operator_children = children_including_empty(operator_body);
-                if !keys_unique(&base_children) || !keys_unique(&operator_children) {
-                    return None;
-                }
-                let operator_map: std::collections::HashMap<&str, &KeyedChild> = operator_children
-                    .iter()
-                    .map(|child| (child.key.as_str(), child))
-                    .collect();
-                let mut removed = std::collections::HashSet::new();
-                let mut expected_operator_keys = Vec::new();
-                for base_child in &base_children {
-                    if let Some(operator_child) = operator_map.get(base_child.key.as_str()) {
-                        if operator_child.text != base_child.text {
-                            return None;
-                        }
-                        expected_operator_keys.push(base_child.key.as_str());
-                    } else {
-                        if base_child.key == PREAMBLE_KEY
-                            || QueueItemLifecycle::classify(&base_child.text)
-                                != QueueItemLifecycle::Struck
-                        {
-                            return None;
-                        }
-                        removed.insert(base_child.key.clone());
-                    }
-                }
-                let actual_operator_keys: Vec<&str> = operator_children
-                    .iter()
-                    .map(|child| child.key.as_str())
-                    .collect();
-                if actual_operator_keys != expected_operator_keys {
-                    return None;
-                }
+                let removed = removed_struck_roots(base_body, operator_body)?;
                 removed_any |= !removed.is_empty();
-                removed
+                removed.into_iter().collect()
             }
             _ => return None,
         };
@@ -3383,8 +3406,19 @@ pub(crate) fn merge_operator_deleted_struck_queue_items(
                     return None;
                 }
                 merged.push_str(canonical_open);
+                let mut removed_parent_indent = None;
                 for child in canonical_children {
-                    if !removed.contains(&child.key) {
+                    let indent = list_indent(&child);
+                    if removed_parent_indent.is_some_and(|parent| indent <= parent) {
+                        removed_parent_indent = None;
+                    }
+                    if let Some((_, root_indent)) =
+                        removed.iter().find(|(key, _)| key == &child.key)
+                    {
+                        removed_parent_indent = Some(*root_indent);
+                        continue;
+                    }
+                    if removed_parent_indent.is_none() {
                         merged.push_str(&child.text);
                     }
                 }

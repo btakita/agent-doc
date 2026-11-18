@@ -27,7 +27,6 @@ use crate::queue_graph::QueueGraph;
 /// row's authored structure and work text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PromptLineageFingerprint {
-    completed: bool,
     multiline: bool,
     indent: usize,
     ordered_marker: Option<String>,
@@ -38,16 +37,14 @@ fn prompt_lineage_fingerprints(entries: &[QueueEntry]) -> Vec<PromptLineageFinge
     entries
         .iter()
         .filter_map(|entry| {
-            let (completed, prompt) = match entry {
-                QueueEntry::Prompt(prompt) => (false, prompt),
-                QueueEntry::Completed(prompt) => (true, prompt),
+            let prompt = match entry {
+                QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => prompt,
                 _ => return None,
             };
             let work = agent_doc_element_queue::strip_priority_markers(&prompt.text);
             let work = agent_doc_element_queue::subprompts::strip_subprompt_projections(&work)
                 .unwrap_or(work);
             Some(PromptLineageFingerprint {
-                completed,
                 multiline: prompt.multiline,
                 indent: prompt.indent,
                 ordered_marker: prompt.ordered_marker.clone(),
@@ -66,7 +63,9 @@ fn prompt_lineage_fingerprints(entries: &[QueueEntry]) -> Vec<PromptLineageFinge
 /// edit lineage, or drop an intentionally repeated prompt. The caller may
 /// change lifecycle/owner/report decorations only. Operator edits happen in a
 /// different authority transition and become the `before` side of the next
-/// projection (`#multieditlineage`).
+/// projection (`#multieditlineage`). Strike state is intentionally excluded:
+/// it is a lifecycle decoration, and a live nested leaf may legitimately
+/// reopen its struck structural parent during this same projection.
 fn ensure_prompt_lineage_conserved(
     before: &[QueueEntry],
     after: &[QueueEntry],
@@ -263,6 +262,22 @@ mod projection_lineage_tests {
         ))
         .unwrap();
         assert!(ensure_prompt_lineage_conserved(&before, &duplicated, "main").is_err());
+    }
+
+    #[test]
+    fn lineage_conservation_allows_lifecycle_strike_changes() {
+        let before = document_queue::parse(concat!(
+            "- ~~structural parent~~\n",
+            "  - live nested leaf\n",
+        ))
+        .unwrap();
+        let after = document_queue::parse(concat!(
+            "- structural parent\n",
+            "  - ~~live nested leaf~~\n",
+        ))
+        .unwrap();
+
+        ensure_prompt_lineage_conserved(&before, &after, "main").unwrap();
     }
 }
 

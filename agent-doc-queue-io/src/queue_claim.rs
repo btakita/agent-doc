@@ -3655,12 +3655,18 @@ pub fn prune_closed_claims(file: &Path, content: &str) -> Result<usize> {
         if let Some(heads) = &heads {
             log_followed(file, &ledger.follow_edits_in_view(now, heads));
             if let Some(live) = &mut live {
-                live.extend(ledger.claims.iter().filter_map(|claim| {
-                    // Gaining children removes dispatch ownership, not
-                    // the old worker's evidence or ability to report.
-                    (claim.worker.is_some() && heads.contains_context_identity(&claim.identity))
-                        .then(|| claim.identity.clone())
-                }));
+                // Gaining children ends dispatch ownership. The original
+                // worker can still report against its retained attempt.
+                live.extend(
+                    ledger
+                        .claims
+                        .iter()
+                        .filter(|claim| {
+                            claim.worker.is_some()
+                                && heads.contains_context_identity(&claim.identity)
+                        })
+                        .map(|claim| claim.identity.clone()),
+                );
             }
         }
         Ok(ledger.prune_detailed(now, live.as_ref()))

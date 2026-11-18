@@ -44527,12 +44527,26 @@ fn handle_queue_projection_generation_write(
 
     let authority = crdt_authority_for_file(&canonical.to_string_lossy());
     if authority.editor_attached() {
+        // Queue lifecycle projection already knows its exact source and target
+        // cuts. Preserve that structural knowledge at the CRDT boundary: a
+        // whole-document Myers alignment can pair the wrong occurrence when
+        // the queue contains repeated or near-identical prompt rows, turning a
+        // marker-only transition into a broad delete/reinsert. Concurrent
+        // editor inserts inside that broad span then survive on a second CRDT
+        // lineage. Component scope makes the write incapable of reaching text
+        // outside the components it actually changed; the relay additionally
+        // specializes lifecycle-only component edits to the matching line
+        // positions (`#queueprojectionlineage`).
+        let component_scope = agent_doc_element::component_scope::changed_component_scope(
+            &payload.source_content,
+            &payload.target_content,
+        );
         let Some(write) = agent_doc_crdt_relay_io::apply_cp_write_for_file_scoped(
             &canonical,
             &payload.source_content,
             &payload.target_content,
             &payload.reason,
-            None,
+            component_scope.as_ref(),
         )?
         else {
             return Ok(QueueProjectionGenerationWriteOutcome::Superseded);

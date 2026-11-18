@@ -139,6 +139,13 @@ tables and external-system assumptions.
 - commit is impossible until the retained agent intent is applied and the exact
   still-current editor version is saved to disk.
 
+`QueueProjectionEditLineage.tla` checks the narrower lifecycle-projection safety
+boundary for repeated and near-identical queue rows. With component scope and
+row-local prefix edits enabled, every interleaving of operator typing and
+projection keeps one operator lineage and one lifecycle marker. Its wedge
+disables row locality and must exhibit the ambiguous-alignment failure: a
+projection after operator input leaves two copies of that lineage.
+
 `VisibleDeliveryReceipt.tla` checks the write-side dual of
 `EditorReplicaStrand`: the visible-delivery receipt that gates the editor-native
 save. `RelayHub` derives availability (`delivery_converged`) and the receipt
@@ -564,6 +571,7 @@ For the D/Du/R/Rc column (Drop, Duplicate, Reorder, Reconnect): `y` = yes,
 | CloseoutChurn | all SV awaits. `ackLanded=TRUE` at Init (28); `replacementAckQueueEmpty := TRUE` by decree (124) | - / - / - / p | none | **yes**. A straight-line script |
 | ConflictReconciliation (+ Lean) | none. Merge is a pure function (133-138; `ConflictReconciliation.lean:95`) | - / p (identical edit applies once, 104-105) / - / - | none | n/a |
 | CrdtLineageFence | frames: 1-slot `staleFramePending`/`currentFramePending` (24-25, 86-105); `EditorNativeSave` `disk' = canonical` AS (128-132); `Commit` SV (209) | p (crash loss 150-167) / p (replay 169-187) / p (old-lineage frame 86-89) / p (lineage rotation 76-84) | none | **mostly**. Frames are never lost; save and commit are atomic cross-party reads |
+| QueueProjectionEditLineage | none. Projection and operator input are local CRDT actions explored in both orders (30-63) | - / p (the wedge duplicates one lineage) / p (both orders) / - | `ScopedProjection` | n/a. This is the pure edit-support boundary, not transport |
 | EditorAuthorityLadder (+ Lean) | `Forward`/`Deliver` SV set-union syncs (118-121, 142-145); `RegisterForward` atomic exchange (149-154); `Handoff` reads every editor at once (167-169, 81-82); `deleted` is a **global, instantly visible tombstone set** (60) | implicit / implicit / implicit / p | none | Safe against skipped or repeated *state* syncs. **Not** safe once tombstones or the handoff cut can be stale |
 | EditorReplicaStrand | `Reregister*` request+answer is one AS reading endpoint `mode` (185-226) | p (permanent `"silent"`, 221-226) / - / - / p | `MaxReregisterAttempts` (108) gates demotion (246, 277) | **yes**. A slow-but-serving endpoint is not expressible |
 | IpcBuildIdentity | `Handshake` compares both identities in one step (131-137) | - / - / - / - | none | n/a. Assumes the identity arrives intact |

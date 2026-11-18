@@ -12424,6 +12424,17 @@ impl ControllerRuntime {
             .map(|document| document.closeout.clone()))
     }
 
+    fn editor_op_capture_projection(
+        &self,
+        document_hash: &str,
+    ) -> Option<agent_doc_state_backbone::EditorOpCaptureReadProjection> {
+        self.memory
+            .lock()
+            .state_projection
+            .document(document_hash)
+            .map(|projection| (&projection.document).into())
+    }
+
     fn wait_for_supervisor_recycle_settle(
         &self,
         timeout: Duration,
@@ -26179,12 +26190,10 @@ agent:queue\n\
     // `Effect`, not a `settle_*` call every consumer has to remember.
     // -----------------------------------------------------------------------
 
-    /// `#fixthrashingbackground`: cycle-state reads ask for the closeout part
-    /// only. The whole projection carries unbounded per-document history (here
-    /// a full commit-candidate document image per write); the closeout answer
-    /// must equal the whole projection's closeout and carry none of it.
+    /// The closeout and editor-op reads each need only part of the live
+    /// projection. Neither answer should carry the commit-candidate images.
     #[test]
-    fn closeout_projection_command_answers_closeout_without_document_history() {
+    fn projection_queries_leave_unrelated_document_history_out() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let (file, document_hash) = retained_test_document(&dir);
@@ -26192,6 +26201,25 @@ agent:queue\n\
         let mut events = vec![
             preflight_started_event(&document_hash),
             response_captured_event(&document_hash),
+            agent_doc_state_backbone::StateEvent::new(
+                format!("editor-op-checkpoint-{document_hash}"),
+                agent_doc_state_backbone::StateFact::EditorOpCaptureCheckpointed {
+                    document_hash: document_hash.clone(),
+                    canonical_path: file.display().to_string(),
+                    epoch: 1,
+                    base_hash: "base".to_string(),
+                    ops_json: "[]".to_string(),
+                    updated_ms: 1,
+                    tip_hash: "tip".to_string(),
+                },
+            ),
+            agent_doc_state_backbone::StateEvent::new(
+                format!("editor-op-clear-{document_hash}"),
+                agent_doc_state_backbone::StateFact::EditorOpCaptureCleared {
+                    document_hash: document_hash.clone(),
+                    epoch: 2,
+                },
+            ),
         ];
         for revision in 0..8_u64 {
             events.push(agent_doc_state_backbone::StateEvent::new(
@@ -26211,7 +26239,7 @@ agent:queue\n\
             append_state_event(dir.path(), event).unwrap();
         }
         let runtime = Arc::new(ControllerRuntime::new(test_bootstrap(&dir)).unwrap());
-        let request = |command: &str| ControllerRequest {
+        let request = |command: &str, diagnostic_payload: Option<&str>| ControllerRequest {
             command: command.to_string(),
             file: Some(file.clone()),
             session_id: None,
@@ -26224,20 +26252,21 @@ agent:queue\n\
             supervisor_pid: None,
             supervisor_socket: None,
             command_kind: None,
-            diagnostic_payload: None,
+            diagnostic_payload: diagnostic_payload.map(str::to_owned),
             sequence: None,
         };
         let mut should_stop = false;
-        let mut answer = |command: &str| {
+        let mut answer = |command, diagnostic_payload| {
             rpc::handle_request_locked(
-                &(serde_json::to_string(&request(command)).unwrap() + "\n"),
+                &(serde_json::to_string(&request(command, diagnostic_payload)).unwrap() + "\n"),
                 &runtime,
                 &mut should_stop,
             )
             .unwrap()
         };
-        let whole = answer("document_state_projection");
-        let closeout = answer("document_closeout_projection");
+        let whole = answer("document_state_projection", None);
+        let closeout = answer("document_closeout_projection", None);
+        let editor_ops = answer("document_state_projection", Some("editor_op_capture"));
 
         #[derive(serde::Deserialize)]
         struct Envelope<T> {
@@ -26249,13 +26278,28 @@ agent:queue\n\
         let closeout_bytes = closeout.len();
         let closeout: Envelope<agent_doc_state_backbone::CloseoutProjection> =
             serde_json::from_str(&closeout).unwrap();
-        assert!(whole.ok && closeout.ok);
+        let editor_ops_bytes = editor_ops.len();
+        let editor_ops: Envelope<serde_json::Value> = serde_json::from_str(&editor_ops).unwrap();
+        assert!(whole.ok && closeout.ok && editor_ops.ok);
         let whole = whole.data.expect("projection");
         assert_eq!(whole.visible_write.commit_candidates.len(), 8);
         assert_eq!(closeout.data.expect("closeout"), whole.closeout);
         assert!(
             closeout_bytes < image.len(),
             "the closeout answer must not carry document history ({closeout_bytes} bytes)"
+        );
+        let expected =
+            agent_doc_state_backbone::EditorOpCaptureReadProjection::from(&whole.document);
+        assert_eq!(expected.editor_op_capture_generation, 2);
+        assert!(expected.editor_op_capture.is_none());
+        assert_eq!(expected.last_editor_op_capture.as_ref().unwrap().epoch, 1);
+        assert_eq!(
+            editor_ops.data.expect("editor-op capture projection"),
+            serde_json::json!({ "document": expected })
+        );
+        assert!(
+            editor_ops_bytes < image.len(),
+            "the editor-op answer must not carry document history ({editor_ops_bytes} bytes)"
         );
     }
 

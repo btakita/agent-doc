@@ -24847,7 +24847,19 @@ pub(crate) fn handle_request_locked(
             // Read-only live-projection query (`#lazily-hot-path`): a client
             // inspects the authoritative in-memory projection instead of
             // replaying cold `state.db`. No fact is emitted.
-            controller_envelope(handle_document_state_projection(runtime.as_ref(), request))
+            if request.diagnostic_payload.as_deref() == Some("editor_op_capture") {
+                // Preserve the document nesting used by older controllers.
+                // Clone only the epochs, never the surrounding write history.
+                let projection = request_file(&request).map(|file| {
+                    let hash = agent_doc_hash::document_id_for_path(&file);
+                    runtime
+                        .editor_op_capture_projection(&hash)
+                        .map(|document| serde_json::json!({ "document": document }))
+                });
+                controller_envelope(projection)
+            } else {
+                controller_envelope(handle_document_state_projection(runtime.as_ref(), request))
+            }
         }
         "document_closeout_projection" => {
             // `#fixthrashingbackground`: the closeout part only. Cycle-state

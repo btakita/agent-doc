@@ -3438,6 +3438,27 @@ impl DocumentProjection {
     }
 }
 
+/// The editor-operation epochs needed to recover a response. Keep these field
+/// names aligned with `DocumentProjection` so older controllers can answer
+/// the same request with their full projection during a rolling upgrade.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EditorOpCaptureReadProjection {
+    #[serde(default)]
+    pub editor_op_capture_generation: u64,
+    pub editor_op_capture: Option<EditorOpCaptureProjection>,
+    pub last_editor_op_capture: Option<EditorOpCaptureProjection>,
+}
+
+impl From<&DocumentProjection> for EditorOpCaptureReadProjection {
+    fn from(document: &DocumentProjection) -> Self {
+        Self {
+            editor_op_capture_generation: document.editor_op_capture_generation,
+            editor_op_capture: document.editor_op_capture.clone(),
+            last_editor_op_capture: document.last_editor_op_capture.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EditorOpCaptureProjection {
     pub epoch: u64,

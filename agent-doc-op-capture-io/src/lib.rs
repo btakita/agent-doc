@@ -150,19 +150,25 @@ fn decode_capture(
 fn captures_from_document_projection(
     document: Option<&agent_doc_state_backbone::DocumentStateProjection>,
 ) -> Result<(u64, Option<OpCaptureState>, Option<OpCaptureState>)> {
-    let generation = document
-        .map(|document| document.document.editor_op_capture_generation)
-        .unwrap_or_default();
+    let Some(document) = document.map(|projection| &projection.document) else {
+        return Ok((0, None, None));
+    };
+    decode_captures(
+        document.editor_op_capture_generation,
+        document.editor_op_capture.as_ref(),
+        document.last_editor_op_capture.as_ref(),
+    )
+}
+
+fn decode_captures(
+    generation: u64,
+    active: Option<&agent_doc_state_backbone::EditorOpCaptureProjection>,
+    retained: Option<&agent_doc_state_backbone::EditorOpCaptureProjection>,
+) -> Result<(u64, Option<OpCaptureState>, Option<OpCaptureState>)> {
     Ok((
         generation,
-        document
-            .and_then(|document| document.document.editor_op_capture.as_ref())
-            .map(decode_capture)
-            .transpose()?,
-        document
-            .and_then(|document| document.document.last_editor_op_capture.as_ref())
-            .map(decode_capture)
-            .transpose()?,
+        active.map(decode_capture).transpose()?,
+        retained.map(decode_capture).transpose()?,
     ))
 }
 
@@ -199,6 +205,7 @@ fn load_projected_captures(
         let request = serde_json::json!({
             "command": "document_state_projection",
             "file": doc,
+            "diagnostic_payload": "editor_op_capture",
         });
         match agent_doc_state_wire::send_ndjson_request_to_actor(
             &controller_socket,
@@ -207,9 +214,14 @@ fn load_projected_captures(
         ) {
             Ok(raw) => {
                 #[derive(serde::Deserialize)]
+                struct WireDocumentProjection {
+                    document: agent_doc_state_backbone::EditorOpCaptureReadProjection,
+                }
+
+                #[derive(serde::Deserialize)]
                 struct ProjectionEnvelope {
                     ok: bool,
-                    data: Option<agent_doc_state_backbone::DocumentStateProjection>,
+                    data: Option<WireDocumentProjection>,
                     error: Option<String>,
                 }
                 let envelope: ProjectionEnvelope =
@@ -220,7 +232,15 @@ fn load_projected_captures(
                         envelope.error.as_deref().unwrap_or("unknown error")
                     );
                 }
-                return captures_from_document_projection(envelope.data.as_ref());
+                let Some(projection) = envelope.data else {
+                    return Ok((0, None, None));
+                };
+                let document = projection.document;
+                return decode_captures(
+                    document.editor_op_capture_generation,
+                    document.editor_op_capture.as_ref(),
+                    document.last_editor_op_capture.as_ref(),
+                );
             }
             Err(agent_doc_state_wire::ActorRequestError::Connect(_))
             | Err(agent_doc_state_wire::ActorRequestError::Timeout(_))

@@ -498,6 +498,14 @@ pub fn observe_with_mode_and_presets(
         boundary,
         prompt_presets,
     );
+    // A concurrent editor/projection splice can briefly retain the first
+    // words of a queue row as a second lineage beside the row the operator
+    // continued typing.  The shorter lineage is not independent work merely
+    // because it is a syntactically valid list item.  Keep it behind the
+    // typing gate while the longer live sibling proves that relationship.
+    // Explicit send remains authoritative and max-hold remains the lossless
+    // escape hatch for a genuinely intentional short sibling.
+    let lineage_prefix_suspects = lineage_prefix_suspect_keys(&queue);
     candidates.extend(queue.candidates.iter().cloned());
     let queue_modes = queue_mode_candidates(watermark, current, prompt_presets);
     candidates.extend(queue_modes.candidates.iter().cloned());
@@ -543,9 +551,16 @@ pub fn observe_with_mode_and_presets(
             .get(&candidate.key)
             .filter(|prior| prior.content_hash == candidate.content_hash);
         let stable_for_ms = prior.map(|prior| ctx.now_ms.saturating_sub(prior.first_seen_ms));
+        let lineage_prefix_suspect = lineage_prefix_suspects.contains(&candidate.key);
         let signal = if candidate.item.change == SteeringChange::Deleted {
             // A removal has no text left to finish.
             CompletionSignal::Complete
+        } else if lineage_prefix_suspect {
+            // Context, rather than the final token alone, proves this version
+            // may be a retained typing prefix.  Treat it as unfinished until
+            // the sibling disappears, the operator explicitly sends it, or
+            // max-hold releases it as possibly partial.
+            CompletionSignal::Incomplete
         } else {
             completion_signal(&candidate.item.verbatim)
         };
@@ -594,7 +609,14 @@ pub fn observe_with_mode_and_presets(
             max_hold_ms: ctx.max_hold_ms,
             signal,
             unbalanced_delimiters,
-            verdict: ctx.classifier.assess(&features, &candidate.content_hash),
+            verdict: if lineage_prefix_suspect {
+                // This is a structural floor.  A learned "complete" verdict
+                // based on the short text must not override evidence from the
+                // coexisting longer lineage.
+                Some(agent_doc_debounce::edit_settle::CompletionVerdict::StillTyping)
+            } else {
+                ctx.classifier.assess(&features, &candidate.content_hash)
+            },
         };
         // An explicit send is the operator saying "this is final": no gate.
         let decision = if ctx.explicit_send {
@@ -1087,6 +1109,42 @@ enum QueueEvent {
 struct QueueAlignment {
     candidates: Vec<Candidate>,
     events: Vec<QueueEvent>,
+    live: Vec<QueueItem>,
+}
+
+/// Candidate keys that look like a retained prefix lineage of a longer live
+/// queue sibling.  Comparison is token-based and case-insensitive so the
+/// editor's capitalization of the first word does not split the relationship.
+/// Requiring two tokens avoids treating ordinary one-word heads as drafts.
+fn lineage_prefix_suspect_keys(alignment: &QueueAlignment) -> BTreeSet<String> {
+    alignment
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.item.source == SteeringSource::Queue
+                && candidate.item.change == SteeringChange::Added
+        })
+        .filter_map(|candidate| {
+            let short = normalize_queue_text(candidate.item.claim_text());
+            alignment
+                .live
+                .iter()
+                .any(|other| other.norm != short && strict_token_prefix(&short, &other.norm))
+                .then(|| candidate.key.clone())
+        })
+        .collect()
+}
+
+fn strict_token_prefix(short: &str, long: &str) -> bool {
+    let tokens = |text: &str| {
+        text.split(|ch: char| !ch.is_alphanumeric())
+            .filter(|token| !token.is_empty())
+            .map(str::to_ascii_lowercase)
+            .collect::<Vec<_>>()
+    };
+    let short = tokens(short);
+    let long = tokens(long);
+    short.len() >= 2 && short.len() < long.len() && long.starts_with(&short)
 }
 
 /// Normalize a queue prompt for comparison: progress/pin/priority markers are
@@ -1209,6 +1267,7 @@ fn queue_alignment(
     let mut alignment = QueueAlignment {
         candidates: Vec::new(),
         events: Vec::new(),
+        live: new.clone(),
     };
 
     let insert = |alignment: &mut QueueAlignment, idx: usize| {
@@ -4080,6 +4139,103 @@ mod tests {
         assert!(partial.ready[0].possibly_partial);
         let rendered = render_steering_context("plan.md", &partial.ready, 0).unwrap();
         assert!(rendered.contains("possibly_partial: true"), "{rendered}");
+    }
+
+    /// A neutral replay of the retained-lineage failure: the editor keeps the
+    /// first two words as a second list row while the operator's continued row
+    /// is also live.  Ordinary quiescence must not turn the prefix into
+    /// independent dispatch work.  Removing that transient branch produces no
+    /// delayed delivery, while a standalone short prompt still settles.
+    #[test]
+    fn retained_typing_prefix_sibling_is_held_without_banning_short_prompts() {
+        let owned = BTreeSet::new();
+        let baseline = doc("- current task\n", EX);
+        let forked = doc(
+            "- current task\n\
+             - Review later failures in the deployment fallback.\n\
+             - review later\n",
+            EX,
+        );
+        let ctx = |now_ms| ObserveContext {
+            now_ms,
+            document_changed_ms: Some(0),
+            debounce_ms: 2_500,
+            binary_owned_queue_ids: &owned,
+            explicit_send: false,
+            max_hold_ms: agent_doc_debounce::edit_settle::DEFAULT_MAX_HOLD_MS,
+            classifier: &agent_doc_debounce::edit_settle::DeterministicOnly,
+            median_pause_ms: None,
+        };
+
+        let first = observe(
+            &seeded(&baseline, Some("current task")),
+            &forked,
+            &ctx(5_000),
+        );
+        assert_eq!(first.ready.len(), 1, "{:?}", first.ready);
+        assert_eq!(
+            first.ready[0].verbatim,
+            "Review later failures in the deployment fallback."
+        );
+        assert_eq!(
+            first.pending, 1,
+            "the retained prefix stays behind the gate"
+        );
+        let prefix_decision = first
+            .decisions
+            .iter()
+            .find(|decision| decision.text_tail == "review later")
+            .expect("the prefix has a gate decision");
+        assert_eq!(
+            prefix_decision.features.signal,
+            agent_doc_debounce::edit_settle::CompletionSignal::Incomplete
+        );
+        assert!(!prefix_decision.decision.deliver());
+
+        let converged = doc(
+            "- current task\n- Review later failures in the deployment fallback.\n",
+            EX,
+        );
+        let after_convergence = observe(&first.next, &converged, &ctx(7_500));
+        assert!(
+            after_convergence.ready.is_empty(),
+            "{:?}",
+            after_convergence.ready
+        );
+        assert_eq!(after_convergence.pending, 0);
+
+        let standalone = doc("- current task\n- review later\n", EX);
+        let short = observe(
+            &seeded(&baseline, Some("current task")),
+            &standalone,
+            &ctx(5_000),
+        );
+        assert_eq!(short.ready.len(), 1, "{:?}", short.ready);
+        assert_eq!(short.ready[0].verbatim, "review later");
+        assert_eq!(short.pending, 0);
+
+        let explicit = observe(
+            &seeded(&baseline, Some("current task")),
+            &forked,
+            &ObserveContext {
+                explicit_send: true,
+                ..ctx(0)
+            },
+        );
+        let explicit_rows: Vec<_> = explicit
+            .ready
+            .iter()
+            .map(|item| item.verbatim.as_str())
+            .collect();
+        assert_eq!(
+            explicit_rows,
+            vec![
+                "Review later failures in the deployment fallback.",
+                "review later"
+            ],
+            "explicit send declares both sibling rows intentional"
+        );
+        assert!(explicit.ready.iter().all(|item| item.explicit));
     }
 
     #[test]

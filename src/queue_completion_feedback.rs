@@ -1955,21 +1955,31 @@ mod tests {
             ),
         )
         .unwrap();
+        let owner_session = Some(agent_doc_queue::queue_claim::ClaimOwnerSession {
+            harness: Some("grok".to_string()),
+            session_id: Some(GROK_CONVERSATION.to_string()),
+            pane: None,
+            pid: None,
+        });
         agent_doc_queue_io::queue_claim::claim_with_session_for_worker_harness(
             &doc,
             ROW,
             OWNER,
             600,
-            Some(agent_doc_queue::queue_claim::ClaimOwnerSession {
-                harness: Some("grok".to_string()),
-                session_id: Some(GROK_CONVERSATION.to_string()),
-                pane: None,
-                pid: None,
-            }),
+            owner_session.clone(),
             Some("claude"),
         )
         .unwrap();
-        agent_doc_queue_io::queue_claim::start_attempt(&doc, ROW, OWNER, WORKER, 600, 1).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt_with_owner_session(
+            &doc,
+            ROW,
+            OWNER,
+            WORKER,
+            600,
+            1,
+            owner_session,
+        )
+        .unwrap();
         let prose = concat!(
             "**Summary**\n\n",
             "The address run landed. The adversarial loop needs a reviewer this subagent cannot spawn. ",

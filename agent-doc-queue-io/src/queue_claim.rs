@@ -1397,6 +1397,33 @@ pub fn start_attempt(
     ttl_secs: u64,
     generation: u64,
 ) -> Result<QueueClaim> {
+    start_attempt_with_owner_session(
+        file,
+        item,
+        owner,
+        worker_id,
+        ttl_secs,
+        generation,
+        current_owner_session(),
+    )
+}
+
+/// [`start_attempt`] with an explicit caller session.
+///
+/// This is a deterministic in-process test seam for cross-harness handoffs;
+/// production command paths always use [`start_attempt`] and the process
+/// environment. Process environment is shared by parallel Rust tests, so a
+/// test must not mutate the harness session variables around a ledger write.
+#[doc(hidden)]
+pub fn start_attempt_with_owner_session(
+    file: &Path,
+    item: &str,
+    owner: &str,
+    worker_id: &str,
+    ttl_secs: u64,
+    generation: u64,
+    owner_session: Option<ClaimOwnerSession>,
+) -> Result<QueueClaim> {
     if item.trim().is_empty() {
         bail!("queue start needs a non-empty --item (`#id` or the queue line's text)");
     }
@@ -1408,7 +1435,6 @@ pub fn start_attempt(
     }
     let (target, heads) = resolve_live_claim_target(file, item, "queue_claim_start")?;
     let now = now_secs();
-    let owner_session = current_owner_session();
     let outcome = mutate_ledger(file, |ledger| {
         // Resolution follows edits on a read-only ledger copy. Persist that
         // same authoritative rekey in the transaction before addressing the

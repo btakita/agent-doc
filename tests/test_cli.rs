@@ -10596,6 +10596,8 @@ fn test_agent_doc_turn_owns_drain_stall_policy() {
         "pub fn queue_drain_stall_status_for_file(",
         "pub fn queue_drain_stall_continuation_pending_for_file(",
         "pub fn clear_queue_drain_stall_continuation_pending_for_file(",
+        "pub fn record_stop_queue_handoff_for_file(",
+        "pub fn clear_queue_drain_stall_continuation_for_dispatch(",
         "\"queue_drain_stall_continuation_recorded\"",
         "\"queue_drain_stall_continuation_cleared\"",
         "\"queue_drain_stall_status\"",
@@ -10639,10 +10641,12 @@ fn test_agent_doc_turn_owns_drain_stall_policy() {
         session_check_source.contains(
             "agent_doc_controller_io::project_controller::record_queue_drain_stall_continuation_pending_for_file"
         ) && idle_watch_source.contains(
-            "agent_doc_controller_io::project_controller::clear_queue_drain_stall_continuation_pending_for_file"
+            "agent_doc_controller_io::project_controller::queue_drain_stall_continuation_pending_for_file"
+        ) && idle_watch_source.contains(
+            "agent_doc_controller_io::project_controller::clear_queue_drain_stall_continuation_for_dispatch"
         ) && !session_check_source.contains("agent_doc_queue_io::drain_stall::")
             && !idle_watch_source.contains("agent_doc_queue_io::drain_stall::"),
-        "session-check and idle-watch must call controller drain-stall projection helpers directly"
+        "session-check and idle-watch must call controller drain-stall projection helpers directly, with dispatch-fenced acknowledgment in idle-watch"
     );
     let turn_drain_stall =
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/drain_stall.rs")).unwrap();

@@ -890,6 +890,11 @@ pub fn reported_origin_close_command(row_text: &str, document: &str) -> Option<S
 
 const NORMAL_CLOSEOUT_HEADER: &str =
     "normal closeout refused while live queue rows are still transient (#transientcloseout)";
+/// Recognize the queue-debt diagnostic across the Stop/closeout status boundary.
+pub fn is_normal_closeout_failure(message: &str) -> bool {
+    message.contains(NORMAL_CLOSEOUT_HEADER)
+}
+
 const CRASH_RECOVERY_HEADER: &str = "crash recovery refused a successful closeout (#transientcloseout): leftover transient queue rows remain; the next turn finishes these transitions and this recovery does not treat them as closed";
 
 /// Failure for a normal closeout, naming each live transient row and the

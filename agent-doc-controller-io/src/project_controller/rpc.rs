@@ -9089,6 +9089,8 @@ struct QueueDrainStallPayload {
     head_sha256: Option<String>,
     #[serde(default)]
     drainable_head_count: usize,
+    #[serde(default)]
+    stop_handoff: bool,
 }
 
 pub fn record_queue_drain_stall_continuation_pending_for_file(
@@ -9097,6 +9099,25 @@ pub fn record_queue_drain_stall_continuation_pending_for_file(
     head_prompt: &str,
     drainable_head_count: usize,
 ) -> Result<agent_doc_state_backbone::QueueDrainStallProjection> {
+    record_queue_drain_stall_continuation(file, cycle_id, head_prompt, drainable_head_count, false)
+}
+
+pub fn record_stop_queue_handoff_for_file(
+    file: &Path,
+    cycle_id: &str,
+    head_prompt: &str,
+    drainable_head_count: usize,
+) -> Result<agent_doc_state_backbone::QueueDrainStallProjection> {
+    record_queue_drain_stall_continuation(file, cycle_id, head_prompt, drainable_head_count, true)
+}
+
+fn record_queue_drain_stall_continuation(
+    file: &Path,
+    cycle_id: &str,
+    head_prompt: &str,
+    drainable_head_count: usize,
+    stop_handoff: bool,
+) -> Result<agent_doc_state_backbone::QueueDrainStallProjection> {
     let project_root = agent_doc_project_root_io::project_root_containing(file)
         .with_context(|| format!("no project root found for {}", file.display()))?;
     ensure_controller_running(&project_root, LaunchMode::Lazy)?;
@@ -9104,6 +9125,7 @@ pub fn record_queue_drain_stall_continuation_pending_for_file(
         cycle_id: Some(cycle_id.to_string()),
         head_sha256: Some(agent_doc_hash::content_hash(head_prompt)),
         drainable_head_count,
+        stop_handoff,
     };
     request_controller(
         &project_root,
@@ -9171,8 +9193,34 @@ pub fn clear_queue_drain_stall_continuation_pending_for_file(
     file: &Path,
     reason: &str,
 ) -> Result<bool> {
+    clear_queue_drain_stall_continuation(file, reason, None)
+}
+
+/// Clear the predecessor's handoff only after the exact head starts.
+pub fn clear_queue_drain_stall_continuation_for_dispatch(
+    file: &Path,
+    predecessor_cycle_id: &str,
+    head: &str,
+) -> Result<bool> {
+    clear_queue_drain_stall_continuation(
+        file,
+        "supervisor_drain_progressed",
+        Some((predecessor_cycle_id, head)),
+    )
+}
+
+fn clear_queue_drain_stall_continuation(
+    file: &Path,
+    reason: &str,
+    admitted: Option<(&str, &str)>,
+) -> Result<bool> {
     let projection = queue_drain_stall_status_for_file(file)?;
-    if !projection.is_pending() {
+    if !projection.is_pending()
+        || admitted.is_some_and(|(cycle_id, head)| {
+            projection.cycle_id != cycle_id
+                || projection.head_sha256.as_deref() != Some(&agent_doc_hash::content_hash(head))
+        })
+    {
         return Ok(false);
     }
     let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
@@ -9185,6 +9233,7 @@ pub fn clear_queue_drain_stall_continuation_pending_for_file(
         cycle_id: None,
         head_sha256: None,
         drainable_head_count: 0,
+        stop_handoff: false,
     };
     request_controller::<agent_doc_state_backbone::QueueDrainStallProjection>(
         &project_root,
@@ -28052,6 +28101,7 @@ fn queue_drain_stall_payload(request: &ControllerRequest) -> Result<QueueDrainSt
             cycle_id: None,
             head_sha256: None,
             drainable_head_count: 0,
+            stop_handoff: false,
         }),
     }
 }
@@ -28081,6 +28131,24 @@ pub(crate) fn handle_queue_drain_stall_continuation_recorded(
     let drainable_head_count = payload.drainable_head_count;
     let document_hash = agent_doc_hash::document_id_for_path(&file);
     let current = queue_drain_stall_projection(runtime, &file)?;
+    if payload.stop_handoff
+        && !runtime
+            .document_closeout_projection(&document_hash)?
+            .is_some_and(|closeout| {
+                closeout.cycle_id.as_deref() == Some(cycle_id.as_str())
+                    && closeout.phase == Some(agent_doc_turn::CyclePhase::Committed)
+                    && closeout.response_sha256.is_some()
+            })
+    {
+        return Ok(agent_doc_state_backbone::QueueDrainStallProjection::default());
+    }
+    // Stop can be called again for the same turn even after the supervisor
+    // admitted the next one. Repeating the predecessor receipt never grants
+    // another dispatch epoch, including after the receipt was cleared.
+    if current.stall_epoch > 0 && current.cycle_id == cycle_id && current.head_sha256 == head_sha256
+    {
+        return Ok(current);
+    }
     let stall_epoch = current.stall_epoch.saturating_add(1);
     let event = agent_doc_state_backbone::StateEvent::new(
         queue_drain_stall_event_id("recorded", &document_hash, stall_epoch),

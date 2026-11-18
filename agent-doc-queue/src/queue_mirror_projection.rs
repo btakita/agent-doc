@@ -21,6 +21,68 @@ use std::collections::HashSet;
 use crate::document_queue::{self, QueueEntry, QueueRowProjection};
 use crate::queue_graph::QueueGraph;
 
+/// Binary lifecycle projection is a decoration-only operation on queue rows.
+/// This fingerprint deliberately excludes every binary-owned attempt token,
+/// owner/report annotation, and legacy child projection, while retaining the
+/// row's authored structure and work text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PromptLineageFingerprint {
+    completed: bool,
+    multiline: bool,
+    indent: usize,
+    ordered_marker: Option<String>,
+    work: String,
+}
+
+fn prompt_lineage_fingerprints(entries: &[QueueEntry]) -> Vec<PromptLineageFingerprint> {
+    entries
+        .iter()
+        .filter_map(|entry| {
+            let (completed, prompt) = match entry {
+                QueueEntry::Prompt(prompt) => (false, prompt),
+                QueueEntry::Completed(prompt) => (true, prompt),
+                _ => return None,
+            };
+            let work = agent_doc_element_queue::strip_priority_markers(&prompt.text);
+            let work = agent_doc_element_queue::subprompts::strip_subprompt_projections(&work)
+                .unwrap_or(work);
+            Some(PromptLineageFingerprint {
+                completed,
+                multiline: prompt.multiline,
+                indent: prompt.indent,
+                ordered_marker: prompt.ordered_marker.clone(),
+                work,
+            })
+        })
+        .collect()
+}
+
+/// Prove the local conservation law for one runtime-projection rewrite:
+///
+/// `erase_binary_projection(after) = erase_binary_projection(before)`.
+///
+/// The equality is ordered and occurrence-sensitive. Consequently a projection
+/// cannot duplicate a sibling, weld one row into another, resurrect an older
+/// edit lineage, or drop an intentionally repeated prompt. The caller may
+/// change lifecycle/owner/report decorations only. Operator edits happen in a
+/// different authority transition and become the `before` side of the next
+/// projection (`#multieditlineage`).
+fn ensure_prompt_lineage_conserved(
+    before: &[QueueEntry],
+    after: &[QueueEntry],
+    queue_id: &str,
+) -> Result<()> {
+    let before = prompt_lineage_fingerprints(before);
+    let after = prompt_lineage_fingerprints(after);
+    anyhow::ensure!(
+        before == after,
+        "runtime queue projection changed authored prompt lineage in queue {queue_id:?}: before_count={} after_count={} (#multieditlineage)",
+        before.len(),
+        after.len(),
+    );
+    Ok(())
+}
+
 /// One queue block offered to a target builder.
 #[derive(Debug, Clone, Copy)]
 pub struct QueueProjectionBlock<'a> {
@@ -84,11 +146,124 @@ pub fn project_runtime_projections_across_queues(
         if let Some((new_body, _)) =
             document_queue::project_prompt_runtime_projections_with(body, &targets, policy)?
         {
+            let new_entries = document_queue::parse(&new_body)?;
+            ensure_prompt_lineage_conserved(&block.entries, &new_entries, &block.id)?;
             projected = block.component.replace_content(&projected, &new_body);
             changed = true;
         }
     }
     Ok(changed.then_some(projected))
+}
+
+#[cfg(test)]
+mod projection_lineage_tests {
+    use super::*;
+    use agent_doc_document::queue_projection::{QueueLifecycleMarker, QueueOwnerProjection};
+
+    fn row(text: &str, marker: QueueLifecycleMarker, owner: &str) -> QueueRowProjection {
+        QueueRowProjection {
+            identity: None,
+            text: text.to_string(),
+            marker,
+            owner: Some(QueueOwnerProjection {
+                owner: owner.to_string(),
+                generation: 1,
+            }),
+            blockers: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn repeated_sibling_projection_around_an_operator_edit_conserves_each_row_once() {
+        let base = concat!(
+            "<!-- agent:queue -->\n",
+            "- first independent worker\n",
+            "- second independent worker\n",
+            "- my last\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let first = project_runtime_projections_across_queues(base, None, |_| {
+            vec![
+                row(
+                    "first independent worker",
+                    QueueLifecycleMarker::Claimed,
+                    "subagent:first",
+                ),
+                row(
+                    "second independent worker",
+                    QueueLifecycleMarker::Claimed,
+                    "subagent:second",
+                ),
+            ]
+        })
+        .unwrap()
+        .expect("first lifecycle projection");
+
+        // This is a separate operator-authority transition: the third row is
+        // edited in place while both sibling attempts remain projected.
+        let edited = first.replacen(
+            "- my last\n",
+            "- my last prompt now contains the complete multi-edit report\n",
+            1,
+        );
+        let second = project_runtime_projections_across_queues(&edited, None, |_| {
+            vec![
+                row(
+                    "first independent worker",
+                    QueueLifecycleMarker::Running,
+                    "subagent:first",
+                ),
+                row(
+                    "second independent worker",
+                    QueueLifecycleMarker::Running,
+                    "subagent:second",
+                ),
+            ]
+        })
+        .unwrap()
+        .expect("second lifecycle projection");
+
+        let components = element::parse(&second).unwrap();
+        let queue = components
+            .iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let entries = document_queue::parse(queue.content(&second)).unwrap();
+        let work = prompt_lineage_fingerprints(&entries);
+        assert_eq!(work.len(), 3);
+        assert_eq!(work[0].work, "first independent worker");
+        assert_eq!(work[1].work, "second independent worker");
+        assert_eq!(
+            work[2].work,
+            "my last prompt now contains the complete multi-edit report"
+        );
+    }
+
+    #[test]
+    fn lineage_conservation_rejects_a_welded_or_duplicated_fork() {
+        let before = document_queue::parse(concat!(
+            "- first independent worker\n",
+            "- second independent worker\n",
+            "- my last prompt\n",
+        ))
+        .unwrap();
+        let welded = document_queue::parse(concat!(
+            "- first independent worker\n",
+            "- second independent worker\n",
+            "- my last prompt + first independent worker + second independent worker\n",
+        ))
+        .unwrap();
+        assert!(ensure_prompt_lineage_conserved(&before, &welded, "main").is_err());
+
+        let duplicated = document_queue::parse(concat!(
+            "- first independent worker\n",
+            "- first independent worker\n",
+            "- second independent worker\n",
+            "- my last prompt\n",
+        ))
+        .unwrap();
+        assert!(ensure_prompt_lineage_conserved(&before, &duplicated, "main").is_err());
+    }
 }
 
 /// Restore nested executable rows that an older lifecycle projection removed

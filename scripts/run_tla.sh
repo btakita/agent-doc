@@ -230,7 +230,7 @@ work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 isolate_run "${work_dir}"
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RegistrationAcknowledgedBase RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation AdmissionSplitMerge AdmissionCutExclusivity StaleColumnRecycle NetChannelRetransmit VisibleDeliveryReceiptNet EditorReplicaStrandNet RecycleSettleDispatchNet AgentDocCloseoutNet PassiveTmuxSyncNet PassiveTmuxSyncRetireNet LifecycleSequence LayoutWidthBound RemoteLayoutNoGuess EditorTransportHealth ControllerLifecycle AuthorityHandoffFold PredecessorWriteAfterLoad)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RegistrationAcknowledgedBase RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation AdmissionSplitMerge AdmissionCutExclusivity QueueProjectionEditLineage StaleColumnRecycle NetChannelRetransmit VisibleDeliveryReceiptNet EditorReplicaStrandNet RecycleSettleDispatchNet AgentDocCloseoutNet PassiveTmuxSyncNet PassiveTmuxSyncRetireNet LifecycleSequence LayoutWidthBound RemoteLayoutNoGuess EditorTransportHealth ControllerLifecycle AuthorityHandoffFold PredecessorWriteAfterLoad)
 
 # Library modules: INSTANCE'd by the models above, never checked on their own
 # (no Spec, no .cfg). They only need to sit next to the importing model.
@@ -385,6 +385,10 @@ must_violate=(
     AdmissionCutExclusivity:AdmissionCutExclusivityResidualMislabelled
     AdmissionCutExclusivity:AdmissionCutExclusivityBoundary
     AdmissionSplitMerge:AdmissionSplitMergeTwinReach
+    # `#multieditlineage`: lifecycle projection is decoration-only and may not
+    # absorb projected sibling rows into a concurrently edited prompt. The
+    # whole-document-alignment wedge must violate the row-isolation invariant.
+    QueueProjectionEditLineage:QueueProjectionEditLineageWedge
     # `#editorauthority`: adopting the CRDT over an open editor rolls it back
     # (api.md, 2026-09-29); forward merging still delivers agent work.
     EditorAuthorityLadder:EditorAuthorityLadderWedge

@@ -3061,7 +3061,7 @@ fn followups_of_a_nested_origin_leave_the_parent_children_alone_and_stay_acknowl
     let rows = run_rows(&doc);
     let position = |needle: &str| {
         rows.iter()
-            .position(|row| row.ends_with(needle))
+            .position(|row| row.trim_end_matches("~~").ends_with(needle))
             .unwrap_or_else(|| panic!("{needle:?} missing: {rows:#?}"))
     };
     assert!(
@@ -3072,10 +3072,7 @@ fn followups_of_a_nested_origin_leave_the_parent_children_alone_and_stay_acknowl
         position("leaf work") < position(followup) && position(followup) < position("sibling work"),
         "{rows:#?}"
     );
-    assert!(
-        rows[position(followup)].starts_with("  - "),
-        "{rows:#?}"
-    );
+    assert!(rows[position(followup)].starts_with("  - "), "{rows:#?}");
     assert_eq!(
         position("sibling work") + 1,
         position("later work"),

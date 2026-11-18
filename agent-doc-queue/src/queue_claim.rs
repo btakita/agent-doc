@@ -801,12 +801,19 @@ impl ClaimQueueView {
                     rows,
                     claim_texts,
                     context_claim_texts,
+                    // A completed nested leaf closes its full nest-vector
+                    // claim, not the same bare leaf under every parent. Keep
+                    // the lineage while collecting strike evidence so edit
+                    // following cannot move that claim onto a new sibling.
                     struck: block
                         .entries
                         .iter()
-                        .filter_map(|entry| match entry {
-                            QueueEntry::Completed(prompt) => {
-                                Some(crate::queue_consume::struck_row_work_text(&prompt.text))
+                        .enumerate()
+                        .filter_map(|(index, entry)| match entry {
+                            QueueEntry::Completed(_) => {
+                                document_queue::lineage_claim_text(&block.entries, index).map(
+                                    |lineage| crate::queue_consume::struck_row_work_text(&lineage),
+                                )
                             }
                             _ => None,
                         })

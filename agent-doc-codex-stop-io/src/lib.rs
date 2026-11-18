@@ -11081,7 +11081,7 @@ Reported.\n\
                 .expect("the approval row is human-owned");
         assert_eq!(rows.len(), 1);
         assert!(
-            tagged.contains("- ⏳ follow up on an action item"),
+            tagged.contains("- 🙋 follow up on an action item"),
             "{tagged}"
         );
         let quiet = stop_over(&tagged);
@@ -11091,7 +11091,7 @@ Reported.\n\
             quiet.map(|continuation| continuation.reason)
         );
         // A projection that repaints `📥` over the tag keeps the turn ending.
-        let repainted = tagged.replace("- ⏳ follow up", "- 📥 follow up");
+        let repainted = tagged.replace("- 🙋 follow up", "- 📥 follow up");
         let quiet = stop_over(&repainted);
         assert!(
             quiet.is_none(),

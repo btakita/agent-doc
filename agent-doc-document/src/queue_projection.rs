@@ -1481,6 +1481,7 @@ pub fn strip_priority_markers(text: &str) -> String {
     }
     let mut bare = t.trim();
     if let Some((id, after, start)) = trailing_operator_action_annotation(bare)
+        && !id.to_ascii_lowercase().starts_with("q-")
         && (canonical_operator_action || is_reserved_operator_action_id(id))
     {
         // A local answer row has no originating work text before the request

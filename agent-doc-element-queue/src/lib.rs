@@ -960,7 +960,11 @@ pub fn strip_priority_markers(text: &str) -> String {
         }
     }
     let mut bare = t.trim();
+    // A generated `[#q-…]` is the row's stable id, not an operator request.
+    // `🙋` must not strip it (`#opverifyrest`); otherwise preflight drops the
+    // id when an `[operator-verify]` follow-up rests as operator wait.
     if let Some((id, after, start)) = trailing_operator_action_annotation(bare)
+        && !id.to_ascii_lowercase().starts_with("q-")
         && (canonical_operator_action
             || id
                 .to_ascii_lowercase()

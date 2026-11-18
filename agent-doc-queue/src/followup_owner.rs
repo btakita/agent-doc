@@ -35,14 +35,14 @@
 //! A human-owned row carries the existing `[operator-verify]` execution tag
 //! after its work text (and before the binary's trailing `[#q-…]` id). That
 //! tag already means "no agent drain scope runs this": free-text heads parse
-//! it inline (`#ftimmediate`), so the row is never drainable or dispatchable,
-//! preflight projects `⏳` awaiting operator onto it instead of `📥`
-//! (`#queueawaitop`), and the `#transientcloseout` gate treats a pending row
-//! that carries it as waiting on the operator (`#stopquiescentrows`). The
-//! operator strikes the row once the action is done, or answers it inline
-//! (`…: done`, `#opverifyanswered`) to hand the remaining work back to an
-//! agent. The tag lives in the work text, so it is durable; the `⏳`/`📥`
-//! glyph is only projection.
+//! it inline (`#ftimmediate`), so the row is never drainable or dispatchable.
+//! It rests as `🙋`, not the agent inbox `📥` (`#opverifyrest`): `📥` holds
+//! the turn and `🙋` does not. The `#transientcloseout` gate also treats a
+//! pending row that still carries the tag as waiting on the operator
+//! (`#stopquiescentrows`). The operator strikes the row once the action is
+//! done, or answers it inline (`…: done`, `#opverifyanswered`) to hand the
+//! remaining work back to an agent. The tag lives in the work text, so it is
+//! durable; the `🙋`/`📥` glyph is only projection.
 //!
 //! # Existing documents
 //!
@@ -77,7 +77,7 @@ pub const OPERATOR_OWNED_TAG: &str = backlog::OPERATOR_VERIFY_TAG;
 pub enum ActionItemOwner {
     /// An agent can do it; the follow-up row stays dispatchable (`📥`).
     Agent,
-    /// Only a person can do it; the row waits on the operator (`⏳`).
+    /// Only a person can do it; the row waits on the operator (`🙋`).
     Human,
 }
 
@@ -648,8 +648,8 @@ pub struct ReclassifiedFollowup {
 ///
 /// Only a row whose lifecycle is bare or `📥` qualifies: a claimed, running,
 /// reported, or lost row has an attempt keyed by its text, and a `🙋` row is
-/// already operator-owned. A `📥` row becomes `⏳`; preflight repaints the
-/// same glyph from the tag.
+/// already operator-owned. A `📥` row becomes `🙋`; preflight repaints the
+/// same glyph from the tag (`#opverifyrest`).
 pub fn reclassify_followup_row(text: &str) -> Option<(String, OwnerEvidence)> {
     if text.contains('\n') || text.trim_start().starts_with("~~") {
         return None;
@@ -672,10 +672,8 @@ pub fn reclassify_followup_row(text: &str) -> Option<(String, OwnerEvidence)> {
     if owner != ActionItemOwner::Human {
         return None;
     }
-    let mut tagged = tag_operator_owned(rest);
-    if marker == Some(QueueLifecycleMarker::Pending) {
-        tagged = queue_projection::apply_awaiting_operator_marker(&tagged);
-    }
+    let tagged = tag_operator_owned(rest);
+    let tagged = crate::queue_continuation::rest_operator_verify_text(&tagged).unwrap_or(tagged);
     Some((format!("{heading}{tagged}"), evidence))
 }
 
@@ -733,7 +731,7 @@ pub fn reclassify_unseen_human_followup_rows(
 /// The identity of a follow-up row for owner classification: its work text
 /// without lifecycle projection, the binary's trailing `[#q-…]` id, or the
 /// `[operator-verify]` tag, whitespace collapsed. Deleting the tag, or the
-/// `📥`/`⏳` repaint, leaves the key unchanged. `None` for a row outside the
+/// `📥`/`🙋` repaint, leaves the key unchanged. `None` for a row outside the
 /// `follow up on an action item` shape.
 pub fn followup_owner_key(text: &str) -> Option<String> {
     let text = text.strip_prefix("### ").unwrap_or(text);

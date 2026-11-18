@@ -2402,13 +2402,63 @@ pub fn extract_head_id(prompt: &str) -> Option<String> {
 /// `#humanfollowupowner`: whether a row waits on the operator by its own
 /// text: it carries the inline `[operator-verify]` execution tag and no inline
 /// operator verdict (`#opverifyanswered`). No agent drain scope runs such a row
-/// ([`head_is_drainable`] reads the same tag), so the `#transientcloseout`
-/// gate treats it as awaiting the operator and preflight projects `⏳` onto it.
-/// `queue report-complete` writes a human-owned action item's follow-up row
-/// this way ([`crate::followup_owner`]).
+/// ([`head_is_drainable`] reads the same tag). It rests as `🙋`
+/// ([`rest_operator_verify_text`]), not the agent inbox `📥`, so the turn may
+/// end while the row stays visible. A `📥` painted before that projection
+/// still does not hold the turn (`#stopquiescentrows`). `queue report-complete`
+/// writes a human-owned action item's follow-up row this way
+/// ([`crate::followup_owner`]).
 pub fn head_awaits_operator_inline(text: &str) -> bool {
     let text = agent_doc_element_queue::strip_queue_prompt_stable_id_annotation(text);
     backlog::item_operator_verify_required(&text) && !head_carries_operator_verdict(&text)
+}
+
+/// `#opverifyrest`: the resting text of an `[operator-verify]` row.
+///
+/// The tag is the operator's review. The row rests as `🙋`, not `📥`. `📥`
+/// is the agent inbox and holds the turn; `🙋` is not a lifecycle marker, so
+/// the turn may end while the row stays visible. `None` when `text` already
+/// rests that way, does not wait on the operator, or still carries a durable
+/// attempt marker (`🟡`, `🚧`, `☑️`, …) that must stay visible.
+pub fn rest_operator_verify_text(text: &str) -> Option<String> {
+    use agent_doc_document::queue_projection as qp;
+    if !head_awaits_operator_inline(text) {
+        return None;
+    }
+    if matches!(
+        qp::lifecycle_marker(text),
+        Some(
+            qp::QueueLifecycleMarker::Blocked
+                | qp::QueueLifecycleMarker::Claimed
+                | qp::QueueLifecycleMarker::Running
+                | qp::QueueLifecycleMarker::Reported
+                | qp::QueueLifecycleMarker::Lost
+                | qp::QueueLifecycleMarker::LostClaimed
+                | qp::QueueLifecycleMarker::LostRunning
+                | qp::QueueLifecycleMarker::LostReported
+                | qp::QueueLifecycleMarker::Reconciling
+                | qp::QueueLifecycleMarker::Unknown
+                | qp::QueueLifecycleMarker::Skipped
+        )
+    ) {
+        return None;
+    }
+    let bare = qp::strip_in_progress_marker_for_display(text).unwrap_or_else(|| text.to_string());
+    let rested = if qp::operator_action_marked(&bare) && qp::lifecycle_marker(&bare).is_none() {
+        bare
+    } else {
+        let marker = qp::operator_action_marker();
+        let leading = bare.len() - bare.trim_start().len();
+        let (indent, rest) = bare.split_at(leading);
+        let content = rest.trim_end();
+        let trailing = &rest[content.len()..];
+        if qp::operator_action_marked(content) && qp::lifecycle_marker(content).is_none() {
+            format!("{indent}{content}{trailing}")
+        } else {
+            format!("{indent}{marker} {}{trailing}", content.trim_start())
+        }
+    };
+    (rested != text).then_some(rested)
 }
 
 /// True when a queue head carries the operator's inline verdict on its own id

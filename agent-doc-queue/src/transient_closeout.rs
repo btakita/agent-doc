@@ -48,10 +48,10 @@
 //!   the same predicate queue selection uses for `Paused`) is not drainable
 //!   until the operator lifts the hold. The control is read from the text, so
 //!   every gate, text-only callers included, releases it the same way.
-//! - **Awaiting the operator by its text** (`#humanfollowupowner`). A `📥`
-//!   row whose work text carries `[operator-verify]` and no inline operator
-//!   verdict is never drainable, so it is the `⏳` row preflight projects;
-//!   a pending glyph painted before that projection does not hold the turn.
+//! - **Awaiting the operator by its text** (`#humanfollowupowner`). A row
+//!   whose work text carries `[operator-verify]` and no inline operator
+//!   verdict is never drainable. It rests as `🙋`, not `📥` (`#opverifyrest`).
+//!   A `📥` glyph painted before that projection does not hold the turn.
 //!   `queue report-complete` writes human-owned action items this way.
 //!   `#personrowselect`: neither does a `🟡`/`🚧` an in-session selection
 //!   painted on such a row when no fresh claim backs it, no report is owed on

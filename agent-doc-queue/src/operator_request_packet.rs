@@ -430,9 +430,9 @@ fn decision_request_id(line: &str) -> Option<&str> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ParsedBlockingOperatorRequestPacket {
-    packet: BlockingOperatorRequestPacket,
-    start_line: usize,
+pub(crate) struct ParsedBlockingOperatorRequestPacket {
+    pub(crate) packet: BlockingOperatorRequestPacket,
+    pub(crate) start_line: usize,
     end_line: usize,
 }
 
@@ -471,7 +471,7 @@ pub fn blocking_operator_request_blocks(response: &str) -> Vec<&str> {
         .collect()
 }
 
-fn parsed_blocking_operator_request_packets(
+pub(crate) fn parsed_blocking_operator_request_packets(
     response: &str,
 ) -> Vec<ParsedBlockingOperatorRequestPacket> {
     let lines: Vec<&str> = response.lines().collect();
@@ -541,9 +541,7 @@ fn parsed_blocking_operator_request_packets(
                             && let Some(label) = operator_request_choice_label(field)
                         {
                             choice_labels.push(label.to_string());
-                            if let Some(row) = canonical_operator_request_choice_row(field, label) {
-                                choice_rows.push(row);
-                            }
+                            choice_rows.push(canonical_operator_request_choice_row(field, label));
                         }
                     }
                     "request" => append_nested_value(request.as_mut(), field),
@@ -655,11 +653,13 @@ fn operator_request_choice_label(field: &str) -> Option<&str> {
     (!label.is_empty()).then_some(label)
 }
 
-fn canonical_operator_request_choice_row(field: &str, label: &str) -> Option<String> {
-    let choice = field.strip_prefix("- ")?.trim();
-    let (_, effect) = choice.split_once(':')?;
-    let effect = effect.trim();
-    (!effect.is_empty()).then(|| format!("**{label}**: {effect}"))
+fn canonical_operator_request_choice_row(field: &str, label: &str) -> String {
+    let choice = field.trim_start_matches("- ").trim();
+    let effect = choice.split_once(':').map(|(_, effect)| effect.trim());
+    match effect {
+        Some(effect) if !effect.is_empty() => format!("**{label}**: {effect}"),
+        _ => choice.to_string(),
+    }
 }
 
 fn operator_request_field(field: &str) -> Option<(&str, &str)> {

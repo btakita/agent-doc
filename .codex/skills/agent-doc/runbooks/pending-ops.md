@@ -289,16 +289,35 @@ plan path into another `.md` file.
 
 ## What to decide each cycle
 
-- Items completed during this response → `--done <id>`
+- **Do not batch completed state until closeout (`#realtimetrackedcompletion`).**
+  When evidence proves an item finished, run the corresponding standalone
+  granular command at the next safe tool boundary, for example
+  `agent-doc backlog <FILE> done <id>`. This immediately marks the item complete
+  and reconciles its linked queue/todo and generated status projections through
+  editor authority without sealing the response cycle; ordinary maintenance
+  later archives the checked row to `agent:done`. If the turn continues, follow
+  it with a salient checkpoint naming current workers and the exact remaining
+  action. Never use a committing backlog-only write for this mid-turn checkpoint:
+  it closes the response cycle. A later final `respond` keeps response placement
+  atomic and omits that already-applied lifecycle mutation.
+  Waiting for a release, another worker, or turn end leaves document state behind
+  execution state; that drift causes false blockers, duplicate or obscuring
+  decisions/prompts, and stale status. Because the operator moves between
+  documents and agents can be replaced, every document must carry this durable
+  handoff state without relying on hidden chat context.
+- Items completed during this response → standalone `agent-doc backlog <FILE>
+  done <id>` immediately; use final `--done <id>` only when completion is first
+  proven while composing the closeout.
 - New items discovered → `--backlog-add "text"`
 - **Agent-proposed forward actions** → `--backlog-add "text"` for each concrete
   follow-up that should be tracked across cycles.
 - **Unaccepted recommendations** → `--backlog-add "[recommended] text"` so the
   item is visibly provisional until the user opts in.
-- **Existing `do #id` work that completed this cycle** → `--done <id>` in
-  the same closeout command whether the item lived in the live backlog or the
-  icebox. Session-doc closeouts now fail before commit when a response clearly
-  completes `#id` but omits the matching done mutation. If the item is
+- **Existing `do #id` work that completed this cycle** → project its lifecycle
+  outcome immediately with the matching standalone granular command whether the
+  item lived in the live backlog or the icebox. Session-doc closeouts still fail
+  before commit when a response clearly completes `#id` but no earlier realtime
+  mutation and no matching closeout mutation exists. If the item is
   code-complete but blocked on an external gate, prefer
   `--backlog-gate <id>` instead of leaving it silently open.
 - **`do [#id]` / `do #id` directives are closeout-gated regardless of response
@@ -329,10 +348,10 @@ plan path into another `.md` file.
   - for a genuine review-only gate, state it explicitly in the response: an
     "no additional backlog follow-up is needed because …" phrase satisfies the
     guard, as does a `<!-- no-blocked-followup-guard -->` marker.
-- If the completed ids are also contiguous head entries in an active
-  `agent:run`, repeating `--done <id>` for each completed id lets closeout
-  consume that done-backed queue batch in the same commit. The queue still stops
-  before the first unresolved queued prompt.
+- If completed ids are also contiguous head entries in an active `agent:run`,
+  the standalone done operation reconciles the linked queue/todo projections
+  immediately. Do not repeat those ids on closeout merely to consume the batch;
+  final closeout still stops before the first unresolved queued prompt.
 - **Multiple free-text heads answered in one cycle → `agent-doc queue consume <FILE> --count <N>` (`#multi-head-consume-one-per-finalize`).** The free-text strike consumes only ONE head per finalize (the head current at that cycle's preflight). When a single cycle answers several free-text heads — most often because the operator added queue items mid-turn and your response addressed all of them — the trailing answered heads stay queued and re-serve on the next auto-loop, producing duplicate-response churn. Drain them explicitly with `queue consume --count <N>` (you assert the leading N free-text heads are answered, the same explicit contract `--done <id>` gives an id-backed head), then close out normally. The count is one atomic editor-authority transaction: agent-doc plans the leading free-text prefix once and writes once, stopping before an id-backed head; it does not re-resolve the same head between asynchronous ACKs. There is intentionally no automatic head→response matcher: an answered free-text head the operator added this cycle is structurally identical to an unanswered one they added, so auto-striking would risk deleting a genuinely unanswered prompt. **Prefer prevention:** in a normal drain, answer only the current head per cycle and let the auto-loop drain subsequent heads one at a time; reach for `queue consume` only after an unavoidable batch answer. `queue consume` is scoped to free-text heads — a leading id-backed (`do [#id]` / `[#id]` / `#id` / `#preset`) head bails with `--done` guidance so it is never desynced from its backlog item.
 - Any response ending with a forward-looking question ("Ready to X?", "Should we A or
   B first?", "Shall I capture Y as a spec?") MUST capture each concrete next-step

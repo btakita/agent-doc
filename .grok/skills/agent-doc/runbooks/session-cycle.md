@@ -116,6 +116,25 @@ only the compact routing table that survives context compaction.
   inspection, and every authorized current-item or returned-subagent outward
   effect before response persistence. Do not keep appending
   "starting/continuing" status prose while requested work remains undone.
+- **Converge completed tracked work immediately (`#realtimetrackedcompletion`).**
+  As soon as current-cycle evidence proves a backlog/review/icebox item finished,
+  run its standalone granular lifecycle command at the next safe tool boundary
+  (for example `agent-doc backlog <FILE> done <id>`). Do not wait for the final
+  `respond` / `finalize`, a release, another worker, or the end of a long turn.
+  The command uses the normal editor/CRDT authority path, updates linked queue and
+  todo projections plus generated top-backlog status, records the cycle fact, and
+  does not seal the response cycle. If work continues, immediately publish a
+  salient checkpoint with `agent-doc salient-checkpoint <FILE>` that names the
+  current worker(s) and exact remaining action. Never simulate this checkpoint with `agent-doc write
+  --commit --backlog-only`: `--commit` closes the response cycle and wedges later
+  live checkpoints. Each document must remain an independently trustworthy
+  current-state surface when the operator switches documents; it cannot depend
+  on retained chat context or a future finalize. This is also the durable
+  replacement-agent handoff if the current agent exhausts tokens or is replaced.
+  Leaving finished work visibly open is correctness drift: later planning can
+  manufacture false blockers, duplicate or obscuring decisions/prompts, and
+  stale status. Finalize remains the atomic response-sealing boundary and must
+  not repeat a lifecycle mutation that is already visible.
 - **Authorized effects precede closeout (`#effectbeforecloseout`).** Posting a
   review, publishing, pushing, sending a message, or making another external
   mutation required by the prompt, a resolved preset, a nested authorization,

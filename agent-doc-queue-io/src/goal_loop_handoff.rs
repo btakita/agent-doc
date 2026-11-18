@@ -307,7 +307,8 @@ pub fn requeue_nonterminal_hand_back(
         crate::claim_release_receipt::ReleaseKind::Requeue,
         Some(claim.generation),
     )?
-    .unwrap_or(claim);
+    .context("the goal hand-back no longer owns the queue attempt")?;
+    crate::lost_running::settle_requeued_attempt(file, &requeued)?;
     let tag = if address_pending {
         "#reviewfixonhead"
     } else if effect_unproven {

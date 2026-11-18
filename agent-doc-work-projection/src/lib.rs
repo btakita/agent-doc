@@ -346,7 +346,10 @@ fn visit_live_queue_lifecycle(
             if review_blockers.holds_external_identity(&identity) {
                 continue;
             }
-            if let Some(attempt) = lifecycle.attempts.get(&identity) {
+            if let Some(attempt) = lifecycle.attempts.get(&identity)
+                && attempt.marker
+                    != agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+            {
                 visit(identity, &prompt.text, attempt);
             }
         }

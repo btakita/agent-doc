@@ -600,6 +600,12 @@ pub struct GoalLoopHandoffLedger {
 impl GoalLoopHandoffLedger {
     /// Record `handoff` as its row's latest interrupted attempt.
     pub fn record(&mut self, handoff: GoalLoopHandoff) {
+        if self
+            .latest_for(&handoff.identity)
+            .is_some_and(|previous| previous.generation > handoff.generation)
+        {
+            return;
+        }
         self.handoffs
             .retain(|existing| existing.identity != handoff.identity);
         self.handoffs.push(handoff);

@@ -5,7 +5,8 @@
 //! until the process enables it, so unit tests stay offline and fail closed.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::io::Read;
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -14,11 +15,11 @@ use agent_doc_queue::address_completion_proof::{
     AddressEffectFacts, AddressEffectGuard, AddressObservation, AddressSnapshot, AddressTarget,
     address_review_target, forced_observation,
 };
+use agent_doc_sqlite::state_store;
+use anyhow::{Context, Result};
 use serde::Deserialize;
 
 static GITHUB: AtomicBool = AtomicBool::new(false);
-static MEMORY: parking_lot::Mutex<BTreeMap<String, AddressSnapshot>> =
-    parking_lot::Mutex::new(BTreeMap::new());
 
 /// Allow this process to read pull requests with `gh`.
 pub fn enable_github_observation() {
@@ -41,6 +42,41 @@ pub fn observation_for_item(file: &Path, item: &str) -> AddressObservation {
         return AddressObservation::Unseen;
     };
     observation_for_target(file, &target)
+}
+
+/// Capture at an execution ingress. Report and closeout only observe.
+pub fn capture_before_execution(file: &Path, item: &str) -> Result<()> {
+    if !github_enabled() {
+        return Ok(());
+    }
+    // Direct-run submission adds a context tree after the selected lineage.
+    // A sibling review in that tree must not choose the execution target.
+    let item = [
+        agent_doc_queue::document_queue::LATEST_REPLY_LABEL,
+        agent_doc_queue::document_queue::PROMPT_TREE_HEADER,
+    ]
+    .iter()
+    .filter_map(|label| item.find(&format!("\n{label}")))
+    .min()
+    .map_or(item, |at| &item[..at]);
+    let Some(target) = address_review_target(item).filter(|target| !fixture_target(target)) else {
+        return Ok(());
+    };
+    ensure_dispatch_baseline(file, &target, fetch_snapshot).with_context(|| {
+        format!("could not capture the pull-request baseline before dispatch for {item:?} (#addressproof)")
+    })
+}
+
+fn ensure_dispatch_baseline(
+    file: &Path,
+    target: &AddressTarget,
+    fetch: impl FnOnce(&AddressTarget) -> Option<AddressSnapshot>,
+) -> Result<()> {
+    if load_baseline(file, target)?.is_none() {
+        let snapshot = fetch(target).context("GitHub did not return a pull-request snapshot")?;
+        save_baseline(file, target, &snapshot)?;
+    }
+    Ok(())
 }
 
 /// Install observations for address rows in `content`, when this process reads
@@ -76,11 +112,21 @@ fn observation_for_target(file: &Path, target: &AddressTarget) -> AddressObserva
     let Some(current) = fetch_snapshot(target) else {
         return AddressObservation::Unseen;
     };
-    let key = format!("{}|{}", file.display(), target.key());
-    let baseline = load_baseline(file, &key);
-    if baseline.is_none() {
-        save_baseline(file, &key, &current);
-    }
+    observe_snapshot(file, target, current)
+}
+
+fn observe_snapshot(
+    file: &Path,
+    target: &AddressTarget,
+    current: AddressSnapshot,
+) -> AddressObservation {
+    let baseline = match load_baseline(file, target) {
+        Ok(baseline) => baseline,
+        Err(error) => {
+            eprintln!("[queue] could not read pull-request baseline: {error:#} (#addressproof)");
+            return AddressObservation::Unseen;
+        }
+    };
     AddressObservation::Seen { baseline, current }
 }
 
@@ -89,65 +135,62 @@ fn fixture_target(target: &AddressTarget) -> bool {
 }
 
 fn address_item_texts(content: &str) -> Vec<String> {
-    let mut texts = Vec::new();
-    if let Ok(components) = agent_doc_element::element::parse(content) {
-        for component in components
-            .iter()
-            .filter(|component| component.name == "queue")
+    agent_doc_queue::queue_continuation::all_queue_head_texts(content).unwrap_or_default()
+}
+
+fn baseline_kind(target: &AddressTarget) -> String {
+    format!("address_effect_baseline:{}", target.key())
+}
+
+fn load_baseline(file: &Path, target: &AddressTarget) -> Result<Option<AddressSnapshot>> {
+    let Some(root) = agent_doc_fs::find_project_root(file) else {
+        return Ok(None);
+    };
+    if state_store::state_db_path(&root).exists() {
+        let conn = state_store::open_state_db_read_only(&root)?;
+        let document_hash = agent_doc_hash::path_hash(file)?;
+        if state_store::state_table_exists(&conn, "queue_document_state")?
+            && let Some(record) = state_store::load_queue_document_state_from_db(
+                &conn,
+                &document_hash,
+                &baseline_kind(target),
+            )?
         {
-            let Ok(entries) = agent_doc_queue::document_queue::parse(component.content(content))
-            else {
-                continue;
-            };
-            for prompt in agent_doc_queue::document_queue::prompts(&entries) {
-                texts.push(prompt.text.clone());
-            }
+            return Ok(Some(serde_json::from_str(&record.payload_json)?));
         }
     }
-    if texts.is_empty() {
-        texts.extend(
-            content
-                .lines()
-                .filter(|line| line.contains("#address"))
-                .map(ToString::to_string),
-        );
-    }
-    texts
-}
-
-fn baseline_path(file: &Path) -> Option<PathBuf> {
-    let root = agent_doc_fs::find_project_root(file)?;
-    Some(root.join(".agent-doc/address-effect-baselines.json"))
-}
-
-fn load_baseline(file: &Path, key: &str) -> Option<AddressSnapshot> {
-    if let Some(snapshot) = MEMORY.lock().get(key).cloned() {
-        return Some(snapshot);
-    }
-    let path = baseline_path(file)?;
-    let text = std::fs::read_to_string(path).ok()?;
-    let entries: BTreeMap<String, AddressSnapshot> = serde_json::from_str(&text).ok()?;
-    let snapshot = entries.get(key)?.clone();
-    MEMORY.lock().insert(key.to_string(), snapshot.clone());
-    Some(snapshot)
-}
-
-fn save_baseline(file: &Path, key: &str, snapshot: &AddressSnapshot) {
-    MEMORY.lock().insert(key.to_string(), snapshot.clone());
-    let Some(path) = baseline_path(file) else {
-        return;
+    let legacy = root.join(".agent-doc/address-effect-baselines.json");
+    let text = match std::fs::read_to_string(&legacy) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error).context("read legacy pull-request baselines"),
     };
-    let mut entries = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|text| serde_json::from_str::<BTreeMap<String, AddressSnapshot>>(&text).ok())
-        .unwrap_or_default();
-    entries.insert(key.to_string(), snapshot.clone());
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    if let Ok(text) = serde_json::to_string(&entries) {
-        let _ = std::fs::write(path, text);
-    }
+    let entries: BTreeMap<String, AddressSnapshot> = serde_json::from_str(&text)?;
+    let canonical = file.canonicalize()?;
+    Ok(entries
+        .get(&format!("{}|{}", canonical.display(), target.key()))
+        .or_else(|| entries.get(&format!("{}|{}", file.display(), target.key())))
+        .cloned())
+}
+
+fn save_baseline(file: &Path, target: &AddressTarget, snapshot: &AddressSnapshot) -> Result<()> {
+    let root = agent_doc_fs::find_project_root(file).context("no agent-doc project root")?;
+    let conn = state_store::open_state_db(&root)?;
+    // The first read owns the baseline. Concurrent captures of a second
+    // target or the same target must not erase an earlier observation.
+    conn.execute(
+        "INSERT INTO queue_document_state
+         (document_hash, state_kind, canonical_path, payload_json, updated_at_secs)
+         VALUES (?1, ?2, ?3, ?4, CAST(strftime('%s', 'now') AS INTEGER))
+         ON CONFLICT(document_hash, state_kind) DO NOTHING",
+        [
+            agent_doc_hash::path_hash(file)?,
+            baseline_kind(target),
+            file.canonicalize()?.to_string_lossy().into_owned(),
+            serde_json::to_string(snapshot)?,
+        ],
+    )?;
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -185,7 +228,7 @@ fn fetch_snapshot(target: &AddressTarget) -> Option<AddressSnapshot> {
     let head: HeadView = serde_json::from_str(&head_json).ok()?;
     let api = format!("repos/{repo}/pulls/{number}/comments");
     let comments_json = gh(&["api", "--paginate", api.as_str()], Duration::from_secs(8))?;
-    let comments = parse_comments(&comments_json);
+    let comments = parse_comments(&comments_json)?;
     let reply_ids = reply_ids(target, &comments);
     let comment_commit = target.discussion_id.and_then(|id| {
         comments
@@ -218,21 +261,15 @@ fn reply_ids(target: &AddressTarget, comments: &[GhComment]) -> Vec<u64> {
     ids
 }
 
-fn parse_comments(stdout: &str) -> Vec<GhComment> {
+fn parse_comments(stdout: &str) -> Option<Vec<GhComment>> {
     if let Ok(comments) = serde_json::from_str::<Vec<GhComment>>(stdout) {
-        return comments;
+        return Some(comments);
     }
     let mut all = Vec::new();
-    for line in stdout.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        if let Ok(comments) = serde_json::from_str::<Vec<GhComment>>(line) {
-            all.extend(comments);
-        }
+    for page in serde_json::Deserializer::from_str(stdout).into_iter::<Vec<GhComment>>() {
+        all.extend(page.ok()?);
     }
-    all
+    (!stdout.trim().is_empty()).then_some(all)
 }
 
 fn gh(args: &[&str], timeout: Duration) -> Option<String> {
@@ -245,24 +282,32 @@ fn gh(args: &[&str], timeout: Duration) -> Option<String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     let mut child = command.spawn().ok()?;
+    let mut pipe = child.stdout.take()?;
+    // Read while gh runs. Waiting for exit before draining stdout deadlocks
+    // a full pipe on a PR with enough discussion comments.
+    let reader = std::thread::spawn(move || {
+        let mut stdout = String::new();
+        pipe.read_to_string(&mut stdout).map(|_| stdout)
+    });
     let started = Instant::now();
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
-                let mut stdout = String::new();
-                if let Some(mut pipe) = child.stdout.take() {
-                    use std::io::Read;
-                    let _ = pipe.read_to_string(&mut stdout);
-                }
+                let stdout = reader.join().ok()?.ok()?;
                 return status.success().then_some(stdout);
             }
-            Ok(None) if started.elapsed() > timeout => {
-                let _ = child.kill();
-                let _ = child.wait();
+            Ok(None) if started.elapsed() <= timeout => {
+                std::thread::sleep(Duration::from_millis(40));
+            }
+            Ok(None) | Err(_) => {
+                if let Err(error) = child.kill() {
+                    eprintln!("[queue] could not stop GitHub observation: {error}");
+                }
+                if let Err(error) = child.wait() {
+                    eprintln!("[queue] could not reap GitHub observation: {error}");
+                }
                 return None;
             }
-            Ok(None) => std::thread::sleep(Duration::from_millis(40)),
-            Err(_) => return None,
         }
     }
 }
@@ -270,6 +315,71 @@ fn gh(args: &[&str], timeout: Duration) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_doc_queue::address_completion_proof::{
+        AddressCompletion, AddressProof, judge_address_completion,
+    };
+
+    #[test]
+    fn nested_address_uses_the_exact_parent_and_a_report_does_not_seed_its_baseline() {
+        let content = concat!(
+            "<!-- agent:run id=\"main\" subagents -->\n",
+            "- ### https://github.com/sample-org/sample-repo/pull/11\n",
+            "  - #address\n",
+            "- ### https://github.com/sample-org/sample-repo/pull/12\n",
+            "  - #address\n",
+            "<!-- /agent:run -->\n",
+        );
+        let targets = address_item_texts(content)
+            .iter()
+            .filter_map(|item| address_review_target(item))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            targets
+                .iter()
+                .map(|target| target.number)
+                .collect::<Vec<_>>(),
+            [11, 12],
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        std::fs::write(&file, content).unwrap();
+        let snapshot = |head: &str, reply_ids| AddressSnapshot {
+            head_sha: head.to_string(),
+            reply_ids,
+            comment_commit: None,
+            thread_named: false,
+        };
+        let before = snapshot("fa3a3f449986d565f21aeb6e0f792323bc8d1d58", vec![]);
+        let after = snapshot("31b6dd51595a26bc1c7d1c052a1ad8d614a949ff9", vec![23]);
+        assert_eq!(
+            judge_address_completion(&observe_snapshot(&file, &targets[0], after.clone()), None,),
+            AddressCompletion::NoEffect {
+                head: after.head_sha.clone(),
+            },
+        );
+        assert_eq!(load_baseline(&file, &targets[0]).unwrap(), None);
+
+        ensure_dispatch_baseline(&file, &targets[0], |_| Some(before.clone())).unwrap();
+        save_baseline(&file, &targets[1], &after).unwrap();
+        save_baseline(&file, &targets[0], &after).unwrap();
+        assert_eq!(
+            load_baseline(&file, &targets[1]).unwrap(),
+            Some(after.clone())
+        );
+        assert_eq!(
+            load_baseline(&file, &targets[0]).unwrap(),
+            Some(before.clone())
+        );
+        assert_eq!(
+            judge_address_completion(&observe_snapshot(&file, &targets[0], after.clone()), None,),
+            AddressCompletion::Proven(AddressProof::HeadChanged {
+                from: before.head_sha,
+                to: after.head_sha,
+            }),
+        );
+    }
 
     #[test]
     fn reply_ids_follow_the_named_discussion() {

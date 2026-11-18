@@ -258,7 +258,11 @@ pub(crate) fn sync_claims_with_conn(
             boot_id: previous
                 .map(|checkpoint| checkpoint.boot_id.clone())
                 .unwrap_or_else(|| boot_id.clone()),
-            phase: worker_phase(claim.state),
+            phase: if claim.replacement_pending() {
+                WorkerPhase::Completed
+            } else {
+                worker_phase(claim.state)
+            },
             artifact: previous.and_then(|checkpoint| checkpoint.artifact.clone()),
             updated_at_secs: now_secs,
         };

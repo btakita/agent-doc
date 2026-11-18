@@ -1921,6 +1921,7 @@ pub fn active_queue_prompt_diff(file: &Path) -> Result<Option<String>> {
         }
         Err(_) => prompt,
     };
+    agent_doc_queue_io::address_effect::capture_before_execution(file, &prompt)?;
     Ok(Some(diff::synthetic_added_lines_diff(&prompt, "queue")))
 }
 

@@ -605,6 +605,7 @@ fn run_action(
         bail!("this queue action does not accept a worker report");
     }
     if action.kind == Kind::Start && worker_id.is_none() {
+        agent_doc_queue_io::address_effect::capture_before_execution(file, &action.item)?;
         if let Some(receipt) = update_receipt(file, id, None, Receipt::SpawnReserved)? {
             return Ok(receipt);
         }

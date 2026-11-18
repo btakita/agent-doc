@@ -3057,6 +3057,20 @@ fn run_with_options_to_writer_in_pass(
     } else {
         preflight_read_projection.queue.selected_prompts.clone()
     };
+    if !options.probe && !no_changes {
+        let claimed = agent_doc_queue_io::queue_claim::ledger_claimed_items_for_content(
+            file,
+            queue_authoritative_content,
+        );
+        for head in &selected_queue_heads {
+            let submitted = agent_doc_queue::queue_response::submitted_continuation_prompt(
+                queue_authoritative_content,
+                head,
+                |row| claimed.claims(row),
+            );
+            agent_doc_queue_io::address_effect::capture_before_execution(file, &submitted)?;
+        }
+    }
     // `#qheadannotation`: surface operator text appended to a selected `do [#id]`
     // head as a typed directive instead of leaving it buried in the head string.
     let queue_head_annotations =

@@ -78,6 +78,7 @@ pub(crate) fn requeue_nonterminal_goal_hand_back(
         "report subagent completion",
         COMPLETION_FEEDBACK_LOCK_WAIT,
     )?;
+    let _apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let resolved =
         agent_doc_document_realtime_io::try_resolve_current_document_content(file, SOURCE)?;
     let current =

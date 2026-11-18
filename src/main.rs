@@ -10923,7 +10923,7 @@ fn try_main() -> anyhow::Result<()> {
                     agent_doc_queue_io::queue_cmd::project_claim_runtime_state_with_effects(
                         &queue_effects,
                         &file,
-                        Some(requeue.claim.item_text.as_str()),
+                        None,
                     )?;
                     if requeue.address_effect_unproven && !requeue.address_fix_pending {
                         eprintln!(
@@ -11421,6 +11421,23 @@ fn try_main() -> anyhow::Result<()> {
                     agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_item(
                         &file, &item,
                     )?;
+                // A crash can leave a reservation before the claim command
+                // finished its pre-spawn observation.
+                if agent_doc_queue_io::address_effect::github_enabled()
+                    && agent_doc_queue::address_completion_proof::address_review_target(
+                        &authorization.item,
+                    )
+                    .is_some()
+                    && let Some(claim) = agent_doc_queue_io::queue_claim::load_ledger(&file)?
+                        .resolve_selector(&authorization.item)?
+                    && claim.state == agent_doc_queue::queue_claim::QueueClaimState::Claimed
+                    && claim.worker.is_none()
+                {
+                    agent_doc_queue_io::address_effect::capture_before_execution(
+                        &file,
+                        &claim.item_text,
+                    )?;
+                }
                 if json {
                     println!("{}", serde_json::to_string_pretty(&authorization)?);
                 } else {

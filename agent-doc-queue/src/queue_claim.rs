@@ -509,7 +509,9 @@ pub fn diagnose_lifecycle(
     now_secs: u64,
     dispatch_grace_secs: u64,
 ) -> Option<QueueLifecycleDiagnosis> {
-    let expected = if claim.retains_frozen_worker_claim()
+    let expected = if claim.replacement_pending() {
+        agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+    } else if claim.retains_frozen_worker_claim()
         || claim.state == QueueClaimState::Lost
         || crate::lost_running_recovery::authorized_running_requeue(claim)
     {
@@ -520,6 +522,7 @@ pub fn diagnose_lifecycle(
         claim.projection_marker()
     };
     let worker_liveness = match claim.state {
+        QueueClaimState::Running if claim.frozen.is_some() => WorkerLivenessEvidence::Absent,
         QueueClaimState::Running | QueueClaimState::Reported => WorkerLivenessEvidence::Proven,
         QueueClaimState::Lost | QueueClaimState::QuotaBlocked => WorkerLivenessEvidence::Absent,
         QueueClaimState::Claimed if claim.is_expired(now_secs) => WorkerLivenessEvidence::Absent,
@@ -658,11 +661,20 @@ impl QueueClaim {
         &self,
         worker_not_running: bool,
     ) -> agent_doc_document::queue_projection::QueueLifecycleMarker {
-        if self.state == QueueClaimState::Running && worker_not_running {
+        if self.replacement_pending() {
+            agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+        } else if self.state == QueueClaimState::Running && worker_not_running {
             agent_doc_document::queue_projection::QueueLifecycleMarker::Lost
         } else {
             self.projection_marker()
         }
+    }
+
+    /// The old generation stays in the ledger as audit and fencing evidence.
+    /// Recorded abandonment and failed continuation leave a replacement owed.
+    pub fn replacement_pending(&self) -> bool {
+        crate::lost_running_recovery::authorized_running_requeue(self)
+            && crate::lost_running_recovery::retry_authorized(self)
     }
 
     /// Whether a `Running` attempt's worker is positively not running.

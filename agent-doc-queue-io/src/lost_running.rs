@@ -59,6 +59,38 @@ pub fn recover_lost_running_automatically(
     })
 }
 
+/// A rejected worker hand-back already authorized requeue for one generation.
+/// Settle only that abandonment before its caller projects the live row.
+pub(crate) fn settle_requeued_attempt(
+    file: &Path,
+    attempt: &agent_doc_queue::queue_claim::QueueClaim,
+) -> Result<()> {
+    let now = crate::queue_claim::claim_clock_now_secs();
+    if !lost_running_recovery::authorized_running_requeue(attempt) {
+        return Ok(());
+    }
+    crate::queue_claim::mutate_ledger(file, |ledger| {
+        let Some(current) = ledger.claims.iter_mut().find(|claim| {
+            claim.identity == attempt.identity
+                && claim.owner == attempt.owner
+                && claim.generation == attempt.generation
+                && claim.worker == attempt.worker
+        }) else {
+            return Ok(());
+        };
+        if lost_running_recovery::authorized_running_requeue(current) {
+            lost_running_recovery::recover_claims(
+                std::slice::from_mut(current),
+                now,
+                agent_doc_queue::queue_claim::DEFAULT_QUEUE_CLAIM_TTL_SECS,
+                true,
+                &mut |claim| lost_running_recovery::default_continue_attempt(claim, now),
+            );
+        }
+        Ok(())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

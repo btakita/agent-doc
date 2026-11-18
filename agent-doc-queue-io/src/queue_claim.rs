@@ -3009,6 +3009,12 @@ pub fn reported_closeout_obligations_for_content(
 fn claim_assessment(claim: &QueueClaim, owner_session_state: &str) -> (&'static str, String) {
     use agent_doc_queue::queue_claim::QueueClaimState;
 
+    if claim.replacement_pending() {
+        return (
+            "replacement_pending",
+            "This generation was requeued and cannot be continued. Its hand-back, when recorded, remains in the queue brief.".to_string(),
+        );
+    }
     match claim.state {
         QueueClaimState::Lost => (
             "lost",

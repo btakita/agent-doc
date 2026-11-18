@@ -761,7 +761,10 @@ fn derive_runtime_projection_scoped(
                     {
                         return None;
                     }
-                    let visible_attempt = attempt.filter(|_| !externally_blocked);
+                    let visible_attempt = attempt.filter(|attempt| {
+                        !externally_blocked
+                            && attempt.marker != agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+                    });
                     let owner = visible_attempt
                         .map(|attempt| agent_doc_document::queue_projection::QueueOwnerProjection {
                             owner: attempt.owner.clone(),
@@ -1209,14 +1212,24 @@ fn claim_with_runtime_projection_under_apply_guard(
         .claims
         .iter()
         .find(|previous| previous.identity == claim.identity);
-    let projection = project_claim_item_runtime_state_under_apply_guard(
-        effects,
-        file,
-        &claim.item_text,
-        false,
-        apply_guard,
-    )
-    .and_then(|_| verify_claim_admission_visible(effects, file, &claim));
+    let dispatch_baseline = if claim.worker.is_none()
+        && claim.state == agent_doc_queue::queue_claim::QueueClaimState::Claimed
+        && claim.owner.starts_with("subagent:")
+    {
+        crate::address_effect::capture_before_execution(file, &claim.item_text)
+    } else {
+        Ok(())
+    };
+    let projection = dispatch_baseline.and_then(|()| {
+        project_claim_item_runtime_state_under_apply_guard(
+            effects,
+            file,
+            &claim.item_text,
+            false,
+            apply_guard,
+        )
+        .and_then(|_| verify_claim_admission_visible(effects, file, &claim))
+    });
     if let Err(projection_error) = projection {
         let rollback = crate::queue_claim::rollback_unstarted_admission(file, &claim, previous);
         // `#waitingitemclaimmarker`: a deterministic blocker terminalizes this
@@ -1242,7 +1255,7 @@ fn claim_with_runtime_projection_under_apply_guard(
         });
         return match (rollback, repair) {
             (Ok(()), None) => Err(projection_error).context(
-                "queue claim admission was rolled back because its Claimed projection was not acknowledged; no worker may be spawned",
+                "queue claim admission was rolled back; no worker may be spawned",
             ),
             (Ok(()), Some(repair_error)) => Err(projection_error).context(format!(
                 "queue claim admission was rolled back because its Claimed projection was not acknowledged; marker repair also failed: {repair_error:#}; no worker may be spawned"
@@ -4407,6 +4420,98 @@ mod tests {
                 .claims
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn rejected_nested_address_stays_pending_through_repair_and_fences_the_old_worker() {
+        let dir = tempfile::tempdir().unwrap();
+        let url = "https://github.com/sample-org/sample-repo/pull/11";
+        let item = format!("{url}: #address");
+        let doc =
+            write_named_claim_projection_doc(dir.path(), &format!("- ### {url}\n  - #address\n"));
+        std::fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            "---\npresets:\n  '#address': 'Address every actionable review item on the current head.'\n---\n",
+        )
+        .unwrap();
+        let effects = FakeEffects::default();
+        let (_, first) =
+            claim_with_runtime_projection(&effects, &doc, &item, "subagent:first", 600).unwrap();
+        crate::queue_claim::start_attempt(
+            &doc,
+            &item,
+            "subagent:first",
+            "worker:first",
+            600,
+            first.generation,
+        )
+        .unwrap();
+        project_claim_item_runtime_state_with_effects(&effects, &doc, &item, false).unwrap();
+        let running = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            running.contains("  - 🚧 [#subagent:first#1] #address"),
+            "{running}"
+        );
+
+        let hand_back = "NO-WRITTEN-FIX head=fa3a3f449986d565f21aeb6e0f792323bc8d1d58\n\
+             INLINE-THREADS-LOADED 0 head=fa3a3f449986d565f21aeb6e0f792323bc8d1d58";
+        let requeued = crate::goal_loop_handoff::requeue_nonterminal_hand_back(
+            &doc,
+            &running,
+            &item,
+            Some(first.generation),
+            hand_back,
+        )
+        .unwrap()
+        .expect("the remote effect is unproven");
+        assert!(requeued.address_effect_unproven);
+        let offered =
+            crate::subagent_dispatch::pending_subagent_dispatch_for_content(&doc, &running)
+                .unwrap();
+        assert_eq!(offered.len(), 1, "{offered:?}");
+        assert!(
+            offered[0] == item || offered[0] == "#address",
+            "{offered:?}"
+        );
+
+        let repair = derive_claim_runtime_projection(&doc, &running, None).unwrap();
+        assert!(
+            repair.target_content.contains("  - 📥 #address"),
+            "{}",
+            repair.target_content
+        );
+        assert!(!repair.target_content.contains("[#subagent:first#1]"));
+        let reports =
+            crate::queue_claim::claim_reports_for_content(&doc, &repair.target_content).unwrap();
+        assert_eq!(reports[0].assessment, "replacement_pending");
+        assert_eq!(reports[0].visible_projection_state, "synchronized");
+        let brief = crate::subagent_dispatch::subagent_authorization_for_item(&doc, &item).unwrap();
+        assert!(brief.subagent_prompt_preamble.contains("NO-WRITTEN-FIX"));
+        assert!(
+            brief
+                .subagent_prompt_preamble
+                .contains("Prior address attempt")
+        );
+
+        let (_, next) =
+            claim_with_runtime_projection(&effects, &doc, &item, "subagent:second", 600).unwrap();
+        assert_eq!(next.generation, first.generation + 1);
+        let current = std::fs::read_to_string(&doc).unwrap();
+        let late = crate::goal_loop_handoff::requeue_nonterminal_hand_back(
+            &doc,
+            &current,
+            &item,
+            Some(first.generation),
+            "late hand-back",
+        )
+        .unwrap_err();
+        assert!(late.to_string().contains("stale queue claim generation"));
+        let stored = crate::queue_claim::load_ledger(&doc)
+            .unwrap()
+            .claims
+            .remove(0);
+        assert_eq!(stored.owner, next.owner);
+        assert_eq!(stored.generation, next.generation);
     }
 
     #[test]

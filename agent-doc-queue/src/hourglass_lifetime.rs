@@ -6,12 +6,14 @@
 //! id is the checked todo, and a free-text follow-up's first `#` token is
 //! often a different id. This pass reads the reserved request annotation, the
 //! row's own stable id when a todo owns it, a checked todo source locator,
-//! exact follow-up action text, and an already-struck copy of the same
-//! follow-up.
+//! exact follow-up action text, an already-struck copy of the same follow-up,
+//! a checked backlog, review, icebox, or done-archive item, and an inline
+//! operator answer once every request the row tracks is no longer open.
 //!
 //! A plain `[operator-verify]` row with none of that evidence stays. Two
 //! still-open copies stay. An open todo or an open backlog item keeps the
-//! row. A live claim
+//! row. A checked request does not strike different work that was only
+//! waiting on the decision. A live claim
 //! (`🟡`/`🚧`/`☑️`/`⚠️`/`⛔`) stays. The second call is a no-op.
 //!
 //! [`crate::queue_sync_payload::HOURGLASS_RESOLVE_GUIDANCE`] still tells the
@@ -32,7 +34,7 @@ use agent_doc_element_queue::{queue_head_identity, queue_prompt_stable_id, struc
 
 use crate::document_queue::{self, QueueEntry};
 use crate::followup_owner;
-use crate::queue_continuation::head_awaits_operator_inline;
+use crate::queue_continuation::{head_awaits_operator_inline, head_carries_operator_verdict};
 
 /// Document after a lifetime strike.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,6 +110,8 @@ struct Evidence {
     checked_actions: HashSet<String>,
     open_sources: HashSet<String>,
     checked_sources: HashSet<String>,
+    /// Reserved request ids that already have an operator answer row.
+    answered: HashSet<String>,
 }
 
 impl Evidence {
@@ -141,15 +145,89 @@ impl Evidence {
             }
             checked_sources.extend(queue_source_ids(action));
         }
-        Self {
+        let mut evidence = Self {
             open,
             checked,
             open_actions,
             checked_actions,
             open_sources,
             checked_sources,
+            answered: answered_request_ids(content),
+        };
+        record_checked_tracked_work(content, &mut evidence);
+        evidence
+    }
+}
+
+/// A checked backlog, review, icebox, or done-archive row is the same
+/// completion evidence as a checked todo. An id that is still open is not
+/// checked. An open backlog row's action stays open work.
+fn record_checked_tracked_work(content: &str, evidence: &mut Evidence) {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return;
+    };
+    for component in &components {
+        let done_archive = agent_doc_element::element::is_backlog_done_component(&component.name);
+        let tracked = agent_doc_element::element::is_tracked_work_component(&component.name);
+        if !done_archive && !tracked {
+            continue;
+        }
+        let (_, items, _) =
+            agent_doc_element_backlog::backlog::parse_items(component.content(content));
+        for item in items {
+            let id = item.id.to_ascii_lowercase();
+            if id.is_empty() {
+                continue;
+            }
+            let done = item.is_done();
+            if done_archive && !done {
+                continue;
+            }
+            if !done {
+                if agent_doc_element::element::is_backlog_component(&component.name) {
+                    let norm = normalize_action(&item.text);
+                    if !norm.is_empty() {
+                        evidence.open_actions.insert(norm);
+                    }
+                    evidence.open_sources.extend(queue_source_ids(&item.text));
+                }
+                continue;
+            }
+            if evidence.open.contains(&id) {
+                continue;
+            }
+            evidence.checked.insert(id);
+            let norm = normalize_action(&item.text);
+            if !norm.is_empty() {
+                evidence.checked_actions.insert(norm);
+            }
+            evidence
+                .checked_sources
+                .extend(queue_source_ids(&item.text));
         }
     }
+}
+
+fn answered_request_ids(content: &str) -> HashSet<String> {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return HashSet::new();
+    };
+    let Ok(queues) = crate::queue_set::QueueSet::parse(content, &components) else {
+        return HashSet::new();
+    };
+    let mut ids = HashSet::new();
+    for block in queues.blocks() {
+        for entry in &block.entries {
+            let text = match entry {
+                QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => &prompt.text,
+                _ => continue,
+            };
+            if let Some(id) = operator_answer_row_request_id(text) {
+                ids.insert(id);
+            }
+        }
+    }
+    ids
 }
 
 fn mark_matches(
@@ -223,11 +301,20 @@ fn completion_or_moot(text: &str, evidence: &Evidence) -> bool {
             return true;
         }
     }
+    // The operator answered this follow-up. An open request above already
+    // kept the row. An answer row for a request that is no longer open, or
+    // an inline verdict, means the wait itself is finished.
+    let reserved = operator_request_annotation_ids(text);
+    if followup_action(text).is_some()
+        && (head_carries_operator_verdict(text)
+            || reserved.iter().any(|id| evidence.answered.contains(id)))
+    {
+        return true;
+    }
     // A follow-up that only cites a reserved request is moot once that request
     // is neither an open nor a checked tracked item. The request row itself
     // (`choose repository access [#subagent-operator-request-…]`) is the wait,
     // not a follow-up, and stays.
-    let reserved = operator_request_annotation_ids(text);
     followup_action(text).is_some()
         && !reserved.is_empty()
         && reserved
@@ -357,6 +444,49 @@ fn strip_source_locators(action: &str) -> String {
     out
 }
 
+/// Drop a trailing inline operator verdict so an answered follow-up keys
+/// with the still-open copies of the same row.
+fn strip_inline_verdict(text: &str) -> String {
+    let Some(colon) = inline_verdict_colon(text) else {
+        return text.to_string();
+    };
+    text[..colon].trim_end().to_string()
+}
+
+fn inline_verdict_colon(text: &str) -> Option<usize> {
+    let tag = followup_owner::OPERATOR_OWNED_TAG;
+    let lower = text.to_ascii_lowercase();
+    if let Some(tag_at) = lower.rfind(tag) {
+        let after = &text[tag_at + tag.len()..];
+        let trimmed = after.trim_start();
+        let base = tag_at + tag.len() + (after.len() - trimmed.len());
+        if trimmed.starts_with(':') {
+            return Some(base);
+        }
+        let start = trimmed.find("[#")?;
+        let bracket = &trimmed[start + 2..];
+        let end = bracket.find(']')?;
+        let rest = &bracket[end + 1..];
+        let rest_trim = rest.trim_start();
+        if rest_trim.starts_with(':') {
+            return Some(base + start + 2 + end + 1 + (rest.len() - rest_trim.len()));
+        }
+        return None;
+    }
+    let start = text.rfind("[#")?;
+    let bracket = &text[start + 2..];
+    let end = bracket.find(']')?;
+    let id = &bracket[..end];
+    if !(id.starts_with("q-") || is_reserved_operator_action_id(id)) {
+        return None;
+    }
+    let rest = &bracket[end + 1..];
+    let rest_trim = rest.trim_start();
+    rest_trim
+        .starts_with(':')
+        .then_some(start + 2 + end + 1 + (rest.len() - rest_trim.len()))
+}
+
 fn strip_operator_verify(text: &str) -> String {
     let tag = followup_owner::OPERATOR_OWNED_TAG;
     let lower = text.to_ascii_lowercase();
@@ -425,6 +555,7 @@ fn queue_source_ids(action: &str) -> Vec<String> {
 
 fn followup_lifetime_key(text: &str) -> Option<String> {
     let bare = agent_doc_element_queue::strip_priority_markers(text);
+    let bare = strip_inline_verdict(&bare);
     let bare = strip_operator_verify(&bare);
     let bare = agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(&bare);
     let bare = strip_correlation_ids(&bare);
@@ -738,5 +869,131 @@ mod tests {
             "- [x] [#subagent-operator-request-x] decide the release\n",
         );
         assert!(strike_completed_hourglass_rows(&doc).unwrap().is_none());
+    }
+
+    fn sections(queue: &str, todo: &str, backlog: &str, done: &str) -> String {
+        format!(
+            "<!-- agent:queue -->\n{queue}<!-- /agent:queue -->\n<!-- agent:todo -->\n{todo}<!-- /agent:todo -->\n<!-- agent:backlog -->\n{backlog}<!-- /agent:backlog -->\n<!-- agent:done -->\n{done}<!-- /agent:done -->\n"
+        )
+    }
+
+    /// An answered or checked follow-up leaves the live queue. A follow-up
+    /// whose request is still open stays, including when the operator has
+    /// already written an answer beside that open request.
+    #[test]
+    fn answered_or_checked_followup_is_cleared_and_an_open_followup_stays() {
+        let answered = document(
+            "- ### ⏳ follow up on an action item from `origin`: operator: approve the release [operator-verify] [#q-1]: shipped\n- ### ⏳ follow up on an action item from `origin`: operator: approve the release [operator-verify] [#q-2]\n",
+            "",
+        );
+        let struck = strike_completed_hourglass_rows(&answered)
+            .unwrap()
+            .expect("an inline answer clears the follow-up and its open copy");
+        assert_eq!(
+            states(&struck.content)
+                .iter()
+                .filter(|(live, _)| *live)
+                .count(),
+            0
+        );
+        assert!(
+            strike_completed_hourglass_rows(&struck.content)
+                .unwrap()
+                .is_none()
+        );
+
+        let checked = sections(
+            "- ### ⏳ follow up on an action item from `origin`: operator: approve the release [operator-verify] [#subagent-operator-request-x]\n- ### 📥 do [#keep]\n",
+            "",
+            "- [x] [#subagent-operator-request-x] approve the release\n",
+            "",
+        );
+        let struck = strike_completed_hourglass_rows(&checked)
+            .unwrap()
+            .expect("a checked backlog request clears the follow-up");
+        assert_struck(&struck.content, "subagent-operator-request-x");
+        assert_live(&struck.content, "do [#keep]");
+
+        let archived = sections(
+            "- ### ⏳ follow up on an action item from `origin`: operator: land the readme [operator-verify] [#q-readme]\n",
+            "",
+            "",
+            "- [x] [#readme-done] land the readme\n",
+        );
+        let struck = strike_completed_hourglass_rows(&archived)
+            .unwrap()
+            .expect("a done-archive action clears the matching follow-up");
+        assert_struck(&struck.content, "land the readme");
+
+        let open = sections(
+            "- ### ⏳ follow up on an action item from `origin`: operator: approve the release [#subagent-operator-request-x]: I approve\n",
+            "",
+            "- [ ] [#subagent-operator-request-x] approve the release\n",
+            "",
+        );
+        assert!(
+            strike_completed_hourglass_rows(&open).unwrap().is_none(),
+            "an open request keeps the follow-up even after an inline answer"
+        );
+
+        let untouched = document(
+            "- ### ⏳ follow up on an action item from `origin`: operator: approve the release [operator-verify] [#q-open]\n",
+            "",
+        );
+        assert!(
+            strike_completed_hourglass_rows(&untouched)
+                .unwrap()
+                .is_none()
+        );
+
+        let answer_row = sections(
+            "- ### ⏳ follow up on an action item from `origin`: operator: approve the release [operator-verify] [#subagent-operator-request-gone]\n- [#subagent-operator-request-gone]: shipped\n",
+            "",
+            "",
+            "",
+        );
+        let struck = strike_completed_hourglass_rows(&answer_row)
+            .unwrap()
+            .expect("an answer row clears the follow-up once its request is gone");
+        assert_struck(&struck.content, "approve the release");
+        assert_live(&struck.content, "shipped");
+    }
+
+    #[test]
+    fn open_backlog_request_keeps_the_row_and_a_checked_request_does_not_strike_other_work() {
+        let open = sections(
+            "- ### ⏳ do the release [#subagent-operator-request-x]\n",
+            "",
+            "- [ ] [#subagent-operator-request-x] decide the release\n",
+            "",
+        );
+        assert!(
+            strike_completed_hourglass_rows(&open).unwrap().is_none(),
+            "an open backlog request keeps the hourglass row"
+        );
+
+        let other = sections(
+            "- ### ⏳ Persist the session [#subagent-operator-request-x]\n- ### 📥 do [#keep]\n",
+            "- [x] [#subagent-operator-request-x] decide the release\n",
+            "",
+            "",
+        );
+        assert!(
+            strike_completed_hourglass_rows(&other).unwrap().is_none(),
+            "different work that was only waiting on a checked request stays"
+        );
+
+        let backlog_other = sections(
+            "- ### ⏳ Persist the session [#subagent-operator-request-z]\n",
+            "",
+            "- [x] [#subagent-operator-request-z] decide the release\n",
+            "",
+        );
+        assert!(
+            strike_completed_hourglass_rows(&backlog_other)
+                .unwrap()
+                .is_none(),
+            "a checked backlog request does not strike different waiting work"
+        );
     }
 }

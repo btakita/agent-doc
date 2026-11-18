@@ -1940,6 +1940,9 @@ impl LiveClearScenario {
                 .position(|line| line.contains("esc to interrupt"))
                 .is_some_and(|row| row >= 30)
         });
+        self.wait_until("the dispatched trigger is durably recorded", || {
+            submitted_lines(self) == [format!("/agent-doc {DOC}")]
+        });
         let before = submitted_lines(self);
         self.type_into_composer(draft);
         before
@@ -1974,13 +1977,8 @@ fn no_route_into_a_running_turn_types_onto_a_draft() {
             "{args:?}\n{diagnostics}"
         );
         assert!(routed.status.success(), "{args:?}\n{diagnostics}");
-        let expected_outcome = if args.contains(&"--dispatch-only") {
-            "ui_outcome=deferred_for_operator_proof"
-        } else {
-            "ui_outcome=steering_delivered_to_owner"
-        };
         assert!(
-            stderr(&routed).contains(expected_outcome),
+            stderr(&routed).contains("ui_outcome=steering_delivered_to_owner"),
             "{args:?}\n{diagnostics}"
         );
     }

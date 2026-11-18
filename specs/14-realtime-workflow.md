@@ -3797,6 +3797,22 @@ not added and does not refuse.
 
 ### Merge cost bound
 
+Queue lifecycle projection is a stricter CRDT operation than a general text
+replacement. Given source document `S`, projected target `T`, and the changed
+component set `C`, the controller must carry `C` to the relay; every emitted
+edit has support inside `C`. When removing binary lifecycle prefixes from the
+corresponding lines of a component makes their bodies identical, the relay must
+diff each line independently. For every such line `i`, the support of its edit
+is confined to line `i`; it cannot tombstone or reinsert a sibling line `j`.
+This positional identity rule avoids ambiguous sequence alignment when queue
+prompts repeat or share long prefixes (`#queueprojectionlineage`).
+
+Consequently, an operator edit `O` whose support is outside a changed lifecycle
+prefix commutes with the projection `P`: `P(O(S)) = O(P(S))`, and the operator
+lineage occurs exactly once. A general component diff remains the fallback when
+the stripped bodies do not prove positional identity. A declared component
+scope still refuses a target that changes text outside that scope.
+
 A CRDT merge runs inside the document's serialized write owner (the session
 actor), so its cost is a liveness property: every write queued behind it waits.
 Replaying a diff onto the text CRDT must cost one visible-order projection per

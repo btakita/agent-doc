@@ -460,6 +460,108 @@ fn minimal_char_span_edits(current: &str, content: &str) -> Result<Vec<(u32, u32
     Ok(edits)
 }
 
+/// Derive position-preserving edits when a component changed only by queue
+/// lifecycle markers.
+///
+/// Repeated prompts make a line-level Myers diff ambiguous: it may align an
+/// updated row with a later near-duplicate and express a one-glyph marker
+/// transition as a large delete/reinsert. In a CRDT that broad tombstone can
+/// intersect a concurrent editor insertion and fork the operator's text onto a
+/// second lineage. Stripping lifecycle markers gives us a stronger identity
+/// proof: when the stripped bodies are byte-identical, every line has the same
+/// non-lifecycle payload at the same position. Diffing each corresponding line
+/// independently is therefore complete and cannot reach a sibling row.
+fn lifecycle_marker_only_char_span_edits(
+    current: &str,
+    content: &str,
+) -> Result<Option<Vec<(u32, u32, String)>>> {
+    let current_lines = split_lines_inclusive(current);
+    let content_lines = split_lines_inclusive(content);
+    if current_lines.len() != content_lines.len() {
+        return Ok(None);
+    }
+
+    fn without_projection_prefix(line: &str) -> Option<String> {
+        let indent_end = line
+            .find(|ch| ch != ' ' && ch != '\t')
+            .unwrap_or(line.len());
+        let rest = &line[indent_end..];
+        let marker = rest.chars().next()?;
+        if !matches!(marker, '-' | '*' | '+') {
+            return None;
+        }
+        let mut payload_start = indent_end + marker.len_utf8();
+        let whitespace = line[payload_start..]
+            .find(|ch| ch != ' ' && ch != '\t')
+            .unwrap_or(line.len() - payload_start);
+        if whitespace == 0 {
+            return None;
+        }
+        payload_start += whitespace;
+
+        // Backlog/run rows may have a Markdown task checkbox between the list
+        // marker and the lifecycle prefix. It is structural, not projection.
+        let payload = &line[payload_start..];
+        if payload.len() >= 3
+            && payload.as_bytes()[0] == b'['
+            && payload.as_bytes()[2] == b']'
+            && matches!(payload.as_bytes()[1], b' ' | b'x' | b'X' | b'/')
+        {
+            let checkbox_end = payload_start + 3;
+            let checkbox_space = line[checkbox_end..]
+                .find(|ch| ch != ' ' && ch != '\t')
+                .unwrap_or(line.len() - checkbox_end);
+            if checkbox_space > 0 {
+                payload_start = checkbox_end + checkbox_space;
+            }
+        }
+
+        let stripped =
+            agent_doc_element_queue::strip_attempt_projection_prefix(&line[payload_start..]);
+        Some(format!("{}{}", &line[..payload_start], stripped))
+    }
+
+    if current_lines
+        .iter()
+        .zip(content_lines.iter())
+        .any(|(before, after)| {
+            before != after
+                && match (
+                    without_projection_prefix(before),
+                    without_projection_prefix(after),
+                ) {
+                    (Some(before), Some(after)) => before != after,
+                    _ => true,
+                }
+        })
+    {
+        return Ok(None);
+    }
+
+    let mut edits = Vec::new();
+    let mut base = 0u32;
+    for (before, after) in current_lines.iter().zip(content_lines.iter()) {
+        for (offset, delete_len, insert) in minimal_char_span_edits(before, after)? {
+            edits.push((
+                base.checked_add(offset)
+                    .ok_or_else(|| anyhow!("canonical edit offset exceeds CRDT codepoint range"))?,
+                delete_len,
+                insert,
+            ));
+        }
+        let line_chars: u32 = before
+            .chars()
+            .count()
+            .try_into()
+            .map_err(|_| anyhow!("canonical edit offset exceeds CRDT codepoint range"))?;
+        base = base
+            .checked_add(line_chars)
+            .ok_or_else(|| anyhow!("canonical edit offset exceeds CRDT codepoint range"))?;
+    }
+    edits.sort_unstable_by_key(|edit| std::cmp::Reverse(edit.0));
+    Ok(Some(edits))
+}
+
 /// Recover the visible insertion strings carried by one text-CRDT delta.
 ///
 /// Existing characters appear in a delta only when their tombstone changed, so
@@ -570,7 +672,11 @@ fn component_scoped_char_span_edits(
         let base: u32 = char_offset_of(current, current_body.start)
             .try_into()
             .map_err(|_| anyhow!("canonical edit offset exceeds CRDT codepoint range"))?;
-        for (offset, delete_len, insert) in minimal_char_span_edits(before, after)? {
+        let body_edits = match lifecycle_marker_only_char_span_edits(before, after)? {
+            Some(edits) => edits,
+            None => minimal_char_span_edits(before, after)?,
+        };
+        for (offset, delete_len, insert) in body_edits {
             edits.push((
                 base.checked_add(offset)
                     .ok_or_else(|| anyhow!("canonical edit offset exceeds CRDT codepoint range"))?,
@@ -4705,6 +4811,94 @@ mod tests {
                 "edit ({offset}, {delete_len}) escaped the queue body [{first}, {last})"
             );
         }
+    }
+
+    #[test]
+    fn lifecycle_projection_edits_only_the_corresponding_repeated_row_prefixes() {
+        const WORK: &str =
+            "follow up on an action item from a modeling paper review and record the result";
+        let before = format!(
+            "- {WORK}: inspect the model.\n- {WORK}: inspect the model carefully.\n- operator draft beside the repeated rows.\n"
+        );
+        let after = format!(
+            "- 🟡 [#worker-a#1] {WORK}: inspect the model.\n- 🚧 [#worker-b#2] {WORK}: inspect the model carefully.\n- operator draft beside the repeated rows.\n"
+        );
+
+        let edits = lifecycle_marker_only_char_span_edits(&before, &after)
+            .unwrap()
+            .expect("only binary lifecycle prefixes changed");
+
+        let first_payload = char_offset_of(&before, before.find(WORK).unwrap()) as u32;
+        let second_row_byte = before.find(&format!("\n- {WORK}: inspect")).unwrap() + 1;
+        let second_row = char_offset_of(&before, second_row_byte) as u32;
+        let second_payload = second_row + 2;
+        for (offset, delete_len, _) in &edits {
+            let end = offset + delete_len;
+            assert!(
+                (*offset <= first_payload && end <= first_payload)
+                    || (*offset >= second_row && end <= second_payload),
+                "lifecycle edit ({offset}, {delete_len}) reached a prompt payload or sibling row: \
+                 {edits:?}"
+            );
+        }
+
+        let mut rebuilt = before.clone();
+        for (offset, delete_len, insert) in edits {
+            let start = rebuilt
+                .char_indices()
+                .nth(offset as usize)
+                .map_or(rebuilt.len(), |(byte, _)| byte);
+            let end = rebuilt
+                .char_indices()
+                .nth((offset + delete_len) as usize)
+                .map_or(rebuilt.len(), |(byte, _)| byte);
+            rebuilt.replace_range(start..end, &insert);
+        }
+        assert_eq!(rebuilt, after);
+    }
+
+    #[test]
+    fn concurrent_operator_text_survives_a_repeated_row_lifecycle_projection_once() {
+        const WORK: &str =
+            "follow up on an action item from a modeling paper review and record the result";
+        let base = format!(
+            "<!-- agent:queue -->\n- {WORK}: inspect the model.\n- {WORK}: inspect the model carefully.\n- operator draft beside the repeated rows.\n<!-- /agent:queue -->\n"
+        );
+        let projected = format!(
+            "<!-- agent:queue -->\n- 🟡 [#worker-a#1] {WORK}: inspect the model.\n- 🚧 [#worker-b#2] {WORK}: inspect the model carefully.\n- operator draft beside the repeated rows.\n<!-- /agent:queue -->\n"
+        );
+        let mut hub = RelayHub::from_text(1, &base);
+        hub.register(2).unwrap();
+        let editor = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        let editor_frontier = editor.state_vector();
+
+        let scope = queue_scope();
+        hub.apply_canonical_replace_scoped(&base, &projected, Some(&scope))
+            .unwrap();
+
+        let caret = base.find(" carefully.\n").unwrap() + " carefully.".len();
+        editor.apply_local_edit(
+            char_offset_of(&base, caret) as u32,
+            0,
+            " operator amendment",
+        );
+        let update = editor.diff(&editor_frontier).unwrap();
+        hub.relay_update(2, &update).unwrap();
+
+        let canonical = hub.canonical_text();
+        assert_eq!(
+            canonical.matches("operator amendment").count(),
+            1,
+            "{canonical}"
+        );
+        assert_eq!(canonical.matches("[#worker-a#1]").count(), 1, "{canonical}");
+        assert_eq!(canonical.matches("[#worker-b#2]").count(), 1, "{canonical}");
+        assert_eq!(
+            canonical.matches("operator draft beside").count(),
+            1,
+            "{canonical}"
+        );
+        assert_eq!(canonical.matches(WORK).count(), 2, "{canonical}");
     }
 
     #[test]

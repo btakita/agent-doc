@@ -136,8 +136,10 @@ fn pool_refill_for_content_at_for_harness(
     let (plan, pools) =
         crate::subagent_dispatch::queue_attr_subagent_plan_and_pools(file, content)?;
     let frozen_bound = frozen_secs();
+    let review_blockers = agent_doc_queue::prompt_pressure::review_blocked_prompts(content);
     let unstarted = crate::queue_claim::active_claims_for_content(file, content)?
         .into_iter()
+        .filter(|claim| !review_blockers.holds_external(&claim.item_text))
         .filter(|claim| {
             agent_doc_queue::queue_claim::dispatch_evidence_missing(
                 claim,
@@ -161,6 +163,7 @@ fn pool_refill_for_content_at_for_harness(
     let claim_states = crate::queue_claim::claim_states_for_content(file, content)?;
     let refresh_due = claim_states
         .iter()
+        .filter(|claim| !review_blockers.holds_external(&claim.item_text))
         .filter(|claim| {
             agent_doc_queue::subagent_pool::heartbeat_due(claim, now_secs, frozen_bound)
         })
@@ -254,6 +257,7 @@ fn pool_refill_for_content_at_for_harness(
         .collect::<Vec<_>>();
     let frozen = claim_states
         .into_iter()
+        .filter(|claim| !review_blockers.holds_external(&claim.item_text))
         .filter_map(|claim| {
             let frozen =
                 agent_doc_queue::subagent_pool::worker_frozen(&claim, now_secs, frozen_bound)?;

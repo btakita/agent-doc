@@ -66,6 +66,13 @@ pub(crate) fn requeue_nonterminal_goal_hand_back(
     generation: Option<u64>,
     response: &str,
 ) -> Result<Option<agent_doc_queue_io::goal_loop_handoff::GoalLoopRequeue>> {
+    // Explicit external evidence is a held prompt, even when the goal preset
+    // normally retries an incomplete hand-back.
+    if agent_doc_queue::prompt_pressure::parse_prompt_blocker(response)
+        .is_some_and(|blocker| blocker.evidence.is_some())
+    {
+        return Ok(None);
+    }
     let _lock = acquire_completion_lock(
         file,
         "report subagent completion",
@@ -89,6 +96,7 @@ pub(crate) struct PromptPressureRequeue {
     pub kind: agent_doc_queue::goal_preset_terminal::PromptPressureKind,
     /// Set when the hand-back was a review structure.
     pub review_id: Option<String>,
+    pub external_evidence: Option<String>,
     pub incomplete: String,
     pub complete_by: String,
 }
@@ -123,6 +131,14 @@ pub(crate) fn requeue_prompt_pressure_hand_back(
     if !claim.owner.starts_with("subagent:") {
         return Ok(None);
     }
+    let blocker = agent_doc_queue::prompt_pressure::parse_prompt_blocker(response);
+    let external = blocker
+        .as_ref()
+        .is_some_and(|blocker| blocker.evidence.is_some());
+    anyhow::ensure!(
+        !external || generation.is_some() || claim.generation == 0,
+        "external blocker requires --generation for the exact started worker attempt"
+    );
     let generation = generation.unwrap_or(claim.generation);
     if generation != claim.generation {
         anyhow::bail!(
@@ -141,15 +157,67 @@ pub(crate) fn requeue_prompt_pressure_hand_back(
         &presets,
     );
     // `#operatororderclosed`: an already-answered human-review BLOCKED is not final.
-    if agent_doc_queue::goal_preset_terminal::hand_back_completes_goal_loop(
-        response,
-        &final_states,
-        &bodies,
-    ) {
+    if !external
+        && agent_doc_queue::goal_preset_terminal::hand_back_completes_goal_loop(
+            response,
+            &final_states,
+            &bodies,
+        )
+    {
         return Ok(None);
     }
-    if let Some(blocker) = agent_doc_queue::prompt_pressure::parse_prompt_blocker(response) {
-        let updated = agent_doc_queue::prompt_pressure::hoist_prompt_blocker(&current, &blocker);
+    if let Some(mut blocker) = blocker {
+        if external {
+            anyhow::ensure!(
+                blocker.matches_prompt(&claim.item_text),
+                "external blocker names a different queue row than {:?}",
+                claim.item_text
+            );
+            anyhow::ensure!(
+                claim.worker.is_some()
+                    && matches!(
+                        claim.state,
+                        agent_doc_queue::queue_claim::QueueClaimState::Running
+                            | agent_doc_queue::queue_claim::QueueClaimState::Lost
+                    ),
+                "external blocker requires the exact started, unfinished worker attempt"
+            );
+            blocker.bind_external_hold(&claim.item_text);
+        }
+        let prior_hold = external
+            .then(|| {
+                agent_doc_queue::prompt_pressure::open_review_blocking_prompt(
+                    &current,
+                    &claim.item_text,
+                )
+            })
+            .flatten()
+            .filter(|prior| prior.id == blocker.id && prior.evidence == blocker.evidence);
+        if external
+            && claim
+                .frozen
+                .as_ref()
+                .is_some_and(agent_doc_queue::queue_claim::QueueWorkerFreeze::is_abandon)
+        {
+            anyhow::ensure!(
+                prior_hold.is_some(),
+                "external blocker for {:?} is from a relinquished attempt; current evidence superseded it",
+                claim.item_text
+            );
+            return Ok(Some(PromptPressureRequeue {
+                claim,
+                kind: agent_doc_queue::goal_preset_terminal::PromptPressureKind::Review,
+                review_id: Some(blocker.id),
+                external_evidence: blocker.evidence,
+                incomplete: blocker.incomplete,
+                complete_by: blocker.complete_by,
+            }));
+        }
+        let updated = if prior_hold.is_some() {
+            current.clone()
+        } else {
+            agent_doc_queue::prompt_pressure::hoist_prompt_blocker(&current, &blocker)
+        };
         if !updated.contains(&format!("[#{}]", blocker.id)) {
             anyhow::bail!(
                 "prompt-blocker review #{} was not written into agent:review (#promptpressure)",
@@ -158,6 +226,24 @@ pub(crate) fn requeue_prompt_pressure_hand_back(
         }
         if updated != current {
             publish_document_update(file, &current, &updated)?;
+        }
+        if external {
+            // A retained editor write alone cannot fence queue consumers.
+            // Keep the exact worker attempt until the current authority
+            // exposes the hold, then the ordinary fenced requeue frees it.
+            let authoritative =
+                agent_doc_document_realtime_io::try_resolve_current_document_content(file, SOURCE)?;
+            anyhow::ensure!(
+                agent_doc_queue::prompt_pressure::open_review_blocking_prompt(
+                    &authoritative,
+                    &claim.item_text,
+                )
+                .is_some_and(
+                    |current| current.id == blocker.id && current.evidence == blocker.evidence
+                ),
+                "external blocker review #{} is awaiting editor authority; report this same generation when it is visible",
+                blocker.id,
+            );
         }
         let pointer = agent_doc_queue::prompt_pressure::exchange_pointer(&blocker);
         let claim = agent_doc_queue_io::goal_loop_handoff::requeue_with_prompt_pressure(
@@ -172,6 +258,7 @@ pub(crate) fn requeue_prompt_pressure_hand_back(
             claim,
             kind: agent_doc_queue::goal_preset_terminal::PromptPressureKind::Review,
             review_id: Some(blocker.id),
+            external_evidence: blocker.evidence,
             incomplete: blocker.incomplete,
             complete_by: blocker.complete_by,
         }));
@@ -195,6 +282,7 @@ pub(crate) fn requeue_prompt_pressure_hand_back(
             claim,
             kind: agent_doc_queue::goal_preset_terminal::PromptPressureKind::Prose,
             review_id: None,
+            external_evidence: None,
             incomplete: String::new(),
             complete_by: String::new(),
         }));
@@ -214,6 +302,7 @@ pub(crate) fn requeue_prompt_pressure_hand_back(
         claim,
         kind: agent_doc_queue::goal_preset_terminal::PromptPressureKind::Prose,
         review_id: None,
+        external_evidence: None,
         incomplete: String::new(),
         complete_by: String::new(),
     }))
@@ -3440,6 +3529,113 @@ mod tests {
             1,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn unchanged_external_blocker_keeps_one_generation_until_evidence_changes() {
+        use agent_doc_queue::subagent_pool::PoolRefillTrigger;
+        use agent_doc_queue_io::{queue_claim, subagent_pool};
+
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("work.md");
+        const ROW: &str = "finish the widget [#q-111111111111]";
+        const SIBLING: &str = "finish the widget [#q-222222222222]";
+        const OWNER: &str = "subagent:widget";
+        let handback = format!(
+            "<!-- agent-doc:prompt-blocker -->\n\
+             - [/] The export is waiting for a signing key\n  \
+             - **Complete by:** Provide the signing key reference\n  \
+             - **Prompt:** {ROW}\n  \
+             - **Evidence:** secret status: absent\n\
+             <!-- /agent-doc:prompt-blocker -->"
+        );
+        fs::write(
+            &doc,
+            format!(
+                "---\nagent_doc_format: template\nqueue: go\n---\n\n\
+                 <!-- agent:run id=\"main\" subagents go -->\n- {ROW}\n- {SIBLING}\n\
+                 <!-- /agent:run -->\n"
+            ),
+        )
+        .unwrap();
+        start_subagent(&doc, ROW, OWNER);
+        assert!(
+            requeue_nonterminal_goal_hand_back(&doc, ROW, Some(1), &handback)
+                .unwrap()
+                .is_none()
+        );
+
+        let report = || requeue_prompt_pressure_hand_back(&doc, ROW, Some(1), &handback, false);
+        let first = report().unwrap().unwrap();
+        agent_doc_queue_io::queue_cmd::project_claim_runtime_state_with_effects(
+            &crate::CliQueueCommandEffects,
+            &doc,
+            Some(ROW),
+        )
+        .unwrap();
+        let held = fs::read_to_string(&doc).unwrap();
+        assert!(
+            held.contains("blocked_until_evidence_hash_changes="),
+            "{held}"
+        );
+        assert!(
+            agent_doc_queue::prompt_pressure::review_blocks_prompt(&held, ROW),
+            "{held}"
+        );
+        assert!(
+            held.lines()
+                .any(|line| line.contains("⛔") && line.contains(ROW)),
+            "{held}"
+        );
+        let reformatted = held.replace("secret status: absent", "secret   status: absent");
+        assert!(agent_doc_queue::prompt_pressure::review_blocks_prompt(
+            &reformatted,
+            ROW
+        ));
+        let refill =
+            subagent_pool::pool_refill_for_content(&doc, &held, PoolRefillTrigger::Plan).unwrap();
+        assert!(
+            refill.next_heads.iter().all(|head| head.item != ROW)
+                && refill.next_heads.iter().any(|head| head.item == SIBLING),
+            "{refill:#?}"
+        );
+        assert!(refill.refresh_due.is_empty(), "{refill:#?}");
+
+        for _ in 0..3 {
+            let replay = report().unwrap().unwrap();
+            assert_eq!(replay.review_id, first.review_id);
+            assert_eq!(replay.claim.generation, 1);
+            assert_eq!(fs::read_to_string(&doc).unwrap(), held);
+            let claim_err = queue_claim::claim(&doc, ROW, "subagent:retry", 600).unwrap_err();
+            assert!(claim_err.to_string().contains("held by external blocker"));
+            assert!(
+                queue_claim::refresh_attempt(&doc, ROW, OWNER, 600, Some(1))
+                    .unwrap_err()
+                    .to_string()
+                    .contains("held by external blocker")
+            );
+        }
+        assert_eq!(
+            agent_doc_queue_io::queue_lineage::max_generation(&doc, ROW).unwrap(),
+            1
+        );
+
+        let changed = held.replace("secret status: absent", "secret status: available");
+        fs::write(&doc, &changed).unwrap();
+        assert!(!agent_doc_queue::prompt_pressure::review_blocks_prompt(
+            &changed, ROW
+        ));
+        assert!(report().unwrap_err().to_string().contains("relinquished"));
+        let refill =
+            subagent_pool::pool_refill_for_content(&doc, &changed, PoolRefillTrigger::Plan)
+                .unwrap();
+        assert!(
+            refill.next_heads.iter().any(|head| head.item == ROW),
+            "{refill:#?}"
+        );
+        let (_, next) = queue_claim::claim(&doc, ROW, "subagent:retry", 600).unwrap();
+        assert_eq!(next.generation, 2);
     }
 
     /// `#promptpressure`: a prose blocker is not a completion. The same row

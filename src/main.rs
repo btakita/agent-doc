@@ -11040,7 +11040,16 @@ fn try_main() -> anyhow::Result<()> {
                         &file,
                         Some(pressure.claim.item_text.as_str()),
                     )?;
-                    if pressure.kind
+                    if let Some(evidence) = pressure.external_evidence.as_deref() {
+                        eprintln!(
+                            "[queue] external blocker for {:?} (owner {}, generation {}) holds the row at review #{}. Current evidence: {evidence}. Complete by: {}. Redispatch and refresh wait for changed evidence.",
+                            pressure.claim.item_text,
+                            pressure.claim.owner,
+                            pressure.claim.generation,
+                            pressure.review_id.as_deref().unwrap_or(""),
+                            pressure.complete_by,
+                        );
+                    } else if pressure.kind
                         == agent_doc_queue::goal_preset_terminal::PromptPressureKind::Review
                     {
                         eprintln!(

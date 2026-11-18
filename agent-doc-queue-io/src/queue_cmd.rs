@@ -561,6 +561,7 @@ fn derive_runtime_projection_scoped(
     // external one.
     let blockers =
         agent_doc_element_backlog_io::done_archive::queue_blockers_for_document(file, current);
+    let review_blockers = agent_doc_queue::prompt_pressure::review_blocked_prompts(current);
     let (skip_queue_id, selected) = match scope {
         ClaimProjectionScope::Document => (
             None,
@@ -695,7 +696,11 @@ fn derive_runtime_projection_scoped(
                         return None;
                     }
                     let is_selected = selected.claims_at(block.entries, index);
-                    let is_blocked = blockers.blocks_row(&prompt.text);
+                    let lineage = agent_doc_queue::document_queue::lineage_claim_text(
+                        block.entries, index,
+                    );
+                    let externally_blocked = review_blockers.holds_external_identity(&identity);
+                    let is_blocked = externally_blocked || blockers.blocks_row(&prompt.text);
                     if rows == RuntimeProjectionRows::LifecycleEvidence
                         && observed.is_none()
                         && !state_degraded
@@ -708,6 +713,8 @@ fn derive_runtime_projection_scoped(
                     }
                     let marker = if state_degraded {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
+                    } else if externally_blocked {
+                        agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
                     } else if let Some(attempt) = attempt {
                         attempt.marker
                     } else if has_completion_evidence {
@@ -754,21 +761,19 @@ fn derive_runtime_projection_scoped(
                     {
                         return None;
                     }
-                    let owner =
-                        attempt.map(|attempt| agent_doc_document::queue_projection::QueueOwnerProjection {
+                    let visible_attempt = attempt.filter(|_| !externally_blocked);
+                    let owner = visible_attempt
+                        .map(|attempt| agent_doc_document::queue_projection::QueueOwnerProjection {
                             owner: attempt.owner.clone(),
                             generation: attempt.generation,
                         });
                     Some(agent_doc_queue::document_queue::QueueRowProjection {
-                        identity: agent_doc_queue::document_queue::lineage_claim_text(
-                            block.entries,
-                            index,
-                        ),
+                        identity: lineage,
                         text: agent_doc_element_queue::render_queue_report_state_annotation(
                             &agent_doc_document::queue_projection::strip_in_progress_marker(
                                 &prompt.text,
                             ),
-                            attempt.and_then(|attempt| attempt.publication_state),
+                            visible_attempt.and_then(|attempt| attempt.publication_state),
                         ),
                         blockers: if marker
                             == agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked

@@ -1788,7 +1788,7 @@ fn first_drainable_head<'a>(
     preset_only_ids: &HashSet<String>,
     preset_supplies_directive: bool,
     scope: DrainScope,
-    review_blocked: &HashSet<String>,
+    review_blocked: &crate::prompt_pressure::ReviewBlockedPrompts,
 ) -> Option<&'a QueuePrompt> {
     let prompts = document_queue::prompts(entries_after);
     let mut session_trigger = None;
@@ -1830,8 +1830,12 @@ fn head_is_drainable(
     preset_only_ids: &HashSet<String>,
     preset_supplies_directive: bool,
     scope: DrainScope,
-    review_blocked: &HashSet<String>,
+    review_blocked: &crate::prompt_pressure::ReviewBlockedPrompts,
 ) -> bool {
+    // Resolve review holds while the stable queue identity is still present.
+    if review_blocked.contains(text) {
+        return false;
+    }
     // Stable `[#q-…]` prompt ids identify free-text queue nodes; they are not
     // tracked-work ids and must not change the prompt's execution semantics.
     // Authored id-backed directives (`do [#item]`) are preserved by the
@@ -1844,12 +1848,6 @@ fn head_is_drainable(
     if matches!(scope, DrainScope::InSessionLoop)
         && crate::session_trigger::is_session_trigger_prompt(text)
     {
-        return false;
-    }
-    // `#promptpressure`: an open review item whose **Prompt:** line is this
-    // head is incomplete work. It stays visible and undrainable until the
-    // operator resolves that review.
-    if review_blocked.contains(&crate::prompt_pressure::normalize_prompt_text(text)) {
         return false;
     }
     // `🙋 [#id]` is an orthogonal local projection of an open operator todo.

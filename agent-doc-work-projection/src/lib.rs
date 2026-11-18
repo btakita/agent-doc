@@ -326,6 +326,7 @@ fn visit_live_queue_lifecycle(
     use agent_doc_queue::waiting_packet::{is_packet_row, is_waiting_item_head};
 
     let queue_set = agent_doc_queue::queue_set::QueueSet::parse(content, components)?;
+    let review_blockers = agent_doc_queue::prompt_pressure::review_blocked_prompts(content);
     for block in queue_set.blocks() {
         let entries =
             agent_doc_queue::nested_claim_steer::expand_slice_if_installed(&block.entries);
@@ -342,6 +343,9 @@ fn visit_live_queue_lifecycle(
             }
             let identity = agent_doc_queue::queue_claim::claim_identity_at(entries, index)
                 .unwrap_or_else(|| agent_doc_queue::queue_claim::claim_identity(&prompt.text));
+            if review_blockers.holds_external_identity(&identity) {
+                continue;
+            }
             if let Some(attempt) = lifecycle.attempts.get(&identity) {
                 visit(identity, &prompt.text, attempt);
             }

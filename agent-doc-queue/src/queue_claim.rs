@@ -2845,10 +2845,12 @@ impl QueueClaimLedger {
         let mut pairings: Vec<(&Vec<String>, QueueHeadPairing)> = Vec::new();
         let mut descendants: Vec<Vec<usize>> = Vec::with_capacity(self.claims.len());
         let mut exclusive: Vec<bool> = Vec::with_capacity(self.claims.len());
+        let mut owner_attested: Vec<bool> = Vec::with_capacity(self.claims.len());
         for (claim_idx, claim) in self.claims.iter().enumerate() {
             if !members[claim_idx] || !claim.blocks_dispatch(now_secs) {
                 descendants.push(Vec::new());
                 exclusive.push(false);
+                owner_attested.push(false);
                 continue;
             }
             // Never a line another live claim holds.
@@ -2925,6 +2927,7 @@ impl QueueClaimLedger {
             lines.dedup();
             descendants.push(lines);
             exclusive.push(is_exclusive);
+            owner_attested.push(matches!(attested.as_slice(), [_]));
         }
         drop(pairings);
 
@@ -2943,10 +2946,13 @@ impl QueueClaimLedger {
                 // Still on (one of) its own line(s).
                 continue;
             }
-            if closed_by_strike(&claim.identity) {
+            if closed_by_strike(&claim.identity) && !owner_attested[claim_idx] {
                 // `#claimfollowstruck`: its row was struck (completed). A strike
                 // is never an edit, so no successor head inherits the claim,
-                // whatever the structural alignment paired it with.
+                // whatever the structural alignment paired it with. An exact
+                // owner/generation projection on one live descendant proves
+                // that descendant is a different, still-owned sibling whose
+                // binary effect annotation the claim must follow.
                 continue;
             }
             if let Some(&first) = lines.first() {

@@ -936,6 +936,102 @@ fn assert_session_check_does_not_accuse_patchback(dir: &std::path::Path, doc: &s
     );
 }
 
+#[test]
+fn codex_worker_debt_blocks_capture_and_the_final_gate() {
+    use std::io::Write as _;
+
+    use agent_doc_queue::queue_claim::ClaimOwnerSession;
+    use agent_doc_queue_io::queue_claim::{claim_with_session, start_attempt_with_owner_session};
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let item = "Review the sample change";
+    let owner = "subagent:review";
+    let doc = committed_session(root, &[item]);
+    let owner_session = Some(ClaimOwnerSession {
+        harness: Some("codex".into()),
+        session_id: Some("coordinator-thread".into()),
+        pane: None,
+        pid: None,
+    });
+    let (_, claim) = claim_with_session(&doc, item, owner, 600, owner_session.clone()).unwrap();
+    start_attempt_with_owner_session(
+        &doc,
+        item,
+        owner,
+        "/root/review",
+        600,
+        claim.generation,
+        owner_session,
+    )
+    .unwrap();
+    let content = fs::read_to_string(&doc).unwrap().replace(
+        &format!("- {item}\n"),
+        &format!("- 🚧 [#{owner}#{}] {item}\n", claim.generation),
+    );
+    fs::write(&doc, &content).unwrap();
+    git(root, &["add", "session.md"]);
+    git(
+        root,
+        &["commit", "-qm", "previous response left a running row"],
+    );
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        &doc,
+        &content,
+        agent_doc_ops_log_io::log_op,
+    )
+    .unwrap();
+    let path = doc.to_str().unwrap();
+    let gate = run_agent_doc(root, &["session-check", "--codex-final-gate", path]);
+    assert_eq!(gate.status.code(), Some(1), "{gate:?}");
+    assert!(
+        String::from_utf8_lossy(&gate.stdout).contains("wait for its hand-back"),
+        "{gate:?}"
+    );
+
+    let cycle =
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
+    let head = git(root, &["rev-parse", "HEAD"]).stdout;
+    let mut finalize = Command::new(env!("CARGO_BIN_EXE_agent-doc"))
+        .env(
+            agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+            CONTROLLER_LAUNCH_REASON,
+        )
+        .current_dir(root)
+        .args(["respond", path, "--template"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    finalize
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(
+            concat!(
+                "<!-- patch:exchange -->\n### Re: Unfinished worker — gpt-5\n\n",
+                "This response must not land before the report.\n<!-- /patch:exchange -->\n",
+                "<!-- patch:recap -->\nA worker is still running.\n<!-- /patch:recap -->\n",
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+    let finalize = finalize.wait_with_output().unwrap();
+    assert!(!finalize.status.success(), "{finalize:?}");
+    assert!(
+        String::from_utf8_lossy(&finalize.stderr).contains("wait for its hand-back"),
+        "{finalize:?}"
+    );
+    assert_eq!(fs::read_to_string(&doc).unwrap(), content);
+    assert_eq!(git(root, &["rev-parse", "HEAD"]).stdout, head);
+    let retained = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+        .unwrap()
+        .unwrap();
+    assert_eq!(retained.cycle_id, cycle.cycle_id);
+    assert!(retained.capture_id.is_none());
+}
+
 fn assert_preflight_admits(dir: &std::path::Path, doc: &std::path::Path, expected_cells: usize) {
     let previous_ops_len = ops_log_len(doc);
     let output = run_agent_doc(dir, &["preflight", doc.to_str().unwrap()]);

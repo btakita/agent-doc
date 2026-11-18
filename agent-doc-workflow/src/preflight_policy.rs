@@ -487,6 +487,7 @@ mod tests {
         for ok in [
             "#ship",
             "ship",
+            "sample-docs: #ship",
             "#spec-test-build-install-commit-push: approve all commit + integration + push: approve all worktree removals",
         ] {
             assert_eq!(
@@ -495,6 +496,14 @@ mod tests {
                 "{ok}"
             );
         }
+        let warning = unresolved_component_preset_warning(
+            "doc.md",
+            &doc("sample-docs: #ship: #missing"),
+            &presets,
+        )
+        .expect("an unknown name in a scoped chain must still warn");
+        assert!(warning.message.contains("preset `#missing`"));
+        assert!(!warning.message.contains("sample-docs"));
     }
 
     #[test]

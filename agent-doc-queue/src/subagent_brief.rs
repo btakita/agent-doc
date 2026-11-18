@@ -259,13 +259,14 @@ fn selected_queue_prompt_attrs(
 fn queue_preset_names(
     content: &str,
     components: &[element::Component],
+    attrs: &crate::prompt_component_attrs::PromptComponentAttrs,
+    effective: &agent_doc_frontmatter::frontmatter::PromptPresets,
 ) -> Vec<(String, PresetSource)> {
     let mut names = Vec::new();
     let Ok(Some(queue)) = crate::queue_set::selected_component(content, components) else {
         return names;
     };
-    let attrs = crate::prompt_component_attrs::prompt_component_attrs_for(queue, "queue");
-    for reference in attrs.preset_refs() {
+    for reference in attrs.preset_refs(effective) {
         let source = match reference {
             crate::prompt_component_attrs::PresetRef::Lookup(_) => PresetSource::QueueAttr,
             crate::prompt_component_attrs::PresetRef::Inline { .. } => {
@@ -326,6 +327,9 @@ pub fn subagent_authorization_with_presets(
         .preset_conflict
         .as_ref()
         .map(ToString::to_string);
+    let queue_default_names =
+        queue_preset_names(content, components, &queue_prompt_attrs, presets_map);
+    let preset_scope = queue_prompt_attrs.preset_scope(presets_map);
     let overlaid = queue_prompt_attrs.overlay_inline_presets(presets_map);
     let presets_map = &overlaid;
     let mut presets: Vec<PresetAuthorization> = Vec::new();
@@ -359,7 +363,7 @@ pub fn subagent_authorization_with_presets(
             effort,
         });
     };
-    for (name, source) in queue_preset_names(content, components) {
+    for (name, source) in queue_default_names {
         push_preset(&name, source);
     }
     // A nested leaf inherits its parent lineage as prompt context. Resolve
@@ -491,7 +495,7 @@ pub fn subagent_authorization_with_presets(
     };
     authorization.prompt_context = agent_doc_prompt_context::lineage::split(submitted).0;
     authorization.subagent_prompt_preamble =
-        render_preamble(document, content, &authorization, submitted);
+        render_preamble(document, content, &authorization, submitted, preset_scope);
     authorization
 }
 
@@ -775,6 +779,7 @@ fn render_preamble(
     content: &str,
     auth: &SubagentAuthorization,
     submitted: &str,
+    preset_scope: Option<&str>,
 ) -> String {
     let mut out = String::new();
     out.push_str(SUBAGENT_PREAMBLE_MARKER);
@@ -794,6 +799,12 @@ fn render_preamble(
     if let Some(queue_id) = &auth.queue_id {
         out.push_str(&format!(
             "\nOrigin queue id (dispatch-time provenance):\n> {queue_id}\n\nAny follow-up queue heads produced by this work belong immediately after the originating head in this queue. Report them to the coordinator in order; the coordinator applies them with `agent-doc queue follow-up {document} --id {queue_id} --after <origin> --item <text>...`. Do not place them in a selected or mirrored sibling queue.\n"
+        ));
+    }
+    if let Some(scope) = preset_scope {
+        out.push_str(&format!(
+            "\nOperator-provided queue scope (context):\n{}\n",
+            quote(scope)
         ));
     }
     // A lineage claim key (`url: #rebase`) has no folded `push` child. The

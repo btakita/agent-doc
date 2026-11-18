@@ -31,6 +31,7 @@ pub fn closeout_evidence_at(file: &Path, content: &str, now_secs: u64) -> Closeo
     let mut integrations_in_flight = Default::default();
     // `#finishedheadrefill`: read from the same claim ledger, below.
     let mut report_owed = HashMap::new();
+    let mut codex_coordinator_claims = Default::default();
     let (fresh_claims, reportable_lost) = match crate::queue_claim::load_ledger_following_read_only(
         file, content,
     ) {
@@ -66,6 +67,16 @@ pub fn closeout_evidence_at(file: &Path, content: &str, now_secs: u64) -> Closeo
                     ReportOwedAttempt::of(claim).map(|owed| (claim.identity.clone(), owed))
                 })
                 .collect();
+            codex_coordinator_claims = ledger
+                .claims
+                .iter()
+                .filter(|claim| {
+                    claim.owner_session.as_ref().is_some_and(|owner| {
+                        owner.harness.as_deref() == Some("codex") && owner.session_id.is_some()
+                    })
+                })
+                .map(|claim| claim.identity.clone())
+                .collect();
             integrations_in_flight =
                 reported_integrations_in_flight(file, &ledger.claims, now_secs);
             (fresh, reportable)
@@ -83,6 +94,7 @@ pub fn closeout_evidence_at(file: &Path, content: &str, now_secs: u64) -> Closeo
         .collect();
     CloseoutEvidence {
         fresh_claims,
+        codex_coordinator_claims,
         schedule_held_heads,
         reportable_lost,
         report_owed,

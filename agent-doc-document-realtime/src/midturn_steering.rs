@@ -1539,7 +1539,7 @@ impl PresetContext {
         if let Some(queue) = queue {
             queue_attrs =
                 agent_doc_queue::prompt_component_attrs::prompt_component_attrs_for(queue, "queue");
-            queue_names.extend(queue_attrs.preset_names().map(str::to_string));
+            queue_names.extend(queue_attrs.preset_names(prompt_presets).map(str::to_string));
             if let Ok(entries) = agent_doc_queue::document_queue::parse(queue.content(current)) {
                 for entry in entries {
                     if let agent_doc_queue::document_queue::QueueEntry::Preset(name) = entry {
@@ -1550,8 +1550,10 @@ impl PresetContext {
         }
         let exchange_attrs =
             agent_doc_queue::prompt_component_attrs::prompt_component_attrs(current, "exchange");
-        let exchange_names: Vec<String> =
-            exchange_attrs.preset_names().map(str::to_string).collect();
+        let exchange_names: Vec<String> = exchange_attrs
+            .preset_names(prompt_presets)
+            .map(str::to_string)
+            .collect();
         // `#runpresetunresolved`: an inline `preset="#name: body"` definition
         // resolves exactly like a frontmatter entry, within its own component.
         let queue_presets = queue_attrs.overlay_inline_presets(prompt_presets);

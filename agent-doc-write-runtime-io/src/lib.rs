@@ -4032,6 +4032,18 @@ fn run_command_inner_within_pass(
         } else {
             resolve_current_document(file, "queue_operator_action_answers")?.into_content()
         };
+        if commit_mode == CommitMode::Required {
+            let evidence =
+                agent_doc_queue_io::transient_closeout::closeout_evidence(file, &current_content);
+            if let Some(failure) =
+                agent_doc_queue::transient_closeout::codex_worker_capture_failure(
+                    &current_content,
+                    &evidence,
+                )?
+            {
+                anyhow::bail!("{failure}");
+            }
+        }
         let answer_rows = backlog_cmd::queue_operator_answer_row_ids(&current_content)?;
         for id in backlog_cmd::answered_queue_operator_action_ids(&current_content)? {
             // `#queueoperatoranswer`: an answer written as its own row is spent once the

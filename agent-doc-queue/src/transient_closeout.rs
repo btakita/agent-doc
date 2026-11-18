@@ -34,7 +34,9 @@
 //!   durable phase: a `🚧` backed only by an unbound dispatch is not a running
 //!   worker. A stale `🚧`, an unacknowledged `🟡`, or a row with no backing
 //!   claim still refuses. The `🙋` part of `🙋🚧` does not exempt its worker
-//!   part from this rule. `#finishedheadrefill`: a `🟡`/`🚧` row whose
+//!   part from this rule. A Codex coordinator keeps an unreported attempt
+//!   as closeout debt unless that row has a durable operator wait.
+//!   `#finishedheadrefill`: a `🟡`/`🚧` row whose
 //!   current-generation attempt is report-owed (its worker ended and the
 //!   harness recorded its hand-back, [`ReportOwedAttempt`]) is not a stale
 //!   worker either: it refuses with the exact `queue report-complete` for
@@ -233,6 +235,8 @@ pub struct IntegrationInFlight {
 pub struct CloseoutEvidence {
     /// Work identities whose live claim is heartbeat-fresh, with its phase.
     pub fresh_claims: HashMap<QueueItemIdentity, FreshClaim>,
+    /// Codex coordinator-owned attempts that still owe a worker report.
+    pub codex_coordinator_claims: HashSet<QueueItemIdentity>,
     /// Head texts that a closed schedule window holds back.
     pub schedule_held_heads: HashSet<String>,
     /// Work identities whose `Lost` attempt holds an ended worker's recorded,
@@ -590,8 +594,30 @@ pub fn assess_transient_closeout(
                 owed,
                 close_command: None,
             };
+            let identity = crate::queue_claim::claim_identity_at(&entries, index)
+                .unwrap_or_else(|| crate::queue_claim::claim_identity(&prompt.text));
+            let codex_worker_owned = matches!(
+                marker,
+                QueueLifecycleMarker::Pending
+                    | QueueLifecycleMarker::Claimed
+                    | QueueLifecycleMarker::Running
+            ) && evidence.codex_coordinator_claims.contains(&identity);
+            if codex_worker_owned && let Some(owed) = evidence.report_owed.get(&identity) {
+                let mut owed_debt = debt(OWED_CODEX_RECORDED_HANDBACK);
+                owed_debt.close_command =
+                    Some(owed.report_command(evidence.document.as_deref().unwrap_or("<FILE>")));
+                assessment.debts.push(owed_debt);
+                continue;
+            }
             if operator == Some(false) {
                 assessment.debts.push(debt(OWED_OPERATOR_RECORD));
+                continue;
+            }
+            if codex_worker_owned
+                && operator != Some(true)
+                && evidence.fresh_claims.contains_key(&identity)
+            {
+                assessment.debts.push(debt(OWED_CODEX_WORKER_REPORT));
                 continue;
             }
             // `#orphanreportedrow`: a `☑️` row that carries an operator
@@ -641,8 +667,6 @@ pub fn assess_transient_closeout(
             }
             match marker {
                 QueueLifecycleMarker::Claimed | QueueLifecycleMarker::Running => {
-                    let identity = crate::queue_claim::claim_identity_at(&entries, index)
-                        .unwrap_or_else(|| crate::queue_claim::claim_identity(&prompt.text));
                     // `#finishedheadrefill`: a finished worker's unreported
                     // hand-back owes its report, not a heartbeat refresh.
                     if let Some(owed) = evidence.report_owed.get(&identity) {
@@ -913,6 +937,36 @@ pub fn normal_closeout_failure_with(
 /// The normal-closeout failure for an assessment already computed.
 pub fn normal_closeout_failure_for(assessment: &TransientCloseoutAssessment) -> Option<String> {
     format_failure(NORMAL_CLOSEOUT_HEADER, &assessment.debts)
+}
+
+const OWED_CODEX_WORKER_REPORT: &str = "finish the current Codex worker dispatch or wait for its hand-back, then record the exact generation's report";
+const OWED_CODEX_RECORDED_HANDBACK: &str = "report the hand-back preserved from the exact Codex worker turn before ending the coordinator's turn";
+
+/// A strict response may not capture a final answer while the coordinator
+/// still owes a worker hand-back. Other queue debt can be settled by the
+/// response's own projected mutations and is checked after that projection.
+pub fn codex_worker_capture_failure(
+    content: &str,
+    evidence: &CloseoutEvidence,
+) -> Result<Option<String>> {
+    if evidence.codex_coordinator_claims.is_empty() {
+        return Ok(None);
+    }
+    let assessment = assess_transient_closeout(content, evidence)?;
+    let debts = assessment
+        .debts
+        .into_iter()
+        .filter(|debt| {
+            matches!(
+                debt.owed,
+                OWED_CODEX_WORKER_REPORT | OWED_CODEX_RECORDED_HANDBACK
+            )
+        })
+        .collect();
+    Ok(normal_closeout_failure_for(&TransientCloseoutAssessment {
+        debts,
+        ..Default::default()
+    }))
 }
 
 /// [`normal_closeout_failure_with`] over text-only evidence.
@@ -1297,6 +1351,36 @@ mod tests {
             failure.contains("operator-request packet in agent:exchange"),
             "{failure}"
         );
+    }
+
+    #[test]
+    fn a_codex_operator_wait_never_hides_the_worker_report_after_completion() {
+        let row = format!("- 🙋🚧 [#subagent:flag#1] set the flag [#{REQ}]\n");
+        let content = operator_doc(&row, true, true);
+        let identity = identity_of(&content, "set the flag");
+        let mut evidence = fresh(&content, &["set the flag"]);
+        evidence.codex_coordinator_claims.insert(identity.clone());
+        assert!(
+            normal_closeout_failure_with(&content, &evidence)
+                .unwrap()
+                .is_none()
+        );
+
+        evidence.fresh_claims.clear();
+        evidence.report_owed.insert(
+            identity,
+            ReportOwedAttempt {
+                item: "set the flag".to_string(),
+                generation: 1,
+            },
+        );
+        for body in [content, operator_doc(&row, false, true)] {
+            let failure = codex_worker_capture_failure(&body, &evidence)
+                .unwrap()
+                .unwrap();
+            assert!(failure.contains("queue report-complete"), "{failure}");
+            assert!(failure.contains("--generation 1"), "{failure}");
+        }
     }
 
     /// `#gatedheadpending` (an sdk session, 2026-11-14): the Stop hook refused

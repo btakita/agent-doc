@@ -2085,7 +2085,9 @@ fn run_with_options_to_writer_in_pass(
     if has_exchange_prompt_target {
         agent_doc_prompt_contract::extend_prompt_preset_resolution(
             &mut prompt_preset_resolution,
-            exchange_prompt_attrs.preset_names().map(str::to_string),
+            exchange_prompt_attrs
+                .preset_names(&frontmatter_prompt_presets)
+                .map(str::to_string),
             &exchange_prompt_presets,
         );
     }

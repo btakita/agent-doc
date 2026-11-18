@@ -5,6 +5,7 @@ pub mod address_effect;
 pub mod blocker_disregard;
 pub mod build_slot;
 pub mod claim_release_receipt;
+pub mod codex_worker_completion;
 pub mod completion_cell_restore;
 pub mod completion_feedback_lock;
 pub mod continuation_detect;

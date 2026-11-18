@@ -7,6 +7,7 @@
 //! Markdown code ranges is never treated as configuration.
 
 use agent_doc_element::element;
+use agent_doc_frontmatter::frontmatter::{PromptPresets, resolve_prompt_preset_key};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PromptComponentAttrs {
@@ -22,13 +23,29 @@ pub struct PromptComponentAttrs {
 }
 
 impl PromptComponentAttrs {
+    /// Context preceding a chain of named queue presets.
+    pub fn preset_scope(&self, effective: &PromptPresets) -> Option<&str> {
+        self.preset
+            .as_deref()
+            .and_then(|value| {
+                scoped_preset_chain(value, |name| {
+                    resolve_prompt_preset_key(effective, name).is_some()
+                })
+            })
+            .map(|(scope, _)| scope)
+    }
+
     /// Preset references declared by `preset=`, in source order.
     ///
     /// See [`parse_preset_refs`] for the grammar.
-    pub fn preset_refs(&self) -> Vec<PresetRef<'_>> {
+    pub fn preset_refs(&self, effective: &PromptPresets) -> Vec<PresetRef<'_>> {
         self.preset
             .as_deref()
-            .map(parse_preset_refs)
+            .map(|value| {
+                parse_preset_refs(value, |name| {
+                    resolve_prompt_preset_key(effective, name).is_some()
+                })
+            })
             .unwrap_or_default()
     }
 
@@ -36,8 +53,8 @@ impl PromptComponentAttrs {
     /// inline-definition names alike. A resolver that looks these names up must
     /// first overlay [`Self::overlay_inline_presets`] so an inline definition
     /// resolves instead of reporting a missing preset.
-    pub fn preset_names(&self) -> impl Iterator<Item = &str> {
-        self.preset_refs().into_iter().map(PresetRef::name)
+    pub fn preset_names(&self, effective: &PromptPresets) -> impl Iterator<Item = &str> {
+        self.preset_refs(effective).into_iter().map(PresetRef::name)
     }
 
     /// `effective` with every inline `#name: body` definition of this
@@ -48,7 +65,7 @@ impl PromptComponentAttrs {
         effective: &agent_doc_frontmatter::frontmatter::PromptPresets,
     ) -> agent_doc_frontmatter::frontmatter::PromptPresets {
         let mut overlaid = effective.clone();
-        for reference in self.preset_refs() {
+        for reference in self.preset_refs(effective) {
             if let PresetRef::Inline { name, body } = reference {
                 overlaid.define_inline(name, body);
             }
@@ -88,7 +105,18 @@ impl<'a> PresetRef<'a> {
 /// trailing `#name:` with no body is a lookup of `#name`. Canonicalization,
 /// duplicate removal, and missing-preset handling belong to the resolver
 /// because bare aliases need the effective preset map.
-pub fn parse_preset_refs(value: &str) -> Vec<PresetRef<'_>> {
+///
+/// A bare scope followed strictly by hashtag references, such as
+/// `sample-docs: #check: #push`, preserves the scope as context and treats
+/// every hashtag as a lookup. It does not define a preset or grant authority.
+fn parse_preset_refs(value: &str, is_defined: impl Fn(&str) -> bool) -> Vec<PresetRef<'_>> {
+    if let Some((_, chain)) = scoped_preset_chain(value, is_defined) {
+        return chain
+            .split_whitespace()
+            .map(|token| PresetRef::Lookup(token.trim_end_matches(':')))
+            .collect();
+    }
+
     let mut refs = Vec::new();
     let mut rest = value;
     loop {
@@ -116,6 +144,27 @@ pub fn parse_preset_refs(value: &str) -> Vec<PresetRef<'_>> {
     refs
 }
 
+fn scoped_preset_chain(value: &str, is_defined: impl Fn(&str) -> bool) -> Option<(&str, &str)> {
+    fn is_name(name: &str) -> bool {
+        name.starts_with(|ch: char| ch.is_ascii_alphanumeric())
+            && name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    }
+
+    let (scope_token, chain) = value.trim().split_once(char::is_whitespace)?;
+    let scope = scope_token.strip_suffix(':')?;
+    let chain = chain.trim();
+    (is_name(scope)
+        && !is_defined(scope_token)
+        && !chain.is_empty()
+        && chain.split_whitespace().all(|token| {
+            let token = token.strip_suffix(':').unwrap_or(token);
+            token.strip_prefix('#').is_some_and(is_name)
+        }))
+    .then_some((scope, chain))
+}
+
 /// How to repair a `preset=` reference nothing defines. Shared by the preflight
 /// warning and the fail-closed subagent brief so both name the same fix
 /// (`#runpresetunresolved`).
@@ -123,7 +172,7 @@ pub const UNRESOLVED_PRESET_FIX: &str = "Define it under frontmatter `prompt_pre
 (`'#name': <authorization text>`), or write the authorization inline on the marker as \
 `preset=\"#name: <authorization text>\"`. A `preset=` value is a list of preset names, not \
 prose: free text without a leading `#name:` is split into word tokens and each is looked up \
-as a preset.";
+as a preset. In `preset=\"scope: #name: #other\"`, the scope is context and every hashtag must resolve.";
 
 /// Preset references on one prompt component that resolve to nothing.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,7 +204,11 @@ pub fn unresolved_component_presets(
             continue;
         }
         let attrs = prompt_component_attrs_for(component, &component.name);
-        let refs = attrs.preset_refs();
+        let refs = attrs
+            .preset
+            .as_deref()
+            .map(|value| parse_preset_refs(value, &is_defined))
+            .unwrap_or_default();
         let mut names: Vec<String> = Vec::new();
         for reference in &refs {
             let PresetRef::Lookup(name) = *reference else {
@@ -346,7 +399,9 @@ mod tests {
         let attrs = prompt_component_attrs(content, "queue");
         assert_eq!(attrs.preset.as_deref(), Some("#push  '#auth' #push"));
         assert_eq!(
-            attrs.preset_names().collect::<Vec<_>>(),
+            attrs
+                .preset_names(&PromptPresets::default())
+                .collect::<Vec<_>>(),
             vec!["#push", "#auth", "#push"]
         );
 
@@ -357,7 +412,7 @@ mod tests {
         );
         assert_eq!(
             prompt_component_attrs(single_quoted, "queue")
-                .preset_names()
+                .preset_names(&PromptPresets::default())
                 .collect::<Vec<_>>(),
             vec!["#push", "#auth"]
         );
@@ -376,14 +431,16 @@ mod tests {
         );
         let attrs = prompt_component_attrs(content, "queue");
         assert_eq!(
-            attrs.preset_refs(),
+            attrs.preset_refs(&PromptPresets::default()),
             vec![PresetRef::Inline {
                 name: "#spec-test-build-install-commit-push",
                 body: "approve all commit + integration + push: approve all worktree removals",
             }]
         );
         assert_eq!(
-            attrs.preset_names().collect::<Vec<_>>(),
+            attrs
+                .preset_names(&PromptPresets::default())
+                .collect::<Vec<_>>(),
             vec!["#spec-test-build-install-commit-push"]
         );
         let overlaid = attrs.overlay_inline_presets(&Default::default());
@@ -396,7 +453,7 @@ mod tests {
 
         // Lookups before the definition stay lookups.
         assert_eq!(
-            parse_preset_refs("#push '#auth' #ship: and tag it"),
+            parse_preset_refs("#push '#auth' #ship: and tag it", |_| false),
             vec![
                 PresetRef::Lookup("#push"),
                 PresetRef::Lookup("#auth"),
@@ -407,15 +464,18 @@ mod tests {
             ]
         );
         // A bare `#name` keeps meaning a lookup; a bodiless `#name:` is one too.
-        assert_eq!(parse_preset_refs("#ship"), vec![PresetRef::Lookup("#ship")]);
         assert_eq!(
-            parse_preset_refs("#ship:"),
+            parse_preset_refs("#ship", |_| false),
+            vec![PresetRef::Lookup("#ship")]
+        );
+        assert_eq!(
+            parse_preset_refs("#ship:", |_| false),
             vec![PresetRef::Lookup("#ship")]
         );
         // Free text without a `#name:` head is still a list of lookups, so it
         // keeps failing closed at the resolver.
         assert_eq!(
-            parse_preset_refs("commit + push"),
+            parse_preset_refs("commit + push", |_| false),
             vec![
                 PresetRef::Lookup("commit"),
                 PresetRef::Lookup("+"),
@@ -423,7 +483,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            parse_preset_refs("#a:b: text"),
+            parse_preset_refs("#a:b: text", |_| false),
             vec![PresetRef::Lookup("#a:b:"), PresetRef::Lookup("text")]
         );
     }
@@ -456,6 +516,38 @@ mod tests {
         assert!(unresolved_component_presets(content, |_| true).is_empty());
     }
 
+    #[test]
+    fn literal_colon_preset_takes_precedence_over_a_scoped_chain() {
+        let document =
+            "<!-- agent:run preset=\"sample-docs: #push\" -->\n- a\n<!-- /agent:run -->\n";
+        let attrs = prompt_component_attrs(document, "queue");
+        for (known_name, scope) in [
+            ("sample-docs:", None),
+            ("#sample-docs:", None),
+            ("sample-docs", Some("sample-docs")),
+        ] {
+            let mut presets = PromptPresets::default();
+            presets.define_inline(known_name, "Review the scoped documentation.");
+            presets.define_inline("#push", "Commit and push.");
+            assert_eq!(attrs.preset_scope(&presets), scope);
+            let names: Vec<_> = attrs.preset_names(&presets).collect();
+            assert_eq!(
+                names,
+                if scope.is_some() {
+                    vec!["#push"]
+                } else {
+                    vec!["sample-docs:", "#push"]
+                }
+            );
+            assert!(
+                unresolved_component_presets(document, |name| {
+                    resolve_prompt_preset_key(&presets, name).is_some()
+                })
+                .is_empty()
+            );
+        }
+    }
+
     /// `presets=` is `preset=` on every marker that already accepts it: the
     /// same reference grammar, one value when the spellings match, and no
     /// value when they disagree.
@@ -473,7 +565,9 @@ mod tests {
             let attrs = prompt_component_attrs(&plural, name);
             assert!(attrs.preset_conflict.is_none(), "{marker}");
             assert_eq!(
-                attrs.preset_names().collect::<Vec<_>>(),
+                attrs
+                    .preset_names(&PromptPresets::default())
+                    .collect::<Vec<_>>(),
                 vec!["#push", "#auth"],
                 "{marker}"
             );
@@ -482,7 +576,7 @@ mod tests {
                 "<!-- agent:{marker} presets=\"#ship: approve all commit\" -->\n- release\n<!-- /agent:{marker} -->\n"
             );
             assert_eq!(
-                prompt_component_attrs(&inline, name).preset_refs(),
+                prompt_component_attrs(&inline, name).preset_refs(&PromptPresets::default()),
                 vec![PresetRef::Inline {
                     name: "#ship",
                     body: "approve all commit",
@@ -499,7 +593,12 @@ mod tests {
         let same_attrs = prompt_component_attrs(same, "queue");
         assert_eq!(same_attrs.preset.as_deref(), Some("#auth"));
         assert!(same_attrs.preset_conflict.is_none());
-        assert_eq!(same_attrs.preset_names().collect::<Vec<_>>(), vec!["#auth"]);
+        assert_eq!(
+            same_attrs
+                .preset_names(&PromptPresets::default())
+                .collect::<Vec<_>>(),
+            vec!["#auth"]
+        );
 
         let both = concat!(
             "<!-- agent:loop preset=\"#canonical\" presets=\"#alias\" -->\n",
@@ -508,7 +607,12 @@ mod tests {
         );
         let conflicted = prompt_component_attrs(both, "queue");
         assert_eq!(conflicted.preset, None);
-        assert!(conflicted.preset_names().next().is_none());
+        assert!(
+            conflicted
+                .preset_names(&PromptPresets::default())
+                .next()
+                .is_none()
+        );
         assert_eq!(
             conflicted.preset_conflict,
             Some(PresetAttrConflict {

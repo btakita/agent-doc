@@ -735,6 +735,24 @@ fn recover_agent_history_response_from(
             if claim.generation == 0 {
                 return HistoryResponse::Unsupported;
             }
+            if worker_id.starts_with("/root/") {
+                let sessions = std::env::var_os("CODEX_HOME")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| home.join(".codex"))
+                    .join("sessions");
+                return match crate::codex_worker_completion::recover_path_bound_handback(
+                    &sessions, claim, session_id,
+                ) {
+                    Ok(Some(response)) => HistoryResponse::Recovered(response),
+                    Ok(None) => HistoryResponse::Missing,
+                    Err(error) => {
+                        eprintln!(
+                            "[agent-doc] Codex worker transcript evidence unavailable: {error:#}"
+                        );
+                        HistoryResponse::Missing
+                    }
+                };
+            }
             let Ok(attempt_completion_key) = crate::queue_claim::completion_feedback_key(claim)
             else {
                 return HistoryResponse::Unsupported;
@@ -765,15 +783,22 @@ fn recover_codex_history_response(
     home: &Path,
     locator: CodexHistoryLocator<'_>,
 ) -> HistoryResponse {
+    recover_codex_history_response_in(&home.join(".codex/sessions"), locator, None)
+}
+
+fn recover_codex_history_response_in(
+    sessions: &Path,
+    locator: CodexHistoryLocator<'_>,
+    completed_turn: Option<&str>,
+) -> HistoryResponse {
     if locator.attempt_completion_key.is_empty()
         || !codex_thread_id_is_safe(locator.coordinator_thread_id)
         || !codex_thread_id_is_safe(locator.native_subagent_id)
     {
         return HistoryResponse::Unsupported;
     }
-    let sessions = home.join(".codex/sessions");
     let mut candidates = Vec::new();
-    collect_codex_rollout_candidates(&sessions, locator.native_subagent_id, &mut candidates);
+    collect_codex_rollout_candidates(sessions, locator.native_subagent_id, &mut candidates);
     let mut matches = candidates
         .into_iter()
         .filter(|path| codex_rollout_matches(path, &locator))
@@ -782,19 +807,23 @@ fn recover_codex_history_response(
     matches.dedup();
     match matches.as_slice() {
         [] => HistoryResponse::Missing,
-        [path] => parse_codex_subagent_final_response(path),
+        [path] => parse_codex_subagent_final_response(path, completed_turn),
         _ => HistoryResponse::Ambiguous,
     }
 }
 
-fn codex_thread_id_is_safe(value: &str) -> bool {
+pub(crate) fn codex_thread_id_is_safe(value: &str) -> bool {
     !value.is_empty()
         && value
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
 }
 
-fn collect_codex_rollout_candidates(root: &Path, worker_id: &str, matches: &mut Vec<PathBuf>) {
+pub(crate) fn collect_codex_rollout_candidates(
+    root: &Path,
+    worker_id: &str,
+    matches: &mut Vec<PathBuf>,
+) {
     let Ok(entries) = std::fs::read_dir(root) else {
         return;
     };
@@ -862,7 +891,10 @@ fn codex_session_metadata_matches(
             == Some("subagent")
 }
 
-fn parse_codex_subagent_final_response(path: &Path) -> HistoryResponse {
+fn parse_codex_subagent_final_response(
+    path: &Path,
+    expected_turn: Option<&str>,
+) -> HistoryResponse {
     let Ok(content) = std::fs::read_to_string(path) else {
         return HistoryResponse::Missing;
     };
@@ -875,14 +907,22 @@ fn parse_codex_subagent_final_response(path: &Path) -> HistoryResponse {
         Ok(values) => values,
         Err(_) => return HistoryResponse::Missing,
     };
-    let started_turns = values
-        .iter()
-        .filter_map(|value| {
-            (value.get("type").and_then(serde_json::Value::as_str) == Some("event_msg")
-                && value
-                    .pointer("/payload/type")
+    let events = values.iter().filter(|value| {
+        value.get("type").and_then(serde_json::Value::as_str) == Some("event_msg")
+            && expected_turn.is_none_or(|turn| {
+                value
+                    .pointer("/payload/turn_id")
                     .and_then(serde_json::Value::as_str)
-                    == Some("task_started"))
+                    == Some(turn)
+            })
+    });
+    let started_turns = events
+        .clone()
+        .filter_map(|value| {
+            (value
+                .pointer("/payload/type")
+                .and_then(serde_json::Value::as_str)
+                == Some("task_started"))
             .then(|| {
                 value
                     .pointer("/payload/turn_id")
@@ -891,14 +931,12 @@ fn parse_codex_subagent_final_response(path: &Path) -> HistoryResponse {
             .flatten()
         })
         .collect::<Vec<_>>();
-    let completed = values
-        .iter()
+    let completed = events
         .filter(|value| {
-            value.get("type").and_then(serde_json::Value::as_str) == Some("event_msg")
-                && value
-                    .pointer("/payload/type")
-                    .and_then(serde_json::Value::as_str)
-                    == Some("task_complete")
+            value
+                .pointer("/payload/type")
+                .and_then(serde_json::Value::as_str)
+                == Some("task_complete")
         })
         .collect::<Vec<_>>();
     if started_turns.is_empty() || completed.is_empty() {
@@ -965,6 +1003,32 @@ fn parse_codex_subagent_final_response(path: &Path) -> HistoryResponse {
         }
         [_] => HistoryResponse::Ambiguous,
         _ => HistoryResponse::Ambiguous,
+    }
+}
+
+/// Recover a hand-back only for the exact child turn the coordinator's
+/// native completion event identified, excluding the inherited fork history.
+pub(crate) fn recover_codex_turn_handback(
+    sessions: &Path,
+    claim: &agent_doc_queue::queue_claim::QueueClaim,
+    coordinator: &str,
+    worker_thread: &str,
+    worker_turn: &str,
+) -> Option<String> {
+    let key = crate::queue_claim::completion_feedback_key(claim).ok()?;
+    match recover_codex_history_response_in(
+        sessions,
+        CodexHistoryLocator {
+            coordinator_thread_id: coordinator,
+            native_subagent_id: worker_thread,
+            attempt_completion_key: &key,
+        },
+        Some(worker_turn),
+    ) {
+        HistoryResponse::Recovered(response) => Some(response),
+        HistoryResponse::Missing | HistoryResponse::Ambiguous | HistoryResponse::Unsupported => {
+            None
+        }
     }
 }
 

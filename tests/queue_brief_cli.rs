@@ -171,6 +171,73 @@ fn brief_resolves_plural_presets_attribute_as_operator_authorization() {
 }
 
 #[test]
+fn brief_resolves_inherited_presets_under_a_bare_queue_scope() {
+    let (dir, doc) = write_doc("");
+    let project = dir.path().join(".agent-doc");
+    std::fs::create_dir(&project).unwrap();
+    std::fs::write(
+        project.join("project.md"),
+        "---\npresets:\n  '#check': 'Run the documentation checks.'\n  '#push': 'Commit and push the reviewed patch.'\n---\n",
+    )
+    .unwrap();
+
+    for (chain, expected_status) in [
+        ("#push", "resolved"),
+        ("#check: #push", "resolved"),
+        ("#push: #missing", "unresolved_preset"),
+        ("#push and publish", "unresolved_preset"),
+    ] {
+        std::fs::write(
+            &doc,
+            format!(
+                "---\nagent_doc_session: brief\nagent_doc_format: template\n---\n\n\
+                 <!-- agent:run id=\"docs-prs\" subagents preset=\"sample-docs: {chain}\" -->\n\
+                 - ### https://github.com/sample-org/sample-docs/pull/3\n  - #address [#q-review]\n\
+                 <!-- /agent:run -->\n"
+            ),
+        )
+        .unwrap();
+        let output = cargo_bin_cmd!("agent-doc")
+            .args(["queue", "brief"])
+            .arg(&doc)
+            .args(["--item", "#address [#q-review]", "--json"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(json["status"], expected_status, "{chain}: {json}");
+        let preamble = json["subagent_prompt_preamble"].as_str().unwrap();
+        if expected_status == "resolved" {
+            assert!(
+                preamble.contains("queue scope (context):\n> sample-docs"),
+                "{preamble}"
+            );
+            assert!(
+                !preamble.contains("AUTHORIZATION NOT RESOLVED"),
+                "{preamble}"
+            );
+            let presets = json["presets"].as_array().unwrap();
+            let push = presets.last().unwrap();
+            assert_eq!(push["name"], "#push", "{json}");
+            assert_eq!(
+                push["body"], "Commit and push the reviewed patch.",
+                "{json}"
+            );
+            assert!(!presets.iter().any(|entry| entry["name"] == "sample-docs"));
+            if chain.starts_with("#check") {
+                assert_eq!(presets[0]["name"], "#check", "{json}");
+            }
+        } else {
+            assert!(
+                preamble.contains("AUTHORIZATION NOT RESOLVED"),
+                "{preamble}"
+            );
+            assert!(preamble.contains("Do not commit, push"), "{preamble}");
+        }
+    }
+}
+
+#[test]
 fn brief_without_a_queue_preset_is_item_text_only() {
     let (_dir, doc) = write_doc(&document("", "subagents", &["rename foo to bar"], &[]));
     let output = cargo_bin_cmd!("agent-doc")

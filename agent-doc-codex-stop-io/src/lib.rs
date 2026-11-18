@@ -2746,6 +2746,15 @@ fn apply_bound_stop(
     file: &Path,
     cleanup_roots: &[PathBuf],
 ) -> Result<StopResponse> {
+    stop_phase("worker_completion_receipts");
+    if let Err(error) =
+        agent_doc_queue_io::codex_worker_completion::preserve_at_stop(file, &input.session_id)
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!("codex_worker_completion_evidence_failed error={error:#}"),
+        );
+    }
     stop_phase("session_check_inspect");
     match agent_doc_session_check_io::inspect_read_only(
         file,

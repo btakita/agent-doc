@@ -691,6 +691,10 @@ pub struct DocumentOpOriginFence {
 /// hub remembers. Each entry is one hash, so the bound is a few KiB.
 pub const BINARY_WRITE_ATTRIBUTION_CAPACITY: usize = 64;
 
+/// Retained binary-authored branches kept while a controller and an editor
+/// temporarily carry different canonical frontiers across a handoff.
+pub const BINARY_WRITE_ATTRIBUTION_BRANCH_CAPACITY: usize = 8;
+
 /// One canonical generation that agent-doc's own binary-authored writes carried
 /// forward to the current canonical (`#attachauthorattribution`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -731,6 +735,17 @@ pub struct BinaryWriteAttribution {
     ancestors: VecDeque<BinaryAttributedAncestor>,
     /// `sha256` hex of the canonical the newest recorded write produced.
     tip: Option<String>,
+    /// Superseded binary-authored runs whose exact tips may still return from a
+    /// retained editor frontier. New binaries can read records written before
+    /// this field existed because serde defaults it to empty.
+    #[serde(default)]
+    retained_runs: VecDeque<BinaryWriteAttributionRun>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct BinaryWriteAttributionRun {
+    ancestors: VecDeque<BinaryAttributedAncestor>,
+    tip: String,
 }
 
 impl BinaryWriteAttribution {
@@ -740,8 +755,23 @@ impl BinaryWriteAttribution {
             return;
         }
         if self.tip.as_deref() != Some(before_hash) {
-            // Something unrecorded moved the canonical since the last binary
-            // write: nothing older is attributable any more.
+            // A replacement controller can branch from its recovered cut while
+            // an editor still carries the predecessor's binary-authored tip.
+            // Keep that exact content-addressed run: if the retained editor
+            // frontier later returns its tip, registration can still prove its
+            // expected cut. Any other canonical remains unattributed.
+            if let Some(tip) = self.tip.take()
+                && !self.ancestors.is_empty()
+            {
+                self.retained_runs.retain(|run| run.tip != tip);
+                self.retained_runs.push_back(BinaryWriteAttributionRun {
+                    ancestors: std::mem::take(&mut self.ancestors),
+                    tip,
+                });
+                while self.retained_runs.len() > BINARY_WRITE_ATTRIBUTION_BRANCH_CAPACITY {
+                    self.retained_runs.pop_front();
+                }
+            }
             self.ancestors.clear();
         }
         self.ancestors.push_back(BinaryAttributedAncestor {
@@ -763,11 +793,18 @@ impl BinaryWriteAttribution {
     /// `canonical_hash`, newest first. Empty unless the newest recorded write
     /// produced exactly `canonical_hash`.
     pub fn ancestors_of(&self, canonical_hash: &str) -> Vec<BinaryAttributedAncestor> {
-        if self.tip.as_deref() != Some(canonical_hash) {
-            return Vec::new();
-        }
-        self.ancestors
-            .iter()
+        let ancestors = if self.tip.as_deref() == Some(canonical_hash) {
+            Some(&self.ancestors)
+        } else {
+            self.retained_runs
+                .iter()
+                .rev()
+                .find(|run| run.tip == canonical_hash)
+                .map(|run| &run.ancestors)
+        };
+        ancestors
+            .into_iter()
+            .flatten()
             .rev()
             .filter(|ancestor| ancestor.content_hash != canonical_hash)
             .cloned()
@@ -2734,6 +2771,39 @@ impl RelayHub {
         self.apply_binary_authored_replace_scoped(expected_current, content, None, source)
     }
 
+    /// Attribute an idempotent binary-authored target that is already the
+    /// canonical text.
+    ///
+    /// A retained binary write can be replayed into the canonical relay before
+    /// its CP Effect runs (for example, by a retained editor/document-op
+    /// frontier). The Effect then observes its exact target and performs no
+    /// CRDT mutation, but its exact `expected_current -> content` derivation is
+    /// still the proof a later editor attach needs to adopt that target without
+    /// treating the expected cut as unmerged operator text.
+    ///
+    /// This method records no provenance unless `content` byte-matches the
+    /// current canonical. Only binary-owned CP paths may call it, under the
+    /// same authority and semantic guards as
+    /// [`Self::apply_binary_authored_replace_scoped`].
+    pub fn attest_binary_authored_target(
+        &mut self,
+        expected_current: &str,
+        content: &str,
+        source: &str,
+    ) -> Result<bool> {
+        if self.canonical.text() != content {
+            anyhow::bail!("binary target attestation refused: target is not canonical");
+        }
+        let before_hash = content_hash(expected_current);
+        let after_hash = content_hash(content);
+        if before_hash == after_hash {
+            return Ok(false);
+        }
+        self.binary_write_attribution
+            .record(&before_hash, &after_hash, source);
+        Ok(true)
+    }
+
     /// The hub's binary-authored write run, for the durable copy.
     pub fn binary_write_attribution(&self) -> &BinaryWriteAttribution {
         &self.binary_write_attribution
@@ -2755,13 +2825,7 @@ impl RelayHub {
     /// the canonical lacks except what agent-doc's own writes replaced, so
     /// adopting canonical over it loses nothing the operator authored.
     pub fn binary_attributed_ancestors(&self) -> Vec<BinaryAttributedAncestor> {
-        let Some(tip) = self.binary_write_attribution.tip() else {
-            return Vec::new();
-        };
         let canonical_hash = content_hash(&self.canonical.text());
-        if tip != canonical_hash {
-            return Vec::new();
-        }
         self.binary_write_attribution.ancestors_of(&canonical_hash)
     }
 
@@ -7753,6 +7817,104 @@ mod tests {
         // An unattributed hub (a cold controller) attributes nothing.
         let cold = RelayHub::from_text(1, pending);
         assert!(cold.binary_attributed_ancestors().is_empty());
+    }
+
+    /// A retained binary target may reach the relay through a durable editor
+    /// frontier before the owning CP Effect replays. The replay is a text no-op,
+    /// but its exact base remains a safe attach ancestor of that target.
+    #[test]
+    fn idempotent_binary_target_attests_its_exact_expected_cut() {
+        let expected = "# Queue\n\n- pending item\n";
+        let target = "# Queue\n\n- completed item\n";
+        let mut hub = RelayHub::from_text(1, target);
+        assert!(hub.binary_attributed_ancestors().is_empty());
+
+        assert!(
+            hub.attest_binary_authored_target(
+                expected,
+                target,
+                "retained_transition_projection_effect",
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            hub.binary_attributed_ancestors(),
+            vec![BinaryAttributedAncestor {
+                content_hash: content_hash(expected),
+                source: "retained_transition_projection_effect".to_string(),
+            }]
+        );
+        assert!(
+            hub.attest_binary_authored_target(
+                expected,
+                "# Queue\n\n- unrelated target\n",
+                "retained_transition_projection_effect",
+            )
+            .is_err(),
+            "a non-canonical target must never mint attach provenance"
+        );
+    }
+
+    /// A controller handoff may project a new binary branch before the retained
+    /// editor republishes the predecessor branch. The newer write must not
+    /// erase provenance for that still-live exact tip.
+    #[test]
+    fn retained_binary_branch_keeps_attach_provenance_across_controller_handoff() {
+        let editor_cut = "# Queue\n\n- pending item\n";
+        let retained_target = "# Queue\n\n- completed item\n";
+        let controller_cut = "# Queue\n\n- pending item\n\ncontroller restart\n";
+        let controller_target = format!("{controller_cut}- projected marker\n");
+
+        let mut predecessor = RelayHub::from_text(1, editor_cut);
+        predecessor
+            .apply_binary_authored_replace(
+                editor_cut,
+                retained_target,
+                "retained_transition_projection_effect",
+            )
+            .unwrap();
+
+        let mut successor = RelayHub::from_text(1, controller_cut);
+        successor.seed_binary_write_attribution(predecessor.binary_write_attribution().clone());
+        successor
+            .apply_binary_authored_replace(
+                controller_cut,
+                &controller_target,
+                "crdt_handoff_queue_attempt_projection",
+            )
+            .unwrap();
+        assert_eq!(
+            successor.binary_attributed_ancestors(),
+            vec![BinaryAttributedAncestor {
+                content_hash: content_hash(controller_cut),
+                source: "crdt_handoff_queue_attempt_projection".to_string(),
+            }]
+        );
+
+        // The retained editor frontier now wins the canonical content. This is
+        // deliberately not a binary write in the successor process.
+        successor
+            .apply_canonical_replace(&controller_target, retained_target)
+            .unwrap();
+        assert_eq!(
+            successor.binary_attributed_ancestors(),
+            vec![BinaryAttributedAncestor {
+                content_hash: content_hash(editor_cut),
+                source: "retained_transition_projection_effect".to_string(),
+            }],
+            "the exact predecessor tip must recover its expected editor cut"
+        );
+
+        let recycled = RelayHub::from_retained_canonical_projection(
+            1,
+            &successor.retained_canonical_projection(),
+        )
+        .unwrap();
+        assert_eq!(
+            recycled.binary_attributed_ancestors(),
+            successor.binary_attributed_ancestors(),
+            "the alternate retained run must survive relay recycle"
+        );
     }
 
     /// `#attachauthorattribution`: an editor-relayed change is not agent-doc's

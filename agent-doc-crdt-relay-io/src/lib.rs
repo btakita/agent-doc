@@ -4901,6 +4901,17 @@ fn apply_cp_write_on_hub(
         // exact target as an idempotent fixed point; delivery convergence is
         // still reported from the existing frontier below, so this cannot
         // manufacture an ACK or hide an unrelated concurrent edit.
+        //
+        // The exact target can also have arrived through a retained editor's
+        // durable document-op frontier before this binary-owned CP Effect ran.
+        // No CRDT mutation is needed in that ordering, but the Effect's exact
+        // expected-cut -> target derivation is still authoritative provenance.
+        // Record it now so a later registration can prove that adopting this
+        // canonical over the expected editor cut loses no operator text.
+        binary_write_attribution::seed_hub(file, hub);
+        if hub.attest_binary_authored_target(expected_current, content, source)? {
+            binary_write_attribution::persist_hub(file, hub);
+        }
         return Ok(CpRelayWrite {
             applied: false,
             content_len: content.len(),
@@ -13979,6 +13990,54 @@ mod tests {
             );
         })
         .unwrap();
+    }
+
+    /// Regression for a retained binary-owned target restored through the
+    /// editor/document-op frontier before its CP Effect ran. The CP replay is
+    /// an idempotent text fixed point, but registration must still receive the
+    /// exact editor cut as a binary-attributed ancestor so it can adopt the
+    /// canonical without `ambiguous-retained-projection`.
+    #[test]
+    fn idempotent_retained_target_preserves_expected_cut_for_reattach() {
+        let (_dir, doc) = temp_doc("retained-target-reattach.md");
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        let expected = std::fs::read_to_string(&doc).unwrap();
+        let target = format!("{expected}\n- completed item\n");
+
+        // Model the retained editor/document-op frontier: canonical already
+        // holds the exact binary target, but no binary-write run survived it.
+        with_hub(&doc, |hub| {
+            *hub = RelayHub::from_text(CANONICAL_CLIENT_ID, &target);
+            assert!(hub.binary_attributed_ancestors().is_empty());
+        })
+        .unwrap();
+
+        let replay = apply_cp_write_for_file(
+            &doc,
+            &expected,
+            &target,
+            "retained_transition_projection_effect",
+        )
+        .unwrap()
+        .expect("the retained target remains on the canonical plane");
+        assert!(!replay.applied, "the exact target is a text fixed point");
+
+        let identity = "intellij:retained-target-reattach";
+        let registration = register_replica_for_file_incremental(&doc, identity, None)
+            .unwrap()
+            .expect("the editor replica should reattach");
+        assert_eq!(
+            registration.canonical_content_hash,
+            agent_doc_hash::content_hash(&target)
+        );
+        assert!(
+            registration
+                .binary_attributed_ancestor_hashes
+                .contains(&agent_doc_hash::content_hash(&expected)),
+            "registration must prove the editor's expected cut is a safe ancestor: {:?}",
+            registration.binary_attributed_ancestor_hashes,
+        );
     }
 
     #[test]

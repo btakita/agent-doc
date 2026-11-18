@@ -227,27 +227,30 @@ and the pending granular-flags-only rule. This runbook carries the rest.
     approve. Never dispatch a new subagent for it and never re-claim it:
     the claim follows its line through an in-place edit, whether an appended
     note or a corrected URL or wording (`#claimfollowedit`), and the worker
-    can still `--refresh` / `release` by the text it was handed. If the harness
-    reports that the exact worker is unavailable or exited, or on Grok the send
-    is rejected or `send_subagent_message` is not in the tool list when
-    `active_agent_messages` is off, the handoff did not happen
-    (`#staleownersteer`): preserve the verbatim operator answer/edit in
-    the queue and run the rendered generation-fenced `queue release ...
-    --generation <N> --requeue` command. That abandons only the stale attempt
-    and makes the edited row dispatchable under a fresh generation; do not drop
-    the answer, report it forwarded, or keep routing only to the unreachable
-    owner. An edit of a
+    can still `--refresh` / `release` by the text it was handed. A rejected send
+    or missing `send_subagent_message` tool leaves the worker and claim intact.
+    Preserve the verbatim operator answer in the queue and report the delivery
+    result. If the harness confirms that the exact worker stopped, exited,
+    or no longer exists, run the rendered generation-fenced `queue release ...
+    --generation <N> --requeue` command (`#staleownersteer`). The edited row is
+    then dispatchable under a fresh generation. An edit of a
     claimed head also wakes an idle coordinator. A different row typed over a
     claimed one is not an edit: it arrives as `cancel_claimed` for the old row
     plus ordinary new work for the new one (`#krwr`).
+  - Worker interruption requires an explicit operator instruction for the
+    exact attempt or the binary's `cancel_claimed` dispatch with
+    `cancellation=operator_removed`. An approval, merge, green check, or other
+    external status does not cancel an independent review. Leave the reviewer
+    running and forward relevant evidence through the normal steering path.
+    `cancel_claimed_pending` is a read-only observation. Keep the worker and
+    claim intact until the binary applies the cancellation.
   - `cancel_claimed` (`#queue-removal-cancels`): the operator deleted a queue
-    row with a durable active claim. Deletion is authoritative cancellation,
-    never a best-effort hint and never permission to continue because substantial
-    work is already done. The binary has tombstoned the exact identity and
+    row with a durable active claim. The binary has tombstoned the exact identity and
     `generation=` and retired pending completion delivery; stale replay cannot
     resurrect/integrate it, and a same-text re-add is a fresh generation. If the
     exact `worker=` is still alive, use the harness interrupt primitive at the
-    nearest safe consistency boundary. Best judgment
+    nearest safe consistency boundary. Without a bound worker ID, acknowledge
+    the tombstone and leave other workers running. Best judgment
     governs only shutdown mechanics. Preserve the worker's branch, worktree, and
     commits; stop further implementation, tests, integration, publication,
     release, and external issue closure. Then run the rendered generation-fenced

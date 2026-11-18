@@ -4066,7 +4066,7 @@ mod tests {
         // Keep the committed cycle clean, then publish one real next-turn
         // queue prompt together with the claimed-row removal. The new row
         // makes session-check enter its committed steering classifier; that
-        // same classifier must surface the removal as `cancel_claimed` without
+        // same classifier must surface the removal as `cancel_claimed_pending` without
         // the read-only pre-guard cut applying its tombstone.
         let deleted = baseline
             .replace("- current work\n", "- current work\n- operator follow-up\n")
@@ -4097,7 +4097,10 @@ mod tests {
         else {
             panic!("committed removed claim must reach steering classification: {status:?}");
         };
-        assert!(message.contains("dispatch=cancel_claimed"), "{message}");
+        assert!(
+            message.contains("dispatch=cancel_claimed_pending "),
+            "{message}"
+        );
         assert!(message.contains(claimed), "{message}");
 
         agent_doc_controller_io::project_controller::drain_state_actor_document_authority_handoffs_for_tests(

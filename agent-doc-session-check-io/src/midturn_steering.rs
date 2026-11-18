@@ -751,7 +751,7 @@ fn route_claimed_items(
     if status_only
         && items
             .iter()
-            .any(|item| item.dispatch == core::SteeringDispatch::CancelClaimed)
+            .any(|item| item.dispatch == core::SteeringDispatch::CancelClaimedPending)
     {
         crate::note_status_only_deferred_write();
     }
@@ -961,11 +961,12 @@ fn cancel_removed_claim_attempt_under_locks(
     content: &str,
     item: &SteeringItem,
     apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
-) -> Result<()> {
+) -> Result<agent_doc_queue::queue_claim::QueueClaimCancellationReceipt> {
     apply_guard.ensure_protects(file)?;
+    let claim_text = item.claim_text();
     let receipt = match agent_doc_queue_io::queue_claim::cancel_removed_attempt(
         file,
-        &item.verbatim,
+        claim_text,
         item.generation,
     ) {
         Ok(receipt) => receipt,
@@ -975,14 +976,15 @@ fn cancel_removed_claim_attempt_under_locks(
                 Some(agent_doc_queue::queue_claim::QueueClaimTransitionRefused::Missing)
             ) =>
         {
-            let identity = agent_doc_queue::queue_claim::claim_identity(&item.verbatim);
+            let identity = agent_doc_queue::queue_claim::claim_identity(claim_text);
             let reported = agent_doc_queue_io::claim_release_receipt::load(file)?
                 .receipts
                 .into_iter()
                 .find(|receipt| {
                     receipt.identity == identity
-                        && (receipt.generation == 0
-                            || item.generation == Some(receipt.generation))
+                        && item.generation == Some(receipt.generation)
+                        && item.owner.as_deref() == Some(receipt.owner.as_str())
+                        && item.worker_id == receipt.worker_id
                 })
                 .with_context(|| {
                 format!(
@@ -994,7 +996,7 @@ fn cancel_removed_claim_attempt_under_locks(
                 agent_doc_queue_io::queue_claim::record_released_cancellation(file, &reported)?;
             agent_doc_queue_io::claim_release_receipt::cancel_reported_attempt(
                 file,
-                &item.verbatim,
+                claim_text,
                 item.generation,
             )?;
             cancellation
@@ -1002,7 +1004,7 @@ fn cancel_removed_claim_attempt_under_locks(
         Err(err) => return Err(err),
     };
     let Some(completion_key) = receipt.completion_key.as_deref() else {
-        return Ok(());
+        return Ok(receipt);
     };
     let retired = agent_doc_document::subagent_completion::strip_completion_cells_matching(
         content,
@@ -1010,7 +1012,7 @@ fn cancel_removed_claim_attempt_under_locks(
     );
     let pending = agent_doc_document_realtime_io::pending_document_write(file).is_some();
     if !pending && retired == content {
-        return Ok(());
+        return Ok(receipt);
     }
     agent_doc_document_realtime_io::retain_deferred_document_write_target(
         file,
@@ -1042,16 +1044,17 @@ fn cancel_removed_claim_attempt_under_locks(
             pending,
         ),
     );
-    Ok(())
+    Ok(receipt)
 }
 
 /// Apply removed-claim cancellations as one explicit top-level transaction.
 /// The lock order matches completion feedback: completion lock first, then the
-/// document apply capability. Pure status/Stop/idle inspection never calls it.
-fn apply_claim_cancellations(file: &Path, candidates: &[SteeringItem]) -> Result<usize> {
+/// document apply capability. Promote only the exact durable receipt to an
+/// actionable dispatch. Pure status/Stop/idle inspection never calls this.
+fn apply_claim_cancellations(file: &Path, candidates: &mut [SteeringItem]) -> Result<usize> {
     if !candidates
         .iter()
-        .any(|item| item.dispatch == core::SteeringDispatch::CancelClaimed)
+        .any(|item| item.dispatch == core::SteeringDispatch::CancelClaimedPending)
     {
         return Ok(0);
     }
@@ -1068,15 +1071,19 @@ fn apply_claim_cancellations(file: &Path, candidates: &[SteeringItem]) -> Result
     let current_identities = all_queue_item_identities(&current);
     let mut applied = 0;
     for item in candidates
-        .iter()
-        .filter(|item| item.dispatch == core::SteeringDispatch::CancelClaimed)
+        .iter_mut()
+        .filter(|item| item.dispatch == core::SteeringDispatch::CancelClaimedPending)
     {
         if current_identities.contains(&agent_doc_queue::queue_claim::claim_identity(
-            &item.verbatim,
+            item.claim_text(),
         )) {
             continue;
         }
-        cancel_removed_claim_attempt_under_locks(file, &current, item, &apply_guard)?;
+        let receipt = cancel_removed_claim_attempt_under_locks(file, &current, item, &apply_guard)?;
+        item.dispatch = core::SteeringDispatch::CancelClaimed;
+        item.owner = Some(receipt.claim.owner);
+        item.generation = Some(receipt.claim.generation);
+        item.worker_id = receipt.claim.worker.map(|worker| worker.worker_id);
         applied += 1;
     }
     Ok(applied)
@@ -1084,8 +1091,8 @@ fn apply_claim_cancellations(file: &Path, candidates: &[SteeringItem]) -> Result
 
 pub fn apply_pending_claim_cancellations(file: &Path) -> Result<usize> {
     let current = crate::resolve_current_document_content(file, "claim_cancellation_probe")?;
-    let candidates = pending_steering_items(file, &current);
-    apply_claim_cancellations(file, &candidates)
+    let mut candidates = pending_steering_items(file, &current);
+    apply_claim_cancellations(file, &mut candidates)
 }
 
 fn load_watermark(
@@ -1178,6 +1185,13 @@ pub struct PreparedObservation {
 }
 
 impl PreparedObservation {
+    fn apply_claim_cancellations(&mut self, file: &Path) -> Result<()> {
+        if let Some(report) = &mut self.report {
+            apply_claim_cancellations(file, &mut report.items)?;
+        }
+        Ok(())
+    }
+
     /// Persist the advanced watermark (and log what surfaced).
     pub fn acknowledge(&self, file: &Path) -> Result<()> {
         let Some(next) = &self.next else {
@@ -1672,14 +1686,12 @@ pub fn observe(file: &Path, consumer: &str, advance: bool) -> Result<Option<Stee
     } else {
         ClosedCyclePolicy::Boundary
     };
-    let Some(prepared) = prepare(file, consumer, policy)? else {
+    let Some(mut prepared) = prepare(file, consumer, policy)? else {
         return Ok(None);
     };
     if advance {
-        if !crate::status_only_pass_active()
-            && let Some(report) = prepared.report.as_ref()
-        {
-            apply_claim_cancellations(file, &report.items)?;
+        if !crate::status_only_pass_active() {
+            prepared.apply_claim_cancellations(file)?;
         }
         prepared.acknowledge(file)?;
     }
@@ -2072,7 +2084,7 @@ pub fn prepare_route_sync_steering(file: &Path) -> Result<Option<RouteSyncSteeri
     // the turn a diff-only payload and then recording it as delivered would
     // advance the baseline past items the agent never saw. Nothing is pasted
     // or recorded; the next send (or the hook's next settle edge) retries.
-    let items = match explicit_send_pending_items(file) {
+    let mut items = match explicit_send_pending_items(file) {
         Ok(items) => items,
         Err(err) => {
             agent_doc_ops_log_io::log_op(
@@ -2086,6 +2098,7 @@ pub fn prepare_route_sync_steering(file: &Path) -> Result<Option<RouteSyncSteeri
             return Err(err.context("read the explicit-send steering items"));
         }
     };
+    apply_claim_cancellations(file, &mut items)?;
     let (previous, cycle_id) = if let Some(watermark) = watermark {
         let previous = match &stored {
             Some(stored) if stored.cycle_id == watermark.cycle_id => stored.content.clone(),
@@ -2436,9 +2449,12 @@ fn emit_closeout_steering_inner(file: &Path, writer: &mut impl std::io::Write, s
         } else {
             prepare_closeout(file)?
         };
-        let Some(prepared) = prepared else {
+        let Some(mut prepared) = prepared else {
             return Ok(false);
         };
+        if !status_only {
+            prepared.apply_claim_cancellations(file)?;
+        }
         let rendered = prepared.report.as_ref().and_then(render_closeout);
         if let Some(text) = &rendered {
             writeln!(writer, "{text}").context("write closeout steering report")?;
@@ -3023,7 +3039,8 @@ fn post_tool_use_response_at_with_checkpoint(
         }
     };
     let mut contexts = Vec::new();
-    if let Some(prepared) = prepared {
+    if let Some(mut prepared) = prepared {
+        prepared.apply_claim_cancellations(&file)?;
         let context = prepared
             .report
             .as_ref()
@@ -5965,7 +5982,10 @@ mod tests {
         let ledger_before = agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap();
         let pending = pending_steering_items(&file, &deleted);
         assert_eq!(pending.len(), 1, "{pending:?}");
-        assert_eq!(pending[0].dispatch, core::SteeringDispatch::CancelClaimed);
+        assert_eq!(
+            pending[0].dispatch,
+            core::SteeringDispatch::CancelClaimedPending
+        );
         assert_eq!(std::fs::read(&state_db).unwrap(), state_before);
         assert_eq!(std::fs::read(&wal_path).ok(), wal_before);
         assert_eq!(std::fs::read(&ops_path).ok(), ops_before);
@@ -5974,6 +5994,31 @@ mod tests {
             agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap(),
             ledger_before
         );
+
+        let peek = observe(&file, CONSUMER_CLI, false).unwrap().expect("peek");
+        let preview = peek.render().expect("preview");
+        assert!(
+            preview.contains("dispatch=cancel_claimed_pending "),
+            "{preview}"
+        );
+        assert!(
+            !preview.contains("cancellation=operator_removed"),
+            "{preview}"
+        );
+        assert!(!preview.contains("interrupt it now"), "{preview}");
+        let mut stale = peek.items;
+        std::fs::write(&file, &baseline).unwrap();
+        assert_eq!(apply_claim_cancellations(&file, &mut stale).unwrap(), 0);
+        assert_eq!(
+            stale[0].dispatch,
+            core::SteeringDispatch::CancelClaimedPending
+        );
+        assert_eq!(
+            agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap(),
+            ledger_before
+        );
+        std::fs::write(&file, &deleted).unwrap();
+        backdate(&file);
 
         // The applying transaction must queue behind completion feedback
         // before it can own the queue apply capability. This exact barrier
@@ -6025,14 +6070,18 @@ mod tests {
         assert_eq!(item.generation, Some(claim.generation));
 
         let rendered = report.render().expect("render");
-        assert!(rendered.contains("dispatch=cancel_claimed"), "{rendered}");
+        assert!(rendered.contains("dispatch=cancel_claimed "), "{rendered}");
+        assert!(
+            rendered.contains("cancellation=operator_removed"),
+            "{rendered}"
+        );
         assert!(rendered.contains("worker=/root/release_348"), "{rendered}");
         assert!(
             rendered.contains("authoritative cancellation"),
             "{rendered}"
         );
         assert!(
-            rendered.contains("never best-effort or sunk-cost"),
+            rendered.contains("authoritative cancellation for that attempt"),
             "{rendered}"
         );
         assert!(
@@ -6069,6 +6118,94 @@ mod tests {
                 .claims
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn external_review_status_cannot_cancel_a_bound_reviewer() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let file = root.join("plan.md");
+        let head = "Review sample-app PR 7 [#a]";
+        let other = "Independently review sample-app PR 7 [#b]";
+        let baseline = format!(
+            "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:queue go -->\n- {head}\n- {other}\n<!-- /agent:queue -->\n\n<!-- agent:status -->\nReview pending.\n<!-- /agent:status -->\n"
+        );
+        std::fs::write(&file, &baseline).unwrap();
+        agent_doc_codex_hook_io::save_state(
+            &root,
+            &agent_doc_codex_hook_io::SessionState {
+                session_id: "grok-review".into(),
+                identity_origin: agent_doc_codex_hook_io::SessionIdentityOrigin::HarnessHook,
+                harness: None,
+                doc_path: file.display().to_string(),
+                last_turn_id: String::new(),
+                last_prompt: "agent-doc plan.md".into(),
+                last_auto_queue_head: None,
+                last_context_clear_at: None,
+                last_prompt_cycle: None,
+                preflight_admitted: None,
+                updated_at: 1,
+            },
+        )
+        .unwrap();
+        let hook = grok_post_tool_use_payload("grok-review", &root, None);
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
+                .unwrap();
+        seed_for_cycle(&file, &cycle.cycle_id, &baseline, Some(head), Vec::new()).unwrap();
+        let before: Vec<_> = [(head, "first"), (other, "second")]
+            .into_iter()
+            .map(|(item, label)| {
+                let owner = format!("subagent:{label}");
+                let (_, claim) =
+                    agent_doc_queue_io::queue_claim::claim(&file, item, &owner, 3600).unwrap();
+                agent_doc_queue_io::queue_claim::start_attempt(
+                    &file,
+                    item,
+                    &owner,
+                    &format!("/root/{label}"),
+                    3600,
+                    claim.generation,
+                )
+                .unwrap()
+            })
+            .collect();
+
+        let approved =
+            baseline.replace("Review pending.", "PR 7 approved by an external reviewer.");
+        std::fs::write(&file, &approved).unwrap();
+        assert_eq!(post_tool_use_response(&hook).unwrap(), None);
+        let ledger = agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap();
+        assert_eq!(ledger.claims, before);
+        assert!(ledger.cancellations.is_empty());
+
+        let removed = approved.replace(&format!("- {head}\n"), "");
+        std::fs::write(&file, &removed).unwrap();
+        let output = post_tool_use_response(&hook)
+            .unwrap()
+            .expect("owner receives cancellation");
+        let context = output["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap();
+        let rendered = take_steering_surrogate(&file, compact_token(context)).unwrap();
+        assert!(rendered.contains("dispatch=cancel_claimed "), "{rendered}");
+        assert!(
+            rendered.contains("worker=/root/first cancellation=operator_removed"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("worker=/root/second"), "{rendered}");
+        let ledger = agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap();
+        let [other_reviewer] = ledger.claims.as_slice() else {
+            panic!("expected the independent reviewer to remain active: {ledger:?}");
+        };
+        assert_eq!(other_reviewer.identity, before[1].identity);
+        assert_eq!(other_reviewer.owner, before[1].owner);
+        assert_eq!(other_reviewer.generation, before[1].generation);
+        assert_eq!(other_reviewer.worker, before[1].worker);
+        assert_eq!(other_reviewer.state, before[1].state);
+        assert_eq!(ledger.cancellations.len(), 1);
+        assert_eq!(ledger.cancellations[0].claim, before[0]);
     }
 
     /// `#queue-removal-cancels`: one removed occurrence cannot authorize

@@ -1390,6 +1390,18 @@ its receipt ended is stale residue, not ownership, so pruning its struck row is
 cleanup (`#deletedstruckmismatch`); each degraded mismatch is reported once per
 owning attempt.
 
+The steering observer classifies a claimed removal as
+`cancel_claimed_pending`. A preview or read-only session check leaves the
+claim intact. A delivering hook, explicit send, advancing CLI observation, or
+closeout rechecks the authoritative queue under the existing completion and
+queue apply guards. After the durable cancellation receipt is recorded and
+completion delivery is retired, it promotes the observation to
+`cancel_claimed` with `cancellation=operator_removed`. The receipt supplies
+the exact owner, generation, and bound worker. An unbound claim has no native
+worker to interrupt. A harness interrupt requires this typed dispatch or
+explicit operator cancellation of the exact worker. External approval and
+status changes provide context for a review and authorize no worker stop.
+
 Independent `report-complete` processes serialize through a document-scoped cross-process owner, then re-read authority and recompute their insertion inside that owner. An attached-editor write is accepted as a durable retained intent and projected by the long-lived controller; the one-shot reporter does not wait through typing, delivery, or native-save backpressure and never writes editor-owned disk. A detached document uses the ordinary synchronous CAS write. Concurrent reports therefore compose without losing notices or operator edits and cannot race coordinator closeout with stale full-document successors.
 
 The short-lived bodyless v0.34 artifact (`### Re: Subagent completed — agent-doc: ...` immediately followed by its marker) has a narrow, idempotent binary migration: `agent-doc queue repair-completion-feedback <FILE>`. It rewrites only exact binary heading+marker pairs into the valid response-cell grammar through the same document owner/editor authority. It does not replay or resubmit the committed closeout, release claims, or change cycle state; running it again is a no-op.

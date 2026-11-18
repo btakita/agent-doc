@@ -1704,6 +1704,12 @@ fn compose_occurrence(
     // content policy. `exchange` blocks are not strike-bearing and keep the
     // content-policy path.
     let lifecycle_governed = is_list_component(&ours.component);
+    let ours_generated_parents = (ours.component == "queue")
+        .then(|| crate::crdt::generated_response_parent_keys_for_rows(&ours_rows))
+        .unwrap_or_default();
+    let theirs_generated_parents = (ours.component == "queue")
+        .then(|| crate::crdt::generated_response_parent_keys_for_rows(&theirs_rows))
+        .unwrap_or_default();
     // Order spine: theirs (live) for list components, ours (history) for exchange.
     let order = if is_exchange {
         weave_order(&identity_seq(ours), &identity_seq(theirs))
@@ -1722,6 +1728,7 @@ fn compose_occurrence(
     };
 
     let mut merged: Vec<(String, ItemValue)> = Vec::with_capacity(order.len());
+    let mut merged_keys = std::collections::HashSet::new();
     let mut conflicts = Vec::new();
     for id in &order {
         let in_b = base_map.contains_key(id);
@@ -1877,7 +1884,19 @@ fn compose_occurrence(
             (None, None) => None,
         };
         if let Some(v) = resolved {
+            // `#responsechildowner`: response metadata is an atomic child
+            // projection of its owning queue row. A retained completion may
+            // add the child while the operator-side cut deletes the owner;
+            // honor that deletion without
+            // promoting the generated child to an orphaned queue row.
+            let generated_parent = ours_generated_parents
+                .get(id)
+                .or_else(|| theirs_generated_parents.get(id));
+            if generated_parent.is_some_and(|parent| !merged_keys.contains(parent)) {
+                continue;
+            }
             merged.push((id.clone(), v));
+            merged_keys.insert(id.clone());
         }
     }
     Some((merged, conflicts))

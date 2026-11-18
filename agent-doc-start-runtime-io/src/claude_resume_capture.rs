@@ -28,11 +28,13 @@
 
 use std::path::Path;
 
-use agent_doc_sqlite::state_store::{self, Connection, DocumentRuntimeStateRecord};
+pub use agent_doc_session_actor_io::{
+    load_claude_session_start_from_db, record_claude_session_start_in_db,
+};
+use agent_doc_sqlite::state_store;
 use agent_doc_supervisor::session_lineage::{
-    CLAUDE_SESSION_START_STATE_KIND, ClaudeSessionStartCapture, HarnessChildIdentity,
-    HarnessSessionLineage, claude_respawn_session_start_adoption,
-    parse_claude_session_start_capture,
+    ClaudeSessionStartCapture, HarnessChildIdentity, HarnessSessionLineage,
+    claude_respawn_session_start_adoption,
 };
 
 use crate::record_document_resume_id_for_harness;
@@ -158,10 +160,6 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-fn session_start_key(document_id: &str) -> String {
-    agent_doc_fs::document_state_hash_from_str(document_id)
-}
-
 /// Persist the hook's proof as a [`ClaudeSessionStartCapture`]. An unreadable
 /// harness start time leaves no record (a respawn then keeps its lineage).
 fn record_session_start_provenance(
@@ -179,6 +177,7 @@ fn record_session_start_provenance(
                 source: capture.source.to_string(),
                 supervisor_pid: capture.supervisor_pid,
                 generation: capture.generation,
+                pane: Some(pane.to_string()),
                 harness_pid: capture.harness_pid,
                 harness_start_ticks,
                 recorded_at_ms,
@@ -197,37 +196,6 @@ fn record_session_start_provenance(
         eprintln!("[turn-status] {line}");
         agent_doc_ops_log_io::log_op(&capture.document, &line);
     }
-}
-
-/// Upsert the document's latest proven Claude `SessionStart` capture.
-pub fn record_claude_session_start_in_db(
-    conn: &Connection,
-    document_id: &str,
-    capture: &ClaudeSessionStartCapture,
-) -> anyhow::Result<()> {
-    state_store::upsert_document_runtime_state_in_db(
-        conn,
-        &DocumentRuntimeStateRecord {
-            document_hash: session_start_key(document_id),
-            state_kind: CLAUDE_SESSION_START_STATE_KIND.to_string(),
-            canonical_path: document_id.to_string(),
-            payload_json: serde_json::to_string(capture)?,
-            updated_at_ms: capture.recorded_at_ms,
-        },
-    )
-}
-
-/// Load the document's latest proven Claude `SessionStart` capture, if any.
-pub fn load_claude_session_start_from_db(
-    conn: &Connection,
-    document_id: &str,
-) -> anyhow::Result<Option<ClaudeSessionStartCapture>> {
-    Ok(state_store::load_document_runtime_state_from_db(
-        conn,
-        &session_start_key(document_id),
-        CLAUDE_SESSION_START_STATE_KIND,
-    )?
-    .and_then(|row| parse_claude_session_start_capture(&row.payload_json)))
 }
 
 /// Outcome of [`claude_respawn_session_start`], for the supervisor's logs.
@@ -524,6 +492,7 @@ mod tests {
                 source: "clear".into(),
                 supervisor_pid: supervisor,
                 generation: 3,
+                pane: Some("%2".to_string()),
                 harness_pid: first_child,
                 harness_start_ticks: u64::from(first_child) + 1000,
                 recorded_at_ms: 1_000,

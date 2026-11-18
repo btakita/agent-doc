@@ -31,7 +31,12 @@
 //! - `record_session_start_persists_authoritative_record`
 
 use agent_doc_harness::{document_harness_from_content, normalize_harness_name};
+use agent_doc_supervisor::session_lineage::{
+    CLAUDE_SESSION_START_STATE_KIND, parse_claude_session_start_capture,
+};
 use agent_doc_supervisor::{OwnershipGeneration, infer_latest_generation_from_content};
+
+pub use agent_doc_supervisor::session_lineage::ClaudeSessionStartCapture;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
@@ -105,6 +110,37 @@ pub fn canonical_document_id_in(base_dir: &Path, file: &str) -> String {
 fn load_store_in(base_dir: &Path) -> Result<ActorStore> {
     let conn = state_store::open_state_db(base_dir)?;
     state_store::load_actor_store_from_db(&conn)
+}
+
+/// Upsert the document's latest proven Claude `SessionStart` capture.
+pub fn record_claude_session_start_in_db(
+    conn: &state_store::Connection,
+    document_id: &str,
+    capture: &ClaudeSessionStartCapture,
+) -> anyhow::Result<()> {
+    state_store::upsert_document_runtime_state_in_db(
+        conn,
+        &state_store::DocumentRuntimeStateRecord {
+            document_hash: agent_doc_fs::document_state_hash_from_str(document_id),
+            state_kind: CLAUDE_SESSION_START_STATE_KIND.to_string(),
+            canonical_path: document_id.to_string(),
+            payload_json: serde_json::to_string(capture)?,
+            updated_at_ms: capture.recorded_at_ms,
+        },
+    )
+}
+
+/// Load the document's latest proven Claude `SessionStart` capture, if any.
+pub fn load_claude_session_start_from_db(
+    conn: &state_store::Connection,
+    document_id: &str,
+) -> anyhow::Result<Option<ClaudeSessionStartCapture>> {
+    Ok(state_store::load_document_runtime_state_from_db(
+        conn,
+        &agent_doc_fs::document_state_hash_from_str(document_id),
+        CLAUDE_SESSION_START_STATE_KIND,
+    )?
+    .and_then(|row| parse_claude_session_start_capture(&row.payload_json)))
 }
 
 fn load_actor_record_by_document_id(

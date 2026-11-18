@@ -1,5 +1,5 @@
-//! A dispatched worker that runs out of tokens or credits
-//! (`#harnessquotaexhausted`), driven through the real `agent-doc` CLI.
+//! Queue worker lifecycle through the real CLI, including coordinator liveness
+//! and a worker running out of tokens or credits (`#harnessquotaexhausted`).
 
 use std::fs;
 use std::io::Write;
@@ -109,6 +109,107 @@ fn claim_for<'a>(claims: &'a serde_json::Value, item: &str) -> &'a serde_json::V
                 .is_some_and(|text| text.contains(item))
         })
         .expect("claim for item")
+}
+
+#[test]
+fn concurrent_worker_claims_keep_the_waiting_codex_coordinator_live() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    fs::create_dir(root.join(".agent-doc")).unwrap();
+    let doc = root.join("session.md");
+    fs::write(
+        &doc,
+        concat!(
+            "---\nagent_doc_session: waiting-owner\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:queue subagents go -->\n",
+            "- coordinator task\n- worker a task\n- worker b task\n",
+            "<!-- /agent:queue -->\n",
+        ),
+    )
+    .unwrap();
+
+    let run = |thread: &str, operation: &str, rest: &[&str]| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let output = Command::new(env!("CARGO_BIN_EXE_agent-doc"))
+                .env(
+                    agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+                    CONTROLLER_LAUNCH_REASON,
+                )
+                .env("AGENT_DOC_ROOT_CEILING_DIRECTORIES", root.parent().unwrap())
+                .env_remove("TMUX")
+                .env("TMUX_TMPDIR", root)
+                .env_remove("CLAUDE_CODE_SESSION_ID")
+                .env_remove("CLAUDE_PID")
+                .env_remove("GROK_SESSION_ID")
+                .env("TMUX_PANE", "%31")
+                .env("CODEX_THREAD_ID", thread)
+                .current_dir(root)
+                .arg("queue")
+                .arg(operation)
+                .arg(&doc)
+                .args(rest)
+                .output()
+                .unwrap();
+            if output.status.success() {
+                break output;
+            }
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                operation == "claim"
+                    && stderr.contains("queue mutation deferred")
+                    && std::time::Instant::now() < deadline,
+                "queue {operation} {rest:?}: {stderr}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+    };
+    run(
+        "coordinator",
+        "claim",
+        &[
+            "--item",
+            "coordinator task",
+            "--owner",
+            "subagent:coordinator-task",
+        ],
+    );
+    run(
+        "coordinator",
+        "start",
+        &[
+            "--item",
+            "coordinator task",
+            "--owner",
+            "subagent:coordinator-task",
+            "--generation",
+            "1",
+            "--worker-id",
+            "coordinator-worker",
+        ],
+    );
+
+    let ready = std::sync::Barrier::new(3);
+    std::thread::scope(|scope| {
+        for (thread, item, owner) in [
+            ("worker-a", "worker a task", "subagent:worker-a"),
+            ("worker-b", "worker b task", "subagent:worker-b"),
+        ] {
+            let ready = &ready;
+            let run = &run;
+            scope.spawn(move || {
+                ready.wait();
+                run(thread, "claim", &["--item", item, "--owner", owner]);
+                let output = run(thread, "claims", &[]);
+                let reports = serde_json::from_slice(&output.stdout).unwrap();
+                let parent = claim_for(&reports, "coordinator task");
+                assert_eq!(parent["owner_session_state"], "live", "{parent:#}");
+                assert!(parent["owner_session_end_reason"].is_null(), "{parent:#}");
+                assert_eq!(parent["expected_visible_marker"], "🚧", "{parent:#}");
+            });
+        }
+        ready.wait();
+    });
 }
 
 fn report_limit(dir: &Path, doc: &str) -> String {

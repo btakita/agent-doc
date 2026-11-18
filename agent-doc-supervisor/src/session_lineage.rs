@@ -118,6 +118,10 @@ pub struct ClaudeSessionStartCapture {
     pub supervisor_pid: u32,
     /// The document generation whose lease named that supervisor.
     pub generation: u64,
+    /// The pane bound to that supervisor at hook time. Older captures omitted
+    /// it and still support crash resume.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<String>,
     /// The supervisor's direct harness child that ran the hook.
     pub harness_pid: u32,
     /// That child's kernel start time (`/proc/<pid>/stat` field 22), which
@@ -230,6 +234,7 @@ mod tests {
             source: "clear".into(),
             supervisor_pid,
             generation: 3,
+            pane: None,
             harness_pid,
             harness_start_ticks: ticks,
             recorded_at_ms: 1,

@@ -82,9 +82,8 @@
 //! [`owner_session_liveness`] judges a claim against what the caller can see:
 //!
 //! * the recorded harness **pid exited** — the coordinator process is gone;
-//! * the **pane's harness session changed** — the caller, or the pane's newest
-//!   harness hook, runs a different session id in the claim's pane (`/clear`,
-//!   a restart, a resume of another session);
+//! * the document's supervisor proved a new Claude conversation start in the
+//!   claim's pane (`/clear` or startup), after the claim bound to its owner;
 //! * otherwise the owner session is **live**, or **unrecorded** (a claim made
 //!   outside a harness, or before this field existed) and judged as before.
 //!
@@ -1071,15 +1070,12 @@ pub fn owner_process_alive(pid: u32) -> bool {
 /// What the caller can observe about a claim's owner session.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct OwnerSessionObservation<'a> {
-    /// The calling process's own harness session (the coordinator, or one of
-    /// its subagents).
-    pub caller: Option<&'a ClaimOwnerSession>,
     /// Whether the recorded owner pid is alive; `None` when no pid is recorded
     /// or it could not be probed.
     pub owner_pid_alive: Option<bool>,
-    /// The session id the claim's pane's harness most recently reported
-    /// through a turn hook, with the time it was observed; `None` when unknown.
-    pub pane_session: Option<(&'a str, u64)>,
+    /// A proven Claude `SessionStart` for the document's supervisor and pane,
+    /// carrying the new conversation id and the event time in milliseconds.
+    pub claude_session_start: Option<(&'a str, u64)>,
 }
 
 /// Why a claim's owner session is known to have ended.
@@ -1119,8 +1115,8 @@ pub enum ClaimOwnerLiveness {
     Unrecorded,
     /// Nothing the caller observes contradicts the owner session being alive.
     Live,
-    /// The owner session is gone. The claim still holds the head until its
-    /// TTL, but nothing proves its work is in flight.
+    /// The owner session ended. The claim holds the head according to its
+    /// worker lifecycle and requires evidence before presenting work in flight.
     Ended(OwnerSessionEndReason),
 }
 
@@ -1135,31 +1131,21 @@ pub fn owner_session_liveness(
     if observation.owner_pid_alive == Some(false) {
         return ClaimOwnerLiveness::Ended(OwnerSessionEndReason::OwnerProcessExited);
     }
-    if let (Some(owner_pane), Some(owner_session)) =
-        (owner.pane.as_deref(), owner.session_id.as_deref())
+    // A worker can inherit the coordinator's pane while using a different
+    // session id. The supervisor-proven lifecycle edge is the only session
+    // replacement evidence. Use the latest owner heartbeat when present so
+    // that an earlier start cannot invalidate a claim after adoption.
+    let owner_bound_at_secs = claim
+        .claimed_at_secs
+        .max(claim.heartbeat_at_secs.unwrap_or_default());
+    if owner.harness.as_deref() == Some("claude")
+        && owner.pane.is_some()
+        && let Some(owner_session) = owner.session_id.as_deref()
+        && let Some((started_session, started_at_ms)) = observation.claude_session_start
+        && started_at_ms / 1000 > owner_bound_at_secs
+        && started_session != owner_session
     {
-        // The caller sits in the claim's pane under another session of the same
-        // harness: one harness runs per pane, so the owner session is gone.
-        if let Some(caller) = observation.caller
-            && caller.pane.as_deref() == Some(owner_pane)
-            && caller.harness == owner.harness
-            && caller
-                .session_id
-                .as_deref()
-                .is_some_and(|session| session != owner_session)
-        {
-            return ClaimOwnerLiveness::Ended(OwnerSessionEndReason::SessionReplaced);
-        }
-        // The pane's harness reported a different session after the claim was
-        // made. Only Claude hook payloads are known to carry the same id as
-        // `CLAUDE_CODE_SESSION_ID`, so other harnesses skip this signal.
-        if owner.harness.as_deref() == Some("claude")
-            && let Some((pane_session, observed_at)) = observation.pane_session
-            && observed_at >= claim.claimed_at_secs
-            && pane_session != owner_session
-        {
-            return ClaimOwnerLiveness::Ended(OwnerSessionEndReason::SessionReplaced);
-        }
+        return ClaimOwnerLiveness::Ended(OwnerSessionEndReason::SessionReplaced);
     }
     ClaimOwnerLiveness::Live
 }
@@ -4976,20 +4962,13 @@ mod tests {
         }
     }
 
-    /// `#claimownerliveness` (haiven-dev tasks/sdk.md, 2026-10-11): a claim
-    /// made by the pre-`/clear` coordinator session in pane %180 reads as
-    /// ended once the pane runs another session — seen by the caller itself
-    /// or by the pane's newest harness hook — and as ended when the harness
-    /// process exits. The same session (including its own subagents, which
-    /// inherit the session id) reads as live; a claim without a recorded
-    /// session stays unrecorded.
     #[test]
-    fn owner_session_liveness_detects_cleared_replaced_and_exited_sessions() {
+    fn owner_session_liveness_requires_a_proven_lifecycle_event() {
         let mut ledger = QueueClaimLedger::default();
         let before_clear = session("claude", "pre-clear", "%180", 4242);
         ledger.claim_in_session(
-            "do [#cligenport]",
-            "subagent:cligoshell-then-cligenport",
+            "do [#a]",
+            "subagent:a",
             100,
             7200,
             Some(before_clear.clone()),
@@ -4997,83 +4976,51 @@ mod tests {
         let claim = ledger.claims[0].clone();
         assert_eq!(claim.owner_session.as_ref(), Some(&before_clear));
 
-        let live = |obs| owner_session_liveness(&claim, obs);
-        // Same session, or a subagent of it: live.
+        let observe = |owner_pid_alive, claude_session_start| {
+            owner_session_liveness(
+                &claim,
+                OwnerSessionObservation {
+                    owner_pid_alive,
+                    claude_session_start,
+                },
+            )
+        };
+        assert_eq!(observe(Some(true), None), ClaimOwnerLiveness::Live);
         assert_eq!(
-            live(OwnerSessionObservation {
-                caller: Some(&before_clear),
-                owner_pid_alive: Some(true),
-                pane_session: Some(("pre-clear", 150)),
-            }),
+            observe(Some(true), Some(("pre-clear", 150_000))),
             ClaimOwnerLiveness::Live
         );
-        // The post-`/clear` coordinator in the same pane: replaced.
-        let after_clear = session("claude", "post-clear", "%180", 4242);
         assert_eq!(
-            live(OwnerSessionObservation {
-                caller: Some(&after_clear),
-                owner_pid_alive: Some(true),
-                pane_session: None,
-            }),
+            observe(Some(true), Some(("post-clear", 200_000))),
             ClaimOwnerLiveness::Ended(OwnerSessionEndReason::SessionReplaced)
         );
-        // A caller outside the pane (a hook, another document's coordinator)
-        // learns it from the pane's harness hook observed after the claim.
-        let elsewhere = session("claude", "other-doc", "%7", 999);
         assert_eq!(
-            live(OwnerSessionObservation {
-                caller: Some(&elsewhere),
-                owner_pid_alive: Some(true),
-                pane_session: Some(("post-clear", 200)),
-            }),
-            ClaimOwnerLiveness::Ended(OwnerSessionEndReason::SessionReplaced)
-        );
-        // A pane observation older than the claim proves nothing.
-        assert_eq!(
-            live(OwnerSessionObservation {
-                caller: None,
-                owner_pid_alive: None,
-                pane_session: Some(("older-session", 99)),
-            }),
+            observe(None, Some(("older-session", 100_999))),
             ClaimOwnerLiveness::Live
         );
-        // The harness process is gone.
         assert_eq!(
-            live(OwnerSessionObservation {
-                caller: None,
-                owner_pid_alive: Some(false),
-                pane_session: None,
-            }),
+            observe(Some(false), None),
             ClaimOwnerLiveness::Ended(OwnerSessionEndReason::OwnerProcessExited)
         );
-        // Session ids are only compared within one harness.
+
         let codex_owner = QueueClaim {
             owner_session: Some(session("codex", "thread-a", "%180", 4242)),
-            ..claim.clone()
+            ..claim
         };
         assert_eq!(
             owner_session_liveness(
                 &codex_owner,
                 OwnerSessionObservation {
-                    caller: None,
                     owner_pid_alive: Some(true),
-                    pane_session: Some(("claude-session", 200)),
+                    claude_session_start: Some(("claude-session", 200_000)),
                 }
             ),
             ClaimOwnerLiveness::Live
         );
-        // No recorded owner session: judged as before.
         let mut legacy = QueueClaimLedger::default();
         legacy.claim("do [#a]", "subagent:a", 100, 600);
         assert_eq!(
-            owner_session_liveness(
-                &legacy.claims[0],
-                OwnerSessionObservation {
-                    caller: Some(&after_clear),
-                    owner_pid_alive: None,
-                    pane_session: None,
-                }
-            ),
+            owner_session_liveness(&legacy.claims[0], OwnerSessionObservation::default()),
             ClaimOwnerLiveness::Unrecorded
         );
         assert_eq!(ClaimOwnerSession::default().non_empty(), None);
@@ -5105,9 +5052,8 @@ mod tests {
             owner_session_liveness(
                 &adopted,
                 OwnerSessionObservation {
-                    caller: Some(&after_clear),
                     owner_pid_alive: Some(true),
-                    pane_session: Some(("post-clear", 200)),
+                    claude_session_start: Some(("earlier-start", 199_000)),
                 }
             ),
             ClaimOwnerLiveness::Live

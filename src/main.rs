@@ -10090,7 +10090,7 @@ fn try_main() -> anyhow::Result<()> {
                             agent_doc_element_backlog_io::backlog_cmd::backfill(&file)
                         }
                         PendingAction::Done { id } => {
-                            agent_doc_element_backlog_io::backlog_cmd::done(&file, &id)
+                            agent_doc_write_runtime_io::complete_tracked_work_realtime(&file, &id)
                         }
                         PendingAction::Reopen { id, queue } => {
                             agent_doc_element_backlog_io::backlog_cmd::reopen(&file, &id, queue)

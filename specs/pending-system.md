@@ -267,6 +267,23 @@ On every preflight run:
   tracked work, creates `agent:done` when needed, and appends each removed item
   there or to its explicit `archive=...done.md` target instead of silently
   deleting it.
+- Realtime lifecycle convergence invariant (`#realtimetrackedcompletion`): once
+  execution evidence proves a tracked item complete during a long-running turn,
+  the agent invokes the matching standalone granular command (for example
+  `agent-doc backlog <file> done <id>`) at the next safe tool boundary. That
+  editor-authoritative operation marks the row complete, updates linked
+  queue/todo and generated status projections, and records the open cycle's
+  completion fact without sealing the response cycle. If execution continues,
+  the same open cycle accepts a salient checkpoint naming current workers and
+  the exact remaining action; a committing backlog-only write is not a valid
+  substitute. Terminal `respond` remains the atomic response-placement boundary,
+  but it is not the sole lifecycle-truth boundary and must not replay an
+  already-visible completion. Each document is an independently trustworthy,
+  durable handoff surface even when the operator switches documents or the agent
+  exhausts tokens and is replaced; no hidden chat context is required to resume.
+  Deferring proven completion until turn end is correctness drift: downstream
+  planning can derive false blockers, duplicate or obscuring decisions/prompts,
+  and stale status from the open row.
 - The standalone `agent-doc backlog <file> reopen <id> [--queue]` command is
   the only supported completed-history reversal. It atomically removes every
   same-id entry from inline or external `agent:done`, restores the newest

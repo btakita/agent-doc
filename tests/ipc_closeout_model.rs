@@ -216,6 +216,118 @@ fn setup_project(with_patches_dir: bool) -> (TempDir, PathBuf, String) {
     (tmp, doc, original)
 }
 
+#[test]
+fn realtime_completion_keeps_cycle_open_and_salient_checkpoint_reaches_editor_gate() {
+    let tmp = TempDir::new().unwrap();
+    let agent_doc_dir = tmp.path().join(".agent-doc");
+    for subdir in [
+        "ack-content",
+        "claimed-patches",
+        "crdt",
+        "logs",
+        "snapshots",
+        "state/cycles",
+    ] {
+        fs::create_dir_all(agent_doc_dir.join(subdir)).unwrap();
+    }
+    let doc = tmp.path().join("session.md");
+    let content = session_doc_content()
+        .replace(
+            "<!-- agent:queue -->\n<!-- /agent:queue -->",
+            "<!-- agent:queue -->\n- do [#preh]\n<!-- /agent:queue -->",
+        )
+        .replace(
+            "<!-- agent:backlog -->\n<!-- /agent:backlog -->",
+            concat!(
+                "<!-- agent:status patch=replace -->\n",
+                "Top backlog item: #preh.\n",
+                "<!-- /agent:status -->\n\n",
+                "<!-- agent:todo -->\n",
+                "- [ ] [#preh] Operator-visible completion\n",
+                "<!-- /agent:todo -->\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] [#preh] Finish the tracked item\n",
+                "<!-- /agent:backlog -->",
+            ),
+        )
+        .replace("model: gpt-5\n", "model: gpt-5\nqueue_active: true\n");
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["preflight", doc.to_str().unwrap()])
+        .assert()
+        .success();
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["backlog", doc.to_str().unwrap(), "done", "preh"])
+        .assert()
+        .success();
+
+    let state = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+        .unwrap()
+        .expect("preflight cycle");
+    assert!(
+        state.is_open(),
+        "completion must not seal the cycle: {state:?}"
+    );
+    assert_eq!(state.pending_done_ids, ["preh"]);
+
+    let checkpoint = agent_doc()
+        .current_dir(tmp.path())
+        .args(["salient-checkpoint", doc.to_str().unwrap()])
+        .write_stdin(
+            "Completed #preh. Current worker: coordinator. Remaining action: verify the full test suite.",
+        )
+        .assert()
+        .failure();
+    checkpoint.stderr(predicates::str::contains(
+        "requires the live controller/Lazily document model",
+    ));
+
+    let current = fs::read_to_string(&doc).unwrap();
+    assert!(
+        current.contains("- [x] [#preh] Finish the tracked item"),
+        "{current}"
+    );
+    assert!(
+        current.contains("- [x] [#preh] Operator-visible completion"),
+        "{current}"
+    );
+    assert!(current.contains("~~do [#preh]~~"), "{current}");
+    let state = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+        .unwrap()
+        .expect("cycle after salient checkpoint");
+    assert!(
+        state.is_open(),
+        "salient checkpoint must keep cycle open: {state:?}"
+    );
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["write", "--commit", doc.to_str().unwrap(), "--force-disk"])
+        .write_stdin(response_text("real-time completion"))
+        .assert()
+        .success();
+    let state = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+        .unwrap()
+        .expect("cycle after final response");
+    assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
+    let committed = head_blob(tmp.path());
+    assert_eq!(
+        committed.matches("[#preh] Finish the tracked item").count(),
+        1
+    );
+    assert_eq!(
+        committed
+            .matches("[#preh] Operator-visible completion")
+            .count(),
+        1
+    );
+    assert_eq!(committed.matches("~~do [#preh]~~").count(), 1);
+}
+
 fn init_git_repo(root: &Path, tracked: &Path) {
     ProcessCommand::new("git")
         .current_dir(root)

@@ -1209,11 +1209,13 @@ unchecks). Preflight reconciles it in `todo_signals`:
   it off with `--todo-done` only if the operator action itself is finished.
   These are never auto-completed.
 
-**Mark it complete when it is finished or moot (`#tododone`).** When the
-operator says an action is done, you verify it is (the gate it cites resolved,
-the draft is published), or current evidence makes the action unnecessary,
-check it off in the SAME closeout:
-`agent-doc write --commit <FILE> --todo-done <id>`. The selector is the item's
+**Mark it complete when it is finished or moot (`#tododone`,
+`#realtimetrackedcompletion`).** When evidence proves a tracked item finished,
+run its standalone lifecycle command at the next safe tool boundary instead of
+waiting for the final closeout; `agent-doc backlog <FILE> done <id>` also
+reconciles the linked todo. When a standalone operator action becomes done or
+moot without a tracked-work transition, include `--todo-done <id>` in the next
+available tracked-work-only checkpoint or closeout. The selector is the item's
 own `[#id]`, a `#id` the item cites (`... (#gate1)`), or its exact text, so
 operator-written items without an id work too. The binary flips `[ ]` to `[x]`
 in place (position, id, and text kept; a repeat is a no-op) and folds any
@@ -1251,8 +1253,9 @@ a bolded residual-work list (`**Still stale:**`, `**Also stale:**`,
 cover a whole list. Otherwise the write prints `[todo] advisory (#operatortodo):
 this closeout response leaves N operator actions pending ...` quoting each ask
 no todo matches (GH #318); record them next cycle.
-When a closeout resolves work (`--done`, `--review-resolve`), an OPEN todo that
-owns that id is checked off in the same closeout (`[todo] auto-done`); one that
+When a realtime or closeout mutation resolves work (`backlog ... done`, `--done`,
+`--review-resolve`), an OPEN todo that owns that id is checked off in the same
+mutation (`[todo] auto-done`); one that
 only cites it gets `[todo] advisory (#tododone)` with the exact `--todo-done`
 command — if the operator action is finished, run it next cycle.
 

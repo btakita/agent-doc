@@ -4,8 +4,9 @@
 //! observation continues that same generation and worker, including while a
 //! turn is already in progress. `turn_in_progress` is recorded on the attempt;
 //! it never suppresses the action. Continue fails closed when there is no
-//! worker to resume, the heartbeat is already past the frozen bound, or the
-//! attempt was abandoned for requeue. That failure authorizes a new generation
+//! worker to resume, the harness recorded that it stopped, or the attempt was
+//! abandoned for requeue. Heartbeat age alone never fails continuation or
+//! authorizes a replacement. A real failure authorizes a new generation
 //! in the same pass (`#transientcloseout`). An explicit requeue of a running
 //! claim must not resume the abandoned worker and must not paint `⚠️🚧`.
 //! The attempt stays `Running` with the abandon freeze, so a failed continue
@@ -36,7 +37,6 @@
 //! is a stopped worker this recovery retries.
 
 use crate::queue_claim::{LostContinueRecord, QueueClaim, QueueClaimState};
-use crate::subagent_pool::{DEFAULT_WORKER_FROZEN_SECS, last_heartbeat_secs};
 
 /// What to do with one lost-running attempt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -224,7 +224,7 @@ pub fn recovery_would_change(claim: &QueueClaim, now_secs: u64) -> bool {
 ///
 /// Success does not write a heartbeat. The worker's own refresh is the proof
 /// of life; stamping one here would continue a dead worker forever.
-pub fn default_continue_attempt(claim: &QueueClaim, now_secs: u64) -> Result<(), String> {
+pub fn default_continue_attempt(claim: &QueueClaim, _now_secs: u64) -> Result<(), String> {
     let Some(worker) = claim.worker.as_ref() else {
         return Err("lost running claim has no worker to continue".to_string());
     };
@@ -244,13 +244,6 @@ pub fn default_continue_attempt(claim: &QueueClaim, now_secs: u64) -> Result<(),
     // worker that is actually still running (`#transientcloseout`).
     if harness_freeze_worker_is_gone(claim) {
         return Err("harness freeze worker is gone; continue refused".to_string());
-    }
-    let last = last_heartbeat_secs(claim).unwrap_or(0);
-    let stale_for = now_secs.saturating_sub(last);
-    if stale_for >= DEFAULT_WORKER_FROZEN_SECS {
-        return Err(format!(
-            "worker heartbeat is stale for {stale_for}s; continue refused"
-        ));
     }
     Ok(())
 }
@@ -516,10 +509,9 @@ mod tests {
     }
 
     #[test]
-    fn default_continue_fails_when_the_heartbeat_is_stale_or_the_worker_is_gone() {
+    fn default_continue_has_no_runtime_timeout_but_refuses_a_gone_worker() {
         let fresh = lost_running("fresh", 1_000);
-        assert!(default_continue_attempt(&fresh, 1_000 + DEFAULT_WORKER_FROZEN_SECS - 1).is_ok());
-        assert!(default_continue_attempt(&fresh, 1_000 + DEFAULT_WORKER_FROZEN_SECS).is_err());
+        assert!(default_continue_attempt(&fresh, u64::MAX).is_ok());
 
         let mut no_worker = fresh.clone();
         no_worker.worker = None;
@@ -681,8 +673,7 @@ mod tests {
         let applied = recover_claims(&mut later, expired_at, 3_600, true, &mut |claim| {
             default_continue_attempt(claim, expired_at)
         });
-        assert_eq!(applied.len(), 1);
-        assert_eq!(applied[0].action, LostRunningAction::Continue);
+        assert!(applied.is_empty(), "a bound worker has no runtime timeout");
         assert_eq!(later[0].generation, 1);
         assert_eq!(later[0].state, QueueClaimState::Running);
         assert!(later[0].lost_from.is_none());
@@ -959,7 +950,6 @@ mod tests {
             .unwrap();
         let now = 1_000 + 601;
         assert!(ledger.claims[0].is_expired(now));
-        assert!(now - 1_000 < DEFAULT_WORKER_FROZEN_SECS);
         assert!(
             ledger.claims[0].blocks_dispatch(now),
             "a live worker past TTL still holds its generation until recovery"

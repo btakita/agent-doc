@@ -177,6 +177,16 @@ upstream you still have to answer, and a harness permission prompt stay. The
 exact rule is in `specs/07-orchestration-commands.md` (`#queueblocked`,
 `#blockerdisregard`).
 
+## Why a long-running `🚧` row stays tracked
+
+`queue claim --ttl-secs` limits only how long an unbound `🟡` reservation may
+wait for `queue start`. Once `queue start` binds a worker, there is no runtime
+timeout: an old heartbeat makes a refresh reminder due, but never changes the
+attempt to `⚠️`, frees its pool slot, or offers its row to another worker.
+Tracking ends only on an authoritative report, an explicit release/requeue, a
+recorded harness stop, quota evidence, or queue-row closure. Use `queue freeze`
+only after the harness has positively reported that the worker stopped.
+
 ## When a `☑️` row closes
 
 `☑️` (reported) means **keep this row**: a worker finished and reported back, but nobody has

@@ -306,18 +306,15 @@ mod tests {
             .unwrap();
         let content = write_doc(&doc, &format!("🚧 [#subagent:fin#1] {FINISHED}"));
 
-        // A live worker with no fresh heartbeat is the generic stale worker.
+        // A live worker stays quiescent regardless of heartbeat age.
         let late = crate::queue_claim::claim_clock_now_secs() + 3_600;
-        let failure = agent_doc_queue::transient_closeout::normal_closeout_failure_with(
+        let assessment = agent_doc_queue::transient_closeout::assess_transient_closeout(
             &content,
             &closeout_evidence_at(&doc, &content, late),
         )
-        .unwrap()
-        .expect("a stale running worker refuses");
-        assert!(
-            failure.contains("no heartbeat-fresh worker claim backs this row"),
-            "{failure}"
-        );
+        .unwrap();
+        assert_eq!(assessment.quiescent.len(), 1, "{assessment:#?}");
+        assert!(assessment.debts.is_empty(), "{assessment:#?}");
 
         let reason = agent_doc_queue::queue_claim::subagent_end_freeze_reason(Some(
             "**Summary** fixed it. **What changed** branch fix/finished, commit 1234abc.",
@@ -346,7 +343,7 @@ mod tests {
             "{failure}"
         );
         assert!(
-            !failure.contains("no heartbeat-fresh worker claim backs this row"),
+            !failure.contains("no bound running worker claim backs this row"),
             "{failure}"
         );
     }

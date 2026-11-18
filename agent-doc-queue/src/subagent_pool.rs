@@ -17,23 +17,22 @@
 //!   before anything else (the Grok sdk-dev miss, 2026-11-05: four claimed
 //!   heads sat unspawned behind serial integration of sixteen reported rows,
 //!   so the pool ran one worker);
-//! * a `Running` attempt occupies a slot unless it is frozen;
-//! * an attempt that expired with its worker still bound occupies a slot:
-//!   expiry only means nobody refreshed the claim, so it is not evidence the
-//!   worker stopped (live miss, 2026-11-05: three working Claude Code workers
-//!   went `lost` at the two-hour TTL because nothing refreshed them);
-//! * a frozen worker frees its slot. Frozen means evidence the worker stopped:
-//!   a recorded stop (`queue freeze`), or no heartbeat past
-//!   [`DEFAULT_WORKER_FROZEN_SECS`] on an attempt this recovery does not own.
+//! * a `Running` attempt occupies a slot until it reports, is explicitly
+//!   released, or the harness records that it stopped. Claim TTL is only an
+//!   unbound dispatch-reservation lease; a bound worker has no runtime
+//!   timeout (live miss, 2026-11-05: working workers went `lost` at the
+//!   two-hour TTL because nothing refreshed them);
+//! * a frozen worker frees its slot. Frozen means authoritative evidence the
+//!   worker stopped: a recorded stop (`queue freeze`). A missing heartbeat is
+//!   a coordinator reminder, never stop evidence.
 //!   Work is proof of life while that wrapper remains open, so the coordinator
 //!   records it as a heartbeat (`queue claim --refresh`). Once the wrapper exits
 //!   and `queue freeze` records that stop, the command's immediate refill runs
 //!   failed-continue recovery and offers the same row for a fresh generation
 //!   (`#lostrunningcontinue`). The coordinator follows that refill's exact
 //!   claim / brief / start sequence; it never rebinds the stopped generation.
-//!   A lost-running attempt is likewise continued first. A heartbeat already
-//!   past the frozen bound fails that continue, and the same task is retried
-//!   into the freed slot (`#lostrunningcontinue`). An explicit `queue release
+//!   A lost-running attempt is likewise continued first. Elapsed time cannot
+//!   fail that continue or offer a duplicate. An explicit `queue release
 //!   --requeue` also abandons the current attempt;
 //! * a worker that FINISHED but whose result is not reported yet is
 //!   **report-owed** and holds its slot (`#finishedheadrefill`). The harness
@@ -83,16 +82,11 @@ pub const CORES_PER_POOL_SLOT: usize = 4;
 /// heavy verification, so the pool runs ahead of the build gate.
 pub const POOL_SLOTS_PER_BUILD_SLOT: usize = 2;
 
-/// A bound worker with no heartbeat for this long is frozen: its pool slot is
-/// freed for a refill while its claim is kept. This is deliberately longer than
-/// the default claim TTL, so expiry alone can never read as a stopped worker.
+/// Legacy stale-heartbeat interval retained for API and persisted-config
+/// compatibility. It no longer freezes a bound worker: elapsed time is not
+/// evidence that a worker stopped.
 pub const DEFAULT_WORKER_FROZEN_SECS: u64 =
     crate::queue_claim::DEFAULT_QUEUE_CLAIM_TTL_SECS * 3 / 2;
-
-const _: () = assert!(
-    DEFAULT_WORKER_FROZEN_SECS > crate::queue_claim::DEFAULT_QUEUE_CLAIM_TTL_SECS,
-    "expiry must come before the frozen deadline"
-);
 
 /// Inputs the pool default is derived from. Every field is injected so the
 /// policy is deterministic under test; the IO adapter probes the machine.
@@ -196,7 +190,8 @@ pub fn resolve_pool_size(capacity: QueueSubagentsCapacity, default: PoolSize) ->
 pub enum WorkerFrozen {
     /// `queue freeze`: the harness reported the worker stopped.
     HarnessReported { frozen_at_secs: u64, reason: String },
-    /// No heartbeat (start or `queue claim --refresh`) within the bound.
+    /// Legacy wire value from binaries that treated heartbeat age as stop
+    /// evidence. Current binaries never produce this variant.
     HeartbeatStale {
         last_heartbeat_secs: u64,
         stale_for_secs: u64,
@@ -236,8 +231,8 @@ pub enum AttemptSlot {
     Dispatching,
     /// A live worker; holds a slot.
     Running,
-    /// Expired with its worker still bound and no evidence it stopped; holds
-    /// a slot and its row is not offered again.
+    /// A legacy lost attempt with its worker still bound and no evidence it
+    /// stopped; holds a slot and its row is not offered again.
     Unconfirmed,
     /// Evidence the worker stopped; holds no slot, keeps its claim.
     Frozen(WorkerFrozen),
@@ -249,7 +244,7 @@ pub enum AttemptSlot {
 
 /// Classify one attempt. Callers may pass an attempt whose expiry was already
 /// projected to `Lost`, or one still `Running` past its expiry.
-pub fn classify_attempt(claim: &QueueClaim, now_secs: u64, frozen_secs: u64) -> AttemptSlot {
+pub fn classify_attempt(claim: &QueueClaim, now_secs: u64, _frozen_secs: u64) -> AttemptSlot {
     // `#harnessquotaexhausted`: an exhausted worker holds no slot and is not
     // frozen. Whether its harness may refill the slot is
     // `worker_quota::pool_refill_quota_block`.
@@ -264,7 +259,8 @@ pub fn classify_attempt(claim: &QueueClaim, now_secs: u64, frozen_secs: u64) -> 
     if crate::lost_running_recovery::retry_authorized(claim) {
         return AttemptSlot::Free;
     }
-    let lapsed = claim.state == QueueClaimState::Lost || claim.is_expired(now_secs);
+    let lapsed =
+        claim.state == QueueClaimState::Lost || claim.unbound_reservation_expired(now_secs);
     if claim.worker.is_none() {
         return if lapsed || claim.state != QueueClaimState::Claimed {
             AttemptSlot::Free
@@ -289,15 +285,6 @@ pub fn classify_attempt(claim: &QueueClaim, now_secs: u64, frozen_secs: u64) -> 
             frozen_at_secs: freeze.frozen_at_secs,
             reason: freeze.reason.clone(),
         });
-    }
-    if let Some(last) = last_heartbeat_secs(claim) {
-        let stale_for_secs = now_secs.saturating_sub(last);
-        if stale_for_secs >= frozen_secs.max(1) {
-            return AttemptSlot::Frozen(WorkerFrozen::HeartbeatStale {
-                last_heartbeat_secs: last,
-                stale_for_secs,
-            });
-        }
     }
     if lapsed {
         AttemptSlot::Unconfirmed
@@ -325,8 +312,8 @@ pub fn occupies_pool_slot(claim: &QueueClaim, now_secs: u64, frozen_secs: u64) -
     )
 }
 
-/// Whether a bound worker's heartbeat is due: half its claim window has passed
-/// (well before expiry), or the attempt already lapsed.
+/// Whether a bound worker's heartbeat is due: half its claim window has passed.
+/// A due heartbeat is a coordinator reminder, not a runtime deadline.
 pub fn heartbeat_due(claim: &QueueClaim, now_secs: u64, frozen_secs: u64) -> bool {
     match classify_attempt(claim, now_secs, frozen_secs) {
         AttemptSlot::Unconfirmed => true,
@@ -349,8 +336,8 @@ pub fn heartbeat_overdue_secs(claim: &QueueClaim, now_secs: u64) -> u64 {
 /// Whether any attempt in `claims` could have a due heartbeat, from the claim
 /// ledger alone. The project controller's tick asks this before it reads a
 /// document, so a quiescent document costs a ledger read and no text. It
-/// ignores the frozen bound on purpose: the exact answer needs the document's
-/// live rows anyway, and a stale worker must not be hidden from that answer.
+/// The exact answer needs the document's live rows; a long-running worker must
+/// never be hidden from that answer.
 pub fn heartbeat_may_be_due<'a>(
     claims: impl IntoIterator<Item = &'a QueueClaim>,
     now_secs: u64,
@@ -951,7 +938,7 @@ mod tests {
     }
 
     #[test]
-    fn frozen_workers_free_their_slot_but_dispatching_claims_hold_one() {
+    fn only_recorded_stops_free_workers_while_dispatching_claims_hold_one() {
         let now = 10_000;
         let frozen_secs = 600;
         let live = claim("live", QueueClaimState::Running, Some(now - 10));
@@ -969,13 +956,10 @@ mod tests {
         let lost = claim("lost", QueueClaimState::Lost, None);
 
         assert!(worker_frozen(&live, now, frozen_secs).is_none());
-        assert!(matches!(
-            worker_frozen(&stale, now, frozen_secs),
-            Some(WorkerFrozen::HeartbeatStale {
-                stale_for_secs: 700,
-                ..
-            })
-        ));
+        assert!(
+            worker_frozen(&stale, now, frozen_secs).is_none(),
+            "heartbeat age is a reminder, not stop evidence"
+        );
         assert!(
             worker_frozen(&beat, now, frozen_secs).is_none(),
             "a refresh is a heartbeat"
@@ -1003,12 +987,12 @@ mod tests {
             now,
             frozen_secs,
         );
-        assert_eq!(occupancy.running, 2, "{occupancy:?}");
+        assert_eq!(occupancy.running, 3, "{occupancy:?}");
         assert_eq!(occupancy.dispatching, 1, "{occupancy:?}");
-        assert_eq!(occupancy.frozen, 2, "{occupancy:?}");
-        assert_eq!(occupancy.free, 1, "{occupancy:?}");
+        assert_eq!(occupancy.frozen, 1, "{occupancy:?}");
+        assert_eq!(occupancy.free, 0, "{occupancy:?}");
         assert!(occupies_pool_slot(&dispatching, now, frozen_secs));
-        assert!(!occupies_pool_slot(&stale, now, frozen_secs));
+        assert!(occupies_pool_slot(&stale, now, frozen_secs));
         assert!(!occupies_pool_slot(&reported, now, frozen_secs));
     }
 
@@ -1251,17 +1235,21 @@ mod tests {
         assert!(!text.contains("queue claim"), "{text}");
     }
 
-    /// Expiry alone is not evidence the worker stopped: an expired bound
-    /// attempt keeps its slot until a recorded stop or the frozen deadline.
+    /// Expiry and heartbeat age are not evidence the worker stopped: a bound
+    /// attempt keeps its state and slot for arbitrarily long work.
     #[test]
-    fn an_expired_bound_attempt_holds_its_slot_until_evidence_it_stopped() {
+    fn a_long_running_attempt_has_no_runtime_timeout() {
         let frozen_secs = 1_000;
         let mut claim = claim("worker", QueueClaimState::Running, Some(100));
         claim.expires_at_secs = 500;
         let expired_at = 600;
         assert_eq!(
             classify_attempt(&claim, expired_at, frozen_secs),
-            AttemptSlot::Unconfirmed
+            AttemptSlot::Running
+        );
+        assert_eq!(
+            classify_attempt(&claim, u64::MAX, frozen_secs),
+            AttemptSlot::Running
         );
         claim.mark_lost();
         assert_eq!(
@@ -1270,10 +1258,10 @@ mod tests {
         );
         assert!(occupies_pool_slot(&claim, expired_at, frozen_secs));
         assert!(heartbeat_due(&claim, expired_at, frozen_secs));
-        assert!(matches!(
-            classify_attempt(&claim, 1_100, frozen_secs),
-            AttemptSlot::Frozen(WorkerFrozen::HeartbeatStale { .. })
-        ));
+        assert_eq!(
+            classify_attempt(&claim, u64::MAX, frozen_secs),
+            AttemptSlot::Unconfirmed
+        );
         claim.frozen = Some(QueueWorkerFreeze {
             frozen_at_secs: 600,
             reason: crate::queue_claim::ABANDONED_REQUEUE_REASON.to_string(),

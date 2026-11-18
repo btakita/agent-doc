@@ -168,8 +168,8 @@ fn subagent_dispatch_candidates_for_content(file: &Path, content: &str) -> Resul
         .filter(|claim| claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost)
         .cloned()
         .collect::<Vec<_>>();
-    // `#subagentworkpool`: an attempt that expired with its worker still bound
-    // and was not abandoned may still be working, so its row is never offered.
+    // `#subagentworkpool`: a legacy lost attempt with its worker still bound
+    // and not abandoned may still be working, so its row is never offered.
     // A stopped harness freeze is transiently `Running` in the ledger. The
     // synchronous recovery pass fails continue and offers a new generation
     // (`#transientcloseout`). This filter is only the unconfirmed slot, which

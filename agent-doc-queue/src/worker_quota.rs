@@ -427,7 +427,7 @@ mod tests {
     #[test]
     fn an_expired_lost_attempt_that_came_back_exhausted_is_blocked_not_lost() {
         let mut ledger = running_ledger();
-        ledger.prune_detailed(NOW + TTL * 2, None);
+        ledger.claims[0].mark_lost();
         assert_eq!(ledger.claims[0].state, QueueClaimState::Lost);
         ledger
             .block_on_quota("do [#a]", Some(1), block(Some("claude")))

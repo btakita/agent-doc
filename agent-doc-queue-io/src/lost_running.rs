@@ -95,6 +95,13 @@ mod tests {
         .unwrap();
 
         let _expired = crate::queue_claim::pin_claim_clock_for_current_thread(pinned + 60);
+        crate::queue_claim::freeze_attempt(
+            &file,
+            item,
+            Some(claimed.generation),
+            "wrapper stopped without a hand-back",
+        )
+        .unwrap();
         let applied = recover_lost_running(&file, true, |_| Ok(())).unwrap();
         assert_eq!(applied.len(), 1);
         assert_eq!(applied[0].action, LostRunningAction::Continue);
@@ -115,22 +122,22 @@ mod tests {
                 .as_ref()
                 .is_some_and(|record| record.during_turn && !record.failed)
         );
-        assert!(
-            crate::subagent_dispatch::pending_subagent_dispatch_for_content(&file, &content)
-                .unwrap()
-                .is_empty(),
-            "a continued worker stays on this generation"
-        );
-
         let _stale = crate::queue_claim::pin_claim_clock_for_current_thread(
             pinned + DEFAULT_WORKER_FROZEN_SECS,
         );
+        crate::queue_claim::freeze_attempt(
+            &file,
+            item,
+            Some(claimed.generation),
+            "wrapper stopped without a hand-back",
+        )
+        .unwrap();
         let failed =
             recover_lost_running(&file, true, |_| Err("continue refused".to_string())).unwrap();
         assert_eq!(failed[0].action, LostRunningAction::Retry);
         assert!(failed[0].during_turn);
         let retried = crate::queue_claim::load_ledger(&file).unwrap();
-        assert_eq!(retried.claims[0].state, QueueClaimState::Lost);
+        assert_eq!(retried.claims[0].state, QueueClaimState::Running);
         assert!(
             retried.claims[0]
                 .lost_continue
@@ -147,8 +154,8 @@ mod tests {
     }
 
     #[test]
-    fn automatic_continue_retries_a_stale_worker_during_a_turn() {
-        let item = "#subagents retry when continue cannot resume";
+    fn automatic_recovery_does_not_lose_a_long_running_worker() {
+        let item = "#subagents keep tracking long work";
         let (_dir, file, content) = project(item);
         let pinned = 2_000_000;
         let _clock = crate::queue_claim::pin_claim_clock_for_current_thread(pinned);
@@ -166,14 +173,19 @@ mod tests {
             pinned + DEFAULT_WORKER_FROZEN_SECS,
         );
         let applied = recover_lost_running_automatically(&file, true).unwrap();
-        assert_eq!(applied[0].action, LostRunningAction::Retry);
-        assert!(applied[0].during_turn);
+        assert!(
+            applied.is_empty(),
+            "elapsed time is not a loss: {applied:?}"
+        );
+        let ledger = crate::queue_claim::load_ledger(&file).unwrap();
+        assert_eq!(ledger.claims[0].state, QueueClaimState::Running);
+        assert_eq!(ledger.claims[0].generation, claimed.generation);
         let offered =
             crate::subagent_dispatch::pending_subagent_dispatch_for_content(&file, &content)
                 .unwrap();
         assert!(
-            offered.iter().any(|head| head.contains(item)),
-            "stale lost-running worker is retried during a turn, got {offered:?}"
+            offered.is_empty(),
+            "a long-running worker must not be offered again, got {offered:?}"
         );
     }
 

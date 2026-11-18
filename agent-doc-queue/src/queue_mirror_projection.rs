@@ -41,7 +41,11 @@ fn prompt_lineage_fingerprints(entries: &[QueueEntry]) -> Vec<PromptLineageFinge
                 QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => prompt,
                 _ => return None,
             };
-            let work = agent_doc_element_queue::strip_priority_markers(&prompt.text);
+            // Use the document projection grammar here as well as in the
+            // projector itself. It has positive-evidence recovery for a torn
+            // duplicated owner/lifecycle prefix, so canonical repair of that
+            // binary-owned corruption does not look like an authored edit.
+            let work = agent_doc_document::queue_projection::strip_priority_markers(&prompt.text);
             let work = agent_doc_element_queue::subprompts::strip_subprompt_projections(&work)
                 .unwrap_or(work);
             Some(PromptLineageFingerprint {
@@ -276,6 +280,19 @@ mod projection_lineage_tests {
             "  - ~~live nested leaf~~\n",
         ))
         .unwrap();
+
+        ensure_prompt_lineage_conserved(&before, &after, "main").unwrap();
+    }
+
+    #[test]
+    fn lineage_conservation_allows_proven_torn_owner_repair() {
+        let work = "Several queue items have the wrong state";
+        let before = document_queue::parse(&format!(
+            "- 🟡 [#subagent:queue-state-fix#3] [#subagent:queue-state-fix#3📥 {work}\n"
+        ))
+        .unwrap();
+        let after =
+            document_queue::parse(&format!("- 🟡 [#subagent:queue-state-fix#3] {work}\n")).unwrap();
 
         ensure_prompt_lineage_conserved(&before, &after, "main").unwrap();
     }

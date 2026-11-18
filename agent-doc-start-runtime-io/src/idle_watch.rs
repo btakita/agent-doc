@@ -964,6 +964,20 @@ fn queue_auto_clear_latest_cycle(path: &Path) -> Option<(String, bool)> {
         })
 }
 
+/// Join the controller-owned handoff with the current cycle and the same
+/// routing head that the supervisor observed from authoritative queue text.
+fn pending_stop_queue_handoff_epoch(path: &Path, head: &str) -> Option<u64> {
+    let projection =
+        agent_doc_controller_io::project_controller::queue_drain_stall_continuation_pending_for_file(path)
+            .ok()??;
+    let (cycle_id, committed) = queue_auto_clear_latest_cycle(path)?;
+    let head_sha256 = agent_doc_hash::content_hash(head);
+    (committed
+        && projection.cycle_id == cycle_id
+        && projection.head_sha256.as_deref() == Some(head_sha256.as_str()))
+    .then_some(projection.stall_epoch)
+}
+
 /// The committed cycle whose captured response explicitly deferred `head`.
 ///
 /// The queue row intentionally remains pending after a scoped `**Deferred:**`
@@ -4049,6 +4063,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
             queue_continuation_triggers.observe_head(
                 active_head.as_deref().map(agent_doc_hash::content_hash),
             );
+            if last_scheduled_deferred_cycle_id != previously_scheduled_deferred_cycle_id {
+                queue_continuation_triggers.observe_committed_deferral();
+            }
             if active_head.is_none() {
                     context_reset_in_flight = false;
                     last_context_reset_head = None;
@@ -4102,6 +4119,26 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     &mut session_log,
                     &mut interrupted_turn_reclaimed,
                 );
+
+                // The old dispatch consumed this head's observation, but
+                // Stop may have handed the still-live work to the supervisor.
+                // Read the actor's receipt only at that stalled idle boundary.
+                if prompt_visible
+                    && !turn_active
+                    && active_transition == IdleQueueTransition::Converged
+                    && let Some(head) = active_head.as_deref()
+                    && last_dispatched.as_deref() == Some(head)
+                    && let Some(epoch) = pending_stop_queue_handoff_epoch(&path, head)
+                    && queue_continuation_triggers.observe_stop_handoff(
+                        &agent_doc_hash::content_hash(head), epoch,
+                    )
+                {
+                    last_dispatched = None;
+                    agent_doc_ops_log_io::log_op(
+                        &path,
+                        &format!("stop_queue_handoff_rearmed stall_epoch={epoch} action=dispatch_same_head"),
+                    );
+                }
 
                 let pending_explicit_send = if interrupted_turn_reclaimed {
                     match agent_doc_session_check_io::midturn_steering::current_cycle_has_pending_explicit_send(&path) {
@@ -6974,18 +7011,6 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     if !queue_continuation_triggers.ready() {
                         continue;
                     }
-                    // `#qstallguard` Layer B/C interaction: the supervisor idle-watch
-                        // is itself continuing the drain (whether the queue is paused —
-                        // the Layer C single-owner failsafe — or normal go-mode). That is
-                        // NOT an in-session stall, so clear any continuation-pending
-                        // projection the prior in-session closeout recorded. Otherwise the
-                        // next drained agent's preflight would see the projection with no
-                        // in-session drain lease and false-fire `queue_stall_detected` for
-                        // a drain the supervisor is actively progressing.
-                        let _ = agent_doc_controller_io::project_controller::clear_queue_drain_stall_continuation_pending_for_file(
-                            Path::new(&file),
-                            "supervisor_drain_progressed",
-                        );
                         // `#qflood2`: hold the trigger until a just-sent `/clear`
                         // has settled, so it is never injected into the in-flight
                         // clear (the concatenated `/clear /agent-doc <FILE>`).
@@ -7541,6 +7566,19 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             // proof, never merely because text was written to
                             // tmux or an accepted-only receipt was returned.
                             queue_continuation_triggers.observe_dispatch_started();
+                            // Admission can already clear the predecessor
+                            // through preflight. Otherwise acknowledge only
+                            // the exact head and predecessor this send proved.
+                            if let Some(Some(predecessor)) = dispatch_admission_baseline.as_ref()
+                                && let Err(error) = agent_doc_controller_io::project_controller::clear_queue_drain_stall_continuation_for_dispatch(
+                                    &path, predecessor, &head,
+                                )
+                            {
+                                agent_doc_ops_log_io::log_op(
+                                    &path,
+                                    &format!("stop_queue_handoff_ack_failed error={error:#}"),
+                                );
+                            }
                                 if paused_failsafe_active {
                                     log_event(
                                         &mut session_log,

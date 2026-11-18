@@ -60,7 +60,10 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+mod pending_queue_handoff;
 mod subagent_quota;
+
+use pending_queue_handoff::hand_off_pending_queue_at_stop;
 pub use subagent_quota::{SubagentQuotaBlockApplied, handle_subagent_stop};
 
 #[cfg(test)]
@@ -284,6 +287,9 @@ impl Serialize for StopResponse {
 
 enum StopCloseAttempt {
     Closed,
+    QueueDebt {
+        reason: String,
+    },
     /// The response closeout is already committed, and a later operator edit
     /// to a typed component is intentionally being left for the next cycle.
     /// The Stop hook must end this turn instead of wrapping that refusal as a
@@ -1752,7 +1758,7 @@ fn claude_stop_answer_with_drain_readiness(
             .as_ref()
             .is_some_and(|cycle| cycle.phase == agent_doc_turn::CyclePhase::PreflightStarted)
         {
-            let answer = transient_turn_end_continuation(input, &file)?;
+            let answer = transient_turn_end_continuation(input, &file, &drain_readiness)?;
             if !answer.is_plain_allow() {
                 return Ok(answer);
             }
@@ -1778,7 +1784,7 @@ fn claude_stop_answer_with_drain_readiness(
         .as_ref()
         .is_some_and(|cycle| cycle.response_sha256.is_none())
     {
-        let answer = transient_turn_end_continuation(input, &file)?;
+        let answer = transient_turn_end_continuation(input, &file, &drain_readiness)?;
         if !answer.is_plain_allow() {
             return Ok(answer);
         }
@@ -1821,7 +1827,7 @@ fn claude_stop_answer_with_drain_readiness(
     // `waiting_on_operator` (`#stopquiescentrows`, agent-doc-bugs.md
     // 2026-11-13: six refused stops over two running workers). Observe-only
     // stops return above and do not consult this gate.
-    transient_turn_end_continuation(input, &file)
+    transient_turn_end_continuation(input, &file, &drain_readiness)
 }
 
 /// Operator-visible notice for `state=unchanged_debts` (`#stophookactiveguard`).
@@ -1864,6 +1870,7 @@ fn unchanged_debts_system_message(
 fn transient_turn_end_continuation(
     input: &ClaudeStopInput,
     file: &Path,
+    drain_readiness: impl FnOnce(&Path) -> agent_doc_controller::status::SupervisorDrainReadiness,
 ) -> Result<ClaudeStopAnswer> {
     let content = match current_document_content(file, "claude_stop_transient_closeout") {
         Ok(content) => content,
@@ -1945,6 +1952,15 @@ fn transient_turn_end_continuation(
             &input.session_id,
             &fingerprint,
         )?;
+    if input.stop_hook_active
+        && hand_off_pending_queue_at_stop(file, &content, &assessment, drain_readiness)?
+    {
+        return Ok(ClaudeStopAnswer::Allow {
+            system_message: Some(
+                "agent-doc recorded the pending queue continuation for the document supervisor. The unfinished rows remain live.".to_string(),
+            ),
+        });
+    }
     if repeats && holds_turn {
         let state = if holds_inbox_or_running {
             "inbox_or_running"
@@ -2801,6 +2817,11 @@ fn apply_bound_stop(
         // report from an older binary took; nothing below treats it as a failure.
         agent_doc_session_check_io::SessionCheckStatus::SteeringPending(reason)
         | agent_doc_session_check_io::SessionCheckStatus::Interrupted(reason) => {
+            // Session-check reaches this guard only after proving the prior
+            // response. A queue transition, not another response replay, is owed.
+            if agent_doc_queue::transient_closeout::is_normal_closeout_failure(&reason) {
+                return codex_transient_queue_continuation(input, file, reason);
+            }
             // `#stopsteeringafterabandon`: the first Stop can fail before it
             // captures anything (for example, an operator edit temporarily
             // fragments an exchange marker). Once the harness turn ends, the
@@ -3190,6 +3211,9 @@ fn apply_bound_stop(
                             "codex_stop_unanswered_edit_pending action=allow_exit_next_cycle (#stopnextedit)",
                         );
                         return Ok(StopResponse::AllowExit);
+                    }
+                    StopCloseAttempt::QueueDebt { reason } => {
+                        return codex_transient_queue_continuation(input, file, reason);
                     }
                     StopCloseAttempt::DeferredToDurableOwner => {
                         return Ok(StopResponse::AllowExit);
@@ -3818,6 +3842,9 @@ fn active_session_prompt_requires_writeback_with(
                 );
                 return Ok(Some(StopResponse::AllowExit));
             }
+            StopCloseAttempt::QueueDebt { reason } => {
+                return codex_transient_queue_continuation(input, file, reason).map(Some);
+            }
             StopCloseAttempt::DeferredToDurableOwner => {
                 agent_doc_ops_log_io::log_op(
                     file,
@@ -3920,6 +3947,9 @@ fn active_exchange_prompt_requires_writeback(
                     "codex_stop_prompt_writeback_next_cycle action=allow_exit (#stopnextedit)",
                 );
                 return Ok(Some(StopResponse::AllowExit));
+            }
+            StopCloseAttempt::QueueDebt { reason } => {
+                return codex_transient_queue_continuation(input, file, reason).map(Some);
             }
             StopCloseAttempt::DeferredToDurableOwner => {
                 agent_doc_ops_log_io::log_op(
@@ -5307,6 +5337,11 @@ fn attempt_stop_closeout(
     ) {
         Ok(outcome) => outcome,
         Err(err) => {
+            if transient_queue_closeout_refusal(&err) {
+                return Ok(StopCloseAttempt::QueueDebt {
+                    reason: format!("{err:#}"),
+                });
+            }
             let ownership = agent_doc_capture_io::retained_write_ownership(file);
             let rendered = format!("{err:#}").replace('\n', " ");
             agent_doc_ops_log_io::log_op(
@@ -5395,6 +5430,11 @@ fn attempt_stop_closeout(
         }
         Ok(false) => {}
         Err(err) => {
+            if transient_queue_closeout_refusal(&err) {
+                return Ok(StopCloseAttempt::QueueDebt {
+                    reason: format!("{err:#}"),
+                });
+            }
             let ownership = agent_doc_capture_io::retained_write_ownership(file);
             let rendered = format!("{err:#}").replace('\n', " ");
             // `#stopnextedit`: this typed refusal proves the response is
@@ -5460,10 +5500,34 @@ fn unanswered_edit_pending_commit_refusal(error: &anyhow::Error) -> bool {
         == Some(agent_doc_turn::write_ownership::RetainedWriteVerdict::UnansweredEditPending)
 }
 
+fn codex_transient_queue_continuation(
+    input: &StopInput,
+    file: &Path,
+    reason: String,
+) -> Result<StopResponse> {
+    if input.stop_hook_active {
+        let content = current_document_content(file, "codex_stop_pending_queue_handoff")?;
+        let assessment = agent_doc_queue_io::transient_closeout::assess(file, &content)?;
+        if hand_off_pending_queue_at_stop(
+            file,
+            &content,
+            &assessment,
+            agent_doc_controller_io::project_controller::supervisor_drain_readiness_for_doc,
+        )? {
+            return Ok(StopResponse::AllowExit);
+        }
+    }
+    Ok(StopResponse::ContinueTurn {
+        class: StopContinuationClass::Queue,
+        reason: format!(
+            "{reason} Continue the owed queue work using `agent-doc plan {file}`. Preserve the committed response and queue row identity. Dispatch any pending worker work, finish its effects, and persist its result through the normal agent-doc closeout.",
+            file = file.display(),
+        ),
+    })
+}
+
 fn transient_queue_closeout_refusal(error: &anyhow::Error) -> bool {
-    format!("{error:#}").contains(
-        "normal closeout refused while live queue rows are still transient (#transientcloseout)",
-    )
+    agent_doc_queue::transient_closeout::is_normal_closeout_failure(&format!("{error:#}"))
 }
 
 /// Whether a failed commit boundary is a deferral the binary already owns.
@@ -6766,6 +6830,128 @@ mod tests {
                 "{function} invalidates before the receipt"
             );
         }
+    }
+
+    const PENDING_QUEUE: &str = "---\nqueue: go\n---\n\n<!-- agent:run id=main subagents go -->\n- Work group\n  - 📥 publish a preview\n<!-- /agent:run -->\n";
+    const READY: agent_doc_controller::status::SupervisorDrainReadiness =
+        agent_doc_controller::status::SupervisorDrainReadiness::Ready { supervisor_pid: 73 };
+
+    #[test]
+    fn pending_queue_handoff_requires_exact_committed_work_and_receiver() {
+        let dir = setup_project();
+        let file = dir.path().join("task.md");
+        std::fs::write(&file, PENDING_QUEUE).unwrap();
+        init_git_repo(dir.path(), &file);
+        let assessment =
+            agent_doc_queue_io::transient_closeout::assess(&file, PENDING_QUEUE).unwrap();
+        assert_eq!(assessment.debts.len(), 1);
+        let unexpected = |_: &Path, _: &str, _: &str, _: usize| {
+            panic!("no handoff may be recorded without a receiver and completed predecessor")
+        };
+
+        assert!(
+            !pending_queue_handoff::hand_off_pending_queue_at_stop_with(
+                &file,
+                PENDING_QUEUE,
+                &assessment,
+                |_| READY,
+                unexpected,
+            )
+            .unwrap()
+        );
+        complete_run(&file);
+        let current = agent_doc_cycle_state_io::load_with_closeout_projection(&file)
+            .unwrap()
+            .unwrap();
+        assert!(
+            !pending_queue_handoff::hand_off_pending_queue_at_stop_with(
+                &file,
+                PENDING_QUEUE,
+                &assessment,
+                |_| agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor,
+                unexpected,
+            )
+            .unwrap()
+        );
+        assert!(
+            !pending_queue_handoff::hand_off_pending_queue_at_stop_with(
+                &file,
+                PENDING_QUEUE,
+                &assessment,
+                |_| READY,
+                |_, _, _, _| false,
+            )
+            .unwrap()
+        );
+        assert!(
+            pending_queue_handoff::hand_off_pending_queue_at_stop_with(
+                &file,
+                PENDING_QUEUE,
+                &assessment,
+                |_| READY,
+                |document, cycle, head, _| {
+                    assert_eq!(document, &file);
+                    assert_eq!(cycle, current.cycle_id);
+                    assert_eq!(head, "publish a preview");
+                    true
+                },
+            )
+            .unwrap()
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), PENDING_QUEUE);
+
+        let gated = PENDING_QUEUE.replace(
+            "📥 publish a preview",
+            "📥 [operator-verify] publish a preview",
+        );
+        let assessment = agent_doc_queue_io::transient_closeout::assess(&file, &gated).unwrap();
+        assert!(
+            !pending_queue_handoff::hand_off_pending_queue_at_stop_with(
+                &file,
+                &gated,
+                &assessment,
+                |_| READY,
+                unexpected,
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn pending_queue_handoff_codex_stop_keeps_the_original_capture() {
+        let dir = setup_project();
+        let file = dir.path().join("task.md");
+        fs::write(&file, PENDING_QUEUE).unwrap();
+        init_git_repo(dir.path(), &file);
+        track_doc(&dir, &file, "test-turn");
+        let cycle_id = complete_run(&file);
+        let original = agent_doc_cycle_state_io::load_with_closeout_projection(&file)
+            .unwrap()
+            .unwrap();
+        for attempt in 0..10 {
+            invalidate_stop_document_cache();
+            let response = apply_stop(&StopInput {
+                session_id: "codex-session".to_string(),
+                cwd: dir.path().display().to_string(),
+                stop_hook_active: attempt > 0,
+                last_assistant_message: "This summary must not replace the capture.".to_string(),
+                turn_id: "test-turn".to_string(),
+            })
+            .unwrap();
+            let StopResponse::ContinueTurn { class, reason } = response else {
+                panic!("pending work must be continued without a ready receiver: {response:?}");
+            };
+            assert_eq!(class, StopContinuationClass::Queue);
+            assert!(reason.contains("📥 publish a preview"), "{reason}");
+            assert!(!reason.contains("agent-doc repair"), "{reason}");
+        }
+        let current = agent_doc_cycle_state_io::load_with_closeout_projection(&file)
+            .unwrap()
+            .unwrap();
+        assert_eq!(current.cycle_id, cycle_id);
+        assert_eq!(current.capture_id, original.capture_id);
+        assert_eq!(current.response_sha256, original.response_sha256);
+        assert_eq!(fs::read_to_string(&file).unwrap(), PENDING_QUEUE);
     }
 
     fn setup_project() -> tempfile::TempDir {

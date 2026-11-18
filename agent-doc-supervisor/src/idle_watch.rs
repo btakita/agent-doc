@@ -278,6 +278,7 @@ impl CapturedFinalizeResumeTriggers {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct QueueContinuationProjection {
     head_key: Option<String>,
+    last_handoff_epoch: Option<u64>,
     state_epoch: u64,
     consumed_state_epoch: u64,
     effect_retry_epoch: u64,
@@ -342,6 +343,33 @@ impl QueueContinuationTriggers {
             projection.consumed_effect_retry_epoch = projection.effect_retry_epoch;
         }
         self.scope.ctx().set(&self.projection, projection);
+    }
+
+    /// A controller-accepted handoff is a new state edge even when the
+    /// routing head is unchanged. Replaying the same receipt never rearms it.
+    pub fn observe_stop_handoff(&self, head_key: &str, epoch: u64) -> bool {
+        let mut projection = self.scope.ctx().get(&self.projection);
+        if projection.head_key.as_deref() != Some(head_key)
+            || projection
+                .last_handoff_epoch
+                .is_some_and(|seen| seen >= epoch)
+        {
+            return false;
+        }
+        projection.last_handoff_epoch = Some(epoch);
+        projection.state_epoch = projection.state_epoch.saturating_add(1);
+        self.scope.ctx().set(&self.projection, projection);
+        true
+    }
+
+    /// A committed deferral requests another dispatch of the same head.
+    /// The caller fences this edge by the exact committed cycle.
+    pub fn observe_committed_deferral(&self) {
+        let mut projection = self.scope.ctx().get(&self.projection);
+        if projection.head_key.is_some() {
+            projection.state_epoch = projection.state_epoch.saturating_add(1);
+            self.scope.ctx().set(&self.projection, projection);
+        }
     }
 
     /// Mark the tmux/PTY delivery effect as started without claiming that the
@@ -1085,6 +1113,42 @@ mod tests {
         assert!(!triggers.ready(), "dispatch-start proof consumes the edge");
         triggers.observe_head(Some("head:a".to_string()));
         assert!(!triggers.ready(), "polling identical state must stay quiet");
+    }
+
+    #[test]
+    fn queue_continuation_rearms_exact_stop_handoff_after_admission() {
+        let triggers = QueueContinuationTriggers::new();
+        triggers.observe_head(Some("head:a".to_string()));
+        triggers.begin_dispatch_effect();
+        triggers.observe_dispatch_started();
+        assert!(!triggers.ready());
+
+        assert!(!triggers.observe_stop_handoff("head:b", 7));
+        assert!(!triggers.ready());
+        assert!(triggers.observe_stop_handoff("head:a", 7));
+        assert!(
+            triggers.ready(),
+            "supervisor owns the next attempt after Stop"
+        );
+        triggers.begin_dispatch_effect();
+        assert!(
+            !triggers.ready(),
+            "same handoff cannot start two deliveries"
+        );
+        triggers.observe_dispatch_started();
+        for _ in 0..10 {
+            assert!(!triggers.observe_stop_handoff("head:a", 7));
+            assert!(
+                !triggers.ready(),
+                "repeated Stops do not spend another epoch"
+            );
+        }
+
+        triggers.observe_committed_deferral();
+        assert!(
+            triggers.ready(),
+            "a distinct committed deferral rearms the same head"
+        );
     }
 
     #[test]

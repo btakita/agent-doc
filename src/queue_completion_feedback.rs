@@ -3554,12 +3554,36 @@ mod tests {
             &doc,
             format!(
                 "---\nagent_doc_format: template\nqueue: go\n---\n\n\
+                 <!-- agent:active -->\n\n<!-- /agent:active -->\n\n\
                  <!-- agent:run id=\"main\" subagents go -->\n- {ROW}\n- {SIBLING}\n\
                  <!-- /agent:run -->\n"
             ),
         )
         .unwrap();
         start_subagent(&doc, ROW, OWNER);
+        let project = || {
+            agent_doc_queue_io::queue_cmd::project_claim_runtime_state_with_effects(
+                &crate::CliQueueCommandEffects,
+                &doc,
+                Some(ROW),
+            )
+            .unwrap();
+        };
+        let active_body = |content: &str| {
+            agent_doc_element::element::parse(content)
+                .unwrap()
+                .into_iter()
+                .find(|component| component.name == "active")
+                .unwrap()
+                .content(content)
+                .to_string()
+        };
+        project();
+        let running = fs::read_to_string(&doc).unwrap();
+        assert!(
+            active_body(&running).contains("finish the widget"),
+            "{running}"
+        );
         assert!(
             requeue_nonterminal_goal_hand_back(&doc, ROW, Some(1), &handback)
                 .unwrap()
@@ -3568,13 +3592,9 @@ mod tests {
 
         let report = || requeue_prompt_pressure_hand_back(&doc, ROW, Some(1), &handback, false);
         let first = report().unwrap().unwrap();
-        agent_doc_queue_io::queue_cmd::project_claim_runtime_state_with_effects(
-            &crate::CliQueueCommandEffects,
-            &doc,
-            Some(ROW),
-        )
-        .unwrap();
+        project();
         let held = fs::read_to_string(&doc).unwrap();
+        assert!(!active_body(&held).contains("finish the widget"), "{held}");
         assert!(
             held.contains("blocked_until_evidence_hash_changes="),
             "{held}"

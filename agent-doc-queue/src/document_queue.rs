@@ -990,6 +990,32 @@ fn parse_spans_uncached(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<u
             continue;
         }
 
+        // `#weldedterminalrow`: a retained lifecycle projection can leave a
+        // short character fragment immediately in front of an otherwise
+        // canonical terminal queue row (the live incident was
+        // `n- ### ~~...~~`).  Without the list marker at column zero, the
+        // generic bare-prose recovery below promotes that already-completed
+        // row back to executable work.  An immediately following canonical
+        // Response child is binary-owned proof that this is a damaged
+        // terminal row, not operator prose that merely mentions strike syntax.
+        // Recover the terminal identity here; the following response tree is
+        // still parsed by the existing generated-structure branch.
+        if let Some((completed, note)) = welded_terminal_row_with_response(&lines, i) {
+            entries.push((
+                QueueEntry::Completed(QueuePrompt {
+                    text: completed.to_string(),
+                    multiline: false,
+                    indent: 0,
+                    ordered_marker: None,
+                    note: note.map(str::to_string),
+                }),
+                span(start_i, start_i + 1),
+            ));
+            bare_prompt_allowed = false;
+            i += 1;
+            continue;
+        }
+
         // Operator-entered diagnostic queue heads are often typed as prose plus a
         // fenced log followed by a `---` separator rather than wrapped in an
         // opening `---` fence. Treat that block as one multiline prompt and
@@ -1062,6 +1088,33 @@ fn parse_spans_uncached(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<u
     }
 
     Ok(entries)
+}
+
+/// Recover a terminal list row whose column-zero marker has one short fragment
+/// welded in front of it by a retained projection.
+///
+/// The generated Response child is the positive ownership witness.  Without
+/// it, arbitrary prose containing `- ### ~~...~~` remains ordinary authored
+/// text and follows the normal bare-prompt rules.
+fn welded_terminal_row_with_response<'a>(
+    lines: &[&'a str],
+    line_index: usize,
+) -> Option<(&'a str, Option<&'a str>)> {
+    let line = *lines.get(line_index)?;
+    if line.trim_start() != line {
+        return None;
+    }
+    let marker = "- ### ";
+    let marker_at = line.find(marker)?;
+    let fragment = &line[..marker_at];
+    if fragment.is_empty()
+        || fragment.len() > 8
+        || !fragment.chars().all(|ch| ch.is_ascii_alphanumeric())
+    {
+        return None;
+    }
+    agent_doc_markdown_ast::overlay::response_row_child_end(lines, line_index + 1, 2)?;
+    parse_completed_inline_with_note(&line[marker_at + marker.len()..])
 }
 
 /// Recover one operator-authored task that was pasted directly into the queue
@@ -15651,6 +15704,65 @@ mod tests {
             "The terminal windows closed because a scope was left behind.\n\
              > diagnostic detail\n"
         );
+    }
+
+    /// A terminal row with one retained-projection byte welded before its list
+    /// marker must not be promoted by `#queuefreetextsplit`.  The canonical
+    /// Response child proves that the line is generated terminal structure,
+    /// and render heals the damaged prefix.
+    #[test]
+    fn welded_prefix_terminal_response_row_is_not_a_live_head() {
+        let body = concat!(
+            "- investigate neighboring corruption\n",
+            "n- ### ~~follow up on the completed integration ⟦published⟧~~\n",
+            "  - **Response [#r-099fd26894a1]**\n",
+            "    - **Timestamp:** 2026-11-18T01:42:36.000Z\n",
+            "    - **Summary:** The integration is complete.\n",
+            "    - **Action items:** none\n",
+            "    - **State:** Complete.\n",
+            "- next live item\n",
+        );
+
+        let entries = parse(body).unwrap();
+        let live = prompts(&entries)
+            .iter()
+            .map(|prompt| prompt.text.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            live,
+            vec!["investigate neighboring corruption", "next live item"],
+            "the welded terminal row must not dispatch: {entries:#?}"
+        );
+        assert!(entries.iter().any(|entry| {
+            matches!(
+                entry,
+                QueueEntry::Completed(prompt)
+                    if prompt.text == "follow up on the completed integration ⟦published⟧"
+            )
+        }));
+
+        let healed = render(&entries);
+        assert!(
+            healed.contains("- ~~follow up on the completed integration ⟦published⟧~~\n"),
+            "{healed}"
+        );
+        assert!(!healed.contains("n- ### ~~"), "{healed}");
+        assert!(
+            healed.contains("  - **Response [#r-099fd26894a1]**\n"),
+            "{healed}"
+        );
+    }
+
+    /// The positive Response-child witness keeps ordinary operator prose from
+    /// being silently converted into a completed row.
+    #[test]
+    fn terminal_syntax_inside_bare_prose_stays_operator_work_without_response_child() {
+        let body = concat!(
+            "- first item\n",
+            "n- ### ~~this is authored prose, not generated terminal structure~~\n",
+        );
+        let entries = parse(body).unwrap();
+        assert!(matches!(entries[1], QueueEntry::Prompt(_)), "{entries:#?}");
     }
 
     /// Indented continuation (one or more lines, up to the next list marker or

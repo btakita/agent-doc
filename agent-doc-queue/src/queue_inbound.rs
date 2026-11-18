@@ -56,10 +56,11 @@ pub struct QueueFollowupPlan {
     pub redirected_from_loop: Option<String>,
 }
 
-/// Insert queue-local follow-up heads immediately after the head that produced
-/// them, or for a nested head after the top-level row that contains it. Queue
-/// id and origin are both mandatory: a mirrored copy in another queue must
-/// never redirect the insertion to the document's selected queue.
+/// Insert queue-local follow-up heads inside the origin row's own prompt tree,
+/// at that row's nesting depth, after that row's own children. A nested origin
+/// does not hoist its follow-ups to a column-0 sibling. Queue id and origin
+/// are both mandatory: a mirrored copy in another queue must never redirect
+/// the insertion to the document's selected queue.
 pub fn plan_queue_followups(
     content: &str,
     queue_id: &str,
@@ -97,18 +98,23 @@ pub fn plan_queue_followups_targeted(
             })?;
         let target = crate::queue_graph::component_for_id(content, &components, &target_id)?
             .ok_or_else(|| anyhow::anyhow!("agent:queue id `{target_id}` not found"))?;
-        let insertion_at = match live_origin_subtree_ends(target.content(content), origin)
-            .as_slice()
-        {
-            [offset] => target.open_end + offset,
+        let slots = live_origin_subtree_ends(target.content(content), origin);
+        let (insertion_at, indent_prefix) = match slots.as_slice() {
+            [slot] => (target.open_end + slot.end, slot.prefix.clone()),
             _ => {
                 let body = target.content(content);
                 if body.is_empty() || body.ends_with('\n') {
-                    target.close_start
+                    (target.close_start, String::new())
                 } else {
                     // Keep the closing marker on its own line.
                     return Ok(QueueFollowupPlan {
-                        content: splice_followups(content, target.close_start, "\n", followups)?,
+                        content: splice_followups(
+                            content,
+                            target.close_start,
+                            "\n",
+                            "",
+                            followups,
+                        )?,
                         queue_id: target_id,
                         redirected_from_loop: Some(queue_id.to_string()),
                     });
@@ -116,20 +122,26 @@ pub fn plan_queue_followups_targeted(
             }
         };
         return Ok(QueueFollowupPlan {
-            content: splice_followups(content, insertion_at, "", followups)?,
+            content: splice_followups(content, insertion_at, "", &indent_prefix, followups)?,
             queue_id: target_id,
             redirected_from_loop: Some(queue_id.to_string()),
         });
     }
     let queue = named;
     let matches = live_origin_subtree_ends(queue.content(content), origin);
-    let insertion_at = match matches.as_slice() {
-        [offset] => queue.open_end + offset,
+    let slot = match matches.as_slice() {
+        [slot] => slot,
         [] => bail!("queue follow-up origin {origin:?} not found in queue id `{queue_id}`"),
         _ => bail!("queue follow-up origin {origin:?} is ambiguous in queue id `{queue_id}`"),
     };
     Ok(QueueFollowupPlan {
-        content: splice_followups(content, insertion_at, "", followups)?,
+        content: splice_followups(
+            content,
+            queue.open_end + slot.end,
+            "",
+            &slot.prefix,
+            followups,
+        )?,
         queue_id: queue_id.to_string(),
         redirected_from_loop: None,
     })
@@ -139,11 +151,13 @@ fn splice_followups(
     content: &str,
     insertion_at: usize,
     lead: &str,
+    indent_prefix: &str,
     followups: &[String],
 ) -> Result<String> {
     let mut insertion = String::from(lead);
     for item in followups {
         let item = normalize_inbound_text(item)?;
+        insertion.push_str(indent_prefix);
         insertion.push_str("- ");
         insertion.push_str(&item);
         insertion.push('\n');
@@ -155,16 +169,24 @@ fn splice_followups(
     Ok(updated)
 }
 
-/// Body-relative end offsets of every live (unstruck) row whose head text is
-/// `origin`, including the nested subtree of its top-level row.
+/// Where one follow-up block is written: after the origin row's own children,
+/// repeating that row's leading whitespace so the new rows stay in its tree.
+struct FollowupSlot {
+    end: usize,
+    prefix: String,
+}
+
+/// Body-relative insertion slots of every live (unstruck) row whose head text
+/// is `origin`.
 ///
-/// Follow-ups are top-level rows. Inserting immediately after only the parent
-/// line makes its pre-existing children appear beneath the new follow-up in
-/// Markdown, silently changing both rows' lineage (`#queueprojectiondrift`).
-/// `#handbackopenitemstriage`: the same holds for the later children of a
-/// nested origin's ancestors, so the insertion point is the end of the whole
-/// top-level row. That row may also be a Response packet or a Waiting-on-you
-/// tree, where a nested row would read as the operator's answer, not as work.
+/// The slot is the end of that row's own descendant subtree, at that row's
+/// nesting depth. A follow-up is not hoisted to the column-0 ancestor: the
+/// prompt tree that produced it keeps the new row. Inserting at a shallower
+/// indent would make the origin's later siblings look like children of the
+/// follow-up (`#queueprojectiondrift`). An ATX heading still ends the list, so
+/// the slot never crosses one. A Waiting-on-you packet does not read the row
+/// as the operator's answer; that classification lives in
+/// [`crate::waiting_packet`], not by leaving the tree.
 ///
 /// `#followuporiginmarkers`: a top-level row is often a `### ` navigation
 /// heading, and its lifecycle projection (`☑️`/`🚧`, `[#subagent:x#N]`,
@@ -174,7 +196,7 @@ fn splice_followups(
 /// find it. When no row matches that text exactly, an id-backed origin
 /// (`[#id]`, `do [#id]`) matches the one live row carrying the same tracked
 /// id; several such rows stay ambiguous and fail closed.
-fn live_origin_subtree_ends(body: &str, origin: &str) -> Vec<usize> {
+fn live_origin_subtree_ends(body: &str, origin: &str) -> Vec<FollowupSlot> {
     let wanted = origin_match_text(origin);
     let exact = origin_subtree_ends(body, |row| row == wanted);
     if !exact.is_empty() {
@@ -202,7 +224,7 @@ fn origin_match_text(text: &str) -> String {
 
 /// [`live_origin_subtree_ends`] for every live row whose work text satisfies
 /// `matches`.
-fn origin_subtree_ends(body: &str, matches_row: impl Fn(&str) -> bool) -> Vec<usize> {
+fn origin_subtree_ends(body: &str, matches_row: impl Fn(&str) -> bool) -> Vec<FollowupSlot> {
     let lines = body
         .split_inclusive('\n')
         .scan(0usize, |offset, line| {
@@ -211,9 +233,9 @@ fn origin_subtree_ends(body: &str, matches_row: impl Fn(&str) -> bool) -> Vec<us
         })
         .collect::<Vec<_>>();
     let mut matches = Vec::new();
-    for (index, (_, line)) in lines.iter().enumerate() {
+    for (index, (line_end, line)) in lines.iter().enumerate() {
         let line_text = line.trim_end_matches(['\r', '\n']);
-        let indent = line_text.len() - line_text.trim_start().len();
+        let indent = line_indent(line_text);
         let Some(prompt) = line_text
             .trim_start()
             .strip_prefix("- ")
@@ -226,146 +248,78 @@ fn origin_subtree_ends(body: &str, matches_row: impl Fn(&str) -> bool) -> Vec<us
         if crate::document_queue::parse_completed_inline(unheaded).is_some() {
             continue;
         }
-        if matches_row(&origin_match_text(prompt)) {
-            let (mut root, mut indent) = (index, indent);
-            for (candidate, (_, line)) in lines[..index].iter().enumerate().rev() {
-                let candidate_indent = line.len() - line.trim_start().len();
-                if line.trim_start().starts_with("- ") && candidate_indent < indent {
-                    (root, indent) = (candidate, candidate_indent);
-                }
-            }
-            let mut subtree_end = lines[root].0;
-            for (descendant_end, descendant) in lines.iter().skip(root + 1) {
-                let descendant = descendant.trim_end_matches(['\r', '\n']);
-                if descendant.trim().is_empty() {
-                    continue;
-                }
-                let descendant_indent = descendant.len() - descendant.trim_start().len();
-                if descendant.trim_start().starts_with("- ") {
-                    if descendant_indent <= indent {
-                        break;
-                    }
-                    subtree_end = *descendant_end;
-                    continue;
-                }
-                if descendant_indent > indent {
-                    subtree_end = *descendant_end;
-                    continue;
-                }
-                break;
-            }
-            // A follow-up is a column-0 bullet. Any list item still indented
-            // under the parent (an ordered marker the walk did not treat as a
-            // sibling, or a child after a prose line that ended the walk) would
-            // nest under that bullet and leave its real parent. Keep those
-            // lines with the parent.
-            subtree_end = extend_past_lines_a_column0_bullet_would_adopt(&lines, subtree_end);
-            matches.push(subtree_end);
-        }
-    }
-    matches
-}
-
-/// End offset at or after `subtree_end` such that a new `- ` bullet there is
-/// not the parent of list items that already belonged to an earlier row.
-///
-/// CommonMark nests a marker at column 2 or more, and a tab, under a column-0
-/// bullet. A column-0 paragraph between the origin and those markers is lazy
-/// continuation, so the markers would nest under the follow-up too. An ATX
-/// heading interrupts the list and is not such a pull.
-fn extend_past_lines_a_column0_bullet_would_adopt(
-    lines: &[(usize, &str)],
-    subtree_end: usize,
-) -> usize {
-    let mut last_keep = subtree_end;
-    let mut index = lines
-        .iter()
-        .position(|(end, _)| *end > subtree_end)
-        .unwrap_or(lines.len());
-    while index < lines.len() {
-        let (end, raw) = lines[index];
-        let text = raw.trim_end_matches(['\r', '\n']);
-        if text.trim().is_empty() {
-            index += 1;
+        if !matches_row(&origin_match_text(prompt)) {
             continue;
         }
-        if let Some(column) = list_marker_column(text) {
-            if column >= 2 {
-                last_keep = end;
-                index += 1;
+        let mut subtree_end = *line_end;
+        for (descendant_end, descendant) in lines.iter().skip(index + 1) {
+            let descendant = descendant.trim_end_matches(['\r', '\n']);
+            if descendant.trim().is_empty() {
+                continue;
+            }
+            // An ATX heading interrupts the list. The follow-up stays on this
+            // side of it, still inside the origin's tree.
+            if is_atx_heading(descendant) && line_indent(descendant) <= indent {
+                break;
+            }
+            let descendant_indent = line_indent(descendant);
+            if is_dash_or_ordered_item(descendant) {
+                if descendant_indent <= indent {
+                    break;
+                }
+                subtree_end = *descendant_end;
+                continue;
+            }
+            if descendant_indent > indent {
+                subtree_end = *descendant_end;
                 continue;
             }
             break;
         }
-        if leading_column(text) >= 2 || column0_line_pulls_a_nested_list_item(lines, index) {
-            last_keep = end;
-            index += 1;
-            continue;
-        }
-        break;
+        let prefix_len = line_text.len() - line_text.trim_start_matches([' ', '\t']).len();
+        matches.push(FollowupSlot {
+            end: subtree_end,
+            prefix: line_text[..prefix_len].to_string(),
+        });
     }
-    last_keep
+    matches
 }
 
-/// Column of a `- ` or `N. ` marker, counting a tab as a 4-column stop.
-/// `None` when `text` is not a list item.
-fn list_marker_column(text: &str) -> Option<usize> {
-    let bytes = text.as_bytes();
-    let mut column = 0usize;
-    let mut index = 0usize;
-    while index < bytes.len() {
-        match bytes[index] {
-            b' ' => column += 1,
-            b'\t' => column += 4 - (column % 4),
-            _ => break,
-        }
-        index += 1;
-    }
-    let rest = &text[index..];
+fn line_indent(text: &str) -> usize {
+    text.len() - text.trim_start().len()
+}
+
+fn is_dash_or_ordered_item(text: &str) -> bool {
+    let rest = text.trim_start_matches([' ', '\t']);
     if rest.starts_with("- ") {
-        return Some(column);
+        return true;
     }
     let digits = rest
         .bytes()
         .take_while(|byte| byte.is_ascii_digit())
         .count();
-    if digits > 0 && rest[digits..].starts_with(". ") {
-        return Some(column);
-    }
-    None
+    digits > 0 && rest[digits..].starts_with(". ")
 }
 
-fn leading_column(text: &str) -> usize {
-    let mut column = 0usize;
-    for byte in text.bytes() {
-        match byte {
-            b' ' => column += 1,
-            b'\t' => column += 4 - (column % 4),
-            _ => break,
-        }
+/// CommonMark ATX heading: one to six `#` at column 0–3, then a space or end.
+fn is_atx_heading(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let mut index = 0usize;
+    while index < bytes.len() && index < 3 && bytes[index] == b' ' {
+        index += 1;
     }
-    column
-}
-
-/// A column-0 non-list line pulls a later nested marker into the new bullet
-/// when nothing before that marker interrupts the list.
-fn column0_line_pulls_a_nested_list_item(lines: &[(usize, &str)], from: usize) -> bool {
-    for (_, raw) in lines.iter().skip(from + 1) {
-        let text = raw.trim_end_matches(['\r', '\n']);
-        if text.trim().is_empty() {
-            continue;
-        }
-        if let Some(column) = list_marker_column(text) {
-            return column >= 2;
-        }
-        if leading_column(text) >= 2 {
-            return true;
-        }
-        if text.trim_start().starts_with('#') {
-            return false;
-        }
+    let hashes = bytes[index..]
+        .iter()
+        .take_while(|byte| **byte == b'#')
+        .count();
+    if !(1..=6).contains(&hashes) {
+        return false;
     }
-    false
+    match bytes.get(index + hashes) {
+        None => true,
+        Some(b' ' | b'\t') => true,
+        Some(_) => false,
+    }
 }
 
 fn valid_token_char(ch: char) -> bool {
@@ -624,10 +578,9 @@ mod tests {
         );
     }
 
-    /// `#handbackopenitemstriage`: follow-ups of a nested origin once landed
-    /// at the top level between its parent's children, so a later child became
-    /// a child of the last follow-up. That row was then a parent, not a leaf,
-    /// and `queue consume --ack-text` could not reach it.
+    /// A nested origin keeps its follow-ups in its own prompt tree, at its
+    /// indent, after its own children. They are not hoisted to a column-0
+    /// sibling of the parent, and the parent's other child stays put.
     #[test]
     fn followups_of_a_nested_origin_land_after_its_top_level_row() {
         let doc = concat!(
@@ -650,18 +603,22 @@ mod tests {
         .unwrap();
         assert!(
             updated.contains(concat!(
+                "        - ☑️ [#subagent:worker#1] pick: leave them out\n",
+                "        - first\n",
+                "        - second\n",
                 "  - 🙋☑️ [#subagent:parent#1] Resolve the open operator action.\n",
-                "- first\n",
-                "- second\n",
                 "- later work\n",
             )),
             "{updated}"
         );
+        assert!(
+            !updated.contains("\n- first\n"),
+            "follow-up must stay nested:\n{updated}"
+        );
     }
 
-    /// A column-0 follow-up used to land before a child the walk had dropped
-    /// (prose ended the subtree, or the parent marker was not `- `). That child
-    /// then nested under the follow-up. The child stays with its parent.
+    /// A follow-up at the origin's depth must not take a later sibling that
+    /// already belonged to the parent, including one that follows a prose line.
     #[test]
     fn followup_does_not_adopt_children_that_already_belonged_to_the_parent() {
         let doc = concat!(
@@ -686,18 +643,17 @@ mod tests {
                 "<!-- agent:run id=main -->\n",
                 "- parent work\n",
                 "  - origin work\n",
+                "  - follow up on an action item from parent\n",
                 "note that stays with the parent\n",
                 "  - sibling child that already belonged to the parent\n",
-                "- follow up on an action item from parent\n",
                 "- later work\n",
                 "<!-- /agent:run -->\n",
             )
         );
     }
 
-    /// `1. parent` is a real queue row. Climbing only `- ` lines treated the
-    /// nested origin as the root and inserted the follow-up between that
-    /// origin and the parent's other child.
+    /// An ordered parent's other child stays a sibling of the nested origin.
+    /// The follow-up is at the origin's indent, not a new parent of that child.
     #[test]
     fn followup_does_not_adopt_children_of_an_ordered_parent() {
         let doc = concat!(
@@ -721,8 +677,8 @@ mod tests {
                 "<!-- agent:run id=main -->\n",
                 "1. parent work\n",
                 "   - origin work\n",
+                "   - follow up on an action item from parent\n",
                 "   - sibling child\n",
-                "- follow up on an action item from parent\n",
                 "- later work\n",
                 "<!-- /agent:run -->\n",
             )

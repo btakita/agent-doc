@@ -2978,12 +2978,10 @@ fn run_printed_command(dir: &std::path::Path, command: &str) -> std::process::Ou
         .unwrap()
 }
 
-/// `#handbackopenitemstriage`: a hand-back from a nested row put its follow-ups
-/// at the top level between the parent's children. The next child then read as
-/// a child of the last follow-up, which made that row a parent rather than an
-/// executable leaf, so `queue consume --ack-text` could not reach it. Rows now
-/// follow the whole top-level row: every child keeps its parent, and each
-/// follow-up stays acknowledgeable.
+/// A hand-back from a nested row keeps its follow-ups at that row's depth,
+/// after the row and before its sibling. They are not hoisted to the top
+/// level, the sibling stays with the parent, and each follow-up stays a leaf
+/// `queue consume --ack-text` can reach.
 #[test]
 fn followups_of_a_nested_origin_leave_the_parent_children_alone_and_stay_acknowledgeable() {
     let dir = tempfile::tempdir().unwrap();
@@ -3070,13 +3068,19 @@ fn followups_of_a_nested_origin_leave_the_parent_children_alone_and_stay_acknowl
         rows[position("sibling work")].starts_with("  - "),
         "{rows:#?}"
     );
-    assert_eq!(
-        position("sibling work") + 1,
-        position(followup),
+    assert!(
+        position("leaf work") < position(followup) && position(followup) < position("sibling work"),
         "{rows:#?}"
     );
-    assert!(rows[position(followup)].starts_with("- "), "{rows:#?}");
-    assert_eq!(position(followup) + 1, position("later work"), "{rows:#?}");
+    assert!(
+        rows[position(followup)].starts_with("  - "),
+        "{rows:#?}"
+    );
+    assert_eq!(
+        position("sibling work") + 1,
+        position("later work"),
+        "{rows:#?}"
+    );
 
     let output = run_agent_doc(
         dir.path(),

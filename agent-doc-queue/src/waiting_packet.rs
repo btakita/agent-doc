@@ -309,7 +309,7 @@ pub fn classify_member(prompt: &QueuePrompt) -> WaitingMember {
     if owner_projection(&prompt.text).is_some() {
         return WaitingMember::Attempt(QueueLifecycleMarker::Claimed);
     }
-    if is_binary_follow_up(&prompt.text) {
+    if is_binary_follow_up(&prompt.text) || is_action_item_followup(&prompt.text) {
         return WaitingMember::BinaryFollowUp;
     }
     if is_offered_choice(&prompt.text) {
@@ -329,6 +329,15 @@ pub fn is_offered_choice(text: &str) -> bool {
         return false;
     };
     !label.trim().is_empty() && !label.contains("**") && !effect.trim().is_empty()
+}
+
+/// An action-item follow-up (`follow up on an action item from …`) is work
+/// nested in the origin's tree. Inside a Waiting-on-you packet it is not the
+/// operator's answer.
+fn is_action_item_followup(text: &str) -> bool {
+    let work = agent_doc_element_queue::strip_attempt_projection_prefix(text).trim();
+    let work = crate::document_queue::strip_top_level_queue_heading(work).trim();
+    work.starts_with("follow up on an action item from ")
 }
 
 /// Whether `text` is exactly a legacy binary follow-up sentence plus only
@@ -392,6 +401,7 @@ pub fn operator_freeform_text(entries: &[QueueEntry], index: usize) -> Option<&s
         || body.starts_with('>')
         || body.starts_with("~~")
         || body.starts_with("&gt;")
+        || is_action_item_followup(body)
         // `#treestatusquery`: a status query is answered by the binary, never
         // an answer to the item.
         || agent_doc_markdown_ast::tree_status_row::status_query_kind(body).is_some()
@@ -425,6 +435,7 @@ pub fn is_struck_operator_freeform(entries: &[QueueEntry], index: usize) -> bool
     };
     !inner.is_empty()
         && !is_agent_doc_reply_entry(entries, index)
+        && !is_action_item_followup(inner)
         && !inner.contains("<!-- agent-doc:")
         && !inner.contains("auto-struck")
         && !["**", "%%", "<", ">", "&gt;"]
@@ -882,6 +893,34 @@ mod tests {
             };
             assert_eq!(classify_member(prompt), WaitingMember::BinaryFollowUp);
         }
+        assert!(!has_operator_reply(&parsed, head));
+        assert!(!is_selected(&parsed, head));
+    }
+
+    /// A follow-up nested under the waiting item that produced it stays in
+    /// that tree and is not decision evidence.
+    #[test]
+    fn an_action_item_followup_inside_a_waiting_packet_is_not_an_operator_answer() {
+        let parsed = entries(concat!(
+            "- ### Waiting on you <!-- agent-doc:waiting-on-you -->\n",
+            "  - [#pick] Pick a release channel. <!-- agent-doc:waiting-item -->\n",
+            "    - ☑️ [#subagent:pick#1] pick: stable\n",
+            "    - follow up on an action item from queue item “pick: stable”: publish the channel\n",
+        ));
+        let head = parsed
+            .iter()
+            .position(is_waiting_item_head)
+            .expect("waiting item head");
+        let follow = parsed
+            .iter()
+            .position(|entry| {
+                matches!(entry, QueueEntry::Prompt(prompt) if prompt.text.contains("follow up on an action item"))
+            })
+            .expect("follow-up row");
+        let QueueEntry::Prompt(prompt) = &parsed[follow] else {
+            panic!("follow-up must parse as a prompt, not freeform operator text");
+        };
+        assert_eq!(classify_member(prompt), WaitingMember::BinaryFollowUp);
         assert!(!has_operator_reply(&parsed, head));
         assert!(!is_selected(&parsed, head));
     }

@@ -496,12 +496,14 @@ mod tests {
             plan_handback_followups(&content, "parent work: leaf work", HANDBACK);
         assert_eq!(outcome.refused, None, "{outcome:?}");
         assert_eq!(outcome.inserted.len(), 2);
-        // The siblings keep their parent; the rows follow the whole parent.
+        // The follow-ups stay at the leaf's depth, after that leaf and before
+        // its sibling. They are not hoisted out to the parent.
         let body = &updated[updated.find("- parent work").unwrap()..];
+        let leaf = body.find("  - leaf work").unwrap();
+        let row = body.find("  - follow up on an action item").unwrap();
         let sibling = body.find("  - sibling work").unwrap();
-        let row = body.find("- follow up on an action item").unwrap();
-        assert!(sibling < row, "{updated}");
-        assert!(row < body.find("- later work").unwrap(), "{updated}");
+        assert!(leaf < row && row < sibling, "{updated}");
+        assert!(sibling < body.find("- later work").unwrap(), "{updated}");
     }
 
     /// `#handbackopenitemstriage`: the #recommendationinrow hand-back labelled

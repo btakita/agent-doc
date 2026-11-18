@@ -1656,8 +1656,19 @@ pub fn canonical_contains_captured(
                 let observed_inserted = &current[observed.new_range()];
                 observed.tag() != DiffTag::Equal
                     && observed.old_range() == change.old_range()
-                    && (observed_inserted.starts_with(inserted)
-                        || observed_inserted.ends_with(inserted))
+                    // `#preh`: every string starts and ends with the empty
+                    // slice. Treating that as containment lets a canonical
+                    // replacement over an operator-deleted prompt tree prove
+                    // that the deletion landed even while the tree remains.
+                    // A deletion is contained here only by the same deletion;
+                    // replacements continue to allow canonical-owned prefix or
+                    // suffix text around the operator insertion.
+                    && if inserted.is_empty() {
+                        observed_inserted.is_empty()
+                    } else {
+                        observed_inserted.starts_with(inserted)
+                            || observed_inserted.ends_with(inserted)
+                    }
             })
         });
     if exact_range_containment {
@@ -1786,6 +1797,55 @@ mod tests {
         // Control: an edit elsewhere that canonical never saw is not contained.
         let elsewhere = batch(shadow, vec![edit(0, 0, "operator header\n")]);
         assert!(!canonical_contains_captured(shadow, canonical, &elsewhere).unwrap());
+    }
+
+    /// `#preh`: deleting a completed prompt tree is operator intent even when
+    /// canonical rewrote that same tree after the settled shadow. A replacement
+    /// over the deleted range must not make an empty insertion look contained.
+    #[test]
+    fn rewritten_completed_prompt_does_not_contain_its_operator_deletion() {
+        let shadow = r#"## contract-prs <!-- agent:run id="contract-prs" -->
+- ### https://example.invalid/example-org/example-contracts/pull/208
+  - ~~How can we resolve discussion?~~
+    - **Response:** old result
+      - **State:** Complete.
+- ### keep me
+<!-- /agent:run -->
+"#;
+        let buffer = r#"## contract-prs <!-- agent:run id="contract-prs" -->
+- ### https://example.invalid/example-org/example-contracts/pull/208
+- ### keep me
+<!-- /agent:run -->
+"#;
+        let canonical = r#"## contract-prs <!-- agent:run id="contract-prs" -->
+- ### https://example.invalid/example-org/example-contracts/pull/208
+  - ~~How can we resolve discussion?~~
+    - **Response:** rewritten retained result
+      - **Timestamp:** later
+      - **State:** Complete.
+- ### keep me
+<!-- /agent:run -->
+"#;
+        let deletion = single_splice(shadow, buffer);
+
+        assert_eq!(
+            agent_doc_element_queue::QueueItemLifecycle::classify(
+                "  - ~~How can we resolve discussion?~~\n"
+            ),
+            agent_doc_element_queue::QueueItemLifecycle::Struck
+        );
+        assert!(
+            !canonical_contains_captured(shadow, canonical, &deletion).unwrap(),
+            "rewriting a deleted prompt tree must not prove its deletion already landed"
+        );
+        assert!(
+            crate::crdt::merge_operator_deleted_struck_queue_items(shadow, buffer, canonical)
+                .is_some()
+        );
+        assert_eq!(
+            rebase(shadow, canonical, &deletion).unwrap().resulting_text,
+            buffer
+        );
     }
 
     #[test]

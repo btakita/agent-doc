@@ -8502,7 +8502,7 @@ impl ControllerDocumentGraphs {
                     &content, file,
                 ),
             ),
-            active_lifecycle: agent_doc_work_projection::active_lifecycle::read(file),
+            active_lifecycle: agent_doc_work_projection::active_lifecycle::read(file, &content),
             content,
         };
         self.queue_authority
@@ -8644,7 +8644,7 @@ impl ControllerDocumentGraphs {
                         // struck source row. Unstruck Reported/Lost work remains in
                         // the index because the pure projection derives from the
                         // authoritative source lifecycle, not from turn completion.
-                        let target_content = match agent_doc_work_projection::reconcile_managed_active_items_from_read(
+                        let target_content = match agent_doc_work_projection::reconcile_queue_lifecycle_summaries_from_read(
                             &target_content,
                             &observation.active_lifecycle,
                         ) {

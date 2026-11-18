@@ -23,8 +23,10 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use agent_doc_document::queue_projection::QueueLifecycleMarker;
-use agent_doc_element_queue::QueueItemIdentity;
-use anyhow::Result;
+use agent_doc_element_queue::{QueueItemIdentity, QueueReportState};
+use agent_doc_queue::queue_claim::{ClaimOwnerLiveness, QueueClaim, QueueClaimState};
+use anyhow::{Context, Result, ensure};
+use serde::Deserialize;
 
 /// The phase an active entry is grouped by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -81,6 +83,7 @@ pub struct ActiveAttempt {
     /// The lifecycle the attempt's records prove (claim state, or `Reported`
     /// / `LostReported` from a release receipt).
     pub marker: QueueLifecycleMarker,
+    pub publication_state: Option<QueueReportState>,
     /// When the entry entered its current group, in unix seconds.
     pub since_secs: u64,
     /// Which record `since_secs` came from (`released`, `pushed`, `started`,
@@ -101,6 +104,77 @@ pub struct LineageFacts {
     pub ended: bool,
 }
 
+pub const QUEUE_LINEAGE_STATE_KIND: &str = "queue_lineage_v1";
+pub const QUEUE_LINEAGE_CONTRACT_VERSION: &str = "agent-doc-queue-lineage-v1";
+
+/// The lifecycle facts of exact work identities and attempts.
+pub type LineageFactsIndex = HashMap<(QueueItemIdentity, String, u64), LineageFacts>;
+
+/// Read the lifecycle subset of the queue lineage contract. This reader is
+/// also used by the CRDT relay, which cannot depend on the queue CLI writer.
+pub fn lineage_facts_from_payload(payload: &str) -> Result<LineageFactsIndex> {
+    #[derive(Deserialize)]
+    struct Ledger {
+        #[serde(default = "lineage_contract_version")]
+        contract_version: String,
+        #[serde(default)]
+        attempts: Vec<Attempt>,
+    }
+    #[derive(Deserialize)]
+    struct Attempt {
+        identity: QueueItemIdentity,
+        #[serde(default)]
+        identity_history: Vec<QueueItemIdentity>,
+        owner: String,
+        generation: u64,
+        #[serde(default)]
+        events: Vec<Event>,
+    }
+    #[derive(Deserialize)]
+    struct Event {
+        #[serde(default = "lineage_created_event")]
+        kind: String,
+        at_secs: u64,
+    }
+
+    let ledger: Ledger = serde_json::from_str(payload).context("parse queue lineage facts")?;
+    ensure!(
+        ledger.contract_version == QUEUE_LINEAGE_CONTRACT_VERSION,
+        "unsupported queue lineage contract {:?}",
+        ledger.contract_version
+    );
+    let mut index = HashMap::new();
+    for attempt in ledger.attempts {
+        let mut facts = LineageFacts::default();
+        for event in attempt.events {
+            facts.integrated |= event.kind == "integrated";
+            facts.ended |= matches!(event.kind.as_str(), "cancelled" | "admission_refused");
+            if facts
+                .latest
+                .as_ref()
+                .is_none_or(|(_, previous)| event.at_secs >= *previous)
+            {
+                facts.latest = Some((event.kind, event.at_secs));
+            }
+        }
+        for identity in std::iter::once(attempt.identity).chain(attempt.identity_history) {
+            index.insert(
+                (identity, attempt.owner.clone(), attempt.generation),
+                facts.clone(),
+            );
+        }
+    }
+    Ok(index)
+}
+
+fn lineage_contract_version() -> String {
+    QUEUE_LINEAGE_CONTRACT_VERSION.to_string()
+}
+
+fn lineage_created_event() -> String {
+    "created".to_string()
+}
+
 /// The durable lifecycle state `agent:active` is rendered from.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ActiveLifecycle {
@@ -119,8 +193,21 @@ impl ActiveLifecycle {
     pub fn from_ledgers(
         claims: &agent_doc_queue::queue_claim::QueueClaimLedger,
         receipts: &agent_doc_queue::claim_release_receipt::ClaimReleaseReceiptLedger,
-        lineage: &HashMap<(String, u64), LineageFacts>,
+        lineage: &LineageFactsIndex,
         now_secs: u64,
+    ) -> Self {
+        Self::from_ledgers_with_liveness(claims, receipts, lineage, now_secs, |_| {
+            ClaimOwnerLiveness::Unrecorded
+        })
+    }
+
+    /// Evaluate each exact attempt once for every document projection.
+    pub fn from_ledgers_with_liveness(
+        claims: &agent_doc_queue::queue_claim::QueueClaimLedger,
+        receipts: &agent_doc_queue::claim_release_receipt::ClaimReleaseReceiptLedger,
+        lineage: &LineageFactsIndex,
+        now_secs: u64,
+        owner_liveness: impl Fn(&QueueClaim) -> ClaimOwnerLiveness,
     ) -> Self {
         let cancelled = |identity: &QueueItemIdentity, generation: u64| {
             claims
@@ -128,19 +215,27 @@ impl ActiveLifecycle {
                 .iter()
                 .any(|cancel| cancel.cancels_attempt(identity, generation))
         };
-        let facts = |owner: &str, generation: u64| lineage.get(&(owner.to_string(), generation));
+        let facts = |identity: &QueueItemIdentity, owner: &str, generation: u64| {
+            lineage.get(&(identity.clone(), owner.to_string(), generation))
+        };
         let mut attempts = HashMap::new();
         for claim in &claims.claims {
-            if cancelled(&claim.identity, claim.generation)
-                || facts(&claim.owner, claim.generation).is_some_and(|facts| facts.ended)
-            {
+            if cancelled(&claim.identity, claim.generation) {
+                continue;
+            }
+            let fact = facts(&claim.identity, &claim.owner, claim.generation)
+                .cloned()
+                .unwrap_or_default();
+            if fact.ended {
                 continue;
             }
             let mut claim = claim.clone();
             claim.project_expiry(now_secs);
-            let fact = facts(&claim.owner, claim.generation)
-                .cloned()
-                .unwrap_or_default();
+            let marker = if claim.state == QueueClaimState::Running && claim.frozen.is_none() {
+                claim.visible_projection_for_owner(owner_liveness(&claim))
+            } else {
+                claim.visible_projection_for_owner(ClaimOwnerLiveness::Unrecorded)
+            };
             let (since_secs, since_source) = match (&fact.latest, &claim.worker) {
                 (Some((kind, at)), _) => (*at, kind.clone()),
                 (None, Some(worker)) => (worker.started_at_secs, "started".to_string()),
@@ -151,7 +246,8 @@ impl ActiveLifecycle {
                 ActiveAttempt {
                     owner: claim.owner.clone(),
                     generation: claim.generation,
-                    marker: claim.projection_marker(),
+                    marker,
+                    publication_state: claim.publication_state,
                     since_secs,
                     since_source,
                     integrated: fact.integrated,
@@ -162,13 +258,15 @@ impl ActiveLifecycle {
             if attempts.contains_key(&receipt.identity)
                 || receipt.attempt_closed()
                 || cancelled(&receipt.identity, receipt.generation)
-                || facts(&receipt.owner, receipt.generation).is_some_and(|facts| facts.ended)
             {
                 continue;
             }
-            let fact = facts(&receipt.owner, receipt.generation)
+            let fact = facts(&receipt.identity, &receipt.owner, receipt.generation)
                 .cloned()
                 .unwrap_or_default();
+            if fact.ended {
+                continue;
+            }
             // Older receipts carry no release time; never render an epoch age.
             let (since_secs, since_source) = if receipt.released_at_secs > 0 {
                 (receipt.released_at_secs, "released".to_string())
@@ -187,6 +285,7 @@ impl ActiveLifecycle {
                     } else {
                         QueueLifecycleMarker::Reported
                     },
+                    publication_state: receipt.publication_state,
                     since_secs,
                     since_source,
                     integrated: fact.integrated,
@@ -198,7 +297,7 @@ impl ActiveLifecycle {
 }
 
 /// Reads one document's [`ActiveLifecycle`] from durable storage.
-pub type ActiveLifecycleLoader = fn(&Path) -> Result<ActiveLifecycle>;
+pub type ActiveLifecycleLoader = fn(&Path, &str) -> Result<ActiveLifecycle>;
 
 static LOADER: OnceLock<ActiveLifecycleLoader> = OnceLock::new();
 
@@ -227,10 +326,10 @@ pub enum ActiveLifecycleRead {
 }
 
 /// Read `file`'s lifecycle through the installed loader.
-pub fn read(file: &Path) -> ActiveLifecycleRead {
+pub fn read(file: &Path, content: &str) -> ActiveLifecycleRead {
     match loader() {
         None => ActiveLifecycleRead::NoLoader,
-        Some(loader) => match loader(file) {
+        Some(loader) => match loader(file, content) {
             Ok(lifecycle) => ActiveLifecycleRead::Loaded(lifecycle),
             Err(err) => ActiveLifecycleRead::Unreadable(format!("{err:#}")),
         },

@@ -294,6 +294,8 @@ pub struct ClaimRuntimeProjection {
     pub target_content: String,
     pub persisted_heads: Vec<String>,
     pub changed: bool,
+    lifecycle: Option<agent_doc_work_projection::active_lifecycle::ActiveLifecycle>,
+    existing_summary_components_only: bool,
 }
 
 const CLAIM_RUNTIME_PROJECTION_MAX_ATTEMPTS: usize = 8;
@@ -370,6 +372,8 @@ enum RuntimeProjectionRows {
     /// that already carry a lifecycle marker.
     LifecycleEvidence,
     BlockedOrPreviouslyBlocked,
+    /// Report and response cell share a component-body-only successor.
+    Report,
 }
 
 /// Document sync and background self-heal both own every queue row's repair
@@ -433,14 +437,45 @@ pub fn derive_claim_runtime_projection_scoped(
     )
 }
 
-fn derive_blocker_runtime_projection(file: &Path, current: &str) -> Result<ClaimRuntimeProjection> {
+/// Compose the report's queue markers and existing summary components with
+/// the retained response-cell write. A legacy document without an Active
+/// component gets its scaffold from ordinary document projection.
+pub fn derive_reported_claim_runtime_projection(
+    file: &Path,
+    current: &str,
+) -> Result<ClaimRuntimeProjection> {
     derive_runtime_projection_scoped(
         file,
         current,
         None,
         ClaimProjectionScope::Document,
-        RuntimeProjectionRows::BlockedOrPreviouslyBlocked,
+        RuntimeProjectionRows::Report,
         None,
+    )
+}
+
+fn reconcile_runtime_summaries(
+    content: String,
+    lifecycle: &agent_doc_work_projection::active_lifecycle::ActiveLifecycle,
+    existing_summary_components_only: bool,
+) -> Result<String> {
+    let Some(summaries) =
+        agent_doc_work_projection::reconcile_queue_lifecycle_summaries(&content, lifecycle)?
+    else {
+        return Ok(content);
+    };
+    if !existing_summary_components_only
+        || agent_doc_element::component_scope::changed_component_scope(&content, &summaries)
+            .is_some()
+    {
+        return Ok(summaries);
+    }
+    let count = agent_doc_work_projection::reported_queue_count(&content, lifecycle)?;
+    Ok(
+        agent_doc_document::status_projection::reconcile_reported_queue_status_content(
+            &content, count,
+        )?
+        .unwrap_or(content),
     )
 }
 
@@ -475,14 +510,6 @@ fn derive_runtime_projection_scoped(
             &repair_claims,
         )?;
     let current = repaired_current.as_deref().unwrap_or(current);
-    let components = agent_doc_element::element::parse(current)?;
-    if !components.iter().any(|component| component.name == "queue") {
-        return Ok(ClaimRuntimeProjection {
-            target_content: input_current.to_string(),
-            persisted_heads: Vec::new(),
-            changed: false,
-        });
-    }
     if let Ok(ledger) = &mut claim_ledger
         && !ledger.claims.is_empty()
         && let Some(view) = agent_doc_queue::queue_claim::ClaimQueueView::from_content(current)
@@ -504,29 +531,19 @@ fn derive_runtime_projection_scoped(
         );
     }
     let now = crate::queue_claim::claim_clock_now_secs();
+    let lifecycle = claim_ledger
+        .as_ref()
+        .ok()
+        .zip(receipt_ledger.as_ref().ok())
+        .map(|(claims, receipts)| {
+            crate::active_lifecycle::from_ledgers(file, claims, receipts, now)
+        });
     let claim_ledger = claim_ledger.unwrap_or_default();
-    let cancellations = claim_ledger.cancellations;
+    let cancellations = &claim_ledger.cancellations;
     let claim_states = claim_ledger
         .claims
-        .into_iter()
-        .map(|mut claim| {
-            claim.project_expiry(now);
-            (claim.identity.clone(), claim)
-        })
-        .collect::<std::collections::HashMap<_, _>>();
-    let receipts = receipt_ledger
-        .unwrap_or_default()
-        .receipts
-        .into_iter()
-        .filter(|receipt| {
-            // `#todoeditrevivesrow`: a closed attempt is consumed work; it
-            // never paints `☑️` onto a later row with its identity.
-            !receipt.attempt_closed()
-                && !cancellations.iter().any(|cancelled| {
-                    cancelled.cancels_attempt(&receipt.identity, receipt.generation)
-                })
-        })
-        .map(|receipt| (receipt.identity.clone(), receipt))
+        .iter()
+        .map(|claim| (&claim.identity, claim))
         .collect::<std::collections::HashMap<_, _>>();
     let completion_evidence = agent_doc_document::subagent_completion::completion_evidence(current)
         .into_iter()
@@ -660,12 +677,11 @@ fn derive_runtime_projection_scoped(
                     if struck {
                         return None;
                     }
-                    let claim = (cleared_identity.as_ref() != Some(&identity))
-                        .then(|| claim_states.get(&identity))
-                        .flatten();
-                    let receipt = (cleared_identity.as_ref() != Some(&identity) && claim.is_none())
-                        .then(|| receipts.get(&identity))
-                        .flatten();
+                    let attempt = lifecycle.as_ref().and_then(|lifecycle| {
+                        (cleared_identity.as_ref() != Some(&identity))
+                            .then(|| lifecycle.attempts.get(&identity))
+                            .flatten()
+                    });
                     let has_completion_evidence = completion_evidence.iter().any(|item| {
                         agent_doc_queue::queue_claim::completion_evidence_matches_row(
                             item,
@@ -673,8 +689,7 @@ fn derive_runtime_projection_scoped(
                         )
                     });
                     if waiting_item_head
-                        && claim.is_none()
-                        && receipt.is_none()
+                        && attempt.is_none()
                         && !has_completion_evidence
                     {
                         return None;
@@ -684,8 +699,7 @@ fn derive_runtime_projection_scoped(
                     if rows == RuntimeProjectionRows::LifecycleEvidence
                         && observed.is_none()
                         && !state_degraded
-                        && claim.is_none()
-                        && receipt.is_none()
+                        && attempt.is_none()
                         && !has_completion_evidence
                         && !is_selected
                         && !is_blocked
@@ -694,16 +708,8 @@ fn derive_runtime_projection_scoped(
                     }
                     let marker = if state_degraded {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
-                    } else if let Some(claim) = claim {
-                        claim.visible_projection_for_owner(crate::queue_claim::claim_owner_liveness(
-                            file, claim,
-                        ))
-                    } else if let Some(receipt) = receipt {
-                        if receipt.completion_recovered_after_loss {
-                            agent_doc_document::queue_projection::QueueLifecycleMarker::LostReported
-                        } else {
-                            agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
-                        }
+                    } else if let Some(attempt) = attempt {
+                        attempt.marker
                     } else if has_completion_evidence {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling
                     } else if is_selected {
@@ -748,18 +754,10 @@ fn derive_runtime_projection_scoped(
                     {
                         return None;
                     }
-                    let owner = claim
-                        .map(|claim| agent_doc_document::queue_projection::QueueOwnerProjection {
-                            owner: claim.owner.clone(),
-                            generation: claim.generation,
-                        })
-                        .or_else(|| {
-                            receipt.map(|receipt| {
-                                agent_doc_document::queue_projection::QueueOwnerProjection {
-                                    owner: receipt.owner.clone(),
-                                    generation: receipt.generation,
-                                }
-                            })
+                    let owner =
+                        attempt.map(|attempt| agent_doc_document::queue_projection::QueueOwnerProjection {
+                            owner: attempt.owner.clone(),
+                            generation: attempt.generation,
                         });
                     Some(agent_doc_queue::document_queue::QueueRowProjection {
                         identity: agent_doc_queue::document_queue::lineage_claim_text(
@@ -770,9 +768,7 @@ fn derive_runtime_projection_scoped(
                             &agent_doc_document::queue_projection::strip_in_progress_marker(
                                 &prompt.text,
                             ),
-                            claim
-                                .and_then(|claim| claim.publication_state)
-                                .or_else(|| receipt.and_then(|receipt| receipt.publication_state)),
+                            attempt.and_then(|attempt| attempt.publication_state),
                         ),
                         blockers: if marker
                             == agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
@@ -816,10 +812,24 @@ fn derive_runtime_projection_scoped(
             targets_for,
         )?
         .unwrap_or_else(|| current.to_string());
+    // Companion summaries and the queue marker overlay land as a single CAS
+    // successor from one durable read. Preflight owns these summaries when
+    // it is only asking us to repaint its sibling queues.
+    let existing_summary_components_only = rows == RuntimeProjectionRows::Report;
+    let target_content = match (&lifecycle, scope) {
+        (Some(lifecycle), ClaimProjectionScope::Document) => reconcile_runtime_summaries(
+            target_content,
+            lifecycle,
+            existing_summary_components_only,
+        )?,
+        _ => target_content,
+    };
     Ok(ClaimRuntimeProjection {
         changed: target_content != input_current,
         target_content,
         persisted_heads,
+        lifecycle,
+        existing_summary_components_only,
     })
 }
 
@@ -862,14 +872,14 @@ fn record_claim_runtime_projection_scoped(
                     &snapshot,
                     &projection.target_content,
                 );
-            // A target-scoped claim still changes the authoritative lifecycle
-            // of that work identity. Keep the derived Active index on the same
-            // accepted boundary; otherwise a reintroduced stable id can show a
-            // fresh Running queue row beside its predecessor's stale Reported
-            // status until an unrelated full-document repair happens.
-            let synced =
-                agent_doc_work_projection::reconcile_managed_active_items_for(file, &queue_synced)?
-                    .unwrap_or(queue_synced);
+            let synced = match &projection.lifecycle {
+                Some(lifecycle) => reconcile_runtime_summaries(
+                    queue_synced,
+                    lifecycle,
+                    projection.existing_summary_components_only,
+                )?,
+                None => queue_synced,
+            };
             if synced != snapshot
                 && let Err(err) = agent_doc_snapshot_io::checkpoint_document_baseline(
                     file,
@@ -909,8 +919,8 @@ fn record_claim_runtime_projection_scoped(
 /// Claims live in `state.db`, but the queue marker is operator-facing runtime
 /// state. Waiting for the next preflight left every just-dispatched worker
 /// invisible for the duration of its run. This command-path projection reads
-/// the editor/CRDT authority, changes only queue components (every queue that
-/// displays a claimed identity, `#queuemirrormarkers`), and converges that
+/// the editor/CRDT authority, updates each queue that displays the identity
+/// (`#queuemirrormarkers`) together with status and Active, and converges that
 /// exact authoritative cut. Existing non-claim `🚧` markers are
 /// preserved; `cleared_item` identifies an abandoned/requeued claim whose
 /// marker must be removed. A reported release keeps its durable receipt visible
@@ -948,6 +958,7 @@ pub fn reconcile_drifted_claim_markers(
         .iter()
         .all(|report| report.visible_projection_state == "synchronized")
         && !orphaned_claim
+        && crate::active_lifecycle::reconcile_summaries(file, &current)?.is_none()
     {
         return Ok(false);
     }
@@ -1837,26 +1848,15 @@ fn project_runtime_state_with_effects(
             if runtime_projection_repairs_every_row(rows) {
                 crate::queue_claim::reconcile_completion_evidence(file, &current)?;
             }
-            let projection = match rows {
-                RuntimeProjectionRows::All
-                | RuntimeProjectionRows::BackgroundComplete
-                | RuntimeProjectionRows::LifecycleEvidence => derive_runtime_projection_scoped(
-                    file,
-                    &current,
-                    cleared_item,
-                    ClaimProjectionScope::Document,
-                    rows,
-                    only_identity,
-                )?,
-                RuntimeProjectionRows::BlockedOrPreviouslyBlocked => {
-                    derive_blocker_runtime_projection(file, &current)?
-                }
-            };
-            let target_content = agent_doc_work_projection::reconcile_managed_active_items_for(
+            let projection = derive_runtime_projection_scoped(
                 file,
-                &projection.target_content,
-            )?
-            .unwrap_or(projection.target_content);
+                &current,
+                cleared_item,
+                ClaimProjectionScope::Document,
+                rows,
+                only_identity,
+            )?;
+            let target_content = projection.target_content;
             // `#sdkdocumentselfheal`: exact operator-request rows and their Todo
             // receipts are one lifecycle. Older/interrupted closeouts could strike
             // the queue row but leave its same-id Todo open until another foreground
@@ -1921,26 +1921,14 @@ fn project_runtime_state_with_effects(
             // authoritative cut, not of the write call returning `Ok(())`.
             let authoritative =
                 effects.current_document_content(file, "queue_claim_runtime_projection_verify")?;
-            let settled = match rows {
-                RuntimeProjectionRows::All
-                | RuntimeProjectionRows::BackgroundComplete
-                | RuntimeProjectionRows::LifecycleEvidence => derive_runtime_projection_scoped(
-                    file,
-                    &authoritative,
-                    cleared_item,
-                    ClaimProjectionScope::Document,
-                    rows,
-                    only_identity,
-                )?,
-                RuntimeProjectionRows::BlockedOrPreviouslyBlocked => {
-                    derive_blocker_runtime_projection(file, &authoritative)?
-                }
-            };
-            let active_settled = agent_doc_work_projection::reconcile_managed_active_items_for(
+            let settled = derive_runtime_projection_scoped(
                 file,
                 &authoritative,
-            )?
-            .is_none();
+                cleared_item,
+                ClaimProjectionScope::Document,
+                rows,
+                only_identity,
+            )?;
             let terminal_todos_settled = !runtime_projection_repairs_every_row(rows)
                 || only_identity.is_some()
                 || agent_doc_queue::queue_consume::reconcile_terminal_operator_request_todos(
@@ -1949,7 +1937,7 @@ fn project_runtime_state_with_effects(
                 )?
                 .completed_ids
                 .is_empty();
-            if !settled.changed && active_settled && terminal_todos_settled {
+            if !settled.changed && terminal_todos_settled {
                 if queue_repair_generation(file)? != repair_generation {
                     return Err(QueueRuntimeProjectionSuperseded.into());
                 }
@@ -1957,6 +1945,8 @@ fn project_runtime_state_with_effects(
                     target_content: authoritative,
                     persisted_heads: settled.persisted_heads,
                     changed: wrote_successor,
+                    lifecycle: settled.lifecycle,
+                    existing_summary_components_only: settled.existing_summary_components_only,
                 };
                 record_claim_runtime_projection_scoped(
                     file,
@@ -4439,7 +4429,7 @@ mod tests {
         let effects = FakeEffects::default();
         assert!(project_claim_runtime_state_with_effects(&effects, &doc, None).unwrap());
         let claimed = std::fs::read_to_string(&doc).unwrap();
-        assert!(claimed.contains("- **Queue** (1)"), "{claimed}");
+        assert!(claimed.contains("- **Running** (1)"), "{claimed}");
         assert!(claimed.contains("- **Status:** claimed"), "{claimed}");
         assert!(!claimed.contains("**Sources:** queue"), "{claimed}");
 
@@ -4462,6 +4452,99 @@ mod tests {
         assert!(snapshot.contains("- **Status:** running"), "{snapshot}");
     }
 
+    #[test]
+    fn lifecycle_transition_checkpoints_queue_active_and_status_together() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("lifecycle.md");
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "## Status <!-- agent:status -->\nOperator status.\n<!-- /agent:status -->\n\n",
+            "## Active <!-- agent:active priority -->\n<!-- /agent:active -->\n\n",
+            "## Run <!-- agent:run id=\"main\" subagents go -->\n",
+            "- do [#sample-work]\n",
+            "<!-- /agent:run -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let effects = FakeEffects::default();
+        let item = "#sample-work";
+        let owner = "subagent:sample";
+        let (_, claim) = claim_with_runtime_projection(&effects, &doc, item, owner, 600).unwrap();
+        let generation = claim.generation;
+        let assert_checkpoint = |marker: &str, state: &str, reports: bool| {
+            let live = std::fs::read_to_string(&doc).unwrap();
+            let baseline = agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .unwrap();
+            for text in [live, baseline] {
+                assert!(
+                    text.contains(&format!(
+                        "{marker} [#{owner}#{generation}] do [#sample-work]"
+                    )),
+                    "{text}"
+                );
+                assert!(text.contains(&format!("- **Status:** {state}")), "{text}");
+                assert_eq!(
+                    text.contains("📤 Queue handoff: 1 reported item"),
+                    reports,
+                    "{text}"
+                );
+                assert!(text.contains("Operator status."), "{text}");
+            }
+        };
+        assert_checkpoint("🟡", "claimed", false);
+
+        crate::queue_claim::start_attempt(&doc, item, owner, "worker:sample", 600, generation)
+            .unwrap();
+        project_claim_item_runtime_state_with_effects(&effects, &doc, item, false).unwrap();
+        assert_checkpoint("🚧", "running", false);
+
+        crate::queue_claim::block_attempt_on_quota(
+            &doc,
+            item,
+            Some(generation),
+            agent_doc_queue::worker_quota::WorkerQuotaBlock {
+                harness: None,
+                limit: "daily test limit".into(),
+                evidence: "limit reached".into(),
+                reset_hint: None,
+                worktree: None,
+                branch: None,
+                blocked_at_secs: crate::queue_claim::claim_clock_now_secs(),
+            },
+        )
+        .unwrap();
+        project_claim_item_runtime_state_with_effects(&effects, &doc, item, false).unwrap();
+        assert_checkpoint("⛔", "blocked", false);
+
+        let running = crate::queue_claim::load_ledger(&doc)
+            .unwrap()
+            .claims
+            .into_iter()
+            .next()
+            .unwrap();
+        crate::claim_release_receipt::capture_response(&doc, &running, "Work completed.").unwrap();
+        crate::queue_claim::report_attempt(&doc, item, Some(generation)).unwrap();
+        project_claim_item_runtime_state_with_effects(&effects, &doc, item, false).unwrap();
+        assert_checkpoint("☑️", "reported", true);
+
+        crate::claim_release_receipt::release_attempt(
+            &doc,
+            item,
+            crate::claim_release_receipt::ReleaseKind::Reported,
+            Some(generation),
+        )
+        .unwrap();
+        project_claim_item_runtime_state_with_effects(&effects, &doc, item, false).unwrap();
+        assert_checkpoint("☑️", "reported", true);
+    }
+
     /// `#managedlistnodrift`: through the real state.db loader, `agent:active`
     /// follows the durable claim lifecycle (claimed and running under Running,
     /// reported under Needs integration with an age), whatever marker the row
@@ -4480,7 +4563,7 @@ mod tests {
         );
         std::fs::write(&doc, content).unwrap();
         let render = |content: &str| {
-            let lifecycle = crate::active_lifecycle::load(&doc).unwrap();
+            let lifecycle = crate::active_lifecycle::load(&doc, content).unwrap();
             let rendered =
                 agent_doc_work_projection::reconcile_managed_active_items_with(content, &lifecycle)
                     .unwrap()

@@ -5,66 +5,76 @@
 //! [`agent_doc_work_projection::active_lifecycle::ActiveLifecycle::from_ledgers`].
 //! The binary installs [`load`] at startup.
 
-use std::collections::HashMap;
 use std::path::Path;
 
-use agent_doc_work_projection::active_lifecycle::{ActiveLifecycle, LineageFacts};
-use anyhow::Result;
+use agent_doc_work_projection::active_lifecycle::{ActiveLifecycle, LineageFactsIndex};
+use anyhow::{Context, Result};
 
-fn lineage_facts(file: &Path) -> HashMap<(String, u64), LineageFacts> {
-    if agent_doc_fs::find_project_root(file).is_none() {
-        return HashMap::new();
-    }
-    let ledger = match crate::queue_lineage::load(file) {
-        Ok(ledger) => ledger,
-        Err(err) => {
-            // Lineage only refines ages and the integrated note; an unreadable
-            // lineage never hides or invents an active entry.
-            eprintln!(
-                "[active] lineage unreadable for {} ({err:#}); ages fall back to claim records",
-                file.display()
-            );
-            return HashMap::new();
-        }
+fn lineage_facts(file: &Path) -> Result<LineageFactsIndex> {
+    let Some(root) = agent_doc_fs::find_project_root(file) else {
+        return Ok(LineageFactsIndex::default());
     };
-    ledger
-        .attempts
-        .into_iter()
-        .map(|attempt| {
-            let latest = attempt
-                .events
-                .iter()
-                .max_by_key(|event| event.at_secs)
-                .map(|event| {
-                    (
-                        format!("{:?}", event.kind).to_ascii_lowercase(),
-                        event.at_secs,
-                    )
-                });
-            let has = |kind: crate::queue_lineage::QueueLineageEventKind| {
-                attempt.events.iter().any(|event| event.kind == kind)
-            };
-            let facts = LineageFacts {
-                latest,
-                integrated: has(crate::queue_lineage::QueueLineageEventKind::Integrated),
-                ended: has(crate::queue_lineage::QueueLineageEventKind::Cancelled)
-                    || has(crate::queue_lineage::QueueLineageEventKind::AdmissionRefused)
-                    || has(crate::queue_lineage::QueueLineageEventKind::Removed),
-            };
-            ((attempt.owner, attempt.generation), facts)
-        })
-        .collect()
+    let hash = agent_doc_hash::path_hash(file)
+        .with_context(|| format!("canonicalize queue lifecycle document: {}", file.display()))?;
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    agent_doc_crdt_relay_io::load_queue_lifecycle_lineage_facts(&conn, &hash)
 }
 
-/// The durable lifecycle of `file`'s queue attempts. An unreadable claim or
-/// receipt ledger is an error, so the caller leaves `agent:active` unchanged.
-pub fn load(file: &Path) -> Result<ActiveLifecycle> {
-    let claims = crate::queue_claim::load_ledger(file)?;
+/// Derive the durable attempt state using the same claim inputs as the queue
+/// projector. The caller supplies the already aligned claims and observed time.
+pub fn from_ledgers(
+    file: &Path,
+    claims: &agent_doc_queue::queue_claim::QueueClaimLedger,
+    receipts: &agent_doc_queue::claim_release_receipt::ClaimReleaseReceiptLedger,
+    now_secs: u64,
+) -> ActiveLifecycle {
+    let lineage = if claims.claims.is_empty() && receipts.receipts.is_empty() {
+        LineageFactsIndex::default()
+    } else {
+        lineage_facts(file).unwrap_or_else(|err| {
+            eprintln!(
+                "[queue] lineage unreadable for {} ({err:#}); ages fall back to attempt records",
+                file.display()
+            );
+            LineageFactsIndex::default()
+        })
+    };
+    ActiveLifecycle::from_ledgers_with_liveness(claims, receipts, &lineage, now_secs, |claim| {
+        crate::queue_claim::claim_owner_liveness(file, claim)
+    })
+}
+
+/// The lifecycle for an authoritative document cut. Follow row edits in
+/// memory so status, Active, and queue markers use the same identity.
+pub fn load(file: &Path, content: &str) -> Result<ActiveLifecycle> {
+    let claims = crate::queue_claim::load_ledger_following(file, content)?;
     let receipts = crate::claim_release_receipt::load(file)?;
-    Ok(ActiveLifecycle::from_ledgers(
+    Ok(from_ledgers(
+        file,
         &claims,
         &receipts,
-        &lineage_facts(file),
         crate::queue_claim::claim_clock_now_secs(),
     ))
+}
+
+/// Durable completion debt for live rows in this document cut.
+pub fn reported_count(file: &Path, content: &str) -> Result<usize> {
+    agent_doc_work_projection::reported_queue_count(content, &load(file, content)?)
+}
+
+/// Re-derive status and Active together for a live queue transition. On read
+/// failure preserve both summaries until the retained ledgers are readable.
+pub fn reconcile_summaries(file: &Path, content: &str) -> Result<Option<String>> {
+    match load(file, content) {
+        Ok(lifecycle) => {
+            agent_doc_work_projection::reconcile_queue_lifecycle_summaries(content, &lifecycle)
+        }
+        Err(err) => {
+            eprintln!(
+                "[queue] durable lifecycle unreadable for {} ({err:#}); status and Active left unchanged",
+                file.display()
+            );
+            Ok(None)
+        }
+    }
 }

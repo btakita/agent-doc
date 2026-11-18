@@ -390,7 +390,8 @@ fn late_reported_queue_status_projection(
         return Ok(None);
     }
 
-    let reported_count = reported_queue_count(file, current_content)?;
+    let reported_count =
+        agent_doc_queue_io::active_lifecycle::reported_count(file, current_content)?;
     let Some(target) =
         agent_doc_document::status_projection::reconcile_reported_queue_status_content(
             committed_content,
@@ -401,23 +402,6 @@ fn late_reported_queue_status_projection(
     };
 
     Ok((target == current_content).then_some(reported_count))
-}
-
-/// The durable claim ledger's reported-handoff count for `content`, the input
-/// of the binary-owned `📤 Queue handoff` status projection.
-fn reported_queue_count(file: &Path, content: &str) -> Result<usize> {
-    let mut reported_identities =
-        agent_doc_queue_io::queue_claim::claim_states_for_content(file, content)?
-            .into_iter()
-            .filter(|claim| claim.state == agent_doc_queue::queue_claim::QueueClaimState::Reported)
-            .map(|claim| claim.identity)
-            .collect::<HashSet<_>>();
-    reported_identities.extend(
-        agent_doc_queue_io::claim_release_receipt::reported_head_texts_for_content(file, content)
-            .into_iter()
-            .map(|head| agent_doc_queue::queue_claim::claim_identity(&head)),
-    );
-    Ok(reported_identities.len())
 }
 
 /// Which binary-owned projections a composed late-landing proof applied.
@@ -480,7 +464,8 @@ fn late_composed_binary_owned_projection(
     ) {
         return Ok(None);
     }
-    let reported_count = reported_queue_count(file, current_content)?;
+    let reported_count =
+        agent_doc_queue_io::active_lifecycle::reported_count(file, current_content)?;
     let mut bases: Vec<(String, Vec<&'static str>)> = Vec::new();
     if let Some(status) = committed_cycle_plan_status(file)?
         && let Ok(with_status) =

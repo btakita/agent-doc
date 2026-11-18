@@ -18,8 +18,9 @@ use agent_doc_queue::reported_closeout::{
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
-pub const QUEUE_LINEAGE_STATE_KIND: &str = "queue_lineage_v1";
-pub const QUEUE_LINEAGE_CONTRACT_VERSION: &str = "agent-doc-queue-lineage-v1";
+pub use agent_doc_work_projection::active_lifecycle::{
+    QUEUE_LINEAGE_CONTRACT_VERSION, QUEUE_LINEAGE_STATE_KIND,
+};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QueueLineageLedger {

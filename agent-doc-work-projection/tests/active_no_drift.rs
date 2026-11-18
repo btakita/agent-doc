@@ -88,7 +88,11 @@ fn lifecycle(doc: &str) -> ActiveLifecycle {
     }))
     .unwrap();
     let lineage = HashMap::from([(
-        ("subagent:c505rebase".to_string(), 1),
+        (
+            identity_of(doc, "#rebase [#q-rebase9]"),
+            "subagent:c505rebase".to_string(),
+            1,
+        ),
         LineageFacts {
             latest: Some(("integrated".to_string(), NOW - 5 * 3600)),
             integrated: true,
@@ -273,7 +277,7 @@ fn model_lifecycle(store: &Store) -> ActiveLifecycle {
         }
         if store.integrated[index] {
             lineage.insert(
-                (owner, 1),
+                (identity_of(&store.doc, row), owner, 1),
                 LineageFacts {
                     latest: Some(("integrated".into(), NOW - 10)),
                     integrated: true,

@@ -112,7 +112,7 @@ fn active_mismatch(file: &Path, content: &str) -> Result<Option<ListMismatch>> {
 fn queue_mismatch(file: &Path, content: &str) -> Result<Option<ListMismatch>> {
     // An unreadable ledger would project every row as `❔`; report it as
     // unverifiable instead of as drift.
-    agent_doc_queue_io::active_lifecycle::load(file)?;
+    agent_doc_queue_io::active_lifecycle::load(file, content)?;
     agent_doc_work_projection::managed_list::check_list(ManagedList::Queue, content, |content| {
         let projection =
             agent_doc_queue_io::queue_cmd::derive_claim_runtime_projection(file, content, None)?;

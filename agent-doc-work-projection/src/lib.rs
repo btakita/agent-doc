@@ -233,67 +233,49 @@ pub fn managed_active_items_durable(
     lifecycle: &active_lifecycle::ActiveLifecycle,
 ) -> Result<Vec<ManagedActiveItem>> {
     use agent_doc_element::element;
-    use agent_doc_queue::document_queue::{self, QueueEntry};
 
     let components = element::parse(content).context("active projection: parse components")?;
     let mut items: Vec<ManagedActiveItem> = Vec::new();
     let mut indexes: HashMap<String, usize> = HashMap::new();
-    let queue_set = agent_doc_queue::queue_set::QueueSet::parse(content, &components)?;
-    for block in queue_set.blocks() {
-        let entries =
-            agent_doc_queue::nested_claim_steer::expand_slice_if_installed(&block.entries);
-        let entries = entries.as_ref();
-        for index in document_queue::executable_prompt_indexes(entries) {
-            let Some(QueueEntry::Prompt(prompt)) = entries.get(index) else {
-                continue;
-            };
-            if agent_doc_queue::waiting_packet::is_packet_row(entries, index) {
-                continue;
-            }
-            let identity = agent_doc_queue::queue_claim::claim_identity_at(entries, index)
-                .unwrap_or_else(|| agent_doc_queue::queue_claim::claim_identity(&prompt.text));
-            let Some(attempt) = lifecycle.attempts.get(&identity) else {
-                continue;
-            };
-            let prompt_text =
-                agent_doc_document::queue_projection::strip_in_progress_marker(prompt.text.trim());
-            if prompt_text.trim().is_empty() {
-                continue;
-            }
-            let display_id = agent_doc_element_queue::queue_prompt_stable_id(&prompt_text);
-            let key = display_id.clone().unwrap_or_else(|| {
-                source_free_text_identity(
-                    "queue",
-                    &agent_doc_element_queue::normalize_multiline_dedup_text(&prompt_text),
-                )
-            });
-            if indexes.contains_key(&key) {
-                continue;
-            }
-            let group = active_lifecycle::ActiveGroup::of_marker(attempt.marker);
-            let mut state = lifecycle_state(attempt.marker).to_string();
-            if attempt.integrated {
-                state.push_str(" (integrated; closeout pending)");
-            }
-            let summary = agent_doc_element_queue::strip_queue_prompt_stable_id_annotation(
-                &agent_doc_element_queue::strip_priority_markers(&prompt_text),
-            );
-            indexes.insert(key.clone(), items.len());
-            items.push(ManagedActiveItem {
-                identity: key,
-                display_id,
-                summary: summarize_text(&summary),
-                sources: vec![ManagedActiveItemSource {
-                    component: "queue".to_string(),
-                    state,
-                }],
-                age: (group == active_lifecycle::ActiveGroup::NeedsIntegration)
-                    .then(|| active_lifecycle::age_line(attempt)),
-                group: group.key().to_string(),
-                summary_priority: 3,
-            });
+    visit_live_queue_lifecycle(content, &components, lifecycle, |_, text, attempt| {
+        let prompt_text =
+            agent_doc_document::queue_projection::strip_in_progress_marker(text.trim());
+        if prompt_text.trim().is_empty() {
+            return;
         }
-    }
+        let display_id = agent_doc_element_queue::queue_prompt_stable_id(&prompt_text);
+        let key = display_id.clone().unwrap_or_else(|| {
+            source_free_text_identity(
+                "queue",
+                &agent_doc_element_queue::normalize_multiline_dedup_text(&prompt_text),
+            )
+        });
+        if indexes.contains_key(&key) {
+            return;
+        }
+        let group = active_lifecycle::ActiveGroup::of_marker(attempt.marker);
+        let mut state = lifecycle_state(attempt.marker).to_string();
+        if attempt.integrated {
+            state.push_str(" (integrated; closeout pending)");
+        }
+        let summary = agent_doc_element_queue::strip_queue_prompt_stable_id_annotation(
+            &agent_doc_element_queue::strip_priority_markers(&prompt_text),
+        );
+        indexes.insert(key.clone(), items.len());
+        items.push(ManagedActiveItem {
+            identity: key,
+            display_id,
+            summary: summarize_text(&summary),
+            sources: vec![ManagedActiveItemSource {
+                component: "queue".to_string(),
+                state,
+            }],
+            age: (group == active_lifecycle::ActiveGroup::NeedsIntegration)
+                .then(|| active_lifecycle::age_line(attempt)),
+            group: group.key().to_string(),
+            summary_priority: 3,
+        });
+    })?;
     for component_name in ["backlog", "review", "icebox"] {
         for component in components.iter().filter(|component| {
             element::canonical_component_name(&component.name) == component_name
@@ -325,6 +307,93 @@ pub fn managed_active_items_durable(
         }
     }
     Ok(items)
+}
+
+/// Join the same live queue occurrences with durable attempts for both
+/// summaries. A waiting-item head with an existing attempt still owns it
+/// when its answer or child evidence no longer makes it dispatchable.
+fn visit_live_queue_lifecycle(
+    content: &str,
+    components: &[agent_doc_element::element::Component],
+    lifecycle: &active_lifecycle::ActiveLifecycle,
+    mut visit: impl FnMut(
+        agent_doc_element_queue::QueueItemIdentity,
+        &str,
+        &active_lifecycle::ActiveAttempt,
+    ),
+) -> Result<()> {
+    use agent_doc_queue::document_queue::{self, QueueEntry};
+    use agent_doc_queue::waiting_packet::{is_packet_row, is_waiting_item_head};
+
+    let queue_set = agent_doc_queue::queue_set::QueueSet::parse(content, components)?;
+    for block in queue_set.blocks() {
+        let entries =
+            agent_doc_queue::nested_claim_steer::expand_slice_if_installed(&block.entries);
+        let entries = entries.as_ref();
+        let executable = document_queue::executable_prompt_indexes(entries);
+        for (index, entry) in entries.iter().enumerate() {
+            let QueueEntry::Prompt(prompt) = entry else {
+                continue;
+            };
+            if is_packet_row(entries, index)
+                || (!is_waiting_item_head(entry) && executable.binary_search(&index).is_err())
+            {
+                continue;
+            }
+            let identity = agent_doc_queue::queue_claim::claim_identity_at(entries, index)
+                .unwrap_or_else(|| agent_doc_queue::queue_claim::claim_identity(&prompt.text));
+            if let Some(attempt) = lifecycle.attempts.get(&identity) {
+                visit(identity, &prompt.text, attempt);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Count durable reported attempts that still have a live row. Mirror rows
+/// contribute once, and neither stale glyphs nor closed historical rows count.
+pub fn reported_queue_count(
+    content: &str,
+    lifecycle: &active_lifecycle::ActiveLifecycle,
+) -> Result<usize> {
+    let components = agent_doc_element::element::parse(content)?;
+    let mut reported = std::collections::HashSet::new();
+    visit_live_queue_lifecycle(content, &components, lifecycle, |identity, _, attempt| {
+        if active_lifecycle::ActiveGroup::of_marker(attempt.marker)
+            == active_lifecycle::ActiveGroup::NeedsIntegration
+        {
+            reported.insert(identity);
+        }
+    })?;
+    Ok(reported.len())
+}
+
+/// Reconcile the summaries from a lifecycle observed by a document actor.
+pub fn reconcile_queue_lifecycle_summaries_from_read(
+    content: &str,
+    read: &active_lifecycle::ActiveLifecycleRead,
+) -> Result<Option<String>> {
+    match read {
+        active_lifecycle::ActiveLifecycleRead::Loaded(lifecycle) => {
+            reconcile_queue_lifecycle_summaries(content, lifecycle)
+        }
+        _ => reconcile_managed_active_items_from_read(content, read),
+    }
+}
+
+/// Apply the binary-owned summaries of the same effective queue lifecycle.
+pub fn reconcile_queue_lifecycle_summaries(
+    content: &str,
+    lifecycle: &active_lifecycle::ActiveLifecycle,
+) -> Result<Option<String>> {
+    let reported_count = reported_queue_count(content, lifecycle)?;
+    let status = agent_doc_document::status_projection::reconcile_reported_queue_status_content(
+        content,
+        reported_count,
+    )?;
+    let active =
+        reconcile_managed_active_items_with(status.as_deref().unwrap_or(content), lifecycle)?;
+    Ok(active.or(status))
 }
 
 /// Render active work grouped by authoritative source. Empty groups are omitted.
@@ -609,7 +678,7 @@ pub fn reconcile_managed_active_items_for(
     file: &std::path::Path,
     content: &str,
 ) -> Result<Option<String>> {
-    let read = active_lifecycle::read(file);
+    let read = active_lifecycle::read(file, content);
     if let active_lifecycle::ActiveLifecycleRead::Unreadable(err) = &read {
         eprintln!(
             "[active] durable lifecycle unreadable for {} ({err}); agent:active left unchanged",

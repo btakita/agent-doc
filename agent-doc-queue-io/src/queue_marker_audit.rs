@@ -129,7 +129,7 @@ pub fn unbacked_reported_rows_in(
 pub fn unbacked_reported_rows(file: &Path, content: &str) -> Result<Vec<UnbackedReportedRow>> {
     unbacked_reported_rows_in(
         content,
-        &crate::active_lifecycle::load(file)?,
+        &crate::active_lifecycle::load(file, content)?,
         &file.display().to_string(),
     )
 }

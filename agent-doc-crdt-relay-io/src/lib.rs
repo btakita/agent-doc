@@ -1298,6 +1298,26 @@ fn owner_liveness_for_marker(
     )
 }
 
+/// Read the lineage facts shared by the relay and queue command projections.
+pub fn load_queue_lifecycle_lineage_facts(
+    conn: &agent_doc_sqlite::state_store::Connection,
+    document_hash: &str,
+) -> Result<agent_doc_work_projection::active_lifecycle::LineageFactsIndex> {
+    use agent_doc_work_projection::active_lifecycle::{
+        QUEUE_LINEAGE_STATE_KIND, lineage_facts_from_payload,
+    };
+    let record = agent_doc_sqlite::state_store::load_queue_document_state_from_db(
+        conn,
+        document_hash,
+        QUEUE_LINEAGE_STATE_KIND,
+    )?;
+    record
+        .as_ref()
+        .map(|record| lineage_facts_from_payload(&record.payload_json))
+        .transpose()
+        .map(Option::unwrap_or_default)
+}
+
 /// Re-derive the binary-owned queue-attempt markers from their durable ledger.
 ///
 /// A controller replacement cannot inherit the predecessor's in-memory relay.
@@ -1341,11 +1361,7 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
         .transpose();
     let state_degraded = claim_ledger.is_err() || receipt_ledger.is_err();
     let mut ledger = claim_ledger.unwrap_or_default().unwrap_or_default();
-    let receipts = receipt_ledger
-        .unwrap_or_default()
-        .unwrap_or_default()
-        .receipts;
-
+    let receipts = receipt_ledger.unwrap_or_default().unwrap_or_default();
     let components = agent_doc_element::element::parse(current)?;
     let selected = agent_doc_queue::queue_set::selected_component(current, &components)?;
     let only_queue = || {
@@ -1382,25 +1398,26 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
             .collect::<Vec<_>>();
         ledger.follow_edits(now_secs, &live_heads);
     }
-    let cancellations = ledger.cancellations;
-    let claim_states = ledger
-        .claims
-        .into_iter()
-        .map(|mut claim| {
-            claim.project_expiry(now_secs);
-            (claim.identity.clone(), claim)
+    let lineage = if ledger.claims.is_empty() && receipts.receipts.is_empty() {
+        Default::default()
+    } else {
+        load_queue_lifecycle_lineage_facts(&conn, &document_hash).unwrap_or_else(|error| {
+            eprintln!(
+                "[queue] lineage unreadable for {} ({error:#}); ages fall back to attempt records",
+                file.display()
+            );
+            Default::default()
         })
-        .collect::<HashMap<_, _>>();
-    let receipts = receipts
-        .into_iter()
-        .filter(|receipt| {
-            !cancellations
-                .iter()
-                .any(|cancelled| cancelled.cancels_attempt(&receipt.identity, receipt.generation))
-        })
-        .filter(|receipt| !claim_states.contains_key(&receipt.identity))
-        .map(|receipt| (receipt.identity.clone(), receipt))
-        .collect::<HashMap<_, _>>();
+    };
+    let lifecycle =
+        agent_doc_work_projection::active_lifecycle::ActiveLifecycle::from_ledgers_with_liveness(
+            &ledger,
+            &receipts,
+            &lineage,
+            now_secs,
+            |claim| owner_liveness_for_marker(file, claim),
+        );
+    let cancellations = &ledger.cancellations;
     let blockers = agent_doc_queue::queue_blocked::queue_blockers(current);
     let completion_evidence = agent_doc_document::subagent_completion::completion_evidence(current)
         .into_iter()
@@ -1445,8 +1462,7 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                         .unwrap_or_else(|| {
                             agent_doc_queue::queue_claim::claim_identity(&prompt.text)
                         });
-                    let claim = claim_states.get(&identity);
-                    let receipt = receipts.get(&identity);
+                    let attempt = lifecycle.attempts.get(&identity);
                     // `#terminalitemstability`: runtime evidence never reopens
                     // a struck row. The operator removes the strike to reopen it.
                     if struck {
@@ -1454,14 +1470,8 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                     }
                     let marker = if state_degraded {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
-                    } else if let Some(claim) = claim {
-                        // Composite lost glyphs (`⚠️🚧`, `⚠️🟡`, `⚠️☑️`) come
-                        // from the attempt, not from `Lost` alone. A running
-                        // worker that is gone paints `⚠️`, not `🚧`
-                        // (`#markdrift`).
-                        claim.visible_projection_for_owner(owner_liveness_for_marker(file, claim))
-                    } else if receipt.is_some() {
-                        agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
+                    } else if let Some(attempt) = attempt {
+                        attempt.marker
                     } else if completion_evidence.iter().any(|item| {
                         agent_doc_queue::queue_claim::completion_evidence_matches_row(
                             item,
@@ -1489,22 +1499,17 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                     } else {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
                     };
-                    let owner = claim
-                        .map(|claim| agent_doc_document::queue_projection::QueueOwnerProjection {
-                            owner: claim.owner.clone(),
-                            generation: claim.generation,
-                        })
-                        .or_else(|| {
-                            receipt.map(|receipt| {
-                                agent_doc_document::queue_projection::QueueOwnerProjection {
-                                    owner: receipt.owner.clone(),
-                                    generation: receipt.generation,
-                                }
-                            })
+                    let owner =
+                        attempt.map(|attempt| agent_doc_document::queue_projection::QueueOwnerProjection {
+                            owner: attempt.owner.clone(),
+                            generation: attempt.generation,
                         });
                     Some(agent_doc_queue::document_queue::QueueRowProjection {
                         identity: None,
-                        text: prompt.text.clone(),
+                        text: agent_doc_element_queue::render_queue_report_state_annotation(
+                            &prompt.text,
+                            attempt.and_then(|attempt| attempt.publication_state),
+                        ),
                         blockers: if marker
                             == agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
                         {
@@ -1523,13 +1528,19 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
             })
             .collect::<Vec<_>>()
     };
-    Ok(
+    let target =
         agent_doc_queue::queue_mirror_projection::project_runtime_projections_across_queues(
             current,
             None,
             targets_for,
         )?
-        .unwrap_or_else(|| current.to_string()),
+        .unwrap_or_else(|| current.to_string());
+    if state_degraded {
+        return Ok(target);
+    }
+    Ok(
+        agent_doc_work_projection::reconcile_queue_lifecycle_summaries(&target, &lifecycle)?
+            .unwrap_or(target),
     )
 }
 
@@ -9891,12 +9902,18 @@ mod tests {
     #[test]
     fn controller_hydration_derives_exact_queue_attempt_markers_idempotently() {
         let (dir, doc) = temp_doc("queue-attempt-hydration.md");
-        let stale = "<!-- agent:queue -->\n\
-- 🚧 claimed item\n\
-- running item\n\
-- 🟡 reported item\n\
-- ⏳ unrelated operator hold\n\
-<!-- /agent:queue -->\n";
+        let stale = concat!(
+            "## Status <!-- agent:status -->\nOperator status.\n<!-- /agent:status -->\n",
+            "## Active <!-- agent:active priority -->\n",
+            "- **Running** (1)\n  - stale item\n    - **Status:** running\n",
+            "<!-- /agent:active -->\n",
+            "<!-- agent:queue -->\n",
+            "- 🚧 claimed item\n",
+            "- running item\n",
+            "- 🟡 reported item\n",
+            "- ⏳ unrelated operator hold\n",
+            "<!-- /agent:queue -->\n",
+        );
         std::fs::write(&doc, stale).unwrap();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -9950,6 +9967,13 @@ mod tests {
         assert!(
             projected.contains("- ⏳ unrelated operator hold\n"),
             "an unrelated row must remain byte-identical:\n{projected}"
+        );
+        assert!(
+            projected.contains("📤 Queue handoff: 1 reported item")
+                && projected.contains("- **Needs integration** (1)")
+                && projected.contains("- **Status:** reported")
+                && projected.contains("Operator status."),
+            "{projected}"
         );
         assert_eq!(
             durable_queue_attempt_projection(&doc, &projected).unwrap(),

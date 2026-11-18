@@ -651,6 +651,7 @@ dependencies = [
  "agent-doc-editor-surface",
  "agent-doc-editor-transport-health-io",
  "agent-doc-element",
+ "agent-doc-element-queue",
  "agent-doc-fs",
  "agent-doc-git-io",
  "agent-doc-hash",
@@ -667,6 +668,7 @@ dependencies = [
  "agent-doc-template",
  "agent-doc-turn",
  "agent-doc-turn-status-io",
+ "agent-doc-work-projection",
  "anyhow",
  "lazily 0.63.0",
  "parking_lot",
@@ -3116,6 +3118,7 @@ dependencies = [
  "agent-doc-queue",
  "anyhow",
  "proptest",
+ "serde",
  "serde_json",
 ]
 

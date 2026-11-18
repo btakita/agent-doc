@@ -421,7 +421,7 @@ fn report_complete_with_lock_wait(
     // one successor. Two separate retained editor writes can conflict while
     // the first is still awaiting projection.
     let projection =
-        agent_doc_queue_io::queue_cmd::derive_claim_runtime_projection(file, &current, None)?;
+        agent_doc_queue_io::queue_cmd::derive_reported_claim_runtime_projection(file, &current)?;
     let (appended, replaced, intent_id, followups) =
         upsert_completion_feedback(file, &current, &projection.target_content, &claim, response)?;
     agent_doc_queue_io::queue_cmd::record_claim_runtime_projection_under_apply_guard(
@@ -691,14 +691,14 @@ fn upsert_completion_feedback(
         return Ok((false, false, intent_id, followups));
     }
     let scope = changed_component_scope(current, &updated)
-        .context("subagent completion feedback must change only agent:exchange/queue")?;
+        .context("subagent completion feedback requires a component-body-only write")?;
     let scope_pairs = scope.to_pairs();
     if (appended && !scope.contains("exchange", 0))
         || scope_pairs
             .iter()
-            .any(|(name, _)| name != "exchange" && name != "queue")
+            .any(|(name, _)| !matches!(name.as_str(), "exchange" | "queue" | "status" | "active"))
     {
-        bail!("subagent completion feedback escaped agent:exchange/queue components");
+        bail!("subagent completion feedback escaped its queue lifecycle components");
     }
     // An attached editor owns disk projection. Hand the target to the durable
     // retained-intent graph and return as soon as the controller accepts it;
@@ -3821,6 +3821,8 @@ The setup pull request is the merged https://github.com/haiven-dev/haiven-sdk/pu
             &doc,
             concat!(
                 "---\nagent_doc_session: sdk-feedback\nagent_doc_format: template\n---\n\n",
+                "## Status <!-- agent:status -->\nOperator status.\n<!-- /agent:status -->\n",
+                "## Active <!-- agent:active priority -->\n\n<!-- /agent:active -->\n",
                 "<!-- agent:exchange patch=append -->\n",
                 "### Re: prior — gpt-5\n\nDone.\n",
                 "<!-- agent:boundary:keep -->\n",
@@ -3871,6 +3873,12 @@ The setup pull request is the merged https://github.com/haiven-dev/haiven-sdk/pu
             Some(QueueReportState::PublishedLocal)
         );
         let reported_content = fs::read_to_string(&doc).unwrap();
+        assert!(
+            reported_content.contains("📤 Queue handoff: 1 reported item")
+                && reported_content.contains("- **Needs integration** (1)")
+                && reported_content.contains("Operator status."),
+            "{reported_content}"
+        );
         assert!(
             reported_content.contains("finish sdk.md with deterministic tests ⟦published+local⟧"),
             "{reported_content}"

@@ -3124,90 +3124,27 @@ fn run_pending_maintenance_with_options(
         snapshot_mutated = true;
     }
 
-    // `#queuehandoffstatus`: a queue made entirely (or mostly) of 📥 rows can
-    // otherwise look inert even though every row is a live coordinator obligation.
-    // Project one aggregate line into agent:status; the pane title's existing
-    // turn-active marker remains the truthful signal that a coordinator turn is
-    // currently executing, so no synthetic actionable queue row is invented.
-    let reported_count =
-        match agent_doc_queue_io::queue_claim::claim_states_for_content(file, &current_content) {
-            Ok(claims) => {
-                let mut reported_identities = claims
-                    .into_iter()
-                    .filter(|claim| {
-                        claim.state == agent_doc_queue::queue_claim::QueueClaimState::Reported
-                    })
-                    .map(|claim| claim.identity)
-                    .collect::<std::collections::HashSet<_>>();
-                reported_identities.extend(
-                    agent_doc_queue_io::claim_release_receipt::reported_head_texts_for_content(
-                        file,
-                        &current_content,
-                    )
-                    .into_iter()
-                    .map(|head| agent_doc_queue::queue_claim::claim_identity(&head)),
-                );
-                Some(reported_identities.len())
-            }
-            Err(err) => {
-                // An uncertain ledger must never erase a previously projected handoff.
-                eprintln!("[preflight] status: failed to read reported queue claims ({err:#})");
-                None
-            }
-        };
-    if let Some(reported_count) = reported_count {
-        if let Some(reconciled) =
-            agent_doc_document::status_projection::reconcile_reported_queue_status_content(
-                &current_content,
-                reported_count,
-            )?
-        {
-            eprintln!(
-                "[preflight] status: reconciled reported queue handoff count={reported_count}"
-            );
-            current_content = reconciled;
-            mutated = true;
-        }
-        if let Some(ref mut snap_content) = snapshot_content
-            && let Some(reconciled) =
-                agent_doc_document::status_projection::reconcile_reported_queue_status_content(
-                    snap_content,
-                    reported_count,
-                )?
-        {
-            *snap_content = reconciled;
-            snapshot_mutated = true;
-        }
-    }
-
-    // Status-only maintenance must defer as one unit when the editor authority
-    // cannot be reached. Capture the pre-status cut before either derived
-    // projection so the legacy stale-marker recovery below does not strand a
-    // newly introduced active block behind an unavailable editor.
+    // A status-only write may be deferred if editor authority is unavailable.
+    // Both summaries are derived together per document cut, so a historical
+    // baseline cannot borrow the current document's live report count.
     let stale_marker_before = (
         current_content.clone(),
         snapshot_content.clone(),
         mutated,
         snapshot_mutated,
     );
-
-    // `agent:active` is a derived observer: keep its managed nested list in
-    // lockstep with started, unclosed queue/tracked-work sources, migrating
-    // legacy `agent:open-items` and nested status cells when present.
-    // Derive each document independently so snapshot maintenance never copies
-    // current-file work across an ownership boundary.
     let mut active_status_mutated = false;
     if let Some(reconciled) =
-        agent_doc_work_projection::reconcile_managed_active_items_for(file, &current_content)?
+        agent_doc_queue_io::active_lifecycle::reconcile_summaries(file, &current_content)?
     {
-        eprintln!("[preflight] active: reconciled managed list");
+        eprintln!("[preflight] status and Active: reconciled queue lifecycle summaries");
         current_content = reconciled;
         mutated = true;
         active_status_mutated = true;
     }
     if let Some(ref mut snap_content) = snapshot_content
         && let Some(reconciled) =
-            agent_doc_work_projection::reconcile_managed_active_items_for(file, snap_content)?
+            agent_doc_queue_io::active_lifecycle::reconcile_summaries(file, snap_content)?
     {
         *snap_content = reconciled;
         snapshot_mutated = true;
@@ -9180,25 +9117,26 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         eprintln!("[preflight] queue: failed to read reported outbox ({err:#})");
     }
     let now = agent_doc_queue_io::queue_claim::claim_clock_now_secs();
+    let lifecycle = claim_ledger
+        .as_ref()
+        .and_then(|claims| claims.as_ref().ok())
+        .zip(
+            receipt_ledger
+                .as_ref()
+                .and_then(|receipts| receipts.as_ref().ok()),
+        )
+        .map(|(claims, receipts)| {
+            agent_doc_queue_io::active_lifecycle::from_ledgers(file, claims, receipts, now)
+        });
     let claim_ledger = claim_ledger.and_then(Result::ok).unwrap_or_default();
-    let cancellations = claim_ledger.cancellations;
+    let cancellations = &claim_ledger.cancellations;
     let claim_states = claim_ledger
         .claims
-        .into_iter()
+        .iter()
+        .cloned()
         .map(|mut claim| {
             claim.project_expiry(now);
             claim
-        })
-        .collect::<Vec<_>>();
-    let report_receipts = receipt_ledger
-        .and_then(Result::ok)
-        .unwrap_or_default()
-        .receipts
-        .into_iter()
-        .filter(|receipt| {
-            !cancellations
-                .iter()
-                .any(|cancelled| cancelled.cancels_attempt(&receipt.identity, receipt.generation))
         })
         .collect::<Vec<_>>();
     let mut in_progress_queue_prompt_texts = active_queue_prompt_texts.clone();
@@ -9229,15 +9167,6 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         .iter()
         .map(|text| agent_doc_queue::queue_claim::claim_identity(text))
         .collect::<std::collections::HashSet<_>>();
-    let claim_by_identity = claim_states
-        .iter()
-        .map(|claim| (claim.identity.clone(), claim))
-        .collect::<std::collections::HashMap<_, _>>();
-    let receipt_by_identity = report_receipts
-        .iter()
-        .filter(|receipt| !claim_by_identity.contains_key(&receipt.identity))
-        .map(|receipt| (receipt.identity.clone(), receipt))
-        .collect::<std::collections::HashMap<_, _>>();
     let completion_items =
         agent_doc_document::subagent_completion::completion_evidence(&current_content)
             .into_iter()
@@ -9269,8 +9198,9 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             let identity =
                 agent_doc_queue::queue_claim::claim_identity_at(&activation.entries_after, index)
                     .unwrap_or_else(|| agent_doc_queue::queue_claim::claim_identity(&prompt.text));
-            let claim = claim_by_identity.get(&identity).copied();
-            let receipt = receipt_by_identity.get(&identity).copied();
+            let attempt = lifecycle
+                .as_ref()
+                .and_then(|state| state.attempts.get(&identity));
             // `#terminalitemstability`: runtime evidence never reopens a
             // struck row. The operator removes the strike to reopen it.
             if matches!(
@@ -9281,12 +9211,8 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             }
             let marker = if lifecycle_state_degraded {
                 agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
-            } else if let Some(claim) = claim {
-                claim.visible_projection_for_owner(
-                    agent_doc_queue_io::queue_claim::claim_owner_liveness(file, claim),
-                )
-            } else if receipt.is_some() {
-                agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
+            } else if let Some(attempt) = attempt {
+                attempt.marker
             } else if completion_items.iter().any(|item| {
                 agent_doc_queue::queue_claim::completion_evidence_matches_row(item, &prompt.text)
             }) {
@@ -9315,24 +9241,19 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             } else {
                 agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
             };
-            let owner = claim
-                .map(
-                    |claim| agent_doc_document::queue_projection::QueueOwnerProjection {
-                        owner: claim.owner.clone(),
-                        generation: claim.generation,
+            let owner =
+                attempt.map(
+                    |attempt| agent_doc_document::queue_projection::QueueOwnerProjection {
+                        owner: attempt.owner.clone(),
+                        generation: attempt.generation,
                     },
-                )
-                .or_else(|| {
-                    receipt.map(|receipt| {
-                        agent_doc_document::queue_projection::QueueOwnerProjection {
-                            owner: receipt.owner.clone(),
-                            generation: receipt.generation,
-                        }
-                    })
-                });
+                );
             Some(agent_doc_queue::document_queue::QueueRowProjection {
                 identity: None,
-                text: prompt.text.clone(),
+                text: agent_doc_element_queue::render_queue_report_state_annotation(
+                    &prompt.text,
+                    attempt.and_then(|attempt| attempt.publication_state),
+                ),
                 blockers: if marker
                     == agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
                 {
@@ -21958,8 +21879,8 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             "document must contain one managed active projection: {file_after}"
         );
         assert!(
-            !file_after.contains("`[#reported]` — integrate the completed worker result"),
-            "pending maintenance runs before durable queue lifecycle is painted; queue maintenance adds the active row later in the same preflight: {file_after}"
+            file_after.contains("`[#reported]` — integrate the completed worker result"),
+            "Active and the handoff count share the same reported lifecycle: {file_after}"
         );
         assert!(
             file_after.contains("Session ready."),
@@ -21970,7 +21891,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             .unwrap();
         assert!(snapshot_after.contains(expected), "{snapshot_after}");
         assert!(
-            !snapshot_after.contains("`[#reported]` —"),
+            snapshot_after.contains("`[#reported]` —"),
             "{snapshot_after}"
         );
     }

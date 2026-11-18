@@ -926,6 +926,25 @@ fn reported_queue_status_line(reported_count: usize) -> String {
     )
 }
 
+fn is_reported_queue_status_line(line: &str) -> bool {
+    let line = line.trim();
+    line.starts_with(REPORTED_QUEUE_STATUS_PREFIX)
+        || line.starts_with(LEGACY_REPORTED_QUEUE_STATUS_PREFIX)
+}
+
+/// The managed handoff projection, excluding operator-authored status.
+pub fn reported_queue_status_signature(content: &str) -> Result<Vec<String>> {
+    let components = element::parse(content)?;
+    Ok(components
+        .iter()
+        .find(|component| component.name == "status")
+        .into_iter()
+        .flat_map(|component| component.content(content).lines())
+        .filter(|line| is_reported_queue_status_line(line))
+        .map(|line| line.trim().to_string())
+        .collect())
+}
+
 /// Reconcile the binary-owned reported-queue summary in a status body.
 ///
 /// The line is projection-only telemetry. It is replaced rather than appended,
@@ -937,9 +956,7 @@ pub fn apply_reported_queue_status(status_body: &str, reported_count: usize) -> 
     let mut existing = Vec::new();
     for segment in status_body.split_inclusive('\n') {
         let line = segment.strip_suffix('\n').unwrap_or(segment);
-        if line.trim().starts_with(REPORTED_QUEUE_STATUS_PREFIX)
-            || line.trim().starts_with(LEGACY_REPORTED_QUEUE_STATUS_PREFIX)
-        {
+        if is_reported_queue_status_line(line) {
             existing.push(line.trim().to_string());
         } else {
             retained.push_str(segment);

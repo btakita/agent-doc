@@ -144,32 +144,33 @@ pub trait QueueConsumeWriteEffects {
     }
 }
 
-/// Fold the binary-owned Active index into a terminal queue successor.
+/// Fold the binary-owned status and Active projections into a terminal queue successor.
 ///
 /// The boolean is significant for callers that would otherwise apply queue-only
 /// structural operations: an Active change crosses that component boundary and
 /// therefore requires their full-text convergence path.
-fn reconcile_terminal_active_projection(file: &Path, content: String) -> Result<(String, bool)> {
-    let reconciled = agent_doc_work_projection::reconcile_managed_active_items_for(file, &content)?;
+fn reconcile_terminal_lifecycle_projection(file: &Path, content: String) -> Result<(String, bool)> {
+    let reconciled = crate::active_lifecycle::reconcile_summaries(file, &content)?;
     Ok(match reconciled {
         Some(reconciled) => (reconciled, true),
         None => (content, false),
     })
 }
 
-/// Repair Active as an independent terminal-source projection edge.
+/// Repair status and Active as terminal-source projections.
 ///
 /// A restarted closeout may observe that its queue head is already struck even
 /// though an earlier retained write landed only the queue portion. That is a
-/// successful no-op for queue consumption but not for the derived Active index.
-fn reconcile_terminal_active_projection_with_effects(
+/// successful no-op for queue consumption that can still require summary repair.
+fn reconcile_terminal_lifecycle_projection_with_effects(
     file: &Path,
     current: &str,
     skip_visible_guard: bool,
     effects: &dyn QueueConsumeWriteEffects,
     reason: &str,
 ) -> Result<bool> {
-    let (target, live_changed) = reconcile_terminal_active_projection(file, current.to_string())?;
+    let (target, live_changed) =
+        reconcile_terminal_lifecycle_projection(file, current.to_string())?;
     if live_changed {
         if skip_visible_guard {
             effects.atomic_write(file, &target)?;
@@ -187,7 +188,7 @@ fn reconcile_terminal_active_projection_with_effects(
 
     let mut snapshot_changed = false;
     if let Some(snapshot) = load_snapshot_recovery_only(file, reason) {
-        let (target, changed) = reconcile_terminal_active_projection(file, snapshot)?;
+        let (target, changed) = reconcile_terminal_lifecycle_projection(file, snapshot)?;
         if changed {
             save_snapshot_recovery_only(file, &target, reason);
             snapshot_changed = true;
@@ -239,10 +240,18 @@ fn queue_write_landed(
         ),
         (Ok(expected), Ok(observed)) if expected == observed
     );
+    let handoff_status_landed = matches!(
+        (
+            agent_doc_document::status_projection::reported_queue_status_signature(target_content),
+            agent_doc_document::status_projection::reported_queue_status_signature(current),
+        ),
+        (Ok(expected), Ok(observed)) if expected == observed
+    );
     matches!((queue_body(target_content), queue_body(current)), (Some(a), Some(b)) if a == b)
         && queue_control(target_content) == queue_control(current)
         && retired_feedback_is_absent
         && active_projection_landed
+        && handoff_status_landed
 }
 
 /// Run a queue write; a retained delivery deferral is not a failure when the
@@ -1065,7 +1074,7 @@ pub fn acknowledge_paused_free_text_queue_head_under_apply_guard(
             &content,
             std::slice::from_ref(&row.lineage),
         )?;
-        target = reconcile_terminal_active_projection(file, target)?.0;
+        target = reconcile_terminal_lifecycle_projection(file, target)?.0;
         let plan = QueueConsumptionPlan {
             consumed_text: row.lineage.clone(),
             consumed_texts: rows.iter().map(|row| row.lineage.clone()).collect(),
@@ -1243,7 +1252,7 @@ pub fn acknowledge_paused_free_text_queue_head_under_apply_guard(
         &content,
         std::slice::from_ref(&observed_head),
     )?;
-    target = reconcile_terminal_active_projection(file, target)?.0;
+    target = reconcile_terminal_lifecycle_projection(file, target)?.0;
 
     let plan = QueueConsumptionPlan {
         consumed_text: observed_head.clone(),
@@ -1420,7 +1429,7 @@ fn consume_queue_prompts_with_options_fenced(
         free_text_count,
     )?
     else {
-        reconcile_terminal_active_projection_with_effects(
+        reconcile_terminal_lifecycle_projection_with_effects(
             file,
             &content,
             skip_visible_guard,
@@ -1623,8 +1632,8 @@ fn consume_queue_prompts_with_options_fenced(
     // leave `reported` or `running` metadata behind until the next foreground
     // preflight. Work whose source row remains unstruck (including Reported or
     // Lost integration debt) is retained by the projection.
-    plan.new_document = reconcile_terminal_active_projection(file, plan.new_document)?.0;
-    plan.new_snapshot = reconcile_terminal_active_projection(file, plan.new_snapshot)?.0;
+    plan.new_document = reconcile_terminal_lifecycle_projection(file, plan.new_document)?.0;
+    plan.new_snapshot = reconcile_terminal_lifecycle_projection(file, plan.new_snapshot)?.0;
 
     record_queue_consumption_proofs_under_apply_guard(
         file,
@@ -2719,7 +2728,7 @@ fn strike_free_text_queue_heads_with_proof(
         (Vec::new(), content.clone())
     };
     let (new_document, active_projection_changed) =
-        reconcile_terminal_active_projection(file, new_document)?;
+        reconcile_terminal_lifecycle_projection(file, new_document)?;
     let live_changed = new_document != content;
     if live_changed {
         require_integrated_reported_repo_work_for_successor(file, &content, &new_document)?;
@@ -2740,7 +2749,7 @@ fn strike_free_text_queue_heads_with_proof(
                     })
                     .transpose()?
                     .unwrap_or_else(|| snap.clone());
-                let (target, _) = reconcile_terminal_active_projection(file, target)?;
+                let (target, _) = reconcile_terminal_lifecycle_projection(file, target)?;
                 Some((snap, target))
             }
             Err(err) => {
@@ -3803,7 +3812,7 @@ fn converge_id_backed_head_strike(
         },
         None => None,
     }
-    .map(|content| reconcile_terminal_active_projection(file, content).map(|value| value.0))
+    .map(|content| reconcile_terminal_lifecycle_projection(file, content).map(|value| value.0))
     .transpose()?;
     // A lifecycle projection is derived, not terminal content. A bare
     // structural `consume` would wrap the visible marker inside the strike
@@ -3831,7 +3840,7 @@ fn converge_id_backed_head_strike(
             .retained_completion_feedback_keys_for_heads(file, &struck_heads)
             .context("orphan strike: failed to inspect retained completion feedback")?,
     );
-    target = reconcile_terminal_active_projection(file, target)?.0;
+    target = reconcile_terminal_lifecycle_projection(file, target)?.0;
     // `#responserowqueuehead`: node ops are the write only when they reproduce
     // the whole target; a strike that also nests response children outside
     // the item spans converges as the full-text successor.
@@ -4715,7 +4724,7 @@ pub fn mark_completed_queue_prompts_for_done_ids_under_apply_guard(
     )?;
     let response_backlink_projected = new_document != strike_only_document;
     let (new_document, active_projection_changed) =
-        reconcile_terminal_active_projection(file, new_document)?;
+        reconcile_terminal_lifecycle_projection(file, new_document)?;
 
     let new_snapshot =
         if let Some(snapshot_content) = load_snapshot_recovery_only(file, "queue done-id mark") {
@@ -4743,7 +4752,7 @@ pub fn mark_completed_queue_prompts_for_done_ids_under_apply_guard(
                     response_body,
                 );
                 Ok(Some(
-                    reconcile_terminal_active_projection(file, snapshot_document)?.0,
+                    reconcile_terminal_lifecycle_projection(file, snapshot_document)?.0,
                 ))
             })() {
                 Ok(snapshot) => snapshot,
@@ -7530,11 +7539,15 @@ mod core_tests {
     }
 
     #[test]
-    fn terminal_queue_noop_repairs_stale_active_in_document_and_snapshot() {
+    fn terminal_queue_noop_repairs_stale_lifecycle_in_document_and_snapshot() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("plan.md");
         let content = concat!(
             "---\nqueue_active: true\n---\n\n",
+            "## Status <!-- agent:status -->\n",
+            "📤 Queue handoff: 1 reported item awaiting coordinator integration.\n",
+            "Operator status.\n",
+            "<!-- /agent:status -->\n\n",
             "## Active <!-- agent:active priority -->\n",
             "- **Queue** (1)\n",
             "  - `queue-free:stale` — already done\n",
@@ -7565,6 +7578,8 @@ mod core_tests {
             .unwrap();
         for (label, content) in [("document", live), ("snapshot", snapshot)] {
             assert!(!content.contains("queue-free:stale"), "{label}: {content}");
+            assert!(!content.contains("📤 Queue handoff:"), "{label}: {content}");
+            assert!(content.contains("Operator status."), "{label}: {content}");
             assert!(content.contains("- ~~already done~~"), "{label}: {content}");
             assert!(
                 agent_doc_work_projection::reconcile_managed_active_items(&content)

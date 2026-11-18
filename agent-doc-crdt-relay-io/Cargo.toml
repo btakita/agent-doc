@@ -34,6 +34,8 @@ agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.580" 
 agent-doc-template = { path = "../agent-doc-template", version = "0.35.580" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.580" }
 agent-doc-turn-status-io = { path = "../agent-doc-turn-status-io", version = "0.35.580" }
+agent-doc-work-projection = { path = "../agent-doc-work-projection", version = "0.35.580" }
+agent-doc-element-queue = { path = "../agent-doc-element-queue", version = "0.35.580" }
 anyhow = "1"
 lazily = { version = "0.63.0", features = ["ipc", "durable-sqlite"] }
 # `#relaylockpoison`: the relay registries use parking_lot, not std::sync::Mutex.

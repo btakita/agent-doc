@@ -6234,10 +6234,8 @@ fn handback_response_id(
     format!("[#r-{}]", &hash[..12])
 }
 
-/// One canonical hand-back section, collapsed to a single line so a file name
-/// survives and the row does not gain a new bullet per source line
-/// (`#handbackrowstructure`).
-fn handback_section_text(
+/// The authored Markdown of one canonical hand-back section.
+fn handback_section_markdown(
     handback: &agent_doc_document::worker_handback::WorkerHandback,
     kind: agent_doc_document::worker_handback::SectionKind,
 ) -> String {
@@ -6245,24 +6243,24 @@ fn handback_section_text(
     if kind == agent_doc_document::worker_handback::SectionKind::Summary
         && !handback.preamble.is_empty()
     {
-        parts.push(collapse_ws(&handback.preamble.join(" ")));
+        parts.push(handback.preamble.join("\n"));
     }
     for section in handback
         .sections
         .iter()
         .filter(|section| section.kind == kind)
     {
-        let body = collapse_ws(&section.lines.join(" "));
-        if body.is_empty() {
+        let body = section.lines.join("\n");
+        if body.trim().is_empty() {
             continue;
         }
         if section.label.eq_ignore_ascii_case(kind.heading()) {
             parts.push(body);
         } else {
-            parts.push(format!("{}: {body}", section.label));
+            parts.push(format!("{}:\n\n{body}", section.label));
         }
     }
-    collapse_ws(&parts.join(" "))
+    parts.join("\n\n")
 }
 
 fn handback_section_bodies(
@@ -6272,10 +6270,72 @@ fn handback_section_bodies(
         .into_iter()
         .filter(|kind| *kind != agent_doc_document::worker_handback::SectionKind::Blocker)
         .filter_map(|kind| {
-            let text = handback_section_text(handback, kind);
+            let text = handback_section_markdown(handback, kind);
             (!text.is_empty()).then_some((kind, text))
         })
         .collect()
+}
+
+/// Keep explicit lists under their field, with a marker on each generated
+/// item. Unmarked operator replies beneath the field remain queue work.
+fn render_handback_section(
+    out: &mut String,
+    indent: &str,
+    kind: agent_doc_document::worker_handback::SectionKind,
+    markdown: &str,
+) {
+    use agent_doc_markdown_ast::overlay::RESPONSE_DETAIL_MARKER;
+    use agent_doc_markdown_ast::{Block, BlockKind, parse};
+    use std::fmt::Write as _;
+
+    fn collect_items(block: &Block, starts: &mut Vec<usize>) {
+        if block.kind == BlockKind::ListItem {
+            starts.push(block.start_byte);
+        }
+        for child in &block.children {
+            collect_items(child, starts);
+        }
+    }
+
+    let mut items = Vec::new();
+    if let Some(document) = parse(markdown) {
+        collect_items(&document, &mut items);
+    }
+    write!(out, "{indent}- **{}:**", kind.heading()).expect("writing to a String cannot fail");
+    if items.is_empty() {
+        writeln!(out, " {}", collapse_ws(markdown)).expect("writing to a String cannot fail");
+        return;
+    }
+
+    writeln!(out, " {RESPONSE_DETAIL_MARKER}").expect("writing to a String cannot fail");
+    let mut items = items.into_iter().peekable();
+    let mut start = 0;
+    let mut markers = element::structural_marker_occurrences(markdown)
+        .into_iter()
+        .peekable();
+    for line in markdown.split_inclusive('\n') {
+        let end = start + line.len();
+        let item = items.next_if(|offset| *offset < end).is_some();
+        let line = line.trim_end_matches(['\r', '\n']);
+        if !line.trim().is_empty() {
+            write!(out, "{indent}  ").expect("writing to a String cannot fail");
+            let mut cursor = 0;
+            while let Some(marker) = markers.next_if(|marker| marker.start < end) {
+                let offset = marker.start - start;
+                out.push_str(&line[cursor..offset]);
+                // The exact bytes are still in the exchange. In the queue,
+                // keep copied component syntax literal instead of opening it.
+                out.push_str("&lt;");
+                cursor = offset + 1;
+            }
+            out.push_str(&line[cursor..]);
+            if item {
+                write!(out, " {RESPONSE_DETAIL_MARKER}").expect("writing to a String cannot fail");
+            }
+        }
+        out.push('\n');
+        start = end;
+    }
 }
 
 /// The labelled worker hand-back whose completion cell names `row_text`.
@@ -6308,7 +6368,7 @@ fn structured_handback_for_row(
             else {
                 continue;
             };
-            if !handback_section_text(
+            if !handback_section_markdown(
                 &handback,
                 agent_doc_document::worker_handback::SectionKind::Blocker,
             )
@@ -6329,7 +6389,7 @@ fn structured_handback_for_row(
     let mut with_markdown = renders
         .into_iter()
         .filter(|(_, handback)| {
-            handback_section_text(
+            handback_section_markdown(
                 handback,
                 agent_doc_document::worker_handback::SectionKind::WhatChanged,
             )
@@ -6360,31 +6420,21 @@ fn handback_response_row_child(
     if bodies.is_empty() {
         return None;
     }
+    use agent_doc_document::worker_handback::SectionKind;
     let summary = bodies
         .iter()
-        .find(|(kind, _)| *kind == agent_doc_document::worker_handback::SectionKind::Summary)
-        .map(|(_, text)| text.clone())
-        .filter(|text| !text.is_empty())
-        .unwrap_or_else(|| "Completed.".to_string());
-    let mut child = format!(
-        "{marker}\n- **Timestamp:** {}\n- **Summary:** {summary}",
-        addressed_at.trim()
-    );
-    for kind in [
-        agent_doc_document::worker_handback::SectionKind::WhatChanged,
-        agent_doc_document::worker_handback::SectionKind::Verification,
-        agent_doc_document::worker_handback::SectionKind::ActionItems,
-        agent_doc_document::worker_handback::SectionKind::OpenItems,
-        agent_doc_document::worker_handback::SectionKind::Notes,
-        agent_doc_document::worker_handback::SectionKind::NextActions,
-    ] {
-        let Some((_, text)) = bodies.iter().find(|(section, _)| *section == kind) else {
-            continue;
-        };
-        child.push_str(&format!("\n- **{}:** {text}", kind.heading()));
+        .find(|(kind, _)| *kind == SectionKind::Summary)
+        .map_or("Completed.", |(_, text)| text);
+    let mut child = format!("{marker}\n- **Timestamp:** {}\n", addressed_at.trim());
+    render_handback_section(&mut child, "", SectionKind::Summary, summary);
+    for (kind, text) in bodies
+        .iter()
+        .filter(|(kind, _)| *kind != SectionKind::Summary)
+    {
+        render_handback_section(&mut child, "", *kind, text);
     }
     let follow_up = !handback.action_items().is_empty();
-    child.push_str("\n- **State:** ");
+    child.push_str("- **State:** ");
     child.push_str(if follow_up {
         RESPONSE_STATE_FOLLOW_UP
     } else {
@@ -6433,12 +6483,7 @@ fn handback_sections_missing_from_response(
         if response_scope.contains(&label) {
             continue;
         }
-        rendered.push_str(&section_indent);
-        rendered.push_str("- ");
-        rendered.push_str(&label);
-        rendered.push(' ');
-        rendered.push_str(&text);
-        rendered.push('\n');
+        render_handback_section(&mut rendered, &section_indent, kind, &text);
     }
     if rendered.is_empty() {
         return None;
@@ -12016,6 +12061,89 @@ mod tests {
             attach_stopped_row_responses(&before, &spliced, "", STOPPED_AT).unwrap(),
             spliced
         );
+    }
+
+    #[test]
+    fn struck_handback_keeps_lists_nested_and_only_operator_rows_runnable() {
+        let work = "Verify the packaged sample [#q-f00dbabe1234]";
+        let struck = format!("~~{work}~~");
+        let handback = concat!(
+            "**Summary**\n\n",
+            "The package passed.\n\n",
+            "**What changed**\n\n",
+            "- Added `bin/sample`.\n",
+            "- Updated the manifest.\n\n",
+            "**Verification**\n\n",
+            "1. Ran the package check.\n",
+            "   - Confirmed the manifest.\n",
+            "2. Ran the smoke test.\n",
+        );
+        let item = format!("Question with: a colon in it: Then another: clause: {work}");
+        let cell = agent_doc_document::subagent_completion::cell_with_response(
+            "subagent:sample",
+            &item,
+            "package-key",
+            handback,
+        )
+        .unwrap();
+        let before = plan_file_run(work, "do [#install]", &cell);
+        let for_leaf = |leaf: &str| plan_file_run(leaf, "do [#install]", &cell);
+        let after = for_leaf(&struck);
+        let summary_child = format!(
+            "{struck}\n\
+             \x20     - **Response [#r-0123456789ab]**\n\
+             \x20       - **Summary:** The package passed.\n"
+        );
+
+        for base in [after, for_leaf(&summary_child)] {
+            let projected = attach_stopped_row_responses(&before, &base, "", STOPPED_AT).unwrap();
+            let marker = agent_doc_markdown_ast::overlay::RESPONSE_DETAIL_MARKER;
+            assert!(
+                projected.contains(&format!(
+                    "        - **What changed:** {marker}\n\
+                 \x20         - Added `bin/sample`. {marker}\n\
+                 \x20         - Updated the manifest. {marker}\n"
+                )),
+                "{projected}"
+            );
+            let nested = format!(
+                "        - **Verification:** {marker}\n\
+                 \x20         1. Ran the package check. {marker}\n\
+                 \x20            - Confirmed the manifest. {marker}\n\
+                 \x20         2. Ran the smoke test. {marker}\n"
+            );
+            assert!(projected.contains(&nested), "{projected}");
+            assert_eq!(
+                attach_stopped_row_responses(&before, &projected, "", STOPPED_AT).unwrap(),
+                projected
+            );
+            let with_reply = projected.replace(
+                &nested,
+                &format!("{nested}          - Rerun the smoke test tomorrow.\n"),
+            );
+            let queue = element::parse(&with_reply)
+                .unwrap()
+                .into_iter()
+                .find(|component| component.name == "queue")
+                .unwrap();
+            let entries = document_queue::parse(queue.content(&with_reply)).unwrap();
+            let prompts = entries
+                .iter()
+                .filter_map(|entry| match entry {
+                    document_queue::QueueEntry::Prompt(prompt) => Some(prompt.text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                prompts,
+                [
+                    "Question with: a colon in it",
+                    "Then another: clause",
+                    "Rerun the smoke test tomorrow.",
+                    "do [#install]",
+                ]
+            );
+        }
     }
 
     fn blocker_supersession_document(

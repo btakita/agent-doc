@@ -211,9 +211,11 @@ pub fn advance_retained_base_over_untouched_components(
 /// line by line, the target's change is the operator's: every line the target
 /// removed from the base the cut removed as well, and every line the target
 /// added is a line the cut added, or a strict prefix of one (the operator kept
-/// typing it). Such a component carries no agent op, so the rebase must take
-/// the operator's body as is; a line-level 3-way merge would otherwise keep
-/// both the stale prefix and the finished line.
+/// typing it). Queue attempt projections are ignored for that comparison: a
+/// bare authored row and its later `🟡 [#owner#generation]` projection are the
+/// same operator line. Such a component carries no agent op, so the rebase must
+/// take the operator's body as is; a line-level 3-way merge would otherwise
+/// keep both the stale prefix and the finished/projected line.
 ///
 /// Returns the target with those components reset to `merge_base`'s bodies,
 /// plus the components reset; `None` when nothing qualifies or the three texts
@@ -230,19 +232,49 @@ pub fn neutralize_stale_operator_typing_snapshots(
         ComponentWriteScope, changed_component_scope, replace_component_bodies,
         top_level_component_bodies,
     };
-    fn line_counts(body: &str) -> std::collections::HashMap<&str, usize> {
+    fn projection_neutral_line(line: &str) -> String {
+        let indent = line.len() - line.trim_start().len();
+        let rest = &line[indent..];
+        let Some((bullet, body)) = rest
+            .strip_prefix("- ")
+            .map(|body| ("- ", body))
+            .or_else(|| rest.strip_prefix("* ").map(|body| ("* ", body)))
+        else {
+            return line.to_string();
+        };
+        format!(
+            "{}{}{}",
+            &line[..indent],
+            bullet,
+            agent_doc_element_queue::strip_attempt_projection_prefix(body)
+        )
+    }
+    fn line_counts(
+        body: &str,
+        neutralize_attempt_projection: bool,
+    ) -> std::collections::HashMap<String, usize> {
         let mut counts = std::collections::HashMap::new();
         for line in body.lines() {
+            let line = if neutralize_attempt_projection {
+                projection_neutral_line(line)
+            } else {
+                line.to_string()
+            };
             *counts.entry(line).or_insert(0) += 1;
         }
         counts
     }
     /// Lines of `after` beyond their count in `before`, with multiplicity.
-    fn added<'a>(before: &str, after: &'a str) -> Vec<&'a str> {
-        let mut remaining = line_counts(before);
+    fn added(before: &str, after: &str, neutralize_attempt_projection: bool) -> Vec<String> {
+        let mut remaining = line_counts(before, neutralize_attempt_projection);
         let mut added = Vec::new();
         for line in after.lines() {
-            match remaining.get_mut(line) {
+            let line = if neutralize_attempt_projection {
+                projection_neutral_line(line)
+            } else {
+                line.to_string()
+            };
+            match remaining.get_mut(&line) {
                 Some(count) if *count > 0 => *count -= 1,
                 _ => added.push(line),
             }
@@ -278,17 +310,18 @@ pub fn neutralize_stale_operator_typing_snapshots(
             // target's change can be attributed to the operator's typing.
             continue;
         }
-        let target_added = added(base_body, target_body);
-        let cut_added = added(base_body, cut_body);
-        let target_removed = added(target_body, base_body);
-        let cut_removed = added(cut_body, base_body);
+        let neutralize_attempt_projection = base.component.name == "queue";
+        let target_added = added(base_body, target_body, neutralize_attempt_projection);
+        let cut_added = added(base_body, cut_body, neutralize_attempt_projection);
+        let target_removed = added(target_body, base_body, neutralize_attempt_projection);
+        let cut_removed = added(cut_body, base_body, neutralize_attempt_projection);
         let mut cut_removed_counts: std::collections::HashMap<&str, usize> =
             std::collections::HashMap::new();
         for line in &cut_removed {
-            *cut_removed_counts.entry(line).or_insert(0) += 1;
+            *cut_removed_counts.entry(line.as_str()).or_insert(0) += 1;
         }
         let removals_are_the_operators = target_removed.iter().all(|line| match cut_removed_counts
-            .get_mut(line)
+            .get_mut(line.as_str())
         {
             Some(count) if *count > 0 => {
                 *count -= 1;
@@ -300,7 +333,7 @@ pub fn neutralize_stale_operator_typing_snapshots(
             && target_added.iter().all(|line| {
                 let typed = line.trim_end();
                 cut_added.iter().any(|candidate| {
-                    *candidate == *line
+                    candidate == line
                         || (!typed.trim().is_empty()
                             && candidate.len() > typed.len()
                             && candidate.starts_with(typed))
@@ -4476,6 +4509,79 @@ mod tests {
             typingdupe_doc(TYPINGDUPE_STRUCK, TYPINGDUPE_FINISHED),
             "one copy of the finished line, and the agent's strike:\n{rebased}"
         );
+    }
+
+    /// Live 2026-11-18 regression (`agent-doc-bugs.md`): a backlog-only
+    /// retained write captured two queue rows while the operator was extending
+    /// their parent. Claim projection then prefixed the rows with exact-attempt
+    /// markers. Raw-line attribution no longer recognized them as the captured
+    /// operator rows, so the retained rebase kept both bare and claimed copies.
+    #[test]
+    fn typingdupe_claim_projection_does_not_fork_captured_operator_queue_rows() {
+        fn doc(queue: &str, backlog: &str) -> String {
+            format!(
+                concat!(
+                    "---\nagent_doc_format: template\n---\n\n",
+                    "<!-- agent:queue go -->\n{}<!-- /agent:queue -->\n\n",
+                    "<!-- agent:backlog -->\n{}<!-- /agent:backlog -->\n",
+                ),
+                queue, backlog,
+            )
+        }
+
+        const PARENT: &str = "- My last prompt was duplicated again.\n";
+        const ROW_A: &str = "In agent-doc-bugs.md, row A was corrupted.";
+        const ROW_B: &str = "In agent-doc-bugs.md, row B was corrupted by agent-doc.";
+        let base = doc(PARENT, "- [#existing] Existing item\n");
+        let captured = doc(
+            &format!("{PARENT}- {ROW_A}\n- {ROW_B}\n"),
+            "- [#existing] Existing item\n- [#agent] Agent backlog patch\n",
+        );
+        let operator_cut = doc(
+            &format!(
+                concat!(
+                    "- My last prompt was duplicated again. See `- 🟡 [#subagent:a#1] {0}` + ",
+                    "`- 🟡 [#subagent:b#1] {1}`.\n",
+                    "- 🟡 [#subagent:a#1] {0}\n",
+                    "- 🟡 [#subagent:b#1] {1}\n",
+                ),
+                ROW_A, ROW_B,
+            ),
+            "- [#existing] Existing item\n",
+        );
+
+        let (neutralized, scope) =
+            neutralize_stale_operator_typing_snapshots(&base, &captured, &operator_cut)
+                .expect("the captured queue branch is operator text modulo claim projection");
+        assert_eq!(scope.to_pairs(), vec![("queue".to_string(), 0)]);
+        assert_eq!(
+            neutralized,
+            doc(
+                PARENT,
+                "- [#existing] Existing item\n- [#agent] Agent backlog patch\n",
+            ),
+        );
+
+        let rebased =
+            rebase_retained_target_over_editor_cut(&base, &captured, &operator_cut).unwrap();
+        assert_eq!(
+            rebased,
+            doc(
+                &format!(
+                    concat!(
+                        "- My last prompt was duplicated again. See `- 🟡 [#subagent:a#1] {0}` + ",
+                        "`- 🟡 [#subagent:b#1] {1}`.\n",
+                        "- 🟡 [#subagent:a#1] {0}\n",
+                        "- 🟡 [#subagent:b#1] {1}\n",
+                    ),
+                    ROW_A, ROW_B,
+                ),
+                "- [#existing] Existing item\n- [#agent] Agent backlog patch\n",
+            ),
+            "the operator fork stays exact, each claimed row stays singular, and the agent backlog op lands",
+        );
+        assert_eq!(rebased.matches(ROW_A).count(), 2, "{rebased}");
+        assert_eq!(rebased.matches(ROW_B).count(), 2, "{rebased}");
     }
 
     #[test]

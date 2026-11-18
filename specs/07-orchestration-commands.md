@@ -12,6 +12,45 @@ instead of adding free-form batch state.
 
 This file covers binary-owned planning/orchestration and the queue surface that reuses the same document lifecycle.
 
+## Connected queue actions
+
+Connected `agent_doc_admit` and successful `agent_doc_finalize` include
+`queue_actions` in their response alongside the cycle or closeout proof. Each
+entry describes the next owed transition for a queue item. `next_action_id`
+and `next_action_argv` identify the first runnable transition. Independent rows
+remain in `queue_actions`, ordered with unbound claims before new claims and
+reported closeout. This contract works without lifecycle hook output.
+
+Call `agent_doc_queue_action` with `file` and `next_action_id` to apply the
+exact transition. For a `start` action, the first call reserves one native
+spawn and returns `spawn.spawn_preamble`. Run the native spawn with that
+preamble, then call the same action with its returned `worker_id` to bind it.
+For a due heartbeat, pass the exact `worker_id` after observing the worker
+alive. A bound worker's `report` action identifies its native worker and exact
+generation. After collecting the handback, pass that `worker_id` and a
+`report` containing the complete `response` and either `prose_only: true` or
+the source and sink repository evidence. It is available before the worker-end
+hook records completion so the coordinator can supply its own native handback.
+A reported result that needs judgment carries its decision in
+`handoff`. An external closeout returns `execute_argv` once for the harness to
+authorize and run. Record its `outcome` as `applied` or `failed`, including a
+`reason` for failure. Use the same failure fields for a declined native spawn.
+
+The connected transport revalidates action ids against the current queue
+projection. Concurrent calls and new MCP processes share the durable receipt
+keyed by document, action, and its evidence. The queue and lineage commands
+still enforce claim generation, worker binding, and integration proof. An
+unchanged failed action returns the same receipt without running again.
+Changed evidence produces a new id. An unsettled reservation remains visible
+with its receipt. If the MCP process stops after reserving a spawn, recover the
+worker identity from the native harness and bind it with the same id. When the
+harness confirms the spawn failed, record that outcome. The existing explicit
+queue recovery remains available when the coordinator has evidence to abandon
+the attempt. Poll the current projection by omitting `next_action_id`
+after native worker results or other changes. A failed projection is reported
+as `queue_action_error` while the original admission or closeout result remains
+authoritative.
+
 ## plan
 
 `agent-doc plan <FILE>`

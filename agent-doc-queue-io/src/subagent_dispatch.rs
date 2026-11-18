@@ -134,6 +134,14 @@ fn subagent_dispatch_candidates_for_content(file: &Path, content: &str) -> Resul
             &format!("lost_running_recovery_skipped error={error:#} (#lostrunningcontinue)"),
         );
     }
+    observe_subagent_dispatch_candidates_for_content(file, content)
+}
+
+/// Derive candidates from recorded evidence without requesting lost-worker recovery.
+pub(crate) fn observe_subagent_dispatch_candidates_for_content(
+    file: &Path,
+    content: &str,
+) -> Result<Vec<String>> {
     let _guard = crate::queue_claim::steer_guard_for(file, content);
     let prompt_presets =
         agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(content, file)?;

@@ -7109,6 +7109,9 @@ fn main() -> ExitCode {
     // internal ones included, waits at most the configured bound and reports
     // `registry_lock_wait` progress.
     agent_doc_session_registry_io::registry_lock::install_process_registry_lock_wait();
+    // `#addressproof`: completion of an address reads the pull request. Tests
+    // leave this unset and fail closed unless they install an observation.
+    agent_doc_queue_io::address_effect::enable_github_observation();
     match try_main() {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
@@ -10921,7 +10924,22 @@ fn try_main() -> anyhow::Result<()> {
                         &file,
                         Some(requeue.claim.item_text.as_str()),
                     )?;
-                    if requeue.address_fix_pending {
+                    if requeue.address_effect_unproven && !requeue.address_fix_pending {
+                        eprintln!(
+                            "[queue] address hand-back for {:?} (owner {}, generation {}) claimed completion without an observed pull-request head change or a review reply; the row stays open and the attempt was requeued (#addressproof). Next: {} and dispatch the same row; its brief carries this hand-back. `FIX-ON-HEAD` and `NO-WRITTEN-FIX` are not that observation. Commit the written fix onto the pull-request head, or post the review reply.",
+                            requeue.claim.item_text,
+                            requeue.claim.owner,
+                            requeue.claim.generation,
+                            agent_doc_queue_io::subagent_dispatch::claim_command(
+                                &file.display().to_string(),
+                                &requeue.claim.item_text,
+                            ),
+                        );
+                        emit_subagent_pool_refill(
+                            &file,
+                            agent_doc_queue::subagent_pool::PoolRefillTrigger::Release,
+                        );
+                    } else if requeue.address_fix_pending {
                         eprintln!(
                             "[queue] address hand-back for {:?} (owner {}, generation {}) does not land the review's written fix on the current head; the row stays open and the attempt was requeued (#reviewfixonhead). Next: {} and dispatch the same row; its brief carries this hand-back. Land the written fix, then finish with `FIX-ON-HEAD <review-url> head=<sha>`. If every review states no code change, do not invent a commit; finish with `NO-WRITTEN-FIX head=<sha>` so a row that also names `#adversarial-pr` continues to that review. A later review does not replace that fix.",
                             requeue.claim.item_text,

@@ -2237,6 +2237,12 @@ pub fn latest_free_text_head_echo_is_deferral(text: &str, head_text: &str) -> bo
 /// A vector quote is that leaf's echo. Deferral beside it keeps the leaf queued.
 /// The bare leaf line remains a deferral too.
 pub fn response_defers_queue_head(content: &str, response_body: &str, head_text: &str) -> bool {
+    // `#addressproof`: an echoed or otherwise answered `#address` of a pull
+    // request stays queued until an observation shows a head change or a
+    // review reply. No echo and no answer is not this deferral.
+    if address_answer_lacks_effect_proof(content, response_body, head_text) {
+        return true;
+    }
     // A goal preset's declared final state is stronger than generic review or
     // waiting prose. In particular, a valid `BLOCKED <operator action> ...`
     // hand-back necessarily names work that remains for the operator; treating
@@ -2388,8 +2394,24 @@ pub fn latest_echo_cell_lacks_goal_final_state(content: &str, text: &str, head_t
 /// the review's written fix on the current head.
 ///
 /// A response that never echoes the head is not this deferral. Returning
-/// `true` only prevents a strike.
+/// `true` only prevents a strike. `#addressproof`: a landed receipt still
+/// defers when no observation shows a head change or a review reply.
 pub fn latest_echo_cell_omits_address_fix(content: &str, text: &str, head_text: &str) -> bool {
+    if address_echo_lacks_written_fix(content, text, head_text) {
+        return true;
+    }
+    let presets = crate::goal_preset_terminal::effective_presets_for_content(content);
+    crate::address_fix_on_head::head_is_address_run(head_text, &presets)
+        && crate::address_completion_proof::address_effect_unproven(head_text)
+        && latest_echo_cell(content, text, head_text).is_some()
+}
+
+/// `#reviewfixonhead`: the latest echo's unquoted answer has neither
+/// `FIX-ON-HEAD` nor `NO-WRITTEN-FIX`.
+///
+/// A response that never echoes the head is not this gap. This does not consult
+/// the remote observation (`#addressproof`).
+pub fn address_echo_lacks_written_fix(content: &str, text: &str, head_text: &str) -> bool {
     let presets = crate::goal_preset_terminal::effective_presets_for_content(content);
     if !crate::address_fix_on_head::head_is_address_run(head_text, &presets) {
         return false;
@@ -2403,6 +2425,23 @@ pub fn latest_echo_cell_omits_address_fix(content: &str, text: &str, head_text: 
         .collect::<Vec<_>>()
         .join("\n");
     !crate::address_fix_on_head::address_run_lands_written_fix(&answer)
+}
+
+/// True when an `#address` response would otherwise count as an answer but no
+/// observation shows a head change or a review reply (`#addressproof`).
+fn address_answer_lacks_effect_proof(content: &str, response_body: &str, head_text: &str) -> bool {
+    let presets = crate::goal_preset_terminal::effective_presets_for_content(content);
+    if !crate::address_fix_on_head::head_is_address_run(head_text, &presets) {
+        return false;
+    }
+    if !crate::address_completion_proof::address_effect_unproven(head_text) {
+        return false;
+    }
+    let echoed = response_explicit_queue_prompt_echoes_head(response_body, head_text)
+        || response_explicitly_echoes_nest_vector(content, response_body, head_text);
+    echoed
+        || crate::address_fix_on_head::address_run_lands_written_fix(response_body)
+        || prompt_preset_head_answered_by_response(content, response_body, head_text)
 }
 
 /// `#presetorder`: the latest echo of a temporal preset order leaves a later
@@ -2953,6 +2992,15 @@ mod tests {
         let landed = format!(
             "### Re: address\n\n> **Queue prompt:** {head}\n\nThe retry applies under shadow so the stored state is allowed.\nFIX-ON-HEAD https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-5837752992 head=fa3a3f449986d565f21aeb6e0f792323bc8d1d58\nINLINE-THREADS-LOADED 0 head=fa3a3f449986d565f21aeb6e0f792323bc8d1d58\n"
         );
+        assert!(
+            latest_echo_cell_omits_address_fix(&doc, &landed, head),
+            "a FIX-ON-HEAD line without an observed head change or review reply stays open"
+        );
+        assert!(response_defers_queue_head(&doc, &landed, head));
+        let _proof = crate::address_completion_proof::AddressEffectGuard::install_item(
+            head,
+            proved_head_change(),
+        );
         assert!(!latest_echo_cell_omits_address_fix(&doc, &landed, head));
         assert!(!latest_echo_cell_omits_inline_threads(&doc, &landed, head));
         assert!(!response_defers_queue_head(&doc, &landed, head));
@@ -2975,6 +3023,14 @@ mod tests {
         ));
         assert!(response_defers_queue_head(&doc, &address_only, head));
         let done = format!("{address_only}PRESET-DONE #adversarial-pr\n");
+        assert!(
+            response_defers_queue_head(&doc, &done, head),
+            "PRESET-DONE does not prove the address changed the head or posted a reply"
+        );
+        let _proof = crate::address_completion_proof::AddressEffectGuard::install_item(
+            head,
+            proved_head_change(),
+        );
         assert!(!latest_echo_cell_skips_later_ordered_preset(
             &doc, &done, head
         ));
@@ -3016,6 +3072,20 @@ mod tests {
             "> **Queue prompt:** do [#abc]\n\nDone.\n",
             "do [#abc]",
         ));
+    }
+
+    fn proved_head_change() -> crate::address_completion_proof::AddressObservation {
+        use crate::address_completion_proof::{AddressObservation, AddressSnapshot};
+        let snap = |head: &str| AddressSnapshot {
+            head_sha: head.to_string(),
+            reply_ids: Vec::new(),
+            comment_commit: None,
+            thread_named: false,
+        };
+        AddressObservation::Seen {
+            baseline: Some(snap("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
+            current: snap("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+        }
     }
 
     fn active_queue_doc(head: &str) -> String {

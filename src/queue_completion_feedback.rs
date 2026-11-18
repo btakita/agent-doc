@@ -2088,11 +2088,12 @@ mod tests {
             "FIX-ON-HEAD https://github.com/haiven-dev/haiven-sdk/pull/286#pullrequestreview-5912901233 head=177f46b753f55f7b37c22706a615ad687544a041\n",
             "INLINE-THREADS-LOADED 0 head=177f46b753f55f7b37c22706a615ad687544a041\n",
         );
+        let _proof = proved_address_observation();
         assert!(
             requeue_nonterminal_goal_hand_back(&doc, ROW, Some(generation), clean)
                 .unwrap()
                 .is_none(),
-            "REVIEW-CLEAN still takes the ordinary report path"
+            "REVIEW-CLEAN still takes the ordinary report path once the address effect is observed"
         );
     }
 
@@ -2362,10 +2363,40 @@ mod tests {
             "FIX-ON-HEAD https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-5837752992 head=fa3a3f449986d565f21aeb6e0f792323bc8d1d58\n",
             "INLINE-THREADS-LOADED 0 head=fa3a3f449986d565f21aeb6e0f792323bc8d1d58\n",
         );
+        let unproven = requeue_nonterminal_goal_hand_back(&doc, ROW, Some(generation), landed)
+            .unwrap()
+            .expect("FIX-ON-HEAD without an observed head change or review reply stays open");
+        assert!(!unproven.address_fix_pending);
+        assert!(unproven.address_effect_unproven);
+        let (outcome, _) =
+            agent_doc_queue_io::queue_claim::claim(&doc, ROW, "subagent:pr12-address3", 600)
+                .expect("the unproven address row is dispatchable again");
+        assert_eq!(
+            outcome,
+            agent_doc_queue::queue_claim::ClaimOutcome::Reassigned,
+        );
+        let generation = agent_doc_queue_io::queue_claim::load_ledger(&doc)
+            .unwrap()
+            .claims
+            .iter()
+            .find(|claim| claim.owner == "subagent:pr12-address3")
+            .map(|claim| claim.generation)
+            .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            ROW,
+            "subagent:pr12-address3",
+            "worker:pr12-address3",
+            600,
+            generation,
+        )
+        .unwrap();
+        let _proof = proved_address_observation();
         assert!(
             requeue_nonterminal_goal_hand_back(&doc, ROW, Some(generation), landed)
                 .unwrap()
-                .is_none()
+                .is_none(),
+            "an observed head change completes the address run"
         );
         let reported = report_complete(&doc, ROW, Some(generation), None, None, landed)
             .expect("the written fix on the head completes the address run");
@@ -2424,6 +2455,8 @@ mod tests {
             1,
         )
         .unwrap();
+        // The address half's receipt is not the observation. A posted reply is.
+        let _proof = proved_address_reply();
         let prose = format!(
             "**Summary**\n\n\
              The approval states no code change, so nothing was committed.\n\
@@ -2469,8 +2502,9 @@ mod tests {
 
     /// `#presetorder`: a no-change address half does not finish a later preset
     /// that declares no goal final states. `PRESET-DONE` for that preset, after
-    /// the address receipt, takes the ordinary report path. A pure `#address`
-    /// row still completes on `NO-WRITTEN-FIX`.
+    /// the address receipt and an observed review reply, takes the ordinary
+    /// report path. A pure `#address` row does not complete on `NO-WRITTEN-FIX`
+    /// alone (`#addressproof`).
     #[test]
     fn no_written_fix_does_not_skip_a_later_preset() {
         let dir = tempfile::tempdir().unwrap();
@@ -2513,6 +2547,8 @@ mod tests {
             1,
         )
         .unwrap();
+        // The address half's receipt is not the observation. A posted reply is.
+        let _proof = proved_address_reply();
         let prose = format!(
             "**Summary**\n\n\
              The approval states no code change, so nothing was committed.\n\
@@ -2574,9 +2610,10 @@ mod tests {
         );
     }
 
-    /// `#reviewfixonhead`: `NO-WRITTEN-FIX` still completes a pure address run.
+    /// `#addressproof`: `NO-WRITTEN-FIX` does not complete a pure address run.
+    /// An observed head change or review reply does.
     #[test]
-    fn no_written_fix_completes_a_pure_address_run() {
+    fn no_written_fix_without_a_head_change_or_reply_stays_open() {
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         fs::write(
@@ -2620,12 +2657,75 @@ mod tests {
              NO-WRITTEN-FIX head={HEAD}\n\
              INLINE-THREADS-LOADED 0 head={HEAD}\n"
         );
+        let unproven = requeue_nonterminal_goal_hand_back(&doc, ROW, Some(1), &prose)
+            .unwrap()
+            .expect("no commit and no review reply does not complete the address");
+        assert!(!unproven.address_fix_pending);
+        assert!(unproven.address_effect_unproven);
+        let _proof = proved_address_reply();
+        let (outcome, _) =
+            agent_doc_queue_io::queue_claim::claim(&doc, ROW, "subagent:pr12-address2", 600)
+                .unwrap();
+        assert_eq!(
+            outcome,
+            agent_doc_queue::queue_claim::ClaimOutcome::Reassigned
+        );
+        let generation = agent_doc_queue_io::queue_claim::load_ledger(&doc)
+            .unwrap()
+            .claims
+            .iter()
+            .find(|claim| claim.owner == "subagent:pr12-address2")
+            .map(|claim| claim.generation)
+            .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            ROW,
+            "subagent:pr12-address2",
+            "worker:pr12-address2",
+            600,
+            generation,
+        )
+        .unwrap();
         assert!(
-            requeue_nonterminal_goal_hand_back(&doc, ROW, Some(1), &prose)
+            requeue_nonterminal_goal_hand_back(&doc, ROW, Some(generation), &prose)
                 .unwrap()
                 .is_none(),
-            "a pure address run still completes on NO-WRITTEN-FIX"
+            "an observed review reply completes the address run"
         );
+    }
+
+    fn proved_address_observation() -> agent_doc_queue::address_completion_proof::ForcedObservation
+    {
+        use agent_doc_queue::address_completion_proof::{
+            AddressObservation, AddressSnapshot, ForcedObservation,
+        };
+        let snap = |head: &str| AddressSnapshot {
+            head_sha: head.to_string(),
+            reply_ids: Vec::new(),
+            comment_commit: None,
+            thread_named: false,
+        };
+        ForcedObservation::install(AddressObservation::Seen {
+            baseline: Some(snap("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
+            current: snap("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+        })
+    }
+
+    fn proved_address_reply() -> agent_doc_queue::address_completion_proof::ForcedObservation {
+        use agent_doc_queue::address_completion_proof::{
+            AddressObservation, AddressSnapshot, ForcedObservation,
+        };
+        let head = "fa3a3f449986d565f21aeb6e0f792323bc8d1d58";
+        let snap = |replies: Vec<u64>| AddressSnapshot {
+            head_sha: head.to_string(),
+            reply_ids: replies,
+            comment_commit: Some(head.to_string()),
+            thread_named: true,
+        };
+        ForcedObservation::install(AddressObservation::Seen {
+            baseline: Some(snap(Vec::new())),
+            current: snap(vec![4_606_896_300]),
+        })
     }
 
     /// `#presetorder`: an ungated earlier preset does not add a receipt.
@@ -2826,11 +2926,17 @@ mod tests {
              THREAD-FIX-ON-HEAD {INLINE_MUST} head={INLINE_HEAD} resolved\n\
              THREAD-FIX-ON-HEAD {INLINE_SHOULD} head={INLINE_HEAD} resolved\n"
         );
+        let unproven = requeue_nonterminal_goal_hand_back(&doc, ROW, Some(generation), &settled)
+            .unwrap()
+            .expect("thread receipts without an observed head change or reply stay open");
+        assert!(unproven.address_effect_unproven);
+        let generation = restart_subagent(&doc, ROW, "subagent:address5");
+        let _proof = proved_address_observation();
         assert!(
             requeue_nonterminal_goal_hand_back(&doc, ROW, Some(generation), &settled)
                 .unwrap()
                 .is_none(),
-            "receipts for every named root thread take the ordinary report path"
+            "receipts plus an observed head change take the ordinary report path"
         );
     }
 

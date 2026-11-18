@@ -202,6 +202,17 @@ pub fn queue_skip_diagnostic_for_response(content: &str, response: &str) -> Resu
     };
     let queue_head_display = display_queue_prompt_text(&queue_head);
     if crate::queue_response::latest_echo_cell_omits_address_fix(content, response, &queue_head) {
+        if crate::address_completion_proof::address_effect_unproven(&queue_head)
+            && !crate::queue_response::address_echo_lacks_written_fix(
+                content,
+                response,
+                &queue_head,
+            )
+        {
+            return Ok(format!(
+                "[queue] kept address head `{queue_head_display}` open. The response claims the address is done, but nothing observed the pull-request head change or a review reply on the addressed thread (#addressproof). `FIX-ON-HEAD` and `NO-WRITTEN-FIX` are not that observation. Next: commit the written fix onto the pull-request head, or post the review reply, and run the address again so the binary can read that fact."
+            ));
+        }
         return Ok(format!(
             "[queue] kept address head `{queue_head_display}` open. The response does not land the review's written fix on the current head (#reviewfixonhead). A later review or a different behavior does not address it. Next: land that written fix on the exact current head and finish with `FIX-ON-HEAD <review-url> head=<sha>`, or finish with `NO-WRITTEN-FIX head=<sha>` when every review states no code change."
         ));
@@ -567,6 +578,13 @@ mod tests {
         let diagnostic = super::queue_skip_diagnostic_for_response(&doc, &response).unwrap();
         assert!(diagnostic.contains("(#reviewfixonhead)"), "{diagnostic}");
         assert!(diagnostic.contains("FIX-ON-HEAD"));
+
+        let claimed = format!(
+            "### Re: address\n\n> **Queue prompt:** {head}\n\nNO-WRITTEN-FIX head=fa3a3f449986d565f21aeb6e0f792323bc8d1d58\n"
+        );
+        let refused = super::queue_skip_diagnostic_for_response(&doc, &claimed).unwrap();
+        assert!(refused.contains("(#addressproof)"), "{refused}");
+        assert!(refused.contains("review reply"));
     }
 
     /// `#managedlistnodrift` regression: the waiting-item roll-up token

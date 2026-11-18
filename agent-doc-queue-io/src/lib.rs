@@ -1,6 +1,7 @@
 //! Queue-related marker storage I/O for agent-doc.
 
 pub mod active_lifecycle;
+pub mod address_effect;
 pub mod blocker_disregard;
 pub mod build_slot;
 pub mod claim_release_receipt;
@@ -49,11 +50,20 @@ pub mod write_queue;
 /// strike/consumption/residue predicates on this thread, so a goal-like preset
 /// declared only in the project config still gates closeout on its declared
 /// final states. Hold the returned guard across the decision.
-pub fn goal_terminal_presets_guard(
-    file: &std::path::Path,
-    content: &str,
-) -> agent_doc_queue::goal_preset_terminal::InheritedPresetsGuard {
-    agent_doc_queue::goal_preset_terminal::InheritedPresetsGuard::install(
+/// Preset map plus, when GitHub observation is enabled, the address-effect
+/// reads for queue rows in `content`. Dropping the guard restores both.
+pub struct CloseoutDecisionGuard {
+    _presets: agent_doc_queue::goal_preset_terminal::InheritedPresetsGuard,
+    _effect: Option<agent_doc_queue::address_completion_proof::AddressEffectGuard>,
+}
+
+pub fn goal_terminal_presets_guard(file: &std::path::Path, content: &str) -> CloseoutDecisionGuard {
+    let presets = agent_doc_queue::goal_preset_terminal::InheritedPresetsGuard::install(
         &agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(content, file),
-    )
+    );
+    let effect = address_effect::install_for_content(file, content);
+    CloseoutDecisionGuard {
+        _presets: presets,
+        _effect: effect,
+    }
 }

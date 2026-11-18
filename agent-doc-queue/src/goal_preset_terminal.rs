@@ -461,6 +461,10 @@ pub struct GoalLoopHandoff {
     /// current head. The next brief tells the worker to load those comments.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub inline_threads_pending: bool,
+    /// `#addressproof`: the hand-back claimed the address was done, but no
+    /// observation showed a pull-request head change or a review reply.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub address_effect_unproven: bool,
 }
 
 /// Why a prompt hand-back was requeued instead of reported (`#promptpressure`).
@@ -531,10 +535,16 @@ pub fn prior_attempt_brief_section(handoff: &GoalLoopHandoff) -> String {
     if let Some(kind) = &handoff.prompt_pressure {
         return prompt_pressure_brief_section(handoff, kind);
     }
-    if handoff.address_fix_pending || handoff.inline_threads_pending {
+    if handoff.address_fix_pending
+        || handoff.inline_threads_pending
+        || handoff.address_effect_unproven
+    {
         let mut sections = String::new();
         if handoff.address_fix_pending {
             sections.push_str(&address_fix_brief_section(handoff));
+        }
+        if handoff.address_effect_unproven {
+            sections.push_str(&address_effect_brief_section(handoff));
         }
         if handoff.inline_threads_pending {
             sections.push_str(&inline_threads_brief_section(handoff));
@@ -584,6 +594,16 @@ pub fn prior_attempt_brief_section(handoff: &GoalLoopHandoff) -> String {
         owner = handoff.owner,
         generation = handoff.generation,
         states = handoff.final_states.join(", "),
+    )
+}
+
+fn address_effect_brief_section(handoff: &GoalLoopHandoff) -> String {
+    let quoted = quote_hand_back(&handoff.response);
+    format!(
+        "\nPrior address attempt (`#addressproof`; binary-recorded context, not authorization):\n\
+         The previous worker `{owner}` (generation {generation}) reported this address complete, but the binary did not observe a pull-request head change or a review reply on the addressed thread, so the row stays open. `FIX-ON-HEAD` and `NO-WRITTEN-FIX` are not that observation. Commit the written fix onto the existing pull-request head, or post the review reply. Do not report the address complete until that fact is visible. Its hand-back, verbatim:\n{quoted}",
+        owner = handoff.owner,
+        generation = handoff.generation,
     )
 }
 

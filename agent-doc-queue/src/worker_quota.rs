@@ -719,6 +719,7 @@ mod tests {
             prompt_pressure: None,
             address_fix_pending: false,
             inline_threads_pending: false,
+            address_effect_unproven: false,
         };
         let section = crate::goal_preset_terminal::prior_attempt_brief_section(&handoff);
         assert!(section.contains("branch `fix/partial`"), "{section}");

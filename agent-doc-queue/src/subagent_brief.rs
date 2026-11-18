@@ -1183,6 +1183,7 @@ mod tests {
         let content = doc(frontmatter, "subagents", &[item], &[]);
         let preamble = subagent_authorization("prs.md", &content, item).subagent_prompt_preamble;
         assert!(preamble.contains("(#reviewfixonhead)"), "{preamble}");
+        assert!(preamble.contains("(#addressproof)"), "{preamble}");
         assert!(preamble.contains("FIX-ON-HEAD <review-url> head=<sha>"));
         assert!(preamble.contains("written fix is the code on the exact current head"));
 

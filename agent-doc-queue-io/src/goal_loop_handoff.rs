@@ -146,6 +146,9 @@ pub struct GoalLoopRequeue {
     /// `#addressinline`: an `#address` or `#adversarial-pr` hand-back whose
     /// root inline discussion threads are not shown on the current head.
     pub inline_threads_pending: bool,
+    /// `#addressproof`: a claimed address completion had no observed head
+    /// change and no observed review reply.
+    pub address_effect_unproven: bool,
     /// `#presetorder`: the first later preset in the item's temporal order
     /// that this hand-back did not settle.
     pub next_ordered_preset: Option<String>,
@@ -190,6 +193,15 @@ pub fn requeue_nonterminal_hand_back(
     let address_lands = address_run
         && agent_doc_queue::address_fix_on_head::address_run_lands_written_fix(response);
     let address_pending = address_run && !address_lands;
+    // `#addressproof`: install the remote read before the completion decision.
+    // A forced observation (tests) replaces the network. No read is not proof.
+    let effect_observation = crate::address_effect::observation_for_item(file, &claim.item_text);
+    let _effect_guard = agent_doc_queue::address_completion_proof::AddressEffectGuard::install_item(
+        &claim.item_text,
+        effect_observation,
+    );
+    let effect_unproven = address_run
+        && agent_doc_queue::address_completion_proof::address_effect_unproven(&claim.item_text);
     // `#addressinline`: `#address` declares no final states, so the empty-state
     // return must not skip a row whose inline discussion threads are unsettled.
     let inline_goal = agent_doc_queue::inline_discussion::head_requires_inline_discussions(
@@ -207,6 +219,7 @@ pub fn requeue_nonterminal_hand_back(
     // fix is on the current head. `#addressinline`: an inline goal stays open
     // until every root thread's written fix is on that head.
     let completes_order = !address_pending
+        && !effect_unproven
         && !inline_pending
         && !final_states.is_empty()
         && agent_doc_queue::goal_preset_terminal::hand_back_completes_goal_loop(
@@ -215,8 +228,11 @@ pub fn requeue_nonterminal_hand_back(
             &bodies,
         );
     let ordinary_empty = !address_run && !inline_goal && final_states.is_empty();
-    let settled_inline_without_states =
-        inline_goal && !inline_pending && !address_pending && final_states.is_empty();
+    let settled_inline_without_states = inline_goal
+        && !inline_pending
+        && !address_pending
+        && !effect_unproven
+        && final_states.is_empty();
     // `#presetorder`: a settled address half, including `NO-WRITTEN-FIX`, does
     // not finish a row that still has a later preset. The first preset keeps
     // its own receipt, so `#rebase then #adversarial-pr` still completes on
@@ -229,8 +245,10 @@ pub fn requeue_nonterminal_hand_back(
     // A landed `#address` receipt completes only a pure address run. A row
     // that also declares goal final states stays open until the hand-back
     // opens on REVIEW-CLEAN or BLOCKED (`#crossagenthandoff`).
-    let address_completes = address_lands && final_states.is_empty() && !later_unmet;
+    let address_completes =
+        address_lands && !effect_unproven && final_states.is_empty() && !later_unmet;
     if !address_pending
+        && !effect_unproven
         && !inline_pending
         && !later_unmet
         && (ordinary_empty || settled_inline_without_states || completes_order || address_completes)
@@ -272,6 +290,7 @@ pub fn requeue_nonterminal_hand_back(
         prompt_pressure: None,
         address_fix_pending: address_pending,
         inline_threads_pending: inline_pending,
+        address_effect_unproven: effect_unproven,
     };
     mutate(file, |ledger| {
         if let Some(live) = live.as_ref() {
@@ -289,6 +308,8 @@ pub fn requeue_nonterminal_hand_back(
     .unwrap_or(claim);
     let tag = if address_pending {
         "#reviewfixonhead"
+    } else if effect_unproven {
+        "#addressproof"
     } else if inline_pending {
         "#addressinline"
     } else if later_unmet {
@@ -322,6 +343,7 @@ pub fn requeue_nonterminal_hand_back(
         answered_blocked_review,
         address_fix_pending: address_pending,
         inline_threads_pending: inline_pending,
+        address_effect_unproven: effect_unproven,
         next_ordered_preset,
     }))
 }
@@ -419,6 +441,7 @@ pub fn requeue_with_prompt_pressure(
         prompt_pressure: Some(kind.clone()),
         address_fix_pending: false,
         inline_threads_pending: false,
+        address_effect_unproven: false,
     };
     mutate(file, |ledger| {
         if let Some(live) = live.as_ref() {
@@ -465,6 +488,7 @@ pub fn record_quota_requeue(file: &Path, claim: &QueueClaim) -> Result<()> {
         prompt_pressure: None,
         address_fix_pending: false,
         inline_threads_pending: false,
+        address_effect_unproven: false,
     };
     mutate(file, |ledger| ledger.record(handoff))
 }

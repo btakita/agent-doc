@@ -2460,12 +2460,16 @@ fn reconcile_component_body(
         .collect();
     let base_map: std::collections::HashMap<&str, &KeyedChild> =
         base_children.iter().map(|c| (c.key.as_str(), c)).collect();
-    let ours_generated_parents = (name == "queue")
-        .then(|| generated_response_parent_keys(&ours_children))
-        .unwrap_or_default();
-    let theirs_generated_parents = (name == "queue")
-        .then(|| generated_response_parent_keys(&theirs_children))
-        .unwrap_or_default();
+    let ours_generated_parents = if name == "queue" {
+        generated_response_parent_keys(&ours_children)
+    } else {
+        Default::default()
+    };
+    let theirs_generated_parents = if name == "queue" {
+        generated_response_parent_keys(&theirs_children)
+    } else {
+        Default::default()
+    };
 
     let ours_keys: Vec<&str> = ours_children.iter().map(|c| c.key.as_str()).collect();
     let theirs_keys: Vec<&str> = theirs_children.iter().map(|c| c.key.as_str()).collect();

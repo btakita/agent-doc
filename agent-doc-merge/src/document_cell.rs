@@ -1704,12 +1704,16 @@ fn compose_occurrence(
     // content policy. `exchange` blocks are not strike-bearing and keep the
     // content-policy path.
     let lifecycle_governed = is_list_component(&ours.component);
-    let ours_generated_parents = (ours.component == "queue")
-        .then(|| crate::crdt::generated_response_parent_keys_for_rows(&ours_rows))
-        .unwrap_or_default();
-    let theirs_generated_parents = (ours.component == "queue")
-        .then(|| crate::crdt::generated_response_parent_keys_for_rows(&theirs_rows))
-        .unwrap_or_default();
+    let ours_generated_parents = if ours.component == "queue" {
+        crate::crdt::generated_response_parent_keys_for_rows(&ours_rows)
+    } else {
+        Default::default()
+    };
+    let theirs_generated_parents = if ours.component == "queue" {
+        crate::crdt::generated_response_parent_keys_for_rows(&theirs_rows)
+    } else {
+        Default::default()
+    };
     // Order spine: theirs (live) for list components, ours (history) for exchange.
     let order = if is_exchange {
         weave_order(&identity_seq(ours), &identity_seq(theirs))

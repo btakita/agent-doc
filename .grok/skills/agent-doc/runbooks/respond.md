@@ -769,6 +769,11 @@ and non-ordering; do not treat it like `after=`. Explicit operator bullets neste
 beneath generated Response/Choices/Next-action/Action/Related metadata remain
 ordinary queue prompts and must be answered normally.
 
+Lead with the outcome and any action the operator needs to take. Give ordered
+steps and unordered findings their own Markdown list items. Put details under
+the item they qualify as indented subitems. Keep the explanation brief and
+retain the evidence needed to verify the outcome.
+
 When a queue response contains a terse salient fact the operator should not
 miss in the larger exchange, include it as its own `%% response <snippet> %%`
 line in the response. Keep the snippet short and lookup-oriented. Closeout

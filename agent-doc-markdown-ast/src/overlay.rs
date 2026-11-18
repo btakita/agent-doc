@@ -785,7 +785,11 @@ const GENERATED_RESPONSE_STRUCTURE_VALUE_LABELS: [&str; 12] = [
 const GENERATED_RESPONSE_STRUCTURE_CONTAINER_LABELS: [&str; 2] =
     ["**Choices:**", "**Next actions:**"];
 
-/// Whether a list item's content is a generated response-structure row
+/// A list item copied from a worker response, as opposed to an operator's
+/// unmarked list item underneath the same response section.
+pub const RESPONSE_DETAIL_MARKER: &str = "<!-- agent-doc:response-detail -->";
+
+/// Whether a list item's content is a marked response detail or a generated response-structure row
 /// (`**Blocker:** …`, `**Summary:** …`, `**What changed:** …`,
 /// `**Verification:** …`, `**Action items:** …`, `**Open items:** …`,
 /// `**Notes:** …`, `**Next actions:** …`, `**State:** …`, `**Guidance:** …`,
@@ -809,7 +813,11 @@ pub fn is_generated_response_structure_row(item_content: &str) -> bool {
     let content = agent_doc_element_queue::strip_attempt_projection_prefix(content).trim();
     let (_, inner) = split_struck_body(content);
     let inner = agent_doc_element_queue::strip_attempt_projection_prefix(inner).trim();
-    if GENERATED_RESPONSE_STRUCTURE_CONTAINER_LABELS.contains(&inner) {
+    if GENERATED_RESPONSE_STRUCTURE_CONTAINER_LABELS.contains(&inner)
+        || inner
+            .strip_suffix(RESPONSE_DETAIL_MARKER)
+            .is_some_and(|body| body.ends_with(char::is_whitespace) && !body.trim().is_empty())
+    {
         return true;
     }
     GENERATED_RESPONSE_STRUCTURE_VALUE_LABELS

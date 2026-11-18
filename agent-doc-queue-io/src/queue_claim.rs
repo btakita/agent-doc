@@ -4114,16 +4114,7 @@ mod tests {
         let content = std::fs::read_to_string(&doc).unwrap();
         let pinned = 1_000_000;
         let _outer = pin_claim_clock_for_current_thread(pinned);
-        let (_, claim) = claim(&doc, "#lostdiag", "subagent:lostdiag", 10).unwrap();
-        start_attempt(
-            &doc,
-            "#lostdiag",
-            "subagent:lostdiag",
-            "/root/lostdiag",
-            10,
-            claim.generation,
-        )
-        .unwrap();
+        claim(&doc, "#lostdiag", "subagent:lostdiag", 10).unwrap();
 
         let _expired = pin_claim_clock_for_current_thread(pinned + 10);
         let reports = claim_reports_for_content(&doc, &content).unwrap();
@@ -4136,16 +4127,9 @@ mod tests {
         assert_eq!(report.assessment, "lost");
         assert_eq!(report.claim_age_secs, 10);
         assert_eq!(report.ttl_remaining_secs, 0);
-        assert_eq!(report.worker_started_age_secs, Some(10));
+        assert_eq!(report.worker_started_age_secs, None);
         let recovery = report.lost_recovery.as_ref().unwrap();
         assert_eq!(recovery.reason, "claim_ttl_expired");
-        assert!(
-            recovery
-                .recover_completed_worker_result
-                .contains("/root/lostdiag"),
-            "{}",
-            recovery.recover_completed_worker_result
-        );
         assert_eq!(
             recovery.closeout_command,
             format!("agent-doc finalize '{}' --done 'lostdiag'", doc.display())
@@ -4157,10 +4141,7 @@ mod tests {
             "{}",
             recovery.recover_completed_worker_result
         );
-        assert_eq!(
-            recovery.reclaim_command, None,
-            "a bound worker makes retry unsafe even after expiry"
-        );
+        assert!(recovery.reclaim_command.is_some());
     }
 
     #[test]
@@ -4171,16 +4152,7 @@ mod tests {
         let content = std::fs::read_to_string(&doc).unwrap();
         let pinned = 1_000_000;
         let _outer = pin_claim_clock_for_current_thread(pinned);
-        let (_, claim) = claim(&doc, item, "subagent:publish", 10).unwrap();
-        start_attempt(
-            &doc,
-            item,
-            "subagent:publish",
-            "/root/publish",
-            10,
-            claim.generation,
-        )
-        .unwrap();
+        claim(&doc, item, "subagent:publish", 10).unwrap();
 
         let _expired = pin_claim_clock_for_current_thread(pinned + 10);
         let reports = claim_reports_for_content(&doc, &content).unwrap();
@@ -5205,12 +5177,10 @@ mod tests {
         );
         assert_eq!(load_ledger(&doc).unwrap().claims[0], refreshed);
 
-        // Judged past its expiry, the same owner's refresh is refused and the
-        // stored claim is left as it was (not revived).
-        let expired =
-            refresh_at(&doc, "#a", "subagent:a", 600, refreshed.expires_at_secs).unwrap_err();
-        assert_eq!(refusal(&expired).kind(), "expired");
-        assert_eq!(load_ledger(&doc).unwrap().claims[0], refreshed);
+        // Judged past its reminder window, the same bound owner may refresh;
+        // elapsed time is not a lifecycle transition.
+        let late = refresh_at(&doc, "#a", "subagent:a", 600, refreshed.expires_at_secs).unwrap();
+        assert!(late.expires_at_secs > refreshed.expires_at_secs);
 
         let ops =
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();

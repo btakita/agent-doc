@@ -55,20 +55,16 @@
 //!   pruned at closeout reconciliation;
 //! * **explicit release** — `agent-doc queue release` when the worker reports
 //!   back, so the in-session loop can take the item again and close it;
-//! * **expiry** — a TTL ([`DEFAULT_QUEUE_CLAIM_TTL_SECS`], overridable per
-//!   claim). Agent-doc receives the worker identity at `queue start`, but has
-//!   no native heartbeat it can observe after dispatch. Without a TTL a lost
-//!   subagent would strand the head forever; with one, the attempt becomes
-//!   nonblocking `Lost` while its row remains visibly worked. `queue claim --refresh`
-//!   ([`QueueClaimLedger::refresh`]) extends an already-started attempt and,
-//!   with the exact generation, revives one that expired with its worker still
-//!   bound only when no worker stop was recorded. It refuses an unstarted,
-//!   abandoned, foreign, recovered-stop, or missing claim rather than promoting
-//!   or (re)creating one. A low-level frozen entry retains its generation only
-//!   until recovery; the public `queue freeze` command immediately runs
-//!   failed-continue recovery and directs a fresh generation. Under the
-//!   queue-level `subagents` attribute an expired claim returns the head to the
-//!   dispatch set, never to inline drainage.
+//! * **pre-start expiry** — a TTL ([`DEFAULT_QUEUE_CLAIM_TTL_SECS`],
+//!   overridable per claim) ends only an unbound `Claimed` reservation. Once
+//!   `queue start` binds the worker, elapsed time and heartbeat age never end
+//!   tracking. `queue claim --refresh` ([`QueueClaimLedger::refresh`]) records
+//!   proof of life and advances the reminder window, but is not required to
+//!   prevent loss. A bound attempt ends only on an authoritative report,
+//!   explicit release/requeue, recorded harness stop, quota evidence, or row
+//!   closure. A low-level frozen entry retains its generation only until
+//!   recovery; the public `queue freeze` command immediately runs
+//!   failed-continue recovery and directs a fresh generation.
 //!
 //! # Owner session liveness (`#claimownerliveness`)
 //!
@@ -95,7 +91,8 @@
 //! An ended owner session does NOT release the claim. A subagent spawned
 //! before `/clear` can legitimately outlive it and report back (that happened
 //! in the same coordinator session that hit the stale claim), so the claim
-//! keeps holding the head out of inline drainage until its TTL. What changes is
+//! keeps holding the head out of inline drainage until an explicit lifecycle
+//! event ends it. What changes is
 //! what agent-doc asserts: the claim is reported as `owner_session_ended` —
 //! unverifiable, not "in flight" — with the two concrete exits for the new
 //! coordinator: for an already-started worker, **adopt** it (`queue claim
@@ -217,10 +214,9 @@ pub struct QueueClaim {
     pub reported_at_secs: Option<u64>,
     /// Last generation-fenced coordinator heartbeat for a running worker
     /// (`queue claim --refresh`). `None` falls back to the worker binding's
-    /// `started_at_secs`. The work pool (`#subagentworkpool`) treats a
-    /// running attempt whose heartbeat is older than the frozen bound as a
-    /// frozen worker: it frees its pool slot while the ledger entry awaits
-    /// failed-continue recovery and a fresh retry.
+    /// `started_at_secs`. Heartbeats prompt an idle coordinator to check the
+    /// worker, but elapsed time alone never freezes a bound running attempt or
+    /// frees its pool slot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub heartbeat_at_secs: Option<u64>,
     /// Recorded evidence that this exact worker wrapper stopped
@@ -447,7 +443,7 @@ pub enum QueueClaimState {
 pub enum WorkerLivenessEvidence {
     /// A generation-fenced worker binding or report receipt exists.
     Proven,
-    /// The owner/session is known gone or the attempt expired.
+    /// The owner/session is known gone or an unbound reservation expired.
     Absent,
     /// No worker observation is available.
     Unknown,
@@ -519,12 +515,8 @@ pub fn diagnose_lifecycle(
         || crate::lost_running_recovery::authorized_running_requeue(claim)
     {
         claim.projection_marker()
-    } else if claim.state != QueueClaimState::Reported && claim.is_expired(now_secs) {
-        if claim.worker.is_some() {
-            agent_doc_document::queue_projection::QueueLifecycleMarker::LostRunning
-        } else {
-            agent_doc_document::queue_projection::QueueLifecycleMarker::LostClaimed
-        }
+    } else if claim.unbound_reservation_expired(now_secs) {
+        agent_doc_document::queue_projection::QueueLifecycleMarker::LostClaimed
     } else {
         claim.projection_marker()
     };
@@ -880,6 +872,16 @@ impl QueueClaim {
         ) && now_secs >= self.expires_at_secs
     }
 
+    /// Whether the pre-start reservation elapsed before any worker was bound.
+    ///
+    /// Claim TTL is a dispatch-boundary lease, not a worker runtime limit.
+    /// Once `queue start` binds a worker, only an authoritative report,
+    /// release, or harness stop changes its lifecycle; wall-clock age alone
+    /// never loses the attempt.
+    pub fn unbound_reservation_expired(&self, now_secs: u64) -> bool {
+        self.state == QueueClaimState::Claimed && self.worker.is_none() && self.is_expired(now_secs)
+    }
+
     pub fn blocks_dispatch(&self, now_secs: u64) -> bool {
         // An explicit requeue of a started worker stays `Running` and does not
         // block: continue cannot resume it, so one replacement may be claimed
@@ -910,13 +912,9 @@ impl QueueClaim {
 
     /// Whether this attempt still owns its worker id against `start` of a
     /// different item. [`Self::blocks_dispatch`] keeps a bound running
-    /// generation past the TTL, so `claim` cannot steal it. An expired,
-    /// non-frozen binding does not: GH #390 retires it before the new start
-    /// is stored.
+    /// generation indefinitely, so elapsed time cannot let another attempt
+    /// steal its worker id.
     fn blocks_worker_reuse(&self, now_secs: u64) -> bool {
-        if self.is_expired(now_secs) && !self.retains_frozen_worker_claim() {
-            return false;
-        }
         self.blocks_dispatch(now_secs)
     }
 
@@ -980,16 +978,13 @@ impl QueueClaim {
                 .is_some_and(QueueWorkerFreeze::is_abandon)
     }
 
-    /// Project TTL expiry onto this attempt. A low-level harness-freeze entry
-    /// stays `Running` until failed-continue recovery handles the recorded
-    /// stop; expiry alone does not perform that transition. The public
-    /// `queue freeze` command immediately runs that recovery and directs a
-    /// fresh generation (`#freezefreshretry`).
+    /// Project TTL expiry onto an unbound pre-start reservation. A bound
+    /// worker has no runtime timeout: it stays tracked until an authoritative
+    /// report, release, or harness stop. The public `queue freeze` command
+    /// immediately runs failed-continue recovery for a recorded stop and
+    /// directs a fresh generation (`#freezefreshretry`).
     pub fn project_expiry(&mut self, now_secs: u64) {
-        if self.is_expired(now_secs)
-            && !self.retains_frozen_worker_claim()
-            && !crate::lost_running_recovery::authorized_running_requeue(self)
-        {
+        if self.unbound_reservation_expired(now_secs) {
             self.mark_lost();
         }
     }
@@ -1770,7 +1765,9 @@ impl QueueClaimLedger {
             });
         }
         let resumes_frozen = claim.retains_frozen_worker_claim();
-        if (claim.is_expired(now_secs) || claim.state == QueueClaimState::Lost) && !resumes_frozen {
+        if (claim.unbound_reservation_expired(now_secs) || claim.state == QueueClaimState::Lost)
+            && !resumes_frozen
+        {
             return Err(QueueClaimStartRefused::Expired {
                 holder: claim.owner.clone(),
                 expired_at_secs: claim.expires_at_secs,
@@ -1923,11 +1920,11 @@ impl QueueClaimLedger {
     }
 
     /// [`Self::refresh_attempt_in_session`] that also accepts the exact
-    /// generation of an attempt that expired with its worker still bound
-    /// (`#subagentworkpool`). Expiry only means nobody refreshed the claim, so
-    /// the coordinator's proof of life revives that same attempt: same owner,
-    /// generation, and worker. This applies only when no worker stop was
-    /// recorded. A low-level frozen ledger entry can still be revived before
+    /// generation of a legacy lost attempt with its worker still bound
+    /// (`#subagentworkpool`). Current bound attempts do not expire; this seam
+    /// preserves compatibility by reviving the same owner, generation, and
+    /// worker when no stop was recorded. A low-level frozen ledger entry can
+    /// still be revived before
     /// recovery, but the public `queue freeze` command synchronously runs
     /// failed-continue recovery and directs a fresh claim/generation instead.
     /// This internal pre-refill operation cannot steal work:
@@ -2016,7 +2013,7 @@ impl QueueClaimLedger {
                 worker_bound: existing.worker_binding_holds_attempt(),
             }));
         }
-        let lapsed = self.claims[index].is_expired(now_secs)
+        let lapsed = self.claims[index].unbound_reservation_expired(now_secs)
             || self.claims[index].state == QueueClaimState::Lost;
         let revive = lapsed
             && revive_expired_bound
@@ -2077,7 +2074,7 @@ impl QueueClaimLedger {
     /// keeps the claim, generation, and worker binding while freeing the slot.
     /// The public command immediately follows it with failed-continue recovery;
     /// when the refill offers this row, a fresh claim retires the stopped
-    /// attempt. An attempt that expired with its worker bound may be frozen too.
+    /// attempt. A legacy lost attempt with its worker bound may be frozen too.
     /// Idempotent for an already-frozen entry before recovery.
     pub fn freeze_attempt(
         &mut self,
@@ -2093,8 +2090,8 @@ impl QueueClaimLedger {
         validate_generation(claim, expected_generation)?;
         match claim.state {
             QueueClaimState::Running => {}
-            // An attempt that expired with its worker bound still needs its
-            // stop recorded before its slot frees (`#subagentworkpool`).
+            // A legacy lost attempt with its worker bound still needs its stop
+            // recorded before its slot frees (`#subagentworkpool`).
             QueueClaimState::Lost if claim.worker.is_some() => {}
             QueueClaimState::Claimed => {
                 return Err(QueueClaimTransitionRefused::NotRunning {
@@ -3033,7 +3030,9 @@ impl QueueClaimLedger {
         // exclusive claim keeps exactly its located lines; only an unlocated
         // claim holds every line with its identity.
         for (claim_idx, claim) in self.claims.iter_mut().enumerate() {
-            if !members[claim_idx] || claim.is_expired(now_secs) || !live.contains(&claim.identity)
+            if !members[claim_idx]
+                || claim.unbound_reservation_expired(now_secs)
+                || !live.contains(&claim.identity)
             {
                 continue;
             }
@@ -3209,7 +3208,7 @@ impl QueueClaimLedger {
         let mut pruned = Vec::new();
         let mut kept = Vec::with_capacity(self.claims.len());
         for mut claim in std::mem::take(&mut self.claims) {
-            if claim.state != QueueClaimState::Lost && claim.is_expired(now_secs) {
+            if claim.state != QueueClaimState::Lost && claim.unbound_reservation_expired(now_secs) {
                 claim.project_expiry(now_secs);
                 if claim.state == QueueClaimState::Lost {
                     pruned.push((claim.clone(), ClaimPruneCause::Expired));
@@ -4465,7 +4464,7 @@ mod tests {
     }
 
     #[test]
-    fn expiry_projection_preserves_claimed_or_running_phase() {
+    fn expiry_projects_only_an_unbound_reservation() {
         use agent_doc_document::queue_projection::QueueLifecycleMarker;
 
         let mut ledger = QueueClaimLedger::default();
@@ -4482,8 +4481,10 @@ mod tests {
             started_at_secs: 20,
         });
         let running = diagnose_lifecycle(claim, None, 100, DISPATCH_EVIDENCE_GRACE_SECS)
-            .expect("expired running attempt needs a lost projection");
-        assert_eq!(running.expected, QueueLifecycleMarker::LostRunning);
+            .expect("the missing visible running marker is projection drift");
+        assert_eq!(running.expected, QueueLifecycleMarker::Running);
+        claim.project_expiry(u64::MAX);
+        assert_eq!(claim.state, QueueClaimState::Running);
     }
 
     /// `#markdrift`: a stopped running worker paints `⚠️`, not `🚧` and not
@@ -5434,13 +5435,10 @@ mod tests {
         assert_eq!(ledger.claims[0].owner, "subagent:a");
         assert_eq!(ledger.claims[0].expires_at_secs, 155);
 
-        // An expired claim is refused, never revived. The bound running
-        // worker still holds the row: expiry alone does not restore drainability.
-        let expired = ledger
-            .refresh("do [#a]", "subagent:a", 155, 50)
-            .unwrap_err();
-        assert_eq!(expired.reason.kind(), "expired");
-        assert_eq!(ledger.claims[0].expires_at_secs, 155);
+        // A bound worker has no runtime timeout. Its owner may refresh after
+        // the reminder window elapsed without a special revival path.
+        let refreshed = ledger.refresh("do [#a]", "subagent:a", 155, 50).unwrap();
+        assert_eq!(refreshed.expires_at_secs, 205);
         assert!(
             ledger.claimed_items(155, None).claims("do [#a]"),
             "a bound running worker still holds the row after its TTL"
@@ -5894,11 +5892,10 @@ mod tests {
         );
     }
 
-    /// `#subagentworkpool`: an attempt that expired with its worker bound is
-    /// revived only by its exact owner and generation, never when a stop is
-    /// recorded, the worker moved on, or a reclaim took the generation.
+    /// `#subagentworkpool`: a long-running bound attempt accepts heartbeats
+    /// only from its exact owner and generation. Elapsed time needs no revival.
     #[test]
-    fn only_the_exact_heartbeat_revives_an_expired_bound_attempt() {
+    fn only_the_exact_heartbeat_refreshes_a_long_running_attempt() {
         let live = || {
             let mut ledger = QueueClaimLedger::default();
             ledger.claim("work", "subagent:a", 100, 10);
@@ -5917,27 +5914,26 @@ mod tests {
                 .unwrap_err()
                 .reason
                 .kind(),
-            "expired"
+            "other_owner"
         );
         assert_eq!(
             revive(&mut expired, "subagent:a", Some(2))
                 .unwrap_err()
                 .reason
                 .kind(),
-            "expired"
+            "stale_attempt"
         );
         assert_eq!(
             revive(&mut expired, "subagent:a", None)
                 .unwrap_err()
                 .reason
                 .kind(),
-            "expired"
+            "stale_attempt"
         );
         assert!(
             expired
                 .refresh_attempt_in_session("work", "subagent:a", 200, 50, None, Some(1))
-                .is_err(),
-            "the plain fenced refresh keeps refusing"
+                .is_ok()
         );
 
         let revived = revive(&mut expired, "subagent:a", Some(1)).unwrap();
@@ -5947,9 +5943,9 @@ mod tests {
         assert_eq!(revived.expires_at_secs, 250);
         assert_eq!(revived.heartbeat_at_secs, Some(200));
 
-        // A projected loss is revived the same way.
+        // A legacy projected loss is revived the same way.
         let mut lost = live();
-        lost.prune(200, Some(&[claim_identity("work")].into_iter().collect()));
+        lost.claims[0].mark_lost();
         assert_eq!(lost.claims[0].state, QueueClaimState::Lost);
         assert_eq!(
             revive(&mut lost, "subagent:a", Some(1)).unwrap().state,
@@ -5979,12 +5975,7 @@ mod tests {
             "transient pre-recovery evidence keeps the running projection"
         );
         let wrong_generation = revive(&mut frozen, "subagent:a", Some(2)).unwrap_err();
-        assert!(
-            wrong_generation
-                .to_string()
-                .contains("NOT eligible for dispatch again"),
-            "{wrong_generation}"
-        );
+        assert_eq!(wrong_generation.reason.kind(), "stale_attempt");
         let revived_frozen = revive(&mut frozen, "subagent:a", Some(1)).unwrap();
         assert_eq!(revived_frozen.state, QueueClaimState::Running);
         assert!(revived_frozen.frozen.is_none());
@@ -6014,23 +6005,11 @@ mod tests {
             "{refusal}"
         );
 
-        // The worker now holds another live attempt.
-        let mut moved = live();
-        moved.claim("other", "subagent:a", 190, 100);
-        moved
-            .start("other", "subagent:a", "worker:a", 190, 100, Some(1))
-            .unwrap();
-        assert!(revive(&mut moved, "subagent:a", Some(1)).is_err());
-
         // A bound refusal never claims the head is dispatchable.
         let mut foreign = live();
         let refusal = revive(&mut foreign, "subagent:b", Some(1)).unwrap_err();
-        assert!(
-            refusal
-                .to_string()
-                .contains("NOT eligible for dispatch again"),
-            "{refusal}"
-        );
+        assert_eq!(refusal.reason.kind(), "other_owner");
+        assert!(foreign.claims[0].blocks_dispatch(200));
     }
 
     #[test]
@@ -6049,7 +6028,12 @@ mod tests {
             QueueClaimState::Running
         );
         ledger.prune(111, Some(&[claim_identity("work")].into_iter().collect()));
-        assert_eq!(ledger.claims[0].state, QueueClaimState::Lost);
+        assert_eq!(ledger.claims[0].state, QueueClaimState::Running);
+        ledger.claims[0].frozen = Some(QueueWorkerFreeze {
+            frozen_at_secs: 111,
+            reason: ABANDONED_REQUEUE_REASON.to_string(),
+            abandoned: true,
+        });
         assert_eq!(
             ledger.claim("work", "subagent:b", 112, 10),
             ClaimOutcome::Reassigned
@@ -6171,6 +6155,11 @@ mod tests {
                     .collect(),
             ),
         );
+        ledger.claims[0].frozen = Some(QueueWorkerFreeze {
+            frozen_at_secs: 111,
+            reason: ABANDONED_REQUEUE_REASON.to_string(),
+            abandoned: true,
+        });
         assert_eq!(
             ledger.claim("work a", "subagent:new", 112, 10),
             ClaimOutcome::Reassigned
@@ -6232,7 +6221,7 @@ mod tests {
     }
 
     #[test]
-    fn expired_worker_binding_is_retired_before_worker_reuse() {
+    fn elapsed_time_cannot_steal_a_running_workers_identity() {
         let mut ledger = QueueClaimLedger::default();
         ledger.claim("parent work", "subagent:parent", 100, 10);
         ledger
@@ -6247,7 +6236,7 @@ mod tests {
             .unwrap();
         ledger.claim("nested answer", "subagent:child", 111, 10);
 
-        let child = ledger
+        let refusal = ledger
             .start(
                 "nested answer",
                 "subagent:child",
@@ -6256,17 +6245,14 @@ mod tests {
                 10,
                 Some(1),
             )
-            .unwrap();
+            .unwrap_err();
 
-        assert_eq!(ledger.claims[0].state, QueueClaimState::Lost);
-        assert_eq!(child.state, QueueClaimState::Running);
-        assert_eq!(
-            child
-                .worker
-                .as_ref()
-                .map(|binding| binding.worker_id.as_str()),
-            Some("worker:same")
-        );
+        assert!(matches!(
+            refusal,
+            QueueClaimStartRefused::WorkerAlreadyBound { .. }
+        ));
+        assert_eq!(ledger.claims[0].state, QueueClaimState::Running);
+        assert_eq!(ledger.claims[1].state, QueueClaimState::Claimed);
         let stored = serde_json::to_string(&ledger).unwrap();
         QueueClaimLedger::from_state_payload(&stored).unwrap();
     }
@@ -7400,12 +7386,15 @@ Add new issues into the backlog + queue except issue #40 + #45.";
             claim.followed_from = vec![KOTLINFLUSH.to_string(), LOOP_WATCH.to_string()];
             claim.followed_generation = claim.generation;
         }
-        // The gen-1 running attempt is past its TTL. `claim` keeps a bound
-        // Running worker until expiry is projected, so project it, then claim
-        // gen 2 on #380. That new attempt must not be restored onto the strike.
+        // Explicitly abandon gen 1, then claim gen 2 on #380. That new attempt
+        // must not be restored onto the strike. Elapsed time alone no longer
+        // abandons a bound worker.
         let later = now + 3601;
-        ledger.claims[0].project_expiry(later);
-        assert_eq!(ledger.claims[0].state, QueueClaimState::Lost);
+        ledger.claims[0].frozen = Some(QueueWorkerFreeze {
+            frozen_at_secs: later,
+            reason: ABANDONED_REQUEUE_REASON.to_string(),
+            abandoned: true,
+        });
         assert_eq!(
             ledger.claim(GH380, "subagent:gh380", later, 3600),
             ClaimOutcome::Reassigned

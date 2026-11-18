@@ -5723,8 +5723,9 @@ enum QueueAction {
     /// Reserve a live queue head for dispatch to a worker outside the
     /// in-session loop (`#queueclaim`). A claim blocks duplicate dispatch but
     /// does not prove that a worker is running; `queue start` records that
-    /// proof after a successful spawn. The claim ends when the item leaves the
-    /// queue, on `queue release`, or when its TTL expires.
+    /// proof after a successful spawn. TTL applies only before `queue start`;
+    /// a bound worker has no runtime timeout and stays tracked until an
+    /// authoritative report, release/requeue, harness stop, or row closure.
     #[command(after_help = agent_doc_frontmatter::frontmatter::queue_marker_legend_help())]
     Claim {
         /// Path to the session document
@@ -5952,8 +5953,8 @@ enum QueueAction {
     /// recovery runs immediately. Prints the authoritative pool refill; when
     /// it offers the same item, follow its exact claim / brief / start commands
     /// to create a fresh generation. Do not rebind the stopped generation with
-    /// an old `queue start` command. An attempt that expired with its worker
-    /// bound may be frozen too.
+    /// an old `queue start` command. A legacy lost attempt with its worker
+    /// still bound may be frozen too.
     #[command(after_help = agent_doc_frontmatter::frontmatter::queue_marker_legend_help())]
     Freeze {
         /// Path to the session document

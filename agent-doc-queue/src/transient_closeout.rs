@@ -138,7 +138,7 @@ impl TransientCloseoutDebt {
 pub enum QuiescentReason {
     /// The row carries `🙋` with its request packet and open Todo recorded.
     OperatorOwned,
-    /// A heartbeat-fresh claim backs the row's `🟡`/`🚧` worker.
+    /// An active claim backs the row's `🟡`/`🚧` worker.
     WaitingOnClaim,
     /// A closed schedule window holds the row back until its next tick.
     ScheduleNotDue,
@@ -179,12 +179,12 @@ pub struct QuiescentRow {
     pub reason: QuiescentReason,
 }
 
-/// The durable phase of a heartbeat-fresh claim (`#stopquiescentrows`).
+/// The durable phase of an active claim (`#stopquiescentrows`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FreshClaim {
     /// An unbound dispatch still inside its acknowledgement grace (`🟡`).
     Dispatching,
-    /// A bound worker whose heartbeat is inside the frozen bound (`🚧`).
+    /// A bound worker (`🚧`); heartbeat age is not a runtime limit.
     Running,
 }
 
@@ -443,7 +443,7 @@ fn owed_stale_worker_transition(marker: QueueLifecycleMarker) -> &'static str {
             "no recent dispatch claim backs this row: start the claimed worker or otherwise leave claimed; a head that is only claimed means the turn is not over"
         }
         _ => {
-            "no heartbeat-fresh worker claim backs this row: refresh the heartbeat (`agent-doc queue claim --refresh`) if the worker is still running, or finish the running worker without converting the claim to Lost; a worker that is still running means the turn is not over; a frozen 🚧 whose continue already failed authorizes a new generation in the same turn"
+            "no bound running worker claim backs this row: acknowledge the worker with `agent-doc queue start` if it is running, or finish the recorded stop/retry transition; a frozen 🚧 whose continue already failed authorizes a new generation in the same turn"
         }
     }
 }
@@ -500,11 +500,10 @@ fn operator_request_recorded(
     }))
 }
 
-/// The fresh phase of `claim` at `now_secs`, if it backs a quiescent worker
-/// wait: an unbound dispatch still inside its acknowledgement grace, or a
-/// bound worker whose heartbeat is inside the frozen bound and whose claim
-/// has not lapsed. `None` for a frozen, lapsed, reported, lost, or
-/// quota-blocked attempt.
+/// The active phase of `claim` at `now_secs`, if it backs a quiescent worker
+/// wait: an unbound dispatch still inside its acknowledgement grace, or any
+/// bound worker without authoritative stop evidence. `None` for a frozen,
+/// reported, lost, or quota-blocked attempt.
 pub fn fresh_claim_phase(
     claim: &crate::queue_claim::QueueClaim,
     now_secs: u64,
@@ -1040,7 +1039,8 @@ mod tests {
         ] {
             assert!(failure.contains(row), "missing {row} in {failure}");
         }
-        assert!(failure.contains("finish the running worker without converting the claim to Lost"));
+        assert!(failure.contains("no bound running worker claim backs this row"));
+        assert!(failure.contains("finish the recorded stop/retry transition"));
         assert!(failure.contains(
             "a frozen 🚧 whose continue already failed authorizes a new generation in the same turn"
         ));
@@ -1134,7 +1134,8 @@ mod tests {
                 .contains("⚠️🚧 [#subagent:pr228seventeen#17] #adversarial-pr [#q-abf0adec8270]"),
             "{failure}"
         );
-        assert!(failure.contains("finish the running worker without converting the claim to Lost"));
+        assert!(failure.contains("no bound running worker claim backs this row"));
+        assert!(failure.contains("finish the recorded stop/retry transition"));
         assert!(failure.contains(
             "a frozen 🚧 whose continue already failed authorizes a new generation in the same turn"
         ));
@@ -1280,7 +1281,7 @@ mod tests {
         let stale = normal_closeout_failure_with(&content, &CloseoutEvidence::default())
             .unwrap()
             .expect("a stale worker under 🙋 still refuses");
-        assert!(stale.contains("no heartbeat-fresh worker claim"), "{stale}");
+        assert!(stale.contains("no bound running worker claim"), "{stale}");
 
         let unrecorded = operator_doc(&row, false, true);
         let failure =
@@ -1463,7 +1464,7 @@ mod tests {
             normal_closeout_failure(&agent_running)
                 .unwrap()
                 .expect("an unbacked agent 🚧 refuses")
-                .contains("no heartbeat-fresh worker claim backs this row")
+                .contains("no bound running worker claim backs this row")
         );
 
         // A worker attempt on the person row (`[#owner#generation]`) is not an
@@ -1501,11 +1502,11 @@ mod tests {
     }
 
     /// agent-doc-bugs.md, 2026-11-13: the Stop hook refused six stops over
-    /// two running workers with refreshed heartbeats. A fresh `🚧` and a
-    /// `🟡` inside its dispatch grace wait on claims; the same rows with no
-    /// fresh claim still refuse.
+    /// two running workers with durable bindings. A bound `🚧` and a `🟡`
+    /// inside its dispatch grace wait on claims; the same rows with no active
+    /// claim still refuse.
     #[test]
-    fn fresh_worker_claims_are_quiescent_and_stale_ones_refuse() {
+    fn active_worker_claims_are_quiescent_and_missing_ones_refuse() {
         let content = doc("\
 - 🚧 [#subagent:alc#1] do [#admissionleasechurn]
 - 🚧 [#subagent:ssb#1] do [#storeschemabatch]
@@ -1527,18 +1528,15 @@ mod tests {
             "waiting_on_claims=3 operator_owned=0 schedule_not_due=0 awaiting_operator=0 queue_held=0 blocked=0 waiting_on_integration=0"
         );
 
-        // One worker went stale: only that row refuses.
+        // One row has no bound claim: only that row refuses.
         let partly = fresh(&content, &["admissionleasechurn", "justdispatched"]);
         let failure = normal_closeout_failure_with(&content, &partly)
             .unwrap()
-            .expect("a stale running worker refuses");
+            .expect("an unbound running row refuses");
         assert!(failure.contains("storeschemabatch"), "{failure}");
         assert!(!failure.contains("admissionleasechurn"), "{failure}");
-        assert!(
-            failure.contains("agent-doc queue claim --refresh"),
-            "{failure}"
-        );
-        assert!(failure.contains("finish the running worker without converting the claim to Lost"));
+        assert!(failure.contains("agent-doc queue start"), "{failure}");
+        assert!(failure.contains("finish the recorded stop/retry transition"));
 
         let unacknowledged = fresh(&content, &["admissionleasechurn", "storeschemabatch"]);
         let failure = normal_closeout_failure_with(&content, &unacknowledged)
@@ -1852,13 +1850,10 @@ mod tests {
             fresh_claim_phase(&running, 1_600, FROZEN, GRACE),
             Some(FreshClaim::Running)
         );
-        assert!(
-            fresh_claim_phase(&running, 1_500 + FROZEN, FROZEN, GRACE).is_none(),
-            "a heartbeat past the frozen bound is stale"
-        );
-        assert!(
-            fresh_claim_phase(&running, 1_000 + 7_200, 100_000, GRACE).is_none(),
-            "a lapsed claim is not fresh"
+        assert_eq!(
+            fresh_claim_phase(&running, u64::MAX, FROZEN, GRACE),
+            Some(FreshClaim::Running),
+            "a bound worker has no runtime timeout"
         );
 
         let dispatching = worker_claim(QueueClaimState::Claimed, 1_000, None, None);
@@ -2237,7 +2232,7 @@ EXCHANGE<!-- /agent:exchange -->
     /// `#finishedheadrefill`, at the Stop gate: the subagent-end
     /// hook froze a worker that FINISHED before the coordinator ran `queue
     /// report-complete`, so its `🚧` row's `Running` attempt is report-owed.
-    /// The Stop hook said "no heartbeat-fresh worker claim backs this row:
+    /// The Stop hook said "no bound running worker claim backs this row:
     /// refresh the heartbeat", which no refresh can satisfy. It now names the
     /// exact `queue report-complete` for that generation, as it already did
     /// for a `⚠️🚧` row with a recorded hand-back.
@@ -2273,7 +2268,7 @@ EXCHANGE<!-- /agent:exchange -->
             "{failure}"
         );
         assert!(
-            !failure.contains("no heartbeat-fresh worker claim backs this row"),
+            !failure.contains("no bound running worker claim backs this row"),
             "{failure}"
         );
         assert!(
@@ -2298,7 +2293,7 @@ EXCHANGE<!-- /agent:exchange -->
             .unwrap()
             .expect("a stale running worker refuses");
         assert!(
-            failure.contains("no heartbeat-fresh worker claim backs this row"),
+            failure.contains("no bound running worker claim backs this row"),
             "{failure}"
         );
     }

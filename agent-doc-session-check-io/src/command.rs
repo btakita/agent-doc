@@ -5870,10 +5870,8 @@ mod terminal_convergence_tests {
             SessionCheckStatus::Interrupted(message) => {
                 assert!(message.contains("normal closeout refused"));
                 assert!(message.contains("🚧 still running"));
-                assert!(
-                    message
-                        .contains("finish the running worker without converting the claim to Lost")
-                );
+                assert!(message.contains("no bound running worker claim backs this row"));
+                assert!(message.contains("finish the recorded stop/retry transition"));
                 assert!(!message.contains("blocked on other open work"));
             }
             other => panic!("expected a refused closeout, got {other:?}"),

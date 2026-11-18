@@ -38498,6 +38498,7 @@ fn test_skill_md_contains_required_steps() {
 
     let runbook_root = tmp.path().join(".claude/skills/agent-doc/runbooks");
     let cycle = std::fs::read_to_string(runbook_root.join("session-cycle.md")).unwrap();
+    let normalized_cycle = cycle.split_whitespace().collect::<Vec<_>>().join(" ");
     let harness = std::fs::read_to_string(runbook_root.join("harness-invocation.md")).unwrap();
     let persist = std::fs::read_to_string(runbook_root.join("persist-closeout.md")).unwrap();
     let planning = std::fs::read_to_string(runbook_root.join("planning-dispatch.md")).unwrap();
@@ -38542,6 +38543,18 @@ fn test_skill_md_contains_required_steps() {
     assert!(
         cycle.contains("do not stop at the newest question"),
         "session-cycle.md should require reconciling the changed exchange tail oldest-first"
+    );
+    assert!(
+        normalized_cycle.contains("#realtimetrackedcompletion")
+            && normalized_cycle.contains("agent-doc backlog <FILE> done <id>")
+            && normalized_cycle.contains("agent-doc salient-checkpoint <FILE>")
+            && normalized_cycle.contains("current worker(s)")
+            && normalized_cycle.contains("exact remaining action")
+            && normalized_cycle.contains("independently trustworthy")
+            && normalized_cycle.contains("exhausts tokens or is replaced")
+            && normalized_cycle.contains("closes the response cycle")
+            && normalized_cycle.contains("must not repeat"),
+        "installed session-cycle.md must require durable real-time completion and replacement-agent handoff state"
     );
     assert!(
         cycle.contains("#managedlistcompletionintent")
@@ -38633,9 +38646,20 @@ fn test_skill_md_contains_required_steps() {
             .join(".claude/skills/agent-doc/runbooks/pending-ops.md"),
     )
     .unwrap();
+    let normalized_pending_ops = pending_ops.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
         pending_ops.contains("plan-spec2-rollout.md"),
         "installed pending-ops runbook should document plan-backed backlog items"
+    );
+    assert!(
+        normalized_pending_ops.contains("#realtimetrackedcompletion")
+            && normalized_pending_ops.contains("agent-doc backlog <FILE> done <id>")
+            && normalized_pending_ops.contains("salient checkpoint")
+            && normalized_pending_ops.contains("current workers")
+            && normalized_pending_ops.contains("exact remaining action")
+            && normalized_pending_ops.contains("closes the response cycle")
+            && normalized_pending_ops.contains("hidden chat context"),
+        "installed pending-ops runbook must prohibit batching completed state until final closeout"
     );
 }
 

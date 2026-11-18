@@ -4155,6 +4155,58 @@ mod tests {
     }
 
     #[test]
+    fn installed_harness_runbooks_require_realtime_completion_handoffs() {
+        let dir = tempfile::tempdir().unwrap();
+
+        for env in [
+            Environment::ClaudeCode,
+            Environment::OpenCode,
+            Environment::Codex,
+        ] {
+            super::install_runbooks_for(env, Some(dir.path())).unwrap();
+            let runbooks = dir.path().join(super::runbooks_rel_path(&env));
+            let session = std::fs::read_to_string(runbooks.join("session-cycle.md")).unwrap();
+            let pending = std::fs::read_to_string(runbooks.join("pending-ops.md")).unwrap();
+
+            for content in [&session, &pending] {
+                let normalized = content.split_whitespace().collect::<Vec<_>>().join(" ");
+                assert!(
+                    content.contains("#realtimetrackedcompletion"),
+                    "{env}: {content}"
+                );
+                assert!(
+                    content.contains("agent-doc backlog <FILE> done <id>"),
+                    "{env}: {content}"
+                );
+                assert!(content.contains("salient checkpoint"), "{env}: {content}");
+                assert!(content.contains("current worker"), "{env}: {content}");
+                assert!(normalized.contains("remaining action"), "{env}: {content}");
+                assert!(
+                    content.contains("closes the response cycle"),
+                    "{env}: {content}"
+                );
+            }
+            assert!(
+                session
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .contains("independently trustworthy"),
+                "{env}: {session}"
+            );
+            let normalized_session = session.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(
+                normalized_session.contains("exhausts tokens or is replaced"),
+                "{env}: {session}"
+            );
+            assert!(
+                normalized_session.contains("must not repeat"),
+                "{env}: {session}"
+            );
+        }
+    }
+
+    #[test]
     fn installed_harness_runbooks_share_manual_repair_rule() {
         let dir = tempfile::tempdir().unwrap();
 

@@ -321,6 +321,9 @@ mod tests {
             std::fs::read_to_string(bundle.join("runbooks/harness-invocation.md")).unwrap();
         let auto_loop =
             std::fs::read_to_string(bundle.join("runbooks/queue-auto-loop.md")).unwrap();
+        let session_cycle =
+            std::fs::read_to_string(bundle.join("runbooks/session-cycle.md")).unwrap();
+        let pending_ops = std::fs::read_to_string(bundle.join("runbooks/pending-ops.md")).unwrap();
 
         for text in [&planning, &respond, &harness] {
             assert!(text.contains("`spawn_subagent`"), "{text}");
@@ -337,6 +340,16 @@ mod tests {
         assert!(auto_loop.contains("automatic on the first admitted cycle"));
         assert!(auto_loop.contains("(never one at a time)"), "{auto_loop}");
         assert!(auto_loop.contains("## Work pool"), "{auto_loop}");
+        for text in [&session_cycle, &pending_ops] {
+            let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(text.contains("#realtimetrackedcompletion"), "{text}");
+            assert!(
+                text.contains("agent-doc backlog <FILE> done <id>"),
+                "{text}"
+            );
+            assert!(normalized.contains("remaining action"), "{text}");
+            assert!(text.contains("closes the response cycle"), "{text}");
+        }
         audit(dir.path()).unwrap();
     }
 }

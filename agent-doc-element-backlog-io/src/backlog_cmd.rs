@@ -740,11 +740,6 @@ fn tracked_work_id_already_resolved_in_content(
     Ok(external_done_archive_ids(file, content)?.contains(&id))
 }
 
-fn tracked_work_id_already_resolved(file: &Path, id: &str) -> Result<bool> {
-    let content = read_command_document(file, "backlog_resolved_id")?;
-    tracked_work_id_already_resolved_in_content(file, &content, id)
-}
-
 fn log_symptom_dedupe(file: &Path, surface: &str, id: &str, key: &backlog::SymptomDedupeKey) {
     agent_doc_ops_log_io::log_op(
         file,
@@ -1302,39 +1297,73 @@ fn complete_todo_owning_done_id(content: &str, id: &str) -> Result<Option<String
     Ok(Some(outcome.content))
 }
 
-/// Mark an item `[x]` by id.
-pub fn done(file: &Path, id: &str) -> Result<()> {
-    let (full_content, comp) = match find_component_containing_open_id(file, id) {
-        Ok(found) => found,
-        Err(_) if tracked_work_id_already_resolved(file, id)? => {
+/// Mark an item `[x]` by id and compose every caller-owned lifecycle projection
+/// into the same editor-authoritative target.
+///
+/// `#realtimetrackedcompletion`: a standalone completion is a live lifecycle
+/// checkpoint, not a response closeout. It deliberately leaves the completed
+/// row available for the ordinary reap/archive boundary, while making the
+/// linked todo and generated top-backlog status current immediately. The
+/// caller projection lets the binary also strike the matching queue row without
+/// publishing an observably inconsistent intermediate document.
+pub fn done_with_target_projection<F>(file: &Path, id: &str, project_target: F) -> Result<()>
+where
+    F: FnOnce(&str) -> Result<String>,
+{
+    let full_content = read_command_document(file, "backlog_done")?;
+    let mut target = full_content.clone();
+    let mut backlog_changed = false;
+
+    match backlog::find_open_tracked_work_component_in_content(&target, id) {
+        Ok(comp) => {
+            let existing = &target[comp.open_end..comp.close_start];
+            let new_content = backlog::op_done(existing, id)?;
+            let canonical = backlog::canonicalize_tracked_work_body(
+                &new_content,
+                &agent_doc_hash::document_id_for_path(file),
+            );
+            backlog_changed = is_backlog_component(&comp.name);
+            target = comp.replace_content(&target, &canonical);
+            if let Some(updated) = complete_todo_owning_done_id(&target, id)? {
+                target = updated;
+            }
+        }
+        Err(_) if tracked_work_id_already_resolved_in_content(file, &target, id)? => {
             eprintln!(
-                "[pending] done: id [#{}] is already resolved; leaving backlog unchanged",
+                "[pending] done: id [#{}] is already resolved; reconciling lifecycle projections",
                 backlog::normalize_pending_id(id)
             );
-            return Ok(());
+            if let Some(updated) = complete_todo_owning_done_id(&target, id)? {
+                target = updated;
+            }
         }
         Err(err) => {
             // `#sdktododone`: an id that names no tracked work but is an
             // `agent:todo` item's own id completes that todo.
-            let content = read_command_document(file, "backlog_done_todo")?;
-            if let Some(updated) = complete_todo_owning_done_id(&content, id)? {
-                if updated != content {
-                    persist_pending_write(file, &content, &updated)?;
-                }
-                return Ok(());
+            if let Some(updated) = complete_todo_owning_done_id(&target, id)? {
+                target = updated;
+            } else {
+                return Err(err);
             }
-            return Err(err);
         }
-    };
-    let existing = &full_content[comp.open_end..comp.close_start];
-    let new_content = backlog::op_done(existing, id)?;
-    let canonical = backlog::canonicalize_tracked_work_body(
-        &new_content,
-        &agent_doc_hash::document_id_for_path(file),
-    );
-    let new_doc = comp.replace_content(&full_content, &canonical);
-    persist_pending_write(file, &full_content, &new_doc)?;
+    }
+
+    if backlog_changed
+        && let Some(reconciled) =
+            agent_doc_document::status_projection::reconcile_top_backlog_status_content(&target)?
+    {
+        target = reconciled;
+    }
+    target = project_target(&target).context("failed to compose completed tracked-work target")?;
+    if target != full_content {
+        persist_pending_write(file, &full_content, &target)?;
+    }
     Ok(())
+}
+
+/// Mark an item `[x]` by id.
+pub fn done(file: &Path, id: &str) -> Result<()> {
+    done_with_target_projection(file, id, |content| Ok(content.to_string()))
 }
 
 fn reopen_in_list(

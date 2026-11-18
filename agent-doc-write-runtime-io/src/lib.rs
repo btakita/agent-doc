@@ -1106,6 +1106,53 @@ pub fn checkpoint_salient_response(file: &Path, response: &str) -> Result<()> {
     run_entry::checkpoint_salient_response(file, response)
 }
 
+/// Persist a completed tracked-work lifecycle checkpoint without sealing the
+/// active response cycle.
+///
+/// `#realtimetrackedcompletion`: long-running turns need the document to be a
+/// truthful handoff surface before their terminal response exists. This path
+/// composes the checked backlog row, linked todo completion, generated status
+/// reconciliation, and every matching queue strike into one authoritative
+/// document target. It records the open cycle's completion fact, but never
+/// advances that cycle to `Committed`; a later salient checkpoint and the
+/// exact-once final response therefore continue to share the same cycle.
+pub fn complete_tracked_work_realtime(file: &Path, id: &str) -> Result<()> {
+    let normalized = agent_doc_element_backlog::backlog::normalize_pending_id(id);
+    anyhow::ensure!(
+        !normalized.is_empty(),
+        "completed tracked-work id must not be empty"
+    );
+    let done_ids = vec![normalized];
+
+    agent_doc_session_check_io::enforce_review_done_guard(file, id)?;
+    backlog_cmd::done_with_target_projection(file, id, |content| {
+        let (projected, _) =
+            agent_doc_queue::queue_consume::mark_queue_prompts_completed_by_done_ids_in_content(
+                content, &done_ids,
+            )?;
+        queue_consume::require_integrated_reported_repo_work_for_successor(
+            file, content, &projected,
+        )?;
+        let still_live =
+            agent_doc_queue::queue_consume::live_queue_prompt_done_ids(&projected, &done_ids)?;
+        anyhow::ensure!(
+            still_live.is_empty(),
+            "queue completion for real-time tracked work did not apply: {} still has live agent:queue head(s) for {:?}",
+            file.display(),
+            still_live,
+        );
+        Ok(projected)
+    })?;
+
+    if agent_doc_cycle_state_io::load_with_closeout_projection(file)?
+        .is_some_and(|state| state.is_open())
+    {
+        agent_doc_cycle_state_io::record_pending_done_ids(file, &done_ids)?;
+        agent_doc_cycle_state_io::mark_pending_mutations(file)?;
+    }
+    Ok(())
+}
+
 pub fn run_command_with_empty_response_recovery(
     options: CommandOptions,
     commit_mode: CommitMode,

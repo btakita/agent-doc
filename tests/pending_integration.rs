@@ -293,6 +293,67 @@ fn pending_done_marks_checked_by_id() {
 }
 
 #[test]
+fn pending_done_converges_linked_todo_queue_and_status_in_one_checkpoint() {
+    let (_tmp, doc) = setup_doc("- [ ] [#preh] completed work\n- [ ] [#later] remaining work");
+    let content = fs::read_to_string(&doc)
+        .unwrap()
+        .replace(
+            "agent_doc_format: template\n",
+            "agent_doc_format: template\nqueue_active: true\n",
+        )
+        .replace(
+            "<!-- agent:exchange -->",
+            concat!(
+                "<!-- agent:status patch=replace -->\n",
+                "Working. Top backlog item: #preh.\n",
+                "<!-- /agent:status -->\n\n",
+                "<!-- agent:queue -->\n",
+                "- do [#preh]\n",
+                "- do [#later]\n",
+                "<!-- /agent:queue -->\n\n",
+                "<!-- agent:todo -->\n",
+                "- [ ] [#preh] Verify completed work\n",
+                "<!-- /agent:todo -->\n\n",
+                "<!-- agent:exchange -->",
+            ),
+        );
+    fs::write(&doc, content).unwrap();
+
+    agent_doc()
+        .args([
+            "backlog",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "done",
+            "preh",
+        ])
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        component_body(&content, "pending").contains("- [x] [#preh] completed work"),
+        "{content}"
+    );
+    assert!(
+        component_body(&content, "todo").contains("- [x] [#preh] Verify completed work"),
+        "{content}"
+    );
+    assert!(
+        component_body(&content, "queue").contains("~~do [#preh]~~"),
+        "{content}"
+    );
+    assert!(
+        component_body(&content, "queue").contains("- do [#later]"),
+        "{content}"
+    );
+    assert!(
+        component_body(&content, "status").contains("Top backlog item: #later."),
+        "{content}"
+    );
+}
+
+#[test]
 fn pending_edit_preserves_hash() {
     let (_tmp, doc) = setup_doc("- [ ] [#abcd] original text");
     agent_doc()

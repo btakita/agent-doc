@@ -2,6 +2,12 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.581
+
+- **Queue prompts survive edits and requeues.** When a parent prompt becomes context for child prompts, its worker evidence remains attached. Address handbacks survive requeue, and queue drain acknowledgments require the matching dispatch.
+- **Queue actions carry durable receipts.** Connected clients can inspect, reserve, and confirm queue actions through MCP. Worker reports are serialized with automatic row closeout. Steering cancels only the attempt identified by the receipt, and replacing a coordinator session requires proof of ownership.
+- **Pending work stays actionable after Stop retries are exhausted.** Queue summaries use the same durable lifecycle. External blockers remain outside Active until their evidence changes.
+
 ## 0.35.579
 
 - **Publish `38dd3cc98d` as `0.35.579`.** Tag `v0.35.578` remains `c24c9e893ce9a27c2cf38a07f48562b79ed7e05a`. Package manifests, internal constraints, `Cargo.lock`, `pyproject.toml`, and the bundled skill sources move to `0.35.579`. JetBrains plugin generations move to classic `0.2.1004`, IDE 262 `0.2.1005`, and IDE 263 `0.2.1006`. `pluginReleaseVersion` moves to `0.35.579`. VS Code stays `0.2.101`. Zed stays `0.1.8`.

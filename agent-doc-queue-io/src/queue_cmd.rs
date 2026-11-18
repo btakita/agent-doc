@@ -924,11 +924,16 @@ pub fn project_claim_runtime_state_with_effects(
     project_claim_runtime_state_under_apply_guard(effects, file, cleared_item, &apply_guard)
 }
 
-/// Repaint queue rows whose visible marker disagrees with the ledger
-/// (`#markdrift`).
+/// Repaint queue rows whose visible marker disagrees with durable lifecycle
+/// state (`#markdrift`).
 ///
 /// A reported attempt paints `☑️`. A `Running` attempt whose worker is not
 /// running paints `⚠️` and stays `Running`, so the head is not redispatched.
+/// A claimed projection whose owner/generation has already left the claim
+/// ledger is repainted pending and becomes drainable again. This latter case
+/// matters for Grok's passive lifecycle: steering can resume after an unstarted
+/// attempt has been released, and the next plan must not trust the orphan
+/// projection.
 /// Already-matching rows are left untouched. The write is the lifecycle-owner
 /// generation converge: it CAS-rebases onto current authority and returns
 /// without waiting for an editor native-save receipt and without forcing disk.
@@ -938,13 +943,56 @@ pub fn reconcile_drifted_claim_markers(
 ) -> Result<bool> {
     let current = effects.current_document_content(file, "queue_claim_marker_drift")?;
     let reports = crate::queue_claim::claim_reports_for_content(file, &current)?;
+    let orphaned_claim = has_orphaned_claimed_projection(file, &current)?;
     if reports
         .iter()
         .all(|report| report.visible_projection_state == "synchronized")
+        && !orphaned_claim
     {
         return Ok(false);
     }
     project_claim_runtime_state_with_effects(effects, file, None)
+}
+
+fn has_orphaned_claimed_projection(file: &Path, current: &str) -> Result<bool> {
+    let ledger = crate::queue_claim::load_ledger(file)?;
+    let components = agent_doc_element::element::parse(current)?;
+    for component in components
+        .iter()
+        .filter(|component| component.name == "queue")
+    {
+        let entries = agent_doc_queue::document_queue::parse(component.content(current))?;
+        for (index, entry) in entries.iter().enumerate() {
+            let QueueEntry::Prompt(prompt) = entry else {
+                continue;
+            };
+            if agent_doc_document::queue_projection::lifecycle_marker(&prompt.text)
+                != Some(agent_doc_document::queue_projection::QueueLifecycleMarker::Claimed)
+            {
+                continue;
+            }
+            let Some(owner) = agent_doc_document::queue_projection::owner_projection(&prompt.text)
+            else {
+                continue;
+            };
+            let Some(identity) = agent_doc_queue::queue_claim::claim_identity_at(&entries, index)
+            else {
+                continue;
+            };
+            let has_attempt = ledger.claims.iter().any(|claim| {
+                claim.identity == identity
+                    && claim.owner == owner.owner
+                    && claim.generation == owner.generation
+                    && !ledger.cancellations.iter().any(|cancellation| {
+                        cancellation.cancels_attempt(&claim.identity, claim.generation)
+                    })
+            });
+            if !has_attempt {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
 
 fn project_claim_runtime_state_under_apply_guard(
@@ -4210,6 +4258,73 @@ mod tests {
         assert!(!reconcile_drifted_claim_markers(&effects, &live).unwrap());
         let live_text = std::fs::read_to_string(&live).unwrap();
         assert!(live_text.contains("- 🚧 still working"), "{live_text}");
+    }
+
+    /// Grok consumes tokenized steering inside the same passive turn. If that
+    /// turn releases a never-started claim, the ledger and pool are already
+    /// free before the next plan. Reconciliation must therefore remove the
+    /// orphan exact-attempt projection while preserving unrelated blockers.
+    #[test]
+    fn grok_steering_reconciles_released_unstarted_claim_without_touching_blockers() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("grok-claim-runtime.md");
+        let content = concat!(
+            "---\n",
+            "session: sid\n",
+            "agent: grok\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- 🟡 [#subagent:sample-release-cleanup#6] do [#sample-release-cleanup]\n",
+            "- ⛔ ⟦blocked by gate-a⟧ do [#blocked-a]\n",
+            "- ⛔ ⟦blocked by gate-b⟧ do [#blocked-b]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:todo -->\n",
+            "- [ ] [#gate-a] prerequisite a\n",
+            "- [ ] [#gate-b] prerequisite b\n",
+            "<!-- /agent:todo -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#blocked-a] after=#gate-a blocked a\n",
+            "- [ ] [#blocked-b] after=#gate-b blocked b\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let effects = FakeEffects::default();
+
+        assert!(
+            crate::queue_claim::load_ledger(&doc)
+                .unwrap()
+                .claims
+                .is_empty()
+        );
+        assert!(reconcile_drifted_claim_markers(&effects, &doc).unwrap());
+
+        let repaired = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            repaired.contains("- 📥 do [#sample-release-cleanup]\n"),
+            "{repaired}"
+        );
+        assert!(!repaired.contains("sample-release-cleanup#6"), "{repaired}");
+        assert!(
+            repaired.contains("⛔ ⟦blocked by gate-a⟧ do [#blocked-a]"),
+            "{repaired}"
+        );
+        assert!(
+            repaired.contains("⛔ ⟦blocked by gate-b⟧ do [#blocked-b]"),
+            "{repaired}"
+        );
+        assert_eq!(repaired.matches("⛔").count(), 2, "{repaired}");
+        assert!(
+            !reconcile_drifted_claim_markers(&effects, &doc).unwrap(),
+            "the repaired Grok lifecycle projection is idempotent"
+        );
     }
 
     #[test]

@@ -77,6 +77,47 @@ that console-visible output is a durable response. The response exists only
 after `agent-doc finalize <FILE>` or strict `agent-doc write --commit <FILE>`
 applies it through the shared write/commit/session-check path.
 
+## LLM framework boundary (`#langchain-rust-boundary`)
+
+Agent Doc does not embed `langchain-rust`, and Lazily does not expose LLM,
+prompt, embedding, vector-store, tool, agent, or retrieval abstractions. This
+decision was evaluated against
+[`langchain-rust` 8.0.0](https://docs.rs/crate/langchain-rust/8.0.0), whose
+provider clients, chains, output parsers, memories, tools, document loaders,
+and vector stores form an async application framework. Those facilities are
+useful when an application owns model invocation, but they duplicate existing
+Agent Doc owners and would couple the deterministic reactive kernel to Tokio,
+HTTP/provider SDKs, tokenization, and application storage.
+
+Capability ownership remains explicit:
+
+| Capability | Owner |
+| --- | --- |
+| Harness invocation, resume, model selection, and final response normalization | `agent-doc-agent-io` backend adapters and custom backend commands |
+| Prompt-cache boundaries, replay keys, token accounting, and cache diagnostics | `agent-doc-prompt-cache` plus provider-specific backend parsing |
+| Session memory, semantic ranking, and retrieval | `agent-doc-memory`, `agent-doc-memory-io`, and `tsift-memory` |
+| Tools, model-driven agents, and provider routing | The selected harness and its MCP/plugin surface |
+| Deterministic workflow, queue, receipt, retry, and state derivation | Agent Doc orchestration composed from Lazily primitives |
+| Reactive graph, effects, transport seams, backpressure, and durable coordination primitives | Lazily, without model-domain policy |
+
+Agent Doc may borrow framework *shapes* without taking the dependency: typed
+provider-neutral usage and tool-call records, structured-output validation,
+and stream/tracing event envelopes are appropriate at the backend adapter
+boundary when a concrete consumer requires them. They must project into Agent
+Doc's response, telemetry, and receipt contracts and must not gain document
+write authority. Chains, chat memory, retrieval, and tool execution remain
+outside Lazily because they are application policy, not reactive-graph
+semantics.
+
+Reconsider an optional dependency only for a concrete in-process provider
+requirement that cannot be met by a harness or custom backend. Any experiment
+must live in a separate optional adapter crate, keep the existing synchronous
+`Agent` facade, own its async runtime outside Lazily, normalize into the same
+closeout contract, and demonstrate a smaller maintenance and dependency cost
+than a narrow provider adapter. It must not move provider credentials, network
+calls, prompt policy, memory, tool execution, or session-document writes into
+Lazily.
+
 ## Resolution Order
 
 1. CLI `--agent` flag

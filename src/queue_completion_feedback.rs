@@ -849,7 +849,19 @@ pub(crate) fn close_mechanical_reported_rows(
         MechanicalCloseoutResult, close_mechanical_reported_attempts,
     };
 
-    let first = close_mechanical_reported_attempts(effects, file)?;
+    let close_pass = || {
+        // Mechanical closeout takes the same queue apply guard as report
+        // publication. Serialize both paths so another reporter cannot take
+        // the completion lock and then run into the preceding report's
+        // direct apply lease. Projection repair acquires the lock on its own.
+        let _lock = acquire_completion_lock(
+            file,
+            "close reported subagent attempts",
+            COMPLETION_FEEDBACK_LOCK_WAIT,
+        )?;
+        close_mechanical_reported_attempts(effects, file)
+    };
+    let first = close_pass()?;
     let outcomes = if first
         .outcomes
         .iter()
@@ -857,7 +869,7 @@ pub(crate) fn close_mechanical_reported_rows(
     {
         match repair_claim_projection(file, effects) {
             Ok(_) => {
-                let second = close_mechanical_reported_attempts(effects, file)?;
+                let second = close_pass()?;
                 merge_closeout_passes(first.outcomes, second.outcomes)
             }
             Err(err) => {

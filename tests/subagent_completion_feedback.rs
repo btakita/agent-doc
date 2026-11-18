@@ -1245,6 +1245,124 @@ fn committed_run_session(dir: &std::path::Path, run_rows: &[&str]) -> std::path:
 }
 
 #[test]
+fn report_complete_retains_the_superseded_parent_result_as_history() {
+    let dir = tempfile::tempdir().unwrap();
+    let parent = "Review the rollout.";
+    let doc = committed_session(dir.path(), &[parent]);
+    let path = doc.to_str().unwrap();
+    let initial = fs::read_to_string(&doc).unwrap();
+    claim_and_start(dir.path(), path, parent, "subagent:parent");
+    let one_leaf = initial.replace(
+        &format!("- {parent}\n"),
+        &format!("- ### {parent}\n  - Check rollout notes.\n"),
+    );
+    fs::write(&doc, &one_leaf).unwrap();
+    let stale_offer = run_agent_doc(
+        dir.path(),
+        &[
+            "queue",
+            "claim",
+            path,
+            "--item",
+            parent,
+            "--owner",
+            "subagent:stale-offer",
+        ],
+    );
+    assert!(!stale_offer.status.success());
+    assert_eq!(fs::read_to_string(&doc).unwrap(), one_leaf);
+
+    let nested = initial.replace(
+        &format!("- {parent}\n"),
+        &format!("- ### {parent}\n  - Check rollout notes.\n  - Check rollback steps.\n"),
+    );
+    assert_ne!(nested, initial);
+    fs::write(&doc, &nested).unwrap();
+    let source = String::from_utf8(git(dir.path(), &["rev-parse", "HEAD"]).stdout).unwrap();
+    let sink_ref =
+        String::from_utf8(git(dir.path(), &["branch", "--show-current"]).stdout).unwrap();
+    let response = "**Summary**\nThe original worker recorded its rollout findings.\n\n**Action items**\n- agent: Old scope follow-up.";
+    let report = run_agent_doc(
+        dir.path(),
+        &[
+            "queue",
+            "report-complete",
+            path,
+            "--item",
+            parent,
+            "--generation",
+            "1",
+            "--source-repo",
+            dir.path().to_str().unwrap(),
+            "--source-sha",
+            source.trim(),
+            "--sink-repo",
+            dir.path().to_str().unwrap(),
+            "--sink-ref",
+            sink_ref.trim(),
+            "--response",
+            response,
+        ],
+    );
+    assert_ok(&report, "retain original worker report");
+    let stderr = String::from_utf8_lossy(&report.stderr);
+    assert!(stderr.contains("original row is now context"), "{stderr}");
+    assert!(!stderr.contains("queue consume"), "{stderr}");
+    assert_eq!(fs::read_to_string(&doc).unwrap(), nested);
+    let restore = run_agent_doc(
+        dir.path(),
+        &["queue", "repair-completion-cells", path, "--apply"],
+    );
+    assert_ok(
+        &restore,
+        "historical capture is not an owed completion cell",
+    );
+    assert_eq!(fs::read_to_string(&doc).unwrap(), nested);
+
+    let claims = run_agent_doc(dir.path(), &["queue", "claims", path]);
+    assert_ok(&claims, "inspect historical claim");
+    let claims: serde_json::Value = serde_json::from_slice(&claims.stdout).unwrap();
+    assert_eq!(claims[0]["assessment"], "structural_context");
+    assert_eq!(claims[0]["context_response"]["body"], response);
+    assert!(claims[0]["reported_closeout"].is_null(), "{claims}");
+    let lineage = run_agent_doc(
+        dir.path(),
+        &[
+            "queue",
+            "lineage",
+            path,
+            "--item",
+            parent,
+            "--generation",
+            "1",
+            "--json",
+        ],
+    );
+    assert_ok(&lineage, "inspect historical repository provenance");
+    let lineage: serde_json::Value = serde_json::from_slice(&lineage.stdout).unwrap();
+    assert_eq!(lineage["attempts"][0]["source_sha"], source.trim());
+    assert_eq!(
+        lineage["attempts"][0]["worker_id"],
+        "worker:subagent:parent"
+    );
+    assert_ok(
+        &run_agent_doc(
+            dir.path(),
+            &[
+                "queue",
+                "claim",
+                path,
+                "--item",
+                "Check rollout notes.",
+                "--owner",
+                "subagent:leaf",
+            ],
+        ),
+        "claim independent leaf",
+    );
+}
+
+#[test]
 fn report_complete_joins_repository_provenance_to_the_exact_attempt() {
     let dir = tempfile::tempdir().unwrap();
     let doc = committed_session(dir.path(), &["repository work"]);

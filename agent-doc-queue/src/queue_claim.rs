@@ -732,6 +732,25 @@ pub struct ClaimQueueView {
 }
 
 impl ClaimQueueView {
+    /// An originally executable row that still exists as queue context,
+    /// including a structural parent struck after its last leaf settles.
+    pub fn contains_context_identity(&self, identity: &QueueItemIdentity) -> bool {
+        self.queues
+            .iter()
+            .flat_map(|queue| &queue.context_claim_texts)
+            .any(|text| claim_identity(text) == *identity)
+    }
+
+    /// Whether the identity remains only as a structural row.
+    pub fn is_context_only(&self, identity: &QueueItemIdentity) -> bool {
+        self.contains_context_identity(identity)
+            && self
+                .queues
+                .iter()
+                .flat_map(|queue| &queue.claim_texts)
+                .all(|text| claim_identity(text) != *identity)
+    }
+
     /// One unnamed queue with no struck rows.
     pub fn single(rows: &[String]) -> Self {
         Self {
@@ -775,7 +794,7 @@ impl ClaimQueueView {
                         document_queue::entry_is_group_parent(&block.entries, *index)
                     })
                     .flat_map(|(index, entry)| match entry {
-                        QueueEntry::Prompt(prompt) => {
+                        QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
                             let bare = document_queue::lineage_claim_text(&block.entries, index);
                             let nested = document_queue::nest_vector_at(
                                 &block.entries,

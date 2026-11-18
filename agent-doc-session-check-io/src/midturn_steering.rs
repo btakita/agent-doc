@@ -3534,6 +3534,50 @@ mod tests {
     }
 
     #[test]
+    fn pool_checkpoint_offers_new_live_leaves_before_the_parent_is_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let parent = "https://example.test/changes/7";
+        let first = "Review the proposed change.";
+        let second = "Verify the rollout notes.";
+        let baseline = format!(
+            "---\nsession: sid\nagent_doc_format: template\nagent_doc_steering_debounce_ms: 600000\n---\n\n<!-- agent:run id=\"main\" subagents=2 go -->\n- 👀 {parent}\n<!-- /agent:run -->\n"
+        );
+        std::fs::write(&file, &baseline).unwrap();
+        let editor = LiveEditorFixture::new(&file, "nested-queue-editor", &baseline);
+        agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline)).unwrap();
+        let original = subagent_pool_checkpoint(&file, 1_000)
+            .unwrap()
+            .expect("the original top-level prompt was offered");
+        assert!(
+            original.contains(&format!("--item '{parent}'")),
+            "{original}"
+        );
+
+        let nested = baseline.replace(
+            &format!("- 👀 {parent}\n"),
+            &format!("- 👀 {parent}\n  - %% operator note %%\n  - {first}\n  - {second}\n"),
+        );
+        editor.publish(&nested);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), baseline);
+
+        // The first checkpoint sees the new executable frontier even if the
+        // edit has not been saved and the steering debounce has not elapsed.
+        let offered = subagent_pool_checkpoint(&file, 1_001)
+            .unwrap()
+            .expect("the first checkpoint offers the new leaf prompts");
+        assert!(offered.contains(first), "{offered}");
+        assert!(offered.contains(second), "{offered}");
+        assert!(
+            !offered.contains(&format!("--item '{parent}'")),
+            "{offered}"
+        );
+        assert!(!offered.contains("operator note"), "{offered}");
+        assert_eq!(subagent_pool_checkpoint(&file, 1_002).unwrap(), None);
+    }
+
+    #[test]
     fn hook_envelope_matches_the_harness_contract() {
         let value = post_tool_use_output("steer");
         assert_eq!(value["hookSpecificOutput"]["hookEventName"], "PostToolUse");

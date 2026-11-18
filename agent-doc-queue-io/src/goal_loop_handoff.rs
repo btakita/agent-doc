@@ -178,7 +178,9 @@ pub fn requeue_nonterminal_hand_back(
     let Some(claim) = ledger.resolve_selector(item)?.cloned() else {
         return Ok(None);
     };
-    if !claim.owner.starts_with("subagent:") {
+    if !claim.owner.starts_with("subagent:")
+        || crate::queue_claim::bound_attempt_is_structural_context(content, &claim)
+    {
         return Ok(None);
     }
     let presets =

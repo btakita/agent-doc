@@ -85,7 +85,7 @@ impl std::fmt::Display for RestoreSkipReason {
         match self {
             Self::AttemptClosed { closed_at_secs } => write!(
                 f,
-                "a strike closed this attempt (closed_at_secs={closed_at_secs}); restore it only with --key"
+                "this attempt is closed (closed_at_secs={closed_at_secs}); restore it only with --key"
             ),
             Self::ClosedAttemptLiveRow => write!(
                 f,

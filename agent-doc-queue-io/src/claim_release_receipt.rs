@@ -319,10 +319,29 @@ pub fn capture_response(
     claim: &QueueClaim,
     response: &str,
 ) -> Result<ClaimReleaseReceipt> {
+    capture_response_with_row_state(file, claim, response, false)
+}
+
+/// Save the full result of a superseded parent as historical evidence.
+/// The receipt belongs to the exact attempt and governs no live queue row.
+pub fn capture_structural_context_response(
+    file: &Path,
+    claim: &QueueClaim,
+    response: &str,
+) -> Result<ClaimReleaseReceipt> {
+    capture_response_with_row_state(file, claim, response, true)
+}
+
+fn capture_response_with_row_state(
+    file: &Path,
+    claim: &QueueClaim,
+    response: &str,
+    structural_context: bool,
+) -> Result<ClaimReleaseReceipt> {
     let completion_key = crate::queue_claim::completion_feedback_key(claim)?;
     let now = now_secs();
     let refused = mutate(file, |ledger| {
-        ledger
+        let refused = ledger
             .record_response_capture(
                 claim,
                 completion_key.clone(),
@@ -330,7 +349,17 @@ pub fn capture_response(
                 now,
                 DEFAULT_RELEASE_RECEIPT_TTL_SECS,
             )
-            .err()
+            .err();
+        if structural_context
+            && refused.is_none()
+            && let Some(receipt) = ledger
+                .receipts
+                .iter_mut()
+                .find(|receipt| receipt.completion_key.as_deref() == Some(completion_key.as_str()))
+        {
+            receipt.attempt_closed_at_secs = Some(now);
+        }
+        refused
     })?;
     if let Some(refused) = refused {
         return Err(refused.into());

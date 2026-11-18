@@ -551,6 +551,15 @@ fn resolve_live_claim_target(
     item: &str,
     source: &str,
 ) -> Result<(String, ClaimQueueView)> {
+    resolve_claim_target(file, item, source, false).map(|(target, view, _)| (target, view))
+}
+
+fn resolve_claim_target(
+    file: &Path,
+    item: &str,
+    source: &str,
+    allow_structural_report: bool,
+) -> Result<(String, ClaimQueueView, bool)> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("read {} to resolve queue item {item:?}", file.display()))?;
     let disk_view = ClaimQueueView::from_content(&content).unwrap_or_default();
@@ -569,6 +578,20 @@ fn resolve_live_claim_target(
             .and_then(ClaimQueueView::from_content)
             .unwrap_or_default()
     });
+    let view = authority_view.as_ref().unwrap_or(&disk_view);
+    // Match the structural identity before ordinary selector resolution can
+    // interpret a stale parent offer as the prefix of a new leaf vector.
+    if view.is_context_only(&claim_identity(item)) {
+        if allow_structural_report {
+            return Ok((item.to_string(), view.clone(), true));
+        }
+        return Err(QueueClaimMiss {
+            item: item.to_string(),
+            live_heads: authority_heads.unwrap_or(disk_heads),
+            ambiguous: Vec::new(),
+        }
+        .into());
+    }
     let resolved = resolve_claim_target_in_views(item, &disk_heads, authority_heads.as_deref());
     let (target, view) = match resolved {
         Ok(resolved) => resolved,
@@ -617,7 +640,7 @@ fn resolve_live_claim_target(
         ClaimHeadSource::Disk => disk_view,
         ClaimHeadSource::EditorAuthority => authority_view.unwrap_or_default(),
     };
-    Ok((target, queues))
+    Ok((target, queues, false))
 }
 
 /// The live head a claim that followed an operator edit away from `item`
@@ -666,10 +689,11 @@ fn shared_leaf_claim_candidates(
     if matches.len() < 2 {
         return Ok(None);
     }
-    Ok(Some((
-        matches,
-        ClaimQueueView::from_content(text).unwrap_or_default(),
-    )))
+    let view = ClaimQueueView::from_content(text).unwrap_or_default();
+    if view.is_context_only(&claim_identity(item)) {
+        return Ok(None);
+    }
+    Ok(Some((matches, view)))
 }
 
 struct PreparedSharedLeaf {
@@ -1775,10 +1799,21 @@ pub fn report_exact_worker_attempt_with_publication_state(
     worker_id: &str,
     publication_state: Option<agent_doc_element_queue::QueueReportState>,
 ) -> Result<QueueClaim> {
-    let (target, heads) = resolve_live_claim_target(file, item, "queue_claim_report")?;
+    let (target, heads, structural_context) =
+        resolve_claim_target(file, item, "queue_claim_report", true)?;
     let now = now_secs();
     let claim = mutate_ledger(file, |ledger| {
         log_followed(file, &ledger.follow_edits_in_view(now, &heads));
+        // A structural parent has no claimable head. Only the already
+        // recorded exact attempt can report there, with the same worker and
+        // generation checks as an executable head below.
+        if structural_context {
+            let identity = claim_identity(&target);
+            anyhow::ensure!(
+                ledger.claims.iter().any(|claim| claim.identity == identity),
+                "no exact worker attempt for the structural parent {target:?}",
+            );
+        }
         let reported = ledger
             .report_exact_worker_with_publication_state(
                 &target,
@@ -2787,6 +2822,14 @@ pub fn claim_states_for_content(file: &Path, content: &str) -> Result<Vec<QueueC
         .collect())
 }
 
+/// An already-bound attempt whose row became context. Its result still
+/// belongs to the old generation while each executable leaf gets its own.
+pub fn bound_attempt_is_structural_context(content: &str, claim: &QueueClaim) -> bool {
+    claim.worker.is_some()
+        && ClaimQueueView::from_content(content)
+            .is_some_and(|view| view.is_context_only(&claim.identity))
+}
+
 /// Actionable recovery for a lost/expired claim shown by `queue claims`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct LostClaimRecovery {
@@ -2846,6 +2889,9 @@ pub struct ClaimReport {
     /// its durable report and lineage facts (`#reportedcloseout`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reported_closeout: Option<agent_doc_queue::reported_closeout::ReportedClaimCloseout>,
+    /// Historical worker response for an original row that became context.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_response: Option<agent_doc_queue::claim_release_receipt::CapturedQueueResponse>,
 }
 
 /// The closeout for one `Reported` attempt (`#reportedcloseout`): lineage
@@ -3172,10 +3218,18 @@ pub fn visible_claim_projection_for_liveness(
     claim: &QueueClaim,
     owner: agent_doc_queue::queue_claim::ClaimOwnerLiveness,
 ) -> VisibleClaimProjection {
-    let expected_visible_marker = claim
-        .visible_projection_for_owner(owner)
-        .prefix()
-        .to_string();
+    visible_claim_projection_with_expected_marker(
+        observed,
+        claim,
+        claim.visible_projection_for_owner(owner).prefix(),
+    )
+}
+
+fn visible_claim_projection_with_expected_marker(
+    observed: &[(agent_doc_element_queue::QueueItemIdentity, String)],
+    claim: &QueueClaim,
+    expected_marker: &str,
+) -> VisibleClaimProjection {
     let observed_visible_markers = observed
         .iter()
         .filter(|(identity, _)| identity == &claim.identity)
@@ -3184,9 +3238,9 @@ pub fn visible_claim_projection_for_liveness(
     let synchronized = !observed_visible_markers.is_empty()
         && observed_visible_markers
             .iter()
-            .all(|marker| marker == &expected_visible_marker);
+            .all(|marker| marker == expected_marker);
     VisibleClaimProjection {
-        expected_visible_marker,
+        expected_visible_marker: expected_marker.to_string(),
         observed_visible_markers,
         synchronized,
     }
@@ -3197,7 +3251,23 @@ pub fn visible_claim_projection_for_liveness(
 pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<ClaimReport>> {
     let observed = visible_lifecycle_markers_for_content(content)?;
     let now = claim_clock_now_secs();
-    let claims = claim_states_for_content(file, content)?;
+    let live = live_queue_head_identities(content).unwrap_or_default();
+    let context = ClaimQueueView::from_content(content);
+    let claims = load_ledger_following(file, content)?
+        .claims
+        .into_iter()
+        .filter(|claim| {
+            live.contains(&claim.identity)
+                || (claim.worker.is_some()
+                    && context
+                        .as_ref()
+                        .is_some_and(|view| view.contains_context_identity(&claim.identity)))
+        })
+        .map(|mut claim| {
+            claim.project_expiry(now);
+            claim
+        })
+        .collect::<Vec<_>>();
     let lineage = lineage_for_reported(file, &claims);
     Ok(claims
         .into_iter()
@@ -3208,14 +3278,46 @@ pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<Claim
                 ClaimOwnerLiveness::Unrecorded => ("unrecorded", None),
                 ClaimOwnerLiveness::Ended(reason) => ("ended", Some(reason.as_str())),
             };
+            let is_context = !live.contains(&claim.identity);
             let VisibleClaimProjection {
                 expected_visible_marker,
                 observed_visible_markers,
                 synchronized,
-            } = visible_claim_projection_for_liveness(&observed, &claim, liveness);
-            let (assessment, assessment_detail) = claim_assessment(&claim, state);
-            let reported_closeout = reported_claim_closeout_in(file, &claim, lineage.as_ref());
-            let next_action_argv = if synchronized {
+            } = visible_claim_projection_with_expected_marker(
+                &observed,
+                &claim,
+                if is_context {
+                    "bare"
+                } else {
+                    claim.visible_projection_for_owner(liveness).prefix()
+                },
+            );
+            let (assessment, assessment_detail) = if is_context {
+                (
+                    "structural_context",
+                    "The original prompt became queue context. Its exact worker history is retained apart from its independently executable leaves.".to_string(),
+                )
+            } else {
+                claim_assessment(&claim, state)
+            };
+            let reported_closeout = if is_context {
+                None
+            } else {
+                reported_claim_closeout_in(file, &claim, lineage.as_ref())
+            };
+            let next_action_argv = if is_context {
+                Some(vec![
+                    "agent-doc".to_string(),
+                    "queue".to_string(),
+                    "lineage".to_string(),
+                    file.to_string_lossy().into_owned(),
+                    "--item".to_string(),
+                    claim.item_text.clone(),
+                    "--generation".to_string(),
+                    claim.generation.to_string(),
+                    "--verbose".to_string(),
+                ])
+            } else if synchronized {
                 reported_closeout
                     .as_ref()
                     .and_then(|closeout| closeout.next_action_argv())
@@ -3237,7 +3339,8 @@ pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<Claim
                     .worker
                     .as_ref()
                     .map(|worker| now.saturating_sub(worker.started_at_secs)),
-                lost_recovery: (claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost)
+                lost_recovery: (!is_context
+                    && claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost)
                     .then(|| lost_claim_recovery(file, &claim, now)),
                 claim,
                 owner_session_state: state,
@@ -3251,6 +3354,7 @@ pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<Claim
                 observed_visible_markers,
                 next_action_argv,
                 reported_closeout,
+                context_response: None,
             }
         })
         .collect())
@@ -3542,7 +3646,7 @@ pub fn prune_closed_claims(file: &Path, content: &str) -> Result<usize> {
         return Ok(0);
     }
     let _guard = steer_guard(nested_claim_steer_snapshots(file, content));
-    let live = live_queue_head_identities(content);
+    let mut live = live_queue_head_identities(content);
     let heads = ClaimQueueView::from_content(content);
     let now = now_secs();
     let pruned = mutate_ledger(file, |ledger| {
@@ -3550,6 +3654,14 @@ pub fn prune_closed_claims(file: &Path, content: &str) -> Result<usize> {
         // `mutate_ledger` may lag it) before closure is judged.
         if let Some(heads) = &heads {
             log_followed(file, &ledger.follow_edits_in_view(now, heads));
+            if let Some(live) = &mut live {
+                live.extend(ledger.claims.iter().filter_map(|claim| {
+                    // Gaining children removes dispatch ownership, not
+                    // the old worker's evidence or ability to report.
+                    (claim.worker.is_some() && heads.contains_context_identity(&claim.identity))
+                        .then(|| claim.identity.clone())
+                }));
+            }
         }
         Ok(ledger.prune_detailed(now, live.as_ref()))
     })?;
@@ -4600,6 +4712,87 @@ mod tests {
             .unwrap();
             assert_eq!(claim_owner_liveness(&doc, &claim), ClaimOwnerLiveness::Live);
         }
+    }
+
+    #[test]
+    fn structural_context_keeps_its_bound_worker_through_prune_and_late_report() {
+        let dir = tempfile::tempdir().unwrap();
+        let parent = "Review the rollout.";
+        let first = "Check rollout notes.";
+        let second = "Check rollback steps.";
+        let doc = write_doc(dir.path(), &[parent]);
+        let baseline = std::fs::read_to_string(&doc).unwrap();
+        let owner = "subagent:original";
+        let worker = "worker:original";
+        let (_, attempt) = claim(&doc, parent, owner, 600).unwrap();
+        let generation = attempt.generation;
+        start_attempt(&doc, parent, owner, worker, 600, generation).unwrap();
+
+        let nested = baseline.replace(
+            &format!("- {parent}\n"),
+            &format!("- ### {parent}\n  - {first}\n  - {second}\n"),
+        );
+        std::fs::write(&doc, &nested).unwrap();
+        assert!(claim(&doc, parent, "subagent:duplicate", 600).is_err());
+        assert_eq!(prune_closed_claims(&doc, &nested).unwrap(), 0);
+
+        let first_vector = format!("{parent}: {first}");
+        let second_vector = format!("{parent}: {second}");
+        let (_, leaf) = claim(&doc, &first_vector, "subagent:leaf", 600).unwrap();
+        assert_eq!(leaf.item_text, first_vector);
+        assert!(!claimed_items_for_content(&doc, &nested).claims(&second_vector));
+
+        // Both leaves finish before the original parent's substantive result
+        // comes back. Neither the derived parent strike nor another turn's
+        // claim pruning may discard that still-bound attempt.
+        let settled = nested
+            .replace(&format!("- ### {parent}"), &format!("- ### ~~{parent}~~"))
+            .replace(&format!("  - {first}"), &format!("  - ~~{first}~~"))
+            .replace(&format!("  - {second}"), &format!("  - ~~{second}~~"));
+        std::fs::write(&doc, &settled).unwrap();
+        assert_eq!(prune_closed_claims(&doc, &settled).unwrap(), 1);
+        let history = claim_reports_for_content(&doc, &settled).unwrap();
+        assert_eq!(history.len(), 1, "{history:?}");
+        assert_eq!(history[0].assessment, "structural_context");
+        assert_eq!(history[0].claim.generation, generation);
+        assert_eq!(history[0].claim.identity, attempt.identity);
+        assert!(history[0].reported_closeout.is_none());
+
+        assert!(
+            report_exact_worker_attempt_with_publication_state(
+                &doc,
+                parent,
+                generation,
+                "worker:other",
+                None,
+            )
+            .is_err()
+        );
+        assert!(
+            report_exact_worker_attempt_with_publication_state(
+                &doc,
+                parent,
+                generation + 1,
+                worker,
+                None,
+            )
+            .is_err()
+        );
+        let reported = report_exact_worker_attempt_with_publication_state(
+            &doc, parent, generation, worker, None,
+        )
+        .unwrap();
+        assert_eq!(
+            reported.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Reported
+        );
+        assert_eq!(reported.identity, attempt.identity);
+        assert!(
+            reported_closeout_obligations_for_content(&doc, &settled)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), settled);
     }
 
     /// `#idlessqueueidentity`: once the operator deletes `id=` from the

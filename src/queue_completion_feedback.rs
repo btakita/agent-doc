@@ -27,6 +27,9 @@ use agent_doc_document::subagent_completion::{
 #[derive(Debug)]
 pub(crate) struct CompletionFeedbackOutcome {
     pub claim: QueueClaim,
+    /// The operator gave the original row children after the worker bound.
+    /// Its response is evidence for that attempt, with no queue row to close.
+    pub structural_context: bool,
     pub appended: bool,
     pub replaced: bool,
     /// Durable editor-authority target still awaiting visible projection.
@@ -129,7 +132,9 @@ pub(crate) fn requeue_prompt_pressure_hand_back(
     let Some(claim) = ledger.resolve_selector(item)?.cloned() else {
         return Ok(None);
     };
-    if !claim.owner.starts_with("subagent:") {
+    if !claim.owner.starts_with("subagent:")
+        || agent_doc_queue_io::queue_claim::bound_attempt_is_structural_context(&current, &claim)
+    {
         return Ok(None);
     }
     let blocker = agent_doc_queue::prompt_pressure::parse_prompt_blocker(response);
@@ -448,6 +453,15 @@ fn report_complete_with_lock_wait(
             Some(&claim),
         ));
     }
+    let structural_context =
+        agent_doc_queue_io::queue_claim::bound_attempt_is_structural_context(&current, &claim);
+    if structural_context {
+        anyhow::ensure!(
+            generation == Some(claim.generation),
+            "structural parent completion requires the original worker's exact generation {}",
+            claim.generation,
+        );
+    }
     let worker_id = claim
         .worker
         .as_ref()
@@ -456,7 +470,13 @@ fn report_complete_with_lock_wait(
     // The full response receipt is the monotonic first boundary. If the
     // process stops after this write, reconciliation can reconstruct the cell
     // and retry the exact state transition without consulting agent history.
-    agent_doc_queue_io::claim_release_receipt::capture_response(file, &claim, response)?;
+    if structural_context {
+        agent_doc_queue_io::claim_release_receipt::capture_structural_context_response(
+            file, &claim, response,
+        )?;
+    } else {
+        agent_doc_queue_io::claim_release_receipt::capture_response(file, &claim, response)?;
+    }
     maybe_pause_report_complete_transaction_after_capture()?;
     // Join the result class to this exact claim before it can become
     // Reported. A crash can leave running repository debt, never a prose-only
@@ -507,6 +527,20 @@ fn report_complete_with_lock_wait(
             &worker_id,
             publication_state,
         )?;
+    if structural_context {
+        // The response receipt and repository lineage already attest the
+        // superseded attempt. No completion cell, strike or follow-up can be
+        // attributed to the new leaf work.
+        return Ok(CompletionFeedbackOutcome {
+            claim,
+            structural_context,
+            appended: false,
+            replaced: false,
+            projection_pending: false,
+            intent_id: None,
+            followups: Default::default(),
+        });
+    }
     // Derive the reported marker and completion cell from one cut and publish
     // one successor. Two separate retained editor writes can conflict while
     // the first is still awaiting projection.
@@ -532,6 +566,7 @@ fn report_complete_with_lock_wait(
     }
     Ok(CompletionFeedbackOutcome {
         claim,
+        structural_context,
         appended,
         replaced,
         projection_pending: intent_id.is_some(),

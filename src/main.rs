@@ -11135,6 +11135,21 @@ fn try_main() -> anyhow::Result<()> {
                         repository.as_ref(),
                         &response,
                     )?;
+                    if outcome.structural_context {
+                        eprintln!(
+                            "[queue] retained the worker response and lineage for {:?} (owner {}, generation {}). The original row is now context. Read the report with `agent-doc queue claims {:?}` and the repository evidence with `agent-doc queue lineage {:?}`.",
+                            outcome.claim.item_text,
+                            outcome.claim.owner,
+                            outcome.claim.generation,
+                            file,
+                            file,
+                        );
+                        emit_subagent_pool_refill(
+                            &file,
+                            agent_doc_queue::subagent_pool::PoolRefillTrigger::ReportComplete,
+                        );
+                        return Ok(());
+                    }
                     let mechanical = match queue_completion_feedback::close_mechanical_reported_rows(
                         &file,
                         &CliQueueCommandEffects,
@@ -11449,10 +11464,31 @@ fn try_main() -> anyhow::Result<()> {
                 // `#claimownerliveness`: each claim carries whether the
                 // coordinator session that made it is still alive.
                 let queue_effects = CliQueueCommandEffects;
-                let claims = agent_doc_queue_io::queue_cmd::claim_reports_with_effects(
+                let mut claims = agent_doc_queue_io::queue_cmd::claim_reports_with_effects(
                     &queue_effects,
                     &file,
                 )?;
+                if claims
+                    .iter()
+                    .any(|report| report.assessment == "structural_context")
+                {
+                    let receipts = agent_doc_queue_io::claim_release_receipt::load(&file)?;
+                    for report in claims
+                        .iter_mut()
+                        .filter(|report| report.assessment == "structural_context")
+                    {
+                        let key = agent_doc_queue_io::queue_claim::completion_feedback_key(
+                            &report.claim,
+                        )?;
+                        report.context_response = receipts
+                            .receipts
+                            .iter()
+                            .find(|receipt| receipt.completion_key.as_deref() == Some(key.as_str()))
+                            .and_then(|receipt| receipt.response.as_ref())
+                            .filter(|response| response.response_id == key && response.is_valid())
+                            .cloned();
+                    }
+                }
                 println!("{}", serde_json::to_string_pretty(&claims)?);
                 // `#subagentworkpool`: a lost attempt freed its pool slot.
                 // Claims JSON stays on stdout; the refill goes to stderr.

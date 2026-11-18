@@ -2460,6 +2460,12 @@ fn reconcile_component_body(
         .collect();
     let base_map: std::collections::HashMap<&str, &KeyedChild> =
         base_children.iter().map(|c| (c.key.as_str(), c)).collect();
+    let ours_generated_parents = (name == "queue")
+        .then(|| generated_response_parent_keys(&ours_children))
+        .unwrap_or_default();
+    let theirs_generated_parents = (name == "queue")
+        .then(|| generated_response_parent_keys(&theirs_children))
+        .unwrap_or_default();
 
     let ours_keys: Vec<&str> = ours_children.iter().map(|c| c.key.as_str()).collect();
     let theirs_keys: Vec<&str> = theirs_children.iter().map(|c| c.key.as_str()).collect();
@@ -2524,6 +2530,7 @@ fn reconcile_component_body(
     let lifecycle_governed = is_list_component(name);
 
     let mut out = String::new();
+    let mut resolved_keys = std::collections::HashSet::new();
     for key in &order {
         let in_o = ours_map.get(key.as_str());
         let in_t = theirs_map.get(key.as_str());
@@ -2612,13 +2619,79 @@ fn reconcile_component_body(
             (None, None) => None,
         };
         if let Some(text) = resolved {
+            // `#responsechildowner`: a generated response row is part of its
+            // owning queue row's
+            // projection, not an independent insertion. If the live/operator
+            // side deleted that owner while a retained response target added
+            // children beneath it, the normal list merge lawfully drops the
+            // owner and would otherwise promote the new children into an
+            // orphaned component prefix. Keep the deletion authoritative and
+            // drop only the detached generated subtree. The saved completion
+            // cell and receipt remain the recovery source.
+            let generated_parent = ours_generated_parents
+                .get(key)
+                .or_else(|| theirs_generated_parents.get(key));
+            if generated_parent.is_some_and(|parent| !resolved_keys.contains(parent)) {
+                continue;
+            }
             if !out.is_empty() && !out.ends_with('\n') && text.trim_start().starts_with("- ") {
                 out.push('\n');
             }
             out.push_str(&text);
+            resolved_keys.insert(key.clone());
         }
     }
     Some(out)
+}
+
+/// Direct structural parents of generated response rows in one keyed cut.
+///
+/// Response keys encode their scope for identity, but that encoding is not a
+/// safe parser boundary because both queue keys and generated labels contain
+/// colons. Derive the relationship from Markdown indentation while the exact
+/// ordered cut is still available instead.
+fn generated_response_parent_keys(
+    children: &[KeyedChild],
+) -> std::collections::HashMap<String, String> {
+    let rows = children
+        .iter()
+        .filter(|child| child.key != PREAMBLE_KEY)
+        .map(|child| (child.key.as_str(), child.text.as_str()))
+        .collect::<Vec<_>>();
+    generated_response_parent_keys_for_rows(&rows)
+}
+
+pub(crate) fn generated_response_parent_keys_for_rows(
+    rows: &[(&str, &str)],
+) -> std::collections::HashMap<String, String> {
+    let generated_key = |key: &str| {
+        key.starts_with("gen:")
+            || key
+                .split_once(':')
+                .and_then(|(_, rest)| rest.split_once(':'))
+                .is_some_and(|(occurrence, item)| {
+                    occurrence.bytes().all(|byte| byte.is_ascii_digit()) && item.starts_with("gen:")
+                })
+    };
+    let indent = |text: &str| {
+        let first = text.lines().next().unwrap_or_default();
+        first.len() - first.trim_start_matches([' ', '\t']).len()
+    };
+    let mut stack: Vec<(usize, &str)> = Vec::new();
+    let mut parents = std::collections::HashMap::new();
+    for (key, text) in rows {
+        let child_indent = indent(text);
+        while stack.last().is_some_and(|(open, _)| *open >= child_indent) {
+            stack.pop();
+        }
+        if generated_key(key)
+            && let Some((_, parent)) = stack.last()
+        {
+            parents.insert((*key).to_string(), (*parent).to_string());
+        }
+        stack.push((child_indent, key));
+    }
+    parents
 }
 
 fn queue_list_child_is_empty_placeholder(text: &str) -> bool {
@@ -7809,6 +7882,50 @@ Second answer line three.
             persisted.contains(&expected),
             "document-cell merge prepended generated response metadata:\n{persisted}"
         );
+    }
+
+    /// A retained completion projection may add its response tree while the
+    /// live editor independently removes the owning queue row. The owner
+    /// deletion wins, and its generated children must not be promoted into an
+    /// orphaned queue prefix. Unrelated live work still survives.
+    #[test]
+    fn generated_response_is_removed_with_its_concurrently_deleted_owner() {
+        let parent = "- ### Review the current run";
+        let response = "  - **Response [#r-0123456789ab]**";
+        let timestamp = "    - **Timestamp:** 2026-11-09T15:27:07.000Z";
+        let summary = "    - **Summary:** The review is complete.";
+        let follow_up = "- ### Apply the supported closeouts";
+        let queue = |rows: &[&str]| rows.join("\n");
+        let base = doc_with_exchange_queue("Q.", &queue(&[parent]));
+        let ours = doc_with_exchange_queue(
+            "Q.",
+            &queue(&[parent, response, timestamp, summary, follow_up]),
+        );
+        let theirs = doc_with_exchange_queue("Q.", &queue(&[follow_up]));
+        let expected = queue(&[follow_up]);
+
+        let base_queue = queue_component_bodies(&base);
+        let ours_queue = queue_component_bodies(&ours);
+        let theirs_queue = queue_component_bodies(&theirs);
+        let reconciled = reconcile_component_body(
+            "queue",
+            Some(base_queue[0]),
+            ours_queue[0],
+            theirs_queue[0],
+            false,
+        )
+        .unwrap();
+        assert_eq!(reconciled.trim(), expected);
+
+        let state = CrdtDoc::from_text(&base).encode_state();
+        let merged = merge_by_component(Some(&state), &ours, &theirs).unwrap();
+        let merged_queue = body_of(&merged, "queue");
+        assert_eq!(merged_queue.trim(), expected);
+
+        let base_state = MultiNodeState::from_text(&base).unwrap();
+        let (persisted, _) = MultiNodeState::merge(Some(&base_state), &ours, &theirs).unwrap();
+        let persisted_queue = body_of(&persisted, "queue");
+        assert_eq!(persisted_queue.trim(), expected);
     }
 
     #[test]

@@ -241,7 +241,7 @@ fn the_tag_lands_before_the_generated_row_id() {
 }
 
 /// The reclassification tags each human-owned pending row in place, swaps
-/// its `📥` for `⏳`, and touches no other byte. A second run changes nothing.
+/// its `📥` for `🙋`, and touches no other byte. A second run changes nothing.
 #[test]
 fn reclassification_tags_human_rows_in_place_and_is_idempotent() {
     let (updated, rows) = reclassify_human_followup_rows(FIXTURE)
@@ -250,7 +250,7 @@ fn reclassification_tags_human_rows_in_place_and_is_idempotent() {
     assert_eq!(rows.len(), HUMAN_ROWS.len());
     for (fragment, _) in HUMAN_ROWS {
         let line = line_containing(&updated, fragment);
-        assert!(line.contains("⏳ follow up on an action item"), "{line}");
+        assert!(line.contains("🙋 follow up on an action item"), "{line}");
         assert!(!line.contains('📥'), "{line}");
         assert!(line.contains(" [operator-verify]"), "{line}");
         // Every reader of the row sees the gate, including an id-less row
@@ -318,7 +318,7 @@ fn reclassification_skips_started_rows() {
     assert_eq!(
         reclassify_followup_row("follow up on an action item from `x`: approve PR 9"),
         Some((
-            "follow up on an action item from `x`: approve PR 9 [operator-verify]".to_string(),
+            "🙋 follow up on an action item from `x`: approve PR 9 [operator-verify]".to_string(),
             OwnerEvidence::Signal("approve")
         ))
     );
@@ -355,7 +355,7 @@ fn stop_gate_releases_human_rows_and_still_refuses_agent_rows() {
         .lines()
         .map(|line| {
             if line.contains("[operator-verify]") {
-                line.replace("⏳ follow up", "📥 follow up")
+                line.replace("🙋 follow up", "📥 follow up")
             } else {
                 line.to_string()
             }
@@ -462,14 +462,20 @@ fn worker_text_with_a_hash_colon_is_not_an_operator_verdict() {
         assert!(head.contains("Fix the typo"), "{scope:?}: {head}");
     }
 
-    // Preflight's lifecycle projection paints `⏳`, never strips it.
+    // Preflight's lifecycle projection rests the row as `🙋`, not `📥` or `⏳`.
     let entries = crate::document_queue::parse(&format!("- 📥 {human}\n- ⏳ {human}\n")).unwrap();
     let none = std::collections::HashSet::new();
     let marked = crate::document_queue::set_prompts_lifecycle_markers(&entries, &none, &none)
-        .expect("the 📥 row gains ⏳");
+        .expect("the inbox and hourglass rows rest as 🙋");
     for prompt in crate::document_queue::prompts(&marked) {
+        assert!(prompt.text.starts_with('🙋'), "{}", prompt.text);
         assert!(
-            agent_doc_document::queue_projection::has_awaiting_operator_marker(&prompt.text),
+            !prompt.text.contains('📥') && !prompt.text.contains('⏳'),
+            "{}",
+            prompt.text
+        );
+        assert!(
+            agent_doc_document::queue_projection::lifecycle_marker(&prompt.text).is_none(),
             "{}",
             prompt.text
         );
@@ -726,7 +732,7 @@ fn an_operator_removed_tag_stays_removed() {
     assert_eq!(seen.classified, HashSet::from([tagged_key.clone()]));
     assert!(seen.live.contains(&agent_key));
 
-    // The operator deletes the tag; `⏳` may linger or be repainted `📥`.
+    // The operator deletes the tag; `🙋` may linger or be repainted `📥`.
     let tagged_line = tagged
         .lines()
         .find(|line| line.contains("[operator-verify]"))
@@ -735,7 +741,7 @@ fn an_operator_removed_tag_stays_removed() {
         tagged_line.replace(" [operator-verify]", ""),
         tagged_line
             .replace(" [operator-verify]", "")
-            .replace('⏳', "📥"),
+            .replace('🙋', "📥"),
     ] {
         let edited = tagged.replace(tagged_line, &handed_back);
         let edited_keys = followup_row_keys(&edited).unwrap();
@@ -794,4 +800,139 @@ fn an_operator_removed_tag_stays_removed() {
     let keys = followup_row_keys(&claimed).unwrap();
     assert!(keys.classified.is_empty());
     assert_eq!(keys.live.len(), 1);
+}
+
+/// `#opverifyrest`: an `[operator-verify]` follow-up is the operator's review.
+/// Queue projection must not leave it in the agent inbox. `🙋` lets the turn
+/// end; `📥` would hold it. An agent-owned follow-up stays `📥`, and a live
+/// attempt marker on a tagged row stays put.
+#[test]
+fn operator_verify_followup_rests_as_operator_wait_not_agent_inbox() {
+    use crate::document_queue::{QueueRowProjection, project_prompt_runtime_projections};
+    use crate::queue_continuation::{DrainScope, live_drainable_continuation_head_entry};
+    use agent_doc_document::queue_projection::QueueLifecycleMarker;
+
+    let human = "follow up on an action item from queue item “Does haiven-contacts have the sdk-dev -> main auto-pr gh action enabled? If not …”: operator: review and merge https://github.com/haiven-dev/haiven-contracts/pull/206 into `sdk-dev`. The workflow is not enabled until that merge. [operator-verify]";
+    let agent =
+        "follow up on an action item from `origin`: Fix the typo in README.md. [#q-0123456789ac]";
+    let body = format!("- 📥 {human}\n- 📥 {agent}\n- 🚧 {human}\n");
+    let pending = |text: &str| QueueRowProjection {
+        identity: None,
+        text: text.to_string(),
+        marker: QueueLifecycleMarker::Pending,
+        owner: None,
+        blockers: Vec::new(),
+    };
+    let running = QueueRowProjection {
+        identity: None,
+        text: format!("🚧 {human}"),
+        marker: QueueLifecycleMarker::Running,
+        owner: None,
+        blockers: Vec::new(),
+    };
+    let (projected, entries) = project_prompt_runtime_projections(
+        &body,
+        &[
+            pending(&format!("📥 {human}")),
+            pending(&format!("📥 {agent}")),
+            running,
+        ],
+    )
+    .unwrap()
+    .expect("the inbox glyph on the operator-verify row changes");
+    let prompts = crate::document_queue::prompts(&entries);
+    assert_eq!(prompts.len(), 3, "{projected}");
+    assert!(
+        prompts[0].text.starts_with('🙋'),
+        "operator-verify follow-up rests as 🙋: {}",
+        prompts[0].text
+    );
+    assert!(
+        !prompts[0].text.contains('📥') && !prompts[0].text.contains('⏳'),
+        "{}",
+        prompts[0].text
+    );
+    assert!(
+        agent_doc_document::queue_projection::lifecycle_marker(&prompts[0].text).is_none(),
+        "{}",
+        prompts[0].text
+    );
+    assert!(
+        prompts[1].text.starts_with('📥'),
+        "an agent follow-up stays in the inbox: {}",
+        prompts[1].text
+    );
+    assert!(
+        prompts[2].text.starts_with('🚧'),
+        "a live attempt stays visible: {}",
+        prompts[2].text
+    );
+    assert!(
+        project_prompt_runtime_projections(
+            &projected,
+            &[
+                pending(&prompts[0].text),
+                pending(&prompts[1].text),
+                QueueRowProjection {
+                    identity: None,
+                    text: prompts[2].text.clone(),
+                    marker: QueueLifecycleMarker::Running,
+                    owner: None,
+                    blockers: Vec::new(),
+                }
+            ]
+        )
+        .unwrap()
+        .is_none(),
+        "a second projection does not repaint the rested row"
+    );
+
+    let open = std::collections::HashSet::new();
+    let kept = crate::document_queue::set_prompt_operator_actions(&entries, &[], &open);
+    let kept_text = kept
+        .as_ref()
+        .map(|entries| crate::document_queue::prompts(entries)[0].text.clone())
+        .unwrap_or_else(|| prompts[0].text.clone());
+    assert!(
+        kept_text.starts_with('🙋') && !kept_text.contains('📥'),
+        "clearing request annotations must not put the row back in the inbox: {kept_text}"
+    );
+
+    let doc = format!(
+        "---\nagent_doc_format: template\nqueue: go\n---\n\n\
+<!-- agent:queue go -->\n\
+- {}\n\
+<!-- /agent:queue -->\n",
+        prompts[0].text
+    );
+    let assessment = assess_transient_closeout(&doc, &CloseoutEvidence::default()).unwrap();
+    assert!(
+        assessment.debts.is_empty(),
+        "the rested row does not hold the turn: {:?}",
+        assessment.debts
+    );
+    for scope in [DrainScope::InSessionLoop, DrainScope::Supervisor] {
+        assert!(
+            live_drainable_continuation_head_entry(&doc, scope).is_none(),
+            "{scope:?} must not drain an operator-verify follow-up"
+        );
+    }
+
+    // The binary's trailing `[#q-…]` is the row's stable id, not an operator
+    // request. Resting as `🙋` must not drop it.
+    let identified = "🙋 follow up on an action item from `origin`: A non-author approves PR 9. [operator-verify] [#q-0123456789ab]";
+    let identified_body = format!("- {identified}\n");
+    let identified_projected =
+        project_prompt_runtime_projections(&identified_body, &[pending(identified)])
+            .unwrap()
+            .map(|(body, _)| body)
+            .unwrap_or(identified_body);
+    assert!(
+        identified_projected.contains("[#q-0123456789ab]"),
+        "{identified_projected}"
+    );
+    assert!(
+        identified_projected.contains("🙋 ") && !identified_projected.contains('📥'),
+        "{identified_projected}"
+    );
 }

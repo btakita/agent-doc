@@ -24,8 +24,9 @@
 //! the worker's `agent:` / `operator:` / `human (<who>):` label, else a
 //! conservative vocabulary of actions only a person can take. A human-owned
 //! row carries `[operator-verify]`, so no drain scope dispatches it, preflight
-//! projects `⏳` onto it, and the Stop hook's `#transientcloseout` gate waits
-//! on the operator instead of refusing every turn end over it.
+//! rests it as `🙋` rather than the agent inbox `📥`, and the Stop hook's
+//! `#transientcloseout` gate waits on the operator instead of refusing every
+//! turn end over it.
 //!
 //! `#handbackrefusedcommandexact`: when that placement cannot be proven, the
 //! report line prints one `queue follow-up` command on its own line. `--after`

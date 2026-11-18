@@ -414,7 +414,7 @@ mod tests {
         assert_eq!(rows, preview);
         let after = std::fs::read_to_string(&doc).unwrap();
         assert!(after.contains(
-            "- ⏳ follow up on an action item from `origin`: A non-author approves PR 9 at head `abc1234`. [operator-verify] [#q-0123456789ab]\n"
+            "- 🙋 follow up on an action item from `origin`: A non-author approves PR 9 at head `abc1234`. [operator-verify] [#q-0123456789ab]\n"
         ), "{after}");
         assert!(after.contains(
             "- 📥 follow up on an action item from `origin`: Fix the typo in README.md. [#q-0123456789ac]\n"

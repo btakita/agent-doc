@@ -2431,6 +2431,20 @@ pub fn set_prompt_runtime_projections_with(
             }
         })
         .collect::<Vec<_>>();
+    // `#opverifyrest`: a pending target is the agent inbox. An
+    // `[operator-verify]` row is the operator's review, so the same pass
+    // rests it as `🙋` instead of leaving `📥`. Doing it here covers the
+    // selected queue and every sibling queue the claim projection repaints.
+    let mut out = out;
+    for entry in &mut out {
+        let QueueEntry::Prompt(prompt) = entry else {
+            continue;
+        };
+        if let Some(rested) = crate::queue_continuation::rest_operator_verify_text(&prompt.text) {
+            prompt.text = rested;
+            changed = true;
+        }
+    }
     (changed && out != entries).then_some(out)
 }
 
@@ -3100,13 +3114,21 @@ pub fn set_prompt_operator_actions(
         } else {
             ids.clear();
         }
-        let projected = if waiting_answer_selected {
+        let mut projected = if waiting_answer_selected {
             clear_waiting_item_operator_gate(&prompt.text)
         } else if let Some(gated) = waiting_item_identity_gate(&prompt.text, &ids) {
             gated
         } else {
             agent_doc_document::queue_projection::apply_operator_action_ids(&prompt.text, &ids)
         };
+        // `#opverifyrest`: a bare `🙋` on an `[operator-verify]` row is the
+        // operator wait, not a request annotation. Clearing it here would
+        // let the next pending paint put the row back in the agent inbox.
+        if ids.is_empty()
+            && let Some(rested) = crate::queue_continuation::rest_operator_verify_text(&projected)
+        {
+            projected = rested;
+        }
         if projected != prompt.text {
             prompt.text = projected;
             changed = true;
@@ -3385,9 +3407,12 @@ pub fn set_prompts_skipped(
 }
 
 /// Reconcile the id-backed lifecycle projections that follow the `🚧` pass:
-/// `⏳` on heads in `awaiting_ids` (`#queueawaitop`) or whose own text carries
-/// `[operator-verify]` with no inline verdict (`#humanfollowupowner`), and `⏭️` on heads in
-/// `skipped_ids` (`#queueskip`), clearing either marker from every other head.
+/// `⏳` on heads in `awaiting_ids` (`#queueawaitop`), `🙋` on a head whose own
+/// text carries `[operator-verify]` with no inline verdict
+/// (`#humanfollowupowner`, `#opverifyrest`), and `⏭️` on heads in
+/// `skipped_ids` (`#queueskip`), clearing a stale `⏳` or `⏭️` from every
+/// other head. The inline tag rests as `🙋`, not `📥` and not `⏳`: `📥` is
+/// the agent inbox and holds the turn.
 ///
 /// A head that already carries `🚧` is left untouched (`#claimskipmarker`):
 /// `🚧` is the in-flight projection (the inline head or a worker's live claim),
@@ -3426,16 +3451,21 @@ pub fn set_prompts_lifecycle_markers(
                 // head's reserved id reads as an annotation, not its id.
                 let id = do_prompt_id(&next.text)
                     .or_else(|| crate::queue_continuation::reserved_request_head_id(&next.text));
-                // `#humanfollowupowner`: a row whose own text gates it on the
-                // operator (`[operator-verify]`, no inline verdict) awaits the
-                // operator whatever id the scan finds; a free-text follow-up
-                // row's first `#` may be a pull request number.
-                let awaiting = id.as_ref().is_some_and(|id| awaiting_ids.contains(id))
-                    || crate::queue_continuation::head_awaits_operator_inline(&next.text);
+                // `#humanfollowupowner` / `#opverifyrest`: a row whose own text
+                // gates it on the operator (`[operator-verify]`, no inline
+                // verdict) rests as `🙋`, whatever id the scan finds. A
+                // free-text follow-up row's first `#` may be a pull request
+                // number. An id-backed head with no inline tag still uses `⏳`.
+                let inline_operator =
+                    crate::queue_continuation::head_awaits_operator_inline(&next.text);
+                let awaiting =
+                    id.as_ref().is_some_and(|id| awaiting_ids.contains(id)) || inline_operator;
                 let skipped = !awaiting && id.as_ref().is_some_and(|id| skipped_ids.contains(id));
                 let has_awaiting = qp::has_awaiting_operator_marker(&next.text);
                 let has_skip = qp::has_skip_marker(&next.text);
-                let text = if awaiting {
+                let text = if inline_operator {
+                    crate::queue_continuation::rest_operator_verify_text(&next.text)
+                } else if awaiting {
                     (!has_awaiting).then(|| qp::apply_awaiting_operator_marker(&next.text))
                 } else if skipped {
                     (!has_skip).then(|| qp::apply_skip_marker(&next.text))

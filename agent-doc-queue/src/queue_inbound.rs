@@ -254,10 +254,118 @@ fn origin_subtree_ends(body: &str, matches_row: impl Fn(&str) -> bool) -> Vec<us
                 }
                 break;
             }
+            // A follow-up is a column-0 bullet. Any list item still indented
+            // under the parent (an ordered marker the walk did not treat as a
+            // sibling, or a child after a prose line that ended the walk) would
+            // nest under that bullet and leave its real parent. Keep those
+            // lines with the parent.
+            subtree_end = extend_past_lines_a_column0_bullet_would_adopt(&lines, subtree_end);
             matches.push(subtree_end);
         }
     }
     matches
+}
+
+/// End offset at or after `subtree_end` such that a new `- ` bullet there is
+/// not the parent of list items that already belonged to an earlier row.
+///
+/// CommonMark nests a marker at column 2 or more, and a tab, under a column-0
+/// bullet. A column-0 paragraph between the origin and those markers is lazy
+/// continuation, so the markers would nest under the follow-up too. An ATX
+/// heading interrupts the list and is not such a pull.
+fn extend_past_lines_a_column0_bullet_would_adopt(
+    lines: &[(usize, &str)],
+    subtree_end: usize,
+) -> usize {
+    let mut last_keep = subtree_end;
+    let mut index = lines
+        .iter()
+        .position(|(end, _)| *end > subtree_end)
+        .unwrap_or(lines.len());
+    while index < lines.len() {
+        let (end, raw) = lines[index];
+        let text = raw.trim_end_matches(['\r', '\n']);
+        if text.trim().is_empty() {
+            index += 1;
+            continue;
+        }
+        if let Some(column) = list_marker_column(text) {
+            if column >= 2 {
+                last_keep = end;
+                index += 1;
+                continue;
+            }
+            break;
+        }
+        if leading_column(text) >= 2 || column0_line_pulls_a_nested_list_item(lines, index) {
+            last_keep = end;
+            index += 1;
+            continue;
+        }
+        break;
+    }
+    last_keep
+}
+
+/// Column of a `- ` or `N. ` marker, counting a tab as a 4-column stop.
+/// `None` when `text` is not a list item.
+fn list_marker_column(text: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut column = 0usize;
+    let mut index = 0usize;
+    while index < bytes.len() {
+        match bytes[index] {
+            b' ' => column += 1,
+            b'\t' => column += 4 - (column % 4),
+            _ => break,
+        }
+        index += 1;
+    }
+    let rest = &text[index..];
+    if rest.starts_with("- ") {
+        return Some(column);
+    }
+    let digits = rest
+        .bytes()
+        .take_while(|byte| byte.is_ascii_digit())
+        .count();
+    if digits > 0 && rest[digits..].starts_with(". ") {
+        return Some(column);
+    }
+    None
+}
+
+fn leading_column(text: &str) -> usize {
+    let mut column = 0usize;
+    for byte in text.bytes() {
+        match byte {
+            b' ' => column += 1,
+            b'\t' => column += 4 - (column % 4),
+            _ => break,
+        }
+    }
+    column
+}
+
+/// A column-0 non-list line pulls a later nested marker into the new bullet
+/// when nothing before that marker interrupts the list.
+fn column0_line_pulls_a_nested_list_item(lines: &[(usize, &str)], from: usize) -> bool {
+    for (_, raw) in lines.iter().skip(from + 1) {
+        let text = raw.trim_end_matches(['\r', '\n']);
+        if text.trim().is_empty() {
+            continue;
+        }
+        if let Some(column) = list_marker_column(text) {
+            return column >= 2;
+        }
+        if leading_column(text) >= 2 {
+            return true;
+        }
+        if text.trim_start().starts_with('#') {
+            return false;
+        }
+    }
+    false
 }
 
 fn valid_token_char(ch: char) -> bool {
@@ -548,6 +656,76 @@ mod tests {
                 "- later work\n",
             )),
             "{updated}"
+        );
+    }
+
+    /// A column-0 follow-up used to land before a child the walk had dropped
+    /// (prose ended the subtree, or the parent marker was not `- `). That child
+    /// then nested under the follow-up. The child stays with its parent.
+    #[test]
+    fn followup_does_not_adopt_children_that_already_belonged_to_the_parent() {
+        let doc = concat!(
+            "<!-- agent:run id=main -->\n",
+            "- parent work\n",
+            "  - origin work\n",
+            "note that stays with the parent\n",
+            "  - sibling child that already belonged to the parent\n",
+            "- later work\n",
+            "<!-- /agent:run -->\n",
+        );
+        let updated = plan_queue_followups(
+            doc,
+            "main",
+            "origin work",
+            &["follow up on an action item from parent".to_string()],
+        )
+        .unwrap();
+        assert_eq!(
+            updated,
+            concat!(
+                "<!-- agent:run id=main -->\n",
+                "- parent work\n",
+                "  - origin work\n",
+                "note that stays with the parent\n",
+                "  - sibling child that already belonged to the parent\n",
+                "- follow up on an action item from parent\n",
+                "- later work\n",
+                "<!-- /agent:run -->\n",
+            )
+        );
+    }
+
+    /// `1. parent` is a real queue row. Climbing only `- ` lines treated the
+    /// nested origin as the root and inserted the follow-up between that
+    /// origin and the parent's other child.
+    #[test]
+    fn followup_does_not_adopt_children_of_an_ordered_parent() {
+        let doc = concat!(
+            "<!-- agent:run id=main -->\n",
+            "1. parent work\n",
+            "   - origin work\n",
+            "   - sibling child\n",
+            "- later work\n",
+            "<!-- /agent:run -->\n",
+        );
+        let updated = plan_queue_followups(
+            doc,
+            "main",
+            "origin work",
+            &["follow up on an action item from parent".to_string()],
+        )
+        .unwrap();
+        assert_eq!(
+            updated,
+            concat!(
+                "<!-- agent:run id=main -->\n",
+                "1. parent work\n",
+                "   - origin work\n",
+                "   - sibling child\n",
+                "- follow up on an action item from parent\n",
+                "- later work\n",
+                "<!-- /agent:run -->\n",
+            )
         );
     }
 

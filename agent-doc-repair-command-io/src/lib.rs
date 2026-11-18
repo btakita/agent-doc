@@ -1268,14 +1268,19 @@ pub fn run_session_check_heal(file: &Path) -> Result<()> {
     // maintenance request whose worker is gone; adopt and run it before the
     // guard, since the worker body takes the apply flock itself.
     recover_orphaned_queue_maintenance_before_closeout(file, "session_check_heal");
-    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
-    let session_effects =
-        agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(file, &apply_guard)?;
-    agent_doc_session_check_io::run_self_heal_under_apply_guard(
-        file,
-        &session_effects,
-        &apply_guard,
-    )?;
+    {
+        let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+        let session_effects =
+            agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(
+                file,
+                &apply_guard,
+            )?;
+        agent_doc_session_check_io::run_self_heal_under_apply_guard(
+            file,
+            &session_effects,
+            &apply_guard,
+        )?;
+    }
     // The applying twin advances the report only after the cancellation
     // transaction above and the remaining guarded self-heals both succeeded.
     agent_doc_session_check_io::midturn_steering::emit_closeout_steering(

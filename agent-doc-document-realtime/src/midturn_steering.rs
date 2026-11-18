@@ -81,9 +81,11 @@ pub enum SteeringDispatch {
     /// forward the operator's change to that owner, never dispatch a new
     /// subagent (`#claimedsteerwake`). [`SteeringItem::owner`] names it.
     ForwardToOwner,
-    /// The operator removed an item owned by an active worker attempt. The
-    /// harness must interrupt that exact worker and retire its claim; it may
-    /// not continue based on sunk-cost judgment (`#queue-removal-cancels`).
+    /// A removal candidate whose durable cancellation has yet to be applied.
+    /// A preview can show it, but it cannot authorize a harness interrupt.
+    CancelClaimedPending,
+    /// The binary recorded the operator's removal of this exact claim
+    /// generation. Only its bound harness worker may be interrupted.
     CancelClaimed,
     /// A deleted struck row still has durable live claim/report/outbox
     /// evidence. Markdown presentation cannot override that conflict; the
@@ -109,6 +111,7 @@ impl SteeringDispatch {
             Self::Subagent => "subagent",
             Self::AwaitReportedCloseout => "await_reported_closeout",
             Self::ForwardToOwner => "forward_to_owner",
+            Self::CancelClaimedPending => "cancel_claimed_pending",
             Self::CancelClaimed => "cancel_claimed",
             Self::DegradedClaimMismatch => "degraded_claim_mismatch",
             Self::PersistReported => "persist_reported",
@@ -1921,6 +1924,9 @@ fn item_header_suffix(item: &SteeringItem) -> String {
     if let Some(worker_id) = &item.worker_id {
         out.push_str(&format!(" worker={worker_id}"));
     }
+    if item.dispatch == SteeringDispatch::CancelClaimed {
+        out.push_str(" cancellation=operator_removed");
+    }
     if item.explicit {
         out.push_str(" sent=explicit");
     }
@@ -2019,8 +2025,9 @@ pub fn struck_removal_report_key(
     )
 }
 
-/// Add authoritative cancellation steering for claimed queue rows the
-/// operator removed (`#queue-removal-cancels`).
+/// Identify cancellation candidates for claimed queue rows the operator
+/// removed (`#queue-removal-cancels`). The applying boundary rechecks the
+/// removal before it can authorize a harness interrupt.
 ///
 /// Ordinary deletion of future queue work remains silent. A deletion becomes
 /// harness work only when the durable claim ledger still names an active
@@ -2081,7 +2088,7 @@ pub fn append_claimed_queue_removals(
                 && item.change == SteeringChange::Deleted
                 && agent_doc_queue::queue_claim::claim_identity(&item.verbatim) == identity
         }) {
-            item.dispatch = SteeringDispatch::CancelClaimed;
+            item.dispatch = SteeringDispatch::CancelClaimedPending;
             item.presets.clear();
             item.owner = Some(claim.owner);
             item.generation = Some(claim.generation);
@@ -2091,7 +2098,7 @@ pub fn append_claimed_queue_removals(
         items.push(SteeringItem {
             source: SteeringSource::Queue,
             change: SteeringChange::Deleted,
-            dispatch: SteeringDispatch::CancelClaimed,
+            dispatch: SteeringDispatch::CancelClaimedPending,
             current_item: watermark.current_item.as_deref().is_some_and(|selected| {
                 agent_doc_queue::queue_claim::claim_identity(selected) == identity
             }),
@@ -2221,10 +2228,9 @@ fn grok_claimed_owner_forward(harness: &str, item: &SteeringItem) -> bool {
 ///
 /// Agent-doc can name the bound harness worker but cannot observe that external
 /// worker's lifecycle. The harness handoff result is therefore the boundary fact:
-/// a successful handoff keeps the attempt, while an explicit unavailable/exited
-/// result abandons exactly this generation and leaves the operator's edited row in
-/// place for a fresh dispatch generation. On Grok, a missing
-/// `send_subagent_message` tool or a rejected send is the same failed handoff.
+/// a successful handoff keeps the attempt, while a harness report that the
+/// worker stopped permits a fresh generation. A missing messaging tool or a
+/// rejected delivery does not establish the worker's lifecycle.
 fn forward_to_owner_instruction(document: &str, item: &SteeringItem, harness: &str) -> String {
     let generation = item
         .generation
@@ -2240,7 +2246,7 @@ fn forward_to_owner_instruction(document: &str, item: &SteeringItem, harness: &s
         grok_send_subagent_message_instruction(item, &requeue)
     } else {
         format!(
-            "{} If the harness reports that the exact worker is unavailable or has exited, the \
+            "{} If the harness reports that the exact worker stopped, exited, or no longer exists, the \
              handoff did NOT happen: do not drop this operator answer/edit, claim it was forwarded, \
              or keep routing only to the unreachable owner. Preserve `verbatim` in the queue and run \
              `{requeue}`. That generation-fenced transition abandons only the stale attempt and makes \
@@ -2303,10 +2309,10 @@ fn grok_send_subagent_message_instruction(item: &SteeringItem, requeue: &str) ->
          `⟦effect:N⟧` marker does not remove it. `publish` on a review posts the review as a \
          plain comment unless the line says approve. Do NOT dispatch a new subagent and do NOT \
          re-claim the item. If `send_subagent_message` is not in the tool list when \
-         `active_agent_messages` is off, or the send is rejected, or the harness reports that \
-         the exact worker is unavailable or has exited, the handoff did NOT happen: do not drop \
-         this operator answer/edit, claim it was forwarded, or keep routing only to the \
-         unreachable owner. Preserve `verbatim` in the queue and run `{requeue}`. That \
+         `active_agent_messages` is off, or the send is rejected, the handoff did NOT happen. \
+         Preserve `verbatim` in the queue and keep the worker and claim intact. Only if the \
+         harness reports that the exact worker stopped, exited, or no longer exists, run \
+         `{requeue}`. That \
          generation-fenced transition abandons only the stale attempt and makes the edited row \
          redispatchable; let the normal queue dispatcher start its replacement under a fresh \
          generation."
@@ -2314,12 +2320,15 @@ fn grok_send_subagent_message_instruction(item: &SteeringItem, requeue: &str) ->
 }
 
 fn cancel_claimed_instruction(document: &str, item: &SteeringItem) -> String {
+    let (Some(worker), Some(generation)) = (
+        item.worker_id
+            .as_deref()
+            .filter(|worker| !worker.trim().is_empty()),
+        item.generation.filter(|generation| *generation > 0),
+    ) else {
+        return "the binary recorded the operator's cancellation. No exact bound harness worker is available for interruption. Preserve artifacts and leave other attempts running.".to_string();
+    };
     let owner = item.owner.as_deref().unwrap_or("the claimed worker");
-    let worker = item.worker_id.as_deref().unwrap_or(owner);
-    let generation = item
-        .generation
-        .map(|generation| generation.to_string())
-        .unwrap_or_else(|| "<generation-above>".to_string());
     let release = format!(
         "agent-doc queue release {} --item {} --generation {}",
         shell_single_quote(document),
@@ -2328,7 +2337,7 @@ fn cancel_claimed_instruction(document: &str, item: &SteeringItem) -> String {
     );
     format!(
         "the operator explicitly REMOVED work claimed by `{owner}` (worker `{worker}`). This is \
-         authoritative cancellation, never best-effort or sunk-cost continuation. If that exact \
+         authoritative cancellation for that attempt. If that exact \
          harness worker is still alive, interrupt it now at the nearest safe consistency boundary; best judgment applies \
          only to shutdown mechanics, never to whether work continues. Preserve recoverable \
          branch/worktree/commit artifacts, but stop further implementation, tests, integration, \
@@ -2466,14 +2475,14 @@ pub fn instruction_for(item: &SteeringItem) -> &'static str {
              row. Fresh dispatch resumes from the queue after that closeout."
         }
         (SteeringDispatch::CancelClaimed, _, _, _) => {
-            "the operator removed claimed work. Interrupt its exact worker attempt and retire the \
-             generation-fenced claim; do not continue based on sunk cost."
+            "the binary recorded the operator's cancellation of this exact claim generation."
+        }
+        (SteeringDispatch::CancelClaimedPending, _, _, _)
+        | (SteeringDispatch::ForwardToOwner, _, SteeringChange::Deleted, _) => {
+            "this observation has no applied worker cancellation. Keep the worker and claim intact."
         }
         (SteeringDispatch::DegradedClaimMismatch, _, _, _) => {
             "a struck-row deletion conflicts with durable work evidence. Preserve/fence it and report the mismatch; do not interrupt, release, or integrate automatically."
-        }
-        (SteeringDispatch::ForwardToOwner, _, SteeringChange::Deleted, _) => {
-            "the operator removed claimed work; treat it as cancellation and do not continue it."
         }
         (SteeringDispatch::ForwardToOwner, _, SteeringChange::Added, _) => FORWARD_ADDED,
         (SteeringDispatch::ForwardToOwner, _, SteeringChange::Edited, _) => FORWARD_EDITED,
@@ -2627,6 +2636,8 @@ pub fn render_closeout_steering_context_for_harness(
         let action = match (item.dispatch, item.source) {
             (
                 SteeringDispatch::ForwardToOwner
+                | SteeringDispatch::CancelClaimed
+                | SteeringDispatch::CancelClaimedPending
                 | SteeringDispatch::PersistReported
                 | SteeringDispatch::QueueModeChanged,
                 _,
@@ -5666,6 +5677,10 @@ mod tests {
                         "{harness}: {action}"
                     );
                     assert!(
+                        action.contains("keep the worker and claim intact. Only if the harness reports that the exact worker stopped"),
+                        "{harness}: {action}"
+                    );
+                    assert!(
                         action.contains("agent-doc queue release 'tasks/bugs.md' --item")
                             && action.contains("--generation 4 --requeue"),
                         "{harness}: {action}"
@@ -5780,8 +5795,8 @@ mod tests {
     }
 
     /// `#krwr`: a different row added in a claimed row's slot is a deletion
-    /// plus new work. The owner is cancelled (`cancel_claimed`) and the new row
-    /// keeps its own routing; it never inherits the claim as an edit. A same-id
+    /// plus new work. The old row becomes a cancellation candidate and the
+    /// new row keeps its own routing. A same-id
     /// prose rewrite and a free-text text edit still forward to the owner.
     #[test]
     fn a_same_slot_replacement_cancels_the_owner_instead_of_forwarding() {
@@ -5851,7 +5866,7 @@ mod tests {
                 assert!(
                     summary.contains(&(
                         SteeringChange::Deleted,
-                        SteeringDispatch::CancelClaimed,
+                        SteeringDispatch::CancelClaimedPending,
                         before
                     )),
                     "{before} -> {after}: {summary:?}"
@@ -5869,7 +5884,7 @@ mod tests {
                 let cancelled = obs
                     .ready
                     .iter()
-                    .find(|item| item.dispatch == SteeringDispatch::CancelClaimed)
+                    .find(|item| item.dispatch == SteeringDispatch::CancelClaimedPending)
                     .unwrap();
                 assert_eq!(cancelled.owner.as_deref(), Some("subagent:owner"));
                 assert_eq!(cancelled.generation, Some(claim.generation));

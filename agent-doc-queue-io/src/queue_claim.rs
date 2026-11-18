@@ -22,9 +22,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_doc_queue::queue_claim::{
     ClaimFollowOutcome, ClaimHeadSource, ClaimOutcome, ClaimOwnerLiveness, ClaimOwnerSession,
-    ClaimQueueView, ClaimedQueueItems, OwnerSessionObservation, QueueClaim,
-    QueueClaimCancellationReceipt, QueueClaimLedger, QueueClaimMiss, QueueClaimRefreshRefused,
-    claim_identity, nest_leaf_matches, owner_session_liveness, resolve_claim_target_in_views,
+    ClaimQueueView, ClaimedQueueItems, QueueClaim, QueueClaimCancellationReceipt, QueueClaimLedger,
+    QueueClaimMiss, QueueClaimRefreshRefused, claim_identity, nest_leaf_matches,
+    resolve_claim_target_in_views,
 };
 use agent_doc_queue::queue_continuation::{
     all_executable_row_keys, all_queue_head_texts, live_queue_head_identities,
@@ -109,54 +109,7 @@ fn owner_session_from_env(var: impl Fn(&str) -> Option<String>) -> Option<ClaimO
     ClaimOwnerSession::from_env_lookup(var)
 }
 
-#[cfg(unix)]
-fn pid_alive(pid: u32) -> bool {
-    agent_doc_queue::queue_claim::owner_process_alive(pid)
-}
-
-/// Without a signal-0 probe the owner pid cannot be judged, so it is treated as
-/// alive: the claim keeps its pre-liveness "in flight" reading rather than being
-/// reported stale on evidence this platform cannot produce.
-#[cfg(not(unix))]
-fn pid_alive(pid: u32) -> bool {
-    pid != 0
-}
-
-/// Judge `claim`'s owner session from this process (`#claimownerliveness`):
-/// the caller's own harness session, whether the recorded pid is alive, and
-/// the session id the claim's pane last reported through a turn hook.
-pub fn claim_owner_liveness(file: &Path, claim: &QueueClaim) -> ClaimOwnerLiveness {
-    let caller = current_owner_session();
-    let pane_session = claim
-        .owner_session
-        .as_ref()
-        .and_then(|owner| owner.pane.as_deref())
-        .and_then(|pane| agent_doc_turn_status_io::pane_harness_session_for_file(file, pane));
-    claim_owner_liveness_observed(claim, caller.as_ref(), pane_session, pid_alive)
-}
-
-fn claim_owner_liveness_observed(
-    claim: &QueueClaim,
-    caller: Option<&ClaimOwnerSession>,
-    pane_session: Option<(String, u64)>,
-    probe_pid: impl Fn(u32) -> bool,
-) -> ClaimOwnerLiveness {
-    let owner_pid_alive = claim
-        .owner_session
-        .as_ref()
-        .and_then(|owner| owner.pid)
-        .map(probe_pid);
-    owner_session_liveness(
-        claim,
-        OwnerSessionObservation {
-            caller,
-            owner_pid_alive,
-            pane_session: pane_session
-                .as_ref()
-                .map(|(session, at)| (session.as_str(), *at)),
-        },
-    )
-}
+pub use agent_doc_turn_status_io::claim_owner_liveness;
 
 /// One read-consistent view of the queue-claim authority.
 ///
@@ -4569,13 +4522,10 @@ mod tests {
         assert_eq!(started.dispatch_policy, claimed.dispatch_policy);
     }
 
-    /// `#claimownerliveness`: the claiming session comes from the harness
-    /// environment (a subagent inherits the coordinator's), and a claim made
-    /// before the pane's `/clear` reads as ended once the pane's hook reports
-    /// the new session — through the real `state.db` both sides use — while
-    /// adoption by the new session makes it live again.
+    /// A session id in the inherited pane environment identifies the caller.
+    /// The pane's generic turn-status hook alone carries no replacement proof.
     #[test]
-    fn claim_owner_session_is_bound_from_env_and_judged_against_the_pane() {
+    fn claim_owner_session_is_bound_from_env_without_treating_generic_hooks_as_replacements() {
         let env = |pairs: &'static [(&'static str, &'static str)]| {
             move |key: &str| {
                 pairs
@@ -4615,86 +4565,35 @@ mod tests {
         assert_eq!(owner_session_from_env(env(&[])), None);
 
         let dir = tempfile::tempdir().unwrap();
-        let doc = write_doc(dir.path(), &["do [#cligenport]"]);
+        let doc = write_doc(dir.path(), &["do [#a]"]);
+        let claude = ClaimOwnerSession {
+            pid: Some(std::process::id()),
+            ..claude
+        };
         let now = now_secs();
         mutate_ledger(&doc, |ledger| {
-            ledger.claim_in_session(
-                "do [#cligenport]",
-                "subagent:cligoshell-then-cligenport",
-                now,
-                7200,
-                Some(claude.clone()),
-            );
+            ledger.claim_in_session("do [#a]", "subagent:a", now, 7200, Some(claude.clone()));
             Ok(())
         })
         .unwrap();
         let claim = load_ledger(&doc).unwrap().claims[0].clone();
         assert_eq!(claim.owner_session.as_ref(), Some(&claude));
-        let alive = |_pid: u32| true;
-        let pane = |file: &Path| {
-            agent_doc_turn_status_io::pane_harness_session_for_file(file, "%claimliveness")
-        };
 
-        // Before any hook: nothing contradicts the owner session.
-        assert_eq!(
-            claim_owner_liveness_observed(&claim, None, pane(&doc), alive),
-            ClaimOwnerLiveness::Live
-        );
-        // The pane's `/clear` SessionStart hook reports the new session.
-        agent_doc_turn_status_io::apply_turn_status_hook_at(
-            dir.path(),
-            "%claimliveness",
-            false,
-            Some(
-                r#"{"hook_event_name":"SessionStart","source":"clear","session_id":"post-clear"}"#,
-            ),
-            now + 1,
-        )
-        .unwrap();
-        assert_eq!(
-            claim_owner_liveness_observed(&claim, None, pane(&doc), alive),
-            ClaimOwnerLiveness::Ended(
-                agent_doc_queue::queue_claim::OwnerSessionEndReason::SessionReplaced
+        for payload in [
+            r#"{"hook_event_name":"UserPromptSubmit","session_id":"worker-session"}"#,
+            r#"{"hook_event_name":"SessionStart","source":"compact","session_id":"worker-session"}"#,
+            r#"{"hook_event_name":"SessionStart","source":"clear","session_id":"unbound-session"}"#,
+        ] {
+            agent_doc_turn_status_io::apply_turn_status_hook_at(
+                dir.path(),
+                "%claimliveness",
+                true,
+                Some(payload),
+                now + 1,
             )
-        );
-        // The claiming harness process is gone.
-        assert_eq!(
-            claim_owner_liveness_observed(&claim, None, None, |_pid| false),
-            ClaimOwnerLiveness::Ended(
-                agent_doc_queue::queue_claim::OwnerSessionEndReason::OwnerProcessExited
-            )
-        );
-        // Adoption by the post-clear session.
-        let adopted = mutate_ledger(&doc, |ledger| {
-            ledger
-                .start(
-                    "#cligenport",
-                    "subagent:cligoshell-then-cligenport",
-                    "worker:cligenport",
-                    now + 1,
-                    7200,
-                    Some(1),
-                )
-                .unwrap();
-            Ok(ledger.refresh_in_session(
-                "#cligenport",
-                "subagent:cligoshell-then-cligenport",
-                now + 2,
-                7200,
-                Some(ClaimOwnerSession {
-                    session_id: Some("post-clear".to_string()),
-                    ..claude.clone()
-                }),
-            ))
-        })
-        .unwrap()
-        .unwrap();
-        assert_eq!(
-            claim_owner_liveness_observed(&adopted, None, pane(&doc), alive),
-            ClaimOwnerLiveness::Live
-        );
-        assert!(pid_alive(std::process::id()));
-        assert!(!pid_alive(0));
+            .unwrap();
+            assert_eq!(claim_owner_liveness(&doc, &claim), ClaimOwnerLiveness::Live);
+        }
     }
 
     /// `#idlessqueueidentity`: once the operator deletes `id=` from the

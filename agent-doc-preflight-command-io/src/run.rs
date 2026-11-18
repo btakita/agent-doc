@@ -4841,19 +4841,27 @@ mod tests {
             }),
         )
         .unwrap();
-        // The same pane's harness reports a new session (`/clear`).
+        // Record the receipt emitted after a SessionStart hook proves that it
+        // came from this document's supervisor's direct harness child.
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        agent_doc_turn_status_io::apply_turn_status_hook_at(
-            dir.path(),
-            pane,
-            false,
-            Some(
-                r#"{"hook_event_name":"SessionStart","source":"clear","session_id":"post-clear"}"#,
-            ),
-            now + 1,
+        let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        let document_id = doc.canonicalize().unwrap();
+        agent_doc_session_actor_io::record_claude_session_start_in_db(
+            &conn,
+            &document_id.to_string_lossy(),
+            &agent_doc_session_actor_io::ClaudeSessionStartCapture {
+                session_id: "post-clear".to_string(),
+                source: "clear".to_string(),
+                supervisor_pid: 1,
+                generation: 1,
+                pane: Some(pane.to_string()),
+                harness_pid: std::process::id(),
+                harness_start_ticks: 1,
+                recorded_at_ms: (now + 1) * 1000,
+            },
         )
         .unwrap();
 

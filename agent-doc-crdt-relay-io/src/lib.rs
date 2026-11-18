@@ -1263,41 +1263,6 @@ pub fn with_hub<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Result<T>
     Ok(result)
 }
 
-/// Owner-session verdict for a queue-marker overlay (`#markdrift`).
-///
-/// Same signals as `queue claims`: this process's harness session, the
-/// recorded pid, and the session the claim's pane last reported. A freeze is
-/// applied by [`agent_doc_queue::queue_claim::QueueClaim::worker_not_running`].
-fn owner_liveness_for_marker(
-    file: &Path,
-    claim: &agent_doc_queue::queue_claim::QueueClaim,
-) -> agent_doc_queue::queue_claim::ClaimOwnerLiveness {
-    use agent_doc_queue::queue_claim::{
-        ClaimOwnerSession, OwnerSessionObservation, owner_process_alive, owner_session_liveness,
-    };
-    let caller = ClaimOwnerSession::from_env_lookup(|key| std::env::var(key).ok());
-    let pane_session = claim
-        .owner_session
-        .as_ref()
-        .and_then(|owner| owner.pane.as_deref())
-        .and_then(|pane| agent_doc_turn_status_io::pane_harness_session_for_file(file, pane));
-    let owner_pid_alive = claim
-        .owner_session
-        .as_ref()
-        .and_then(|owner| owner.pid)
-        .map(owner_process_alive);
-    owner_session_liveness(
-        claim,
-        OwnerSessionObservation {
-            caller: caller.as_ref(),
-            owner_pid_alive,
-            pane_session: pane_session
-                .as_ref()
-                .map(|(session, at)| (session.as_str(), *at)),
-        },
-    )
-}
-
 /// Read the lineage facts shared by the relay and queue command projections.
 pub fn load_queue_lifecycle_lineage_facts(
     conn: &agent_doc_sqlite::state_store::Connection,
@@ -1415,10 +1380,11 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
             &receipts,
             &lineage,
             now_secs,
-            |claim| owner_liveness_for_marker(file, claim),
+            |claim| agent_doc_turn_status_io::claim_owner_liveness(file, claim),
         );
     let cancellations = &ledger.cancellations;
     let blockers = agent_doc_queue::queue_blocked::queue_blockers(current);
+    let review_blockers = agent_doc_queue::prompt_pressure::review_blocked_prompts(current);
     let completion_evidence = agent_doc_document::subagent_completion::completion_evidence(current)
         .into_iter()
         .filter(|evidence| {
@@ -1462,7 +1428,8 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                         .unwrap_or_else(|| {
                             agent_doc_queue::queue_claim::claim_identity(&prompt.text)
                         });
-                    let attempt = lifecycle.attempts.get(&identity);
+                    let externally_blocked = review_blockers.holds_external_identity(&identity);
+                    let attempt = lifecycle.attempts.get(&identity).filter(|_| !externally_blocked);
                     // `#terminalitemstability`: runtime evidence never reopens
                     // a struck row. The operator removes the strike to reopen it.
                     if struck {
@@ -1470,6 +1437,8 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                     }
                     let marker = if state_degraded {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
+                    } else if externally_blocked {
+                        agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
                     } else if let Some(attempt) = attempt {
                         attempt.marker
                     } else if completion_evidence.iter().any(|item| {

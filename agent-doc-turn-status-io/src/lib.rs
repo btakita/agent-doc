@@ -15,11 +15,15 @@
 //! `pane-border-status` is enabled. The command is best-effort — it never fails
 //! the turn: outside tmux, or on any tmux error, it succeeds quietly.
 
+use agent_doc_queue::queue_claim::{
+    ClaimOwnerLiveness, OwnerSessionObservation, QueueClaim, owner_process_alive,
+    owner_session_liveness,
+};
 use agent_doc_sqlite::state_store::{
     Connection, CoordinationLeaseRecord, clear_coordination_lease_if_heartbeat_at_or_before_in_db,
     clear_coordination_lease_if_holder_in_db, clear_coordination_lease_in_db,
     load_coordination_lease_from_db, load_coordination_leases_for_scope_kind_from_db,
-    open_state_db, upsert_coordination_lease_in_db,
+    open_state_db, open_state_db_read_only, upsert_coordination_lease_in_db,
 };
 use agent_doc_turn::turn_status::{
     TRANSCRIPT_TAIL_PROBE_BYTES, TranscriptTailEvidence, TurnActiveMarker,
@@ -218,6 +222,45 @@ pub fn pane_harness_session(base: &Path, pane: &str) -> Option<(String, u64)> {
 pub fn pane_harness_session_for_file(file: &Path, pane: &str) -> Option<(String, u64)> {
     let root = agent_doc_project_root_io::project_root_containing(file)?;
     pane_harness_session(&root, pane)
+}
+
+/// The proven Claude conversation start in the claim's document and pane.
+/// The captured hook came from the exact supervisor's direct harness child.
+/// The receipt retains that pane through actor closure and garbage collection.
+fn claude_session_start_for_owner_pane(
+    file: &Path,
+    pane: &str,
+) -> Option<agent_doc_session_actor_io::ClaudeSessionStartCapture> {
+    let root = agent_doc_project_root_io::project_root_containing(file)?;
+    let document_id =
+        agent_doc_session_actor_io::canonical_document_id_in(&root, &file.to_string_lossy());
+    let conn = open_state_db_read_only(&root).ok()?;
+    let capture =
+        agent_doc_session_actor_io::load_claude_session_start_from_db(&conn, &document_id)
+            .ok()??;
+    (capture.pane.as_deref() == Some(pane)).then_some(capture)
+}
+
+/// Judge the claim against process exit and a proven conversation start for
+/// its exact document and pane.
+pub fn claim_owner_liveness(file: &Path, claim: &QueueClaim) -> ClaimOwnerLiveness {
+    let Some(owner) = claim.owner_session.as_ref() else {
+        return ClaimOwnerLiveness::Unrecorded;
+    };
+    let start = owner
+        .pane
+        .as_deref()
+        .filter(|_| owner.harness.as_deref() == Some("claude"))
+        .and_then(|pane| claude_session_start_for_owner_pane(file, pane));
+    owner_session_liveness(
+        claim,
+        OwnerSessionObservation {
+            owner_pid_alive: owner.pid.map(owner_process_alive),
+            claude_session_start: start
+                .as_ref()
+                .map(|capture| (capture.session_id.as_str(), capture.recorded_at_ms)),
+        },
+    )
 }
 
 /// The newest harness turn-end receipt for `pane`, if any.

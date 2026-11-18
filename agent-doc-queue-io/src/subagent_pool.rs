@@ -132,6 +132,29 @@ fn pool_refill_for_content_at_for_harness(
             &format!("lost_running_recovery_skipped error={error:#} (#lostrunningcontinue)"),
         );
     }
+    observe_pool_refill(file, content, trigger, now_secs, harness)
+}
+
+/// A connected client can inspect and revalidate action IDs without triggering
+/// lost-worker recovery. Recovery remains with the owning queue scheduler.
+pub fn observe_pool_refill_for_content(file: &Path, content: &str) -> Result<PoolRefill> {
+    let harness = pool_refill_session_harness();
+    observe_pool_refill(
+        file,
+        content,
+        PoolRefillTrigger::Plan,
+        crate::queue_claim::claim_clock_now_secs(),
+        harness.as_deref(),
+    )
+}
+
+fn observe_pool_refill(
+    file: &Path,
+    content: &str,
+    trigger: PoolRefillTrigger,
+    now_secs: u64,
+    harness: Option<&str>,
+) -> Result<PoolRefill> {
     let document = file.display().to_string();
     let (plan, pools) =
         crate::subagent_dispatch::queue_attr_subagent_plan_and_pools(file, content)?;
@@ -277,7 +300,7 @@ fn pool_refill_for_content_at_for_harness(
     let next_heads = if quota_refill_block.is_some() {
         Vec::new()
     } else {
-        crate::subagent_dispatch::pending_subagent_dispatch_for_content(file, content)?
+        crate::subagent_dispatch::observe_subagent_dispatch_candidates_for_content(file, content)?
             .into_iter()
             .map(|item| RefillHead {
                 claim_command: crate::subagent_dispatch::claim_command(&document, &item),

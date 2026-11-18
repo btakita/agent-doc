@@ -4,6 +4,8 @@ use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod queue_actions;
+
 const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
 const MCP_REPLAY_REQUEST_ENV: &str = "AGENT_DOC_MCP_REPLAY_REQUEST";
 const MCP_REPLAY_REQUEST_MAX_BYTES: usize = 96 * 1024;
@@ -118,6 +120,7 @@ fn message_calls_mutating_tool(line: &str) -> bool {
             "agent_doc_admit"
                 | "agent_doc_preflight"
                 | "agent_doc_finalize"
+                | "agent_doc_queue_action"
                 | "agent_doc_session_check"
                 | "agent_doc_steering"
         )
@@ -433,6 +436,35 @@ fn tools_list_result() -> Value {
                 }
             },
             {
+                "name": "agent_doc_queue_action",
+                "title": "Apply a connected queue action",
+                "description": "Inspect current queue actions when next_action_id is omitted. With an id, apply the exact transition or reserve its native spawn or external command once. Use worker_id to bind the returned native worker or confirm a due heartbeat. A failed receipt stays terminal for unchanged evidence.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file": { "type": "string", "description": "Path to the session document." },
+                        "next_action_id": { "type": "string", "description": "The opaque id returned by admit, finalize, or this tool." },
+                        "worker_id": { "type": "string", "description": "Native worker identity from spawn or positive liveness evidence." },
+                        "report": {
+                            "type": "object",
+                            "description": "Complete native worker handback with prose_only=true or exact repository delivery evidence.",
+                            "properties": {
+                                "response": { "type": "string" },
+                                "prose_only": { "type": "boolean" },
+                                "source_repo": { "type": "string" },
+                                "source_sha": { "type": "string" },
+                                "sink_repo": { "type": "string" },
+                                "sink_ref": { "type": "string" }
+                            },
+                            "required": ["response"]
+                        },
+                        "outcome": { "type": "string", "enum": ["applied", "failed"], "description": "Outcome of a reserved external command, or failed native spawn." },
+                        "reason": { "type": "string", "description": "Observed error when outcome is failed." }
+                    },
+                    "required": ["file"]
+                }
+            },
+            {
                 "name": "agent_doc_steering",
                 "title": "Resolve compact agent-doc steering",
                 "description": "Resolve and consume a one-shot compact steering reference. The token must match its canonical document and active cycle and must be used within five minutes.",
@@ -478,6 +510,7 @@ fn handle_tools_call(params: Option<&Value>) -> std::result::Result<Value, McpPr
         "agent_doc_admit" => tool_admit(&args),
         "agent_doc_preflight" => tool_preflight(&args),
         "agent_doc_plan" => tool_plan(&args),
+        "agent_doc_queue_action" => queue_actions::tool(&args),
         "agent_doc_session_check" => tool_session_check(&args),
         "agent_doc_steering" => tool_steering(&args),
         "agent_doc_finalize" => tool_finalize(&args),
@@ -543,6 +576,9 @@ fn tool_admit(args: &Map<String, Value>) -> Result<Value> {
     if let Some(pane) = resolved_from_pane {
         structured["resolved_from_pane"] = json!(pane);
         structured["notice"] = json!(pane_document_notice(&file, &pane));
+    }
+    if let Some(content) = admitted_content.as_deref() {
+        queue_actions::add_fields(&mut structured, &file, content);
     }
     Ok(tool_success_result(
         serde_json::to_string_pretty(&structured)?,
@@ -872,8 +908,17 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
             (false, "interrupted", message)
         }
     };
-    let continuation = ok
-        .then(|| resolve_tool_queue_continuation(&file, "mcp_finalize_queue_continuation"))
+    let content = ok
+        .then(|| {
+            agent_doc_document_realtime_io::try_resolve_current_document_content(
+                &file,
+                "mcp_finalize_queue_continuation",
+            )
+        })
+        .transpose()?;
+    let continuation = content
+        .as_deref()
+        .map(|content| tool_queue_continuation_for_content(&file, content))
         .transpose()?;
     let mut structured = json!({
         "ok": ok,
@@ -897,6 +942,9 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
             .expect("finalize result is an object"),
         continuation.as_ref(),
     )?;
+    if let Some(content) = content.as_deref() {
+        queue_actions::add_fields(&mut structured, &file, content);
+    }
     Ok(tool_success_result(
         serde_json::to_string_pretty(&structured)?,
         structured,
@@ -920,12 +968,19 @@ fn resolve_tool_queue_continuation(
 ) -> Result<ToolQueueContinuation> {
     let content =
         agent_doc_document_realtime_io::try_resolve_current_document_content(file, resolve_reason)?;
-    let continuation = agent_doc_queue_io::queue_continuation::detect_for_content(file, &content)?;
+    tool_queue_continuation_for_content(file, &content)
+}
+
+fn tool_queue_continuation_for_content(
+    file: &Path,
+    content: &str,
+) -> Result<ToolQueueContinuation> {
+    let continuation = agent_doc_queue_io::queue_continuation::detect_for_content(file, content)?;
     let auto_clear_yield = continuation.is_some()
-        && agent_doc_queue_io::queue_auto_clear::in_session_auto_clear_yield(file, &content, true)
+        && agent_doc_queue_io::queue_auto_clear::in_session_auto_clear_yield(file, content, true)
             .yields;
     let reported_closeout =
-        agent_doc_queue_io::queue_claim::pending_reported_closeout_for_content(file, &content)?;
+        agent_doc_queue_io::queue_claim::pending_reported_closeout_for_content(file, content)?;
     Ok(ToolQueueContinuation {
         continuation,
         auto_clear_yield,
@@ -2096,6 +2151,7 @@ Done.
             "agent_doc_admit",
             "agent_doc_preflight",
             "agent_doc_finalize",
+            "agent_doc_queue_action",
             "agent_doc_session_check",
             "agent_doc_steering",
         ] {

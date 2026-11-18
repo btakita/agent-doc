@@ -2873,6 +2873,10 @@ fn mcp_serve_admit_plan_read_finalize_uses_one_cycle() {
 
     assert_eq!(responses.len(), 4);
     assert_eq!(responses[0]["result"]["isError"], false);
+    assert_eq!(
+        responses[0]["result"]["structuredContent"]["queue_actions"],
+        serde_json::json!([])
+    );
     let admitted_cycle_id = responses[0]["result"]["structuredContent"]["admission"]["cycle_id"]
         .as_str()
         .expect("admit should return a cycle id");
@@ -2895,6 +2899,10 @@ fn mcp_serve_admit_plan_read_finalize_uses_one_cycle() {
         "exchange"
     );
     assert_eq!(responses[3]["result"]["isError"], false);
+    assert_eq!(
+        responses[3]["result"]["structuredContent"]["queue_actions"],
+        serde_json::json!([])
+    );
     assert!(
         !stderr.contains("repaired stale preflight_started"),
         "connected read/plan/finalize must not repair or replace the admitted cycle:\n{stderr}"
@@ -2905,6 +2913,132 @@ fn mcp_serve_admit_plan_read_finalize_uses_one_cycle() {
         .expect("finalize should leave terminal cycle state");
     assert_eq!(state.cycle_id, admitted_cycle_id);
     assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
+}
+
+#[test]
+fn mcp_queue_actions_reserve_native_spawn_once_and_retain_failure_across_servers() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = template_doc("Session", "❯ Coordinate the queue\n", "", "").replace(
+        "<!-- agent:queue -->\n<!-- /agent:queue -->",
+        "<!-- agent:run subagents=2 go -->\n- Handle an item's data.\n- Handle independent work.\n<!-- /agent:run -->",
+    );
+    fs::write(&doc, &content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    seed_snapshot(tmp.path(), &doc, &content);
+
+    // Every request uses a fresh server. There is no harness hook, session
+    // memory, shared MCP process, or shell interpolation to restore the id.
+    let call = |tool: &str, mut args: serde_json::Value| {
+        if args["file"].is_null() {
+            args["file"] = serde_json::json!(doc);
+        }
+        let request = serde_json::json!({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": { "name": tool, "arguments": args },
+        });
+        let response = agent_doc_cmd()
+            .current_dir(tmp.path())
+            .args(["mcp", "serve"])
+            .write_stdin(format!("{request}\n"))
+            .assert()
+            .success();
+        let response: serde_json::Value =
+            serde_json::from_slice(&response.get_output().stdout).unwrap();
+        response["result"].clone()
+    };
+    let queue_action = |args| {
+        let response = call("agent_doc_queue_action", args);
+        assert_eq!(response["isError"], false, "{response}");
+        response["structuredContent"].clone()
+    };
+    let admit = call("agent_doc_admit", serde_json::json!({}));
+    assert_eq!(admit["isError"], false, "{admit}");
+    let admission = &admit["structuredContent"];
+    assert_eq!(
+        admission["queue_actions"].as_array().unwrap().len(),
+        2,
+        "{admission}"
+    );
+    let first = admission["next_action_id"].as_str().unwrap();
+    assert_eq!(admission["next_action_argv"][5], "Handle an item's data.");
+    let sibling = tmp.path().join("sibling.md");
+    fs::write(&sibling, &content).unwrap();
+    let wrong_doc = call(
+        "agent_doc_queue_action",
+        serde_json::json!({"file": sibling, "next_action_id": first}),
+    );
+    assert_eq!(wrong_doc["isError"], true);
+    let malformed = call(
+        "agent_doc_queue_action",
+        serde_json::json!({"next_action_id": "not-an-id"}),
+    );
+    assert_eq!(malformed["isError"], true);
+
+    let claimed = queue_action(serde_json::json!({"next_action_id": first}));
+    assert_eq!(claimed["receipt"]["state"], "applied", "{claimed}");
+    assert_eq!(claimed["queue_actions"][0]["kind"], "start", "{claimed}");
+    let start = claimed["next_action_id"].as_str().unwrap();
+    assert_ne!(start, first);
+    let reserved = queue_action(serde_json::json!({"next_action_id": start}));
+    assert_eq!(reserved["receipt"]["state"], "spawn_reserved");
+    assert!(
+        reserved["spawn"]["spawn_preamble"]
+            .as_str()
+            .unwrap()
+            .contains("Handle an item's data.")
+    );
+    let retried = queue_action(serde_json::json!({"next_action_id": start}));
+    assert!(
+        retried["spawn"].is_null(),
+        "a second native spawn must not be offered"
+    );
+
+    let failed = queue_action(
+        serde_json::json!({"next_action_id": start, "outcome": "failed", "reason": "harness declined spawn"}),
+    );
+    assert_eq!(failed["receipt"]["state"], "failed");
+    let replay = queue_action(serde_json::json!({"next_action_id": start}));
+    assert_eq!(replay["receipt"], failed["receipt"], "{replay}");
+    assert!(replay["spawn"].is_null());
+    assert_eq!(replay["queue_actions"][0]["next_action_id"], start);
+
+    let second = replay["next_action_id"].as_str().unwrap();
+    assert_ne!(second, start);
+    let claimed = queue_action(serde_json::json!({"next_action_id": second}));
+    let start = claimed["next_action_id"].as_str().unwrap();
+    let reserved = queue_action(serde_json::json!({"next_action_id": start}));
+    assert_eq!(reserved["receipt"]["state"], "spawn_reserved");
+    let started =
+        queue_action(serde_json::json!({"next_action_id": start, "worker_id": "worker-two"}));
+    assert_eq!(started["receipt"]["state"], "applied", "{started}");
+    assert!(started["next_action_id"].is_null(), "{started}");
+    assert!(fs::read_to_string(&doc).unwrap().contains("🚧"));
+
+    let report = started["queue_actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|action| action["kind"] == "report")
+        .unwrap();
+    assert_eq!(report["awaiting_harness"], true);
+    let report_id = report["next_action_id"].as_str().unwrap();
+    let reported = queue_action(serde_json::json!({
+        "next_action_id": report_id, "worker_id": "worker-two",
+        "report": {"prose_only": true, "response": "**Summary**\n\nIndependent work completed and verified."}
+    }));
+    assert_eq!(reported["receipt"]["state"], "applied", "{reported}");
+    assert!(reported["next_action_id"].is_null(), "{reported}");
+    let closed = fs::read_to_string(&doc).unwrap();
+    assert!(closed.contains("Independent work completed and verified."));
+    assert!(
+        closed
+            .lines()
+            .any(|line| line.contains("~~") && line.contains("Handle independent work."))
+    );
+    let replay = queue_action(serde_json::json!({"next_action_id": report_id}));
+    assert_eq!(replay["receipt"], reported["receipt"]);
+    assert_eq!(fs::read_to_string(&doc).unwrap(), closed);
 }
 
 /// Grok Build (and any harness admitting through MCP) has no `UserPromptSubmit`

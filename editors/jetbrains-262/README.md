@@ -110,12 +110,13 @@ classic ZIP and the VS Code package. The package-generation fence tracks both
 the modular build and the classic implementation sources reused by its backend.
 `make check` builds and verifies all compatibility-ranged ZIPs plus the modular
 backend/frontend sandboxes, while the tag workflow rejects equal update versions
-and copies both JetBrains artifacts by exact versioned name. The
-generic `agent-doc plugin install jetbrains` asset resolver deliberately accepts
-only the classic numeric filename shape; it must not choose the exact-262 ZIP by
-shared prefix until it can prove the target IDE build. Marketplace/custom-repo
-compatibility selection or an explicit two-sided local install owns the modular
-path in the meantime.
+and copies the artifacts by exact versioned name.
+`agent-doc plugin install jetbrains` derives the target build from the
+versioned IDE data directory and selects the classic, exact-262, or exact-263
+ZIP for that build. The installer fails closed if it cannot prove a supported
+build. Marketplace synchronizes the compatible ZIP across Remote Dev peers.
+For a local or custom-repository install, install the same ranged ZIP in each
+peer, using `--plugins-dir <PATH>` when needed.
 
 ## Fail-closed integration boundary
 

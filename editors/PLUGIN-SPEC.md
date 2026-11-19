@@ -29,18 +29,20 @@ Rust binary.
   splices even when the host reports the reload as an incremental range edit.
 - Missing capabilities, an incompatible ABI, an unknown intent, or ambiguous
   structure fails closed without mutating the buffer or disk.
-- A plugin package is selected per target editor build, never per release or
-  per most recent local build. JetBrains publishes two disjoint packages under
-  one plugin ID: builds 242-261 receive `agent-doc-jetbrains-<version>.zip` and
-  build 262 receives `agent-doc-jetbrains-262-<version>.zip`. The installer
+- The target editor build determines package selection. JetBrains publishes
+  three disjoint packages under one plugin ID. Builds `242` through `261.*`
+  receive `agent-doc-jetbrains-<version>.zip`, `262` through `262.*` receive
+  `agent-doc-jetbrains-262-<version>.zip`, and `263` through `263.*` receive
+  `agent-doc-jetbrains-263-<version>.zip`. The installer
   proves the build from the versioned IDE data directory; an unprovable or
   unsupported target fails closed with guidance instead of defaulting to the
   classic package. During installed-plugin reconciliation (`agent-doc
   upgrade`), a target whose proven build is outside every published range is
   not a failure (GH #233): its installed plugin is left in place and one
   warning names the build, the supported ranges and the version left
-  installed, with no retry or manual-install advice, and the upgrade exits 0. Update numbers are compared only within one line; a target
-  holding the other line is always replaced with its own line's package.
+  installed, with no retry or manual-install advice, and the upgrade exits 0.
+  Update numbers are compared only within one line. A target holding another
+  line is always replaced with its own line's package.
   Within one line an update number is an ordering, not a content identity
   (GH #392): a number below the asset is replaced, an equal number is the same
   generation, and a number ABOVE the asset is kept only when it is the
@@ -78,13 +80,13 @@ Rust binary.
   frontend in the JetBrains Client JVM (GH #333). Live-process plugin-jar probes
   match every line's versioned plugin jar
   (`agent-doc-jetbrains-<v>.jar`, `agent.doc-<v>.jar`).
-- Exact-263 whole-package restart-free upgrade is explicitly unsupported in the
-  current architecture (GH #339). Making `agent.doc.shared` optional cannot
-  supply the missing cross-JVM handoff. The modular line must stay
-  restart-required until one protocol proves both full module-graph replacement
-  and generation-fenced backend/frontend activation of the same verified
-  artifact. Native derivations may still hot-reload when the JetBrains source
-  digest is unchanged.
+- Exact-263 whole-package upgrades require a restart (GH #339). Under the
+  adopted reopen rule, tests for a restart-free implementation swap must prove
+  that it preserves the modular graph, plugin descriptor, and all platform
+  registrations, that the retired implementation classloader becomes
+  unreachable and is collected, and that generation-fenced backend and frontend
+  activation receipts name the same verified artifact. Native derivations may
+  still hot-reload when the JetBrains source digest is unchanged.
 - The proposed route around that boundary does not unload the plugin. A stable
   shell, the same plugin ID with an unchanged module graph, would own every
   IntelliJ registration and load a versioned implementation jar into an
@@ -360,6 +362,7 @@ An adapter that ships more than one artifact under one plugin identity must:
    generation; a one-sided or mismatched install fails closed with no fallback
    to a different artifact's code path.
 
-The JetBrains classic (`242`..`261.*`) and exact-262 modular (`262`..`262.*`)
-updates and their per-range custom-repository listings are specified in
+The JetBrains classic (`242` through `261.*`), exact-262 modular
+(`262` through `262.*`), and exact-263 modular (`263` through `263.*`) updates
+and their per-range custom-repository listings are specified in
 [`docs/reference/jetbrains-distribution.md`](../docs/reference/jetbrains-distribution.md).

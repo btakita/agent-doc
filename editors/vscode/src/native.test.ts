@@ -390,6 +390,9 @@ describe('Rust-owned C string ownership at the koffi boundary (#vscodekoffisegv)
                 out.nodePatches = n.applyNodePatches(doc, []);
                 out.nodePatchesError = n.applyNodePatches(doc, [{ bogus: 1 }]);
                 out.deriveError = n.editorDeriveJson('{}');
+                out.visibleAgent = n.frontmatterAgent('---\\nagent: "codex" # visible edit\\n---\\n');
+                out.noAgent = n.frontmatterAgent(doc);
+                out.invalidAgent = n.frontmatterAgent('---\\nagent: [codex\\n---\\n');
                 out.resolved = n.resolveProjectPath(${JSON.stringify(fixtureDoc)});
                 out.treeStatus = n.queueTreeStatus(queueDoc, 1);
                 out.treeStatusOutside = n.queueTreeStatus('# no queue\\n', 1);
@@ -420,6 +423,9 @@ describe('Rust-owned C string ownership at the koffi boundary (#vscodekoffisegv)
         assert.match(out.preserveHead, /agent:boundary:/);
         assert.strictEqual(out.nodePatchesError, null);
         assert.strictEqual(out.deriveError, null);
+        assert.strictEqual(out.visibleAgent, 'codex');
+        assert.strictEqual(out.noAgent, null);
+        assert.strictEqual(out.invalidAgent, null);
         assert.deepStrictEqual(out.resolved, { projectRoot: fixtureRoot, relativePath: path.join('docs', 'session.md') });
         assert.strictEqual(out.treeStatus.whole_queue, true, JSON.stringify(out.treeStatus));
         assert.deepStrictEqual(

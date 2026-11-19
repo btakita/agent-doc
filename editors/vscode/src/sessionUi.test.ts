@@ -37,8 +37,16 @@ describe('sessionUi', () => {
 
     it('builds session command args for agent restart routing', () => {
         assert.deepStrictEqual(
-            buildSessionCommandArgs('restart-agent', 'tasks/agent-doc/agent-doc-bugs2.md'),
-            ['session', 'restart-agent', 'tasks/agent-doc/agent-doc-bugs2.md'],
+            buildSessionCommandArgs('restart-agent', 'docs/session.md', 'codex'),
+            ['session', 'restart-agent', '--expect-agent', 'codex', 'docs/session.md'],
+        );
+        assert.deepStrictEqual(
+            buildSessionCommandArgs('restart-agent', 'docs/session.md', null),
+            ['session', 'restart-agent', 'docs/session.md'],
+        );
+        assert.deepStrictEqual(
+            buildSessionCommandArgs('restart-supervisor', 'docs/session.md', 'codex'),
+            ['session', 'restart-supervisor', 'docs/session.md'],
         );
     });
 

@@ -10424,6 +10424,40 @@ pub fn current_text_via_controller_model_read_for_doc(
     doc: &Path,
     source: &str,
 ) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
+    Ok(current_text_observation_via_controller(doc, source, false)?.map(|(current, _)| current))
+}
+
+/// The same current-text read, with the controller's typing evidence for the
+/// returned text. Missing evidence permits the caller's legacy capture probe.
+pub fn current_text_with_typing_via_controller_model_read_for_doc(
+    doc: &Path,
+    source: &str,
+) -> Result<
+    Option<(
+        agent_doc_crdt_relay_io::CurrentText,
+        Option<ControllerWriteTyping>,
+    )>,
+> {
+    current_text_observation_via_controller(doc, source, true)
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ControllerWriteTyping {
+    Clear,
+    Pending(agent_doc_op_capture_io::EditorOpsInFlight),
+}
+
+fn current_text_observation_via_controller(
+    doc: &Path,
+    source: &str,
+    include_write_typing: bool,
+) -> Result<
+    Option<(
+        agent_doc_crdt_relay_io::CurrentText,
+        Option<ControllerWriteTyping>,
+    )>,
+> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let file_arg = canonical.to_string_lossy().to_string();
     let authority = crdt_authority_for_file(&file_arg);
@@ -10436,7 +10470,7 @@ pub fn current_text_via_controller_model_read_for_doc(
                 source,
             ),
         );
-        return Ok(Some(agent_doc_crdt_relay_io::CurrentText::Detached));
+        return Ok(Some((agent_doc_crdt_relay_io::CurrentText::Detached, None)));
     }
     let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
         agent_doc_ops_log_io::log_op(
@@ -10449,7 +10483,13 @@ pub fn current_text_via_controller_model_read_for_doc(
         );
         return Ok(None);
     };
-    match request_existing_controller_crdt_current_text_read(&project_root, &canonical, source) {
+    match request_existing_controller_crdt_current_text_read_with_diagnostics(
+        &project_root,
+        &canonical,
+        source,
+        true,
+        include_write_typing,
+    ) {
         Ok(current) => {
             clear_expired_controller_model_pressure(&project_root);
             Ok(Some(current))
@@ -10754,29 +10794,20 @@ fn request_controller_crdt_current_text_with_options(
     Ok(current)
 }
 
-fn request_existing_controller_crdt_current_text_read(
-    project_root: &Path,
-    canonical: &Path,
-    source: &str,
-) -> Result<agent_doc_crdt_relay_io::CurrentText> {
-    request_existing_controller_crdt_current_text_read_with_diagnostics(
-        project_root,
-        canonical,
-        source,
-        true,
-    )
-}
-
 fn request_existing_controller_crdt_current_text_read_quiet(
     project_root: &Path,
     canonical: &Path,
     source: &str,
 ) -> Result<agent_doc_crdt_relay_io::CurrentText> {
-    request_existing_controller_crdt_current_text_read_with_diagnostics(
-        project_root,
-        canonical,
-        source,
-        false,
+    Ok(
+        request_existing_controller_crdt_current_text_read_with_diagnostics(
+            project_root,
+            canonical,
+            source,
+            false,
+            false,
+        )?
+        .0,
     )
 }
 
@@ -10785,7 +10816,11 @@ fn request_existing_controller_crdt_current_text_read_with_diagnostics(
     canonical: &Path,
     source: &str,
     publish_diagnostic: bool,
-) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    include_write_typing: bool,
+) -> Result<(
+    agent_doc_crdt_relay_io::CurrentText,
+    Option<ControllerWriteTyping>,
+)> {
     let request = ControllerRequest {
         command: "crdt_current_text".to_string(),
         file: Some(canonical.to_path_buf()),
@@ -10805,6 +10840,7 @@ fn request_existing_controller_crdt_current_text_read_with_diagnostics(
                 "recover_projection": false,
                 "flush_barrier": false,
                 "effect_free": !publish_diagnostic,
+                "include_write_typing": include_write_typing,
             })
             .to_string(),
         ),
@@ -10827,7 +10863,12 @@ fn request_existing_controller_crdt_current_text_read_with_diagnostics(
     if publish_diagnostic {
         log_controller_current_text_result(canonical, source, &current);
     }
-    Ok(current)
+    let write_typing = data
+        .get("write_typing")
+        .map(|evidence| serde_json::from_value(evidence.clone()))
+        .transpose()
+        .context("decode controller current-text typing evidence")?;
+    Ok((current, write_typing))
 }
 
 fn request_existing_controller_crdt_revision_read(
@@ -12511,6 +12552,8 @@ struct ControllerCrdtCurrentTextPayload {
     /// controller cleanup, or diagnostics may be published by either endpoint.
     #[serde(default)]
     effect_free: bool,
+    #[serde(default)]
+    include_write_typing: bool,
 }
 
 fn default_crdt_current_text_flush_barrier() -> bool {
@@ -12650,6 +12693,7 @@ fn editor_route_other_lane_pane(
 
 fn handle_crdt_current_text_rpc(
     bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
     request: ControllerRequest,
 ) -> Result<serde_json::Value> {
     let requested_file = request_file(&request)?;
@@ -12693,7 +12737,31 @@ fn handle_crdt_current_text_rpc(
     if !payload.effect_free {
         log_controller_current_text_result(&canonical, &source, &current);
     }
-    Ok(controller_current_text_response(current))
+    let write_typing = if payload.include_write_typing
+        && let agent_doc_crdt_relay_io::CurrentText::Current { text, .. } = &current
+    {
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let active_capture = runtime
+            .memory
+            .lock()
+            .state_projection
+            .document(&document_hash)
+            .and_then(|capture| capture.document.editor_op_capture.clone());
+        // Omit the optional field when the projection is unreadable so the
+        // writer can use its established probe and diagnostic.
+        agent_doc_op_capture_io::editor_ops_in_flight_for_projection(active_capture.as_ref(), text)
+            .ok()
+            .map(|typing| {
+                typing.map_or(ControllerWriteTyping::Clear, ControllerWriteTyping::Pending)
+            })
+    } else {
+        None
+    };
+    let mut response = controller_current_text_response(current);
+    if let Some(write_typing) = write_typing {
+        response["write_typing"] = serde_json::to_value(write_typing)?;
+    }
+    Ok(response)
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -12856,6 +12924,7 @@ fn crdt_current_text_payload(
             recover_projection: false,
             flush_barrier: default_crdt_current_text_flush_barrier(),
             effect_free: false,
+            include_write_typing: false,
         });
     };
     if payload_json.trim().is_empty() {
@@ -12864,6 +12933,7 @@ fn crdt_current_text_payload(
             recover_projection: false,
             flush_barrier: default_crdt_current_text_flush_barrier(),
             effect_free: false,
+            include_write_typing: false,
         });
     }
     serde_json::from_str(payload_json).context("failed to parse CRDT current-text payload")
@@ -25268,9 +25338,11 @@ pub(crate) fn handle_request_locked(
         "editor_command_await" => {
             controller_envelope(handle_editor_command_await_rpc(runtime.as_ref(), request))
         }
-        "crdt_current_text" => {
-            controller_envelope(handle_crdt_current_text_rpc(&bootstrap_snapshot, request))
-        }
+        "crdt_current_text" => controller_envelope(handle_crdt_current_text_rpc(
+            &bootstrap_snapshot,
+            runtime,
+            request,
+        )),
         "resume_claimant" => {
             controller_envelope(handle_resume_claimant_rpc(&bootstrap_snapshot, request))
         }
@@ -66877,6 +66949,77 @@ mod tests {
             ops_log.contains("controller_crdt_current_text")
                 && ops_log.contains("status=editor_attached_model_missing"),
             "controller should log the pure relay-read result:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn current_text_rpc_reports_attested_typing_only_when_requested() {
+        let _env = reliable_sync_env_lock();
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("typing.md");
+        let baseline = "Body\n";
+        let typing = "Body\nTyping\n";
+        std::fs::write(&file, baseline).unwrap();
+        let file = file.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        controller_liveness_plane().lock().restore_liveness(&[
+            agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash: document_hash.clone(),
+                pid: std::process::id().into(),
+                tag: "test-editor-typing-observation".into(),
+            },
+        ]);
+        agent_doc_crdt_relay_io::seed_embedded_relay_for_file(&file).unwrap();
+        let editor_tip = agent_doc_hash::content_hash(typing);
+        append_state_event(
+            dir.path(),
+            &agent_doc_state_backbone::StateEvent::new(
+                format!("typing-observation-{document_hash}"),
+                agent_doc_state_backbone::StateFact::EditorOpCaptureCheckpointed {
+                    document_hash,
+                    canonical_path: file.display().to_string(),
+                    epoch: 1,
+                    base_hash: agent_doc_hash::content_hash(baseline),
+                    ops_json: serde_json::to_string(&[agent_doc_merge::crdt::EditorOp::Insert {
+                        offset: baseline.len(),
+                        text: "Typing\n".into(),
+                    }])
+                    .unwrap(),
+                    updated_ms: 1,
+                    tip_hash: editor_tip.clone(),
+                },
+            ),
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = test_controller_runtime(&bootstrap);
+        let read = |include_write_typing| {
+            let request = serde_json::from_value(serde_json::json!({
+                "command": "crdt_current_text",
+                "file": file,
+                "diagnostic_payload": serde_json::json!({
+                    "source": "test_typing_observation",
+                    "flush_barrier": false,
+                    "include_write_typing": include_write_typing,
+                }).to_string(),
+            }))
+            .unwrap();
+            handle_crdt_current_text_rpc(&bootstrap, &runtime, request).unwrap()
+        };
+        assert!(read(false).get("write_typing").is_none());
+        let observation = read(true);
+        assert_eq!(observation["text"], baseline);
+        let evidence: ControllerWriteTyping =
+            serde_json::from_value(observation["write_typing"].clone()).unwrap();
+        assert_eq!(
+            evidence,
+            ControllerWriteTyping::Pending(agent_doc_op_capture_io::EditorOpsInFlight {
+                epoch: 1,
+                pending_from: 0,
+                pending_ops: 1,
+                tip_hash: editor_tip,
+            })
         );
     }
 

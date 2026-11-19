@@ -1187,7 +1187,7 @@ pub fn verified_editor_ops_for_base(doc: &Path, base_text: &str) -> Result<Optio
 
 /// Operator typing the editor attested over a visible text but whose delta the
 /// relay has not ingested (`#inflighttypinghold`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EditorOpsInFlight {
     /// The active epoch holding the typing.
     pub epoch: u64,
@@ -1232,6 +1232,17 @@ pub fn editor_ops_in_flight_over(doc: &Path, visible: &str) -> Result<Option<Edi
         return Ok(None);
     };
     Ok(editor_ops_in_flight_for_capture(&capture, visible))
+}
+
+/// Evaluate the active editor-op projection already owned by the controller.
+pub fn editor_ops_in_flight_for_projection(
+    active: Option<&agent_doc_state_backbone::EditorOpCaptureProjection>,
+    visible: &str,
+) -> Result<Option<EditorOpsInFlight>> {
+    Ok(active
+        .map(decode_capture)
+        .transpose()?
+        .and_then(|capture| editor_ops_in_flight_for_capture(&capture, visible)))
 }
 
 /// Replay the newest durable editor operation checkpoint when, and only when,

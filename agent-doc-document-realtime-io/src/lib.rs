@@ -133,6 +133,9 @@ pub const RETAINED_FOR_RETRY_MARKER: &str = "pending change retained for retry";
 const CRDT_WRITE_CONVERGENCE_TIMEOUT_MS: u64 = 5_000;
 #[cfg(not(test))]
 const CRDT_WRITE_CONVERGENCE_TIMEOUT_MS: u64 = 60_000;
+// A continuously typing operator may take much longer than an ordinary flush.
+// Give brief bursts a synchronous path, then hand off to the retained writer.
+const CRDT_WRITE_TYPING_HOLD_FOREGROUND_MS: u64 = 2_000;
 const CRDT_WRITE_BACKOFF_INITIAL_MS: u64 = 25;
 const CRDT_WRITE_BACKOFF_MAX_MS: u64 = 250;
 /// `#crdtcasraced`: shared pure backoff policy for the convergence loop.
@@ -1483,7 +1486,7 @@ fn dropped_replica_editor_edit_in_flight(
     target: &str,
     source: &str,
 ) -> bool {
-    cp_write_editor_ops_in_flight(file, relay_text, target, source).is_some()
+    cp_write_editor_ops_in_flight(file, relay_text, target, source, None).is_some()
         || agent_doc_reliable_sync_io::plane_document_in_flight_for_path(&file.to_string_lossy())
             == Some(true)
 }
@@ -4080,9 +4083,16 @@ fn cp_write_editor_ops_in_flight(
     relay_text: &str,
     target: &str,
     source: &str,
+    observed: Option<agent_doc_controller_io::project_controller::ControllerWriteTyping>,
 ) -> Option<agent_doc_op_capture_io::EditorOpsInFlight> {
+    use agent_doc_controller_io::project_controller::ControllerWriteTyping;
     if relay_text == target {
         return None;
+    }
+    match observed {
+        Some(ControllerWriteTyping::Clear) => return None,
+        Some(ControllerWriteTyping::Pending(typing)) => return Some(typing),
+        None => {}
     }
     match agent_doc_op_capture_io::editor_ops_in_flight_over(file, relay_text) {
         Ok(in_flight) => in_flight,
@@ -4265,7 +4275,7 @@ pub fn apply_canonical_replace_if_attached(
                                 agent_doc_hash::content_hash(expected_current),
                             ),
                         );
-                        prewrite_observed = Some(observed);
+                        prewrite_observed = Some((observed, None));
                     } else {
                         return Err(error);
                     }
@@ -4273,10 +4283,14 @@ pub fn apply_canonical_replace_if_attached(
             }
 
             let mut delivery_wait_cursor: Option<(u64, usize)> = None;
-            let observed_result: Result<_> = match prewrite_observed {
-                Some(observed) => Ok(observed),
-                None => observe_live_editor_authority_after_model_ensure(file, source),
-            };
+            let observed_result: Result<_> =
+                match prewrite_observed {
+                    Some(observed) => Ok(observed),
+                    None => query_live_editor_authority_after_model_ensure_with_typing(
+                        file, source, true,
+                    )
+                    .inspect(|(current, _)| record_current_text_authority(file, source, current)),
+                };
             let observed = match observed_result {
                 Ok(current) => Some(current),
                 Err(err) if transient_convergence_backpressure_error(&err) => {
@@ -4289,7 +4303,7 @@ pub fn apply_canonical_replace_if_attached(
                 Err(err) => return Err(err),
             };
 
-            if let Some(observed) = observed {
+            if let Some((observed, write_typing)) = observed {
                 match observed {
                     agent_doc_crdt_relay_io::CurrentText::Detached => {
                         return Ok(canonical_replace_detached_step());
@@ -4521,9 +4535,13 @@ pub fn apply_canonical_replace_if_attached(
                                     reason: wait_state,
                                 });
                             }
-                        } else if let Some(in_flight) =
-                            cp_write_editor_ops_in_flight(file, &relay_text, content, source)
-                        {
+                        } else if let Some(in_flight) = cp_write_editor_ops_in_flight(
+                            file,
+                            &relay_text,
+                            content,
+                            source,
+                            write_typing,
+                        ) {
                             // `#inflighttypinghold` (1): the controller's retained
                             // projection already waits for attested typing
                             // (`AwaitingEditorOps`), but this direct CP write did
@@ -4551,6 +4569,23 @@ pub fn apply_canonical_replace_if_attached(
                             #[cfg(test)]
                             in_flight_typing_hold_hook::fire();
                             wait_state = CrdtConvergenceState::AwaitingEditorOps;
+                            if controller_elapsed_ms >= CRDT_WRITE_TYPING_HOLD_FOREGROUND_MS {
+                                let intent_id = ensure_deferred_document_write_intent(
+                                    file,
+                                    expected_current,
+                                    content,
+                                    source,
+                                    DocumentWriteDeferredReason::EditorProjectionPending,
+                                )?;
+                                return Err(retained_intent_refusal(
+                                    file,
+                                    &intent_id,
+                                    format!(
+                                        "{source}: typing is still in flight for {} (reason={wait_state}, intent_id={intent_id}). The retained target waits for the editor delta before rebasing",
+                                        file.display(),
+                                    ),
+                                ));
+                            }
                         } else {
                             let effective_target =
                                 if relay_text == expected_current || relay_text == content {
@@ -4951,8 +4986,12 @@ pub fn apply_canonical_replace_if_attached(
                 delivery_wait_elapsed.as_millis().min(u128::from(u64::MAX)) as u64;
             let controller_elapsed_ms =
                 exclusive_controller_elapsed_ms(total_elapsed_ms, delivery_wait_elapsed_ms);
-            let remaining_ms =
-                CRDT_WRITE_CONVERGENCE_TIMEOUT_MS.saturating_sub(controller_elapsed_ms);
+            let foreground_budget_ms = if wait_state == CrdtConvergenceState::AwaitingEditorOps {
+                CRDT_WRITE_TYPING_HOLD_FOREGROUND_MS
+            } else {
+                CRDT_WRITE_CONVERGENCE_TIMEOUT_MS
+            };
+            let remaining_ms = foreground_budget_ms.saturating_sub(controller_elapsed_ms);
             if wait_state == CrdtConvergenceState::DeliveryProjectionPending
                 && let Some((delivery_version, live_editors)) = delivery_wait_cursor
             {
@@ -7710,11 +7749,26 @@ fn query_live_editor_authority(
     file: &std::path::Path,
     source: &str,
 ) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    Ok(query_live_editor_authority_with_typing(file, source, false)?.0)
+}
+
+type LiveEditorAuthorityObservation = (
+    agent_doc_crdt_relay_io::CurrentText,
+    Option<agent_doc_controller_io::project_controller::ControllerWriteTyping>,
+);
+
+fn query_live_editor_authority_with_typing(
+    file: &std::path::Path,
+    source: &str,
+    #[cfg_attr(test, allow(unused_variables))] include_write_typing: bool,
+) -> Result<LiveEditorAuthorityObservation> {
     if controller_document_mutation_in_progress() {
-        return agent_doc_crdt_relay_io::current_text_for_file(file);
+        return Ok((agent_doc_crdt_relay_io::current_text_for_file(file)?, None));
     }
     let embedded = match query_embedded_relay(file, source)? {
-        Some(current) if embedded_relay_observation_is_current(&current) => return Ok(current),
+        Some(current) if embedded_relay_observation_is_current(&current) => {
+            return Ok((current, None));
+        }
         embedded => embedded,
     };
     if !agent_doc_controller_io::project_controller::reliable_sync_editor_live_for_file(file) {
@@ -7726,20 +7780,31 @@ fn query_live_editor_authority(
                 source,
             ),
         );
-        return Ok(embedded.unwrap_or(agent_doc_crdt_relay_io::CurrentText::Detached));
+        return Ok((
+            embedded.unwrap_or(agent_doc_crdt_relay_io::CurrentText::Detached),
+            None,
+        ));
     }
     #[cfg(test)]
     {
-        Ok(embedded.unwrap_or_else(|| {
-            agent_doc_crdt_relay_io::current_text_for_file(file)
-                .unwrap_or(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)
-        }))
+        Ok((
+            embedded.unwrap_or_else(|| {
+                agent_doc_crdt_relay_io::current_text_for_file(file)
+                    .unwrap_or(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)
+            }),
+            None,
+        ))
     }
     #[cfg(not(test))]
-    match agent_doc_controller_io::project_controller::current_text_via_controller_model_read_for_doc(
-        file, source,
-    ) {
-        Ok(Some(current)) => {
+    match if include_write_typing {
+        agent_doc_controller_io::project_controller::current_text_with_typing_via_controller_model_read_for_doc(file, source)
+    } else {
+        agent_doc_controller_io::project_controller::current_text_via_controller_model_read_for_doc(
+            file, source,
+        )
+        .map(|current| current.map(|current| (current, None)))
+    } {
+        Ok(Some((current, typing))) => {
             if let Some(embedded) = embedded.as_ref() {
                 agent_doc_ops_log_io::log_op(
                     file,
@@ -7752,7 +7817,7 @@ fn query_live_editor_authority(
                     ),
                 );
             }
-            Ok(current)
+            Ok((current, typing))
         }
         Ok(None) => {
             agent_doc_ops_log_io::log_op(
@@ -7768,8 +7833,11 @@ fn query_live_editor_authority(
                     },
                 ),
             );
-            Ok(embedded
-                .unwrap_or(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica))
+            Ok((
+                embedded
+                    .unwrap_or(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica),
+                None,
+            ))
         }
         Err(e) => {
             if let Some(embedded) = embedded {
@@ -7783,7 +7851,7 @@ fn query_live_editor_authority(
                         current_text_status(&embedded),
                     ),
                 );
-                return Ok(embedded);
+                return Ok((embedded, None));
             }
             // Record controller degradation so hot polling paths (idle-queue
             // watch) can back off and stop flooding a wedged controller.
@@ -7972,7 +8040,16 @@ fn query_live_editor_authority_after_model_ensure(
     file: &std::path::Path,
     source: &str,
 ) -> Result<agent_doc_crdt_relay_io::CurrentText> {
-    let current = query_live_editor_authority(file, source)?;
+    Ok(query_live_editor_authority_after_model_ensure_with_typing(file, source, false)?.0)
+}
+
+fn query_live_editor_authority_after_model_ensure_with_typing(
+    file: &std::path::Path,
+    source: &str,
+    include_write_typing: bool,
+) -> Result<LiveEditorAuthorityObservation> {
+    let (current, typing) =
+        query_live_editor_authority_with_typing(file, source, include_write_typing)?;
     match current {
         agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
         | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
@@ -7986,13 +8063,13 @@ fn query_live_editor_authority_after_model_ensure(
                         current_text_status(&current),
                     ),
                 );
-                return Ok(current);
+                return Ok((current, typing));
             }
             let ensured = ensure_document_model_through_authority(file, source)?;
-            Ok(ensured)
+            Ok((ensured, None))
         }
         agent_doc_crdt_relay_io::CurrentText::Detached
-        | agent_doc_crdt_relay_io::CurrentText::Current { .. } => Ok(current),
+        | agent_doc_crdt_relay_io::CurrentText::Current { .. } => Ok((current, typing)),
     }
 }
 
@@ -9702,7 +9779,21 @@ pub fn peek_current_document(file: &std::path::Path, source: &str) -> Result<Cur
         }
     };
     match current {
-        Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. }) => {
+        Some(agent_doc_crdt_relay_io::CurrentText::Current {
+            text,
+            quarantined_replicas,
+            ..
+        }) => {
+            if quarantined_replicas > 0 {
+                return Ok(CurrentDocument::new(
+                    file.to_path_buf(),
+                    agent_doc_document_realtime::crdt_relay_reconciliation(
+                        text,
+                        "crdt_relay_quarantined",
+                        quarantined_replicas,
+                    ),
+                ));
+            }
             let disk = peek_disk_document_content(file, source)?;
             let buffer = BufferState::new(text, true, 0);
             Ok(CurrentDocument::new(
@@ -15115,6 +15206,36 @@ mod tests {
     }
 
     #[test]
+    fn status_only_peek_preserves_quarantine_even_when_disk_matches_canonical() {
+        let baseline = "# Session\n\nOriginal text\n";
+        let target = "# Session\n\nProjected text\n";
+        let (_dir, file, _) = temp_doc(baseline);
+        let identity = "test-quarantined-status-only-peek";
+        seed_reliable_sync_open(&file, identity);
+        let (replica, _) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .unwrap();
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| {
+            let visible = hub.canonical_text();
+            hub.apply_canonical_replace_scoped(&visible, target, None)
+                .unwrap();
+            hub.fence_registered_document_op_origins([replica]).unwrap();
+            for _ in 0..=agent_doc_document_realtime::crdt_relay::MAX_REDELIVERIES_WITHOUT_ACK {
+                hub.pending_updates(replica).unwrap();
+            }
+            assert_eq!(hub.quarantined_live_replicas(), vec![replica]);
+        })
+        .unwrap();
+        std::fs::write(&file, target).unwrap();
+
+        let current = peek_current_document(&file, "test_quarantined_status_only_peek").unwrap();
+        assert_eq!(current.content(), target);
+        assert_eq!(current.reconciliation().quarantined_replicas, 1);
+        assert!(current.reconciliation().diverged);
+        seed_reliable_sync_close(&file, identity);
+    }
+
+    #[test]
     fn canonical_replace_returns_retained_then_ack_converges_projection() {
         let baseline = "# Session\n\nbody\n";
         let target = "# Session\n\nbody\n\n### Re: settled\n\nDone.\n";
@@ -15462,7 +15583,7 @@ mod tests {
     ///
     /// `mid_epoch` lands an earlier burst of the same epoch before the write, so
     /// the visible text is inside the epoch rather than its base (gap 2).
-    fn run_cli_cp_write_in_flight_typing_scenario(mid_epoch: bool) {
+    fn run_cli_cp_write_in_flight_typing_scenario(mid_epoch: bool, land_delta: bool) {
         use agent_doc_merge::crdt::EditorOp;
         let disk = concat!(
             "# Session\n\n",
@@ -15554,7 +15675,7 @@ mod tests {
         let landing_tip = operator_tip.clone();
         let mut landed = false;
         in_flight_typing_hold_hook::install(move || {
-            if landed {
+            if landed || !land_delta {
                 return;
             }
             landed = true;
@@ -15569,13 +15690,33 @@ mod tests {
             })
             .unwrap();
         });
-        let ack = project_next_crdt_delivery(file.clone(), identity);
+        let ack = land_delta.then(|| project_next_crdt_delivery(file.clone(), identity));
         let write =
             apply_canonical_replace_if_attached(&file, &write_base, &agent, "test_inflight_hold");
         let held = in_flight_typing_hold_hook::fired();
         in_flight_typing_hold_hook::clear();
+        if !land_delta {
+            let error = write.expect_err("prolonged typing must retain the write");
+            let intent = pending_document_write(&file).expect("durable write intent");
+            assert!(
+                error.to_string().contains("reason=awaiting_editor_ops"),
+                "{error}"
+            );
+            assert!(error.to_string().contains(&intent.intent_id), "{error}");
+            assert_eq!(
+                intent.expected_content.as_deref(),
+                Some(write_base.as_str())
+            );
+            assert_eq!(intent.target_content, agent);
+            assert_eq!(std::fs::read_to_string(&file).unwrap(), disk);
+            let canonical =
+                agent_doc_crdt_relay_io::with_hub(&file, |hub| hub.canonical_text()).unwrap();
+            assert_eq!(canonical, write_base);
+            seed_reliable_sync_close(&file, identity);
+            return;
+        }
         write.unwrap().expect("attached CRDT write");
-        ack.join().unwrap();
+        ack.unwrap().join().unwrap();
 
         let log = std::fs::read_to_string(file.parent().unwrap().join(".agent-doc/logs/ops.log"))
             .unwrap_or_default();
@@ -15610,12 +15751,17 @@ mod tests {
 
     #[test]
     fn inflighttypinghold_cli_cp_write_holds_for_attested_typing_then_rolls_forward() {
-        run_cli_cp_write_in_flight_typing_scenario(false);
+        run_cli_cp_write_in_flight_typing_scenario(false, true);
     }
 
     #[test]
     fn inflighttypinghold_cli_cp_write_holds_a_mid_epoch_burst_then_rolls_forward() {
-        run_cli_cp_write_in_flight_typing_scenario(true);
+        run_cli_cp_write_in_flight_typing_scenario(true, true);
+    }
+
+    #[test]
+    fn inflighttypinghold_cli_cp_write_retains_during_prolonged_typing() {
+        run_cli_cp_write_in_flight_typing_scenario(false, false);
     }
 
     #[test]

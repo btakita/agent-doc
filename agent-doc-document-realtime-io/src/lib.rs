@@ -6087,7 +6087,7 @@ pub fn persist_exact_operator_edit_through_authority(
             );
             guard_visible_write_expected_current(file, source, expected)?;
             anyhow::ensure!(
-                cp_write_editor_ops_in_flight(file, expected, target, source).is_none(),
+                cp_write_editor_ops_in_flight(file, expected, target, source, None).is_none(),
                 "{source}: editor typing is still in flight. Retry the browser save after it settles."
             );
             if target != expected {

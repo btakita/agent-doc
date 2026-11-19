@@ -592,6 +592,12 @@ chain needed to diagnose the rejected envelope.
 
 ## session-check
 
+The owner PostToolUse hook shares a revision-aware current-document projection
+across mid-turn steering, status sync, place, subagent-pool, and reported-closeout
+checkpoints. Unchanged document revisions reuse one full authority read. When a
+claim cancellation acquires its effect locks, it refreshes the document before
+acting and invalidates the projection again after applying the cancellation.
+
 `agent-doc session-check <FILE>`
 
 - Evaluates **one document version per sweep** (`#sccurrentpass`). `session-check` is an observationally stable pass over a single document, so its entry points (`run_with_options`, `inspect_with_warnings`) open a pass-scoped current-document memo: the first resolve wins and every later guard in that sweep reads the same value. This is a correctness rule before it is a performance one — the operator can type mid-sweep, and independent per-guard resolution let two guards disagree about the same document. It is also the dominant cost fix for editor-attached documents, where each resolve was a full controller round trip returning the whole document text (~8 per sweep, ~0.5-1s apiece); `Compact Exchange`, which runs a sweep after its writeback, inherits that saving directly. The memo is never ambient: outside a pass, resolution is unchanged; force-disk resolution bypasses it (different authority); nested entry points reuse the outer pass; and every self-heal / captured-resume / convergence step that can rewrite the document invalidates it so the next guard re-reads.

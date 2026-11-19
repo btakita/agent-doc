@@ -186,6 +186,36 @@ pub fn requeue_nonterminal_hand_back(
     let presets =
         agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(content, file);
     let preset_pairs = agent_doc_queue::goal_preset_terminal::resolved_presets(&presets);
+    let bodies = agent_doc_queue::goal_preset_terminal::head_goal_preset_bodies_in(
+        &claim.item_text,
+        &preset_pairs,
+    );
+    let answered_blocked_review =
+        agent_doc_queue::goal_preset_terminal::blocked_review_order_already_answered(
+            response, &bodies,
+        );
+    // External evidence normally goes to prompt pressure. The resolved goal
+    // order can supersede the requested decision on this exact claim.
+    if let Some(blocker) = agent_doc_queue::prompt_pressure::parse_prompt_blocker(response)
+        .filter(|blocker| blocker.evidence.is_some())
+    {
+        if !answered_blocked_review || !blocker.matches_prompt(&claim.item_text) {
+            return Ok(None);
+        }
+        anyhow::ensure!(
+            generation.is_some() || claim.generation == 0,
+            "external blocker requires --generation for the exact started worker attempt"
+        );
+        anyhow::ensure!(
+            claim.worker_binding_holds_attempt()
+                && matches!(
+                    claim.state,
+                    agent_doc_queue::queue_claim::QueueClaimState::Running
+                        | agent_doc_queue::queue_claim::QueueClaimState::Lost
+                ),
+            "external blocker requires the exact started, unfinished worker attempt"
+        );
+    }
     let final_states = agent_doc_queue::goal_preset_terminal::head_final_states_in(
         &claim.item_text,
         &preset_pairs,
@@ -212,17 +242,14 @@ pub fn requeue_nonterminal_hand_back(
     );
     let inline_pending =
         inline_goal && !agent_doc_queue::inline_discussion::inline_threads_settled(response);
-    let bodies = agent_doc_queue::goal_preset_terminal::head_goal_preset_bodies_in(
-        &claim.item_text,
-        &preset_pairs,
-    );
     // `#operatororderclosed`: an already-answered human-review BLOCKED does not
     // complete. `#adversarialselfreview`: a REVIEW-CLEAN that admits no posted
     // COMMENTED review does not complete. `#reviewfixonhead`: an address run
     // stays open until the written fix is on the current head.
     // `#addressinline`: an inline goal stays open until every root thread's
     // written fix is on that head.
-    let completes_order = !address_pending
+    let completes_order = !answered_blocked_review
+        && !address_pending
         && !effect_unproven
         && !inline_pending
         && !final_states.is_empty()
@@ -333,10 +360,6 @@ pub fn requeue_nonterminal_hand_back(
             requeued.item_text.trim().len(),
         ),
     );
-    let answered_blocked_review =
-        agent_doc_queue::goal_preset_terminal::blocked_review_order_already_answered(
-            response, &bodies,
-        );
     let suppress_immediate_refill = answered_blocked_review
         && agent_doc_queue::goal_preset_terminal::response_published_pull_request_explanation(
             response,

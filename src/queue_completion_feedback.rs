@@ -69,13 +69,6 @@ pub(crate) fn requeue_nonterminal_goal_hand_back(
     generation: Option<u64>,
     response: &str,
 ) -> Result<Option<agent_doc_queue_io::goal_loop_handoff::GoalLoopRequeue>> {
-    // Explicit external evidence is a held prompt, even when the goal preset
-    // normally retries an incomplete hand-back.
-    if agent_doc_queue::prompt_pressure::parse_prompt_blocker(response)
-        .is_some_and(|blocker| blocker.evidence.is_some())
-    {
-        return Ok(None);
-    }
     let _lock = acquire_completion_lock(
         file,
         "report subagent completion",
@@ -2288,16 +2281,33 @@ mod tests {
         .unwrap();
         const ROW: &str = "https://github.com/sample-org/sample-repo/pull/12: #adversarial-pr";
         start_subagent(&doc, ROW, "subagent:pr12-review1");
-        let quiet = concat!(
-            "BLOCKED reviewer clears or replaces review 1000000001 against the current head ",
-            "base=cccc333 head=bbbb222 cycles=2\n\n",
-            "Two COMMENTED reviews are already on head bbbb222. This preset cannot approve ",
-            "or dismiss that review. No new review was posted.\n",
-            "INLINE-THREADS-LOADED 0 head=bbbb222\n",
+        let approval_blocker = format!(
+            "<!-- agent-doc:prompt-blocker -->\n\
+             - [/] The current head is independently review-clean and awaits merge approval.\n\
+             \x20 - **Complete by:** Receive an eligible GitHub review approving the current PR head.\n\
+             \x20 - **Prompt:** {ROW}\n\
+             \x20 - **Evidence:** GitHub reports REVIEW_REQUIRED and BLOCKED on bbbb222.\n\
+             <!-- /agent-doc:prompt-blocker -->"
         );
-        let requeue = requeue_nonterminal_goal_hand_back(&doc, ROW, Some(1), quiet)
+        let runner_blocker = approval_blocker.replace(
+            "Receive an eligible GitHub review approving the current PR head.",
+            "Restore the hosted runner budget before the independent review.",
+        );
+        assert!(
+            requeue_nonterminal_goal_hand_back(&doc, ROW, Some(1), &runner_blocker)
+                .unwrap()
+                .is_none(),
+            "evidence about approval does not override an independent external gate"
+        );
+        assert!(
+            requeue_nonterminal_goal_hand_back(&doc, ROW, None, &approval_blocker)
+                .unwrap_err()
+                .to_string()
+                .contains("requires --generation")
+        );
+        let requeue = requeue_nonterminal_goal_hand_back(&doc, ROW, Some(1), &approval_blocker)
             .unwrap()
-            .expect("an already-answered human-review BLOCKED stays open");
+            .expect("an already-answered human-review blocker returns to the goal loop");
         assert!(requeue.answered_blocked_review);
         assert!(!requeue.suppress_immediate_refill);
         assert_eq!(requeue.claim.generation, 1);
@@ -2308,6 +2318,7 @@ mod tests {
             "{content}"
         );
         assert!(!content.contains("~~"), "{content}");
+        assert!(!content.contains("agent:review"), "{content}");
         assert!(!content.contains("### Re: Subagent completed"), "{content}");
 
         let (outcome, _) =

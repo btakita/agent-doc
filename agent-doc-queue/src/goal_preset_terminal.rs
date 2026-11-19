@@ -243,7 +243,7 @@ pub fn head_goal_preset_bodies(content: &str, head: &str) -> Vec<String> {
 ///
 /// It overrides a preset sentence that closes the order `BLOCKED`, asks the
 /// operator to clear or dismiss a review, or withholds the pull-request response.
-pub const OPERATOR_ORDER_CLOSE_RULE: &str = "Operator order (#operatororderclosed): do not close this order with BLOCKED, and do not ask the operator a question the preset already answers. Do not approve or dismiss a human review. Address the review and resolve every thread that is fully addressed. A rerun does not post another human review when the current head already has one. When the run cannot progress, still write the response on the pull request, and that response says why the work is not progressing. Do not post that explanation again when it is already on the pull request for this head. Do not skip the write. These rules override a preset sentence that stays BLOCKED, withholds another address cycle, or tells the worker not to post.";
+pub const OPERATOR_ORDER_CLOSE_RULE: &str = "Operator order (#operatororderclosed): do not close this order with BLOCKED, and do not ask the operator a question the preset already answers. Do not approve or dismiss a human review. Address the review and resolve every thread that is fully addressed. A rerun does not post another human review when the current head already has one. When the run cannot progress, still write the response on the pull request, and that response says why the work is not progressing. Do not post that explanation again when it is already on the pull request for this head. Do not skip the write. These rules also apply to a structured prompt blocker. These rules override a preset sentence that stays BLOCKED, withholds another address cycle, or tells the worker not to post.";
 
 /// `#adversarialselfreview`: the GitHub login may be the pull-request author.
 /// A fresh reviewer that did not implement the head still posts one plain
@@ -251,7 +251,7 @@ pub const OPERATOR_ORDER_CLOSE_RULE: &str = "Operator order (#operatororderclose
 /// older SHA does not replace it. This overrides the `#operatororderclosed`
 /// sentence that a rerun does not post another human review, but only when
 /// the exact head lacks a verdict-bearing plain COMMENTED review.
-pub const INDEPENDENT_SELF_REVIEW_RULE: &str = "Independent self-review (#adversarialselfreview): #adversarial-pr posts exactly one plain COMMENTED review on the exact current remote head even when `gh api user` is the pull-request author. That author-account review counts. Independence is a fresh reviewer that did not implement the head, not a different GitHub login. Do not refuse, and do not stop a compound row before #adversarial-pr, because the login matches the author. An APPROVED review, an empty COMMENTED review, a review on an older SHA, and the fixer's review of a head it just pushed do not replace that COMMENTED review. The #operatororderclosed sentence that a rerun does not post another human review does not skip this review when the exact head lacks a plain COMMENTED review that states a verdict. When that verdict-bearing COMMENTED review is already on the exact head, do not post a duplicate, and do not say REVIEW-CLEAN for an APPROVED or empty review. A hand-back that says no review was posted, or that the author login cannot post, is not REVIEW-CLEAN.";
+pub const INDEPENDENT_SELF_REVIEW_RULE: &str = "Independent self-review (#adversarialselfreview): #adversarial-pr posts exactly one plain COMMENTED review on the exact current remote head even when `gh api user` is the pull-request author. That author-account review counts. Independence is a fresh reviewer that did not implement the head, not a different GitHub login. Do not refuse, and do not stop a compound row before #adversarial-pr, because the login matches the author. An APPROVED review, an empty COMMENTED review, a review on an older SHA, and the fixer's review of a head it just pushed do not replace that COMMENTED review. The #operatororderclosed sentence that a rerun does not post another human review does not skip this review when the exact head lacks a plain COMMENTED review that states a verdict. When that verdict-bearing COMMENTED review is already on the exact head, do not post a duplicate, and do not say REVIEW-CLEAN for an APPROVED or empty review. A hand-back that says no review was posted, or that the author login cannot post, is not REVIEW-CLEAN. Once the review-clean criteria are met, report REVIEW-CLEAN even if branch protection still requires approval to merge.";
 
 /// True when `item` carries `#adversarial-pr` as its own token.
 pub fn item_mentions_adversarial_preset(item: &str) -> bool {
@@ -359,14 +359,24 @@ pub fn preset_requires_operator_order_rule(body: &str) -> bool {
     lower.contains("pull request") || lower.contains("remote head")
 }
 
-/// True when `response` states `BLOCKED` and asks for a human-review decision
-/// (clear, dismiss, approve, or replace that review).
+/// True when a BLOCKED hand-back asks for a human-review decision (clear,
+/// dismiss, approve, or replace that review). For a structured blocker only
+/// the action counts. Evidence can mention review status for a different gate.
 pub fn blocked_hand_back_asks_to_decide_human_review(response: &str) -> bool {
-    let blocked = ["BLOCKED".to_string()];
-    if !text_states_final_state(response, &blocked) {
-        return false;
+    if let Some(blocker) = crate::prompt_pressure::parse_prompt_blocker(response) {
+        let action = blocker.complete_by.to_ascii_lowercase();
+        return (action.contains("review") && asks_for_human_review_decision(&action))
+            || (action.contains("approv")
+                && ["github review", "pull request", "pr head"]
+                    .iter()
+                    .any(|target| action.contains(target)));
     }
-    let lower = response.to_ascii_lowercase();
+    let blocked = ["BLOCKED".to_string()];
+    text_states_final_state(response, &blocked)
+        && asks_for_human_review_decision(&response.to_ascii_lowercase())
+}
+
+fn asks_for_human_review_decision(lower: &str) -> bool {
     if lower.contains("dismiss") || lower.contains("human approval") {
         return true;
     }
@@ -394,33 +404,38 @@ pub fn blocked_hand_back_asks_to_decide_human_review(response: &str) -> bool {
         || lower.contains("approve the review")
 }
 
-fn preset_already_answers_human_review(bodies: &[String]) -> bool {
-    bodies.iter().any(|body| {
-        let lower = body.to_ascii_lowercase();
-        [
-            "do not approve",
-            "does not approve",
-            "don't approve",
-            "do not dismiss",
-            "does not dismiss",
-            "don't dismiss",
-            "cannot dismiss",
-            "never dismiss",
-            "never approve",
-        ]
-        .iter()
-        .any(|phrase| lower.contains(phrase))
-            || (lower.contains("cannot submit")
-                && (lower.contains("approval") || lower.contains("human review")))
-    })
+fn preset_already_answers_human_review(body: &str) -> bool {
+    let lower = body.to_ascii_lowercase();
+    [
+        "do not approve",
+        "does not approve",
+        "don't approve",
+        "do not dismiss",
+        "does not dismiss",
+        "don't dismiss",
+        "cannot dismiss",
+        "never dismiss",
+        "never approve",
+    ]
+    .iter()
+    .any(|phrase| lower.contains(phrase))
+        || (lower.contains("cannot submit")
+            && (lower.contains("approval") || lower.contains("human review")))
 }
 
-/// `#operatororderclosed`: `BLOCKED` on a human review the preset already
-/// refuses to approve or dismiss. That hand-back does not complete the order
-/// and is not an operator question.
+/// `#operatororderclosed`: a blocker on a human review the preset already
+/// refuses to approve or dismiss does not complete the order.
 pub fn blocked_review_order_already_answered(response: &str, bodies: &[String]) -> bool {
+    let structured = crate::prompt_pressure::response_contains_prompt_blocker(response);
     blocked_hand_back_asks_to_decide_human_review(response)
-        && preset_already_answers_human_review(bodies)
+        && bodies.iter().any(|body| {
+            preset_already_answers_human_review(body)
+                && (!structured
+                    || (preset_requires_operator_order_rule(body)
+                        && preset_final_states(body)
+                            .iter()
+                            .any(|state| state == "REVIEW-CLEAN")))
+        })
 }
 
 /// True when `response` records a pull-request comment that says why the work
@@ -920,6 +935,21 @@ mod tests {
 
         let clean = "REVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-200 head=bbb cycles=2";
         assert!(hand_back_completes_goal_loop(clean, &declared, &bodies));
+
+        let structured = concat!(
+            "<!-- agent-doc:prompt-blocker -->\n",
+            "- [/] This head is ready for its required merge approval.\n",
+            "  - **Complete by:** Receive an eligible GitHub review approving the current PR head.\n",
+            "  - **Prompt:** Work on the current pull request.\n",
+            "  - **Evidence:** GitHub reports REVIEW_REQUIRED.\n",
+            "<!-- /agent-doc:prompt-blocker -->\n",
+        );
+        assert!(blocked_review_order_already_answered(structured, &bodies));
+        let merge_goal = [bodies[0].replace("REVIEW-CLEAN", "MERGED")];
+        assert!(!blocked_review_order_already_answered(
+            structured,
+            &merge_goal
+        ));
     }
 
     /// `#adversarialselfreview`: REVIEW-CLEAN that admits this cycle posted no

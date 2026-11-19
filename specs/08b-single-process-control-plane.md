@@ -671,9 +671,9 @@ deterministic tests.
 - Same-generation writes exist and are routine: lifecycle transitions
   (`Starting`/`Ready`/`Busy`/`WaitingInput`/`Closed`), a binding projection onto
   the pane the record already names, the supervisor's harness writeback, stale
-  and dead-pane closes, registry prune, and a cross-document pane eviction all
-  commit at the current generation. A generation is therefore not a write
-  identity. Every one of these writes inserts an `actor_transitions` row and
+  and dead-pane closes, registry prune, and cross-document pane eviction
+  within an actor store transaction all commit at the current generation.
+  Each of these writes inserts an `actor_transitions` row and
   points `documents.last_transition_id` at it, so that id (`ActorRevision`) is
   the record's write identity (`#syncbindingfence`). A binding writer that
   decides from one read of the actor record and writes later is fenced on BOTH
@@ -693,8 +693,8 @@ deterministic tests.
   pins the existing paths.
 - Controller sweeps that close or delete an actor they judged stale follow the
   same rule (`#controllerclosefence`): the stale-`Starting` close, the
-  dead-pane/idle close, the cross-document pane eviction, the start_session
-  stale-alias close, and the `#actorprune` delete each decide from one read of
+  dead-pane/idle close, the `start_session` stale-alias close, and the
+  `#actorprune` delete each decide from one read of
   the record and its `ActorRevision`
   (`state_store::load_actor_record_with_revision_from_db`) and write fenced on
   both (`store_actor_record_fenced_tx`, `delete_actor_document_fenced_tx`). The

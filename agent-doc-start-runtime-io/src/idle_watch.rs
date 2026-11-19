@@ -5272,11 +5272,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 let effective_cycle_open = cycle_open;
                 // `#gh179`: reclaim scheduling belongs to the idle supervisor,
                 // not to the optional recycle path below. A recycle request can
-                // produce one `DeferCycleOpen` and then disappear; tying retries
-                // to that request loses the only wakeup once the empty preflight
-                // later crosses its stall deadline. The bounded watch cadence
-                // reevaluates the durable cycle until the authority gate either
-                // protects it or closes it. A fresh live-turn observation remains
+                // produce one `DeferCycleOpen` and then disappear. The bounded
+                // watch cadence keeps observing the cycle for a terminal harness
+                // receipt without requiring a recycle request. A live-turn observation remains
                 // an unconditional veto (`#reclaimliveturn`).
                 if empty_preflight_reclaim_probe_due && effective_cycle_open {
                     let harness_turn_live = turn_active_for_owned_pane_with_idle_evidence(
@@ -8641,41 +8639,48 @@ mod tests {
         }
     }
 
-    /// `#gh179`: an ORPHANED empty preflight must be reevaluated without a
-    /// second send or a persistent recycle request.
-    ///
-    /// Observed 2026-09-28 on `tasks/agent-doc/agent-doc-bugs.md`: `preflight`
-    /// opened `cycle-1790612453335`, the owner durably recorded
-    /// `closeout_owner_released` without ever capturing a response, and the idle
-    /// watch then logged `supervisor_recycle_deferred_cycle_open stale=true
-    /// inflight=0` **8752 consecutive times across 77 minutes**. The operator's
-    /// advertised remedy could not clear it either, because an explicit
-    /// `admin recycle` defers on this identical gate, so the session was pinned
-    /// to a stale binary until a human intervened.
-    ///
-    /// The original repair was nested under `DeferCycleOpen`, so the single
-    /// recycle request supplied one probe and no later wakeup crossed the stall
-    /// deadline. Assert the idle-watch cadence owns the repair before recycle
-    /// policy is even evaluated.
+    /// A harness terminal receipt can arrive after an idle tick. Recovery
+    /// must see it even when no restart or recycle has been requested.
     #[test]
     fn idle_watch_reclaims_an_orphaned_empty_preflight_independently_of_recycle() {
         let source = include_str!("idle_watch.rs");
-        // Built from fragments so this guard never matches its own source text.
-        let reclaim = ["cancel_preflight_cycle", "_after_owner", "_release("].concat();
-        assert!(
-            source.contains(&reclaim),
-            "the idle supervisor must attempt the owner-released empty-preflight reclaim"
-        );
-        let reclaim_position = source
-            .find("supervisor_empty_preflight_reclaim_probe file=")
-            .expect("independent reclaim receipt must exist");
+        let probe_start = source
+            .find("if empty_preflight_reclaim_probe_due && effective_cycle_open {")
+            .expect("independent reclaim cadence must exist");
+        let restart_position = source
+            .find("let restart_action = supervisor_restart_action(")
+            .expect("restart policy must exist");
         let recycle_position = source
             .find("let recycle_action = supervisor_recycle_action(")
             .expect("recycle policy must exist");
         assert!(
-            reclaim_position < recycle_position,
-            "empty-preflight reclaim must run independently before recycle policy"
+            probe_start < restart_position && probe_start < recycle_position,
+            "empty-preflight recovery must run before restart and recycle policy"
         );
+
+        let probe = &source[probe_start..restart_position.min(recycle_position)];
+        let terminal_recovery = probe
+            .find("cancel_preflight_cycle_after_harness_turn_end(")
+            .expect("reclaim must require the authoritative terminal receipt");
+        let receipt = probe
+            .find("supervisor_empty_preflight_reclaim_probe file=")
+            .expect("independent reclaim receipt must exist");
+        assert!(
+            terminal_recovery < receipt,
+            "log the outcome of terminal recovery"
+        );
+        for fallback in [
+            "cancel_preflight_cycle_after_owner_release(",
+            "stalled_before_response_capture_cycle(",
+            "STALLED_CYCLE_RESOLVE_SECS",
+            "mark_abandoned",
+        ] {
+            assert!(
+                !probe.contains(fallback),
+                "an idle tick must not retire an unanswered cycle through {fallback}"
+            );
+        }
+
         let recycle_owned_counter = ["recycle_cycle_", "open_deferrals"].concat();
         assert!(
             !source.contains(&recycle_owned_counter),

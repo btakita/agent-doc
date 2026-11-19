@@ -25,6 +25,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use std::collections::{BTreeMap, HashSet};
 
 pub const IN_PROGRESS_MARKER: &str = "🚧";
+pub const PROMPT_BLOCKER_OPEN_MARKER: &str = "<!-- agent-doc:prompt-blocker -->";
 
 /// Lifecycle state for a pending item, encoded by its GFM checkbox.
 ///
@@ -580,6 +581,7 @@ impl MalformedTrackedItemRef {
 pub fn detect_malformed_item_lines(body: &str) -> Vec<MalformedPendingItemLine> {
     let literal_ranges = agent_doc_element::element::find_markdown_literal_ranges(body);
     let mut offset = 0usize;
+    let mut in_item = false;
     body.split_inclusive('\n')
         .enumerate()
         .filter_map(|(idx, raw_line)| {
@@ -587,7 +589,12 @@ pub fn detect_malformed_item_lines(body: &str) -> Vec<MalformedPendingItemLine> 
             offset += raw_line.len();
             let line = raw_line.strip_suffix('\n').unwrap_or(raw_line);
             let line = line.strip_suffix('\r').unwrap_or(line);
-            if parse_item_line(line).is_some() {
+            let parent = parse_item_line_outside_literals(line, line_start, &literal_ranges);
+            let nested = in_item && is_indented_continuation_line(line);
+            if !line.is_empty() && !nested {
+                in_item = parent.is_some();
+            }
+            if parent.is_some() {
                 return None;
             }
             let trimmed = line.trim();
@@ -601,7 +608,11 @@ pub fn detect_malformed_item_lines(body: &str) -> Vec<MalformedPendingItemLine> 
                 return None;
             }
             let prefix = &trimmed[..id_start];
-            if !prefix_contains_task_checkbox(prefix) {
+            if !prefix_contains_task_checkbox(prefix)
+                || (nested
+                    && parse_item_line(trimmed)
+                        .is_some_and(|item| item.id.eq_ignore_ascii_case(id)))
+            {
                 return None;
             }
             Some(MalformedPendingItemLine {
@@ -3927,11 +3938,31 @@ fn split_indent(line: &str) -> (&str, &str) {
     line.split_at(idx)
 }
 
+/// Prompt blocker fields are review metadata. Older backfills may have
+/// decorated these protocol-owned bullets with a generated child checklist ID.
+fn prompt_blocker_field<'a>(line: &'a str, parent_id: &str) -> Option<&'a str> {
+    let text = if let Some(text) = line.strip_prefix("- [ ] [#") {
+        let (id, text) = text.split_once("] ")?;
+        let suffix = id.strip_prefix(parent_id)?.strip_prefix('-')?;
+        if !(4..=8).contains(&suffix.len()) || !is_valid_pending_id(suffix) {
+            return None;
+        }
+        text
+    } else {
+        line.strip_prefix("- ")?
+    };
+    ["**Complete by:**", "**Prompt:**", "**Evidence:**"]
+        .iter()
+        .any(|label| text.starts_with(label))
+        .then_some(text)
+}
+
 fn normalize_nested_subtasks(
     continuation: &str,
     parent_id: &str,
     doc_id: &str,
     taken: &mut HashSet<String>,
+    is_prompt_blocker: bool,
 ) -> (String, bool) {
     if continuation.is_empty() {
         return (String::new(), false);
@@ -3958,6 +3989,16 @@ fn normalize_nested_subtasks(
             .any(|(start, end)| marker >= *start && marker < *end)
         {
             out.push_str(raw_line);
+            continue;
+        }
+        if is_prompt_blocker && let Some(field) = prompt_blocker_field(trimmed, parent_id) {
+            out.push_str(indent);
+            out.push_str("- ");
+            out.push_str(field);
+            if has_newline {
+                out.push('\n');
+            }
+            changed |= trimmed.strip_prefix("- ") != Some(field);
             continue;
         }
         let Some(mut child) = parse_item_line(trimmed) else {
@@ -4010,7 +4051,7 @@ pub fn backfill_reporting_dropped_text(
     doc_id: &str,
     existing_ids: &HashSet<String>,
 ) -> (String, bool, Vec<String>) {
-    let (layout, dropped_text) = PendingLayout::parse(body).drop_spliced_non_item_text();
+    let (mut layout, dropped_text) = PendingLayout::parse(body).drop_spliced_non_item_text();
     let items = layout.items();
     let mut taken: HashSet<String> = existing_ids.clone();
     for item in &items {
@@ -4020,7 +4061,18 @@ pub fn backfill_reporting_dropped_text(
     }
 
     let mut changed = false;
-    let rewritten = layout.replace_items(|item| {
+    let mut prompt_blocker_opener = false;
+    layout.segments.retain_mut(|segment| {
+        let PendingSegment::Item { item, .. } = segment else {
+            if let PendingSegment::Text(raw) = segment
+                && !raw.trim().is_empty()
+            {
+                prompt_blocker_opener = raw.trim_end() == PROMPT_BLOCKER_OPEN_MARKER;
+            }
+            return true;
+        };
+        let is_prompt_blocker =
+            std::mem::take(&mut prompt_blocker_opener) && item.state == PendingState::Gated;
         // Drop content-less items: a bullet with no description text and no
         // continuation carries no information (typically a stray empty `- [ ]`
         // from an editor/IPC insertion). Backfilling it would manufacture a
@@ -4029,7 +4081,7 @@ pub fn backfill_reporting_dropped_text(
         // self-heals an already-cemented id-only empty item (`- [ ] [#hash]`).
         if item.text.trim().is_empty() && item.continuation.trim().is_empty() {
             changed = true;
-            return None;
+            return false;
         }
         // Same class, different disguise (`#adqueuelinephantomid`). A row whose
         // whole text is a bare `do [#other]` queue directive is an absorbed
@@ -4053,25 +4105,29 @@ pub fn backfill_reporting_dropped_text(
             && text_is_bare_queue_directive_reference(&item.text)
         {
             changed = true;
-            return None;
+            return false;
         }
-        let mut next = item.clone();
-        if next.id.is_empty() {
-            let id = assign_unique_hash(&next.text, doc_id, &taken);
+        if item.id.is_empty() {
+            let id = assign_unique_hash(&item.text, doc_id, &taken);
             taken.insert(id.clone());
-            next.id = id;
+            item.id = id;
             changed = true;
         }
-        let (continuation, nested_changed) =
-            normalize_nested_subtasks(&next.continuation, &next.id, doc_id, &mut taken);
+        let (continuation, nested_changed) = normalize_nested_subtasks(
+            &item.continuation,
+            &item.id,
+            doc_id,
+            &mut taken,
+            is_prompt_blocker,
+        );
         if nested_changed {
-            next.continuation = continuation;
+            item.continuation = continuation;
             changed = true;
         }
-        Some(next)
+        true
     });
 
-    let new_body = rewritten.render();
+    let new_body = layout.render();
 
     // Also mark as changed when the canonical render differs from the input
     // (e.g., legacy whitespace / missing checkbox normalization).
@@ -5514,6 +5570,24 @@ mod tests {
         assert_eq!(malformed[0].id, "pcops");
         assert_eq!(malformed[0].line, 1);
         assert!(malformed[0].text.contains("damaged prefix"));
+    }
+
+    #[test]
+    fn malformed_guard_accepts_owned_nested_tasks_but_rejects_orphans() {
+        let body = concat!(
+            "- [ ] [#parent] parent task\n",
+            "\n",
+            "  - [ ] [#parent-abcd] child task\n",
+            "  _- [ ] [#damaged] damaged child\n",
+            "## Separate section\n",
+            "  - [ ] [#orphan] no parent\n",
+        );
+
+        let ids: Vec<_> = detect_malformed_item_lines(body)
+            .into_iter()
+            .map(|item| item.id)
+            .collect();
+        assert_eq!(ids, ["damaged", "orphan"]);
     }
 
     #[test]

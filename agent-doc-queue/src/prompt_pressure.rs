@@ -16,7 +16,7 @@ use agent_doc_element::element;
 use agent_doc_element_backlog::backlog::{self, PendingItem, PendingListMarker, PendingState};
 
 /// Opens a prompt-blocker review block.
-pub const OPEN_MARKER: &str = "<!-- agent-doc:prompt-blocker -->";
+pub const OPEN_MARKER: &str = backlog::PROMPT_BLOCKER_OPEN_MARKER;
 /// Closes a prompt-blocker review block.
 pub const CLOSE_MARKER: &str = "<!-- /agent-doc:prompt-blocker -->";
 const EXTERNAL_HOLD_PREFIX: &str = "<!-- agent-doc:blocked_until_evidence_hash_changes=";
@@ -1197,6 +1197,49 @@ mod tests {
         assert!(review_blocks_prompt(&twice, "finish the widget"));
         assert!(review_blocks_prompt(&twice, "📥 finish the widget"));
         assert!(!review_blocks_prompt(&twice, "do the other thing"));
+    }
+
+    #[test]
+    fn hoisted_external_hold_metadata_survives_backfill_and_the_closeout_guard() {
+        let head = "Define synthetic conversations and their expected results in a fixture.";
+        let mut blocker = parse_prompt_blocker(STRUCTURE).unwrap();
+        blocker.evidence =
+            Some("The review branch is waiting on publication authorization.".into());
+        blocker.bind_external_hold(head);
+        let doc = "<!-- agent:review -->\n- [/] [#other] Keep me\n<!-- /agent:review -->\n";
+        let hoisted = hoist_prompt_blocker(doc, &blocker);
+        let components = element::parse(&hoisted).unwrap();
+        let review = components
+            .iter()
+            .find(|component| element::is_review_component(&component.name))
+            .unwrap();
+        let body = review.content(&hoisted);
+        let ids = std::collections::HashSet::new();
+        assert_eq!(
+            backlog::backfill(body, "test-doc", &ids),
+            (body.into(), false)
+        );
+
+        let legacy = body
+            .replace(
+                "  - **Complete by:**",
+                &format!("  - [ ] [#{}-abcd] **Complete by:**", blocker.id),
+            )
+            .replace(
+                "  - **Prompt:**",
+                &format!("  - [ ] [#{}-efgh] **Prompt:**", blocker.id),
+            )
+            .replace(
+                "  - **Evidence:**",
+                &format!("  - [ ] [#{}-jkmn] **Evidence:**", blocker.id),
+            );
+        assert_eq!(
+            backlog::backfill(&legacy, "test-doc", &ids),
+            (body.into(), true)
+        );
+        assert!(backlog::malformed_tracked_item_refs(&hoisted).is_empty());
+        assert!(review_blocks_prompt(&hoisted, head));
+        assert!(!review_blocks_prompt(&hoisted, "Move the smoke fixture."));
     }
 
     #[test]

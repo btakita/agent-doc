@@ -110,6 +110,10 @@
     const liveResponseBody = document.getElementById("liveResponseBody");
 
     let savedContent = "";
+    let savedRevision = "";
+    let savedLineEnding = "\n";
+    let loadedDoc = null;
+    let loadEpoch = 0;
     let saving = false;
     let events = null;
     let sessions = [];
@@ -150,8 +154,9 @@
 
     function updateDirty() {
       const dirty = editor.value !== savedContent;
-      saveBtn.disabled = saving || accessScope !== "edit" || !dirty;
-      editor.readOnly = accessScope !== "edit";
+      const canEdit = accessScope === "edit" && savedRevision && loadedDoc === selectedDoc;
+      saveBtn.disabled = saving || !canEdit || !dirty;
+      editor.readOnly = saving || !canEdit;
       dirtyEl.textContent = dirty ? "● unsaved" : "";
       bytesEl.textContent = editor.value.length + " bytes";
     }
@@ -164,6 +169,16 @@
 
     function hasUnsavedEdits() {
       return editor.value !== savedContent;
+    }
+
+    function acceptSavedText(text, revision) {
+      savedRevision = revision;
+      savedLineEnding = text.includes("\r\n") && !text.replaceAll("\r\n", "").includes("\n")
+        ? "\r\n"
+        : "\n";
+      editor.value = text;
+      savedContent = editor.value;
+      updateGutter();
     }
 
     function docUrl(base) {
@@ -223,7 +238,9 @@
         const projection = await r.json();
         sessions = projection.sessions || [];
         const hashDoc = hashSelection();
-        selectedDoc = sessions.some((session) => session.path === hashDoc)
+        selectedDoc = sessions.some((session) => session.path === selectedDoc)
+          ? selectedDoc
+          : sessions.some((session) => session.path === hashDoc)
           ? hashDoc
           : (projection.selected || sessions.find((session) => session.exists)?.path || "");
         renderSessions();
@@ -252,9 +269,11 @@
     }
 
     function selectDoc(path) {
-      if (path === selectedDoc) return;
+      if (saving || path === selectedDoc) return;
       if (hasUnsavedEdits() && !confirm("Discard unsaved edits and switch documents?")) return;
       selectedDoc = path;
+      savedRevision = "";
+      updateDirty();
       window.location.hash = "#/" + encodeURIComponent(path);
       renderSessions();
       loadDoc("loading " + path + "…");
@@ -262,6 +281,10 @@
     }
 
     async function loadDoc(reason) {
+      if (saving) return;
+      const epoch = ++loadEpoch;
+      const requestedDoc = selectedDoc;
+      const initialDraft = editor.value;
       setStatus(reason || "loading…");
       if (!selectedDoc && sessions.length === 0) {
         setStatus("no session documents found", "warn");
@@ -272,16 +295,22 @@
           cache: "no-store",
           headers: authHeaders(),
         });
-        if (!r.ok) throw new Error("HTTP " + r.status);
+        if (!r.ok) throw new Error((await r.text()).split("\n")[0] || ("HTTP " + r.status));
+        const revision = r.headers.get("ETag");
+        if (!revision) throw new Error("server did not provide a document revision");
         const text = await r.text();
-        savedContent = text;
-        editor.value = text;
+        if (epoch !== loadEpoch || requestedDoc !== selectedDoc || saving) return;
+        if (editor.value !== initialDraft) {
+          setStatus("The document updated while you were typing. Your draft is still here.", "warn");
+          return;
+        }
+        loadedDoc = requestedDoc;
+        acceptSavedText(text, revision);
         setStatus("loaded", "ok");
         updateDirty();
-        updateGutter();
         loadProjection();
       } catch (e) {
-        setStatus("load failed: " + e.message, "err");
+        if (epoch === loadEpoch) setStatus("load failed: " + e.message, "err");
       }
     }
 
@@ -314,26 +343,34 @@
     }
 
     async function saveDoc() {
-      if (saving) return;
+      if (saving || !savedRevision || loadedDoc !== selectedDoc) return;
       if (accessScope !== "edit") {
         setStatus("read-only token cannot save", "warn");
         return;
       }
       saving = true;
-      saveBtn.disabled = true;
+      ++loadEpoch;
+      updateDirty();
       setStatus("saving document…");
       try {
         const r = await fetch(docUrl("/save"), {
           method: "POST",
-          headers: authHeaders({ "Content-Type": "text/markdown; charset=utf-8" }),
-          body: editor.value,
+          headers: authHeaders({
+            "Content-Type": "text/markdown; charset=utf-8",
+            "X-Agent-Doc-Base-Revision": savedRevision,
+          }),
+          body: editor.value.replaceAll("\n", savedLineEnding),
         });
         if (!r.ok) {
           const err = await r.text();
           throw new Error(err.split("\n")[0] || ("HTTP " + r.status));
         }
         const result = await r.json();
-        savedContent = editor.value;
+        const revision = r.headers.get("ETag");
+        if (!revision || typeof result.content !== "string") {
+          throw new Error("server did not return the saved document revision");
+        }
+        acceptSavedText(result.content, revision);
         headEl.textContent = "HEAD " + (result.head || "—");
         setStatus("saved via " + (result.commit_mode || "git") + " (HEAD " + result.head + ")", "ok");
         loadProjection();
@@ -356,12 +393,13 @@
         setStatus("live updates connected", "ok");
       });
       events.addEventListener("doc-changed", () => {
+        if (saving) return;
         loadSessions();
         if (hasUnsavedEdits()) {
-          setStatus("file changed on disk; reload to discard local edits", "warn");
+          setStatus("The document changed. Your draft is still here.", "warn");
           return;
         }
-        loadDoc("file changed on disk; reloading…");
+        loadDoc("document changed; reloading…");
       });
       events.addEventListener("agent-response", (e) => {
         try {
@@ -408,8 +446,9 @@
     });
     saveBtn.addEventListener("click", saveDoc);
     reloadBtn.addEventListener("click", () => {
+      if (saving) return;
       if (editor.value !== savedContent &&
-          !confirm("Discard unsaved edits and reload from disk?")) return;
+          !confirm("Discard unsaved edits and reload the document?")) return;
       loadDoc();
     });
     document.addEventListener("keydown", (e) => {

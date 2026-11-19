@@ -251,7 +251,7 @@ pub fn normalize_session_document_content(content: &str) -> String {
 fn staged_blob_for_commit(
     git_root: &Path,
     resolved: &Path,
-    snapshot_content: Option<&str>,
+    exact_content: Option<&str>,
 ) -> std::result::Result<(String, String), CommitTransactionError> {
     let rel_path = relative_to_root(resolved, git_root);
     if git_path_is_ignored_untracked(git_root, &rel_path)? {
@@ -260,17 +260,20 @@ fn staged_blob_for_commit(
         });
     }
 
-    let staged_content = if let Some(snap) = snapshot_content {
-        normalize_session_document_content(snap)
-    } else {
-        std::fs::read_to_string(resolved).map_err(|err| {
-            CommitTransactionError::Fatal(anyhow::anyhow!(
-                "failed to read commit path {}: {err}",
-                resolved.display()
-            ))
-        })?
+    let disk;
+    let staged_content = match exact_content {
+        Some(content) => content,
+        None => {
+            disk = std::fs::read_to_string(resolved).map_err(|err| {
+                CommitTransactionError::Fatal(anyhow::anyhow!(
+                    "failed to read commit path {}: {err}",
+                    resolved.display()
+                ))
+            })?;
+            &disk
+        }
     };
-    let hash = crate::index::hash_object(git_root, &staged_content)
+    let hash = crate::index::hash_object(git_root, staged_content)
         .map_err(CommitTransactionError::Fatal)?;
     Ok((hash, rel_path.to_string_lossy().into_owned()))
 }
@@ -332,12 +335,43 @@ pub fn stage_and_commit_exact_paths_once_with_fence(
     msg: &str,
     fence: Option<&dyn CommitTransactionFence>,
 ) -> std::result::Result<Output, CommitTransactionError> {
+    let normalized = snapshot_content.map(normalize_session_document_content);
+    stage_and_commit_paths_once(
+        git_root,
+        resolved,
+        normalized.as_deref(),
+        additional_paths,
+        msg,
+        fence,
+    )
+}
+
+/// Commit a verified, immutable operator cut byte for byte through the same
+/// private-index transaction as session closeout.
+pub fn stage_and_commit_operator_cut_once(
+    git_root: &Path,
+    resolved: &Path,
+    cut: &str,
+    msg: &str,
+    fence: &dyn CommitTransactionFence,
+) -> std::result::Result<Output, CommitTransactionError> {
+    stage_and_commit_paths_once(git_root, resolved, Some(cut), &[], msg, Some(fence))
+}
+
+fn stage_and_commit_paths_once(
+    git_root: &Path,
+    resolved: &Path,
+    exact_content: Option<&str>,
+    additional_paths: &[PathBuf],
+    msg: &str,
+    fence: Option<&dyn CommitTransactionFence>,
+) -> std::result::Result<Output, CommitTransactionError> {
     if let Some(fence) = fence {
         fence
             .ensure(resolved, CommitFencePhase::BeforeStage)
             .map_err(CommitTransactionError::Fatal)?;
     }
-    let (blob_hash, rel_path) = staged_blob_for_commit(git_root, resolved, snapshot_content)?;
+    let (blob_hash, rel_path) = staged_blob_for_commit(git_root, resolved, exact_content)?;
     let mut cacheinfos = vec![format!("100644,{blob_hash},{rel_path}")];
     for path in additional_paths {
         let (side_effect_hash, side_effect_rel_path) =

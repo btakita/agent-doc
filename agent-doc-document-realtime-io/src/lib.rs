@@ -6011,6 +6011,14 @@ fn canonicalize_and_validate_agent_rebase(
 }
 
 fn atomic_write_authority_raw(path: &Path, content: &str) -> Result<()> {
+    atomic_write_authority_guarded(path, content, || Ok(()))
+}
+
+fn atomic_write_authority_guarded(
+    path: &Path,
+    content: &str,
+    before_rename: impl FnOnce() -> Result<()>,
+) -> Result<()> {
     use std::io::Write;
 
     let parent = path.parent().unwrap_or(Path::new("."));
@@ -6018,6 +6026,7 @@ fn atomic_write_authority_raw(path: &Path, content: &str) -> Result<()> {
         .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
     tmp.write_all(content.as_bytes())
         .with_context(|| "failed to write temp file")?;
+    before_rename()?;
     tmp.persist(path)
         .with_context(|| format!("failed to rename temp file to {}", path.display()))?;
     record_document_write_provenance(path, content);
@@ -6026,6 +6035,76 @@ fn atomic_write_authority_raw(path: &Path, content: &str) -> Result<()> {
     // here; the rebased path invalidating again is a harmless epoch bump.
     current_document_projection::invalidate_current_document_projection(path);
     Ok(())
+}
+
+/// Persist an operator edit already merged against an exact current cut.
+///
+/// The caller owns the per-document write queue through persistence and its
+/// commit decision. A second, unrelated edit requires a fresh merge by that
+/// caller, so this operation never falls through to agent-rebase or journals a
+/// whole-document replacement for later replay.
+pub fn persist_exact_operator_edit_through_authority(
+    file: &Path,
+    expected: &str,
+    target: &str,
+    source: &str,
+) -> Result<()> {
+    use agent_doc_crdt_relay_io::CurrentText;
+
+    anyhow::ensure!(
+        agent_doc_document_realtime::write_authority::within_owner_scope(),
+        "{source}: operator edits must run through the document write queue"
+    );
+    validate_canonical_document_target(file, target, source)?;
+    match observe_editor_authority_for_disk_write(file, source)? {
+        CurrentText::Detached => {
+            let ensure_detached_base = || -> Result<()> {
+                anyhow::ensure!(
+                    !agent_doc_controller_io::project_controller::crdt_authority_for_file(
+                        &file.to_string_lossy(),
+                    )
+                    .editor_attached()
+                        && matches!(
+                            observe_editor_authority_for_disk_write(file, source)?,
+                            CurrentText::Detached
+                        )
+                        && canonical_disk_projection_is_exact(file, expected),
+                    "{source}: disk authority or document revision changed before the browser edit could be written"
+                );
+                Ok(())
+            };
+            if expected == target {
+                return ensure_detached_base();
+            }
+            atomic_write_authority_guarded(file, target, ensure_detached_base)
+        }
+        CurrentText::Current {
+            text, live_editors, ..
+        } => {
+            anyhow::ensure!(
+                text == expected && live_editors > 0,
+                "{source}: editor authority or document revision changed before the browser edit could be written"
+            );
+            guard_visible_write_expected_current(file, source, expected)?;
+            anyhow::ensure!(
+                cp_write_editor_ops_in_flight(file, expected, target, source).is_none(),
+                "{source}: editor typing is still in flight. Retry the browser save after it settles."
+            );
+            if target != expected {
+                apply_cp_write_through_relay_authority(file, expected, target, source)?
+                    .context("editor detached before the browser edit was admitted")?;
+                current_document_projection::invalidate_current_document_projection(file);
+            }
+            guard_canonical_editor_projection_persisted(file, target, source).context(
+                "browser edit was admitted to editor authority, but its exact native save was not confirmed",
+            )
+        }
+        CurrentText::EditorSyncPending | CurrentText::EditorAttachedMissingReplica => {
+            anyhow::bail!(
+                "{source}: the editor's current revision is unavailable. Retry after it synchronizes."
+            )
+        }
+    }
 }
 
 pub fn record_document_write_provenance(path: &Path, content: &str) {

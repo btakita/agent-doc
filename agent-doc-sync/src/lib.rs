@@ -1227,25 +1227,13 @@ impl ResyncTargetMatcher {
         if candidate.is_empty() {
             return false;
         }
-        let resolved = resolve_absolute_file_path(Path::new(candidate));
+        let resolved = self.base_dir.join(candidate);
         let canonical = resolved.canonicalize().unwrap_or(resolved);
         canonical == self.target
     }
 
     pub fn candidate_matches_target(&self, candidate: &str) -> bool {
-        if self.same_document_path(candidate) {
-            return true;
-        }
-        if candidate.is_empty() {
-            return false;
-        }
-        let path = Path::new(candidate);
-        if path.is_absolute() {
-            return false;
-        }
-        let resolved = self.base_dir.join(path);
-        let canonical = resolved.canonicalize().unwrap_or(resolved);
-        canonical == self.target
+        self.same_document_path(candidate)
     }
 
     pub fn registry_file_for_target(&self) -> String {
@@ -1254,19 +1242,6 @@ impl ResyncTargetMatcher {
             .unwrap_or(&self.target)
             .to_string_lossy()
             .to_string()
-    }
-}
-
-fn resolve_absolute_file_path(file: &Path) -> PathBuf {
-    if file.is_absolute() {
-        return file.to_path_buf();
-    }
-    let cwd = std::env::current_dir().unwrap_or_default();
-    let candidate = cwd.join(file);
-    if candidate.exists() {
-        candidate.canonicalize().unwrap_or(candidate)
-    } else {
-        file.to_path_buf()
     }
 }
 
@@ -2279,6 +2254,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
         let target = doc.canonicalize().unwrap();
         let matcher = ResyncTargetMatcher::new(&target, dir.path());
 
+        assert!(matcher.same_document_path("tasks/test.md"));
         assert!(matcher.candidate_matches_target("tasks/test.md"));
     }
 

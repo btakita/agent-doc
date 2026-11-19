@@ -222,18 +222,24 @@ pub fn resolve_to_git_root(file: &Path) -> Result<(PathBuf, PathBuf)> {
 
 /// Resolve the cwd to use when spawning a pane for `file`.
 ///
-/// For documents inside a submodule, returns the submodule's own git toplevel
-/// so the spawned session starts inside that submodule. For top-level docs (or
-/// when git resolution fails), falls back to the process cwd.
+/// Use the document's nearest git toplevel, including its own submodule.
+/// A document outside git starts from its canonical parent directory.
 pub fn resolve_pane_cwd(file: &Path) -> PathBuf {
-    if let Ok((super_root, resolved)) = resolve_to_git_root(file) {
-        let (git_root, in_submodule) = narrow_to_submodule(&super_root, &resolved);
-        if in_submodule {
-            return git_root;
-        }
-        return super_root;
-    }
-    std::env::current_dir().unwrap_or_default()
+    let resolved = if file.is_absolute() {
+        file.to_path_buf()
+    } else {
+        resolve_to_git_root(file)
+            .map(|(_, resolved)| resolved)
+            .unwrap_or_else(|_| file.to_path_buf())
+    };
+    let absolute = std::path::absolute(&resolved).unwrap_or(resolved);
+    let canonical = absolute.canonicalize().unwrap_or(absolute);
+    let parent = canonical.parent().unwrap_or(&canonical);
+    git_toplevel_at(parent).unwrap_or_else(|| {
+        parent
+            .canonicalize()
+            .unwrap_or_else(|_| parent.to_path_buf())
+    })
 }
 
 /// Get git toplevel from a specific directory.
@@ -306,10 +312,8 @@ mod tests {
     /// `#wsflake2`: the process working directory is global to the whole test
     /// binary, so a test that chdirs is visible to every test running in
     /// parallel with it — restoring the value on drop only narrows the window,
-    /// it does not close it. `resolve_pane_cwd_falls_back_to_process_cwd_for_non_git_path`
-    /// reads the process cwd, so while a `ScopedCurrentDir` was active it saw the
-    /// OTHER test's TempDir, and once that TempDir was dropped the path no longer
-    /// existed — failing both halves of its assertion under load.
+    /// it does not close it. A reader could observe another test's TempDir
+    /// immediately before that directory is removed.
     ///
     /// Every test that sets OR reads the process cwd takes this lock, so the two
     /// can never overlap. `#relaylockpoison`: this is a `parking_lot::Mutex`, so a
@@ -738,19 +742,18 @@ mod tests {
     }
 
     #[test]
-    fn resolve_pane_cwd_falls_back_to_process_cwd_for_non_git_path() {
+    fn resolve_pane_cwd_uses_document_parent_outside_git() {
+        let caller = tempfile::TempDir::new().unwrap();
+        init_repo(caller.path());
         let dir = tempfile::TempDir::new().unwrap();
         let non_git_file = dir.path().join("notes.md");
         fs::write(&non_git_file, "notes\n").unwrap();
 
-        // `#wsflake2`: this reads the process cwd, so it must not run while a
-        // sibling `ScopedCurrentDir` has moved it.
-        let _cwd_guard = lock_current_dir();
-        let cwd = resolve_pane_cwd(&non_git_file);
+        let _cwd = ScopedCurrentDir::set(caller.path());
 
-        assert!(
-            cwd.exists() || cwd == std::env::current_dir().unwrap_or_default(),
-            "fallback cwd should be the process cwd or an existing path"
+        assert_eq!(
+            resolve_pane_cwd(&non_git_file),
+            dir.path().canonicalize().unwrap()
         );
     }
 }

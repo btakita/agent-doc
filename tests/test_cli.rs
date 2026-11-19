@@ -5012,6 +5012,83 @@ fn test_cli_tmux_ensure_help_exposes_headless_bootstrap_contract() {
 }
 
 #[test]
+fn terminal_probes_and_launches_with_the_configured_tmux_client() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let doc = root.join("notes.md");
+    fs::write(&doc, "---\nterminal_host: external\n---\n# Notes\n").unwrap();
+    let bin = root.join("bin");
+    fs::create_dir(&bin).unwrap();
+    let tmux = root.join("configured tmux");
+    let launcher = root.join("terminal recorder");
+    let fallback = bin.join("tmux");
+    let probe_receipt = root.join("configured-probe.txt");
+    let fallback_receipt = root.join("unexpected-probe.txt");
+    for (path, script) in [
+        (
+            &tmux,
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$PROBE_RECEIPT\"\n[ \"$5\" = '-V' ]\n",
+        ),
+        (&launcher, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n"),
+        (
+            &fallback,
+            "#!/bin/sh\nprintf 'unexpected' > \"$FALLBACK_RECEIPT\"\nexit 1\n",
+        ),
+    ] {
+        fs::write(path, script).unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let config_dir = root.join("config");
+    fs::create_dir_all(config_dir.join("agent-doc")).unwrap();
+    let template = format!(
+        "{} {{tmux_command}}",
+        shell_words::quote(launcher.to_str().unwrap())
+    );
+    fs::write(
+        config_dir.join("agent-doc/config.toml"),
+        format!(
+            "tmux_bin = {:?}\n[terminal]\ncommand = {template:?}\n",
+            tmux.to_str().unwrap()
+        ),
+    )
+    .unwrap();
+
+    let launch_args = format!(
+        "{}\n-L\nterminal-test\n-f\n/dev/null\nnew-session\n-A\n-s\nnotes session\n",
+        tmux.display()
+    );
+    let mut cmd = agent_doc_cmd();
+    isolate_user_config(&mut cmd, root);
+    cmd.current_dir(root)
+        .env("PATH", &bin)
+        .env("XDG_CONFIG_HOME", &config_dir)
+        .env("AGENT_DOC_TMUX_SOCKET", "terminal-test")
+        .env("PROBE_RECEIPT", &probe_receipt)
+        .env("FALLBACK_RECEIPT", &fallback_receipt)
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .env_remove("CODER")
+        .env_remove("CODER_WORKSPACE_NAME")
+        .env_remove("CODER_WORKSPACE_ID")
+        .env_remove("CODER_WORKSPACE_AGENT_NAME")
+        .env_remove("CODER_WORKSPACE_OWNER_NAME")
+        .args([
+            "terminal",
+            doc.to_str().unwrap(),
+            "--session",
+            "notes session",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::eq(launch_args));
+    let probe_args = fs::read_to_string(probe_receipt).unwrap();
+    assert!(probe_args.contains("-L\nterminal-test\n-f\n/dev/null\n-V\n"));
+    assert!(!fallback_receipt.exists());
+}
+
+#[test]
 fn test_sync_without_explicit_columns_fails_closed() {
     let mut cmd = agent_doc_cmd();
     cmd.arg("sync");

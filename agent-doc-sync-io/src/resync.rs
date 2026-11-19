@@ -294,9 +294,9 @@ fn resync_entry_document_path(project_root: &Path, document: &str) -> PathBuf {
 fn filter_registry_for_target(
     registry: &tmux_router::Registry,
     target: &Path,
+    base_dir: &Path,
 ) -> tmux_router::Registry {
-    let cwd = std::env::current_dir().unwrap_or_default();
-    let matcher = ResyncTargetMatcher::new(target, cwd);
+    let matcher = ResyncTargetMatcher::new(target, base_dir);
     registry
         .iter()
         .filter(|(key, entry)| {
@@ -1412,6 +1412,7 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
             let scoped = filter_registry_for_target(
                 &agent_doc_session_registry_io::load_in(&base_dir)?,
                 &target,
+                &base_dir,
             );
             if scoped.is_empty() {
                 eprintln!("No registered sessions found for {}.", target.display());
@@ -1441,6 +1442,7 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
         let scoped_registry = filter_registry_for_target(
             &agent_doc_session_registry_io::load_in(&base_dir)?,
             &target,
+            &base_dir,
         );
         let issues = detect_issues_in_registry_with_main_layout_eligibility(
             &tmux,
@@ -1484,6 +1486,7 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
         let scoped_registry = filter_registry_for_target(
             &agent_doc_session_registry_io::load_in(&base_dir)?,
             &target,
+            &base_dir,
         );
         if !scoped_registry.is_empty() {
             eprintln!("\nActive matching sessions:");
@@ -2128,18 +2131,21 @@ mod tests {
         let target = doc_a.canonicalize().unwrap();
 
         let mut registry = SessionRegistry::new();
-        registry.insert(
-            "sess-a".to_string(),
-            test_entry("%1", &doc_a.to_string_lossy()),
-        );
+        registry.insert("sess-a".to_string(), test_entry("%1", "a.md"));
+        registry.insert("a.md".to_string(), test_entry("%2", ""));
         registry.insert(
             "sess-b".to_string(),
-            test_entry("%2", &doc_b.to_string_lossy()),
+            test_entry("%3", &doc_b.to_string_lossy()),
         );
 
-        let filtered = filter_registry_for_target(&registry, &target);
-        assert_eq!(filtered.len(), 1, "only the target doc should remain");
+        let filtered = filter_registry_for_target(&registry, &target, dir.path());
+        assert_eq!(
+            filtered.len(),
+            2,
+            "only the target doc's rows should remain"
+        );
         assert!(filtered.contains_key("sess-a"));
+        assert!(filtered.contains_key("a.md"));
         assert!(!filtered.contains_key("sess-b"));
     }
 

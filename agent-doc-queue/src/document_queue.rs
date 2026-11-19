@@ -762,6 +762,37 @@ fn parse_spans_uncached(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<u
             } else {
                 rest
             };
+            if let Some(end_i) = agent_doc_markdown_ast::overlay::tracked_do_context_block_end(
+                &lines,
+                i,
+                item_content,
+            ) {
+                let completed = parse_completed_inline_with_note(item_content);
+                let (head, note) = completed.map_or((item_content, None), |(head, note)| {
+                    (strip_top_level_queue_heading(head), note)
+                });
+                let mut text = head.to_string();
+                for child in &lines[i + 1..end_i] {
+                    text.push('\n');
+                    text.push_str(child);
+                }
+                let prompt = QueuePrompt {
+                    text,
+                    multiline: false,
+                    indent,
+                    ordered_marker,
+                    note: note.map(str::to_string),
+                };
+                let entry = if completed.is_some() {
+                    QueueEntry::Completed(prompt)
+                } else {
+                    QueueEntry::Prompt(prompt)
+                };
+                entries.push((entry, span(start_i, end_i)));
+                bare_prompt_allowed = false;
+                i = end_i;
+                continue;
+            }
             let entry = if item_content.trim().is_empty() {
                 // An editor's trailing `- ` placeholder carries no work. Keep
                 // its bytes, but never surface an empty runnable queue head.
@@ -17163,7 +17194,69 @@ mod tests {
         }
         for prefix in ["", "🚧 ", "📥 "] {
             let tracked = format!("- {prefix}do [#alpha]\n  - child\n");
-            assert_eq!(parse(&tracked).unwrap().len(), 2, "{tracked:?}");
+            assert_eq!(parse(&tracked).unwrap().len(), 1, "{tracked:?}");
+        }
+    }
+
+    #[test]
+    fn tracked_do_owns_and_closes_its_prose_context() {
+        let body = "- do [#alpha]\n  - Add a test.\n    - Cover the idle case.\n- next\n";
+        let entries = parse(body).unwrap();
+        assert_eq!(executable_prompt_indexes(&entries), vec![0, 1]);
+        assert_eq!(
+            lineage_claim_text(&entries, 0).as_deref(),
+            Some("do [#alpha]\n  - Add a test.\n    - Cover the idle case.")
+        );
+        assert!(
+            submitted_prompt_at(&entries, 0)
+                .unwrap()
+                .contains("Cover the idle case.")
+        );
+        let doc = format!("<!-- agent:run -->\n{body}<!-- /agent:run -->\n");
+        let nodes = agent_doc_markdown_ast::mutations::item_nodes(&doc, "queue").unwrap();
+        assert_eq!(nodes.len(), 2);
+        let closed =
+            agent_doc_markdown_ast::mutations::consume_node(&doc, "queue", &nodes[0].node_key)
+                .unwrap();
+        assert!(
+            closed.contains(
+                "~~do [#alpha]~~\n  - ~~Add a test.~~\n    - ~~Cover the idle case.~~\n- next"
+            ),
+            "{closed}"
+        );
+        let (completed, _) = crate::queue_consume::mark_entries_completed_by_done_ids(
+            &entries,
+            &["alpha".to_string()],
+        );
+        assert!(
+            render(&completed)
+                .contains("~~do [#alpha]~~\n  - ~~Add a test.~~\n    - ~~Cover the idle case.~~"),
+            "{completed:?}"
+        );
+        assert_eq!(
+            executable_prompt_indexes(&parse(&render(&completed)).unwrap()),
+            vec![1]
+        );
+    }
+
+    #[test]
+    fn tracked_do_preserves_child_commands_and_existing_attempts() {
+        for body in [
+            "- do [#alpha]\n  - prose\n  - do [#beta]\n",
+            "- do [#alpha]\n  - 🚧 [#subagent:worker#1] existing child\n",
+            "- ~~do [#alpha]~~\n  - still live\n",
+            "- do [#alpha]\n  1. ordered child\n",
+        ] {
+            let entries = parse(body).unwrap();
+            let doc = format!("<!-- agent:run -->\n{body}<!-- /agent:run -->\n");
+            let nodes = agent_doc_markdown_ast::mutations::item_nodes(&doc, "queue").unwrap();
+            assert_eq!(nodes.len(), entries.len(), "{body}");
+            assert!(
+                executable_prompt_indexes(&entries)
+                    .iter()
+                    .all(|&index| index != 0),
+                "{body}"
+            );
         }
     }
 

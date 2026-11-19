@@ -1,15 +1,14 @@
 //! Claim-ledger view of `#nestedclaimsteer`.
 //!
-//! Queue parsing is leaf-only: nested list items are already distinct entries
-//! and parents are context labels. This compatibility view still expands any
-//! folded prompt read from an older in-memory representation while leaving the
-//! canonical flat tree unchanged.
+//! Independent nested list items already have distinct entries. This
+//! compatibility view can expand a legacy folded free-text prompt. A tracked
+//! command's prose stays with that command and its claim.
 
 use std::borrow::Cow;
 use std::cell::RefCell;
 
 use agent_doc_element_queue::nested_claim_steer::split_nested_claim_steer_with_limit;
-use agent_doc_element_queue::subprompts::has_subprompts;
+use agent_doc_element_queue::subprompts::{has_subprompts, is_tracked_do};
 
 use crate::document_queue::{QueueEntry, QueuePrompt};
 use crate::queue_claim::{QueueClaim, claim_identity};
@@ -153,7 +152,7 @@ fn expand_prompt(prompt: &QueuePrompt, snapshots: &[ClaimTimeSnapshot], out: &mu
     else {
         return;
     };
-    if !has_subprompts(&prompt.text) {
+    if !has_subprompts(&prompt.text) || is_tracked_do(&prompt.text) {
         return;
     }
     let split = split_nested_claim_steer_with_limit(

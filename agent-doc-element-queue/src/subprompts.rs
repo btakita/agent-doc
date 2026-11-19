@@ -1,12 +1,12 @@
 //! Nested sub-prompts of a runnable list row (`#nestedsubprompts`).
 //!
 //! In a runnable list component (`agent:run`, its `agent:queue` / `agent:loop`
-//! aliases) an indented list beneath a free-text row is that row's
-//! **sub-prompts**: extra instructions for the same piece of work, authored as
-//! separate lines so the operator never has to keep appending to one long row.
+//! aliases) prose bullets beneath an explicit tracked `do` row can be its
+//! **sub-prompts**. They carry instructions for the same tracked work. The
+//! representation also supports legacy folded free-text rows.
 //!
 //! ```text
-//! - Sync PR + Jira state into this document.
+//! - do [#sync]
 //!   - Start with GitHub, read-only.
 //!   - Never print the Jira token.
 //! ```
@@ -15,9 +15,9 @@
 //! verbatim; the children are never independent heads, never dispatched on
 //! their own, and never carry a lifecycle projection of their own.
 //!
-//! A later direct sibling can still surface as its own head after the parent
-//! is claimed (`#nestedclaimsteer`). That is a claim-ledger view over this
-//! fold, not a second segmentation: this module keeps the block intact.
+//! The tracked command keeps its prose children through claims and steering.
+//! The legacy free-text representation also supports claim-time splitting
+//! (`#nestedclaimsteer`).
 //!
 //! This module owns the text-level contract every layer shares:
 //!
@@ -154,6 +154,16 @@ pub fn head_without_subprompts(text: &str) -> &str {
 /// True when `text` carries a sub-prompt block.
 pub fn has_subprompts(text: &str) -> bool {
     split_subprompt_block(text).1.is_some()
+}
+
+/// A tracked command can own its nested prose without assigning it a second
+/// work identity. Bare references retain their ordinary tree semantics.
+pub fn is_tracked_do(text: &str) -> bool {
+    let work = strip_attempt_projection_prefix(head_without_subprompts(text)).trim();
+    let work = strip_intent_tags(work);
+    work.split_once(' ')
+        .is_some_and(|(verb, _)| verb.eq_ignore_ascii_case("do"))
+        && QueueItemIdentity::from_prompt(&work).is_id_backed()
 }
 
 /// The sub-prompt rows of `text`: each indented list line's content after its

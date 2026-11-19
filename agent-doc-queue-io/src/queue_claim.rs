@@ -206,6 +206,14 @@ pub(crate) fn mutate_ledger<T>(
     file: &Path,
     mutate: impl FnOnce(&mut QueueClaimLedger) -> Result<T>,
 ) -> Result<T> {
+    mutate_ledger_in_view(file, None, mutate)
+}
+
+fn mutate_ledger_in_view<T>(
+    file: &Path,
+    view: Option<&ClaimQueueView>,
+    mutate: impl FnOnce(&mut QueueClaimLedger) -> Result<T>,
+) -> Result<T> {
     let Some((root, document_hash, canonical_path)) = state_identity(file)? else {
         bail!(
             "{} is not inside an agent-doc project (no .agent-doc root); queue claims need state.db",
@@ -219,13 +227,16 @@ pub(crate) fn mutate_ledger<T>(
         let mut ledger = load_from_conn(&conn, &document_hash)?;
         // `#claimfollowsedit`: persist claims that followed an operator
         // annotation of their head before the mutation looks them up.
-        if !ledger.claims.is_empty()
-            && let Some(view) = std::fs::read_to_string(file)
-                .ok()
+        if !ledger.claims.is_empty() {
+            let disk_view = view
+                .is_none()
+                .then(|| std::fs::read_to_string(file).ok())
+                .flatten()
                 .as_deref()
-                .and_then(ClaimQueueView::from_content)
-        {
-            log_followed(file, &ledger.follow_edits_in_view(now_secs(), &view));
+                .and_then(ClaimQueueView::from_content);
+            if let Some(view) = view.or(disk_view.as_ref()) {
+                log_followed(file, &ledger.follow_edits_in_view(now_secs(), view));
+            }
         }
         let value = mutate(&mut ledger)?;
         if ledger.claims.is_empty() && ledger.cancellations.is_empty() {
@@ -1410,8 +1421,24 @@ pub fn reserve_native_spawn(file: &Path, claim: &QueueClaim) -> Result<bool> {
     if claim.native_spawn_pending {
         return Ok(false);
     }
+    let (target, view) = resolve_live_claim_target(file, &claim.item_text, "queue_spawn_reserve")?;
+    anyhow::ensure!(
+        target == claim.item_text,
+        "native spawn claim changed before reservation"
+    );
+    reserve_native_spawn_in_view(file, claim, &view)
+}
+
+fn reserve_native_spawn_in_view(
+    file: &Path,
+    claim: &QueueClaim,
+    view: &ClaimQueueView,
+) -> Result<bool> {
     crate::address_effect::require_worker_observation(file, claim)?;
-    mutate_ledger(file, |ledger| {
+    // Claim resolution and reservation must agree during an editor save. A disk
+    // view that lacks a newly assigned row ID can otherwise rekey the claim back
+    // to its original text inside this transaction.
+    mutate_ledger_in_view(file, Some(view), |ledger| {
         let stored = ledger
             .claims
             .iter_mut()
@@ -3957,6 +3984,33 @@ mod tests {
         )
         .unwrap();
         doc
+    }
+
+    #[test]
+    fn native_spawn_uses_live_claim_identity_before_editor_save() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let item = "Describe the sample";
+        let annotated = "Describe the sample [#q-aaaaaaaaaaaa]";
+        let doc = subagents_doc(dir.path(), &[item]);
+        let disk_text = std::fs::read_to_string(&doc)?;
+        let live_text = disk_text.replace(item, annotated);
+        let view = ClaimQueueView::from_content(&live_text).unwrap();
+        let (_, original) = claim(&doc, item, "subagent:sample", 60)?;
+        let live = load_ledger_following(&doc, &live_text)?;
+        let current = live.resolve_selector(annotated)?.unwrap();
+
+        assert_ne!(current.identity, original.identity);
+        assert_eq!(current.generation, original.generation);
+        assert!(reserve_native_spawn_in_view(&doc, &original, &view).is_err());
+        assert!(reserve_native_spawn_in_view(&doc, current, &view)?);
+        assert!(!reserve_native_spawn_in_view(&doc, current, &view)?);
+
+        let durable = load_ledger(&doc)?;
+        let reserved = durable.resolve_selector(annotated)?.unwrap();
+        assert!(reserved.native_spawn_pending);
+        assert_eq!(reserved.identity, current.identity);
+        assert_eq!(std::fs::read_to_string(&doc)?, disk_text);
+        Ok(())
     }
 
     /// `#keptlineage`: claiming a kept `☑️` row restores the existing receipt

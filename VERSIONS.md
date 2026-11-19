@@ -2,6 +2,13 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.582
+
+- **Admitted turns wait for terminal evidence.** Direct runs no longer time out after 30 minutes. Idle recovery waits for a durable terminal receipt before offering an admitted prompt again.
+- **Queue actions retain exact receipts.** Inline address receipts survive across turns, and native worker launch reservations survive expiry and restart. Reservations use the live queue identity when editor changes have yet to reach disk. Ambiguous effects stay held for reconciliation.
+- **Queue steering and Todo preserve intent.** Worker handbacks retain nested response lists, claim steering follows the applicable prompt, and Todo priorities and nested edits project onto the right rows.
+- **Editors and routing use current authority.** Browser saves bind to the observed editor revision, JetBrains maintains a persistent replica shadow, and the controller negotiates public API capabilities independently of CLI versions. Tmux routing resolves layout and working directory in the selected document's project.
+
 ## 0.35.581
 
 - **Queue prompts survive edits and requeues.** When a parent prompt becomes context for child prompts, its worker evidence remains attached. Address handbacks survive requeue, and queue drain acknowledgments require the matching dispatch.

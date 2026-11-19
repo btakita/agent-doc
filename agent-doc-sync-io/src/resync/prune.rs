@@ -7,13 +7,13 @@ use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
 pub(crate) fn prune_dead_entries_for_target_in_registry<F>(
     registry: &mut tmux_router::Registry,
     target: &Path,
+    base_dir: &Path,
     mut pane_alive: F,
 ) -> Vec<(String, tmux_router::RegistryEntry)>
 where
     F: FnMut(&str) -> bool,
 {
-    let cwd = std::env::current_dir().unwrap_or_default();
-    let matcher = ResyncTargetMatcher::new(target, cwd);
+    let matcher = ResyncTargetMatcher::new(target, base_dir);
     let removed: Vec<(String, tmux_router::RegistryEntry)> = registry
         .iter()
         .filter(|(key, entry)| {
@@ -49,9 +49,10 @@ pub(crate) fn prune_targeted_in(
     // `#adsessreap1`: prune an entry whose pane degraded `claude → zsh`. The
     // pane is still alive to tmux but owns no agent, so the stale registry entry
     // must be removed like a dead-pane entry.
-    let removed = prune_dead_entries_for_target_in_registry(&mut registry, target, |pane| {
-        agent_doc_supervisor_process::session_liveness::pane_owns_live_agent(tmux, pane)
-    });
+    let removed =
+        prune_dead_entries_for_target_in_registry(&mut registry, target, base_dir, |pane| {
+            agent_doc_supervisor_process::session_liveness::pane_owns_live_agent(tmux, pane)
+        });
     if !removed.is_empty() {
         agent_doc_session_registry_io::save_in(base_dir, &registry)?;
     }
@@ -92,8 +93,11 @@ pub fn apply_targeted_fix_for_route(
     let recovered = recover_target_document_pane_in(tmux, &target, &base_dir)?;
     outcome.reregistered_owner = recovered.reregistered_owner;
     outcome.killed_redundant_stash_panes = recovered.killed_redundant_stash_panes;
-    let scoped_registry =
-        filter_registry_for_target(&agent_doc_session_registry_io::load_in(&base_dir)?, &target);
+    let scoped_registry = filter_registry_for_target(
+        &agent_doc_session_registry_io::load_in(&base_dir)?,
+        &target,
+        &base_dir,
+    );
     let issues = detect_issues_in_registry_with_main_layout_eligibility(
         tmux,
         &scoped_registry,
@@ -538,20 +542,26 @@ mod tests {
         let target = doc_a.canonicalize().unwrap();
 
         let mut registry = SessionRegistry::new();
-        registry.insert(
-            "sess-a".to_string(),
-            test_entry("%dead-a", &doc_a.to_string_lossy()),
-        );
+        registry.insert("sess-a".to_string(), test_entry("%dead-a", "a.md"));
+        registry.insert("a.md".to_string(), test_entry("%dead-key", ""));
+        registry.insert("live-a".to_string(), test_entry("%live-a", "a.md"));
         registry.insert(
             "sess-b".to_string(),
             test_entry("%dead-b", &doc_b.to_string_lossy()),
         );
 
         let removed =
-            prune_dead_entries_for_target_in_registry(&mut registry, &target, |_pane| false);
-        assert_eq!(removed.len(), 1, "only the target doc should be pruned");
-        assert_eq!(removed[0].0, "sess-a");
+            prune_dead_entries_for_target_in_registry(&mut registry, &target, dir.path(), |pane| {
+                pane == "%live-a"
+            });
+        assert_eq!(
+            removed.len(),
+            2,
+            "only dead rows for the target should be pruned"
+        );
         assert!(!registry.contains_key("sess-a"));
+        assert!(!registry.contains_key("a.md"));
+        assert!(registry.contains_key("live-a"));
         assert!(registry.contains_key("sess-b"));
     }
     #[test]

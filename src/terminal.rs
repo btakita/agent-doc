@@ -21,12 +21,13 @@
 //! - If the resolved session already has an attached client → no-op (no duplicate terminals).
 //! - If the session exists but is detached → open a terminal to re-attach.
 //! - If no session found → create a new one via `tmux new-session -A -s <name>`.
+//! - Probe and launch use the same configured tmux binary and socket.
 //! - Terminal command resolution order:
 //!   1. `[terminal] command` in `~/.config/agent-doc/config.toml` (supports `{tmux_command}` placeholder).
 //!   2. `$TERMINAL` env var (appended with `-e {tmux_command}`).
 //!   3. Error with setup instructions.
-//! - Session names containing characters outside `[a-zA-Z0-9_-]` are single-quote-escaped
-//!   before being passed to the shell.
+//! - Quote tmux arguments for the terminal template and launch the decoded
+//!   argument vector directly.
 //!
 //! ## Agentic Contracts
 //! - `run()` is the sole public entry point.
@@ -35,8 +36,6 @@
 //! - Resolution is idempotent: calling `run()` twice for an already-attached session is a no-op.
 //!
 //! ## Evals
-//! - shell_escape_simple: alphanumeric names → returned unchanged
-//! - shell_escape_special: name with space → single-quoted output
 //! - resolve_terminal_from_config: config has `command` template → `{tmux_command}` replaced correctly
 //! - resolve_terminal_no_config_no_env: no config, no `$TERMINAL` → error containing "No terminal configured"
 //! - classify_session_target: `SessionTarget::Create` variant matches correctly
@@ -60,7 +59,7 @@ use agent_doc_config::terminal_host::{
 
 /// Run the terminal command: ensure tmux session exists, launch terminal if needed.
 pub fn run(file: &Path, session_name: Option<&str>) -> Result<()> {
-    let tmux = Tmux::default();
+    let tmux = agent_doc_tmux_io::configured_tmux();
 
     // Step 1: Resolve the target session
     let target = resolve_target_session(&tmux, file, session_name)?;
@@ -87,7 +86,7 @@ pub fn run(file: &Path, session_name: Option<&str>) -> Result<()> {
                 "[terminal] session '{}' exists but is detached — opening terminal to attach",
                 name
             );
-            launch_resolved_terminal(&policy, &name)
+            launch_resolved_terminal(&tmux, &policy, &name)
         }
         SessionTarget::Create(name) => {
             if !policy.auto_start_tmux {
@@ -97,7 +96,7 @@ pub fn run(file: &Path, session_name: Option<&str>) -> Result<()> {
                 );
             }
             eprintln!("[terminal] no active session found — creating '{}'", name);
-            launch_resolved_terminal(&policy, &name)
+            launch_resolved_terminal(&tmux, &policy, &name)
         }
     }
 }
@@ -237,7 +236,11 @@ fn pane_session_name(tmux: &Tmux, pane_id: &str) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 /// Build the tmux command and launch the resolved external terminal emulator.
-fn launch_resolved_terminal(policy: &ResolvedTerminalPolicy, session_name: &str) -> Result<()> {
+fn launch_resolved_terminal(
+    tmux: &Tmux,
+    policy: &ResolvedTerminalPolicy,
+    session_name: &str,
+) -> Result<()> {
     match policy.host {
         ResolvedTerminalHost::External => {}
         ResolvedTerminalHost::Ide => anyhow::bail!(
@@ -247,7 +250,13 @@ fn launch_resolved_terminal(policy: &ResolvedTerminalPolicy, session_name: &str)
             anyhow::bail!("No terminal host available: {}", policy.reason)
         }
     }
-    let tmux_command = format!("tmux new-session -A -s {}", shell_escape(session_name));
+    let mut attach = tmux.cmd();
+    attach.args(["new-session", "-A", "-s", session_name]);
+    let tmux_command = shell_words::join(
+        std::iter::once(attach.get_program())
+            .chain(attach.get_args())
+            .map(|arg| arg.to_string_lossy()),
+    );
     let terminal_cmd = resolve_terminal_command(policy.command.as_deref(), &tmux_command)?;
 
     eprintln!("[terminal] launching: {}", terminal_cmd);
@@ -392,28 +401,17 @@ fn resolve_terminal_command(command: Option<&str>, tmux_command: &str) -> Result
 
 /// Spawn the terminal process (detached from current process).
 fn spawn_terminal(command: &str) -> Result<()> {
-    let parts: Vec<&str> = command.split_whitespace().collect();
-    if parts.is_empty() {
+    let parts = shell_words::split(command).context("invalid terminal command quoting")?;
+    let Some((program, args)) = parts.split_first() else {
         anyhow::bail!("terminal command is empty");
-    }
+    };
 
-    Command::new(parts[0])
-        .args(&parts[1..])
+    Command::new(program)
+        .args(args)
         .spawn()
-        .with_context(|| format!("failed to launch terminal: {}", parts[0]))?;
+        .with_context(|| format!("failed to launch terminal: {program}"))?;
 
     Ok(())
-}
-
-/// Minimal shell escaping for session names.
-fn shell_escape(s: &str) -> String {
-    if s.chars()
-        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
-    {
-        s.to_string()
-    } else {
-        format!("'{}'", s.replace('\'', "'\\''"))
-    }
 }
 
 #[cfg(test)]
@@ -448,17 +446,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn shell_escape_simple() {
-        assert_eq!(shell_escape("my-session"), "my-session");
-        assert_eq!(shell_escape("0"), "0");
-    }
-
-    #[test]
-    fn shell_escape_special() {
-        assert_eq!(shell_escape("my session"), "'my session'");
     }
 
     #[test]

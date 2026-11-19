@@ -6983,11 +6983,12 @@ fn run_requote_unlandable_capture(file: &Path) -> anyhow::Result<()> {
 /// `AGENT_DOC_ROOT_CEILING_DIRECTORIES`, so a test process wrote the operator's
 /// `~/.agent-doc/logs/debug.log.<date>`, and a nested project without `logs/`
 /// yet logged into an outer project. The nearest root now owns the log, and
-/// its `logs/` is created like `ops.log` creates it. No root within the
-/// ceiling means no file log: there is no user-level log location to fall
-/// back to, and an ancestor beyond the ceiling is never adopted.
+/// its `logs/` is created like `ops.log` creates it. Process-level diagnostics
+/// outside projects use the user state directory unless discovery is bounded.
 fn tracing_log_dir(cwd: &Path) -> Option<PathBuf> {
-    let logs = agent_doc_fs::find_project_root(cwd)?.join(".agent-doc/logs");
+    let logs = agent_doc_fs::find_project_root(cwd)
+        .map(|root| root.join(".agent-doc/logs"))
+        .or_else(agent_doc_fs::user_log_directory)?;
     std::fs::create_dir_all(&logs).ok()?;
     Some(logs)
 }
@@ -7003,7 +7004,7 @@ fn init_tracing() {
         .and_then(|cwd| tracing_log_dir(&cwd))
     else {
         eprintln!(
-            "[tracing] AGENT_DOC_LOG set but no agent-doc project root (within any {}) owns the working directory — logging disabled",
+            "[tracing] AGENT_DOC_LOG set but neither a project root (within any {}) nor a user state log directory is available — logging disabled",
             agent_doc_fs::ROOT_CEILING_ENV
         );
         return;

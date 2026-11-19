@@ -143,9 +143,8 @@ fn ensure_tmux_session_with_ide(
 /// back to `current_dir()` for a rootless document, so a start run from inside
 /// another project bound the document (actor, registry, controller, config
 /// pin) in that project's store, where no reader of the document looks.
-fn start_project_root(canonical: &Path) -> PathBuf {
+fn start_project_root(canonical: &Path) -> Result<PathBuf> {
     agent_doc_project_root_io::project_root_or_file_parent(canonical)
-        .unwrap_or_else(|_| canonical.parent().unwrap_or(Path::new(".")).to_path_buf())
 }
 
 fn ensure_tmux_session_with_ide_client(
@@ -178,7 +177,7 @@ fn ensure_tmux_session_with_ide_client(
     }
 
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    let project_root = start_project_root(&canonical);
+    let project_root = start_project_root(&canonical)?;
 
     // The report already observed whether the server runs; asking again cost
     // one more tmux client spawn on every start.
@@ -637,7 +636,7 @@ fn start_bootstrap_target(
         shared
     };
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    let project_root = start_project_root(&canonical);
+    let project_root = start_project_root(&canonical)?;
     let pane_id = if outcome.created {
         // A freshly created session (or navigation lane) starts with exactly
         // one idle pane; the start takes it over.
@@ -1665,7 +1664,7 @@ fn prepare_start_runtime_with_admission(
     }
 
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    let project_root = start_project_root(&canonical);
+    let project_root = start_project_root(&canonical)?;
     // A route-owned child is autonomous infrastructure even when the tmux
     // command itself was already submitted. Re-check durable queue control at
     // the lifecycle boundary to close the pause-vs-route race. Supervisor
@@ -3046,8 +3045,8 @@ mod tests {
         std::fs::write(&tracked, "# tracked\n").unwrap();
         assert_ne!(std::env::current_dir().unwrap(), notes);
 
-        assert_eq!(start_project_root(&rootless), notes);
-        assert_eq!(start_project_root(&tracked), project);
+        assert_eq!(start_project_root(&rootless).unwrap(), notes);
+        assert_eq!(start_project_root(&tracked).unwrap(), project);
     }
 
     fn generation_race_actor(

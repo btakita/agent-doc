@@ -14,6 +14,8 @@
  */
 import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
+import { dirname } from 'path';
+import { projectRoots as projectRootPolicy } from './projectRoots.js';
 // esbuild inlines this at build time from the pinned lazily-js package (same
 // resolution the state-graph-mirror import uses).
 import { OrSet } from '@lazily-hub/lazily-js';
@@ -127,6 +129,7 @@ export function registerReliableSyncLiveness(
             ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 
     const push = (root: string, documentHash: string, opsJson: string) => {
+        if (!projectRootPolicy.allows(root)) return;
         if (reliableSyncLivenessEnqueue(root, documentHash, opsJson) === 0) {
             reliableSyncLivenessFlush(root, documentHash);
         }
@@ -139,6 +142,7 @@ export function registerReliableSyncLiveness(
         // Off the event loop's critical path — the flush may do a controller RPC.
         setImmediate(() => {
             const root = resolveProjectPath(filePath, workspaceRoot)?.projectRoot ?? workspaceRoot;
+            if (!projectRootPolicy.allowsFallback(dirname(filePath), root)) return;
             // Scope liveness to agent-doc session documents only: a plain source
             // file opened as a tab must not enter the plane (it would over-count the
             // session-document scope). This disk read

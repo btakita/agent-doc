@@ -6,6 +6,7 @@ import * as crypto from 'crypto';
 import * as net from 'net';
 import { execFile } from 'child_process';
 import * as native from './native.js';
+import { projectRoots } from './projectRoots.js';
 import {
     aboutMismatches,
     nativeAboutFacts,
@@ -313,7 +314,8 @@ function relativePath(root: string, filePath: string): string {
  * is returned so route / claim commands run in the correct working directory
  * and the file path they receive is relative to that root.
  *
- * Falls back to the workspace folder root when no ancestor has `.agent-doc/`.
+ * Without a project store, uses an eligible workspace folder or the document's
+ * parent as the CLI working directory. Socket registration has its own guard.
  *
  * Returns `{ cwd, relativePath }` — ready to pass to `runCli(args, cwd)` with
  * the file argument as `relativePath`.
@@ -322,22 +324,15 @@ function resolveProject(
     workspaceRoot: string,
     filePath: string,
 ): { cwd: string; relativePath: string } {
+    const parent = path.dirname(filePath);
     // Try FFI first (shared canonical implementation).
     const ffi = native.resolveProjectPath(filePath, workspaceRoot);
-    if (ffi) return { cwd: ffi.projectRoot, relativePath: ffi.relativePath };
-
-    // JS fallback: walk up looking for `.agent-doc/`.
-    let dir = path.dirname(filePath);
-    const fsRoot = path.parse(dir).root;
-    while (dir && dir !== fsRoot) {
-        if (fs.existsSync(path.join(dir, '.agent-doc'))) {
-            return { cwd: dir, relativePath: path.relative(dir, filePath) };
-        }
-        const parent = path.dirname(dir);
-        if (parent === dir) break;
-        dir = parent;
+    if (ffi && projectRoots.allowsFallback(parent, ffi.projectRoot)) {
+        return { cwd: ffi.projectRoot, relativePath: ffi.relativePath };
     }
-    return { cwd: workspaceRoot, relativePath: path.relative(workspaceRoot, filePath) };
+    const cwd = projectRoots.find(parent)
+        ?? (projectRoots.allowsFallback(parent, workspaceRoot) ? workspaceRoot : parent);
+    return { cwd, relativePath: path.relative(cwd, filePath) };
 }
 
 interface RunCliOptions {
@@ -2950,21 +2945,9 @@ class PatchWatcher implements vscode.Disposable {
     }
 
     private findProjectRoot(): string | undefined {
-        // Walk up from workspace root to find the agent-doc project root.
-        const roots = vscode.workspace.workspaceFolders;
-        if (!roots || roots.length === 0) return undefined;
-
-        let dir = roots[0].uri.fsPath;
-        const root = path.parse(dir).root;
-
-        while (dir !== root) {
-            if (fs.existsSync(path.join(dir, '.agent-doc'))) {
-                return dir;
-            }
-            dir = path.dirname(dir);
-        }
-
-        return roots[0].uri.fsPath;
+        const first = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!first) return undefined;
+        return projectRoots.find(first) ?? (projectRoots.allows(first) ? first : undefined);
     }
 
     /** Complete a deferred native save only from the editor's save event. */

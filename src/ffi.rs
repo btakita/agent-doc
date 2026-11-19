@@ -1062,6 +1062,11 @@ fn spawn_ipc_listener<F>(root_str: String, label: &'static str, handler: F) -> i
 where
     F: Fn(&str) -> Option<String> + Send + Sync + 'static,
 {
+    if let Err(error) = agent_doc_project_root_io::ensure_project_root_allowed(Path::new(&root_str))
+    {
+        eprintln!("[ffi] refusing to start IPC listener: {error}");
+        return 0;
+    }
     if let Err(error) = agent_doc_ipc_io::set_local_build_id(concat!(
         env!("CARGO_PKG_VERSION"),
         "+",

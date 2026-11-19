@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
 use std::path::{Component, Path, PathBuf};
+use std::sync::OnceLock;
 
 pub mod install_freshness;
 pub mod jetbrains_install;
@@ -37,6 +38,81 @@ const LOCK_DIR: &str = ".agent-doc/locks";
 const RECOVERY_DIR: &str = ".agent-doc/recovery";
 const STARTING_DIR: &str = ".agent-doc/starting";
 
+/// Explicit opt-in for a home directory that is itself an agent-doc project.
+pub const ALLOW_HOME_ROOT_ENV: &str = "AGENT_DOC_ALLOW_HOME_ROOT";
+
+struct ProjectRootPolicy {
+    home: Option<PathBuf>,
+    temp: Vec<PathBuf>,
+    allow_home: bool,
+}
+
+fn canonical_or_normalized(path: &Path) -> PathBuf {
+    path.canonicalize()
+        .unwrap_or_else(|_| path.components().collect())
+}
+
+fn user_home() -> Option<PathBuf> {
+    ["HOME", "USERPROFILE"]
+        .into_iter()
+        .filter_map(std::env::var_os)
+        .map(PathBuf::from)
+        .find(|path| path.is_absolute())
+}
+
+impl ProjectRootPolicy {
+    fn new(home: Option<PathBuf>, temp: Vec<PathBuf>, allow_home: bool) -> Self {
+        Self {
+            home: home.as_deref().map(canonical_or_normalized),
+            temp: temp
+                .iter()
+                .map(|path| canonical_or_normalized(path))
+                .collect(),
+            allow_home,
+        }
+    }
+
+    fn allows(&self, path: &Path) -> bool {
+        let path = canonical_or_normalized(path);
+        (!path.has_root() || path.parent().is_some())
+            && !self.temp.contains(&path)
+            && (self.home.as_ref() != Some(&path) || self.allow_home || path.join(".git").exists())
+    }
+}
+
+/// Whether a directory can own an agent-doc project. Filesystem and temp roots
+/// are never projects. Home needs an explicit opt-in or its own Git worktree.
+/// These checks apply to the directory itself, including symlink aliases.
+pub fn project_root_allowed(path: &Path) -> bool {
+    static POLICY: OnceLock<ProjectRootPolicy> = OnceLock::new();
+    POLICY
+        .get_or_init(|| {
+            let mut temp = vec![std::env::temp_dir()];
+            #[cfg(unix)]
+            temp.extend([PathBuf::from("/tmp"), PathBuf::from("/var/tmp")]);
+            ProjectRootPolicy::new(
+                user_home(),
+                temp,
+                std::env::var_os(ALLOW_HOME_ROOT_ENV).as_deref() == Some(std::ffi::OsStr::new("1")),
+            )
+        })
+        .allows(path)
+}
+
+/// User-level diagnostics live outside project state. Bounded discovery
+/// never redirects logs into the user's state directory.
+pub fn user_log_directory() -> Option<PathBuf> {
+    if !root_ceiling_directories().is_empty() || std::env::var_os(TEST_RUNTIME_SCOPE_ENV).is_some()
+    {
+        return None;
+    }
+    let state = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| user_home().map(|home| home.join(".local/state")))?;
+    Some(state.join("agent-doc"))
+}
+
 /// Walk up the directory tree from `path` to find the directory containing
 /// `.agent-doc` (the project root). Relative inputs are first anchored to the
 /// process working directory so the returned root is never an empty relative
@@ -57,7 +133,7 @@ pub fn find_project_root(path: &Path) -> Option<PathBuf> {
     // `$HOME/.agent-doc` as its project root.
     ancestors_within_root_ceiling(start)
         .into_iter()
-        .find(|dir| dir.join(".agent-doc").is_dir())
+        .find(|dir| dir.join(".agent-doc").is_dir() && project_root_allowed(dir))
 }
 
 /// Canonicalize `path` first, then delegate to [`find_project_root`].
@@ -734,6 +810,37 @@ fn project_roots_for(path: &Path) -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn root_policy_blocks_only_the_named_boundaries() {
+        let fixture = tempfile::tempdir().unwrap();
+        let home = fixture.path().join("home");
+        let temp = fixture.path().join("temp");
+        for dir in [&home, &temp] {
+            std::fs::create_dir_all(dir.join("child/.agent-doc")).unwrap();
+        }
+        let policy = super::ProjectRootPolicy::new(Some(home.clone()), vec![temp.clone()], false);
+        assert!(!policy.allows(&home));
+        assert!(!policy.allows(&temp));
+        assert!(!policy.allows(fixture.path().ancestors().last().unwrap()));
+        assert!(policy.allows(&home.join("child")));
+        assert!(policy.allows(&temp.join("child")));
+        assert!(super::ProjectRootPolicy::new(Some(home.clone()), vec![], true).allows(&home));
+        std::fs::create_dir(home.join(".git")).unwrap();
+        assert!(policy.allows(&home));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn root_policy_rejects_symlinks_to_protected_directories() {
+        let fixture = tempfile::tempdir().unwrap();
+        let home = fixture.path().join("home");
+        let alias = fixture.path().join("home-alias");
+        std::fs::create_dir_all(home.join("project")).unwrap();
+        std::os::unix::fs::symlink(&home, &alias).unwrap();
+        let policy = super::ProjectRootPolicy::new(Some(home), vec![], false);
+        assert!(!policy.allows(&alias));
+        assert!(policy.allows(&alias.join("project")));
+    }
     use super::{
         document_state_hash, document_state_hash_from_str, find_project_root, inode_of_path,
         preserve_dropped_operator_buffer, preserve_unproven_reseed, quarantine_corrupt_file,

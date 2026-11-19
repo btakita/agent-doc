@@ -19292,6 +19292,7 @@ fn connect_or_launch_with_claim_wait_and_before_claim(
     launch_claim_wait: Duration,
     before_claim: impl FnOnce(),
 ) -> Result<interprocess::local_socket::Stream> {
+    agent_doc_project_root_io::ensure_project_root_allowed(project_root)?;
     if let Ok(active_status) = controller_adoption_status(project_root)
         && active_status.active
     {
@@ -19536,6 +19537,7 @@ fn log_launch_claim_waiter_adopted(
 
 pub fn ensure_controller_running(project_root: &Path, launch_mode: LaunchMode) -> Result<()> {
     let stream = if EMBEDDED_NATIVE_HOST.load(Ordering::SeqCst) {
+        agent_doc_project_root_io::ensure_project_root_allowed(project_root)?;
         connect(project_root)?
     } else {
         connect_or_launch(project_root, launch_mode)?
@@ -19551,6 +19553,7 @@ pub fn ensure_controller_running(project_root: &Path, launch_mode: LaunchMode) -
 /// observed a missing listener or an unacknowledged request. Ordinary internal
 /// callers keep [`ensure_controller_running`]'s cheaper connect/adopt contract.
 pub fn ensure_serving_controller(project_root: &Path, launch_mode: LaunchMode) -> Result<()> {
+    agent_doc_project_root_io::ensure_project_root_allowed(project_root)?;
     // A successful connect proves only that the kernel accepted a socket. Focus
     // handoff reaches this boundary specifically after a request was not served,
     // so require the controller's status receipt before adopting it.
@@ -20885,6 +20888,7 @@ pub(crate) fn serve_with_options(
     handoff_state: ControllerHandoffState,
     serve_ready: Option<std::sync::mpsc::Sender<PathBuf>>,
 ) -> Result<()> {
+    agent_doc_project_root_io::ensure_project_root_allowed(project_root)?;
     // `#ensurereplicagensup`: this process is about to become the relay-hub
     // owner. Everything that keys off `hub_registry()` needs to distinguish "the
     // replica has not registered yet" (worth waiting on, only meaningful here)

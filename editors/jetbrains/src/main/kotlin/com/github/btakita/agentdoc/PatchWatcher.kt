@@ -226,6 +226,7 @@ class PatchWatcher(private val project: Project) : Disposable {
      */
     fun registerRoot(root: String) {
         if (!running) return
+        if (!ProjectRoots.processPolicy.allows(File(root))) return
         if (rootStates.containsKey(root)) return
         val state = RootState(root)
         if (rootStates.putIfAbsent(root, state) != null) return // race: another caller won
@@ -287,16 +288,8 @@ class PatchWatcher(private val project: Project) : Disposable {
      * Returns the root path (parent of `.agent-doc/`) or null if not found.
      * Mirrors find_project_root in the Rust binary.
      */
-    private fun resolveRootFor(filePath: String): String? {
-        var dir: File? = File(filePath).absoluteFile.parentFile
-        while (dir != null) {
-            if (File(dir, ".agent-doc").isDirectory) {
-                return dir.absolutePath
-            }
-            dir = dir.parentFile
-        }
-        return null
-    }
+    private fun resolveRootFor(filePath: String): String? =
+        File(filePath).absoluteFile.parentFile?.let(ProjectRoots.processPolicy::find)?.absolutePath
 
     /**
      * Start socket IPC listener via FFI for a given root.

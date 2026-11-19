@@ -289,16 +289,8 @@ object TurnStateBridge {
 
     private fun compactWhitespace(text: String): String = text.replace(Regex("""\s+"""), " ").trim()
 
-    private fun findAgentDocProjectRoot(file: File): File? {
-        var current = if (file.isDirectory) file else file.parentFile
-        while (current != null) {
-            if (File(current, ".agent-doc").isDirectory) {
-                return current
-            }
-            current = current.parentFile
-        }
-        return null
-    }
+    private fun findAgentDocProjectRoot(file: File): File? =
+        (if (file.isDirectory) file else file.absoluteFile.parentFile)?.let(ProjectRoots.processPolicy::find)
 
     private fun relativePathUnder(root: File, file: File): String {
         val relative =

@@ -89,6 +89,21 @@ exported by another checkout never replaces this one's; `#checktmpdirleak`) and 
 `TMPDIR` with an `.agent-doc` ancestor (`#testisolationtests`); a cargo test
 binary without it bounds in-process discovery at its temp root.
 
+## AGENT_DOC_ALLOW_HOME_ROOT
+
+An implicit project root must be a directory below a filesystem root. The
+configured process temp directory and the standard Unix temp directories
+`/tmp` and `/var/tmp` are also ineligible. Their child projects remain eligible.
+The home directory is eligible only when it has its own `.git` entry or the
+process explicitly sets `AGENT_DOC_ALLOW_HOME_ROOT=1`. The policy also rejects
+symlink aliases of an ineligible directory and applies before editor endpoints,
+controller startup and rootless document bootstrap can adopt one.
+
+VS Code and JetBrains use the same boundary and ceiling rules for local
+discovery, including when the native library cannot resolve the project. Use a
+child Git project for sessions that would otherwise belong to the home or temp
+directory itself.
+
 ## AGENT_DOC_LOG
 
 Optional `tracing` filter (for example `debug` or `agent_doc::preflight=debug`).
@@ -96,9 +111,11 @@ Unset, nothing is logged to a file. Set, the log rolls daily as
 `debug.log.<date>` in `<root>/.agent-doc/logs/`. `<root>` is the nearest
 project root that ceiling-aware discovery resolves from the working directory,
 so `AGENT_DOC_ROOT_CEILING_DIRECTORIES` bounds it. `logs/` is created when it
-is missing. With no project root inside the ceiling, file logging is disabled
-with a stderr note. It never falls back to a user-level directory or to an
-ancestor project above the ceiling (`#tracingrootceiling`).
+is missing. An unbounded process outside an eligible project logs to
+`$XDG_STATE_HOME/agent-doc`, defaulting to `$HOME/.local/state/agent-doc`.
+The panic hook uses the same root and fallback. Bounded and test-scoped
+processes never fall back to user state or an ancestor above the ceiling
+(`#tracingrootceiling`). Document, cycle and session logs remain project scoped.
 
 ## Project prompt presets
 

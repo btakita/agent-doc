@@ -25628,6 +25628,7 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
         "pub fn reconcile_queue_tombstones",
         "pub fn format_queue_ids",
         "pub fn collect_backlog_priority_ranks",
+        "pub fn collect_queue_priority_ranks",
         "pub fn collect_after_deps",
     ] {
         assert!(
@@ -25656,7 +25657,7 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
     assert!(
         preflight_maintenance.contains("agent_doc_queue::backlog_sync::collect_backlog_queue_sync")
             && preflight_maintenance
-                .contains("agent_doc_queue::backlog_sync::collect_backlog_priority_ranks")
+                .contains("agent_doc_queue::backlog_sync::collect_queue_priority_ranks")
             && preflight_maintenance.contains("agent_doc_queue::backlog_sync::collect_after_deps")
             && preflight_maintenance
                 .contains("agent_doc_queue::backlog_sync::plan_auto_backlog_queue_sync_ids"),

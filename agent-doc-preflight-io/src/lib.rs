@@ -2638,7 +2638,12 @@ fn run_pending_maintenance_with_options(
         .filter(|c| is_tracked_work_component(&c.name))
         .map(|c| c.name.clone())
         .collect();
-    if tracked_surfaces.is_empty() {
+    if tracked_surfaces.is_empty()
+        && !components.iter().any(|component| {
+            agent_doc_element::todo::is_todo_component(&component.name)
+                && component.attrs.contains_key("priority")
+        })
+    {
         return Ok(PendingMaintenanceReport::default());
     }
 
@@ -3081,8 +3086,8 @@ fn run_pending_maintenance_with_options(
 
     // `#managedlistnodrift`: `agent:todo` is render(durable state). An open
     // item whose own tracked work is durably resolved closes here, at the
-    // turn boundary, through the same projection the closeout uses; nothing
-    // else in the list changes. Duplicate ids are reported, never merged.
+    // turn boundary, through the same projection the closeout uses. A priority
+    // list also orders its open items. Duplicate ids are reported.
     // Each document derives from its own tracked-work evidence.
     match agent_doc_element_backlog_io::backlog_cmd::todo_link_index_in_content(
         file,
@@ -7303,7 +7308,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
 
     // Queue priority ordering (#backlog-priority-attribute): when the queue
     // marker carries `priority`, stable-sort its do-prompts by the priority of
-    // the matching backlog/icebox item so append-built or manual queues come out
+    // the matching backlog/icebox/Todo item so append-built or manual queues come out
     // prioritized. The backlog itself is priority-sorted earlier in the pipeline
     // by run_pending_maintenance, so the rank map read here is already current.
     // Also runs when the rank map is empty so a `__prioritized__` manual pin
@@ -7311,7 +7316,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
     // when no backlog item carries a `priority` attribute.
     if comp.attrs.contains_key("priority") || source_queue_priority {
         let rank =
-            agent_doc_queue::backlog_sync::collect_backlog_priority_ranks(&components, &content);
+            agent_doc_queue::backlog_sync::collect_queue_priority_ranks(&components, &content);
         let mut operator_authored_identities: std::collections::HashSet<String> =
             std::collections::HashSet::new();
         if let Ok(Some(snap_content)) = agent_doc_snapshot_io::load_document_baseline(file)
@@ -7409,7 +7414,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                 &backlog_sourced,
                 &operator_authored_identities,
             )
-            .map(|s| ("backlog priority (operator pins position-locked)", s))
+            .map(|s| ("source priority (operator pins position-locked)", s))
         });
         if let Some((how, sorted)) = sorted {
             // `#pinoperatoronly`: do NOT annotate sort promotions with the agent

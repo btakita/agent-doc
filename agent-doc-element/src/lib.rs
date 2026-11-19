@@ -18,6 +18,7 @@ pub mod decision_stamp;
 pub mod element;
 pub mod id;
 pub mod place;
+pub mod priority;
 pub mod recap;
 pub mod rules;
 #[doc(hidden)]

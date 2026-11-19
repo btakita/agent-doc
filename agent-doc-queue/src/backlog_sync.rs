@@ -753,6 +753,20 @@ pub fn collect_backlog_priority_ranks(
     rank
 }
 
+/// Rank id-backed Run prompts by their owning tracked item. Backlog and
+/// Icebox ids keep precedence when a Todo shares the same id.
+pub fn collect_queue_priority_ranks(
+    components: &[element::Component],
+    content: &str,
+) -> HashMap<String, u8> {
+    let mut ranks = collect_backlog_priority_ranks(components, content);
+    let todos = agent_doc_element::todo::OwnedTodoIndex::from_components(content, components);
+    for (id, rank) in todos.open_priorities() {
+        ranks.entry(id.to_owned()).or_insert(rank);
+    }
+    ranks
+}
+
 /// Build the canonical id->`after=#id` dependency projection.
 ///
 /// Explicit tracked-work metadata is collected first. Nested ordered-list
@@ -2231,6 +2245,30 @@ mod tests {
         let ranks = collect_backlog_priority_ranks(&components, content);
         assert_eq!(ranks.get("a"), Some(&5));
         assert_eq!(ranks.get("r"), None);
+    }
+
+    #[test]
+    fn collect_queue_priority_ranks_adds_open_owning_todos() {
+        let content = concat!(
+            "<!-- agent:todo -->\n",
+            "- [ ] [#shared] priority=1 prerequisite\n",
+            "- [/] #todoreview priority=2 waiting\n",
+            "- [ ] [#unnumbered] no rank here\n",
+            "  - priority=1 note\n",
+            "- [x] [#finished] priority=1 completed\n",
+            "- [ ] Mentions [#citation] priority=1\n",
+            "<!-- /agent:todo -->\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#shared] priority=4 work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let components = element::parse(content).unwrap();
+        let ranks = collect_queue_priority_ranks(&components, content);
+        assert_eq!(ranks.get("shared"), Some(&4));
+        assert_eq!(ranks.get("todoreview"), Some(&2));
+        assert_eq!(ranks.get("unnumbered"), Some(&backlog::PRIORITY_RANK_UNSET));
+        assert!(!ranks.contains_key("finished"));
+        assert!(!ranks.contains_key("citation"));
     }
 
     #[test]

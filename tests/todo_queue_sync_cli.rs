@@ -40,6 +40,24 @@ fn run_agent_doc(dir: &std::path::Path, args: &[&str]) -> std::process::Output {
 }
 
 fn session(dir: &std::path::Path, run_rows: &str, todo_rows: &str) -> std::path::PathBuf {
+    session_with_tracked_sections(
+        dir,
+        run_rows,
+        todo_rows,
+        concat!(
+            "## Backlog <!-- agent:backlog priority queue -->\n",
+            "- [ ] [#bk1] backlog work\n",
+            "<!-- /agent:backlog -->\n",
+        ),
+    )
+}
+
+fn session_with_tracked_sections(
+    dir: &std::path::Path,
+    run_rows: &str,
+    todo_rows: &str,
+    tracked_sections: &str,
+) -> std::path::PathBuf {
     fs::create_dir_all(dir.join(".agent-doc/locks")).unwrap();
     let doc = dir.join("session.md");
     let content = format!(
@@ -57,12 +75,11 @@ fn session(dir: &std::path::Path, run_rows: &str, todo_rows: &str) -> std::path:
             "## Todo <!-- agent:todo priority -->\n",
             "{todo_rows}",
             "<!-- /agent:todo -->\n\n",
-            "## Backlog <!-- agent:backlog priority queue -->\n",
-            "- [ ] [#bk1] backlog work\n",
-            "<!-- /agent:backlog -->\n",
+            "{tracked_sections}",
         ),
         run_rows = run_rows,
         todo_rows = todo_rows,
+        tracked_sections = tracked_sections,
     );
     fs::write(&doc, &content).unwrap();
     git(dir, &["init", "-q"]);
@@ -227,6 +244,47 @@ fn an_operator_checked_todo_closes_its_queue_row() {
     assert!(
         after.contains("- [ ] [#other] call the vendor\n"),
         "{after}"
+    );
+}
+
+/// An admitted priority pass uses the Todo action rank for both the operator
+/// list and existing Run heads naming the owning todo IDs.
+#[test]
+fn preflight_uses_todo_priorities_for_the_list_and_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = session_with_tracked_sections(
+        dir.path(),
+        "- do [#later]\n- do [#default]\n- do [#first]\n",
+        concat!(
+            "- [ ] [#later] priority=5 Later\n",
+            "- [ ] [#default] No explicit rank\n",
+            "- [ ] [#first] priority=1 First\n",
+            "  - operator note travels with its task\n",
+        ),
+        "",
+    );
+    let previous_ops_len = ops_log_len(&doc);
+    let path = doc.to_str().unwrap();
+    let output = run_agent_doc(dir.path(), &["preflight", path]);
+    assert_ok(&output, "preflight");
+    wait_for_queue_maintenance(&doc, previous_ops_len);
+
+    let run = run_body(&doc);
+    assert!(
+        run.find("do [#first]").unwrap() < run.find("do [#later]").unwrap()
+            && run.find("do [#later]").unwrap() < run.find("do [#default]").unwrap(),
+        "{run}"
+    );
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains(concat!(
+            "<!-- agent:todo priority -->\n",
+            "- [ ] [#first] priority=1 First\n",
+            "  - operator note travels with its task\n",
+            "- [ ] [#later] priority=5 Later\n",
+            "- [ ] [#default] No explicit rank\n",
+        )),
+        "{content}"
     );
 }
 

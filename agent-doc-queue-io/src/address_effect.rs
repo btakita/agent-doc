@@ -135,7 +135,7 @@ fn reserve_inline_execution(
     }
     // The before receipts are a single admission cut. A failure before the
     // handoff exposes none of the prompts and leaves none with a false hold.
-    let tx = conn.transaction()?;
+    let tx = agent_doc_sqlite::immediate_transaction(&mut conn)?;
     for (revision, target, baseline) in baselines {
         refuse_inline_hold(inline_hold(&tx, &document_hash, revision, target)?, target)?;
         insert_snapshot(

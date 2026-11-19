@@ -978,9 +978,9 @@ fn queue_lifecycle_required_commands(
                 entry.item, entry.claim_command,
             ),
             format!(
-                "Only after the successful claim for queue item {:?}, launch one native \
-                     background subagent with `authorization.subagent_prompt_preamble` verbatim.",
-                entry.item,
+                "Only after the successful claim for queue item {:?}, reserve its native spawn with `{}` \
+                     using the printed generation, then launch one native background subagent with the returned preamble verbatim.",
+                entry.item, entry.brief_command,
             ),
             format!(
                 "Immediately after spawn returns the worker id for queue item {:?}, before \

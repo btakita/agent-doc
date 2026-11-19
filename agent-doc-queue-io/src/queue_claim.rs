@@ -23,7 +23,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use agent_doc_queue::queue_claim::{
     ClaimFollowOutcome, ClaimHeadSource, ClaimOutcome, ClaimOwnerLiveness, ClaimOwnerSession,
     ClaimQueueView, ClaimedQueueItems, QueueClaim, QueueClaimCancellationReceipt, QueueClaimLedger,
-    QueueClaimMiss, QueueClaimRefreshRefused, claim_identity, nest_leaf_matches,
+    QueueClaimMiss, QueueClaimRefreshRefused, QueueClaimState, claim_identity, nest_leaf_matches,
     resolve_claim_target_in_views,
 };
 use agent_doc_queue::queue_continuation::{
@@ -1151,6 +1151,7 @@ fn restored_reported_claim(
         lost_from: None,
         completion_recovered_after_loss: false,
         publication_state: None,
+        native_spawn_pending: false,
         worker,
         dispatch_policy: None,
         tracked_item_aliases: Vec::new(),
@@ -1401,6 +1402,77 @@ pub fn start_attempt(
         generation,
         current_owner_session(),
     )
+}
+
+/// Reserve the one outward spawn for an exact live claim. The existing
+/// claim transaction also sinks this checkpoint into the restart journal.
+pub fn reserve_native_spawn(file: &Path, claim: &QueueClaim) -> Result<bool> {
+    if claim.native_spawn_pending {
+        return Ok(false);
+    }
+    crate::address_effect::require_worker_observation(file, claim)?;
+    mutate_ledger(file, |ledger| {
+        let stored = ledger
+            .claims
+            .iter_mut()
+            .find(|stored| {
+                stored.identity == claim.identity
+                    && stored.owner == claim.owner
+                    && stored.generation == claim.generation
+                    && stored.item_text == claim.item_text
+            })
+            .context("native spawn claim changed before reservation")?;
+        anyhow::ensure!(
+            stored.state == QueueClaimState::Claimed
+                && stored.worker.is_none()
+                && !stored.unbound_reservation_expired(now_secs()),
+            "native spawn requires an unexpired, unbound claim"
+        );
+        if stored.native_spawn_pending {
+            return Ok(false);
+        }
+        stored.native_spawn_pending = true;
+        Ok(true)
+    })
+}
+
+/// Settle an unbound native handoff only when the harness confirms the
+/// launch did not happen. Transport failure or timeout alone cannot settle it.
+pub fn confirm_native_spawn_failed(
+    file: &Path,
+    item: &str,
+    generation: u64,
+    reason: &str,
+) -> Result<QueueClaim> {
+    anyhow::ensure!(
+        !reason.trim().is_empty(),
+        "native spawn failure requires harness evidence"
+    );
+    let (target, heads) = resolve_live_claim_target(file, item, "queue_spawn_failed")?;
+    let now = now_secs();
+    mutate_ledger(file, |ledger| {
+        log_followed(file, &ledger.follow_edits_in_view(now, &heads));
+        let identity = claim_identity(&target);
+        let claim = ledger
+            .claims
+            .iter_mut()
+            .find(|claim| claim.identity == identity && claim.generation == generation)
+            .context("native spawn failure requires the exact generation")?;
+        anyhow::ensure!(
+            claim.state == QueueClaimState::Claimed
+                && claim.native_spawn_pending
+                && claim.worker.is_none(),
+            "native spawn failure requires a pending, unbound handoff"
+        );
+        claim.native_spawn_pending = false;
+        claim.mark_lost();
+        claim.frozen = Some(agent_doc_queue::queue_claim::QueueWorkerFreeze {
+            frozen_at_secs: now,
+            reason: format!("native harness confirmed no spawn: {}", reason.trim()),
+            abandoned: true,
+        });
+        Ok(claim.clone())
+    })
 }
 
 /// [`start_attempt`] with an explicit caller session.
@@ -2766,7 +2838,10 @@ pub fn dispatch_acknowledgement_obligation(
         brief_command: crate::subagent_dispatch::brief_command(
             &file.display().to_string(),
             &claim.item_text,
-        ),
+        )
+        .strip_suffix("<generation>")
+        .map(|prefix| format!("{prefix}{}", claim.generation))
+        .expect("dispatch brief command ends with a generation placeholder"),
     }
 }
 
@@ -3073,6 +3148,10 @@ fn claim_assessment(claim: &QueueClaim, owner_session_state: &str) -> (&'static 
         QueueClaimState::Reported => (
             "reported_pending_integration",
             "The worker reported completion; coordinator integration, verification, and queue closeout are still pending. `reported_closeout` lists the exact commands, and `next_action_argv` is the first. When it is absent, settle `reported_closeout.decision` first (present `reported_closeout.operator_request_packet` when only the operator can).".to_string(),
+        ),
+        QueueClaimState::Claimed if claim.native_spawn_pending => (
+            "native_spawn_pending",
+            "The native spawn handoff was issued. Recover the exact worker ID from the harness and bind it with queue start. Use queue release --requeue --spawn-failed only with a harness receipt proving the launch did not occur.".to_string(),
         ),
         QueueClaimState::Claimed => (
             if owner_session_state == "ended" {

@@ -1781,6 +1781,7 @@ mod tests {
             lost_from: None,
             completion_recovered_after_loss: false,
             publication_state: None,
+            native_spawn_pending: false,
             worker: Some(QueueWorkerBinding {
                 worker_id: "worker-1".to_string(),
                 started_at_secs: 100,

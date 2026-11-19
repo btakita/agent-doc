@@ -61,6 +61,7 @@ impl MainAgentPhase {
 #[serde(rename_all = "snake_case")]
 pub enum WorkerPhase {
     Dispatching,
+    NativeSpawnPending,
     Running,
     Reported,
     Lost,
@@ -259,7 +260,9 @@ impl RestartJournal {
                         RecoveryAction::PreserveReceipt
                     }
                     WorkerPhase::Reported => RecoveryAction::PreserveReceipt,
-                    WorkerPhase::Lost | WorkerPhase::Orphaned => RecoveryAction::NeedsOperator,
+                    WorkerPhase::Lost | WorkerPhase::Orphaned | WorkerPhase::NativeSpawnPending => {
+                        RecoveryAction::NeedsOperator
+                    }
                     // A reservation is an intent. A crash between native
                     // spawn and bind can leave no worker id in this journal.
                     WorkerPhase::Dispatching if !same_boot => RecoveryAction::NeedsOperator,

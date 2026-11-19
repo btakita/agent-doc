@@ -157,6 +157,10 @@ pub struct QueueClaim {
     /// `owner` are coordinator-chosen and are not worker-liveness evidence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worker: Option<QueueWorkerBinding>,
+    /// The harness was offered exactly one native spawn handoff. Until bound
+    /// or disproved, the attempt may already be executing and cannot expire.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub native_spawn_pending: bool,
     /// Resolved subagent launch policy captured when this attempt was claimed.
     /// `None` preserves the historical inherit-the-coordinator behavior.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -472,6 +476,7 @@ pub const DISPATCH_EVIDENCE_GRACE_SECS: u64 = 10;
 pub fn dispatch_evidence_missing(claim: &QueueClaim, now_secs: u64, grace_secs: u64) -> bool {
     claim.state == QueueClaimState::Claimed
         && claim.worker.is_none()
+        && !claim.native_spawn_pending
         && !claim.is_expired(now_secs)
         && now_secs.saturating_sub(claim.claimed_at_secs) >= grace_secs
 }
@@ -615,7 +620,7 @@ impl QueueClaimState {
 impl QueueClaim {
     /// Move this attempt into lost state without erasing its previous phase.
     pub fn mark_lost(&mut self) {
-        if self.state != QueueClaimState::Lost {
+        if self.state != QueueClaimState::Lost && !self.native_spawn_pending {
             self.lost_from = Some(self.state);
             self.state = QueueClaimState::Lost;
         }
@@ -896,10 +901,12 @@ const FOLLOWED_FROM_LIMIT: usize = 8;
 
 impl QueueClaim {
     pub fn is_expired(&self, now_secs: u64) -> bool {
-        !matches!(
-            self.state,
-            QueueClaimState::Reported | QueueClaimState::QuotaBlocked
-        ) && now_secs >= self.expires_at_secs
+        !self.native_spawn_pending
+            && !matches!(
+                self.state,
+                QueueClaimState::Reported | QueueClaimState::QuotaBlocked
+            )
+            && now_secs >= self.expires_at_secs
     }
 
     /// Whether the pre-start reservation elapsed before any worker was bound.
@@ -1250,6 +1257,9 @@ pub enum QueueClaimTransitionRefused {
     NotRunning {
         generation: u64,
     },
+    NativeSpawnUncertain {
+        generation: u64,
+    },
     Terminal {
         generation: u64,
         state: QueueClaimState,
@@ -1272,6 +1282,10 @@ impl std::fmt::Display for QueueClaimTransitionRefused {
                 f,
                 "stale queue worker {expected:?}; current worker is {}",
                 current.as_deref().unwrap_or("<unbound>")
+            ),
+            Self::NativeSpawnUncertain { generation } => write!(
+                f,
+                "generation {generation} has an unacknowledged native spawn; reconcile its harness receipt before releasing it"
             ),
             Self::NotRunning { generation } => write!(
                 f,
@@ -1405,7 +1419,9 @@ fn rekey_claim_supersedes(candidate: &QueueClaim, kept: &QueueClaim) -> bool {
         || (candidate.generation == kept.generation
             && (state_rank(candidate.state) > state_rank(kept.state)
                 || (candidate.state == kept.state
-                    && candidate.expires_at_secs > kept.expires_at_secs)))
+                    && (candidate.native_spawn_pending && !kept.native_spawn_pending
+                        || (candidate.native_spawn_pending == kept.native_spawn_pending
+                            && candidate.expires_at_secs > kept.expires_at_secs)))))
 }
 
 /// `queue_document_state.state_kind` of the per-document claim ledger row.
@@ -1617,6 +1633,7 @@ impl QueueClaimLedger {
             lost_from: None,
             completion_recovered_after_loss: false,
             publication_state: None,
+            native_spawn_pending: false,
             worker: None,
             dispatch_policy: None,
             tracked_item_aliases: Vec::new(),
@@ -1874,6 +1891,7 @@ impl QueueClaimLedger {
             });
         }
         claim.state = QueueClaimState::Running;
+        claim.native_spawn_pending = false;
         claim.lost_from = None;
         claim.frozen = None;
         claim.lost_continue = None;
@@ -2423,6 +2441,11 @@ impl QueueClaimLedger {
         };
         if enforce_generation {
             validate_generation(&self.claims[index], expected_generation)?;
+        }
+        if self.claims[index].native_spawn_pending {
+            return Err(QueueClaimTransitionRefused::NativeSpawnUncertain {
+                generation: self.claims[index].generation,
+            });
         }
         Ok(Some(self.claims.remove(index)))
     }
@@ -5553,6 +5576,7 @@ mod tests {
                     lost_from: None,
                     completion_recovered_after_loss: false,
                     publication_state: None,
+                    native_spawn_pending: false,
                     worker: None,
                     dispatch_policy: None,
                     tracked_item_aliases: Vec::new(),
@@ -5578,6 +5602,7 @@ mod tests {
                     lost_from: None,
                     completion_recovered_after_loss: false,
                     publication_state: None,
+                    native_spawn_pending: false,
                     worker: None,
                     dispatch_policy: None,
                     tracked_item_aliases: Vec::new(),

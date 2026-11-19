@@ -7,7 +7,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use agent_doc_queue::queue_claim::{QueueClaimState, claim_item_handle};
+use agent_doc_queue::queue_claim::{QueueClaim, QueueClaimState, claim_item_handle};
 use agent_doc_queue::reported_closeout::{
     ReportedCloseoutAction, ReportedCloseoutReadiness, ReportedCloseoutStep,
 };
@@ -51,6 +51,8 @@ struct Action {
     handoff: Option<Value>,
     #[serde(skip)]
     spawn: Option<Value>,
+    #[serde(skip)]
+    spawn_claim: Option<QueueClaim>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     awaiting_harness: bool,
     receipt: Option<Receipt>,
@@ -72,6 +74,7 @@ impl Action {
             next_action_argv: argv,
             handoff: None,
             spawn: None,
+            spawn_claim: None,
             awaiting_harness: false,
             receipt: None,
         })
@@ -123,12 +126,12 @@ fn project_actions(file: &Path, content: &str) -> Result<Vec<Action>> {
     let mut actions = Vec::new();
     // Pool warnings only show unbound claims after their grace period. A
     // successful connected claim needs its exact start action immediately.
-    for entry in claims
-        .iter()
-        .filter(|entry| entry.state == QueueClaimState::Claimed && entry.worker.is_none())
-    {
-        let authorization =
-            subagent_dispatch::subagent_authorization_for_content(file, content, &entry.item_text)?;
+    for entry in claims.iter().filter(|entry| {
+        matches!(
+            entry.state,
+            QueueClaimState::Claimed | QueueClaimState::Running
+        )
+    }) {
         let mut argv = agent_doc_argv(file, "start", &claim_item_handle(&entry.item_text));
         argv.extend([
             "--owner".into(),
@@ -160,12 +163,32 @@ fn project_actions(file: &Path, content: &str) -> Result<Vec<Action>> {
             entry.generation,
             entry.claimed_at_secs,
         ))?);
-        action.spawn = Some(json!({
-            "spawn_preamble": authorization.subagent_prompt_preamble,
-            "model": authorization.model,
-            "effort": authorization.effort,
-        }));
-        actions.push(with_receipt(action)?);
+        // Running receipts are needed after a crash between bind and MCP
+        // acknowledgement. Publish no spawn handoff for those attempts.
+        if entry.worker.is_none() && !entry.native_spawn_pending {
+            let authorization = subagent_dispatch::subagent_authorization_for_content(
+                file,
+                content,
+                &entry.item_text,
+            )?;
+            action.spawn = Some(json!({
+                "spawn_preamble": authorization.subagent_prompt_preamble,
+                "model": authorization.model,
+                "effort": authorization.effort,
+            }));
+        }
+        action.spawn_claim = Some(entry.clone());
+        let mut action = with_receipt(action)?;
+        if let Some(worker) = &entry.worker {
+            action.receipt = Some(Receipt::Applied);
+            action.handoff = Some(json!({ "bound_worker_id": worker.worker_id }));
+        } else if entry.native_spawn_pending {
+            if action.receipt.is_none() {
+                action.receipt = Some(Receipt::SpawnReserved);
+            }
+            action.handoff = Some(json!({ "native_spawn_result_required": true }));
+        }
+        actions.push(action);
     }
     for head in pool.next_heads {
         let authorization =
@@ -595,7 +618,7 @@ fn run_action(
     result: &mut Value,
 ) -> Result<Receipt> {
     if let Some(existing) = &previous
-        && (*existing != Receipt::SpawnReserved || worker_id.is_none())
+        && (worker_id.is_none() || *existing == Receipt::Applied)
     {
         return Ok(existing.clone());
     }
@@ -604,25 +627,45 @@ fn run_action(
     if report.is_some() && action.kind != Kind::Report {
         bail!("this queue action does not accept a worker report");
     }
-    if action.kind == Kind::Start && worker_id.is_none() {
-        if agent_doc_queue_io::address_effect::github_enabled()
-            && agent_doc_queue::address_completion_proof::address_review_target(&action.item)
-                .is_some()
-        {
-            let ledger = queue_claim::load_ledger_following_read_only(file, &content)?;
-            let claim = ledger
-                .resolve_selector(&action.item)?
-                .context("address evidence requires the exact reserved queue claim")?;
-            agent_doc_queue_io::address_effect::require_worker_observation(file, claim)?;
+    if let Some(claim) = &action.spawn_claim {
+        if let Some(worker) = &claim.worker {
+            if let Some(worker_id) = worker_id {
+                anyhow::ensure!(
+                    worker_id == worker.worker_id,
+                    "native spawn already bound to another worker"
+                );
+                if previous != Some(Receipt::Applied) {
+                    // A prior worker bind may have committed before its
+                    // lineage or visible claim projection finished.
+                    run_command(&render_command(&action, Some(worker_id), report)?)?;
+                }
+            }
+            update_receipt(file, id, previous, Receipt::Applied)?;
+            return Ok(Receipt::Applied);
         }
-        if let Some(receipt) = update_receipt(file, id, None, Receipt::SpawnReserved)? {
-            return Ok(receipt);
+        if worker_id.is_none() {
+            if !queue_claim::reserve_native_spawn(file, claim)? {
+                return Ok(Receipt::SpawnReserved);
+            }
+            if let Some(receipt) = update_receipt(file, id, None, Receipt::SpawnReserved)? {
+                return Ok(receipt);
+            }
+            result["spawn"] = json!(action.spawn);
+            return Ok(Receipt::SpawnReserved);
         }
-        result["spawn"] = json!(action.spawn);
-        return Ok(Receipt::SpawnReserved);
+        anyhow::ensure!(
+            claim.native_spawn_pending || previous == Some(Receipt::SpawnReserved),
+            "reserve the start action before spawning a native worker"
+        );
+        // Bind is a generation-fenced idempotent state transition, so a
+        // crash can retry the exact acknowledgement. It never calls spawn.
+        let argv = render_command(&action, worker_id, report)?;
+        run_command(&argv)?;
+        update_receipt(file, id, previous, Receipt::Applied)?;
+        return Ok(Receipt::Applied);
     }
-    if action.kind == Kind::Start && previous != Some(Receipt::SpawnReserved) {
-        bail!("reserve the start action before spawning a native worker");
+    if let Some(existing) = previous.as_ref() {
+        return Ok(existing.clone());
     }
     let argv = render_command(&action, worker_id, report)?;
     if action.kind == Kind::ExternalCloseout {

@@ -177,7 +177,7 @@ fn observe_pool_refill(
                 owner: claim.owner.clone(),
                 generation: claim.generation,
                 claimed_for_secs: now_secs.saturating_sub(claim.claimed_at_secs),
-                brief_command: crate::subagent_dispatch::brief_command(&document, &claim.item_text),
+                brief_command: obligation.brief_command,
                 start_command: obligation.start_command,
                 release_command: obligation.release_command,
             }

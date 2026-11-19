@@ -33,18 +33,122 @@ pub fn github_enabled() -> bool {
 
 /// Record an inline execution after its cycle has been admitted, before the
 /// agent receives the prompt.
-pub fn capture_before_execution(file: &Path, submitted: &str) -> Result<()> {
-    let revision = address_prompt_revision(submitted);
-    let Some(target) = remote_target(&revision) else {
+pub fn capture_before_execution(
+    file: &Path,
+    submitted: impl IntoIterator<Item = impl AsRef<str>>,
+) -> Result<()> {
+    let effects = submitted
+        .into_iter()
+        .filter_map(|item| {
+            let revision = address_prompt_revision(item.as_ref());
+            let target = remote_target(&revision)?;
+            Some((revision, target))
+        })
+        .collect::<Vec<_>>();
+    if effects.is_empty() {
         return Ok(());
-    };
+    }
     let cycle = open_cycle(file)?.context("address observation requires an admitted cycle")?;
-    ensure_dispatch_baseline(
-        file,
-        &AddressAttempt::inline(&cycle, &revision),
-        &target,
-        fetch_snapshot,
-    )
+    reserve_inline_execution(file, &cycle, &effects, fetch_snapshot)
+}
+
+/// The existing before receipt is also a durable hold. Admission cannot
+/// distinguish a crash just before prompt delivery from one just after it.
+/// Retain the observed attempt rather than sampling a new baseline.
+fn inline_hold(
+    conn: &state_store::Connection,
+    document_hash: &str,
+    revision: &str,
+    target: &AddressTarget,
+) -> Result<Option<String>> {
+    const PREFIX: &str = "address_effect_v2:before:inline:";
+    let suffix = format!(":{}:{}", revision_hash(revision), target.key());
+    let mut query = conn.prepare(
+        "SELECT state_kind FROM queue_document_state
+         WHERE document_hash = ?1 AND substr(state_kind, 1, length(?2)) = ?2
+           AND substr(state_kind, -length(?3)) = ?3
+           AND length(state_kind) > length(?2) + length(?3)
+         ORDER BY state_kind LIMIT 2",
+    )?;
+    let mut rows = query.query((document_hash, PREFIX, &suffix))?;
+    let Some(first) = rows.next()? else {
+        return Ok(None);
+    };
+    let state_kind: String = first.get(0)?;
+    anyhow::ensure!(
+        rows.next()?.is_none(),
+        "#addressproof: multiple earlier inline executions for {} require exact cycle reconciliation",
+        target.key()
+    );
+    Ok(Some(
+        state_kind[PREFIX.len()..state_kind.len() - suffix.len()].to_string(),
+    ))
+}
+
+fn inline_observed_cycle(
+    file: &Path,
+    revision: &str,
+    target: &AddressTarget,
+) -> Result<Option<String>> {
+    let Some(root) = agent_doc_fs::find_project_root(file) else {
+        return Ok(None);
+    };
+    if !state_store::state_db_path(&root).exists() {
+        return Ok(None);
+    }
+    let conn = state_store::open_state_db_read_only(&root)?;
+    if !state_store::state_table_exists(&conn, "queue_document_state")? {
+        return Ok(None);
+    }
+    inline_hold(&conn, &agent_doc_hash::path_hash(file)?, revision, target)
+}
+
+fn refuse_inline_hold(cycle: Option<String>, target: &AddressTarget) -> Result<()> {
+    if let Some(cycle) = cycle {
+        anyhow::bail!(
+            "#addressproof: inline cycle {cycle} already received a before observation for {}. Reconcile the exact prior response and remote effect before repeating this prompt revision.",
+            target.key(),
+        );
+    }
+    Ok(())
+}
+
+fn reserve_inline_execution(
+    file: &Path,
+    cycle: &str,
+    effects: &[(String, AddressTarget)],
+    mut fetch: impl FnMut(&AddressTarget) -> Option<AddressSnapshot>,
+) -> Result<()> {
+    let root = agent_doc_fs::find_project_root(file).context("no agent-doc project root")?;
+    let mut conn = state_store::open_state_db(&root)?;
+    let document_hash = agent_doc_hash::path_hash(file)?;
+    let mut baselines = Vec::new();
+    for (revision, target) in effects {
+        refuse_inline_hold(
+            inline_hold(&conn, &document_hash, revision, target)?,
+            target,
+        )?;
+        let baseline = fetch(target).context(
+            "could not capture the pull-request baseline before dispatch (#addressproof)",
+        )?;
+        baselines.push((revision, target, baseline));
+    }
+    // The before receipts are a single admission cut. A failure before the
+    // handoff exposes none of the prompts and leaves none with a false hold.
+    let tx = conn.transaction()?;
+    for (revision, target, baseline) in baselines {
+        refuse_inline_hold(inline_hold(&tx, &document_hash, revision, target)?, target)?;
+        insert_snapshot(
+            &tx,
+            file,
+            &AddressAttempt::inline(cycle, revision),
+            target,
+            SnapshotKind::Before,
+            &baseline,
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
 }
 
 /// Record the before observation for the exact reserved worker attempt.
@@ -52,6 +156,10 @@ pub fn capture_before_worker(file: &Path, claim: &QueueClaim) -> Result<()> {
     let Some(target) = remote_target(&claim.item_text) else {
         return Ok(());
     };
+    refuse_inline_hold(
+        inline_observed_cycle(file, &claim.item_text, &target)?,
+        &target,
+    )?;
     let attempt = AddressAttempt::for_claim(claim);
     if load_snapshot(file, &attempt, &target, SnapshotKind::Before)?.is_none()
         && inherit_proven_stage(file, claim, &attempt, &target)?
@@ -67,6 +175,10 @@ pub fn require_worker_observation(file: &Path, claim: &QueueClaim) -> Result<()>
     let Some(target) = remote_target(&claim.item_text) else {
         return Ok(());
     };
+    refuse_inline_hold(
+        inline_observed_cycle(file, &claim.item_text, &target)?,
+        &target,
+    )?;
     let attempt = AddressAttempt::for_claim(claim);
     anyhow::ensure!(
         load_snapshot(file, &attempt, &target, SnapshotKind::Before)?.is_some(),
@@ -259,12 +371,24 @@ pub fn install_for_content(file: &Path, content: &str) -> Option<AddressEffectGu
                 Ok(Some(claim)) if claim.worker_binding_holds_attempt() => {
                     (Some(AddressAttempt::for_claim(claim)), true)
                 }
-                Ok(None) => (
-                    cycle
-                        .as_ref()
-                        .map(|cycle| AddressAttempt::inline(&cycle.cycle_id, &submitted)),
-                    cycle.as_ref().is_some_and(|cycle| cycle.is_open()),
-                ),
+                Ok(None) => {
+                    let prior = match inline_observed_cycle(file, &submitted, &target) {
+                        Ok(prior) => prior,
+                        Err(error) => {
+                            eprintln!(
+                                "[queue] could not read prior inline address attempt: {error:#}"
+                            );
+                            return AddressObservation::Unseen;
+                        }
+                    };
+                    let fetch = cycle.as_ref().is_some_and(|cycle| {
+                        cycle.is_open() && prior.as_deref() == Some(cycle.cycle_id.as_str())
+                    });
+                    (
+                        prior.map(|cycle| AddressAttempt::inline(&cycle, &submitted)),
+                        fetch,
+                    )
+                }
                 Ok(Some(_)) => (None, false),
                 Err(error) => {
                     eprintln!("[queue] ambiguous address claim: {error:#}");
@@ -410,6 +534,17 @@ fn save_snapshot(
 ) -> Result<()> {
     let root = agent_doc_fs::find_project_root(file).context("no agent-doc project root")?;
     let conn = state_store::open_state_db(&root)?;
+    insert_snapshot(&conn, file, attempt, target, kind, snapshot)
+}
+
+fn insert_snapshot(
+    conn: &state_store::Connection,
+    file: &Path,
+    attempt: &AddressAttempt,
+    target: &AddressTarget,
+    kind: SnapshotKind,
+    snapshot: &AddressSnapshot,
+) -> Result<()> {
     // The first observation owns this exact attempt and phase. Another
     // process may resume the same attempt, but may not replace that evidence.
     conn.execute(
@@ -560,6 +695,47 @@ mod tests {
             comment_commit: None,
             thread_named: true,
         }
+    }
+
+    #[test]
+    fn inline_hold_fences_new_cycle_and_preserves_other_revisions() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        std::fs::write(&file, "task").unwrap();
+        let revision = "#address https://github.com/sample-org/sample-repo/pull/302#discussion_r1";
+        let target = address_review_target(revision).unwrap();
+        let effect = (revision.to_string(), target.clone());
+        let before = snapshot("fa3a3f449986d565f21aeb6e0f792323bc8d1d58", vec![]);
+        reserve_inline_execution(&file, "first-cycle", &[effect.clone()], |_| {
+            Some(before.clone())
+        })
+        .unwrap();
+        let prior = AddressAttempt::inline("first-cycle", revision);
+        assert_eq!(
+            observe_snapshot(&file, &prior, &target, |_| None).unwrap(),
+            AddressObservation::Unseen
+        );
+        let error = reserve_inline_execution(&file, "replacement-cycle", &[effect], |_| {
+            panic!("unknown prior effect must not obtain a fresh baseline")
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("first-cycle"), "{error:#}");
+        assert_eq!(
+            load_snapshot(
+                &file,
+                &AddressAttempt::inline("replacement-cycle", revision),
+                &target,
+                SnapshotKind::Before,
+            )
+            .unwrap(),
+            None
+        );
+        let edited = format!("{revision} for a new review request");
+        reserve_inline_execution(&file, "replacement-cycle", &[(edited, target)], |_| {
+            Some(before.clone())
+        })
+        .unwrap();
     }
 
     #[test]

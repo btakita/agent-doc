@@ -3063,12 +3063,13 @@ fn run_with_options_to_writer_in_pass(
     if !options.probe && !no_changes {
         // Bind the before observation to the same ordered submissions the
         // harness receives, including the ancestry of repeated nested rows.
-        for submitted in agent_doc_queue::queue_response::submitted_prompts_for_heads(
-            queue_authoritative_content,
-            &selected_queue_heads,
-        ) {
-            agent_doc_queue_io::address_effect::capture_before_execution(file, &submitted)?;
-        }
+        agent_doc_queue_io::address_effect::capture_before_execution(
+            file,
+            agent_doc_queue::queue_response::submitted_prompts_for_heads(
+                queue_authoritative_content,
+                &selected_queue_heads,
+            ),
+        )?;
     }
     // `#qheadannotation`: surface operator text appended to a selected `do [#id]`
     // head as a typed directive instead of leaving it buried in the head string.

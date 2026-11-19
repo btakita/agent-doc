@@ -3007,8 +3007,31 @@ fn mcp_queue_actions_reserve_native_spawn_once_and_retain_failure_across_servers
     assert_ne!(second, start);
     let claimed = queue_action(serde_json::json!({"next_action_id": second}));
     let start = claimed["next_action_id"].as_str().unwrap();
+    let start_argv = claimed["next_action_argv"].as_array().unwrap();
+    let generation = start_argv
+        .windows(2)
+        .find(|pair| pair[0] == "--generation")
+        .and_then(|pair| pair[1].as_str())
+        .unwrap();
+    agent_doc_cmd()
+        .current_dir(tmp.path())
+        .args(["queue", "brief"])
+        .arg(&doc)
+        .args([
+            "--item",
+            "Handle independent work.",
+            "--reserve-spawn",
+            generation,
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Handle independent work."));
     let reserved = queue_action(serde_json::json!({"next_action_id": start}));
     assert_eq!(reserved["receipt"]["state"], "spawn_reserved");
+    assert!(
+        reserved["spawn"].is_null(),
+        "CLI already reserved the handoff"
+    );
     let started =
         queue_action(serde_json::json!({"next_action_id": start, "worker_id": "worker-two"}));
     assert_eq!(started["receipt"]["state"], "applied", "{started}");

@@ -2535,7 +2535,7 @@ pub fn instruction_for(item: &SteeringItem) -> &'static str {
                 agent_doc_queue::subagent_worktree_layout_rule!(),
                 " Before dispatching, claim it with `agent-doc queue claim <FILE> --item \
                  <id-or-line> --owner subagent:<label>` so the loop and Stop hook do not re-enter for \
-                 it; then paste the output of `agent-doc queue brief <FILE> --item <id-or-line>` \
+                 it; then paste the output of `agent-doc queue brief <FILE> --item <id-or-line> --reserve-spawn <generation>` \
                  verbatim at the top of the subagent prompt (the operator's authorization for the \
                  item, `#waypostauthorization`). When the subagent reports back, persist its result \
                  in THIS turn, but first execute and verify every authorized current-item or \
@@ -2652,7 +2652,7 @@ pub fn start_command_for(document: &str, verbatim: &str) -> String {
 /// subagent dispatch of `verbatim` in `document` (`#waypostauthorization`).
 pub fn brief_command_for(document: &str, verbatim: &str) -> String {
     format!(
-        "agent-doc queue brief {} --item {}",
+        "agent-doc queue brief {} --item {} --reserve-spawn <generation>",
         shell_single_quote(document),
         shell_single_quote(&claim_item_handle(verbatim))
     )
@@ -4863,7 +4863,7 @@ mod tests {
             "the dispatch directive names the worker acknowledgement: {text}"
         );
         assert!(
-            text.contains("`agent-doc queue brief 'tasks/bugs.md' --item '#preflightdeadline'`"),
+            text.contains("`agent-doc queue brief 'tasks/bugs.md' --item '#preflightdeadline' --reserve-spawn <generation>`"),
             "the dispatch directive names the authorization brief: {text}"
         );
         assert_eq!(

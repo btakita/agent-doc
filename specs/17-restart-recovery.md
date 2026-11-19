@@ -62,17 +62,25 @@ consume those typed actions; they must not turn `needs_operator` into a retry.
 Admission records the document and baseline hashes and the cycle ID. The
 steering watermark and the selected free-text queue witness distinguish
 operator changes from existing work and past generated markers. Queue claims
-add the authored identity and generation. The harness start receipt adds a
-worker ID. A reservation with no bind can have crashed on either side of
-native spawn. The journal leaves that case recoverable without minting a
-second startup attempt.
+add the authored identity and generation. CLI and hook dispatch reserve the
+launch using `queue brief --reserve-spawn N`, and connected MCP start actions
+reserve that same claim before yielding the worker preamble. The harness start
+receipt adds a worker ID. A reservation with no bind can have crashed on either
+side of native spawn. It holds the same generation and pool slot beyond claim
+TTL. Cold recovery reports `native_spawn_pending` and `needs_operator` on either
+boot until the harness can bind the worker or attest that the launch did not
+occur. A timeout or missing receipt leaves the hold intact.
 
 For `#address`, the external adapter records the baseline in the admitted
 inline cycle or worker generation and the exact submitted queue revision.
 Only a paired observation proves a delta. A worker hand-back retained because
 the remote is unavailable is ordinary goal hand-back data. The separate
 completion receipt is recorded only when the report can enter the completion
-path. A new execution of the same GitHub target receives its own baseline.
+path. The inline before receipt also holds the exact submitted revision
+across cycles. Closeout can consult that attempt's durable paired proof.
+A later cycle cannot obtain a new baseline for the same revision, even if the
+earlier agent's delivery receipt was lost. A different revision receives
+its own baseline.
 
 A worker claim disappearing from the live ledger is orphaned until a matching
 worker, owner, identity, and generation appear in a cancellation or exact

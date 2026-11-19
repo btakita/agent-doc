@@ -6157,6 +6157,9 @@ enum QueueAction {
         /// result from releasing a replacement attempt.
         #[arg(long)]
         generation: Option<u64>,
+        /// Record why the harness confirms that the reserved native spawn did not occur.
+        #[arg(long, requires_all = ["generation", "requeue"])]
+        spawn_failed: Option<String>,
     },
     /// Print the operator authorization preamble for a dispatched queue item
     /// (`#waypostauthorization`): the verbatim item, the backlog text an id head
@@ -6174,6 +6177,9 @@ enum QueueAction {
         /// Print the whole authorization object as JSON instead of the preamble
         #[arg(long)]
         json: bool,
+        /// Reserve native spawn for the exact generation printed by queue claim.
+        #[arg(long, value_name = "GENERATION")]
+        reserve_spawn: Option<u64>,
     },
     /// Print a compact read-only view of the document's queue trees
     /// (`#queuetreeview`): one line per queue row and live operator answer with
@@ -10484,8 +10490,8 @@ fn try_main() -> anyhow::Result<()> {
                         &file, &claim,
                     );
                 eprintln!(
-                    "[queue] next: after the harness spawn returns its worker identity, run `{}`; if no worker was spawned, run `{}`",
-                    acknowledgement.start_command, acknowledgement.release_command,
+                    "[queue] next: reserve the exact native spawn with `{}`; after the harness returns its worker identity, run `{}`",
+                    acknowledgement.brief_command, acknowledgement.start_command,
                 );
                 Ok(())
             }
@@ -10721,6 +10727,7 @@ fn try_main() -> anyhow::Result<()> {
                 item,
                 requeue,
                 generation,
+                spawn_failed,
             } => {
                 use agent_doc_queue_io::claim_release_receipt::{ReleaseKind, release_attempt};
                 let kind = if requeue {
@@ -10728,7 +10735,18 @@ fn try_main() -> anyhow::Result<()> {
                 } else {
                     ReleaseKind::Reported
                 };
-                let released = release_attempt(&file, &item, kind, generation)?;
+                let released = if let Some(reason) = spawn_failed.as_deref() {
+                    Some(
+                        agent_doc_queue_io::queue_claim::confirm_native_spawn_failed(
+                            &file,
+                            &item,
+                            generation.context("missing native spawn generation")?,
+                            reason,
+                        )?,
+                    )
+                } else {
+                    release_attempt(&file, &item, kind, generation)?
+                };
                 if let Some(claim) = released.as_ref() {
                     let queue_effects = CliQueueCommandEffects;
                     agent_doc_queue_io::queue_cmd::project_claim_item_runtime_state_with_effects(
@@ -11431,24 +11449,26 @@ fn try_main() -> anyhow::Result<()> {
                 }
                 Ok(())
             }
-            QueueAction::Brief { file, item, json } => {
+            QueueAction::Brief {
+                file,
+                item,
+                json,
+                reserve_spawn,
+            } => {
                 let authorization =
                     agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_item(
                         &file, &item,
                     )?;
-                // A crash can leave an unbound reservation. The brief must
-                // verify its existing before receipt, not sample the target again.
-                if agent_doc_queue_io::address_effect::github_enabled()
-                    && agent_doc_queue::address_completion_proof::address_review_target(
-                        &authorization.item,
-                    )
-                    .is_some()
-                    && let Some(claim) = agent_doc_queue_io::queue_claim::load_ledger(&file)?
+                if let Some(generation) = reserve_spawn {
+                    let ledger = agent_doc_queue_io::queue_claim::load_ledger(&file)?;
+                    let claim = ledger
                         .resolve_selector(&authorization.item)?
-                    && claim.state == agent_doc_queue::queue_claim::QueueClaimState::Claimed
-                    && claim.worker.is_none()
-                {
-                    agent_doc_queue_io::address_effect::require_worker_observation(&file, claim)?;
+                        .filter(|claim| claim.generation == generation)
+                        .context("native spawn requires the current claimed generation")?;
+                    anyhow::ensure!(
+                        agent_doc_queue_io::queue_claim::reserve_native_spawn(&file, claim)?,
+                        "native spawn for generation {generation} is already reserved; reconcile the harness result and bind its worker ID with queue start"
+                    );
                 }
                 if json {
                     println!("{}", serde_json::to_string_pretty(&authorization)?);

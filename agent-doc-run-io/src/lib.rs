@@ -674,7 +674,10 @@ pub fn run_once(
     }
 
     if let Some(submitted) = &queue_submission {
-        agent_doc_queue_io::address_effect::capture_before_execution(file, submitted)?;
+        agent_doc_queue_io::address_effect::capture_before_execution(
+            file,
+            std::iter::once(submitted),
+        )?;
     }
 
     let fork = resume_id.is_none();

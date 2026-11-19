@@ -1,6 +1,5 @@
 package com.github.btakita.agentdoc
 
-import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertSame
@@ -8,14 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.random.Random
 
-/**
- * `#kotlinflushprep`: [prepareLocalEditorEditsUtil] applies a burst to an edit window over the
- * shadow instead of a whole-document `StringBuilder`, and converts offsets with a cached
- * surrogate-pair index instead of `Character.codePointCount` over the document. Every case here
- * runs the shipped function beside [legacyPrepareLocalEditorEditsUtil], the pre-window
- * implementation kept verbatim, and requires the same answer: the same native edits (offsets,
- * delete counts, inserts), the same resulting text, and the same refusals.
- */
+/** Compare the persistent shadow to the original whole-document walk. */
 class LocalEditorSplicePreparationTest {
     @Test
     fun `randomized bursts prepare exactly what the whole-document walk prepared`() {
@@ -23,31 +15,19 @@ class LocalEditorSplicePreparationTest {
         var compared = 0
         var refused = 0
         repeat(4_000) { round ->
-            var shadow = randomText(random, random.nextInt(0, 160))
-            // Chain several flushes the way the replica worker does: each one types into the
-            // text the previous one produced, so the pair index cached for that text is reused.
+            var text = randomText(random, random.nextInt(0, if (round % 5 == 0) 420 else 160))
+            var shadow = ReplicaShadow(text)
             repeat(random.nextInt(1, 6)) {
-                val burst = randomBurst(random, shadow, clustered = round % 3 != 0)
-                val expected = legacyPrepareLocalEditorEditsUtil(shadow, burst)
+                val burst = randomBurst(random, text, clustered = round % 3 != 0)
+                val expected = legacyPrepareLocalEditorEditsUtil(text, burst)
                 val actual = prepareLocalEditorEditsUtil(shadow, burst)
-                assertEquals("round $round shadow=${shadow.escaped()} burst=$burst", expected, actual)
+                assertEquals("round $round shadow=${text.escaped()} burst=$burst", expected, actual?.toTextBatch())
                 compared++
                 if (expected == null) {
                     refused++
                 } else {
-                    assertArrayEquals(
-                        "pair index carried to the next shadow",
-                        scanSurrogatePairStartsUtil(expected.resultingText),
-                        surrogatePairStartsUtil(actual!!.resultingText),
-                    )
-                    shadow =
-                        if (random.nextInt(4) == 0) {
-                            // An equal text that is not the instance the flush produced: a
-                            // cache miss, so the index is rebuilt from the text.
-                            String(actual.resultingText.toCharArray())
-                        } else {
-                            actual.resultingText
-                        }
+                    text = expected.resultingText
+                    shadow = actual!!.resultingShadow
                 }
             }
         }
@@ -55,60 +35,70 @@ class LocalEditorSplicePreparationTest {
     }
 
     @Test
-    fun `the edit window counts code points like Character codePointCount over any range`() {
+    fun `the rope counts code points like Character codePointCount over any range`() {
         val random = Random(0x77696e64)
         repeat(2_000) { round ->
-            val base = randomText(random, random.nextInt(0, 80))
-            val window = EditWindowText(base, scanSurrogatePairStartsUtil(base))
+            val base = randomText(random, random.nextInt(0, 350))
+            var shadow = ReplicaShadow(base)
             val text = StringBuilder(base)
             repeat(random.nextInt(1, 8)) {
                 val start = random.nextInt(text.length + 1)
                 val end = start + random.nextInt(0, minOf(4, text.length - start) + 1)
                 val insert = randomText(random, random.nextInt(0, 3))
-                window.cover(start, end)
-                window.replaceCovered(start, end, insert)
+                shadow = shadow.replace(start, end, insert)
                 text.replace(start, end, insert)
-                assertEquals(text.length, window.length)
+                assertEquals(text.length, shadow.length)
                 repeat(12) {
                     val from = random.nextInt(text.length + 1)
                     val to = random.nextInt(from, text.length + 1)
                     assertEquals(
                         "round $round [$from, $to) of ${text.toString().escaped()}",
                         Character.codePointCount(text, from, to),
-                        window.codePointCount(from, to),
+                        shadow.codePointCount(from, to),
                     )
                 }
             }
-            val materialized = window.materialize()
-            assertEquals(text.toString(), materialized)
-            assertArrayEquals(scanSurrogatePairStartsUtil(materialized), window.resultingPairStarts(materialized))
+            assertEquals(text.toString(), shadow.toString())
         }
     }
 
     @Test
-    fun `typing into its own result reuses the cached pair index`() {
-        var shadow = "a😀b".repeat(2_000) + "\n❯ prompt\n"
-        surrogatePairStartsUtil(shadow)
-        val scansBefore = surrogatePairFullScans.get()
+    fun `typing into its own result does not rescan the unchanged document`() {
+        val before = "a😀b".repeat(20_000) + "\n❯ prompt\n"
+        var shadow = ReplicaShadow(before)
+        assertEquals(20_000, shadow.length - shadow.codePointCount(0, shadow.length))
+        val scanned = surrogatePairScannedUtf16.get()
         var anchor = shadow.length - 1
-        repeat(64) { typed ->
+        repeat(256) { typed ->
             val edit = CapturedLocalEditorEdit(anchor, "", "😁", 0L, shadow.length)
-            val batch = prepareLocalEditorEditsUtil(shadow, listOf(edit))
-            assertEquals(legacyPrepareLocalEditorEditsUtil(shadow, listOf(edit)), batch)
-            shadow = batch!!.resultingText
+            val batch = prepareLocalEditorEditsUtil(shadow, listOf(edit))!!
+            assertEquals(PreparedLocalEditorEdit(anchor - 20_000 - typed, 0, "😁"), batch.edits.single())
+            shadow = batch.resultingShadow
             anchor += 2
-            assertEquals(2_000 + typed + 1, shadow.length - shadow.codePointCount(0, shadow.length))
+            assertEquals(20_000 + typed + 1, shadow.length - shadow.codePointCount(0, shadow.length))
         }
-        assertEquals("no whole-text scan while typing into produced shadows", scansBefore, surrogatePairFullScans.get())
+        assertTrue("only small pieces are rescanned", surrogatePairScannedUtf16.get() - scanned < before.length)
+        assertEquals(before.dropLast(1) + "😁".repeat(256) + "\n", shadow.toString())
     }
 
     @Test
     fun `an empty burst answers the shadow itself`() {
-        val shadow = "Queue: 😀\n"
+        val shadow = ReplicaShadow("Queue: 😀\n")
         val batch = prepareLocalEditorEditsUtil(shadow, emptyList())
         assertNotNull(batch)
-        assertSame(shadow, batch!!.resultingText)
+        assertSame(shadow, batch!!.resultingShadow)
         assertEquals(emptyList<PreparedLocalEditorEdit>(), batch.edits)
+    }
+
+    @Test
+    fun `UTF-8 hash preserves pairs across pieces and replaces malformed surrogates`() {
+        val before = "x".repeat(4095) + "\uD83D" + "y".repeat(500) + "\uDE00"
+        val shadow = ReplicaShadow(before).replace(4096, 4096, "\uDE00")
+        val expected = before.take(4096) + "\uDE00" + before.drop(4096)
+        assertEquals(expected, shadow.toString())
+        assertEquals(expected.codePointCount(0, expected.length), shadow.codePointCount(0, shadow.length))
+        assertEquals(contentHashUtil(expected), shadow.contentHash)
+        assertEquals(contentHashUtil(before), ReplicaShadow(before).contentHash)
     }
 
     @Test

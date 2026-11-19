@@ -6,6 +6,7 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -606,23 +607,18 @@ class CrdtReplicaForwarderTest {
         assertTrue(fwd.register())
         assertEquals("registration establishes the one native text observation", 1, node.textReads)
 
-        // Aligning an already-equal editor cut canonicalizes the manager's
-        // String instance without another FFI materialization.
-        fwd.ensureEditorText(base)
+        assertTrue(fwd.ensureEditorText(base))
         assertEquals(1, node.textReads)
 
-        var current = base
+        var current = fwd.replicaShadow()!!
         repeat(8) {
-            val next = "$current!"
-            fwd.forwardLocalDelta(
-                offset = current.length,
-                deleteLen = 0,
-                insert = "!",
-                resultingText = next,
-            )
-            assertTrue(shouldForwardLocalDeltaUtil(fwd.replicaText(), next))
-            current = next
+            val edit = CapturedLocalEditorEdit(current.length, "", "!", 0L, current.length)
+            val batch = prepareLocalEditorEditsUtil(current, listOf(edit))!!
+            assertTrue(fwd.forwardLocalEdits(batch))
+            assertSame(batch.resultingShadow, fwd.replicaShadow())
+            current = batch.resultingShadow
         }
+        assertEquals(base + "!".repeat(8), fwd.replicaText())
 
         assertEquals(
             "ordinary keystrokes must not materialize the 100K native document",

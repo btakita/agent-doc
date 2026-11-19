@@ -743,16 +743,18 @@ class CrdtReplicaProjectionFrontierTest {
 
     @Test
     fun `local delta is never applied against a stale native baseline`() {
-        assertTrue(shouldForwardLocalDeltaUtil("before", "before"))
-        assertFalse(shouldForwardLocalDeltaUtil("stale", "before"))
-        assertFalse(shouldForwardLocalDeltaUtil(null, "before"))
+        val before = ReplicaShadow("before")
+        assertEquals(
+            LocalReplicaBaselineDecision.RebootstrapCanonicalThenForward,
+            localReplicaBaselineDecisionUtil(null, before),
+        )
         assertEquals(
             LocalReplicaBaselineDecision.ForwardLocal,
-            localReplicaBaselineDecisionUtil("before", "before"),
+            localReplicaBaselineDecisionUtil(ReplicaShadow("before"), before),
         )
         assertEquals(
             LocalReplicaBaselineDecision.RebootstrapCanonicalThenForward,
-            localReplicaBaselineDecisionUtil("stale", "before"),
+            localReplicaBaselineDecisionUtil(ReplicaShadow("stale!"), before),
         )
 
         val managerPath =
@@ -770,7 +772,7 @@ class CrdtReplicaProjectionFrontierTest {
         assertTrue(localEffect.contains("expectedCanonicalTextAtSwap = canonical"))
         assertTrue(localEffect.contains("expectedEditorTextAtSwap = visibleEditorText"))
         assertTrue(localEffect.contains("bootstrapFromControllerCanonical = true"))
-        assertTrue(localEffect.contains("shadows[filePath] = beforeText"))
+        assertTrue(localEffect.contains("shadows[filePath] = beforeShadow"))
         assertTrue(
             localEffect.indexOf("replacement.replicaText() != canonical") <
                 localEffect.indexOf("replacement.forwardLocalEdits(rebased)"),

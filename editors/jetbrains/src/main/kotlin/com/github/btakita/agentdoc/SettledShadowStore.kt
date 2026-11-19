@@ -82,7 +82,7 @@ internal class SettledShadowStore(
     /** Per-document state; guarded by its own monitor for the hot-path fields. */
     private class DocState {
         /** The newest settled shadow not yet on disk, or null when the record is current. */
-        var pending: String? = null
+        var pending: ReplicaShadow? = null
         var pendingSeq: Long = 0L
         var invalidationQueued: Boolean = false
         var writeQueued: Boolean = false
@@ -117,7 +117,9 @@ internal class SettledShadowStore(
      * record is invalidated and rewritten in the background (see the class comment). After [close],
      * nothing is scheduled any more, so the record is written on the calling thread instead.
      */
-    fun save(filePath: String, text: String) {
+    fun save(filePath: String, text: String) = save(filePath, ReplicaShadow(text))
+
+    fun save(filePath: String, text: ReplicaShadow) {
         val state = states.computeIfAbsent(filePath) { DocState() }
         if (closed) {
             synchronized(state) {
@@ -182,7 +184,7 @@ internal class SettledShadowStore(
         val loaded =
             synchronized(ioLock) {
                 // A pending shadow is newer than any record (and the record may be invalidated).
-                synchronized(state) { state.pending }?.let { return@synchronized it }
+                synchronized(state) { state.pending }?.let { return@synchronized it.toString() }
                 readRecord(filePath)?.also { (_, hash) -> state.diskHash = hash }?.first
             }
         maybeScheduleGc()
@@ -197,7 +199,7 @@ internal class SettledShadowStore(
     private fun persist(filePath: String, state: DocState, write: Boolean): Boolean =
         synchronized(ioLock) {
             val (text, seq) = synchronized(state) { (state.pending ?: return true) to state.pendingSeq }
-            val hash = contentHashUtil(text)
+            val hash = text.contentHash
             if (hash == state.diskHash) {
                 clearPending(state, seq)
                 return true
@@ -218,7 +220,7 @@ internal class SettledShadowStore(
                 }
             }
             try {
-                writeRecord(target, filePath, hash, text)
+                writeRecord(target, filePath, hash, text.toString())
                 state.diskHash = hash
                 clearPending(state, seq)
                 true

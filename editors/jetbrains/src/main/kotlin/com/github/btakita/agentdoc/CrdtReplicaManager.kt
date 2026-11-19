@@ -728,9 +728,6 @@ internal fun replicaBaselineDecisionUtil(
     else -> ReplicaBaselineDecision.RetryFailClosed
 }
 
-internal fun shouldForwardLocalDeltaUtil(replicaText: String?, shadowText: String): Boolean =
-    replicaText == shadowText
-
 internal enum class LocalReplicaBaselineDecision {
     ForwardLocal,
     RebootstrapCanonicalThenForward,
@@ -750,10 +747,10 @@ internal fun capturedRebaseCanReuseEndpointUtil(
 ): Boolean = endpointReplicaText == canonicalText && visibleEditorText == capturedVisibleText
 
 internal fun localReplicaBaselineDecisionUtil(
-    replicaText: String?,
-    capturedBaseText: String,
+    replicaShadow: ReplicaShadow?,
+    capturedBase: ReplicaShadow,
 ): LocalReplicaBaselineDecision =
-    if (shouldForwardLocalDeltaUtil(replicaText, capturedBaseText)) {
+    if (replicaShadow?.matches(capturedBase) == true) {
         LocalReplicaBaselineDecision.ForwardLocal
     } else {
         LocalReplicaBaselineDecision.RebootstrapCanonicalThenForward
@@ -1306,13 +1303,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             ::contentHash,
         )
     private val fileCacheConflicts = FileCacheConflictPlane(ownershipContext)
-    private val shadows = ConcurrentHashMap<String, String>()
+    private val shadows = ConcurrentHashMap<String, ReplicaShadow>()
     // Unlike [shadows], this frontier advances only after the controller
     // acknowledges the complete visible projection. A local CRDT mutation can
     // update the editing baseline while its controller is retiring or its
     // durable lineage is stale; treating that local baseline as settled lets a
     // replacement controller project an older snapshot over operator text.
-    private val settledShadows = ConcurrentHashMap<String, String>()
+    private val settledShadows = ConcurrentHashMap<String, ReplicaShadow>()
     // `#restartadoptscanonical`: the durable copy of [settledShadows]. An IDE restart used to
     // discard the settled ancestor while the controller hub survived, so registration adopted the
     // surviving canonical over operator text. Written whenever the settled shadow advances, read
@@ -1575,7 +1572,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 // Install the pre-edit base synchronously before another EDT
                 // event arrives. The serialized worker will register from this
                 // cut and forward this deletion/insertion as a real local delta.
-                shadows.putIfAbsent(filePath, beforeText)
+                shadows.putIfAbsent(filePath, ReplicaShadow(beforeText))
             }
             recordLocalEditorEdit(filePath, edit)
             scheduleLocalEditorFlush(filePath)
@@ -2015,7 +2012,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         if (
             publishedEditorCut == null ||
             hasPendingLocal(filePath) ||
-            shadows[filePath] != publishedEditorCut
+            shadows[filePath]?.matches(publishedEditorCut) != true
         ) {
             if (publishedEditorCut != null && !hasPendingLocal(filePath)) {
                 scheduleUnforwardedOperatorTextRecovery(filePath, "post-register-replay-replica-raced")
@@ -2131,7 +2128,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 }
                 val forwarder = attachedForwarder ?: forwarderFor(filePath, closingText) ?: return@submit false
                 forwarder.ensureEditorText(closingText)
-                shadows[filePath] = closingText
+                shadows[filePath] = ReplicaShadow(closingText)
                 clearLocalPending(filePath)
                 if (forwarders.remove(filePath, forwarder)) {
                     forwarder.deregister()
@@ -2183,7 +2180,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 checkpointResultText = checkpoint.batch.resultingText,
                 checkpointEpoch = checkpoint.projectionEpoch,
                 currentEpoch = nonOperatorMutationEpoch(filePath),
-                shadow = shadows[filePath],
+                shadow = shadows[filePath]?.toString(),
                 capturedEdits = capturedEdits,
                 attempts = undurableLocalForwardWaits.count(filePath),
                 canonicalCarriesCheckpoint = { canonicalCarriesUndurableLocalForward(filePath, checkpoint) },
@@ -2216,7 +2213,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             is UndurableLocalForwardSettlement.Settled -> {
                 retireUndurableLocalForward(filePath, checkpoint)
                 val settledShadow = settlement.settledShadow
-                shadows[filePath] = settledShadow
+                shadows[filePath] = ReplicaShadow(settledShadow)
                 log.warn(
                     "[crdt-replica] controller canonical carries the unacknowledged local delta for " +
                         "${File(filePath).name}; advancing the native baseline. " +
@@ -2278,16 +2275,19 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             requestRemoteDrain(filePath, "stale-operator-event-fenced")
             return LocalEditorForwardResult.Fenced
         }
-        val beforeText = shadows[filePath] ?: return LocalEditorForwardResult.Retry
+        val beforeShadow = shadows[filePath] ?: return LocalEditorForwardResult.Retry
+        val beforeText by lazy(LazyThreadSafetyMode.NONE) { beforeShadow.toString() }
         var rebasedPastAgentPatch = false
         var reconstructedMissingBase: String? = null
         val batch =
-            prepareLocalEditorEditsUtil(beforeText, currentEdits)
+            prepareLocalEditorEditsUtil(beforeShadow, currentEdits)
                 ?: rebaseSplicesPastMissingAgentPatch(filePath, beforeText, currentEdits)
                     ?.also { rebasedPastAgentPatch = true }
+                    ?.toReplicaBatch()
                 ?: reconstructSplicesFromVisibleCut(filePath, beforeText, currentEdits)
                     ?.also { reconstructedMissingBase = it.capturedBaseText }
                     ?.batch
+                    ?.toReplicaBatch()
                 ?: run {
                     log.debug(
                         "[crdt-replica] retained local splice batch for $filePath because its exact shadow range no longer matches",
@@ -2299,7 +2299,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             requestRemoteDrain(filePath, "stale-operator-event-fenced")
             return LocalEditorForwardResult.Fenced
         }
-        val editorText = batch.resultingText
+        val editorShadow = batch.resultingShadow
+        val editorText by lazy(LazyThreadSafetyMode.NONE) { editorShadow.toString() }
         // GH #282: TypingTracker can reach the splice worker before the ordinary
         // open-document attach observes this file. A plain markdown buffer has no
         // replica to converge, so retaining this batch as Retry would run both the
@@ -2308,20 +2309,22 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         // agent-doc marker is reclassified from its current text and can attach.
         if (forwarders[filePath]?.attached != true && !isAgentDocDocumentTextUtil(editorText)) {
             recordNotAgentDocDocument(filePath)
-            shadows[filePath] = editorText
+            shadows[filePath] = editorShadow
             return LocalEditorForwardResult.Fenced
         }
         val forwarder =
             forwarderFor(
                 filePath = filePath,
-                initialEditorText = beforeText,
+                initialEditorShadow = beforeShadow,
                 deferCanonicalProjectionForPendingLocal = true,
             )
         if (forwarder == null) {
-            shadows[filePath] = beforeText
+            shadows[filePath] = beforeShadow
             return LocalEditorForwardResult.Retry
         }
-        val replicaText = forwarder.replicaText()
+        val replicaShadow = forwarder.replicaShadow()
+        val baselineMatches = localReplicaBaselineDecisionUtil(replicaShadow, beforeShadow) ==
+            LocalReplicaBaselineDecision.ForwardLocal
         // `#captureddeltalivelock`: the endpoint that applied this burst's splices
         // without a durable receipt, if any.
         var undurableHolder: CrdtReplicaForwarder? = null
@@ -2333,10 +2336,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         capturedBaseText = reconstructedMissingBase!!,
                         visibleEditorText = editorText,
                         staleForwarder = forwarder,
-                        batch = batch,
+                        batch = batch.toTextBatch(),
                     )
-                localReplicaBaselineDecisionUtil(replicaText, beforeText) ==
-                    LocalReplicaBaselineDecision.ForwardLocal -> {
+                baselineMatches -> {
                     currentEpoch == nonOperatorMutationEpoch(filePath) &&
                         forwarder.forwardLocalEdits(batch).also { durable ->
                             if (!durable && forwarder.holdsUndurableLocalEdits) undurableHolder = forwarder
@@ -2348,7 +2350,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         capturedBaseText = beforeText,
                         visibleEditorText = editorText,
                         staleForwarder = forwarder,
-                        batch = batch,
+                        batch = batch.toTextBatch(),
                         onUndurableForward = { holder -> undurableHolder = holder },
                     )
             }
@@ -2356,7 +2358,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             // Retain the exact captured base. Advancing the shadow before the
             // delta reaches a canonical replica loses the only safe rebase
             // proof and turns the next retry into whole-editor adoption.
-            shadows[filePath] = beforeText
+            shadows[filePath] = beforeShadow
             undurableHolder?.let { holder ->
                 // `#captureddeltalivelock`: the replica applied this burst but the
                 // controller receipt was lost or refused. Record exactly which
@@ -2369,7 +2371,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         forwarder = holder,
                         shadowText = beforeText,
                         capturedEdits = capturedEdits,
-                        batch = batch,
+                        batch = batch.toTextBatch(),
                         projectionEpoch = currentEpoch,
                     )
                 log.warn(
@@ -2379,20 +2381,20 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         "recovery=settle-undurable-local-delta",
                 )
             }
-            if (replicaText != beforeText) {
+            if (!baselineMatches) {
                 retainedCanonicalProjectionPaths.add(filePath)
                 log.warn(
                     "[crdt-replica] local delta found a stale native baseline for ${File(filePath).name}; " +
                         "shadow_hash=${contentHash(beforeText)} " +
-                        "replica_hash=${replicaText?.let(::contentHash) ?: "missing"} " +
+                        "replica_hash=${replicaShadow?.contentHash ?: "missing"} " +
                         "recovery=canonical-rebootstrap-captured-local-delta",
                 )
             }
             requestRemoteDrain(filePath, "captured-local-delta-retry")
             return LocalEditorForwardResult.Retry
         }
-        shadows[filePath] = editorText
-        if (forwarders[filePath]?.replicaText() != editorText) {
+        shadows[filePath] = editorShadow
+        if (forwarders[filePath]?.replicaShadow()?.matches(editorShadow) != true) {
             retainedCanonicalProjectionPaths.add(filePath)
             requestRemoteDrain(filePath, "rebased-local-splices-projection")
         }
@@ -2402,7 +2404,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             // The controller folds that patch from its own receipt; the remote
             // apply then re-aligns the shadow with the editor.
             requestRemoteDrain(filePath, "rebased-past-agent-patch")
-        } else if (!projectSettledVisibleState(filePath, forwarders[filePath]!!, editorText)) {
+        } else if (!projectSettledVisibleState(filePath, forwarders[filePath]!!, editorShadow)) {
             requestRemoteDrain(filePath, "local-visible-projection-retry")
         }
         logSlow(
@@ -2410,7 +2412,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             filePath,
             started,
             details =
-                "splices=${batch.edits.size} before_chars=${beforeText.length} after_chars=${editorText.length}",
+                "splices=${batch.edits.size} before_chars=${beforeShadow.length} after_chars=${editorShadow.length}",
         )
         return LocalEditorForwardResult.Applied
     }
@@ -2738,7 +2740,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         var usefulWork = 0
         if (hasPendingLocal(filePath) || remoteEditorApplyPaths.contains(filePath)) return 0
         try {
-            val expectedText = shadows[filePath] ?: return 0
+            val expectedShadow = shadows[filePath] ?: return 0
+            val expectedText by lazy(LazyThreadSafetyMode.NONE) { expectedShadow.toString() }
             // D2: a replace delivery (out-of-band deletion re-bootstrap) installs
             // the corrected canonical only when the editor buffer still matches
             // the local replica baseline; normal deltas are merged into the native
@@ -2837,7 +2840,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     }
                     RemoteTextApplyDisposition.Recovered -> visibleProjectionAdvanced = true
                     RemoteTextApplyDisposition.RetryFailClosed -> {
-                        editorBufferText(filePath)?.let { current -> shadows[filePath] = current }
+                        editorBufferText(filePath)?.let { current -> shadows[filePath] = ReplicaShadow(current) }
                     }
                 }
             }
@@ -2916,7 +2919,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     val liveBuffer = document.text
                     if (
                         replaceDeliveryWouldClobberUnsettledOperatorTextUtil(
-                            settledShadow = settledShadows[filePath] ?: nativeReloadSettledShadows[filePath],
+                            settledShadow = (settledShadows[filePath] ?: nativeReloadSettledShadows[filePath])?.toString(),
                             bufferText = liveBuffer,
                             canonicalText = canonical,
                         )
@@ -2930,7 +2933,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     }
                     val before = document.text
                     if (before == canonical) {
-                        shadows[filePath] = canonical
+                        shadows[filePath] = ReplicaShadow(canonical)
                         installed = persistRemoteCrdtTextIfSafe(
                             filePath,
                             document,
@@ -2967,7 +2970,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                                 applyMinimalDocumentEditUtil(document, before, canonical)
                             }
                         }
-                        shadows[filePath] = canonical
+                        shadows[filePath] = ReplicaShadow(canonical)
                         installed = persistRemoteCrdtTextIfSafe(
                             filePath,
                             document,
@@ -3005,7 +3008,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 "[crdt-replica] REPLACE refused: the live buffer holds operator text the controller never " +
                     "accepted for $filePath; re-registering from the buffer instead of projecting canonical over it. " +
                     "buffer_hash=${contentHash(bufferText)} " +
-                    "settled_hash=${(settledShadows[filePath] ?: nativeReloadSettledShadows[filePath])?.let(::contentHash) ?: "missing"} " +
+                    "settled_hash=${(settledShadows[filePath] ?: nativeReloadSettledShadows[filePath])?.contentHash ?: "missing"} " +
                     "canonical_hash=${contentHash(canonical)}",
             )
             retainedCanonicalProjectionPaths.remove(filePath)
@@ -3187,7 +3190,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 scheduleTemplateGuardRecoveryRetry(filePath, "template-guard-editor-adopt")
                 return RemoteTextApplyDisposition.RetryFailClosed
             }
-            shadows[filePath] = editorText
+            shadows[filePath] = ReplicaShadow(editorText)
             retainedCanonicalProjectionPaths.remove(filePath)
             clearTemplateGuardRecoveryBackoff(filePath)
             if (!projectSettledVisibleState(filePath, replacement, editorText)) {
@@ -3330,7 +3333,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 return completeRemoteEditorApply(pending, RemoteEditorApplyOutcome(false, before), started)
             }
             if (before == pending.targetText) {
-                shadows[pending.filePath] = pending.targetText
+                shadows[pending.filePath] = ReplicaShadow(pending.targetText)
                 RemoteEditorApplyOutcome(false, before)
             } else if (hasPendingLocal(pending.filePath)) {
                 RemoteEditorApplyOutcome(false, before)
@@ -3349,7 +3352,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         preserveOperatorEditorViewStateUtil(project, document) {
                             applyMinimalDocumentEditUtil(document, before, pending.targetText)
                         }
-                        shadows[pending.filePath] = pending.targetText
+                        shadows[pending.filePath] = ReplicaShadow(pending.targetText)
                     }
                     RemoteEditorApplyOutcome(false, pending.targetText)
                 } finally {
@@ -3637,12 +3640,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             )
         ) {
             RemotePersistReconciliation.Persisted -> {
-                shadows[filePath] = targetText
+                shadows[filePath] = ReplicaShadow(targetText)
                 RemotePersistOutcome(true, targetText)
             }
             RemotePersistReconciliation.PersistedEditorNormalization -> {
                 val normalizedText = document.text
-                shadows[filePath] = normalizedText
+                shadows[filePath] = ReplicaShadow(normalizedText)
                 log.info(
                     "[crdt-replica] editor save normalized a remote projection for $filePath; " +
                         "target_hash=${contentHash(targetText)} normalized_hash=${contentHash(normalizedText)} " +
@@ -3668,7 +3671,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         }
                     }
                 }
-                shadows[filePath] = beforeText
+                shadows[filePath] = ReplicaShadow(beforeText)
                 if (document.text == beforeText && diskAfterSave == beforeText) {
                     preserveOperatorEditorViewStateUtil(project, document) {
                         FileDocumentManager.getInstance().reloadFromDisk(document)
@@ -3678,7 +3681,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             }
             RemotePersistReconciliation.PreserveAdvancedEditor -> {
                 val editorText = document.text
-                shadows[filePath] = editorText
+                shadows[filePath] = ReplicaShadow(editorText)
                 log.warn(
                     "[crdt-replica] remote editor persistence diverged from both exact planes; preserving the advanced editor and withholding disk-persisted projection for $filePath: " +
                         "before_hash=${contentHash(beforeText)} target_hash=${contentHash(targetText)} " +
@@ -3826,7 +3829,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             decision == ReplicaBaselineDecision.ProjectRemoteTarget &&
             editorRemoteGeneration != null
         ) {
-            shadows[filePath] = editorText
+            shadows[filePath] = ReplicaShadow(editorText)
                     if (!projectSettledVisibleState(filePath, forwarder, editorText)) {
                         requestRemoteDrain(filePath, "already-visible-state-projection-retry")
                     }
@@ -3867,7 +3870,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 scheduleTemplateGuardRecoveryRetry(filePath, "visible-target-canonical-advanced")
                 return false
             }
-            shadows[filePath] = editorText
+            shadows[filePath] = ReplicaShadow(editorText)
                     if (!projectSettledVisibleState(filePath, replacement, editorText)) {
                         retainedCanonicalProjectionPaths.add(filePath)
                         scheduleTemplateGuardRecoveryRetry(filePath, "visible-target-projection-retry")
@@ -3915,7 +3918,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 "[crdt-replica] incoming update deferred after shadow realignment for $filePath: " +
                     "editor_hash=$editorHash expected_hash=$expectedHash replica_hash=$visibleReplicaHash"
             )
-            shadows[filePath] = editorText
+            shadows[filePath] = ReplicaShadow(editorText)
             requestRemoteDrain(filePath, "shadow-realigned")
             return false
         }
@@ -4052,20 +4055,23 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         expectedCanonicalTextAtSwap: String? = null,
         deferCanonicalProjectionForPendingLocal: Boolean = false,
         bypassRetainedProjectionHold: Boolean = false,
+        initialEditorShadow: ReplicaShadow? = null,
     ): CrdtReplicaForwarder? {
         if (!isAgentDocUserDocumentPathUtil(filePath)) {
             attachFailureReasons[filePath] = "internal_agent_doc_path"
             return null
         }
         val cached = forwarders[filePath]
+        val initialText by lazy(LazyThreadSafetyMode.NONE) {
+            initialEditorText ?: initialEditorShadow?.toString()
+        }
         // GH #282: every registration entry point must share the open-document
         // eligibility guard. In particular, local-edit forwarding reaches this
         // helper directly. A controller refusal for plain markdown is terminal for
         // the current text and must never arm registration backoff.
         if (
             cached?.attached != true &&
-            initialEditorText != null &&
-            !isAgentDocDocumentTextUtil(initialEditorText)
+            initialText?.let { !isAgentDocDocumentTextUtil(it) } == true
         ) {
             recordNotAgentDocDocument(filePath)
             return null
@@ -4154,8 +4160,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return null
         }
         val publishedShadowAtRegistration =
-            settledShadows[filePath] ?: nativeReloadSettledShadows[filePath] ?: restorePersistedSettledShadow(filePath)
-        val bufferTextAtRegistration = editorBufferText(filePath) ?: initialEditorText
+            (settledShadows[filePath] ?: nativeReloadSettledShadows[filePath])?.toString() ?: restorePersistedSettledShadow(filePath)
+        val bufferTextAtRegistration = editorBufferText(filePath) ?: initialText
         val canonicalTextAtRegistration = forwarder.replicaText()
         val acknowledgedBaseAtRegistration =
             acknowledgedReplicaBaseUtil(
@@ -4538,7 +4544,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 } else if (!forwarder.ensureEditorText(bufferText) || forwarder.replicaText() != bufferText) {
                     false
                 } else {
-                    shadows[filePath] = bufferText
+                    shadows[filePath] = ReplicaShadow(bufferText)
                     fenceCapturedEditsSubsumedByPublishedBuffer(
                         filePath,
                         bufferText,
@@ -4580,7 +4586,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 if (
                     publishedShadow == null ||
                     bufferText == null ||
-                    (settledShadows[filePath] ?: nativeReloadSettledShadows[filePath]) !=
+                    (settledShadows[filePath] ?: nativeReloadSettledShadows[filePath])?.toString() !=
                         publishedShadow ||
                     editorBufferText(filePath) != bufferText ||
                     (!forwarder.retainedReplicaReseedPending &&
@@ -4595,7 +4601,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     if (!forwarder.ensureEditorText(bufferText) || forwarder.replicaText() != bufferText) {
                         false
                     } else {
-                        shadows[filePath] = bufferText
+                        shadows[filePath] = ReplicaShadow(bufferText)
                         fenceCapturedEditsSubsumedByPublishedBuffer(
                             filePath,
                             bufferText,
@@ -4627,7 +4633,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         publishedShadow == null ||
                         bufferText == null ||
                         canonical == null ||
-                        (settledShadows[filePath] ?: nativeReloadSettledShadows[filePath]) !=
+                        (settledShadows[filePath] ?: nativeReloadSettledShadows[filePath])?.toString() !=
                             publishedShadow ||
                         editorBufferText(filePath) != bufferText
                     ) {
@@ -4679,7 +4685,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         forwarder: CrdtReplicaForwarder,
     ) {
         val canonical = forwarder.replicaText() ?: return
-        shadows[filePath] = canonical
+        shadows[filePath] = ReplicaShadow(canonical)
         val visibleText = editorBufferText(filePath)
         if (visibleText == null) {
             retainedCanonicalProjectionPaths.add(filePath)
@@ -4717,14 +4723,21 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         forwarder: CrdtReplicaForwarder,
         visibleText: String,
         diskPersisted: Boolean = false,
+    ): Boolean = projectSettledVisibleState(filePath, forwarder, ReplicaShadow(visibleText), diskPersisted)
+
+    private fun projectSettledVisibleState(
+        filePath: String,
+        forwarder: CrdtReplicaForwarder,
+        visibleShadow: ReplicaShadow,
+        diskPersisted: Boolean = false,
     ): Boolean {
-        val projected = forwarder.projectVisibleState(visibleText, diskPersisted)
+        val projected = forwarder.projectVisibleState(visibleShadow, diskPersisted)
         if (projected) {
-            settledShadows[filePath] = visibleText
+            settledShadows[filePath] = visibleShadow
             nativeReloadSettledShadows.remove(filePath)
             // `#restartadoptscanonical`: the same proof, durable across an IDE restart. No I/O
             // here (`#shadowstorecost`): the store writes in the background and flushes on dispose.
-            settledShadowStore.save(filePath, visibleText)
+            settledShadowStore.save(filePath, visibleShadow)
         }
         return projected
     }
@@ -4737,13 +4750,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
      * Registration workers only (it reads a file).
      */
     private fun restorePersistedSettledShadow(filePath: String): String? {
-        val restored = settledShadowStore.load(filePath) ?: return null
+        val restored = ReplicaShadow(settledShadowStore.load(filePath) ?: return null)
         val winner = settledShadows.putIfAbsent(filePath, restored) ?: restored
         log.info(
             "[crdt-replica] restored the persisted settled shadow for ${File(filePath).name}; " +
-                "settled_hash=${contentHash(winner)} (#restartadoptscanonical)",
+                "settled_hash=${winner.contentHash} (#restartadoptscanonical)",
         )
-        return winner
+        return winner.toString()
     }
 
     private fun refreshReplicaAfterTransportLoss(
@@ -5299,7 +5312,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         // The replica now holds exactly the visible cut. Re-base local
         // bookkeeping on it: the quarantined stale-baseline batch is subsumed,
         // and anything typed after the cut is kept and forwarded from it.
-        shadows[filePath] = visibleText
+        shadows[filePath] = ReplicaShadow(visibleText)
         undurableLocalForwards.remove(filePath)
         undurableLocalForwardWaits.clear(filePath)
         unforwardedOperatorTextObservations.remove(filePath)
@@ -5370,14 +5383,18 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return
         }
         val shadow = shadows[filePath]
-        val replica = forwarder.replicaText()
+        val replica = forwarder.replicaShadow()
         var recovered: CapturedLocalEditorEdit? = null
         withEditorCaptureCut(filePath) { visible ->
+            if (shadow?.matches(visible) == true) {
+                unforwardedOperatorTextObservations.remove(filePath)
+                return@withEditorCaptureCut
+            }
             val epoch = nonOperatorMutationEpoch(filePath)
             val splice =
                 unforwardedOperatorTextSpliceUtil(
-                    shadow = shadow,
-                    replica = replica,
+                    shadow = shadow?.toString(),
+                    replica = replica?.toString(),
                     visible = visible,
                     captured = pendingLocalEditorEdits[filePath].orEmpty(),
                     epoch = epoch,
@@ -5386,7 +5403,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 unforwardedOperatorTextObservations.remove(filePath)
                 return@withEditorCaptureCut
             }
-            val observation = "${contentHash(shadow!!)}:${contentHash(visible)}:$epoch"
+            val observation = "${shadow!!.contentHash}:${contentHash(visible)}:$epoch"
             if (unforwardedOperatorTextObservations.put(filePath, observation) != observation) {
                 // First sighting: a remote apply or registration may still be
                 // settling. Look again shortly; act only on a stable divergence.
@@ -5407,7 +5424,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
         log.warn(
             "[crdt-replica] rolled unforwarded operator text forward onto the replica for " +
-                "${File(filePath).name}; replica_hash=${contentHash(replica!!)} " +
+                "${File(filePath).name}; replica_hash=${replica!!.contentHash} " +
                 "removed_chars=${splice.oldFragment.length} inserted_chars=${splice.newFragment.length} " +
                 "reason=$reason recovery=editor-text-authoritative",
         )
@@ -5550,7 +5567,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         private val nonOperatorMutationEpochs = ConcurrentHashMap<String, AtomicLong>()
         private val nativeReloadResumeStates =
             ConcurrentHashMap<String, ReplicaResumeState>()
-        private val nativeReloadSettledShadows = ConcurrentHashMap<String, String>()
+        private val nativeReloadSettledShadows = ConcurrentHashMap<String, ReplicaShadow>()
 
         fun getInstance(project: Project): CrdtReplicaManager {
             // `#pluginunloadresurrect`: a retired classloader must not start a

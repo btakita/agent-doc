@@ -80,7 +80,14 @@ may republish the retained intent, but remains subject to the same rule.
   reads the same store's config. A start of a rootless document from another project's cwd
   therefore writes no store, actor, registry entry, controller, or config pin into the cwd's
   project, and the cwd's `tmux_session` pin never becomes its relocation target. The registry
-  entry's `cwd` stays the supervisor's process cwd: that is where the harness child runs.
+  entry's `cwd` stays the supervisor's process cwd.
+  First admission may initialize the canonical-parent store. Before it exists,
+  path-based turn and actor readers return absence without creating it. After
+  admission, actor generation, session logs, and turn leases use that store.
+  The supervisor passes the admitted store to each managed child so its
+  `turn-status` hooks use it even with an explicit `agent_doc_cwd` in another project.
+  A missing managed store leaves only the pane title update. A hook outside a
+  managed launch retains the existing working-directory lookup.
   `tests/start_rootless_store_tmux.rs` (`make tmux-ci`) runs the real in-pane start this way
   against a fake harness.
 - Route-owned tmux autostart panes must not automatically restart the child harness after a clean exit. If the newly started child exits before or after surfacing a prompt, `start --route-owned` must surface the local restart/quit prompt instead of immediately spawning another child process.

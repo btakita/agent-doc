@@ -2357,12 +2357,19 @@ pub fn run_with_reap_policy_resume_and_harness(
             agent_doc_ops_log_io::log_op(file, &event);
         }
 
-        // Build PtySpawnConfig and spawn child under pty
+        // Hook state belongs to the admitted document even if the harness
+        // works in another directory. Set this on every actual child launch,
+        // after resolving its inherited and frontmatter environment.
+        let mut child_env = resolved_env.clone();
+        child_env.insert(
+            agent_doc_turn_status_io::TURN_STATUS_ROOT_ENV.into(),
+            project_root.to_string_lossy().into_owned(),
+        );
         let cfg = PtySpawnConfig {
             program: harness.binary.clone(),
             args,
             cwd: resolved_cwd.path.clone(),
-            env: resolved_env.clone(),
+            env: child_env,
             size: initial_size,
         };
         child_launch_count += 1;

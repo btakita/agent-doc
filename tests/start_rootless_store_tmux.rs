@@ -2,7 +2,7 @@
 //! `.agent-doc` ancestor, run from a pane whose cwd is inside ANOTHER agent-doc
 //! project, binds the document in the store every reader of it consults (its
 //! canonical parent, `project_root_or_file_parent`) and writes nothing into the
-//! cwd's project.
+//! cwd's project, even when the fake harness runs its turn hooks from there.
 //!
 //! Start admission (`prepare_start_runtime_with_admission`) used to resolve the
 //! store as `project_root_containing(doc).unwrap_or(current_dir())`, while
@@ -23,10 +23,17 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 const SESSION_ID: &str = "00000000-0000-4000-8000-0000000000d1";
-const DOC: &str = "---\nagent_doc_session: 00000000-0000-4000-8000-0000000000d1\nagent: claude\n---\n\n# Session\n\n## User\n\nhello\n";
+const DOC: &str = "---\nagent_doc_session: 00000000-0000-4000-8000-0000000000d1\nagent: claude\nagent_doc_cwd: ../foreign\n---\n\n# Session\n\n## User\n\nhello\n";
 const FOREIGN_CONFIG: &str = "tmux_session = \"foreign-pin\"\n";
-/// Fake harness: records that the supervisor launched it, then idles.
-const FAKE_CLAUDE: &str = "#!/bin/sh\n# Fake harness (#startcwdfallback).\ntouch \"$FAKE_CLAUDE_STARTED\"\nexec sleep 600\n";
+/// Fake harness exposes both hook edges to the isolated test.
+const FAKE_CLAUDE: &str = r#"#!/bin/sh
+agent-doc turn-status active </dev/null
+pwd > "$FAKE_CLAUDE_STARTED"
+while [ ! -e "$FAKE_CLAUDE_CLOSE_TURN" ]; do sleep 0.1; done
+agent-doc turn-status idle </dev/null
+touch "$FAKE_CLAUDE_FINISHED"
+exec sleep 600
+"#;
 
 fn agent_doc_bin() -> PathBuf {
     std::env::var_os("AGENT_DOC_BIN")
@@ -89,6 +96,20 @@ fn start_of_a_rootless_document_from_another_projects_cwd_binds_in_its_parent_st
         None,
         "fixture: the document has no .agent-doc ancestor"
     );
+    assert!(agent_doc_turn_status_io::read_turn_active_marker_for_file(&doc).is_none());
+    assert_eq!(
+        agent_doc_session_actor_io::infer_latest_generation(&doc, SESSION_ID).unwrap(),
+        0
+    );
+    assert!(
+        agent_doc_supervisor_io::startup_miss::supervisor_session_log_path(&doc, SESSION_ID)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        !notes.join(".agent-doc").exists(),
+        "readers must not materialize a rootless store"
+    );
     let fake_claude = bin_dir.join("claude");
     std::fs::write(&fake_claude, FAKE_CLAUDE).unwrap();
     make_executable(&fake_claude);
@@ -110,11 +131,13 @@ fn start_of_a_rootless_document_from_another_projects_cwd_binds_in_its_parent_st
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
     let started = base.join("harness-started");
+    let close_turn = base.join("close-turn");
+    let finished = base.join("turn-finished");
     let run = bin_dir.join("run-start.sh");
     std::fs::write(
         &run,
         format!(
-            "#!/bin/sh\nexport PATH={path}\nexport HOME={home}\nexport XDG_CONFIG_HOME={config}\nexport AGENT_DOC_TMUX_SOCKET={socket}\nexport AGENT_DOC_ROOT_CEILING_DIRECTORIES={ceiling}\nexport {launch_env}=startcwdfallback_live_start\nexport FAKE_CLAUDE_STARTED={started}\nunset CLAUDECODE\nif [ \"$(command -v claude)\" != {claude} ]; then echo 'refusing: claude is not the fake harness'; sleep 600; exit 99; fi\ncd {cwd}\nexec agent-doc start {doc}\n",
+            "#!/bin/sh\nexport PATH={path}\nexport HOME={home}\nexport XDG_CONFIG_HOME={config}\nexport AGENT_DOC_TMUX_SOCKET={socket}\nexport AGENT_DOC_ROOT_CEILING_DIRECTORIES={ceiling}\nexport {launch_env}=startcwdfallback_live_start\nexport FAKE_CLAUDE_STARTED={started}\nexport FAKE_CLAUDE_CLOSE_TURN={close_turn}\nexport FAKE_CLAUDE_FINISHED={finished}\nunset CLAUDECODE\nif [ \"$(command -v claude)\" != {claude} ]; then echo 'refusing: claude is not the fake harness'; sleep 600; exit 99; fi\ncd {cwd}\nexec agent-doc start {doc}\n",
             path = shell_quote(&path_env),
             home = shell_quote(&home.to_string_lossy()),
             config = shell_quote(&home.join(".config").to_string_lossy()),
@@ -124,6 +147,8 @@ fn start_of_a_rootless_document_from_another_projects_cwd_binds_in_its_parent_st
             claude = shell_quote(&fake_claude.to_string_lossy()),
             cwd = shell_quote(&foreign.to_string_lossy()),
             started = shell_quote(&started.to_string_lossy()),
+            close_turn = shell_quote(&close_turn.to_string_lossy()),
+            finished = shell_quote(&finished.to_string_lossy()),
             doc = shell_quote(&doc.to_string_lossy()),
         ),
     )
@@ -167,6 +192,11 @@ fn start_of_a_rootless_document_from_another_projects_cwd_binds_in_its_parent_st
         started.exists(),
         "the supervisor never launched the fake harness\n--- pane ---\n{screen}"
     );
+    assert_eq!(
+        std::fs::read_to_string(&started).unwrap().trim_end(),
+        foreign.to_string_lossy(),
+        "the harness hooks must run from the foreign cwd"
+    );
 
     let record = actor_record_in(&notes, &doc).unwrap_or_else(|| {
         panic!(
@@ -180,12 +210,43 @@ fn start_of_a_rootless_document_from_another_projects_cwd_binds_in_its_parent_st
         (pane.as_str(), SESSION_ID),
         "pane ---\n{screen}"
     );
+    assert_eq!(
+        agent_doc_session_actor_io::infer_latest_generation(&doc, SESSION_ID).unwrap(),
+        record.generation
+    );
+    assert!(
+        agent_doc_supervisor_io::startup_miss::supervisor_session_log_path(&doc, SESSION_ID)
+            .unwrap()
+            .is_some_and(
+                |path| path == notes.join(format!(".agent-doc/logs/{SESSION_ID}.log"))
+                    && path.is_file()
+            ),
+        "session logs must use the admitted parent store"
+    );
+    assert!(
+        agent_doc_turn_status_io::turn_active_for_pane_for_file(&doc, &pane),
+        "the active hook must publish in the document store, regardless of its cwd"
+    );
     assert!(
         agent_doc_session_registry_io::load_in(&notes)
             .unwrap()
             .values()
             .any(|entry| entry.session_id == SESSION_ID && entry.pane == pane),
         "the start's registry entry is in the document's parent store\n--- pane ---\n{screen}"
+    );
+
+    std::fs::write(&close_turn, "").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline && !finished.exists() {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(
+        finished.exists(),
+        "the fake harness did not run its idle hook"
+    );
+    assert!(
+        !agent_doc_turn_status_io::turn_active_for_pane_for_file(&doc, &pane),
+        "the idle hook must clear the active marker in the same store"
     );
 
     // Nothing lands in the cwd's project: no store (so no actor, registry

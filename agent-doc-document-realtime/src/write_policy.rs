@@ -520,6 +520,17 @@ fn rebase_agent_candidate_over_editor_cut_reconciled(
     let agent_target = neutralized
         .as_ref()
         .map_or(agent_target, |(target, _)| target.as_str());
+    // `#queueretargetchild`: an agent candidate may carry a stale queue row
+    // whose exact attempt / prompt id still names a baseline row, but whose
+    // work text was replaced. That is a retarget, not a new row. Feeding it to
+    // the CRDT as delete+add can delete the editor's authoritative parent and
+    // leave an operator-authored child attached to the next surviving row.
+    // Cancel only the retarget by restoring the baseline row in the agent
+    // candidate. Genuine additions and lifecycle-only projections remain.
+    let queue_retarget_neutralized = neutralize_agent_queue_retargets(merge_base, agent_target);
+    let agent_target = queue_retarget_neutralized
+        .as_deref()
+        .unwrap_or(agent_target);
     let editor_reconciled = agent_doc_merge::response_cell::reconcile_superseded_response_targets(
         editor_cut,
         merge_base,
@@ -582,11 +593,241 @@ fn rebase_agent_candidate_over_editor_cut_reconciled(
     Ok(reconciled_rebase(rebased, editor_reconciled, agent_target))
 }
 
+fn neutralize_agent_queue_retargets(merge_base: &str, agent_target: &str) -> Option<String> {
+    let baseline_components = element::parse(merge_base).ok()?;
+    let target_components = element::parse(agent_target).ok()?;
+    let baseline_queue = baseline_components
+        .iter()
+        .find(|component| component.name == "queue")?;
+    let target_queue = target_components
+        .iter()
+        .find(|component| component.name == "queue")?;
+    let baseline_content = baseline_queue.content(merge_base);
+    let target_content = target_queue.content(agent_target);
+
+    let mut baseline_rows = BTreeMap::<String, Option<(&str, String)>>::new();
+    for line in baseline_content.lines() {
+        let Some((identity, work)) = explicit_queue_row_identity_and_work(line) else {
+            continue;
+        };
+        baseline_rows
+            .entry(identity)
+            .and_modify(|row| *row = None)
+            .or_insert_with(|| Some((line, work)));
+    }
+
+    let mut changed = false;
+    let mut lines = Vec::new();
+    for line in target_content.lines() {
+        let replacement =
+            explicit_queue_row_identity_and_work(line).and_then(|(identity, work)| {
+                let (baseline_line, baseline_work) = baseline_rows.get(&identity)?.as_ref()?;
+                (work != *baseline_work).then_some(*baseline_line)
+            });
+        if let Some(baseline_line) = replacement {
+            lines.push(baseline_line);
+            changed = true;
+        } else {
+            lines.push(line);
+        }
+    }
+    if !changed {
+        return None;
+    }
+
+    let mut neutralized_queue = lines.join("\n");
+    if target_content.ends_with('\n') {
+        neutralized_queue.push('\n');
+    }
+    Some(target_queue.replace_content(agent_target, &neutralized_queue))
+}
+
+fn explicit_queue_row_identity_and_work(line: &str) -> Option<(String, String)> {
+    let body = queue_list_row_body(line)?;
+    let identity = explicit_queue_row_identity(body)?;
+    Some((identity.clone(), queue_row_work(body, Some(&identity))))
+}
+
+fn queue_row_work(body: &str, identity: Option<&str>) -> String {
+    let mut work = body.trim();
+    while let Some(rest) = work.strip_prefix("### ") {
+        work = rest.trim_start();
+    }
+    work = agent_doc_element_queue::strip_attempt_projection_prefix(work);
+    let annotation = identity.map(|identity| format!("[#{identity}]"));
+    let without_identity = annotation.as_deref().map_or_else(
+        || work.to_string(),
+        |annotation| work.replacen(annotation, "", 1),
+    );
+    let mut work = without_identity.trim();
+    for publication in ["⟦published+local⟧", "⟦published⟧", "⟦local⟧"] {
+        if let Some(rest) = work.strip_suffix(publication) {
+            work = rest.trim_end();
+            break;
+        }
+    }
+    work.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn queue_list_row_body(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    if let Some(rest) = trimmed.strip_prefix("- ") {
+        return Some(rest);
+    }
+    let marker_end = trimmed.find(". ")?;
+    trimmed[..marker_end]
+        .chars()
+        .all(|character| character.is_ascii_digit())
+        .then_some(&trimmed[marker_end + 2..])
+}
+
+fn explicit_queue_row_identity(body: &str) -> Option<String> {
+    let mut remaining = body;
+    while let Some(start) = remaining.find("[#") {
+        let after_start = &remaining[start + 2..];
+        let Some(end) = after_start.find(']') else {
+            return None;
+        };
+        let identity = &after_start[..end];
+        let attempt_id = identity
+            .rsplit_once('#')
+            .is_some_and(|(owner, generation)| {
+                owner.contains(':')
+                    && !owner.chars().any(char::is_whitespace)
+                    && !generation.is_empty()
+                    && generation
+                        .chars()
+                        .all(|character| character.is_ascii_digit())
+            });
+        if attempt_id {
+            return Some(identity.to_string());
+        }
+        remaining = &after_start[end + 1..];
+    }
+    None
+}
+
+fn queue_tree_row_identity(body: &str) -> Option<String> {
+    if let Some(identity) = explicit_queue_row_identity(body) {
+        return Some(format!("explicit:{identity}"));
+    }
+    let work = queue_row_work(body, None);
+    match agent_doc_element_queue::queue_head_identity(&work) {
+        agent_doc_element_queue::QueueItemIdentity::Id(id) => Some(format!("work:{id}")),
+        agent_doc_element_queue::QueueItemIdentity::FreeText(_) => None,
+    }
+}
+
+fn queue_list_row(line: &str) -> Option<(usize, &str)> {
+    let trimmed = line.trim_start_matches(' ');
+    let indent = line.len() - trimmed.len();
+    queue_list_row_body(line).map(|body| (indent, body))
+}
+
+fn restore_editor_queue_id_child_parentage(editor_cut: &str, rebased: &str) -> Option<String> {
+    let editor_components = element::parse(editor_cut).ok()?;
+    let rebased_components = element::parse(rebased).ok()?;
+    let editor_queue = editor_components
+        .iter()
+        .find(|component| component.name == "queue")?;
+    let rebased_queue = rebased_components
+        .iter()
+        .find(|component| component.name == "queue")?;
+    let editor_lines: Vec<_> = editor_queue.content(editor_cut).lines().collect();
+    let mut desired = Vec::new();
+    for (child_index, line) in editor_lines.iter().enumerate() {
+        let Some((child_indent, child_body)) = queue_list_row(line) else {
+            continue;
+        };
+        if child_indent == 0 {
+            continue;
+        }
+        let Some(child_identity) = queue_tree_row_identity(child_body) else {
+            continue;
+        };
+        let parent_identity = editor_lines[..child_index]
+            .iter()
+            .rev()
+            .filter_map(|line| queue_list_row(line))
+            .find(|(indent, _)| *indent < child_indent)
+            .and_then(|(_, body)| queue_tree_row_identity(body));
+        if let Some(parent_identity) = parent_identity {
+            desired.push((child_identity, parent_identity));
+        }
+    }
+    if desired.is_empty() {
+        return None;
+    }
+
+    let rebased_content = rebased_queue.content(rebased);
+    let mut lines: Vec<String> = rebased_content.lines().map(str::to_string).collect();
+    let mut changed = false;
+    for (child_identity, desired_parent_identity) in desired {
+        let Some(child_index) = unique_queue_row_index(&lines, &child_identity) else {
+            continue;
+        };
+        let Some((child_indent, _)) = queue_list_row(&lines[child_index]) else {
+            continue;
+        };
+        let current_parent = lines[..child_index]
+            .iter()
+            .rev()
+            .filter_map(|line| queue_list_row(line))
+            .find(|(indent, _)| *indent < child_indent)
+            .and_then(|(_, body)| queue_tree_row_identity(body));
+        if current_parent.as_deref() == Some(desired_parent_identity.as_str()) {
+            continue;
+        }
+
+        let subtree_end = lines[child_index + 1..]
+            .iter()
+            .position(|line| queue_list_row(line).is_some_and(|(indent, _)| indent <= child_indent))
+            .map_or(lines.len(), |offset| child_index + 1 + offset);
+        let subtree: Vec<_> = lines.drain(child_index..subtree_end).collect();
+        let Some(parent_index) = unique_queue_row_index(&lines, &desired_parent_identity) else {
+            lines.splice(child_index..child_index, subtree);
+            continue;
+        };
+        let Some((parent_indent, _)) = queue_list_row(&lines[parent_index]) else {
+            lines.splice(child_index..child_index, subtree);
+            continue;
+        };
+        let insert_at = lines[parent_index + 1..]
+            .iter()
+            .position(|line| {
+                queue_list_row(line).is_some_and(|(indent, _)| indent <= parent_indent)
+            })
+            .map_or(lines.len(), |offset| parent_index + 1 + offset);
+        lines.splice(insert_at..insert_at, subtree);
+        changed = true;
+    }
+    if !changed {
+        return None;
+    }
+
+    let mut repaired_queue = lines.join("\n");
+    if rebased_content.ends_with('\n') {
+        repaired_queue.push('\n');
+    }
+    Some(rebased_queue.replace_content(rebased, &repaired_queue))
+}
+
+fn unique_queue_row_index(lines: &[String], identity: &str) -> Option<usize> {
+    let mut matches = lines.iter().enumerate().filter_map(|(index, line)| {
+        let (_, body) = queue_list_row(line)?;
+        (queue_tree_row_identity(body).as_deref() == Some(identity)).then_some(index)
+    });
+    let first = matches.next()?;
+    matches.next().is_none().then_some(first)
+}
+
 fn reconciled_rebase(
     rebased: String,
     editor_reconciled: String,
     agent_target: &str,
 ) -> ReconciledRebase {
+    let rebased =
+        restore_editor_queue_id_child_parentage(&editor_reconciled, &rebased).unwrap_or(rebased);
     ReconciledRebase {
         rebased: canonicalize_rebase_exchange_boundary(&rebased, agent_target),
         editor_reconciled,
@@ -7434,6 +7675,53 @@ fn rebase_residue_outside_every_component_is_detected() {
     // Changes inside a component never count.
     let inside = cut.replace("- slow?\n", "- slow?\n- new item\n");
     assert!(!rebase_introduces_unscoped_text(&inside, cut, target));
+}
+
+/// `#queueretargetchild`: a stale disk target reused the reported attempt id
+/// with different work text. The rejected retarget deleted the editor's parent
+/// and left `#rebase` beneath the new tracker row.
+#[test]
+fn queue_attempt_retarget_cannot_reparent_operator_child() {
+    let base = concat!(
+        "<!-- agent:queue -->\n",
+        "- ### ☑️ [#subagent:sample_rebase#1] https://github.com/example/sample-sdk/pull/344 ⟦published⟧\n",
+        "<!-- /agent:queue -->\n",
+    );
+    let agent = concat!(
+        "<!-- agent:queue -->\n",
+        "- ### target node [#subagent:sample_rebase#1]\n",
+        "- #tracker follow-up SAMPLE-347 [#q-tracker]\n",
+        "<!-- /agent:queue -->\n",
+    );
+    let editor = concat!(
+        "<!-- agent:queue -->\n",
+        "- ### ☑️ [#subagent:sample_rebase#1] https://github.com/example/sample-sdk/pull/344 ⟦published⟧\n",
+        "  - #rebase\n",
+        "- Destination question? [#q-destination-1]\n",
+        "- Destination question, clarified? [#q-destination-2]\n",
+        "- do [#q-do]\n",
+        "<!-- /agent:queue -->\n",
+    );
+
+    let rebased = rebase_agent_candidate_over_editor_cut(base, agent, editor).unwrap();
+    assert!(!rebased.contains("target node"), "{rebased}");
+    assert_eq!(rebased.matches("pull/344").count(), 1, "{rebased}");
+    assert!(
+        rebased.contains(concat!(
+            "- ### ☑️ [#subagent:sample_rebase#1] https://github.com/example/sample-sdk/pull/344 ⟦published⟧\n",
+            "  - #rebase\n",
+        )),
+        "the operator child must stay beneath its exact parent:\n{rebased}",
+    );
+    assert_eq!(
+        rebased.matches("#tracker follow-up SAMPLE-347").count(),
+        1,
+        "{rebased}"
+    );
+    assert!(
+        !rebased.contains("#tracker follow-up SAMPLE-347 [#q-tracker]\n  - #rebase"),
+        "the child must never migrate beneath the tracker addition:\n{rebased}",
+    );
 }
 
 #[cfg(test)]

@@ -14868,14 +14868,14 @@ agent_doc_write: crdt\n\
             "{entries:?}"
         );
         // `#waypostauthorization`: every entry carries the operator's
-        // authorization and the command that re-prints it.
+        // authorization and the command that reserves a launch before returning it.
         assert!(
             entries[0]
                 .brief_command
                 .starts_with("agent-doc queue brief ")
                 && entries[0]
                     .brief_command
-                    .ends_with("--item '#preflightdeadline'"),
+                    .ends_with("--item '#preflightdeadline' --reserve-spawn <generation>"),
             "{entries:?}"
         );
         let auth = &entries[0].authorization;

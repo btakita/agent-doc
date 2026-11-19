@@ -692,10 +692,10 @@ pub fn run_once(
         RunMode::Template => response.text.clone(),
     };
     enforce_imperative_response_contract_for_diff(file, &the_diff, &response_text)?;
-    record_run_progress(file, "response_capture", agent_name, None);
+    record_run_progress(file, "response_capture", agent_name);
     agent_doc_repair_io::pending::save_pending(file, &response_text)?;
 
-    record_run_progress(file, "response_write", agent_name, None);
+    record_run_progress(file, "response_write", agent_name);
     match run_mode {
         RunMode::Append => apply_append_response_with_authority(
             effects,
@@ -1412,13 +1412,10 @@ fn run_heartbeat_interval() -> Duration {
     Duration::from_secs(secs.max(1))
 }
 
-pub fn record_run_progress(file: &Path, phase: &str, agent_name: &str, timeout: Option<Duration>) {
-    let timeout_detail = timeout
-        .map(|timeout| format!(" timeout_s={}", timeout.as_secs()))
-        .unwrap_or_default();
-    let event = format!("run_progress phase={phase} agent={agent_name}{timeout_detail}");
+pub fn record_run_progress(file: &Path, phase: &str, agent_name: &str) {
+    let event = format!("run_progress phase={phase} agent={agent_name}");
     let _ = agent_doc_cycle_state_io::record_open_cycle_progress(file, &event);
-    eprintln!("[run] progress phase={phase}{timeout_detail}");
+    eprintln!("[run] progress phase={phase}");
 }
 
 pub fn mark_run_write_applied(file: &Path, event: &str) -> Result<()> {

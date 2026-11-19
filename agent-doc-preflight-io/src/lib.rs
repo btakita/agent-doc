@@ -2032,27 +2032,18 @@ pub fn enforce_cycle_completion_with_mode(
     let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
     if mode == PreflightCycleCompletionMode::PreserveFreshOwnedPaneReentry
         && let Some(open) = state.as_ref()
+        && open.reusable_by_reentrant_preflight()
     {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        if open.reusable_by_reentrant_preflight(
-            0,
-            now,
-            agent_doc_cycle_state_io::STALLED_CYCLE_RESOLVE_SECS,
-        ) {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "preflight_owned_pane_reentry_preserved file={} cycle_id={} phase={:?} actor_transport_authority=current_pane",
-                    file.display(),
-                    open.cycle_id,
-                    open.phase,
-                ),
-            );
-            return Ok((retained_recovered, false));
-        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "preflight_owned_pane_reentry_preserved file={} cycle_id={} phase={:?} actor_transport_authority=current_pane",
+                file.display(),
+                open.cycle_id,
+                open.phase,
+            ),
+        );
+        return Ok((retained_recovered, false));
     }
     let missing_commit_event = if state.as_ref().map(|state| state.is_open()).unwrap_or(false) {
         None

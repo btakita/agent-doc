@@ -58,7 +58,7 @@ impl Agent for OpenCode {
         cmd.stderr(std::process::Stdio::piped());
         configure_agent_child_process_group(&mut cmd);
 
-        let output = cmd.output()?;
+        let output = cmd.spawn()?.wait_with_output()?;
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 

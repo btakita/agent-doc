@@ -9,7 +9,7 @@ fn actor_transport_harness(recorded_harness: &str) -> HarnessConfig {
 use std::time::Duration;
 
 use agent_doc_controller::dispatch::{
-    ActorDispatchState, AuthoritativeActorDispatchAction, AuthoritativeActorDispatchActionFacts,
+    AuthoritativeActorDispatchAction, AuthoritativeActorDispatchActionFacts,
     AuthoritativeActorDispatchIntent, CloseoutBlockDispatchDecision, DispatchOnlyBusyRefusalFacts,
     DispatchOnlyReopenDelivery, ReopenMode, RouteCloseoutBlockContext, RouteCloseoutDrainOutcome,
     RouteCloseoutEntryFacts, RouteCloseoutEntryPlan, RouteExplicitSendDecision,
@@ -70,22 +70,6 @@ pub struct RouteAuthoritativeActorEffects {
     pub route_admission_effects: RouteAdmissionEffects,
     pub dispatch_only_route_effects: DispatchOnlyRouteEffects,
     pub wait_for_ready_override: fn() -> Option<Duration>,
-}
-
-/// Re-capture the pane after a short delay and report whether it *still* shows no
-/// busy cue.
-///
-/// `#jbsteerinterrupt`: used to confirm a stale-busy projection before promoting
-/// it to ready. A live turn re-renders its spinner every frame, so a second
-/// cue-free capture distinguishes a genuinely idle pane from a torn or mid-redraw
-/// frame. Fails closed — a capture error reports "not confirmed idle", leaving the
-/// busy projection in place.
-fn confirm_pane_still_idle(tmux: &Tmux, pane: &str, harness: &HarnessConfig) -> bool {
-    std::thread::sleep(Duration::from_millis(250));
-    match tmux.capture_pane(pane, Some(80)) {
-        Ok(content) => !harness.has_busy_cue(&content),
-        Err(_) => false,
-    }
 }
 
 /// Re-capture the authoritative pane after the same torn-frame guard interval
@@ -2431,110 +2415,16 @@ pub fn route_via_authoritative_actor(
         actor_state = agent_doc_controller::actor::ActorState::Ready;
     }
 
-    // Timeout-idle recovery: the wait loop exhausted its budget without finding
-    // a dispatch-ready prompt, but the live pane also shows no active busy cue.
-    // The pane is idle by the absence-of-work test even though our prompt
-    // detection patterns did not match the actual pane output. Promote the
-    // stale Busy projection to Ready and dispatch. This handles Codex output
-    // formats where the footer does not match `is_ignorable_output_line` or
-    // `is_bottom_idle_chrome` patterns but the pane is clearly not mid-turn.
-    if waited_and_timed_out
-        && actor_dispatch_state(actor_state) == ActorDispatchState::Busy
-        && !prompt_ready
-        && let Ok(content) = tmux.capture_pane(&dispatch_pane, Some(80))
-    {
-        if !harness.has_busy_cue(&content) {
-            eprintln!(
-                "[route] timeout-idle recovery for {}: waited full timeout but pane has no busy cue; promoting stale busy projection to ready and dispatching",
-                file.display()
-            );
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "route_timeout_idle_recovery file={} pane={} harness={} generation={} actor_state={} busy_cue=false pane_tail={:?}",
-                    file.display(),
-                    dispatch_pane,
-                    harness.binary,
-                    actor.record.generation,
-                    actor_state.as_str(),
-                    content
-                        .lines()
-                        .rev()
-                        .take(5)
-                        .collect::<Vec<_>>()
-                        .into_iter()
-                        .rev()
-                        .collect::<Vec<_>>()
-                        .join(" | ")
-                ),
-            );
-            actor_state = agent_doc_controller::actor::ActorState::Ready;
-        } else {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "route_timeout_idle_recovery_blocked file={} pane={} harness={} generation={} actor_state={} busy_cue=true",
-                    file.display(),
-                    dispatch_pane,
-                    harness.binary,
-                    actor.record.generation,
-                    actor_state.as_str()
-                ),
-            );
-        }
-    }
-
-    // Eager busy-cue check for dispatch-only queue fallback: when
-    // `dispatch_only_busy_should_wait_for_ready` skipped the wait because
-    // a queue fallback existed (prompt_context or inactive queue head), the
-    // timeout-idle recovery above never ran. The actor may be projected Busy
-    // while the live pane is actually idle. Check the pane eagerly and promote
-    // to Ready so the dispatch proceeds instead of queuing behind a stale
-    // projection. This is the #opencode-jb-stall root cause: JB Run Agent Doc
-    // sends a prompt, the wait is skipped, and the stale Busy projection queues
-    // the prompt into agent:queue, which never drains because the
-    // auto-loop requires the actor to become ready.
-    if dispatch_only
-        && actor_dispatch_state(actor_state) == ActorDispatchState::Busy
-        && !waited_and_timed_out
-        && prompt_context.is_some()
-        && let Ok(content) = tmux.capture_pane(&dispatch_pane, Some(80))
-        && !harness.has_busy_cue(&content)
-        // #jbsteerinterrupt: never promote a busy projection to ready on a single
-        // frame. Promotion here dispatches the trigger into the pane, and if the
-        // turn is actually live that submission is what Claude Code renders as
-        // "Interrupted" — the exact outcome `#realtime-steering-verbatim` forbids,
-        // since the prompt is already in the document for the running turn to
-        // consume as steering. A genuinely stale projection stays cue-free across
-        // frames, while a live turn re-renders its spinner, so require a second
-        // confirming capture. Cheap insurance against a torn or mid-redraw frame.
-        && confirm_pane_still_idle(tmux, &dispatch_pane, harness)
-    {
-        eprintln!(
-            "[route] eager busy-cue check for {}: actor projected busy but pane has no busy cue across two captures (queue fallback skipped the wait); promoting stale busy projection to ready and dispatching",
-            file.display()
-        );
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "route_eager_busy_cue_recovery file={} pane={} harness={} generation={} actor_state={} busy_cue=false pane_tail={:?}",
-                file.display(),
-                dispatch_pane,
-                harness.binary,
-                actor.record.generation,
-                actor_state.as_str(),
-                content
-                    .lines()
-                    .rev()
-                    .take(5)
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev()
-                    .collect::<Vec<_>>()
-                    .join(" | ")
-            ),
-        );
-        actor_state = agent_doc_controller::actor::ActorState::Ready;
+    if waited_and_timed_out && actor_state == agent_doc_controller::actor::ActorState::Busy {
+        // The wait has a transport budget. Ending it says nothing about
+        // whether the current turn can still produce a response.
+        crate::invocation::record_route_deferral(format!(
+            "[route] dispatch for {} deferred: generation {} on pane {} remained busy without a verified ready prompt; its current turn and the pending prompt are retained",
+            file.display(),
+            actor.record.generation,
+            dispatch_pane,
+        ));
+        return Ok(dispatch_pane);
     }
 
     let actor_dispatch_state = actor_dispatch_state(actor_state);

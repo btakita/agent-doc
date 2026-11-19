@@ -174,6 +174,48 @@ impl Drop for ScopedCurrentDir {
     }
 }
 
+/// Stage an exact harness terminal receipt after a test's unanswered cycle.
+pub fn record_fixture_harness_turn_end(file: &Path, ended_at: u64) {
+    use agent_doc_controller::actor::{ActorLastTransition, ActorRecord, ActorState};
+    use agent_doc_controller_io::project_controller::{load_actor_record, store_actor_record};
+
+    let file = file.canonicalize().unwrap();
+    let root = agent_doc_project_root_io::project_root_containing(&file).unwrap();
+    let document_id = file.to_string_lossy().into_owned();
+    let record = load_actor_record(&root, &document_id)
+        .unwrap()
+        .unwrap_or_else(|| {
+            store_actor_record(
+                &root,
+                None,
+                &ActorRecord {
+                    document_id,
+                    session_id: "fixture-harness".into(),
+                    generation: 1,
+                    pane_id: "%471".into(),
+                    window_id: "@471".into(),
+                    harness: "codex".into(),
+                    state: ActorState::Ready,
+                    last_transition: ActorLastTransition {
+                        caller: "test".into(),
+                        reason: "harness turn ended".into(),
+                        timestamp: ended_at,
+                        prior_generation: 0,
+                        new_generation: 1,
+                    },
+                },
+            )
+            .unwrap()
+        });
+    agent_doc_turn_status_io::record_harness_turn_end_at(
+        &root,
+        &record.pane_id,
+        ended_at,
+        "interrupt",
+    )
+    .unwrap();
+}
+
 pub fn test_registry_entry(pane: &str, file: &str, cwd: &Path) -> tmux_router::RegistryEntry {
     tmux_router::RegistryEntry {
         pane: pane.to_string(),

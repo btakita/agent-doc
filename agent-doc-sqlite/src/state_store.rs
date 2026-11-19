@@ -5800,31 +5800,13 @@ pub fn latest_unfailed_dispatch_accepted_stage(
         .flatten())
 }
 
-/// How long an unproven dispatch may pin the controller's idle self-recycle gate
-/// (`#dispatchgateleak`).
-///
-/// An unproven row is only cleared by `mark_open_dispatches_consumed` on an actor
-/// `Ready` transition. A dispatch that never reached `Ready` — a killed pane, a
-/// crashed harness, a supervisor that died mid-turn — leaves its row open forever,
-/// and because [`has_any_open_in_flight_dispatch`] is project-wide, ONE such row
-/// pins the recycle gate false for every document in the project, permanently.
-///
-/// Live repro 2026-07-18: 18 unproven rows aged 34-50h kept a stale `controller
-/// serve` alive across two days of cycles, so the freshly-installed binary could
-/// never be promoted. No real dispatch stays in flight for hours; anything past
-/// this horizon is leaked state, not in-flight work.
+/// How long a dispatch whose turn was never observed running may pin the
+/// project-wide controller recycle gate. The receipt remains in SQLite so a
+/// new controller can observe its later start or its terminal outcome.
 pub const OPEN_DISPATCH_IN_FLIGHT_HORIZON_SECS: i64 = 30 * 60;
 
-/// `#ctlrecycle`: is ANY dispatch in flight across every document/generation? The
-/// controller's idle self-recycle (R1) uses this as its idle proof — it must never
-/// exit while a turn is mid-dispatch for any session it coordinates. Same open-set
-/// definition as [`has_open_in_flight_dispatch`] without the document/generation
-/// filter.
-///
-/// Bounded by [`OPEN_DISPATCH_IN_FLIGHT_HORIZON_SECS`] (`#dispatchgateleak`) so a
-/// leaked unproven row cannot wedge the recycle gate forever. This only ever makes
-/// the gate MORE permissive for provably-stale rows; a genuinely in-flight dispatch
-/// is minutes old at most and still pins the gate exactly as before.
+/// An observed running dispatch pins the recycle gate until an authoritative
+/// terminal event. Other unproven receipts pin it for the pre-start horizon.
 pub fn has_any_open_in_flight_dispatch(conn: &Connection) -> Result<bool> {
     has_any_open_in_flight_dispatch_as_of(conn, timestamp_secs() as i64)
 }
@@ -5839,7 +5821,7 @@ pub fn has_any_open_in_flight_dispatch_as_of(conn: &Connection, now_secs: i64) -
         WHERE failed_stage IS NULL
           AND COALESCE(result_status, '') IN ('accepted', 'queued', 'running')
           AND dispatch_start_proven = 0
-          AND timestamp > ?1
+          AND (result_status = 'running' OR timestamp > ?1)
         "#,
         params![now_secs - OPEN_DISPATCH_IN_FLIGHT_HORIZON_SECS],
         |row| row.get(0),
@@ -5928,14 +5910,11 @@ pub fn mark_open_dispatches_turn_started(conn: &Connection, document_id: &str) -
 /// RUNNING right now? True only for a receipt promoted to `running` by
 /// [`mark_open_dispatches_turn_started`] (the `caller=dispatch` `Busy` edge or the
 /// turn's own preflight) and not yet settled by a `Ready` transition — positive
-/// evidence that the harness is executing this document's turn, independent of what
-/// the pane's composer happens to render between tool calls. Bounded by
-/// [`OPEN_DISPATCH_IN_FLIGHT_HORIZON_SECS`] so a leaked row cannot pin the
-/// operator-clear guard forever.
+/// evidence that the harness is executing this document's turn, independent of pane redraws and elapsed time.
 pub fn has_running_dispatch_turn_as_of(
     conn: &Connection,
     document_id: &str,
-    now_secs: i64,
+    _now_secs: i64,
 ) -> Result<bool> {
     let count: i64 = conn.query_row(
         r#"
@@ -5945,9 +5924,8 @@ pub fn has_running_dispatch_turn_as_of(
           AND failed_stage IS NULL
           AND COALESCE(result_status, '') = 'running'
           AND dispatch_start_proven = 0
-          AND timestamp > ?2
         "#,
-        params![document_id, now_secs - OPEN_DISPATCH_IN_FLIGHT_HORIZON_SECS],
+        params![document_id],
         |row| row.get(0),
     )?;
     Ok(count > 0)
@@ -6011,23 +5989,18 @@ pub fn open_dispatch_turn_as_of(
         SELECT
           COALESCE(SUM(
             COALESCE(result_status, '') = 'running'
-            AND timestamp > ?2
           ), 0),
           COALESCE(SUM(
             COALESCE(result_status, '') IN ('accepted', 'queued')
             AND command_kind NOT LIKE 'session\_%' ESCAPE '\'
-            AND timestamp > ?3
+            AND timestamp > ?2
           ), 0)
         FROM dispatch_attempts
         WHERE document_id = ?1
           AND failed_stage IS NULL
           AND dispatch_start_proven = 0
         "#,
-        params![
-            document_id,
-            now_secs - OPEN_DISPATCH_IN_FLIGHT_HORIZON_SECS,
-            now_secs - DISPATCH_PRE_TURN_GRACE_SECS
-        ],
+        params![document_id, now_secs - DISPATCH_PRE_TURN_GRACE_SECS],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
     Ok(if running > 0 {
@@ -6066,7 +6039,7 @@ pub fn has_open_dispatch_accepted_between(
           AND command_kind NOT LIKE 'session\_%' ESCAPE '\'
           AND timestamp > ?2
           AND timestamp <= ?3
-          AND timestamp > ?4
+          AND (result_status = 'running' OR timestamp > ?4)
         "#,
         params![
             document_id,
@@ -6363,7 +6336,7 @@ pub fn mark_open_dispatches_consumed_as_of(
 }
 
 /// The leak-bound half of [`mark_open_dispatches_consumed_as_of`], with no turn
-/// settlement: release every open receipt older than
+/// settlement: release open receipts whose turns never started, older than
 /// [`DISPATCH_PRE_TURN_GRACE_SECS`].
 ///
 /// The pre-turn grace is a leak bound, not a turn settlement: a trigger that never
@@ -6382,7 +6355,7 @@ pub fn sweep_open_dispatches_past_pre_turn_grace_as_of(
         SET dispatch_start_proven = 1
         WHERE document_id = ?1
           AND failed_stage IS NULL
-          AND COALESCE(result_status, '') IN ('accepted', 'queued', 'running')
+          AND COALESCE(result_status, '') IN ('accepted', 'queued')
           AND dispatch_start_proven = 0
           AND timestamp <= ?2
         "#,
@@ -8362,10 +8335,10 @@ mod tests {
     }
 
     /// GH #232: only an observed, unsettled turn counts as a
-    /// running dispatch turn — not a pre-turn receipt, not a settled one, not another
-    /// document's, and not a leaked row past the in-flight horizon.
+    /// running dispatch turn. A terminal receipt ends this observation;
+    /// elapsed time cannot turn it into a pre-start or settled receipt.
     #[test]
-    fn running_dispatch_turn_is_observed_unsettled_and_bounded() -> Result<()> {
+    fn running_dispatch_turn_survives_the_pre_start_horizon() -> Result<()> {
         let conn = dispatch_attempts_fixture()?;
         let now = 1_000_000i64;
         insert_open_dispatch(&conn, "doc", now - 5, "accepted")?;
@@ -8381,15 +8354,25 @@ mod tests {
             "another document's running turn does not count"
         );
         assert!(
-            !has_running_dispatch_turn_as_of(
+            has_running_dispatch_turn_as_of(
                 &conn,
                 "doc",
                 now + OPEN_DISPATCH_IN_FLIGHT_HORIZON_SECS + 10
             )?,
-            "a running row past the in-flight horizon is leaked state"
+            "a running receipt survives the pre-start horizon"
+        );
+        let late = now + OPEN_DISPATCH_IN_FLIGHT_HORIZON_SECS + 10;
+        assert_eq!(
+            open_dispatch_turn_as_of(&conn, "doc", late)?,
+            Some(OpenDispatchTurn::Running)
+        );
+        assert!(has_any_open_in_flight_dispatch_as_of(&conn, late)?);
+        assert_eq!(
+            sweep_open_dispatches_past_pre_turn_grace_as_of(&conn, "doc", late)?,
+            0
         );
 
-        assert_eq!(mark_open_dispatches_consumed_as_of(&conn, "doc", now)?, 1);
+        assert_eq!(mark_open_dispatches_consumed_as_of(&conn, "doc", late)?, 1);
         assert!(
             !has_running_dispatch_turn_as_of(&conn, "doc", now)?,
             "a Ready-settled turn is no longer running"
@@ -9010,8 +8993,8 @@ mod tests {
         );
         assert_eq!(
             agrees(now + OPEN_DISPATCH_IN_FLIGHT_HORIZON_SECS)?,
-            None,
-            "a leaked running receipt is bounded by the in-flight horizon"
+            Some(OpenDispatchTurn::Running),
+            "an observed turn keeps its receipt until it ends"
         );
         insert_open_dispatch(&conn, "doc", now - 2, "accepted")?;
         assert_eq!(
@@ -9569,11 +9552,18 @@ mod tests {
             "tasks/clear.md",
             now
         )?);
-        // ... but it still sweeps receipts past the pre-turn grace (leak bound).
         let past_grace = now + DISPATCH_PRE_TURN_GRACE_SECS + 1;
         let (_, released) =
             store_actor_lifecycle_record_tx(&mut conn, Some(1), &record, None, None, past_grace)?;
-        assert_eq!(released, 1, "the pre-turn-grace sweep still runs");
+        assert_eq!(
+            released, 0,
+            "a Ready reassertion still ends no running turn after the grace"
+        );
+        assert!(has_running_dispatch_turn_as_of(
+            &conn,
+            "tasks/clear.md",
+            past_grace
+        )?);
         Ok(())
     }
 

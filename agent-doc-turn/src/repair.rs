@@ -12,43 +12,10 @@ pub const STALE_EMPTY_PREFLIGHT_TTL_SECS: u64 = 60;
 /// cycle's answer and never proves a free-text queue head answered.
 pub const COMMITTED_HEADING_REPLAY_PARKED_REASON: &str = "committed_heading_replay_parked";
 
-/// The proof a caller carries when it asks to reclaim an empty
-/// `preflight_started` cycle.
-///
-/// `#duplicatepreflightunblock`: reclaiming this shape needs a proof, because
-/// an empty `preflight_started` cycle with no capture is ALSO the normal state
-/// while a model is still generating its first response — abandoning that
-/// aborts a live turn (the `#suprecyclespin-falseabandon` regression). So the
-/// reclaim was gated on one proof only: the caller had just cancelled the
-/// owning harness run.
-///
-/// That single proof is reachable from exactly one place, `agent-doc session
-/// cancel-turn`, which an operator has to run at the right moment. Every other
-/// caller passed "unproven" and was refused — including the route closeout
-/// drain, whose `cancel_empty_preflight` step therefore could never succeed.
-/// A duplicate `agent-doc <FILE>` invocation then repeated repair →
-/// session-check → a 30s projection await → `Blocked`, forever, and the
-/// document stayed wedged until a human typed `session cancel-turn`.
-///
-/// Observed 2026-09-19 on `src/haiven-dev/tasks/fpe.md`: pane `%5` held empty
-/// `cycle-1789763038157`; only an explicit `session cancel-turn` freed it.
-///
-/// The fix is a second proof, not a weaker gate: a controller projection that
-/// reports the owning actor RELEASED the cycle, **paired with** the cycle
-/// having sat untouched past the pre-capture stall deadline.
-///
-/// Both halves are load-bearing. Release alone is NOT sufficient: the route
-/// drain's projection await also reports `OwnerReleased` when there is no
-/// controller projection to release anything, so a first cut that reclaimed on
-/// release alone abandoned a brand-new preflight whose model had not started
-/// answering — caught by `plain_run_trigger_cannot_overtake_a_fresh_open_preflight`.
-/// The stall deadline (`STALLED_CYCLE_RESOLVE_SECS`) was chosen for exactly
-/// this hazard in `#suprecyclespin-falseabandon`: it is generous enough that a
-/// slow first response, which ticks nothing while it generates, never looks
-/// stalled.
-///
-/// Together they are bounded and operator-free: an orphaned empty preflight
-/// resolves on its own once the deadline passes, and a live one never does.
+/// Evidence required to reclaim an unanswered preflight. A closeout-owner
+/// release says that no closeout writer owns the cycle. The harness can still
+/// be working before it has a response to capture, so release cannot settle
+/// the cycle without a separate terminal turn receipt.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EmptyPreflightCancelAuthority {
     /// No proof the owning run stopped. A live first response may still be
@@ -56,10 +23,8 @@ pub enum EmptyPreflightCancelAuthority {
     Unproven,
     /// The caller cancelled the owning harness run before asking.
     RunCancelled,
-    /// The controller's closeout projection proved the owning actor released
-    /// this cycle. Reclaim additionally requires the cycle to be stalled past
-    /// the pre-capture deadline, because this projection also reports a
-    /// release when there was no owner to release.
+    /// The closeout owner released this cycle. Reclaim also requires a newer
+    /// harness turn-end receipt for the authoritative pane.
     OwnerReleased,
     /// `#runctrlclaude`: the owning pane's harness reported a session boundary
     /// (a `SessionStart` for `/clear`, a fresh start, or a resume; or a settled
@@ -114,22 +79,10 @@ impl EmptyPreflightCancelAuthority {
         !matches!(self, Self::Unproven)
     }
 
-    /// Whether this proof must ALSO observe the cycle stalled past the
-    /// pre-capture deadline before it may reclaim.
-    ///
-    /// `RunCancelled` does not: the caller stopped the run itself, so there is
-    /// nothing left to wait for. `OwnerReleased` does, because the projection
-    /// cannot tell "the owner let go" apart from "there was no owner", and the
-    /// second reading is indistinguishable from a fresh cycle whose model has
-    /// not answered yet.
-    pub const fn requires_stalled_cycle(self) -> bool {
-        matches!(self, Self::OwnerReleased)
-    }
-
     /// Whether this proof must ALSO observe a harness turn-end receipt newer
     /// than the cycle (and no live turn lease) before it may reclaim.
     pub const fn requires_harness_turn_end(self) -> bool {
-        matches!(self, Self::HarnessTurnEnded)
+        matches!(self, Self::OwnerReleased | Self::HarnessTurnEnded)
     }
 
     /// Whether the reclaim must read the authoritative actor's turn fence and
@@ -262,14 +215,13 @@ mod tests {
     /// was no owner to release, which reads identically to a fresh cycle whose
     /// model has not answered yet — reclaiming on it abandoned a live turn.
     #[test]
-    fn only_the_owner_release_proof_must_also_observe_a_stalled_cycle() {
+    fn owner_release_must_confirm_a_harness_turn_end() {
         assert!(
-            EmptyPreflightCancelAuthority::OwnerReleased.requires_stalled_cycle(),
-            "release alone cannot tell an orphan apart from a fresh cycle; the \
-             pre-capture stall deadline is what separates them"
+            EmptyPreflightCancelAuthority::OwnerReleased.requires_harness_turn_end(),
+            "release alone cannot tell whether a cycle can still deliver a response"
         );
         assert!(
-            !EmptyPreflightCancelAuthority::RunCancelled.requires_stalled_cycle(),
+            !EmptyPreflightCancelAuthority::RunCancelled.requires_harness_turn_end(),
             "the caller stopped the run itself; there is nothing left to wait for"
         );
     }
@@ -280,12 +232,8 @@ mod tests {
         assert!(authority.authorizes_cancel());
         assert!(authority.requires_harness_turn_end());
         assert!(authority.requires_turn_fence());
-        assert!(
-            !authority.requires_stalled_cycle(),
-            "#runctrlclaude: a /clear receipt is the proof; waiting out the stall is the wedge"
-        );
         assert!(EmptyPreflightCancelAuthority::OwnerReleased.requires_turn_fence());
-        assert!(!EmptyPreflightCancelAuthority::OwnerReleased.requires_harness_turn_end());
+        assert!(EmptyPreflightCancelAuthority::OwnerReleased.requires_harness_turn_end());
         assert!(!EmptyPreflightCancelAuthority::RunCancelled.requires_turn_fence());
         assert!(!EmptyPreflightCancelAuthority::Unproven.requires_turn_fence());
     }
@@ -296,7 +244,6 @@ mod tests {
         assert!(authority.authorizes_cancel());
         assert!(authority.requires_turn_fence());
         assert!(!authority.requires_harness_turn_end());
-        assert!(!authority.requires_stalled_cycle());
     }
 
     /// `#runctrlclaude` truth table. The only authorizing row is: no live

@@ -606,8 +606,10 @@ its prompt, until the operator typed `/clear` by hand.
   is already `Ready` (a supervisor `idle_pane_reconcile` racing its own slow
   startup `prompt_ready`, or any repeat) settles no `running` receipt, since
   a route-dispatched turn runs with the actor `Ready` throughout. It still
-  runs the pre-turn-grace leak sweep
-  (`sweep_open_dispatches_past_pre_turn_grace_as_of`), logged as
+  runs the pre-turn-grace sweep for `accepted` and `queued` receipts
+  (`sweep_open_dispatches_past_pre_turn_grace_as_of`). A `running` receipt
+  survives both the pre-turn grace and the controller recycle horizon. A
+  repeat Ready may log
   `dispatch_in_flight_released ... reason=pre_turn_grace_sweep` (a real
   transition logs `reason=actor_ready`).
   `#infraclearsession`: the settle happens ON the retirement edge

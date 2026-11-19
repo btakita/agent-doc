@@ -1719,24 +1719,12 @@ fn extract_do_pending_ids(action: &str) -> Vec<String> {
     agent_doc_queue::queue_directive::explicit_do_directive_target_ids(action)
 }
 
-/// `#plansealedturn`: the open, not-yet-captured preflight cycle for `file`,
-/// if the binary's preflight has sealed this turn. Uses the same re-entry policy
-/// preflight uses, so a stalled (crashed/superseded) older cycle never counts.
+/// `#plansealedturn`: the unanswered cycle whose admission owns this turn.
 fn sealed_preflight_turn(file: &Path) -> Option<agent_doc_cycle_state_io::CycleState> {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
     agent_doc_cycle_state_io::load(file)
         .ok()
         .flatten()
-        .filter(|cycle| {
-            cycle.reusable_by_reentrant_preflight(
-                0,
-                now,
-                agent_doc_cycle_state_io::STALLED_CYCLE_RESOLVE_SECS,
-            )
-        })
+        .filter(agent_doc_cycle_state_io::CycleState::reusable_by_reentrant_preflight)
 }
 
 /// `#chatprompt` (GH #125): the chat prompts the open cycle carries.

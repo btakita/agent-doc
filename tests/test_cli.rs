@@ -20581,7 +20581,7 @@ fn test_dispatch_turn_start_is_recorded_on_the_busy_transition() {
         );
     }
     assert!(
-        state_store.contains("(record.state == ActorState::Ready).then_some(now_secs)"),
+        state_store.contains("lifecycle_as_of.filter(|_| record.state == ActorState::Ready)"),
         "only a Ready lifecycle write releases dispatch receipts"
     );
     let handler_at = rpc.find("pub(crate) fn handle_mark_lifecycle(").unwrap();
@@ -24164,7 +24164,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     for required_snippet in [
         "with_controller_document_mutation",
         "agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file)",
-        "if controller_document_mutation_in_progress() {\n        return agent_doc_crdt_relay_io::current_text_for_file(file);",
+        "if controller_document_mutation_in_progress() {\n        return Ok((agent_doc_crdt_relay_io::current_text_for_file(file)?, None));",
         "if controller_document_mutation_in_progress() {\n        return agent_doc_crdt_relay_io::ensure_document_model(file, source);",
     ] {
         assert!(
@@ -35916,7 +35916,9 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
     }
     assert!(
         sync_runtime_source.contains("agent_doc_sync::normalize_scope_arg")
-            && sync_runtime_source.contains("agent_doc_sync::shared_sync_scope_root")
+            && sync_runtime_source.contains("fn tmux_session_config_for_scope(")
+            && sync_runtime_source
+                .contains("agent_doc_sync::sync_scope_root(col_args, focus, caller_root)")
             && sync_runtime_source.contains("agent_doc_sync::layout_state_scope_root")
             && sync_runtime_source.contains("use agent_doc_sync::{")
             && sync_runtime_source.contains("effective_sync_columns")
@@ -35945,7 +35947,8 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
                 .contains("agent_doc_process_owner_io::process_tree_agent_doc_owner_pid_for_file(")
             && sync_runtime_source
                 .contains("agent_doc_process_owner_io::process_tree_has_agent_doc_owner_for_file(")
-            && route_session_resolution.contains("agent_doc_sync::shared_sync_scope_root"),
+            && route_session_resolution
+                .contains("agent_doc_sync_io::sync::tmux_session_config_for_scope("),
         "agent-doc-sync-io runtime graph should call focused sync policy and process-owner IO crates directly, while route session resolution keeps using focused sync scope policy"
     );
     assert!(

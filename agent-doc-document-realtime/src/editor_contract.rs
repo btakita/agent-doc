@@ -278,7 +278,7 @@ mod tests {
                 && jetbrains_manager.contains("oldFragment = oldFragment")
                 && jetbrains_manager.contains("newFragment = newFragment")
                 && jetbrains_manager
-                    .contains("prepareLocalEditorEditsUtil(beforeText, currentEdits)")
+                    .contains("prepareLocalEditorEditsUtil(beforeShadow, currentEdits)")
                 && jetbrains_manager.contains("isDocumentUnsaved(event.document)"),
             "JetBrains must publish exact dirty DocumentEvent splices",
         );

@@ -1234,6 +1234,10 @@ every entry.
   failure on a worker, and Compact Exchange formats its refusal on its pooled
   thread. The Compact Exchange refusal sentence itself (`attachRefusalMessage`)
   is UI wording around the derived remedy and stays in Kotlin.
+  A controller `not_agent_doc_document` refusal also disarms timed registration
+  retries. Body text can resemble agent-doc markers without making the file a
+  session. A fresh editor observation can try registration after the file is
+  opted in. This is ordinary admission and creates no durable recovery hold.
 - Local-edit capture (`prepareLocalEditorEditsUtil`,
   `reconstructCapturedLocalEditorBatchUtil`, `currentEpochCapturedEditsUtil`,
   `singleSpliceCapturedEditUtil`, `singleSpliceBatchUtil`) maps IntelliJ UTF-16

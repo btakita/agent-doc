@@ -2711,8 +2711,10 @@ mod tests {
             ),
             agent_doc_document::subagent_completion::cell("subagent:sample", child, "child-key"),
         );
+        // The child already has independent lifecycle evidence from an
+        // earlier attempt, so it stays a separate row during migration.
         let content = format!(
-            "<!-- agent:exchange -->\n{cells}\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n- {parent}\n  - {child}\n- {composite}\n<!-- /agent:queue -->\n"
+            "<!-- agent:exchange -->\n{cells}\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n- {parent}\n  - 🔄 {child}\n- {composite}\n<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, &content).unwrap();
         assert!(

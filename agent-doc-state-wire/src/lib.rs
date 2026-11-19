@@ -34,7 +34,21 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
+use std::sync::OnceLock;
 use std::time::Duration;
+
+static PROCESS_BINARY_VERSION: OnceLock<String> = OnceLock::new();
+
+/// Stamp the version of the executable that owns this process once, so
+/// clients below controller I/O can send the same stamped wire version.
+pub fn set_process_binary_version(version: &str) {
+    let _ = PROCESS_BINARY_VERSION.set(version.to_string());
+}
+
+/// The executable's stamped version, when initialized by its entrypoint.
+pub fn process_binary_version() -> Option<&'static str> {
+    PROCESS_BINARY_VERSION.get().map(String::as_str)
+}
 
 type LocalDocumentProjectionReader = Box<dyn Fn(&str) -> Option<DocumentStateProjection>>;
 type SharedDocumentProjectionReader =

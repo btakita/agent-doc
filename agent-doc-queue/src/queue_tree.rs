@@ -182,6 +182,9 @@ pub struct QueueTreeNode {
     /// A struck copy of it is not deletable: the Todo it projects is open.
     #[serde(skip)]
     pub todo_open: bool,
+    /// Prose list rows owned by a tracked command's folded span.
+    #[serde(skip)]
+    context_rows: usize,
     /// The gutter icon's tooltip: the state label, then the roll-up of a live
     /// waiting head (`waiting on you · you 1 · agent 0 · done 2`). Editors show
     /// it verbatim so every plugin words a node the same way.
@@ -451,10 +454,18 @@ pub fn queue_tree(document: &str, options: &QueueTreeOptions) -> anyhow::Result<
             }
             let depth = stack.len();
             stack.push(indent);
-            let raw = match entry {
-                QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => prompt.text.as_str(),
-                QueueEntry::Freeform(line) => line.as_str(),
-                _ => "",
+            let (raw, context_rows) = match entry {
+                QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) if !prompt.multiline => {
+                    (
+                        prompt.text.as_str(),
+                        agent_doc_element_queue::subprompts::subprompt_rows(&prompt.text).len(),
+                    )
+                }
+                QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
+                    (prompt.text.as_str(), 0)
+                }
+                QueueEntry::Freeform(line) => (line.as_str(), 0),
+                _ => ("", 0),
             };
             nodes.push(QueueTreeNode {
                 line: line_of(document, start),
@@ -469,6 +480,7 @@ pub fn queue_tree(document: &str, options: &QueueTreeOptions) -> anyhow::Result<
                 waiting_item: waiting_packet::is_waiting_item_head(entry),
                 todo_open: waiting_packet::is_waiting_item_head(entry)
                     && own_id(raw).is_some_and(|id| open_todo_ids.contains(&id)),
+                context_rows,
                 rollup,
                 tooltip: node_tooltip(state, rollup),
             });
@@ -747,7 +759,12 @@ pub fn row_closure(tree: &QueueTree, index: usize) -> Option<RowClosure> {
     let nodes = &tree.nodes;
     let node = nodes.get(index)?;
     let nested = nested_indexes(nodes, index);
-    let nested_rows = nested.len();
+    let nested_rows = node.context_rows
+        + nested.len()
+        + nodes[nested.clone()]
+            .iter()
+            .map(|descendant| descendant.context_rows)
+            .sum::<usize>();
     let first_open_nested = first_open(nodes, nested.clone());
     let top_index = (0..=index).rev().find(|&candidate| {
         let candidate = &nodes[candidate];

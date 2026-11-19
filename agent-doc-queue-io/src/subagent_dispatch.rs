@@ -2004,9 +2004,8 @@ queue: go
     }
 
     /// A claimed earlier `agent:run subagents` queue stays the claim-blind
-    /// selection. A nested row under `do [#id]` is its own live head (the
-    /// directive is not a free-text parent). Neither that head nor the claim
-    /// hides a later independent `subagents` queue. Each queue keeps its own cap.
+    /// selection. A tracked directive dispatches with its nested prose. A
+    /// later independent `subagents` queue keeps its own cap.
     #[test]
     fn claimed_subagents_queue_does_not_hide_a_later_independent_run() {
         let dir = tempfile::tempdir().unwrap();
@@ -2028,10 +2027,15 @@ queue: go
             "an unclaimed head on the claimed queue stays dispatchable: {listed:?}"
         );
         assert!(
+            listed.iter().any(|head| head.starts_with("do [#parent]")
+                && head.contains("merge-794-then-requeue-759")),
+            "the tracked parent dispatches with its nested prose: {listed:?}"
+        );
+        assert!(
             listed
                 .iter()
-                .any(|head| head == "merge-794-then-requeue-759"),
-            "a nested row under do [#id] is its own unclaimed head: {listed:?}"
+                .all(|head| head != "merge-794-then-requeue-759"),
+            "the nested prose has no independent dispatch: {listed:?}"
         );
         assert!(
             listed

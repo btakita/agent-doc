@@ -1338,6 +1338,72 @@ pub fn queue_subprompt_block_end(lines: &[&str], parent: usize, from: usize) -> 
     (end > from).then_some(end)
 }
 
+/// Recognize prose attached to an explicit tracked `do` row. Keep an existing
+/// group intact when a descendant has its own command, attempt, or generated
+/// response. A struck legacy parent with a live child also keeps both nodes.
+pub fn tracked_do_context_block_end(
+    lines: &[&str],
+    parent: usize,
+    item_content: &str,
+) -> Option<usize> {
+    use agent_doc_element_queue::subprompts::{
+        is_tracked_do, line_indent_width, list_item_content,
+    };
+
+    let next_content_line = |from| (from..lines.len()).find(|&i| !lines[i].trim().is_empty());
+    let parent_indent = line_indent_width(lines.get(parent)?);
+    let from = next_content_line(parent + 1).filter(|&i| {
+        line_indent_width(lines[i]) > parent_indent && list_item_content(lines[i]).is_some()
+    })?;
+    let item = parse_item(item_content, 0, item_content.len(), true);
+    if !is_tracked_do(&item.text)
+        || item.text.contains("[#subagent-operator-request-")
+        || item.text.contains("<!-- agent-doc:")
+    {
+        return None;
+    }
+    let mut end = queue_subprompt_block_end(lines, parent, from)?;
+    // A blank is allowed between prose children. An indented independent row
+    // still prevents folding the entire group, even after that blank.
+    while let Some(next) =
+        next_content_line(end).filter(|&i| line_indent_width(lines[i]) > parent_indent)
+    {
+        end = queue_subprompt_block_end(lines, parent, next)?;
+    }
+    for (offset, line) in lines[from..end].iter().enumerate() {
+        let Some(row) = list_item_content(line) else {
+            continue;
+        };
+        if !line.trim_start().starts_with(['-', '*', '+']) {
+            // An ordered child explicitly opts into its group's dependencies.
+            return None;
+        }
+        let row = row.trim();
+        let work = row
+            .strip_prefix("📥 ")
+            .or_else(|| row.strip_prefix("👀 "))
+            .unwrap_or(row)
+            .trim_start();
+        if work != agent_doc_element_queue::strip_attempt_projection_prefix(work)
+            || is_ignored_list_comment(work)
+            || inert_list_child_end(lines, from + offset, line_indent_width(line)).is_some()
+            || is_generated_response_structure_row(work)
+            || !matches!(classify(work), ItemKind::FreeText)
+            || work.starts_with("Include #subagent:")
+            || work
+                .strip_prefix("re:")
+                .is_some_and(|target| target.trim_start().starts_with("[#"))
+            || work.contains("<!-- agent-doc:")
+            || crate::tree_status_row::find_status_query_token(work).is_some()
+            || matches!(work, "push" | "publish")
+            || (item.struck && !work.is_empty() && !split_struck_body(work).0)
+        {
+            return None;
+        }
+    }
+    Some(end)
+}
+
 /// Byte-free shape of one bullet-less multi-line queue head: a prose title run
 /// followed by one or more balanced Markdown code fences
 /// (`#multilinequeuehead`).
@@ -1589,9 +1655,8 @@ fn parse_item(
     queue_item: bool,
 ) -> Item {
     let raw = raw_line_content.trim().to_string();
-    // Compatibility for a caller that passes a legacy folded row. Canonical
-    // component parsing calls this once per list row, so `subprompt_block` is
-    // absent and every child has its own node.
+    // A tracked command with nested prose has one span. This also handles
+    // legacy folded free-text rows.
     let (head_raw, subprompt_block) =
         agent_doc_element_queue::subprompts::split_subprompt_block(&raw);
     let mut body = head_raw.trim();
@@ -2079,15 +2144,26 @@ pub fn components(source: &str) -> Vec<Component> {
             if is_ignored_list_comment(item_content) {
                 continue;
             }
+            // `item_content` is a suffix slice of `content`, which starts at
+            // `line_start`.
+            let raw_start = line_start + (content.len() - item_content.len());
+            if is_runnable_component(&comp.name)
+                && let Some(end_index) =
+                    tracked_do_context_block_end(&content_lines, index, item_content)
+            {
+                let end = line_offsets.get(end_index).copied().unwrap_or(source.len());
+                comp.items
+                    .push(parse_item(&source[raw_start..end], line_start, end, true));
+                continuable_item = None;
+                line_index = end_index;
+                continue;
+            }
             comp.items.push(parse_item(
                 item_content,
                 line_start,
                 offset,
                 is_runnable_component(&comp.name),
             ));
-            // `item_content` is a suffix slice of `content`, which starts at
-            // `line_start`.
-            let raw_start = line_start + (content.len() - item_content.len());
             if is_runnable_component(&comp.name) && queue_item_accepts_continuation(item_content) {
                 continuable_item = Some((raw_start, QueueContinuationState::default()));
             }

@@ -13582,7 +13582,7 @@ mod tests {
     fn response_echoes_capture_full_concrete_ancestry_and_keep_leaf_compatibility() {
         let entries = entries(concat!(
             "- Root context\n",
-            "  - do [#parent]\n",
+            "  - [#parent]\n",
             "    - same leaf\n",
             "- Sibling root\n",
             "  - same leaf\n",

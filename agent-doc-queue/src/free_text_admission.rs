@@ -1849,13 +1849,8 @@ mod tests {
         );
     }
 
-    /// A nested free-text leaf under a tracked `do [#id]` parent stays in that
-    /// tree slot when admission mints a backlog id (`#freetextqueue`,
-    /// `#queuenest`). Lifting it to a top-level `do [#id]` leaves the original
-    /// text in place or wakes the parent, and both dispatch.
     #[test]
-    fn nested_free_text_under_tracked_parent_stays_in_the_tree() {
-        const CHILD: &str = "Is this tree still blocked? If not, update the head run item.";
+    fn nested_prose_under_tracked_do_stays_with_the_existing_task() {
         let content = concat!(
             "<!-- agent:run subagents priority go -->\n",
             "- do [#push]\n",
@@ -1864,61 +1859,20 @@ mod tests {
         );
         let entries = queue_entries_from_content(content);
         assert!(
-            free_text_prompt_is_backlog_task(CHILD),
-            "the reported nested prompt must be admissible backlog work"
-        );
-
-        let prepared = prepare_free_text_admission(
-            content,
-            &entries,
-            None,
-            &FreeTextAdmissionScope::All,
-            false,
-            "doc-id",
-        )
-        .unwrap()
-        .expect("nested free text is admitted");
-        assert_eq!(prepared.admitted_count, 1);
-        assert_eq!(prepared.unique_ids.len(), 1);
-        let id = prepared.unique_ids[0].clone();
-
-        let admission = prepared.finish(FreeTextAdmissionExecution::Queue).unwrap();
-        let queue_entries = queue_entries_from_content(&admission.content);
-        let rendered = crate::document_queue::render(&queue_entries);
-
-        assert!(
-            rendered.contains(&format!("  - do [#{id}]\n")),
-            "the minted id must replace the free text at the same indent:\n{rendered}"
-        );
-        assert_eq!(
-            rendered.matches(&format!("do [#{id}]")).count(),
-            1,
-            "one nested child is one queue row, not a second top-level row:\n{rendered}"
-        );
-        assert!(
-            !rendered.contains(CHILD),
-            "the free text must not remain beside the minted id:\n{rendered}"
-        );
-        let parent = queue_entries.iter().position(|entry| {
-            matches!(
-                entry,
-                crate::document_queue::QueueEntry::Prompt(prompt)
-                    if prompt.indent == 0 && prompt.text.contains("do [#push]")
+            prepare_free_text_admission(
+                content,
+                &entries,
+                None,
+                &FreeTextAdmissionScope::All,
+                false,
+                "doc-id",
             )
-        });
-        let parent = parent.expect("tracked parent stays");
-        assert!(
-            crate::document_queue::entry_is_group_parent(&queue_entries, parent),
-            "the parent stays a non-executable group label"
+            .unwrap()
+            .is_none()
         );
-        let heads = crate::document_queue::prompts(&queue_entries);
-        assert_eq!(
-            heads.len(),
-            1,
-            "one nested child produces one dispatch, not two: {heads:?}"
-        );
-        assert_eq!(heads[0].text, format!("do [#{id}]"));
-        assert!(heads[0].is_nested());
+        let [head] = crate::document_queue::prompts(&entries).try_into().unwrap();
+        assert!(head.text.starts_with("do [#push]\n"));
+        assert!(head.text.contains("update the head run item."));
     }
 
     /// The same child typed again as the exchange prompt must not mint a second
@@ -1930,7 +1884,7 @@ mod tests {
         const CHILD: &str = "Is this tree still blocked? If not, update the head run item.";
         let content = concat!(
             "<!-- agent:run subagents priority go -->\n",
-            "- do [#push]\n",
+            "- Push tree\n",
             "  - Is this tree still blocked? If not, update the head run item.\n",
             "<!-- /agent:run -->\n",
         );
@@ -2856,13 +2810,12 @@ mod tests {
         }
     }
 
-    /// Free text nested under an ordinary work row (no waiting item, choice,
-    /// or request) is still promoted in its slot (`#queuenest`).
+    /// Free text nested under a bare tracked group is promoted in its slot.
     #[test]
     fn free_text_under_plain_work_parent_is_still_promoted() {
         let content = concat!(
             "<!-- agent:run subagents priority go -->\n",
-            "- do [#push]\n",
+            "- [#push]\n",
             "  - Is this tree still blocked? If not, update the head run item.\n",
             "<!-- /agent:run -->\n",
         );

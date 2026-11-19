@@ -16304,7 +16304,7 @@ impl SimEditor {
 
     /// Pull every pending peer delivery through the same full-state projection contract the
     /// production plugins use. Returns the number of remote deliveries applied.
-    fn pull_peer_updates(&mut self) -> Result<usize> {
+    pub(crate) fn pull_peer_updates(&mut self) -> Result<usize> {
         let Some(pull) = agent_doc_crdt_relay_io::pull_replica_updates_for_file(
             &self.path,
             &self.replica_identity,
@@ -16338,7 +16338,7 @@ impl SimEditor {
 
     /// Flush the buffer to disk (Ctrl-S): buffer == disk, clean. The relay
     /// remains the current-document authority; disk becomes its saved projection.
-    fn save(&mut self) -> Result<()> {
+    pub(crate) fn save(&mut self) -> Result<()> {
         std::fs::write(&self.path, &self.buffer)
             .map_err(|err| anyhow!("SimEditor save write {}: {err}", self.path.display()))?;
         self.dirty = false;

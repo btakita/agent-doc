@@ -856,7 +856,7 @@ fn merge_forward(
 /// before a change that starts there (the reconcile's rule 2). An identical
 /// change made by both sides applies once, as in the reconcile. The result
 /// never holds a line that is neither the operator's nor canonical's.
-fn line_merge(base: &str, yours: &str, agent: &str) -> Option<String> {
+pub fn line_merge(base: &str, yours: &str, agent: &str) -> Option<String> {
     let base_lines: Vec<&str> = base.split_inclusive('\n').collect();
     let hunks =
         |side: &str| line_hunks(&base_lines, &side.split_inclusive('\n').collect::<Vec<_>>());

@@ -2251,8 +2251,11 @@ fn write_todo_add_rejects_malformed_nested_sub_items_and_applies_nothing() {
         ("Item\n\n  - child", "is blank"),
         ("Item\n- flush child", "is not a nested sub-item"),
         ("Item\n  prose under it", "is not a nested sub-item"),
-        ("Item\n  - one\n    - deeper", "changes indentation"),
-        ("Item\n  - [ ] a checkbox child", "is a checkbox row"),
+        (
+            "Item\n  - one\n    - deeper\n   - orphan",
+            "no enclosing list item",
+        ),
+        ("Item\n  - [ ]", "empty checkbox sub-item"),
         (
             "Item\n  - <!-- /agent:todo -->",
             "HTML comment or component marker",
@@ -2277,6 +2280,65 @@ fn write_todo_add_rejects_malformed_nested_sub_items_and_applies_nothing() {
             "{text:?}: a rejected write applies nothing"
         );
     }
+}
+
+#[test]
+fn nested_checkbox_todos_keep_independent_state_and_replace_only_their_subtree() {
+    let (tmp, doc) = setup_doc("- [ ] [#open] backlog task");
+    let additions = "id=parent Prepare release\n   - Measurements\n       - [ ] [#measure] Record timing\n           - Keep the raw results\n   - [X] [#baseline] Record baseline";
+    assert_nested_ok(
+        &nested_write(&tmp, &doc, &["--todo-add", additions]),
+        "add the nested checklist",
+    );
+    let before = fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        component_body(&before, "todo"),
+        "- [ ] [#parent] Prepare release\n  - Measurements\n    - [ ] [#measure] Record timing\n      - Keep the raw results\n  - [x] [#baseline] Record baseline"
+    );
+    let stderr = assert_nested_ok(
+        &nested_write(&tmp, &doc, &["--todo-add", additions]),
+        "replay the nested checklist",
+    );
+    assert!(!stderr.contains("were kept"), "{stderr}");
+    assert_eq!(fs::read_to_string(&doc).unwrap(), before);
+    assert_nested_ok(
+        &nested_write(&tmp, &doc, &["--todo-done", "measure"]),
+        "check off the grandchild",
+    );
+    let checked = fs::read_to_string(&doc).unwrap();
+    assert_eq!(checked, before.replace("[ ] [#measure]", "[x] [#measure]"));
+
+    let invalid = nested_write(
+        &tmp,
+        &doc,
+        &[
+            "--todo-edit",
+            "measure=Record timing\n  - [ ] [#open] Collision",
+        ],
+    );
+    assert!(!invalid.status.success());
+    assert!(
+        String::from_utf8_lossy(&invalid.stderr)
+            .contains("nested checkbox id [#open] already belongs"),
+    );
+    assert_eq!(fs::read_to_string(&doc).unwrap(), checked);
+
+    assert_nested_ok(
+        &nested_write(
+            &tmp,
+            &doc,
+            &[
+                "--todo-edit",
+                "measure=Record new timing\n   - [ ] Attach results\n        - Include both runs",
+            ],
+        ),
+        "replace a grandchild's sub-items",
+    );
+    let content = fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        component_body(&content, "todo"),
+        "- [ ] [#parent] Prepare release\n  - Measurements\n    - [x] [#measure] Record new timing\n      - [ ] Attach results\n        - Include both runs\n  - [x] [#baseline] Record baseline"
+    );
 }
 
 /// `#nestedtodoadd`: the backlog and icebox add flags take the same

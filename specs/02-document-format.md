@@ -683,17 +683,14 @@ is a no-op). Template patches may also update
 `todo`, but the write path rejects replacements that reduce its checklist-item
 count, so an agent MUST preserve every existing item when emitting `patch:todo`.
 
-**Nested todo sub-items (`#nestedtodoadd`).** A todo item may carry nested
-sub-items: plain `  - <text>` rows directly under its checklist line, for
-example the open questions of one decision, each on its own line. They are part
-of the item, never items: they are not checklist rows, get no own id (preflight
-`#todoidbackfill` mints none), are never queue heads, and move, check off, and
-delete with their item. `--todo-add` takes them as one multi-line value whose
-first line is the item and whose every later line is one indented `- <text>`
-row:
+**Nested todo sub-items (`#nestedtodoadd`).** A todo item may carry a tree of
+indented bullets. Plain bullets are notes. Checkbox bullets are Todo rows
+with their own state and usual id backfill. `--todo-add` takes the tree as one
+multi-line value. The first line is the item and each subsequent line is an
+indented `- <text>` or `- [ ] <action>` row:
 
 ```bash
-agent-doc respond plan.md --todo-add $'id=pmsyncq Answer the PM-sync design questions\n  - Which provider ships first?\n  - Who owns a conflicting edit?'
+agent-doc respond plan.md --todo-add $'id=pmsyncq Answer the PM-sync design questions\n  - Which provider ships first?\n    - [ ] Confirm rollout order\n  - Who owns a conflicting edit?'
 ```
 
 renders
@@ -701,24 +698,24 @@ renders
 ```markdown
 - [ ] [#pmsyncq] Answer the PM-sync design questions
   - Which provider ships first?
+    - [ ] Confirm rollout order
   - Who owns a conflicting edit?
 ```
 
 The input is validated strictly, and a malformed value fails the write with
-nothing applied: no blank lines, every later line indented and starting with
-`- `, all sub-items at one indentation (one level), non-empty single-line text,
-no checkbox rows (a `- [ ]` row would be a separate todo item), and no HTML
-comments or component markers. Sub-items render two columns deeper than their
-item, whatever indentation the input used. Identity, id minting, source
-linking, and dedupe read the item line alone, so a replayed add with sub-items
-is a no-op, and when the existing item's nested lines differ from the add's
-(an operator edited a sub-item) the add still changes nothing and its receipt
-says the lines were kept. `--todo-done` and `--todo-reopen` flip the checkbox
-and keep the sub-items; `--todo-remove` deletes them with the item; a
-multi-line `--todo-edit "<selector>=<text>\n  - <sub-item>"` replaces the
-item's nested lines with the new sub-items, and a single-line edit keeps them.
-The backlog and icebox add flags take the same input (`pending-system.md`,
-*Adding an item with nested sub-items*).
+nothing applied. Each later line starts with an indented `- ` and carries
+non-empty text or a checkbox action. A dedent returns to a previously open
+level. Blank lines, HTML comments, and component markers are rejected.
+Rendering uses two spaces per level. A checkbox action can name its own id if
+that id is available. The root line determines add identity, root id minting,
+and source linking. A replay leaves an existing subtree untouched and
+reports differences in its nesting, text, or checkbox state. An id backfilled
+onto a previously id-less checkbox does not count as a difference.
+`--todo-done` and `--todo-reopen` flip the selected checkbox and keep its
+descendants. `--todo-remove` deletes the selected item and its subtree. A
+multi-line `--todo-edit` replaces the selected item's descendants, and a
+single-line edit keeps them. The backlog and icebox add flags support their own
+nested-subtask syntax (`pending-system.md`, *Adding an item with nested sub-items*).
 
 **Todo item identity.** A todo item's own id is the LEADING id token after
 its checkbox, bracketed or bare: `- [ ] [#gate1] Verify [#gate1] in a live
@@ -1103,7 +1100,7 @@ error naming the candidates.
 | Flag | Effect |
 |---|---|
 | `--todo-done <selector>` | `[ ]`/`[/]` → `[x]` in place; position, id, text, and nested sub-items kept; a repeat is a no-op. Then folds duplicate copies of the item. `#todolink`: the same write strikes the queue row whose work identity is that todo's own id, and a completion strike checks the owning todo. |
-| `--todo-edit "<selector>=<text>"` | Replace the action text; id, state, and position kept. The text may repeat but not change the id. Multi-line text replaces the item's nested lines with its `  - <sub-item>` rows; single-line text keeps them (`#nestedtodoadd`). |
+| `--todo-edit "<selector>=<text>"` | Replace the action text; id, state, and position kept. The text may repeat but not change the id. Multi-line text replaces the subtree with indented notes and checkbox rows. Single-line text keeps the subtree (`#nestedtodoadd`). |
 | `--todo-reopen <selector>` | `[x]`/`[/]` → `[ ]` in place; a repeat is a no-op. `#todolink`: restores the linked completion strike. |
 | `--todo-remove <selector>` | Delete the item and its deeper-indented continuation lines; errors when nothing matches. |
 

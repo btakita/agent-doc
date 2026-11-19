@@ -3,7 +3,7 @@
 use agent_doc_controller::dispatch::{is_stash_window_name, normalize_context_session};
 use agent_doc_harness::HarnessConfig;
 use anyhow::Result;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tmux_router::Tmux;
 
 /// Get the tmux session that owns the caller pane.
@@ -16,79 +16,6 @@ pub fn current_tmux_session(tmux: &Tmux) -> Option<String> {
     agent_doc_tmux_io::ambient_current_session_for_process(tmux).map(|ambient| ambient.session)
 }
 
-pub fn current_agent_doc_session(tmux: &Tmux) -> Option<String> {
-    let current = current_tmux_session(tmux)?;
-    if agent_doc_tmux_io::has_window_named(tmux, &current, "agent-doc") {
-        Some(current)
-    } else {
-        None
-    }
-}
-
-pub fn resolve_preferred_session(
-    tmux: &Tmux,
-    context_session: Option<&str>,
-    log_prefix: &str,
-) -> Option<String> {
-    if let Some(ctx) = normalize_context_session(context_session) {
-        return Some(ctx.to_string());
-    }
-
-    if let Some(current) = current_agent_doc_session(tmux) {
-        return Some(current);
-    }
-
-    let configured = agent_doc_project_config_io::project_tmux_session();
-    if configured.as_ref().is_some_and(|s| tmux.session_alive(s)) {
-        return configured;
-    }
-
-    if let Some(ref stale) = configured {
-        eprintln!(
-            "{log_prefix} configured tmux_session '{}' is not alive, ignoring stale pin",
-            stale
-        );
-    }
-
-    current_tmux_session(tmux)
-}
-
-pub(crate) fn resolve_preferred_session_for_layout(
-    tmux: &Tmux,
-    context_session: Option<&str>,
-    col_args: &[String],
-    focus: Option<&Path>,
-    policy: &agent_doc_sync::TmuxSessionPolicy,
-    log_prefix: &str,
-) -> Result<Option<String>> {
-    let explicit = normalize_context_session(context_session).map(str::to_string);
-    let current_agent_doc = current_agent_doc_session(tmux);
-    let focus_owned = focus.map(|path| path.to_string_lossy().into_owned());
-    let scoped_project = agent_doc_sync::shared_sync_scope_root(col_args, focus_owned.as_deref())
-        .and_then(|scope_root| {
-            agent_doc_sync_io::sync::configured_session_for_root(tmux, &scope_root)
-        });
-    let document_binding = agent_doc_sync_io::sync::scoped_document_tmux_session_binding(
-        policy,
-        col_args,
-        focus_owned.as_deref(),
-    );
-    let fallback = resolve_preferred_session(tmux, None, log_prefix);
-    let decision = agent_doc_sync::select_layout_session_with_policy(
-        agent_doc_sync::LayoutSessionCandidates {
-            explicit,
-            focused_actor: None,
-            document_binding,
-            current_agent_doc,
-            scoped_project,
-            fallback,
-        },
-        policy,
-    )
-    .map_err(|refused| anyhow::anyhow!("{log_prefix} {refused}"))?;
-    Ok(decision.map(|decision| decision.session))
-}
-
 /// Single source of truth for target session resolution.
 ///
 /// Priority:
@@ -97,7 +24,7 @@ pub(crate) fn resolve_preferred_session_for_layout(
 /// 3. Multi-session mode only (`tmux_sessions` set, GH #17): the document's
 ///    `tmux_session` frontmatter binding
 /// 4. Current tmux session when it already has an `agent-doc` window
-/// 5. config.toml `tmux_session` if the session is alive (user explicitly pinned via `session set`)
+/// 5. The scope project's live `tmux_session` pin (set via `session set`)
 /// 6. Fallback to current tmux session or harness-specific fallback name (auto-detect)
 ///
 /// Under a non-empty `tmux_sessions` list the result must be a member: ambient
@@ -114,18 +41,38 @@ pub fn resolve_target_session(
     harness: &HarnessConfig,
 ) -> Result<String> {
     let focus_owned = focus.map(|path| path.to_string_lossy().into_owned());
-    let policy =
-        agent_doc_sync_io::sync::tmux_session_policy_for_scope(col_args, focus_owned.as_deref());
-    let resolved = resolve_preferred_session_for_layout(
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let (policy, scoped_project) = agent_doc_sync_io::sync::tmux_session_config_for_scope(
         tmux,
-        context_session,
         col_args,
-        focus,
-        &policy,
+        focus_owned.as_deref(),
+        &cwd,
         "[route]",
-    )?;
-    if let Some(session) = resolved {
-        return Ok(session);
+    );
+    let fallback = current_tmux_session(tmux);
+    let current_agent_doc = fallback
+        .as_ref()
+        .filter(|session| agent_doc_tmux_io::has_window_named(tmux, session, "agent-doc"))
+        .cloned();
+    let document_binding = agent_doc_sync_io::sync::scoped_document_tmux_session_binding(
+        &policy,
+        col_args,
+        focus_owned.as_deref(),
+    );
+    let resolved = agent_doc_sync::select_layout_session_with_policy(
+        agent_doc_sync::LayoutSessionCandidates {
+            explicit: normalize_context_session(context_session).map(str::to_string),
+            focused_actor: None,
+            document_binding,
+            current_agent_doc,
+            scoped_project,
+            fallback,
+        },
+        &policy,
+    )
+    .map_err(|refused| anyhow::anyhow!("[route] {refused}"))?;
+    if let Some(resolved) = resolved {
+        return Ok(resolved.session);
     }
     let fallback = harness.tmux_session_fallback.clone();
     policy
@@ -217,12 +164,6 @@ pub fn ensure_auto_start_target_session(
     harness: &HarnessConfig,
 ) -> Result<()> {
     if normalize_context_session(context_session).is_some() {
-        return Ok(());
-    }
-
-    if agent_doc_project_config_io::project_tmux_session().as_deref() == Some(session_name)
-        && tmux.session_alive(session_name)
-    {
         return Ok(());
     }
 
@@ -467,7 +408,7 @@ mod tests {
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn resolve_preferred_session_prefers_current_agent_doc_session_over_live_project_pin() {
+    fn resolve_target_session_prefers_current_agent_doc_session_over_live_project_pin() {
         let dir = tempfile::TempDir::new().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -487,15 +428,15 @@ mod tests {
 
         assert_eq!(current_tmux_session(&iso).as_deref(), Some("1"));
         assert_eq!(
-            resolve_preferred_session(&iso, None, "[test]").as_deref(),
-            Some("1"),
+            resolve_target_session(&iso, None, &[], None, &HarnessConfig::claude()).unwrap(),
+            "1",
             "the current agent-doc session should beat a live project tmux_session pin"
         );
     }
 
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn resolve_preferred_session_uses_live_project_pin_when_current_has_no_agent_doc_window() {
+    fn resolve_target_session_uses_live_project_pin_when_current_has_no_agent_doc_window() {
         let dir = tempfile::TempDir::new().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -511,9 +452,59 @@ mod tests {
 
         assert_eq!(current_tmux_session(&iso).as_deref(), Some("1"));
         assert_eq!(
-            resolve_preferred_session(&iso, None, "[test]").as_deref(),
-            Some("0"),
+            resolve_target_session(&iso, None, &[], None, &HarnessConfig::claude()).unwrap(),
+            "0",
             "a live project tmux_session pin remains the fallback when the current session has no agent-doc window"
+        );
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run make tmux-ci"]
+    fn resolve_target_session_rejects_a_disallowed_documentless_pin() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        std::fs::create_dir(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"pinned\"\ntmux_sessions = [\"allowed\"]\n",
+        )
+        .unwrap();
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-documentless-pin-policy");
+        iso.new_session("pinned", dir.path()).unwrap();
+        iso.new_session("allowed", dir.path()).unwrap();
+
+        let err = resolve_target_session(&iso, None, &[], None, &HarnessConfig::claude())
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("'pinned' (from project tmux_session pin)"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run make tmux-ci"]
+    fn resolve_target_session_does_not_borrow_a_pin_for_an_unpinned_document() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        std::fs::create_dir(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"pinned\"\n",
+        )
+        .unwrap();
+        let nested = dir.path().join("nested");
+        std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+        let document = nested.join("notes.md");
+        std::fs::write(&document, "").unwrap();
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-unpinned-document-scope");
+        iso.new_session("pinned", dir.path()).unwrap();
+        iso.new_session("ambient", dir.path()).unwrap();
+
+        assert_eq!(
+            resolve_target_session(&iso, None, &[], Some(&document), &HarnessConfig::claude())
+                .unwrap(),
+            "ambient"
         );
     }
     #[test]

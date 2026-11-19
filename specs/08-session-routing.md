@@ -810,8 +810,12 @@ below is then a no-op and resolution is exactly the historical order.
 
 **Policy owner.** `agent_doc_sync::TmuxSessionPolicy` is the pure policy, built
 from `tmux_sessions` of the `.agent-doc` root that governs the document set
-(`sync_scope_root`). `agent_doc_sync_io::sync::tmux_session_policy_for_scope`
-loads it, and `document_tmux_session_binding` reads a document's
+(`sync_scope_root`). `agent_doc_sync_io::sync::tmux_session_config_for_scope`
+reads the allow-list and pin from that same configuration. Its scope is the
+shared root of the candidate documents or the focused document's root. A
+documentless call uses the supplied project or working directory. A request
+with documents never consults an unrelated caller's tmux configuration.
+`document_tmux_session_binding` reads a document's
 `tmux_session:` frontmatter. That binding is honored only in multi-session mode
 (`TmuxSessionPolicy::effective_document_binding`).
 

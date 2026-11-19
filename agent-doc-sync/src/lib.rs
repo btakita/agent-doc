@@ -678,24 +678,32 @@ pub fn shared_sync_scope_root(col_args: &[String], focus: Option<&str>) -> Optio
         .find(|dir| dir.join(".agent-doc").is_dir())
 }
 
-/// Resolve the root used for sync layout and prune state.
+/// Resolve the project whose tmux configuration governs the candidate set.
+/// A documentless call uses the supplied directory, but an unscoped document
+/// does not borrow tmux policy from the caller's project.
 pub fn sync_scope_root(col_args: &[String], focus: Option<&str>, cwd: &Path) -> Option<PathBuf> {
     shared_sync_scope_root(col_args, focus)
         .or_else(|| {
-            focus
-                .map(str::trim)
-                .filter(|path| !path.is_empty())
-                .and_then(|path| agent_doc_fs::find_project_root(Path::new(path)))
+            normalize_scope_arg(focus).and_then(|path| {
+                let path = Path::new(path);
+                let canonical = path.canonicalize().ok();
+                agent_doc_fs::find_project_root(canonical.as_deref().unwrap_or(path))
+            })
         })
         .or_else(|| {
-            agent_doc_fs::find_project_root(cwd)
-                .or_else(|| cwd.join(".agent-doc").is_dir().then_some(cwd.to_path_buf()))
+            if sync_candidate_files(col_args, focus).is_empty() {
+                agent_doc_fs::find_project_root(cwd)
+            } else {
+                None
+            }
         })
 }
 
 /// Resolve the base directory used for sync layout state.
 pub fn layout_state_scope_root(col_args: &[String], focus: Option<&str>, cwd: &Path) -> PathBuf {
-    sync_scope_root(col_args, focus, cwd).unwrap_or_else(|| cwd.to_path_buf())
+    sync_scope_root(col_args, focus, cwd)
+        .or_else(|| agent_doc_fs::find_project_root(cwd))
+        .unwrap_or_else(|| cwd.to_path_buf())
 }
 
 pub fn latency_budget_status(elapsed: Duration, budget: Duration) -> &'static str {
@@ -1273,6 +1281,35 @@ fn resolve_absolute_file_path(file: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_documentless_calls_use_the_callers_tmux_configuration() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir(project.path().join(".agent-doc")).unwrap();
+        let rootless = tempfile::tempdir().unwrap();
+        let document = rootless.path().join("notes.md");
+        std::fs::write(&document, "").unwrap();
+        let document = document.to_string_lossy();
+        let columns = [document.to_string()];
+
+        assert_eq!(
+            sync_scope_root(&[" , ".to_string()], Some(" "), project.path()),
+            Some(project.path().to_path_buf())
+        );
+        assert_eq!(sync_scope_root(&columns, None, project.path()), None);
+        assert_eq!(sync_scope_root(&[], Some(&document), project.path()), None);
+        assert_eq!(
+            layout_state_scope_root(&columns, None, project.path()),
+            project.path()
+        );
+
+        #[cfg(unix)]
+        {
+            let alias = project.path().join("alias.md");
+            std::os::unix::fs::symlink(document.as_ref(), &alias).unwrap();
+            assert_eq!(sync_scope_root(&[], alias.to_str(), project.path()), None);
+        }
+    }
 
     fn name_evidence(
         index: &str,

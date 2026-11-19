@@ -321,6 +321,7 @@ tmux-ci:
 	run_tmux_ci agent-doc-controller-io-navigation_lane_session $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-controller-io --lib navigation_lane_session_ --no-fail-fast -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
 	run_tmux_ci agent-doc-claim-io-navigation_lane_requester $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-claim-io --lib navigation_lane_requester_ --no-fail-fast -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
 	run_tmux_ci agent-doc-route-io-layout_startup $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-route-io --lib layout_startup_completion_cannot_append_a_third_visible_pane --no-fail-fast -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
+	run_tmux_ci agent-doc-route-io-session_resolution $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-route-io --lib session_resolution::tests:: --no-fail-fast -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
 	run_tmux_ci agent-doc-tmux-io-client_visibility $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-tmux-io --lib client_visibility:: --no-fail-fast -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
 	run_tmux_ci agent-doc-sync-io-superseded_owner $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-sync-io --lib superseded_owner:: --no-fail-fast -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
 	run_tmux_ci agent-doc-route-io-dispatch-client-less $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-route-io --lib dispatch_into_a_client_less_session_reports_the_pane_not_visible --no-fail-fast -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \

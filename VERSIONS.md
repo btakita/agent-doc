@@ -2,6 +2,12 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.583
+
+- **Worker launch recovery keeps the original attempt.** A legacy native launch reservation stays held until the harness settles that exact attempt, preventing duplicate dispatch after restart.
+- **Queue completion preserves task ownership.** Finishing a parent prompt leaves its child tasks open, and recovery keeps completed worker responses attached to their original rows across queues.
+- **Historical edits and live steering stay distinct.** Compaction preserves operator edits to earlier Exchange sections, and progress checkpoints no longer enter the steering queue.
+
 ## 0.35.582
 
 - **Admitted turns wait for terminal evidence.** Direct runs no longer time out after 30 minutes. Idle recovery waits for a durable terminal receipt before offering an admitted prompt again.

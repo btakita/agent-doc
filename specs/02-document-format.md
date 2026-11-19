@@ -785,8 +785,13 @@ state from BEFORE that closeout's resolutions (the item is still open). An add
 whose action cites an item the same closeout resolves never layers on it: it
 mints a standalone own id with no source locator, does not fold into an open
 todo already linked to that item, and is exempt from that closeout's
-auto-completion and `#tododone` advisory. Exactly one open todo results, and a
-replay of the closeout folds into it. Why standalone rather than layered: a
+auto-completion and `#tododone` advisory. A new standalone follow-up records
+the cited ids that are resolved or resolving in that closeout in a
+`⟦todo-follow-up:<id>,…⟧` annotation. Later preflights exclude those citations
+from `cited_work_resolved` and source qualification. The row remains open and
+continues to emit `todo_sync_required`. Ordinary citations and legacy rows
+without the annotation retain their existing behavior. Exactly one open todo
+results, and a replay of the closeout folds into it. Why standalone rather than layered: a
 layered todo is the operator prompt for its source item, and an item finished
 in this cycle has no prompt left to show. The locator would be an
 auto-completion edge to finished work, so the row would be checked off by this
@@ -945,7 +950,8 @@ action is finished or moot:
   signals above, `linked_work_resolved` (an OPEN todo whose OWN id, or every
   source its canonical locator names, is resolved tracked work), and
   `cited_work_resolved` (an OPEN todo that only CITES tracked work, all of it
-  resolved). Structural sync signals remain available when tracked-work
+  resolved, excluding citations marked as same-closeout follow-up context).
+  Structural sync signals remain available when tracked-work
   evidence is unreadable; no link verdict is inferred in that case. Signals
   are state, not events, so they repeat until the state changes.
   `stale_tracked_item` (`#decisionstaleaudit`) names an open todo, backlog,

@@ -1443,6 +1443,10 @@ fn todo_item_id(content: &str, action: &str) -> String {
     let line = body
         .lines()
         .find(|line| {
+            let line = line
+                .strip_suffix('⟧')
+                .and_then(|line| line.rsplit_once(" ⟦todo-follow-up:"))
+                .map_or(*line, |(action, _)| action);
             line.ends_with(action)
                 || line
                     .strip_suffix(')')
@@ -2796,9 +2800,10 @@ fn todo_add_citing_an_item_the_same_closeout_resolves_mints_one_open_follow_up()
         "{content}"
     );
     let todo = todo_item_id(&content, action);
+    let expected_todo = format!("- [ ] [#{todo}] {action} ⟦todo-follow-up:claimfollowstruck⟧");
     assert_eq!(
         component_body(&content, "todo"),
-        format!("- [ ] [#{todo}] {action}"),
+        expected_todo,
         "one open standalone follow-up, no locator to finished work"
     );
 
@@ -2818,7 +2823,7 @@ fn todo_add_citing_an_item_the_same_closeout_resolves_mints_one_open_follow_up()
     assert!(stderr.contains("already present"), "{stderr}");
     assert_eq!(
         component_body(&fs::read_to_string(&doc).unwrap(), "todo"),
-        format!("- [ ] [#{todo}] {action}")
+        expected_todo
     );
 
     // A later closeout with tracked-work flags leaves the follow-up open: it
@@ -2836,8 +2841,36 @@ fn todo_add_citing_an_item_the_same_closeout_resolves_mints_one_open_follow_up()
         .success();
     assert_eq!(
         component_body(&fs::read_to_string(&doc).unwrap(), "todo"),
-        format!("- [ ] [#{todo}] {action}")
+        expected_todo
     );
+
+    // Inspect the durable document in a fresh preflight session. The write
+    // fixtures above intentionally leave synthetic cycles uncommitted.
+    let (_preflight_tmp, preflight_doc) = setup_doc("");
+    let evidence = content.replace(
+        "<!-- /agent:todo -->",
+        "- [ ] [#legacy-follow-up] Review the implications of #claimfollowstruck\n<!-- /agent:todo -->",
+    );
+    fs::write(&preflight_doc, evidence).unwrap();
+    let preflight = agent_doc()
+        .args(["preflight", preflight_doc.to_str().unwrap()])
+        .assert()
+        .success();
+    let result: serde_json::Value = serde_json::from_slice(&preflight.get_output().stdout).unwrap();
+    let signals = result["todo_signals"].as_array().unwrap();
+    assert!(
+        signals
+            .iter()
+            .any(|signal| { signal["kind"] == "todo_sync_required" && signal["todo"] == todo })
+    );
+    assert!(
+        !signals
+            .iter()
+            .any(|signal| { signal["kind"] == "cited_work_resolved" && signal["todo"] == todo })
+    );
+    assert!(signals.iter().any(|signal| {
+        signal["kind"] == "cited_work_resolved" && signal["todo"] == "legacy-follow-up"
+    }));
 }
 
 /// `#todoaddonsamecycledone`: two `--done` + `--todo-add` pairs in ONE
@@ -2898,7 +2931,7 @@ fn two_done_and_todo_add_pairs_in_one_closeout_keep_both_follow_ups_open() {
     assert_eq!(
         component_body(&content, "todo"),
         format!(
-            "- [x] [#{earlier}] Approve the isolation plan for [#prunetestisolation] (source: agent:backlog [#prunetestisolation])\n- [ ] [#{a}] {follow_a}\n- [ ] [#{b}] {follow_b}\n- [ ] [#{c}] {layered} (source: agent:backlog [#keepopen])"
+            "- [x] [#{earlier}] Approve the isolation plan for [#prunetestisolation] (source: agent:backlog [#prunetestisolation])\n- [ ] [#{a}] {follow_a} ⟦todo-follow-up:claimfollowstruck⟧\n- [ ] [#{b}] {follow_b} ⟦todo-follow-up:prunetestisolation⟧\n- [ ] [#{c}] {layered} (source: agent:backlog [#keepopen])"
         ),
         "{stderr}"
     );

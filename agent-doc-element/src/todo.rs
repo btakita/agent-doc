@@ -128,6 +128,7 @@
 use anyhow::{Context, Result};
 
 use crate::element::{self, Component};
+use crate::priority::item_priority_rank;
 
 /// Canonical component name for the operator action checklist.
 pub const TODO_COMPONENT: &str = "todo";
@@ -2111,6 +2112,18 @@ impl OwnedTodoIndex {
         }
         self.first_owner.get(&id)
     }
+
+    /// Queue priority is metadata on the first owning checklist row. Notes,
+    /// children, and references to another item's id do not set its rank.
+    pub fn open_priorities(&self) -> impl Iterator<Item = (&str, u8)> {
+        self.first_owner
+            .values()
+            .filter(|item| item.state.is_open())
+            .map(|item| {
+                let action = item.text.lines().next().unwrap_or_default();
+                (item.id.as_str(), item_priority_rank(action))
+            })
+    }
 }
 
 /// One operator-checked `agent:todo` item: every row that owns `id` is `[x]`.
@@ -2556,17 +2569,74 @@ pub struct TodoProjection {
     pub duplicate_ids: Vec<(String, usize)>,
 }
 
+/// Stable-sort open sibling checklist blocks inside each top-level Markdown
+/// list. Keep the source spans, so nested notes travel with their item and
+/// prose, separators, checked items, and duplicate owners keep their slots.
+fn sort_todo_priority(
+    body: &str,
+    owner_counts: &std::collections::BTreeMap<String, usize>,
+) -> String {
+    use pulldown_cmark::{Event, Parser, Tag, TagEnd};
+
+    let mut sorted = String::with_capacity(body.len());
+    let mut cursor = 0;
+    let mut depth = 0;
+    let mut slots = Vec::new();
+    for (event, span) in Parser::new(body).into_offset_iter() {
+        match event {
+            Event::Start(tag) => {
+                if depth == 1
+                    && matches!(tag, Tag::Item)
+                    && let Some(item) = body[span.clone()].lines().next().and_then(parse_todo_line)
+                    && item.state.is_open()
+                    && !item.own_id.is_some_and(|id| {
+                        owner_counts
+                            .get(&normalize_link_id(id))
+                            .is_some_and(|count| *count > 1)
+                    })
+                {
+                    let start = body[..span.start]
+                        .rfind('\n')
+                        .map_or(0, |newline| newline + 1);
+                    let row = &body[start..span.end];
+                    let trimmed = row.trim_end_matches(|c: char| c.is_ascii_whitespace());
+                    let trailing = &row[trimmed.len()..];
+                    let end = start
+                        + trimmed.len()
+                        + trailing.find(['\r', '\n']).unwrap_or(trailing.len());
+                    slots.push((start..end, item_priority_rank(item.action)));
+                }
+                depth += 1;
+            }
+            Event::End(tag) => {
+                depth -= 1;
+                if depth == 0 && matches!(tag, TagEnd::List(_)) {
+                    let mut ordered = slots.clone();
+                    ordered.sort_by_key(|(_, rank)| *rank);
+                    for ((slot, _), (source, _)) in slots.drain(..).zip(ordered) {
+                        sorted.push_str(&body[cursor..slot.start]);
+                        sorted.push_str(&body[source]);
+                        cursor = slot.end;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    sorted.push_str(&body[cursor..]);
+    sorted
+}
+
 /// `#managedlistnodrift`: `render(durable state)` for `agent:todo`.
 ///
 /// The durable state is the todo items themselves (operator records: id,
 /// action, checkbox) plus `links`, the tracked-work index built from the
-/// tracked components and the done archive. The only state this projection
-/// derives is the checkbox of an OPEN item whose OWN id (or every tracked item
-/// linked to it) is durably resolved: that item is closed `[x]`, text
-/// otherwise unchanged ([`TodoLinkFindingKind::LinkedWorkResolved`]). Nothing
-/// is deleted, reordered, or folded; an item that only cites resolved work, an
-/// id-less item, and an item whose id `links` does not know stay open (fail
-/// closed). A second application is a no-op.
+/// tracked components and the done archive. An open item whose own id (or every
+/// tracked item linked to it) is durably resolved closes as `[x]`
+/// ([`TodoLinkFindingKind::LinkedWorkResolved`]). The
+/// `priority` marker also orders open checklist items by their rank. An item
+/// that only cites resolved work, an id-less item, and an item whose id
+/// `links` does not know stay open (fail closed). A second application is a no-op.
 pub fn project_todo(content: &str, links: &TodoLinkIndex) -> Result<TodoProjection> {
     project_todo_except(content, links, &[])
 }
@@ -2623,6 +2693,11 @@ pub fn project_todo_except(
         })
         .collect();
     let rendered = body.render();
+    let rendered = if todo.attrs.contains_key("priority") && rendered.contains("priority=") {
+        sort_todo_priority(&rendered, &counts)
+    } else {
+        rendered
+    };
     let content =
         (rendered != todo.content(content)).then(|| todo.replace_content(content, &rendered));
     Ok(TodoProjection {
@@ -2635,6 +2710,45 @@ pub fn project_todo_except(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_todo_priority_preserves_subtrees_and_checked_slots() {
+        let low = concat!("- [ ] [#low] priority=9 later\n", "  - low note\n");
+        let checked = "- [x] [#checked] priority=1 stays in its slot\n";
+        let high = concat!(
+            "- [/] #high priority=1 first\n",
+            "\n",
+            "  - first note after a blank line\n",
+        );
+        let tie = "- [ ] [#tie] priority=1 stable tie\n";
+        let unnumbered = "- [ ] [#unnumbered] priority=0 after numbered items\n";
+        let content = format!(
+            "<!-- agent:todo priority -->\n{low}{checked}{unnumbered}{high}{tie}<!-- /agent:todo -->\n"
+        );
+        let projection = project_todo(&content, &TodoLinkIndex::default()).unwrap();
+        let projected = projection.content.unwrap();
+        assert_eq!(
+            projected,
+            format!(
+                "<!-- agent:todo priority -->\n{high}{checked}{tie}{low}{unnumbered}<!-- /agent:todo -->\n"
+            )
+        );
+        assert!(
+            project_todo(&projected, &TodoLinkIndex::default())
+                .unwrap()
+                .content
+                .is_none()
+        );
+        assert!(
+            project_todo(
+                &content.replace("agent:todo priority", "agent:todo"),
+                &TodoLinkIndex::default()
+            )
+            .unwrap()
+            .content
+            .is_none()
+        );
+    }
 
     /// `#managedlistnodrift`: the todo projection closes exactly the open
     /// items whose own tracked work is durably resolved, changes nothing else,

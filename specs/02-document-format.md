@@ -1022,6 +1022,12 @@ action is finished or moot:
   question or note about a decision todo) never completes the todo: only the
   explicit `--done` says the todo's work is finished.
 
+**Todo ordering (`#todopriorityinert`).** When `agent:todo` carries the
+bare `priority` flag, preflight stable-sorts `[ ]` and `[/]` rows within
+each top-level list. Put `priority=<1..9>` on the item's own checklist line, with
+`1` highest. Unnumbered items follow numbered items. Checked and duplicate-id
+rows keep their slots, and nested notes and checklists travel with their parent.
+
 **Todo-backed queue rows stay in sync (`#todosync`).** The operator may queue
 work on a Todo directly (`do [#<todo own id>]`). Such a row shares the Todo's
 lifecycle the way a backlog-backed row shares its backlog item's:
@@ -1032,6 +1038,11 @@ lifecycle the way a backlog-backed row shares its backlog item's:
 | Operator checks the item `[x]` | reaped to `agent:done`; preflight strikes the row (`source=done`) | the Todo stays `[x]` in place; preflight strikes the row (`source=todo_checked`) |
 | `--done <id>` | resolves the item, strikes the row | checks the Todo off, strikes the row (`#sdktododone`) |
 | Worker reported, item must stay open | `queue consume --ack-id <id>` | `queue consume --ack-id <id>` (`#nestedechostrike`) |
+
+A Run marked `priority` uses the open Todo's own-id rank for its eligible
+`do [#id]` rows, even if the Todo list itself is unmarked. An active
+backlog or icebox source takes precedence when it owns the same id. Existing
+queue dependency, pin, and authored-position rules still apply.
 
 `--ack-id <id>` may find more than one open reported-release receipt for the
 id, for example a Todo first dispatched as a waiting row and later answered

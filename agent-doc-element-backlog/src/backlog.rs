@@ -20,6 +20,7 @@
 //! - Mutation ops (`op_add/done/edit/clear/reorder`) return a new body string, never mutate in place.
 
 use agent_doc_element::element;
+pub use agent_doc_element::priority::{PRIORITY_RANK_UNSET, item_priority_rank};
 use agent_doc_frontmatter::frontmatter::{QueueLifecycleMarker, queue_icons};
 use anyhow::{Context, Result, anyhow, bail};
 use std::collections::{BTreeMap, HashSet};
@@ -3060,25 +3061,6 @@ pub fn active_enqueue_item_ids(body: &str) -> Vec<String> {
         .filter(|item| !item_precondition_unmet(&item.text, today))
         .map(|item| item.id.clone())
         .collect()
-}
-
-/// Rank an item's priority from a `priority=<1..9>` token anywhere in its text
-/// (`#backlog-priority-attribute`). `1` is the highest priority and sorts first;
-/// `9` is the lowest numbered priority. An item with no valid `priority=` token
-/// ranks `10` — below every numbered item — so unprioritized items sort last
-/// while preserving their authored relative order under a stable sort.
-pub const PRIORITY_RANK_UNSET: u8 = 10;
-
-pub fn item_priority_rank(text: &str) -> u8 {
-    for token in text.split_whitespace() {
-        if let Some(value) = token.strip_prefix("priority=")
-            && let Ok(n) = value.parse::<u8>()
-            && (1..=9).contains(&n)
-        {
-            return n;
-        }
-    }
-    PRIORITY_RANK_UNSET
 }
 
 /// Active (open) backlog item ids paired with their priority rank, in document

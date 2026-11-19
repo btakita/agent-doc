@@ -37,10 +37,11 @@ reconciliation instead of copying its payload.
 | main, nonterminal | new boot and resume UUID | resume the exact main thread |
 | main, nonterminal | new boot without resume UUID | needs operator |
 | main, explicit `needs_operator` phase | any | preserve the operator gate; never auto-resume |
-| worker, dispatching/lost | new boot | generation-fenced redispatch |
+| worker, dispatching | new or unknown boot | reconcile native spawn and bind evidence |
+| worker, lost or orphaned | any | reconcile the exact attempt |
 | worker, running | same boot | reattach to the existing worker |
-| worker, running | new boot plus durable artifact reference | integrate artifact through existing claim/lineage fences |
-| worker, running | new boot and no durable artifact | needs operator; never guess whether effects completed |
+| worker, running | new boot plus durable Git commit reference | recover the artifact through existing claim, lineage, and delivery fences |
+| worker, running | new boot and no durable Git commit reference | needs operator, including when only a worktree or repository locator survived |
 | worker, reported/completed | durable receipt | preserve receipt; never replay work |
 | worker, quota blocked | any | needs operator |
 
@@ -56,6 +57,38 @@ queue recovery`, and deliberately leaves worker reattachment/redispatch to the
 existing generation-fenced coordinator edges. Native harness adapters may later
 consume those typed actions; they must not turn `needs_operator` into a retry.
 
+## Prompt revision evidence
+
+Admission records the document and baseline hashes and the cycle ID. The
+steering watermark and the selected free-text queue witness distinguish
+operator changes from existing work and past generated markers. Queue claims
+add the authored identity and generation. The harness start receipt adds a
+worker ID. A reservation with no bind can have crashed on either side of
+native spawn. The journal leaves that case recoverable without minting a
+second startup attempt.
+
+For `#address`, the external adapter records the baseline in the admitted
+inline cycle or worker generation and the exact submitted queue revision.
+Only a paired observation proves a delta. A worker hand-back retained because
+the remote is unavailable is ordinary goal hand-back data. The separate
+completion receipt is recorded only when the report can enter the completion
+path. A new execution of the same GitHub target receives its own baseline.
+
+A worker claim disappearing from the live ledger is orphaned until a matching
+worker, owner, identity, and generation appear in a cancellation or exact
+response release receipt. The latter preserves the hand-back until the
+normal closeout path verifies integration and records the strike. The main
+cycle's independently captured response hash, visible write proof, and final
+commit stay in the cycle and document authority projections. Recovery joins
+their existing receipts instead of using journal metadata to prove a commit.
+
+GitHub can demonstrate a remote head or reply change, but the provider read
+does not identify the local worker that caused a concurrent change. The
+restart journal cannot prove native spawn absence from a missing bind.
+Adapters with a complete before/after or authenticated effect receipt may
+resolve those cases. For the rest, the status projection retains the exact
+reconciliation obligation.
+
 ## Disk bounds and retention
 
 Defaults are intentionally small and configurable at process start:
@@ -63,7 +96,7 @@ Defaults are intentionally small and configurable at process start:
 | Setting | Default | Environment variable |
 | --- | ---: | --- |
 | retained transition records | 64 | `AGENT_DOC_RESTART_JOURNAL_MAX_TRANSITIONS` |
-| retained generations per queue identity | 3 | `AGENT_DOC_RESTART_JOURNAL_RECENT_GENERATIONS` |
+| retained terminal generations per queue identity | 3 | `AGENT_DOC_RESTART_JOURNAL_RECENT_GENERATIONS` |
 | compaction cadence | 16 transitions | `AGENT_DOC_RESTART_JOURNAL_COMPACT_EVERY` |
 | terminal worker recovery window | 6 hours | `AGENT_DOC_RESTART_JOURNAL_TERMINAL_RETENTION_SECS` |
 | per-document serialized cap | 64 KiB | `AGENT_DOC_RESTART_JOURNAL_DOCUMENT_BYTE_CAP` |

@@ -328,7 +328,7 @@ pub fn run_once(
 
     eprintln!("[run] starting for {}", file.display());
 
-    let Some((the_diff, queue_synthetic_diff)) = compute_run_diff(file)? else {
+    let Some((the_diff, queue_submission)) = compute_run_submission(file)? else {
         let cycle_state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
         let no_change_input = cycle_state.as_ref().map(|state| NoChangeCycleStateInput {
             cycle_id: &state.cycle_id,
@@ -366,6 +366,7 @@ pub fn run_once(
             queue_consumption: None,
         });
     };
+    let queue_synthetic_diff = queue_submission.is_some();
     effects.guard_no_exchange_compaction_request_for_diff(file, &the_diff)?;
 
     let raw_content =
@@ -670,6 +671,10 @@ pub fn run_once(
             &diagnostic,
         )?;
         anyhow::bail!("{}", diagnostic);
+    }
+
+    if let Some(submitted) = &queue_submission {
+        agent_doc_queue_io::address_effect::capture_before_execution(file, submitted)?;
     }
 
     let fork = resume_id.is_none();
@@ -1876,23 +1881,33 @@ pub fn authoritative_actor_owns_current_pane_for_harness(
 }
 
 pub fn compute_run_diff(file: &Path) -> Result<Option<(String, bool)>> {
+    Ok(compute_run_submission(file)?.map(|(diff, submitted)| (diff, submitted.is_some())))
+}
+
+fn compute_run_submission(file: &Path) -> Result<Option<(String, Option<String>)>> {
     if let Some(d) = agent_doc_diff_io::compute(
         &agent_doc_snapshot_io::DiffBaselineStore::new(agent_doc_ops_log_io::log_op),
         file,
     )? {
         eprintln!("[run] diff computed ({} bytes)", d.len());
-        return Ok(Some((d, false)));
+        return Ok(Some((d, None)));
     }
 
-    if let Some(d) = active_queue_prompt_diff(file)? {
+    if let Some(submitted) = active_queue_prompt_submission(file)? {
         eprintln!("[run] active queue head synthesized as prompt diff");
-        return Ok(Some((d, true)));
+        let diff = diff::synthetic_added_lines_diff(&submitted, "queue");
+        return Ok(Some((diff, Some(submitted))));
     }
 
     Ok(None)
 }
 
 pub fn active_queue_prompt_diff(file: &Path) -> Result<Option<String>> {
+    Ok(active_queue_prompt_submission(file)?
+        .map(|submitted| diff::synthetic_added_lines_diff(&submitted, "queue")))
+}
+
+fn active_queue_prompt_submission(file: &Path) -> Result<Option<String>> {
     let ActiveQueuePromptState::Ready { prompt } = active_queue_prompt_state(file)? else {
         return Ok(None);
     };
@@ -1921,8 +1936,7 @@ pub fn active_queue_prompt_diff(file: &Path) -> Result<Option<String>> {
         }
         Err(_) => prompt,
     };
-    agent_doc_queue_io::address_effect::capture_before_execution(file, &prompt)?;
-    Ok(Some(diff::synthetic_added_lines_diff(&prompt, "queue")))
+    Ok(Some(prompt))
 }
 
 pub fn active_queue_prompt_state(file: &Path) -> Result<ActiveQueuePromptState> {

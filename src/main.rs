@@ -11436,8 +11436,8 @@ fn try_main() -> anyhow::Result<()> {
                     agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_item(
                         &file, &item,
                     )?;
-                // A crash can leave a reservation before the claim command
-                // finished its pre-spawn observation.
+                // A crash can leave an unbound reservation. The brief must
+                // verify its existing before receipt, not sample the target again.
                 if agent_doc_queue_io::address_effect::github_enabled()
                     && agent_doc_queue::address_completion_proof::address_review_target(
                         &authorization.item,
@@ -11448,10 +11448,7 @@ fn try_main() -> anyhow::Result<()> {
                     && claim.state == agent_doc_queue::queue_claim::QueueClaimState::Claimed
                     && claim.worker.is_none()
                 {
-                    agent_doc_queue_io::address_effect::capture_before_execution(
-                        &file,
-                        &claim.item_text,
-                    )?;
+                    agent_doc_queue_io::address_effect::require_worker_observation(&file, claim)?;
                 }
                 if json {
                     println!("{}", serde_json::to_string_pretty(&authorization)?);

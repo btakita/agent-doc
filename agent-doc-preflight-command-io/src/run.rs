@@ -3061,16 +3061,12 @@ fn run_with_options_to_writer_in_pass(
         preflight_read_projection.queue.selected_prompts.clone()
     };
     if !options.probe && !no_changes {
-        let claimed = agent_doc_queue_io::queue_claim::ledger_claimed_items_for_content(
-            file,
+        // Bind the before observation to the same ordered submissions the
+        // harness receives, including the ancestry of repeated nested rows.
+        for submitted in agent_doc_queue::queue_response::submitted_prompts_for_heads(
             queue_authoritative_content,
-        );
-        for head in &selected_queue_heads {
-            let submitted = agent_doc_queue::queue_response::submitted_continuation_prompt(
-                queue_authoritative_content,
-                head,
-                |row| claimed.claims(row),
-            );
+            &selected_queue_heads,
+        ) {
             agent_doc_queue_io::address_effect::capture_before_execution(file, &submitted)?;
         }
     }

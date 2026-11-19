@@ -226,27 +226,52 @@ pub(crate) fn sync_claims_with_conn(
         .iter()
         .map(|claim| (identity_hash(&claim.identity), claim.generation))
         .collect();
-    let completed = journal
+    let disappeared = journal
         .workers
         .iter()
         .filter(|checkpoint| {
             !active_keys.contains(&(checkpoint.identity_hash.clone(), checkpoint.generation))
                 && !checkpoint.phase.terminal()
+                && checkpoint.phase != WorkerPhase::Orphaned
         })
         .cloned()
         .map(|mut checkpoint| {
-            checkpoint.phase = WorkerPhase::Completed;
+            // Absence of the claim is not an attestation of disposition.
+            // Cold reconciliation will join release and cancellation receipts.
+            checkpoint.phase = WorkerPhase::Orphaned;
             checkpoint.updated_at_secs = now_secs;
             checkpoint
         })
         .collect::<Vec<_>>();
-    for checkpoint in completed {
+    for checkpoint in disappeared {
         journal.record_worker(checkpoint, limits);
     }
     for claim in &ledger.claims {
         let key = identity_hash(&claim.identity);
-        let previous = journal.workers.iter().find(|checkpoint| {
-            checkpoint.identity_hash == key && checkpoint.generation == claim.generation
+        let previous = journal.workers.iter().position(|checkpoint| {
+            checkpoint.generation == claim.generation
+                && checkpoint.owner == claim.owner
+                && (checkpoint.identity_hash == key
+                    || (claim.followed_generation == claim.generation
+                        && claim.generation != 0
+                        && checkpoint.worker_id.as_deref()
+                            == claim
+                                .worker
+                                .as_ref()
+                                .map(|worker| worker.worker_id.as_str())
+                        && claim.followed_from.iter().any(|old| {
+                            identity_hash(&agent_doc_queue::queue_claim::claim_identity(old))
+                                == checkpoint.identity_hash
+                        })))
+        });
+        let previous = previous.map(|index| {
+            if journal.workers[index].identity_hash == key {
+                journal.workers[index].clone()
+            } else {
+                // The same attempt followed an authored edit. Preserve its
+                // original boot across the new queue identity.
+                journal.workers.remove(index)
+            }
         });
         let checkpoint = WorkerCheckpoint {
             identity_hash: key,
@@ -256,10 +281,11 @@ pub(crate) fn sync_claims_with_conn(
             // Preserve the originating boot for an existing attempt. A cold
             // reader must not make an orphan look reattached merely by loading it.
             boot_id: previous
+                .as_ref()
                 .map(|checkpoint| checkpoint.boot_id.clone())
                 .unwrap_or_else(|| boot_id.clone()),
             phase: if claim.replacement_pending() {
-                WorkerPhase::Completed
+                WorkerPhase::Cancelled
             } else {
                 worker_phase(claim.state)
             },
@@ -284,6 +310,7 @@ pub(crate) fn sync_claims_with_conn(
 pub fn reconcile(file: &Path, now_secs: u64) -> Result<RestartRecoveryProjection> {
     let mut journal = load(file)?;
     attach_lineage_artifacts(file, &mut journal)?;
+    settle_orphaned_worker_checkpoints(file, &mut journal, now_secs)?;
     let limits = configured_limits();
     journal.compact(limits, now_secs);
     let projection = journal.reconcile(&current_boot_id());
@@ -299,6 +326,78 @@ pub fn reconcile(file: &Path, now_secs: u64) -> Result<RestartRecoveryProjection
         )?;
     }
     Ok(projection)
+}
+
+fn settle_orphaned_worker_checkpoints(
+    file: &Path,
+    journal: &mut RestartJournal,
+    now_secs: u64,
+) -> Result<()> {
+    if !journal
+        .workers
+        .iter()
+        .any(|worker| worker.phase == WorkerPhase::Orphaned)
+    {
+        return Ok(());
+    }
+    let ledger = crate::queue_claim::load_ledger_read_only(file)?;
+    let releases = crate::claim_release_receipt::load_read_only(file)?;
+    let recovered: Vec<_> = journal
+        .workers
+        .iter()
+        .filter(|worker| worker.phase == WorkerPhase::Orphaned)
+        .filter_map(|worker| {
+            let matching_attempt = |identity, owner: &str, generation, worker_id| {
+                identity_hash(identity) == worker.identity_hash
+                    && generation == worker.generation
+                    && owner == worker.owner
+                    && worker_id == worker.worker_id.as_deref()
+            };
+            let terminal = if ledger.cancellations.iter().any(|receipt| {
+                let claim = &receipt.claim;
+                receipt.response_free_proof.is_some()
+                    && matching_attempt(
+                        &claim.identity,
+                        &claim.owner,
+                        claim.generation,
+                        claim
+                            .worker
+                            .as_ref()
+                            .map(|worker| worker.worker_id.as_str()),
+                    )
+            }) {
+                WorkerPhase::Cancelled
+            } else {
+                let receipt = releases.receipts.iter().find(|receipt| {
+                    receipt.attests_exact_attempt()
+                        && receipt
+                            .response
+                            .as_ref()
+                            .is_some_and(|response| response.is_valid())
+                        && matching_attempt(
+                            &receipt.identity,
+                            &receipt.owner,
+                            receipt.generation,
+                            receipt.worker_id.as_deref(),
+                        )
+                })?;
+                if receipt.attempt_closed() {
+                    WorkerPhase::Completed
+                } else {
+                    WorkerPhase::Reported
+                }
+            };
+            Some(WorkerCheckpoint {
+                phase: terminal,
+                updated_at_secs: now_secs,
+                ..worker.clone()
+            })
+        })
+        .collect();
+    for checkpoint in recovered {
+        journal.record_worker(checkpoint, configured_limits());
+    }
+    Ok(())
 }
 
 /// One compact operator-visible status line for startup logs/editor surfaces.
@@ -332,18 +431,34 @@ pub fn recovery_status_line(projection: &RestartRecoveryProjection) -> Option<St
 fn attach_lineage_artifacts(file: &Path, journal: &mut RestartJournal) -> Result<()> {
     let lineage = crate::queue_lineage::load(file)?;
     for worker in &mut journal.workers {
+        // A legacy cached locator predates the exact owner/worker join below.
+        worker.artifact = None;
         let Some(attempt) = lineage.attempts.iter().find(|attempt| {
-            identity_hash(&attempt.identity) == worker.identity_hash
-                && attempt.generation == worker.generation
+            attempt.generation == worker.generation
+                && attempt.owner == worker.owner
+                && std::iter::once(&attempt.identity)
+                    .chain(&attempt.identity_history)
+                    .any(|identity| identity_hash(identity) == worker.identity_hash)
         }) else {
             continue;
         };
-        let Some(event) = attempt.events.iter().rev().find(|event| {
-            event.source_sha.is_some()
-                || event.worktree_path.is_some()
-                || event.repo_path.is_some()
-                || event.source_repo_path.is_some()
-        }) else {
+        let events = || {
+            attempt
+                .events
+                .iter()
+                .rev()
+                .filter(|event| event.worker_id.as_deref() == worker.worker_id.as_deref())
+        };
+        let Some(event) = events()
+            .find(|event| event.source_sha.is_some())
+            .or_else(|| {
+                events().find(|event| {
+                    event.worktree_path.is_some()
+                        || event.repo_path.is_some()
+                        || event.source_repo_path.is_some()
+                })
+            })
+        else {
             continue;
         };
         let locator = event
@@ -485,6 +600,54 @@ mod tests {
         assert_eq!(
             projection.main.map(|main| main.action),
             Some(RecoveryAction::ResumeMain)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn disappearing_bound_worker_without_receipt_remains_recoverable() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        std::fs::create_dir_all(dir.path().join(".agent-doc"))?;
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, "# session\n")?;
+        let (root, document_hash, canonical_path) = state_identity(&file)?.unwrap();
+        let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+        let mut journal = RestartJournal::default();
+        journal.record_worker(
+            WorkerCheckpoint {
+                identity_hash: "identity-hash".into(),
+                generation: 3,
+                owner: "subagent:fixture".into(),
+                worker_id: Some("worker:fixture".into()),
+                boot_id: "prior-boot".into(),
+                phase: WorkerPhase::Running,
+                artifact: None,
+                updated_at_secs: 1,
+            },
+            configured_limits(),
+        );
+        store_with_conn(
+            &conn,
+            &document_hash,
+            &canonical_path,
+            &mut journal,
+            1,
+            configured_limits(),
+        )?;
+        sync_claims_with_conn(
+            &conn,
+            &document_hash,
+            &canonical_path,
+            &QueueClaimLedger::default(),
+            2,
+        )?;
+        let projection = reconcile(&file, 3)?;
+        assert_eq!(projection.workers.len(), 1);
+        assert_eq!(projection.workers[0].phase, WorkerPhase::Orphaned);
+        assert_eq!(projection.workers[0].action, RecoveryAction::NeedsOperator);
+        assert_eq!(
+            projection.workers[0].worker_id.as_deref(),
+            Some("worker:fixture")
         );
         Ok(())
     }

@@ -605,7 +605,16 @@ fn run_action(
         bail!("this queue action does not accept a worker report");
     }
     if action.kind == Kind::Start && worker_id.is_none() {
-        agent_doc_queue_io::address_effect::capture_before_execution(file, &action.item)?;
+        if agent_doc_queue_io::address_effect::github_enabled()
+            && agent_doc_queue::address_completion_proof::address_review_target(&action.item)
+                .is_some()
+        {
+            let ledger = queue_claim::load_ledger_following_read_only(file, &content)?;
+            let claim = ledger
+                .resolve_selector(&action.item)?
+                .context("address evidence requires the exact reserved queue claim")?;
+            agent_doc_queue_io::address_effect::require_worker_observation(file, claim)?;
+        }
         if let Some(receipt) = update_receipt(file, id, None, Receipt::SpawnReserved)? {
             return Ok(receipt);
         }

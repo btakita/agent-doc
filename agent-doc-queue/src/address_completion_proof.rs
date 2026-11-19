@@ -67,6 +67,9 @@ pub enum AddressObservation {
     },
     /// The remote could not be read. This is not a worker claim.
     Unseen,
+    /// The exact admitted execution has no before observation. A current or
+    /// historical remote read cannot establish that this execution caused it.
+    MissingBaseline,
 }
 
 /// The fact that lets an `#address` run complete.
@@ -120,10 +123,7 @@ impl AddressEffectGuard {
     /// under its own text so a missing parse cannot look proven.
     pub fn install_item(item: &str, observation: AddressObservation) -> Self {
         let mut by_key = BTreeMap::new();
-        let key = address_review_target(item)
-            .map(|target| target.key())
-            .unwrap_or_else(|| item.to_string());
-        by_key.insert(key, observation);
+        by_key.insert(address_prompt_revision(item), observation);
         Self::install(AddressEffectFacts {
             by_key,
             validator: None,
@@ -169,6 +169,14 @@ pub fn forced_observation() -> Option<AddressObservation> {
 
 /// The pull-request target of an `#address` item, when it names one.
 pub fn address_review_target(item: &str) -> Option<AddressTarget> {
+    let lineage_end = [
+        crate::document_queue::LATEST_REPLY_LABEL,
+        crate::document_queue::PROMPT_TREE_HEADER,
+    ]
+    .iter()
+    .filter_map(|label| item.find(&format!("\n{label}")))
+    .min();
+    let item = lineage_end.map_or(item, |at| &item[..at]);
     if !crate::address_fix_on_head::item_mentions_address_preset(item) {
         return None;
     }
@@ -184,29 +192,50 @@ pub fn address_review_target(item: &str) -> Option<AddressTarget> {
     found
 }
 
-/// True when `item` is an `#address` of a GitHub pull request and the installed
-/// observation does not show a head change or a review reply.
-///
-/// No installed observation is not proof. An item that is not such an address
-/// is not blocked here.
+/// Prompt lineage with queue-owned presentation stripped. Preserve the
+/// semantic text and occurrence tokens used to distinguish repeated work.
+pub fn address_prompt_revision(item: &str) -> String {
+    // The newest operator reply changes the admitted instructions, even
+    // though target selection still uses only the selected ancestry.
+    let item = item
+        .split_once(&format!("\n{}", crate::document_queue::PROMPT_TREE_HEADER))
+        .map_or(item, |(without_tree, _)| without_tree);
+    let work = agent_doc_document::queue_projection::strip_in_progress_marker(item.trim());
+    let work = crate::document_queue::render_queue_effect_report_state_annotation(&work, None);
+    let work = agent_doc_element_queue::strip_priority_markers(work.trim());
+    crate::document_queue::without_binary_markers(work.trim())
+}
+
+/// True when a named address has no proved head change or reply.
 pub fn address_effect_unproven(item: &str) -> bool {
-    let Some(target) = address_review_target(item) else {
-        return false;
-    };
-    let Some(facts) = FACTS.with(|slot| slot.borrow().clone()) else {
-        return true;
-    };
-    let Some(observation) = facts.by_key.get(&target.key()) else {
-        return true;
-    };
-    let validator = match observation {
-        AddressObservation::Unseen => facts.validator.as_ref(),
-        AddressObservation::Seen { .. } => None,
-    };
-    !matches!(
-        judge_address_completion(observation, validator),
-        AddressCompletion::Proven(_)
-    )
+    address_completion_for_item(item)
+        .is_some_and(|completion| !matches!(completion, AddressCompletion::Proven(_)))
+}
+
+fn address_completion_for_item(item: &str) -> Option<AddressCompletion> {
+    let revision = address_prompt_revision(item);
+    address_review_target(&revision)?;
+    Some(FACTS.with(|slot| {
+        let facts = slot.borrow();
+        let Some(facts) = facts.as_ref() else {
+            return AddressCompletion::Unseen;
+        };
+        let Some(observation) = facts.by_key.get(&revision) else {
+            return AddressCompletion::Unseen;
+        };
+        judge_address_completion(observation, facts.validator.as_ref())
+    }))
+}
+
+/// Evaluate a concrete queue row using the same submitted lineage as admission.
+pub fn queued_address_completion(content: &str, item: &str) -> Option<AddressCompletion> {
+    let submitted = crate::queue_response::submitted_continuation_prompt(content, item, |_| false);
+    address_completion_for_item(&submitted)
+}
+
+pub fn queued_address_effect_unproven(content: &str, item: &str) -> bool {
+    queued_address_completion(content, item)
+        .is_some_and(|completion| !matches!(completion, AddressCompletion::Proven(_)))
 }
 
 /// Decide completion from a remote read.
@@ -221,6 +250,7 @@ pub fn judge_address_completion(
 ) -> AddressCompletion {
     match observation {
         AddressObservation::Seen { baseline, current } => judge_seen(baseline.as_ref(), current),
+        AddressObservation::MissingBaseline => AddressCompletion::Unseen,
         AddressObservation::Unseen => match independent_validator {
             Some(AddressObservation::Seen { baseline, current }) => {
                 judge_seen(baseline.as_ref(), current)

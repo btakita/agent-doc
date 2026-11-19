@@ -327,6 +327,57 @@ impl PendingLayout {
             .collect()
     }
 
+    /// Rejoin the narrow corruption shape produced when an editor splice puts
+    /// the closing bracket of an explicit id at the start of the next row:
+    ///
+    /// ```text
+    /// - [ ] [#preserveoutcome
+    /// - [ ] ] Preserve one terminal outcome
+    /// ```
+    ///
+    /// Both lines are otherwise valid list items, so ordinary backfill would
+    /// mint an id for each and make the split durable.  Only repair an exact,
+    /// adjacent pair: the first row must consist solely of an unterminated
+    /// valid explicit id, the second must begin with `]` plus whitespace and
+    /// non-empty prose, and their list/state metadata must agree.  Ambiguous
+    /// malformed prose remains untouched.
+    fn repair_split_explicit_id_rows(&mut self) -> bool {
+        let mut repaired = false;
+        let mut segments = Vec::with_capacity(self.segments.len());
+
+        for segment in std::mem::take(&mut self.segments) {
+            match segment {
+                PendingSegment::Item {
+                    item: mut next_item,
+                    has_newline: next_has_newline,
+                } => {
+                    if let Some(PendingSegment::Item {
+                        item: previous_item,
+                        has_newline: previous_has_newline,
+                    }) = segments.last_mut()
+                        && let Some((explicit_id, description)) =
+                            split_explicit_id_row_pair(previous_item, &next_item)
+                    {
+                        previous_item.id = explicit_id;
+                        previous_item.text = description;
+                        previous_item.continuation = std::mem::take(&mut next_item.continuation);
+                        *previous_has_newline = next_has_newline;
+                        repaired = true;
+                        continue;
+                    }
+                    segments.push(PendingSegment::Item {
+                        item: next_item,
+                        has_newline: next_has_newline,
+                    });
+                }
+                text => segments.push(text),
+            }
+        }
+
+        self.segments = segments;
+        repaired
+    }
+
     fn first_item_index(&self) -> Option<usize> {
         self.segments
             .iter()
@@ -508,6 +559,36 @@ impl PendingLayout {
             })
             .collect()
     }
+}
+
+fn split_explicit_id_prefix(text: &str) -> Option<&str> {
+    let id = text.strip_prefix("[#")?;
+    (!id.contains(']') && is_valid_pending_id(id)).then_some(id)
+}
+
+fn split_explicit_id_description(text: &str) -> Option<&str> {
+    let after_bracket = text.strip_prefix(']')?;
+    let description = after_bracket.trim_start();
+    (description.len() < after_bracket.len() && !description.is_empty()).then_some(description)
+}
+
+fn split_explicit_id_row_pair(
+    previous: &PendingItem,
+    next: &PendingItem,
+) -> Option<(String, String)> {
+    if !previous.id.is_empty()
+        || !next.id.is_empty()
+        || previous.marker != next.marker
+        || previous.state != next.state
+        || previous.gate_type != next.gate_type
+        || !previous.continuation.is_empty()
+    {
+        return None;
+    }
+    Some((
+        split_explicit_id_prefix(&previous.text)?.to_lowercase(),
+        split_explicit_id_description(&next.text)?.to_string(),
+    ))
 }
 
 fn parse_item_line_outside_literals(
@@ -4034,6 +4115,7 @@ pub fn backfill_reporting_dropped_text(
     existing_ids: &HashSet<String>,
 ) -> (String, bool, Vec<String>) {
     let (mut layout, dropped_text) = PendingLayout::parse(body).drop_spliced_non_item_text();
+    let mut changed = layout.repair_split_explicit_id_rows();
     let items = layout.items();
     let mut taken: HashSet<String> = existing_ids.clone();
     for item in &items {
@@ -4042,7 +4124,6 @@ pub fn backfill_reporting_dropped_text(
         }
     }
 
-    let mut changed = false;
     let mut prompt_blocker_opener = false;
     layout.segments.retain_mut(|segment| {
         let PendingSegment::Item { item, .. } = segment else {
@@ -5895,6 +5976,63 @@ mod tests {
         let (new_body, changed) = backfill(body, DOC_ID, &ids());
         assert!(changed);
         assert!(new_body.contains("[#"));
+    }
+
+    #[test]
+    fn backfill_rejoins_explicit_id_split_before_closing_bracket() {
+        let body = concat!(
+            "- [ ] [#preserveoutcome\n",
+            "- [ ] ] Preserve one terminal or recoverable outcome\n",
+            "  - retain the original prompt revision\n",
+            "- [ ] [#keep] another item\n",
+        );
+
+        let (new_body, changed) = backfill(body, DOC_ID, &ids());
+        assert!(changed);
+        assert!(
+            new_body.starts_with(
+                "- [ ] [#preserveoutcome] Preserve one terminal or recoverable outcome\n"
+            ),
+            "the explicit id and description must be reconstructed: {new_body:?}"
+        );
+        assert!(new_body.contains("retain the original prompt revision"));
+        assert!(new_body.ends_with("- [ ] [#keep] another item\n"));
+
+        let (_, items, _) = parse_items(&new_body);
+        assert_eq!(items.len(), 2, "split row must remain one item: {items:?}");
+        assert_eq!(items[0].id, "preserveoutcome");
+        assert_eq!(
+            items[0].text,
+            "Preserve one terminal or recoverable outcome"
+        );
+        assert!(items[0].continuation.contains("original prompt revision"));
+
+        let (idempotent_body, idempotent_changed) = backfill(&new_body, DOC_ID, &ids());
+        assert!(!idempotent_changed);
+        assert_eq!(idempotent_body, new_body);
+    }
+
+    #[test]
+    fn backfill_does_not_join_ambiguous_split_explicit_id_rows() {
+        let body = concat!(
+            "- [ ] [#preserveoutcome\n",
+            "- [x] ] Preserve one terminal or recoverable outcome\n",
+        );
+
+        let (new_body, changed) = backfill(body, DOC_ID, &ids());
+        assert!(changed);
+        let (_, items, _) = parse_items(&new_body);
+        assert_eq!(
+            items.len(),
+            2,
+            "different states are not a safe join: {new_body:?}"
+        );
+        assert!(items.iter().all(|item| item.id != "preserveoutcome"));
+        assert_eq!(items[0].text, "[#preserveoutcome");
+        assert_eq!(
+            items[1].text,
+            "] Preserve one terminal or recoverable outcome"
+        );
     }
 
     #[test]

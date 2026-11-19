@@ -2150,8 +2150,17 @@ fn persist_todo_queue_link(
 /// and position. Re-applying the same text is a no-op.
 pub fn todo_edit(file: &Path, selector: &str, text: &str) -> Result<bool> {
     let full_content = read_command_document(file, "todo_edit")?;
-    let outcome =
-        agent_doc_element::todo::edit_todo_item_in_document(&full_content, selector, text)?;
+    let reserved = if text.contains('\n') {
+        backlog::document_reserved_identity_ids(&full_content)
+    } else {
+        HashSet::new()
+    };
+    let outcome = agent_doc_element::todo::edit_todo_item_in_document_with_reserved_ids(
+        &full_content,
+        selector,
+        text,
+        &reserved,
+    )?;
     persist_todo_mutation(file, &full_content, outcome, "todo-edit")
 }
 

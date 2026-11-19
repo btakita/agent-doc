@@ -28,13 +28,13 @@
 //!   closeout therefore never duplicates a todo, and never resurrects one the
 //!   operator already checked off.
 //! - `#nestedtodoadd`: add/edit text may carry nested sub-items. The first
-//!   line is the item; every later line is one `  - <text>` sub-item, rendered
-//!   under the item as `  - <text>` (two columns deeper than the item). The
-//!   input is validated strictly ([`split_todo_payload`]): no blank lines, no
-//!   flush-left or non-bullet lines, one indentation level, no checkbox
-//!   children (a checkbox row is a separate todo item), no HTML comments or
-//!   component markers. Sub-items are part of the item, never items: identity,
-//!   id minting, source linking and dedupe read the item line alone, so a
+//!   line is the item; later lines are indented bullets at any depth,
+//!   rendered with two columns per level. Plain bullets are notes.
+//!   Checkbox bullets are selectable todo items. The input is validated
+//!   strictly ([`split_todo_payload`]): no blank, flush-left, non-bullet, or
+//!   empty lines, inconsistent dedents, HTML comments, or component markers.
+//!   The add's identity, id minting, source linking and dedupe read the
+//!   root item line alone, so a
 //!   replayed add with sub-items is a no-op, and when the existing item's
 //!   nested lines differ the add still changes nothing
 //!   ([`TodoAddOutcome::sub_items_kept`]). `--todo-done`/`--todo-reopen` flip
@@ -695,26 +695,30 @@ fn normalize_todo_action_for(text: &str, flag: &str) -> Result<String> {
 struct TodoInput {
     id: Option<String>,
     action: String,
-    /// Sub-item texts, without indentation or the `- ` bullet, in order.
-    children: Vec<String>,
+    children: Vec<TodoChild>,
 }
 
-/// `#nestedtodoadd`: split add/edit text into the item line and its nested
-/// sub-items.
-///
-/// The first line is the item. Every later line must be one nested list item,
-/// `<indent>- <text>`, with the same non-empty indentation as its siblings
-/// (one level only) and single-line, non-empty text. Rejected, so nothing is
-/// silently split into several items or written outside the item: blank
-/// lines, flush-left or non-bullet lines, mixed indentation, checkbox children
-/// (`- [ ] ...`, which would parse as separate todo items), and HTML comments
-/// or component markers.
-fn split_todo_payload<'a>(text: &'a str, flag: &str) -> Result<(&'a str, Vec<String>)> {
+#[derive(PartialEq, Eq)]
+struct TodoChild {
+    /// Relative depth, with the root item's immediate children at depth one.
+    depth: usize,
+    bullet: String,
+}
+
+/// `#nestedtodoadd`: the first line is the item and later lines form its subtree.
+fn split_todo_payload<'a>(text: &'a str, flag: &str) -> Result<(&'a str, Vec<TodoChild>)> {
     let trimmed = text.trim_end().trim_start_matches(['\n', '\r']);
     let mut lines = trimmed.lines();
     let first = lines.next().unwrap_or("");
+    Ok((first, parse_todo_children(lines, flag)?))
+}
+
+fn parse_todo_children<'a>(
+    lines: impl Iterator<Item = &'a str>,
+    flag: &str,
+) -> Result<Vec<TodoChild>> {
     let mut children = Vec::new();
-    let mut sibling_indent: Option<&str> = None;
+    let mut indents: Vec<&str> = Vec::new();
     for (offset, line) in lines.enumerate() {
         let number = offset + 2;
         anyhow::ensure!(
@@ -733,30 +737,43 @@ fn split_todo_payload<'a>(text: &'a str, flag: &str) -> Result<(&'a str, Vec<Str
             "{flag}: line {number} ({line:?}) is not a nested sub-item; every line after the first must be an indented list item, `  - <text>`"
         );
         let child = child.unwrap_or_default();
-        match sibling_indent {
-            None => sibling_indent = Some(indent),
-            Some(expected) => anyhow::ensure!(
-                expected == indent,
-                "{flag}: line {number} ({line:?}) changes indentation; nested sub-items are one level deep, all at the same indent"
-            ),
+        if let Some(level) = indents.iter().position(|previous| *previous == indent) {
+            indents.truncate(level + 1);
+        } else {
+            anyhow::ensure!(
+                indents
+                    .last()
+                    .is_none_or(|parent| indent.starts_with(*parent)),
+                "{flag}: line {number} ({line:?}) dedents to a level with no enclosing list item"
+            );
+            indents.push(indent);
         }
         anyhow::ensure!(
             !child.is_empty(),
             "{flag}: line {number} is an empty sub-item"
         );
         anyhow::ensure!(
-            !["[ ]", "[x]", "[X]", "[/]"]
-                .iter()
-                .any(|checkbox| child == *checkbox || child.starts_with(&format!("{checkbox} "))),
-            "{flag}: line {number} ({line:?}) is a checkbox row; a sub-item is plain text (`  - <text>`), since a checkbox row is a separate todo item"
+            !matches!(child, "[ ]" | "[x]" | "[X]" | "[/]"),
+            "{flag}: line {number} is an empty checkbox sub-item"
         );
         anyhow::ensure!(
             !child.contains("<!--") && !child.contains("-->"),
             "{flag}: line {number} ({line:?}) carries an HTML comment or component marker; sub-items are plain text"
         );
-        children.push(child.to_string());
+        let bullet = match child.strip_prefix("[X] ") {
+            Some(action) => format!("- [x] {action}"),
+            None => format!("- {child}"),
+        };
+        anyhow::ensure!(
+            parse_todo_line(&bullet).is_none_or(|row| !row.action.trim().is_empty()),
+            "{flag}: line {number} is an empty checkbox sub-item"
+        );
+        children.push(TodoChild {
+            depth: indents.len(),
+            bullet,
+        });
     }
-    Ok((first, children))
+    Ok(children)
 }
 
 /// Split an add/edit input into an optional caller-chosen id, the action, and
@@ -799,29 +816,61 @@ fn parse_todo_input(text: &str, flag: &str) -> Result<TodoInput> {
     })
 }
 
-/// Render nested sub-items under an item whose own line is indented `indent`
-/// columns: one `<indent+2>- <text>\n` line each.
-fn render_todo_children(indent: usize, children: &[String]) -> String {
-    let pad = " ".repeat(indent + 2);
+/// Render two columns per level relative to the root item's indentation.
+fn render_todo_children(indent: usize, children: &[TodoChild]) -> String {
     children
         .iter()
-        .map(|child| format!("{pad}- {child}\n"))
+        .map(|child| {
+            let pad = " ".repeat(indent + 2 * child.depth);
+            format!("{pad}{}\n", child.bullet)
+        })
         .collect()
 }
 
-/// The trimmed continuation lines of the item at `items[index]` (its nested
-/// sub-items and any operator notes under it), for comparing against an add's
-/// requested sub-items.
-fn existing_children(body: &TodoBody, index: usize) -> Vec<String> {
+/// Compare the tree against a replay, ignoring a checkbox id backfilled after
+/// the original add when the request did not name an id.
+fn todo_children_match(body: &TodoBody, index: usize, requested: &[TodoChild]) -> bool {
     let item = &body.items[index];
     let span = body.item_span(item);
-    body.lines[span.start + 1..span.end]
+    let lines = body.lines[span.start + 1..span.end]
         .iter()
-        .map(|line| {
-            let line = line.trim();
-            line.strip_prefix("- ").unwrap_or(line).trim().to_string()
-        })
-        .collect()
+        .map(|line| line.trim_end_matches(['\n', '\r']));
+    let Ok(existing) = parse_todo_children(lines, "--todo-add") else {
+        return false;
+    };
+    existing.len() == requested.len() && existing.iter().zip(requested).all(|(old, new)| {
+        if old == new {
+            return true;
+        }
+        old.depth == new.depth
+            && matches!(
+                (parse_todo_line(&old.bullet), parse_todo_line(&new.bullet)),
+                (Some(old), Some(new))
+                    if new.own_id.is_none() && old.state == new.state && old.action == new.action
+            )
+    })
+}
+
+fn todo_child_ids(children: &[TodoChild]) -> impl Iterator<Item = &str> {
+    children
+        .iter()
+        .filter_map(|child| parse_todo_line(&child.bullet)?.own_id)
+}
+
+fn ensure_todo_child_ids_available(
+    children: &[TodoChild],
+    flag: &str,
+    is_taken: impl Fn(&str) -> bool,
+) -> Result<()> {
+    let mut seen = std::collections::HashSet::new();
+    for id in todo_child_ids(children) {
+        let id = id.to_ascii_lowercase();
+        anyhow::ensure!(
+            !is_taken(&id) && seen.insert(id.clone()),
+            "{flag}: nested checkbox id [#{id}] already belongs to another item"
+        );
+    }
+    Ok(())
 }
 
 /// Collapse whitespace so two spellings of one action compare equal.
@@ -972,7 +1021,7 @@ pub fn add_todo_item_to_document(
         let source = contextual_source.clone();
         let sub_items_kept = !children.is_empty()
             && existing_index < located.items.len()
-            && existing_children(&located, existing_index) != children;
+            && !todo_children_match(&located, existing_index, &children);
         if wanted != wanted_legacy
             && normalize_action_text(existing.action) == wanted_legacy
             && id.as_deref() == contextual_source.as_ref().map(|(id, _)| id.as_str())
@@ -1060,7 +1109,7 @@ pub fn add_todo_item_to_document(
             {
                 let sub_items_kept = !children.is_empty()
                     && existing_index < located.items.len()
-                    && existing_children(&located, existing_index) != children;
+                    && !todo_children_match(&located, existing_index, &children);
                 return Ok(TodoAddOutcome {
                     content: ensured.clone(),
                     inserted: false,
@@ -1079,6 +1128,7 @@ pub fn add_todo_item_to_document(
                     && !taken.contains(&candidate)
                     && !reserved.contains(&candidate)
                     && !links.knows(&candidate)
+                    && !todo_child_ids(&children).any(|id| id.eq_ignore_ascii_case(&candidate))
                 {
                     chosen = Some(candidate);
                     break;
@@ -1087,6 +1137,12 @@ pub fn add_todo_item_to_document(
             chosen.context("--todo-add could not derive a collision-free todo id")?
         }
     };
+    ensure_todo_child_ids_available(&children, "--todo-add", |child_id| {
+        child_id == id
+            || owner(child_id).is_some()
+            || links.knows(child_id)
+            || reserved.contains(child_id)
+    })?;
     let action = match source.as_ref() {
         Some((source_id, component)) => {
             action_with_source_reference(&action, source_id, Some(component.as_str()))
@@ -1705,6 +1761,16 @@ pub fn edit_todo_item_in_document(
     selector: &str,
     text: &str,
 ) -> Result<TodoMutationOutcome> {
+    edit_todo_item_in_document_with_reserved_ids(content, selector, text, &Default::default())
+}
+
+/// Replace a todo item's text while protecting ids owned outside its subtree.
+pub fn edit_todo_item_in_document_with_reserved_ids(
+    content: &str,
+    selector: &str,
+    text: &str,
+    reserved: &std::collections::HashSet<String>,
+) -> Result<TodoMutationOutcome> {
     let flag = "--todo-edit";
     let (todo, mut body) = todo_body_for_mutation(content, flag)?;
     let index = resolve_todo_selector(&body, selector, None, flag)?;
@@ -1735,6 +1801,20 @@ pub fn edit_todo_item_in_document(
     // `#nestedtodoadd`: multi-line edit text replaces the item's nested lines
     // with its sub-items; single-line text keeps them as they are.
     let span = body.item_span(&item);
+    ensure_todo_child_ids_available(&children, flag, |child_id| {
+        let mut retained_child = false;
+        for other in body
+            .items
+            .iter()
+            .filter(|other| other.own_id.as_deref() == Some(child_id))
+        {
+            if other.line <= span.start || other.line >= span.end {
+                return true;
+            }
+            retained_child = true;
+        }
+        reserved.contains(child_id) && !retained_child
+    })?;
     body.rewrite_line(item.line, item.state, item.own_id.as_deref(), &action);
     if !children.is_empty() {
         let last = &body.lines[span.end - 1];
@@ -3346,9 +3426,11 @@ mod tests {
             ("Item\n- flush child", "not a nested sub-item"),
             ("Item\n  plain prose", "not a nested sub-item"),
             ("Item\n  * star child", "not a nested sub-item"),
-            ("Item\n  - one\n    - deeper", "changes indentation"),
-            ("Item\n  - [ ] checkbox child", "checkbox row"),
-            ("Item\n  - [x]", "checkbox row"),
+            (
+                "Item\n  - one\n    - deeper\n   - orphan",
+                "no enclosing list item",
+            ),
+            ("Item\n  - [x]", "empty checkbox sub-item"),
             ("Item\n  - <!-- agent:queue -->", "HTML comment"),
             ("Item\n  - ends -->", "HTML comment"),
             ("Item\n  - ", "empty sub-item"),
@@ -3361,6 +3443,33 @@ mod tests {
             }
             let err = format!("{:#}", result.expect_err(text));
             assert!(err.contains(why), "{text:?}: {err}");
+        }
+    }
+
+    #[test]
+    fn add_replay_compares_nesting_and_ignores_backfilled_checkbox_ids() {
+        let text = "id=q1 Prepare release\n   - Measurements\n       - [ ] Record result\n   - [X] Baseline recorded";
+        let initial = add(&wrap(""), text).unwrap();
+        assert_eq!(
+            todo_body(&initial.content),
+            "- [ ] [#q1] Prepare release\n  - Measurements\n    - [ ] Record result\n  - [x] Baseline recorded\n"
+        );
+        let backfilled = initial
+            .content
+            .replace("- [ ] Record result", "- [ ] [#measure] Record result");
+        let replay = add(&backfilled, text).unwrap();
+        assert!(!replay.inserted);
+        assert!(!replay.sub_items_kept);
+        assert_eq!(replay.content, backfilled);
+
+        for edited in [
+            backfilled.replace("    - [ ] [#measure]", "  - [ ] [#measure]"),
+            backfilled.replace("- [ ] [#measure]", "- [x] [#measure]"),
+        ] {
+            let replay = add(&edited, text).unwrap();
+            assert!(!replay.inserted);
+            assert!(replay.sub_items_kept);
+            assert_eq!(replay.content, edited);
         }
     }
 

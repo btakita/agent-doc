@@ -334,7 +334,10 @@ pub fn operator_unskipped_queue_ids(diff: Option<&str>) -> std::collections::Has
         } else {
             continue;
         };
-        let Some(id) = crate::queue_response::queue_prompt_done_id(body) else {
+        let prompt =
+            crate::document_queue::split_list_item(body).map_or(body, |(_, _, content)| content);
+        let prompt = crate::document_queue::strip_top_level_queue_heading(prompt);
+        let Some(id) = crate::queue_response::queue_prompt_done_id(prompt) else {
             continue;
         };
         let skipped = body

@@ -691,7 +691,8 @@ fn normalize_prompt_for_delta(prompt: &str) -> String {
 }
 
 pub fn unresolved_exchange_prompt_in_content(content: &str) -> Option<String> {
-    let body = exchange_body(content)?;
+    let prompt_input = agent_doc_diff::without_salient_checkpoints(content);
+    let body = exchange_body(&prompt_input)?;
     let lines: Vec<&str> = body.lines().collect();
     let tail_start = boundary_tail_start(&lines);
     let tail = &lines[tail_start..];
@@ -1077,6 +1078,37 @@ mod tests {
         assert!(
             !set.verbatim_aggregate().unwrap().contains("agent:todo"),
             "managed context must stay outside exchange steering"
+        );
+    }
+
+    #[test]
+    fn salient_checkpoint_is_inert_to_diff_and_steering() {
+        let baseline = doc("❯ Existing operator prompt.\n");
+        let checkpoint = concat!(
+            "<!-- agent:salient-response cycle=\"cycle-sample\" -->\n",
+            "#### Live response (not final)\n\n",
+            "Add this completed action to the backlog.\n",
+            "<!-- /agent:salient-response -->\n",
+        );
+        let current = doc(&format!("❯ Existing operator prompt.\n\n{checkpoint}"));
+        assert_eq!(
+            agent_doc_diff::strip_comments(&baseline),
+            agent_doc_diff::strip_comments(&current)
+        );
+        assert_eq!(
+            unresolved_exchange_prompt_in_content(&baseline),
+            unresolved_exchange_prompt_in_content(&current)
+        );
+        assert_eq!(exchange_steering_set_between(&baseline, &current).len(), 0);
+
+        let steered = doc(&format!(
+            "❯ Existing operator prompt.\n\n{checkpoint}❯ Keep the real concurrent prompt.\n"
+        ));
+        let steering = exchange_steering_set_between(&baseline, &steered);
+        assert_eq!(steering.len(), 1, "{steering:?}");
+        assert_eq!(
+            steering.primary().verbatim(),
+            Some("❯ Keep the real concurrent prompt.")
         );
     }
 

@@ -365,7 +365,7 @@ pub fn parse_fragment_spans(text: &str) -> Result<Vec<(QueueEntry, std::ops::Ran
 /// The operator-facing recommendation remains repeated `1.` markers because
 /// insertions do not renumber siblings, but accepting and retaining every
 /// decimal spelling keeps existing documents byte-preserving.
-fn split_list_item(line: &str) -> Option<(usize, Option<String>, &str)> {
+pub(crate) fn split_list_item(line: &str) -> Option<(usize, Option<String>, &str)> {
     let indent = line.len() - line.trim_start_matches(' ').len();
     let dedented = &line[indent..];
     if let Some(rest) = dedented.strip_prefix("- ") {

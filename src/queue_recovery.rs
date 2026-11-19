@@ -16,6 +16,9 @@ use std::process::Command;
 
 use agent_doc_element::element;
 use agent_doc_queue::document_queue as queue;
+use agent_doc_queue::queue_response::{
+    normalized_authored_queue_prompt_text, queue_prompt_owned_id,
+};
 
 const QUEUE_COMPONENT: &str = "queue";
 
@@ -95,11 +98,23 @@ pub(crate) fn build_report(file: &Path, max_git_versions: usize) -> Result<LostQ
     let canonical = file
         .canonicalize()
         .with_context(|| format!("file not found: {}", file.display()))?;
-    let current_doc = fs::read_to_string(&canonical)
-        .with_context(|| format!("failed to read {}", canonical.display()))?;
+    let current_doc = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        &canonical,
+        "queue_recover_lost",
+    )
+    .with_context(|| format!("failed to read {}", canonical.display()))?;
     let current_heads = queue_heads_from_doc(&current_doc, true);
     let current_head_set: BTreeSet<String> = current_heads.iter().cloned().collect();
-    let coverage_text = current_coverage_text(&canonical, &current_doc)?;
+    let current_authored_heads: BTreeSet<_> = current_heads
+        .iter()
+        .map(|text| normalized_authored_queue_prompt_text(text))
+        .collect();
+    let mut coverage_ids = current_coverage_ids(&canonical, &current_doc)?;
+    coverage_ids.extend(
+        current_heads
+            .iter()
+            .filter_map(|text| queue_prompt_owned_id(text)),
+    );
 
     let mut sources = Vec::new();
     collect_snapshot_sources(&canonical, &mut sources);
@@ -122,12 +137,20 @@ pub(crate) fn build_report(file: &Path, max_git_versions: usize) -> Result<LostQ
         if current_head_set.contains(text) {
             continue;
         }
-        let id = queue_prompt_id(text);
-        if let Some(id) = &id
-            && id_is_accounted_for(id, &coverage_text)
-        {
-            covered_ids.insert(id.clone());
-            continue;
+        let id = queue_prompt_owned_id(text);
+        match &id {
+            Some(id) if coverage_ids.contains(id) => {
+                covered_ids.insert(id.clone());
+                continue;
+            }
+            // A legacy copy has no occurrence id to match. It is visible if
+            // the current row differs only in binary-owned projection.
+            None if current_authored_heads
+                .contains(&normalized_authored_queue_prompt_text(text)) =>
+            {
+                continue;
+            }
+            _ => {}
         }
         let candidate = RestoreCandidate {
             text: text.clone(),
@@ -183,7 +206,7 @@ pub(crate) fn build_report(file: &Path, max_git_versions: usize) -> Result<LostQ
     } else {
         RecoveryProof {
             status: "user_removal_or_completion_proof".to_string(),
-            message: "Every historical queue head is still queued/completed or its id appears in the current document or done archive; no lost queue content needs restore.".to_string(),
+            message: "Every historical queue head has a visible row or an owning tracked-work record; no lost queue content needs restore.".to_string(),
         }
     };
 
@@ -315,15 +338,17 @@ fn resolve_git_paths(file: &Path) -> Result<(PathBuf, String)> {
 }
 
 fn queue_heads_from_doc(doc: &str, include_completed: bool) -> Vec<String> {
-    let Some(body) = queue_component_text(doc) else {
-        return Vec::new();
-    };
-    let Ok(entries) = queue::parse(&body) else {
+    let Ok(components) = element::parse(doc) else {
         return Vec::new();
     };
     let mut seen = BTreeSet::new();
     let mut heads = Vec::new();
-    for entry in entries {
+    for entry in components
+        .iter()
+        .filter(|component| component.name == QUEUE_COMPONENT)
+        .filter_map(|component| queue::parse(component.content(doc)).ok())
+        .flatten()
+    {
         let text = match entry {
             queue::QueueEntry::Prompt(prompt) => normalize_prompt_text(&prompt.text),
             queue::QueueEntry::Completed(prompt) if include_completed => {
@@ -340,15 +365,10 @@ fn queue_heads_from_doc(doc: &str, include_completed: bool) -> Vec<String> {
     heads
 }
 
-fn queue_component_text(doc: &str) -> Option<String> {
-    let components = element::parse(doc).ok()?;
-    let queue = components
-        .iter()
-        .find(|component| component.name == QUEUE_COMPONENT)?;
-    Some(queue.content(doc).to_string())
-}
-
 fn normalize_prompt_text(text: &str) -> Option<String> {
+    if text.contains(agent_doc_queue::queue_consume::WAITING_ON_YOU_ROOT_MARKER) {
+        return None;
+    }
     let normalized = text
         .lines()
         .map(str::trim)
@@ -358,8 +378,8 @@ fn normalize_prompt_text(text: &str) -> Option<String> {
     (!normalized.is_empty()).then_some(normalized)
 }
 
-/// Text an id must appear in to count as accounted for: the current document
-/// plus every done archive the writer's resolver locates.
+/// Owning tracked-work ids from the current document and the resolved archives.
+/// A citation in another prompt, response, or archive entry is not ownership.
 ///
 /// GH #325 (same class): this used to join the raw `agent:done archive=` value
 /// onto the document directory, so a project-relative value read
@@ -370,31 +390,35 @@ fn normalize_prompt_text(text: &str) -> Option<String> {
 /// `done_archive::read_done_archive_sources` keeps this audit on the same
 /// archive set preflight uses, and an invalid declared target fails the audit
 /// instead of under-reporting coverage.
-fn current_coverage_text(file: &Path, current_doc: &str) -> Result<String> {
-    let mut text = current_doc.to_string();
+fn current_coverage_ids(file: &Path, current_doc: &str) -> Result<BTreeSet<String>> {
+    use agent_doc_element_backlog::backlog::{
+        extract_done_item_own_ids, tracked_work_ids_from_component_body,
+    };
+
+    let components = element::parse(current_doc)?;
+    let mut ids = BTreeSet::new();
+    for component in &components {
+        let body = component.content(current_doc);
+        if element::is_tracked_work_component(&component.name) {
+            ids.extend(tracked_work_ids_from_component_body(body));
+        } else if element::is_backlog_done_component(&component.name) {
+            ids.extend(extract_done_item_own_ids(body));
+        }
+    }
+    ids.extend(
+        agent_doc_element::todo::OwnedTodoIndex::from_components(current_doc, &components)
+            .open_ids()
+            .iter()
+            .cloned(),
+    );
+    ids.extend(agent_doc_element::todo::checked_todo_own_ids(current_doc));
     let sources =
         agent_doc_element_backlog_io::done_archive::read_done_archive_sources(file, current_doc)
             .with_context(|| format!("failed to read done archives for {}", file.display()))?;
     for source in sources {
-        text.push('\n');
-        text.push_str(&source.content);
+        ids.extend(extract_done_item_own_ids(&source.content));
     }
-    Ok(text)
-}
-
-fn id_is_accounted_for(id: &str, coverage_text: &str) -> bool {
-    let bracketed = format!("[#{id}]");
-    let bare = format!("#{id}");
-    coverage_text.contains(&bracketed) || coverage_text.contains(&bare)
-}
-
-fn queue_prompt_id(text: &str) -> Option<String> {
-    let hash = text.find('#')?;
-    let id: String = text[hash + 1..]
-        .chars()
-        .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
-        .collect();
-    (!id.is_empty()).then(|| id.to_ascii_lowercase())
+    Ok(ids.into_iter().map(|id| id.to_ascii_lowercase()).collect())
 }
 
 /// Returns true when `text` references a session document other than `file`
@@ -636,6 +660,43 @@ mod tests {
         // No foreign-document reference → restorable, with a restore hint.
         assert!(candidate.restorable);
         assert!(candidate.recommendation.contains("re-queue"));
+    }
+
+    #[test]
+    fn recover_lost_reads_each_queue_and_requires_owning_evidence() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        let follow_up = "Decide whether `do [#id]` twins need a diagnostic. [operator-verify]";
+        let before = doc_with_queue(
+            "- Waiting on you <!-- agent-doc:waiting-on-you -->\n- Retain separate packages [operator-verify]\n",
+            "",
+        );
+        let loop_queue = format!(
+            "\n<!-- agent:loop id=periodic -->\n- {follow_up}\n- do [#lost]\n<!-- /agent:loop -->\n",
+        );
+        fs::write(&file, before + &loop_queue).unwrap();
+        run_git(dir.path(), &["init"]);
+        run_git(dir.path(), &["config", "user.email", "test@example.com"]);
+        run_git(dir.path(), &["config", "user.name", "Test User"]);
+        run_git(dir.path(), &["add", "session.md"]);
+        run_git(dir.path(), &["commit", "-m", "queue two tasks"]);
+
+        let current = doc_with_queue(
+            "- 🙋 Retain separate packages [operator-verify] [#q-0123456789ab]\n",
+            "A citation to [#lost] and a prefix match [#lost-other].",
+        );
+        fs::write(&file, current).unwrap();
+        let report = build_report(&file, 5).unwrap();
+        let candidates: Vec<_> = report
+            .git_history_only_candidates
+            .iter()
+            .map(|entry| (entry.candidate.text.as_str(), entry.candidate.id.as_deref()))
+            .collect();
+        assert_eq!(
+            candidates,
+            [(follow_up, None), ("do [#lost]", Some("lost"))]
+        );
     }
 
     #[test]

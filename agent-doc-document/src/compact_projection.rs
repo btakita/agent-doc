@@ -224,11 +224,10 @@ pub fn newer_compacted_exchange_supersedes(retained: &str, current: &str) -> boo
 /// Rebase a retained Compact Exchange projection over the editor's current cut.
 ///
 /// Compaction owns the exchange prefix before `agent:boundary`; the editor owns
-/// the live tail after it and every sibling component. A normal component-level
-/// three-way merge treats an editor cut inside the soon-to-be-compacted prefix as
-/// a conflict, even though that prefix is intentionally replaced by the compact
-/// summary. Rebuild only that ownership split and leave the rest of the current
-/// editor projection byte-for-byte intact.
+/// the live tail after it and every sibling component. Rebuild that ownership
+/// split while the editor shows an unchanged prefix of the archived source,
+/// or already matches the intended replacement. The earlier source may be
+/// longer when an editor registers with a truncated snapshot.
 ///
 /// `None` means the inputs do not prove this narrow compact lineage. Callers must
 /// retain the write or use their normal conflict policy instead of guessing.
@@ -268,8 +267,12 @@ pub fn rebase_retained_compact_exchange_over_editor_cut(
     boundary_marker_line(base_content)?;
     boundary_marker_line(retained_content)?;
     let editor_boundary = boundary_marker_line(editor_content)?;
+    let (base_prefix, _) = split_component_content_at_boundary(base_content);
     let (mut retained_prefix, _) = split_component_content_at_boundary(retained_content);
-    let (_, editor_tail) = split_component_content_at_boundary(editor_content);
+    let (editor_prefix, editor_tail) = split_component_content_at_boundary(editor_content);
+    if !base_prefix.starts_with(&editor_prefix) && editor_prefix != retained_prefix {
+        return None;
+    }
     if !retained_prefix.ends_with('\n') {
         retained_prefix.push('\n');
     }
@@ -572,6 +575,12 @@ mod tests {
         assert!(rebased.contains("<!-- agent:boundary:editor -->\nnew queued editor text\n"));
         assert!(rebased.contains("- version 2"));
         assert!(!rebased.contains("- version 1"));
+
+        let edited_history = editor.replace("answer line one", "❯ A new task within history");
+        assert!(
+            rebase_retained_compact_exchange_over_editor_cut(base, retained, &edited_history)
+                .is_none()
+        );
     }
 
     #[test]

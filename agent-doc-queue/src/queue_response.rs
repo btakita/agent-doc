@@ -23,7 +23,9 @@ fn direct_response_text(text: &str) -> Cow<'_, str> {
     }
 }
 
-pub fn queue_prompt_done_id(text: &str) -> Option<String> {
+/// The prompt's tracked reference or explicit trailing row id. A citation in
+/// the prompt body never owns the row.
+pub fn queue_prompt_owned_id(text: &str) -> Option<String> {
     // `#claimrowtombstone`: lifecycle markers and the binary-owned
     // `[#owner#generation]` attempt annotation are projection metadata, never
     // the row's id. Reading the first `#` of the raw row named a claimed
@@ -38,16 +40,38 @@ pub fn queue_prompt_done_id(text: &str) -> Option<String> {
     // first `#` named it `review`: `queue consume --id adr0043-publish` found
     // no head, `--done adr0043-publish` left the row, and the reported `☑️`
     // row had no closing command at all (haiven-dev sdk-demo.md, 2026-10-28).
-    // Only an id-backed work identity overrides; a free-text identity keeps
-    // the first-`#` reading below.
     if let agent_doc_element_queue::QueueItemIdentity::Id(id) =
         agent_doc_element_queue::queue_head_identity(text)
     {
         return Some(id.to_ascii_lowercase());
     }
+    let head = agent_doc_element_queue::subprompts::head_without_subprompts(text);
+    let visible = strip_priority_markers(head);
+    let (_, id) = visible.trim_end().strip_suffix(']')?.rsplit_once(" [#")?;
+    (!id.is_empty()
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')))
+    .then(|| id.to_ascii_lowercase())
+}
+
+pub fn queue_prompt_done_id(text: &str) -> Option<String> {
+    if let Some(id) = queue_prompt_owned_id(text) {
+        return Some(id);
+    }
+    // Legacy multiline prompts can end in a standalone preset/reference
+    // line. This is an explicit label rather than a citation in the prose.
+    if let Some((_, tail)) = text.trim_end().rsplit_once('\n')
+        && let Some(id) = bare_hash_reference_id(tail)
+    {
+        return Some(id);
+    }
+    // Historical tagged queue rows and `[#todo]: action` still have an
+    // explicit leading label. Free prose that merely mentions a tag does not.
     let visible = strip_priority_markers(text);
-    let marker = visible.find('#')?;
-    let tail = &visible[marker + 1..];
+    let tail = visible
+        .strip_prefix("[#")
+        .or_else(|| visible.strip_prefix('#'))?;
     let id = tail
         .chars()
         .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
@@ -3244,6 +3268,10 @@ mod tests {
             Some("jbrsrbusyint".to_string())
         );
         assert_eq!(queue_prompt_done_id("plain prompt"), None);
+        assert_eq!(
+            queue_prompt_done_id("Describe the result.\n#ship"),
+            Some("ship".into())
+        );
     }
 
     /// `#claimrowtombstone`: the binary's own attempt annotation is never the
@@ -3291,10 +3319,28 @@ mod tests {
                 "the done id and the claim identity are one key: {row}"
             );
         }
-        // A free-text identity keeps the first-`#` reading.
+        // A free-text row can still carry a legacy leading label.
         assert_eq!(
             queue_prompt_done_id("#fix1 do the thing"),
             Some("fix1".to_string())
+        );
+    }
+
+    #[test]
+    fn a_done_id_cannot_strike_free_text_that_only_cites_it() {
+        let text = "Decide whether committed plain `do [#id]` twins need a visible diagnostic. [operator-verify]";
+        let content = format!("<!-- agent:run -->\n- {text}\n- do [#id]\n<!-- /agent:run -->\n");
+        let (updated, marked) =
+            crate::queue_consume::mark_queue_prompts_completed_by_done_ids_in_content(
+                &content,
+                &["id".into()],
+            )
+            .unwrap();
+        assert!(updated.contains(&format!("- {text}\n")), "{updated}");
+        assert_eq!(marked, 1);
+        assert_eq!(
+            queue_prompt_done_id(&format!("{text} [#q-0123456789ab]")),
+            Some("q-0123456789ab".into())
         );
     }
 

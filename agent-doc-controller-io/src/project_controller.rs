@@ -27653,6 +27653,18 @@ agent:queue\n\
         assert!(rebased.contains("<!-- agent:boundary:editor -->\nnew queue\n"));
         assert!(rebased.contains("- version 2"));
         assert!(!rebased.contains("answer one"));
+
+        let edited = editor_cut.replace("answer one", "❯ Keep this task before the boundary.");
+        let edited_delivery = RetainedDeliveryObservation {
+            content_hash: agent_doc_hash::content_hash(&edited),
+            content: Arc::from(edited),
+            ..delivery
+        };
+        let state = retained_transition_state(Some(&projection), Some(&edited_delivery), 3);
+        assert_eq!(
+            retained_transition_state_tag(&state),
+            "operator_text_conflict"
+        );
     }
 
     #[test]

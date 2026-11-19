@@ -247,6 +247,12 @@ The current coordinator-admission path selects valid reported rows even when no
 fresh worker row is drainable, but older orphaned state may still need
 `agent-doc queue repair-managed-state <FILE>` (dry-run first, then `--apply`).
 
+`agent-doc queue recover-lost <FILE>` compares every Run and Loop with the
+document's baseline and Git history. A historical row is accounted for by a
+visible row or by an owning task ID in tracked work or Done. Completion
+strikes the row that owns the ID. The audit is read-only and reports
+historical restoration candidates for review.
+
 These keep a `☑️` row open on purpose:
 
 - **`🙋☑️`**: a blocking operator request is still open. The `🙋` stays until

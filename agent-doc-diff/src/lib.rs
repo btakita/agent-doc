@@ -229,9 +229,48 @@ pub fn strip_comments(content: &str) -> String {
     // the write agree byte-for-byte on the block boundary.
     // `place:out` interiors are derived bytes. Blank them before comment
     // stripping so writing an answer does not come back as a new prompt.
-    let blanked = agent_doc_element::place::blank_outputs(content);
+    let prompt_input = without_salient_checkpoints(content);
+    let blanked = agent_doc_element::place::blank_outputs(&prompt_input);
     let stripped = strip_pipeline_block_lines(&element::strip_comments(&blanked));
     neutralize_informational_component_content(&stripped)
+}
+
+/// The cycle's live response is a binary-owned projection inside Exchange.
+/// Omit it from both cuts before planning or comparing operator prompt input.
+pub fn without_salient_checkpoints(content: &str) -> std::borrow::Cow<'_, str> {
+    if !content.contains("agent:salient-response") {
+        return std::borrow::Cow::Borrowed(content);
+    }
+    let Ok(components) = element::parse(content) else {
+        return std::borrow::Cow::Borrowed(content);
+    };
+    let mut cuts: Vec<(usize, usize)> = Vec::new();
+    for checkpoint in components
+        .iter()
+        .filter(|item| item.name == "salient-response")
+    {
+        if !components.iter().any(|exchange| {
+            exchange.name == "exchange"
+                && exchange.open_end <= checkpoint.open_start
+                && checkpoint.close_end <= exchange.close_start
+        }) || cuts
+            .last()
+            .is_some_and(|&(_, end)| checkpoint.open_start < end)
+        {
+            continue;
+        }
+        let start =
+            checkpoint.open_start - usize::from(content[..checkpoint.open_start].ends_with("\n\n"));
+        cuts.push((start, checkpoint.close_end));
+    }
+    if cuts.is_empty() {
+        return std::borrow::Cow::Borrowed(content);
+    }
+    let mut result = content.to_string();
+    for (start, end) in cuts.into_iter().rev() {
+        result.replace_range(start..end, "");
+    }
+    std::borrow::Cow::Owned(result)
 }
 
 /// Remove only the bodies of context-only components before comparing snapshots.

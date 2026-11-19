@@ -783,6 +783,11 @@ fn run_in_controller_scoped(
     // mutation, or commit.
     require_git_repository_for_compact_commit(file, commit)?;
 
+    if component_name.unwrap_or("exchange") == "exchange"
+        && let Some(baseline) = agent_doc_snapshot_io::load_document_baseline(file)?
+    {
+        require_settled_exchange_history(&baseline, &semantic_base_content)?;
+    }
     let content = compose_active_capture_for_compaction(file, &semantic_base_content)?;
     // A salient node is display state for the open cycle,
     // so compaction keeps only that cycle's node, and only in the live target.
@@ -2004,11 +2009,34 @@ fn converge_compact_targets_with_retry(
     }
 }
 
+/// A user's edit inside old Exchange history is still live intent. The
+/// boundary identifies the exact historical region compaction may archive.
+fn require_settled_exchange_history(baseline: &str, current: &str) -> Result<()> {
+    let exchange_history = |document: &str| {
+        let components = element::parse(document).ok()?;
+        let body = components
+            .iter()
+            .find(|component| component.name == "exchange")?
+            .content(document);
+        let boundary = agent_doc_document::compact_projection::boundary_marker_line(body)?;
+        let body = remove_all_salient_responses(body);
+        Some((boundary, split_component_content_at_boundary(&body).0))
+    };
+    if let (Some((old_boundary, old_prefix)), Some((boundary, prefix))) =
+        (exchange_history(baseline), exchange_history(current))
+        && old_boundary == boundary
+        && old_prefix.trim_end() != prefix.trim_end()
+    {
+        anyhow::bail!(
+            "compact: Exchange history has uncommitted edits before the boundary; preserve and settle those edits before archiving the history"
+        );
+    }
+    Ok(())
+}
+
 /// Fold an active, not-yet-committed capture into the compaction input before
-/// selecting archive topics. This closes the race where a response write is
-/// retained for editor delivery while a later Compact Exchange is computed
-/// from an older disk/controller projection. The write CAS still uses
-/// `current_content` as its base; only the archive/summary model is enriched.
+/// selecting archive topics. The write CAS still uses `current_content` as
+/// its base, while the archive includes a response retained for delivery.
 fn compose_active_capture_for_compaction(file: &Path, current_content: &str) -> Result<String> {
     let Some(capture) = agent_doc_capture_io::load_active(file)? else {
         return Ok(current_content.to_string());
@@ -3224,6 +3252,24 @@ mod tests {
             assert!(!projection.contains("- do [#q2]"));
             assert!(!projection.contains("- do [#q3]"));
         }
+    }
+
+    #[test]
+    fn compact_refuses_uncommitted_edits_inside_history() {
+        let base = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: verified work\n\nPrevious response.\n",
+            "<!-- agent:boundary:verified -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let new_task = "❯ Keep this new task in the live document.";
+        let historical = base.replace("Previous response.", new_task);
+        assert!(require_settled_exchange_history(base, &historical).is_err());
+        let tail = base.replace(
+            "<!-- /agent:exchange -->",
+            &format!("{new_task}\n<!-- /agent:exchange -->"),
+        );
+        require_settled_exchange_history(base, &tail).unwrap();
     }
 
     #[test]

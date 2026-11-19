@@ -657,7 +657,8 @@ built-in informational exceptions. `place` is a built-in trigger: its prompt
 body can start a turn, and the nested `place:out` bytes are derived output. The registry also lists the binary-written
 components that only ever appear nested inside another element and have no
 descriptor of their own (`NESTED_BINARY_COMPONENTS`: `salient-response`, the
-non-final checkpoint node inside `agent:exchange`, and `referral`, the
+non-final checkpoint node inside `agent:exchange` that is excluded from prompt
+diffs and steering, and `referral`, the
 `transfer --referral` pointer block, plus the binary-owned `decision` and
 `decision-revision` records). Every marker-level gate, the tagpath
 dialect lint above all, must accept every marker the binary itself writes; a

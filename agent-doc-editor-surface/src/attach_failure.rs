@@ -99,6 +99,10 @@ pub fn diagnose_attach_failure(evidence: &AttachFailureEvidence) -> AttachFailur
     let reason = evidence.reason.as_deref().unwrap_or("");
     let live_replica_attached = evidence.live_replica_attached.unwrap_or(false);
     let needs_operator_surface = needs_operator_surface(reason);
+    let non_session_document = matches!(
+        reason,
+        "not_agent_doc_document" | "controller_refused: not_agent_doc_document"
+    );
     // A projection hold refused only the replacement
     // registration. The attached replica keeps the buffer and the controller in
     // sync, so the close/repair/reopen remedy would detach a healthy replica.
@@ -120,7 +124,7 @@ pub fn diagnose_attach_failure(evidence: &AttachFailureEvidence) -> AttachFailur
         status_token: status_token(reason),
         needs_operator_surface,
         needs_liveness_republish: reason.contains("replica_register_stale_editor_endpoint"),
-        retry_disposition: if needs_operator_surface {
+        retry_disposition: if needs_operator_surface || non_session_document {
             AttachFailureRetryDisposition::AwaitOperatorEvidence
         } else {
             AttachFailureRetryDisposition::Automatic
@@ -295,10 +299,9 @@ pub enum AttachHoldTransition {
 }
 
 /// Derive [`AttachHoldTransition`] from one `editor_surface_event`'s
-/// `surface` and `status`, by the same rule [`diagnose_attach_failure`] uses
-/// to disarm the editor's retry, so the agent-side record can never disagree
-/// with the editor about whether it is waiting for the operator. Events on
-/// other surfaces say nothing about the attach (`None`).
+/// `surface` and `status` using the same diagnosis as the plugin. Only holds
+/// that require an operator-facing recovery are durable. Plain Markdown can
+/// stop retrying without an editor-replica recovery obligation.
 pub fn attach_hold_transition(surface: &str, status: &str) -> Option<AttachHoldTransition> {
     if surface != REPLICA_REGISTRATION_SURFACE {
         return None;
@@ -311,15 +314,13 @@ pub fn attach_hold_transition(surface: &str, status: &str) -> Option<AttachHoldT
         file_name: None,
         live_replica_attached: None,
     });
-    Some(
-        if diagnosis.retry_disposition == AttachFailureRetryDisposition::AwaitOperatorEvidence {
-            AttachHoldTransition::Record {
-                status_token: diagnosis.status_token,
-            }
-        } else {
-            AttachHoldTransition::Clear
-        },
-    )
+    Some(if diagnosis.needs_operator_surface {
+        AttachHoldTransition::Record {
+            status_token: diagnosis.status_token,
+        }
+    } else {
+        AttachHoldTransition::Clear
+    })
 }
 
 #[cfg(test)]
@@ -474,13 +475,13 @@ mod tests {
         assert_eq!(json["hold_notification"], "error");
     }
 
-    /// `#controllerrecyclelost`: the agent-side hold record follows the exact
-    /// rule that disarms the editor's retry. The 2026-11-04 status
+    /// `#controllerrecyclelost`: the agent-side hold record follows the
+    /// operator-facing recovery decision. The 2026-11-04 status
     /// `attach_refused_ambiguous-retained-projection` records a hold; a
     /// transient refusal or any other registration outcome supersedes it; an
     /// unrelated surface says nothing.
     #[test]
-    fn the_attach_hold_transition_follows_the_retry_disposition() {
+    fn the_attach_hold_transition_follows_the_operator_surface_decision() {
         for token in [
             "ambiguous-retained-projection",
             "ambiguous-reregister-projection",
@@ -503,6 +504,7 @@ mod tests {
         for status in [
             "attach_refused_controller-register",
             "attach_refused_socket_unavailable",
+            "attach_refused_not_agent_doc_document",
             "attached",
         ] {
             assert_eq!(

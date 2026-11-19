@@ -302,6 +302,11 @@ backlog edits continue to reject Review-only targets.
   Compact Exchange transaction: authoritative read, archive/summary computation,
   CRDT mutation, visible projection proof, and optional commit. Its in-process
   mutation scope must not issue document or commit RPCs back into its own socket.
+- Compact controller diagnostics include `requester=editor`, `requester=agent`,
+  or `requester=cli`. Editor actions set a per-process hint, which takes
+  precedence over inherited harness context. The CLI uses the detected harness
+  for other submissions. A legacy invocation without attribution logs
+  `requester=unknown`. Attribution is diagnostic metadata.
 - A stale caller/controller binary mismatch fails before mutation and performs at
   most one reconnect/promotion retry. The command uses a compact-operation
   deadline, not the short generic controller-response timeout.

@@ -514,6 +514,7 @@ dependencies = [
  "agent-doc-markdown-ast",
  "agent-doc-merge",
  "agent-doc-merge-io",
+ "agent-doc-model-tier",
  "agent-doc-op-capture-io",
  "agent-doc-ops-log-io",
  "agent-doc-project-root-io",

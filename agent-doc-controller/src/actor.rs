@@ -62,6 +62,16 @@ pub struct ActorRecord {
     pub last_transition: ActorLastTransition,
 }
 
+impl ActorRecord {
+    /// A closed generation cannot regain ownership through a lifecycle update.
+    /// A separate binding or replacement can establish a new owner.
+    pub fn permits_lifecycle_state(&self, generation: u64, state: ActorState) -> bool {
+        self.generation != generation
+            || self.state != ActorState::Closed
+            || state == ActorState::Closed
+    }
+}
+
 /// The write an actor record was last committed by (`#syncbindingfence`).
 ///
 /// A generation fence alone does not detect a write that keeps the generation:

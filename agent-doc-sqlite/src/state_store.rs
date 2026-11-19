@@ -6652,7 +6652,7 @@ pub fn store_actor_record_fenced_tx(
             record: record.clone(),
             launch_mode,
             controller_epoch,
-            release_ready_dispatches_as_of: None,
+            lifecycle_as_of: None,
         },
     )
     .map(|(write, _)| write)
@@ -6692,7 +6692,7 @@ pub fn store_actor_lifecycle_record_tx(
         record,
         launch_mode,
         controller_epoch,
-        (record.state == ActorState::Ready).then_some(now_secs),
+        Some(now_secs),
     )
 }
 
@@ -6726,7 +6726,7 @@ pub fn store_actor_lifecycle_record_fenced_tx(
             record: record.clone(),
             launch_mode,
             controller_epoch,
-            release_ready_dispatches_as_of: (record.state == ActorState::Ready).then_some(now_secs),
+            lifecycle_as_of: Some(now_secs),
         },
     )
 }
@@ -6737,7 +6737,7 @@ fn store_actor_record_in_tx(
     record: &ActorRecord,
     launch_mode: Option<String>,
     controller_epoch: Option<i64>,
-    release_ready_dispatches_as_of: Option<i64>,
+    lifecycle_as_of: Option<i64>,
 ) -> Result<(ActorStoreWrite, usize)> {
     // This transaction reads the current actor generation before writing the
     // replacement record. A deferred SQLite transaction can let two starters
@@ -6768,7 +6768,7 @@ fn store_actor_record_in_tx(
         record,
         launch_mode,
         controller_epoch,
-        release_ready_dispatches_as_of,
+        lifecycle_as_of,
     )?;
     tx.commit()?;
     Ok(written)
@@ -6788,7 +6788,7 @@ pub(crate) fn apply_actor_record_write_in_tx(
     record: &ActorRecord,
     launch_mode: Option<String>,
     controller_epoch: Option<i64>,
-    release_ready_dispatches_as_of: Option<i64>,
+    lifecycle_as_of: Option<i64>,
 ) -> Result<(ActorStoreWrite, usize)> {
     if record.generation < prior_generation {
         anyhow::bail!(
@@ -6796,6 +6796,19 @@ pub(crate) fn apply_actor_record_write_in_tx(
             record.document_id,
             record.generation,
             prior_generation
+        );
+    }
+    // The runtime can decide while the actor is still live, then lose ownership
+    // to a same-generation close before the effect reaches this transaction.
+    // Test the existing transaction's prior row before any write or receipt release.
+    if lifecycle_as_of.is_some()
+        && previous
+            .is_some_and(|prior| !prior.permits_lifecycle_state(record.generation, record.state))
+    {
+        anyhow::bail!(
+            "controller lifecycle transition refused for {}: actor generation {} is closed",
+            record.document_id,
+            record.generation
         );
     }
     let evicted_document_ids = if record.state != ActorState::Closed {
@@ -6819,6 +6832,8 @@ pub(crate) fn apply_actor_record_write_in_tx(
     // never left `Ready`, which is also exactly the state a route-dispatched turn
     // runs in. Settling there released that running turn's receipt. It keeps the
     // pre-turn-grace leak sweep only.
+    let release_ready_dispatches_as_of =
+        lifecycle_as_of.filter(|_| record.state == ActorState::Ready);
     let released_dispatches = match (release_ready_dispatches_as_of, previous) {
         (None, _) => 0,
         (Some(now_secs), Some(prior)) if prior.state == ActorState::Ready => {

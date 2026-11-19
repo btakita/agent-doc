@@ -763,7 +763,13 @@ deterministic tests.
   over an owner's same-generation `Busy` would otherwise also release that
   running turn's dispatch receipt. The owner's own transitions (supervisor,
   `start`, the `session` operator commands) keep the generation-only fence:
-  they are the evidence, not a decision about it. A controller that predates the
+  they are the evidence, not a decision about it. Within a generation,
+  `Closed` is terminal for lifecycle updates. The controller refuses a
+  non-closed update to a closed actor before sequence admission, and the
+  existing store transaction checks the same rule before any write or
+  dispatch receipt settlement. This covers a close committed after the
+  controller observed the actor. Explicit binding and generation replacement
+  remain separate transitions. A controller that predates the route revision
   payload ignores it and applies the generation-only fence.
 - Every accepted command receives a durable dispatch receipt before external
   side effects such as tmux input, supervisor stdin, response write-back, or

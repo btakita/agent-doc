@@ -844,6 +844,7 @@ mod tests {
             lost_from: None,
             completion_recovered_after_loss: false,
             publication_state: None,
+            native_spawn_pending: false,
             worker: worker_started.map(|started_at_secs| QueueWorkerBinding {
                 worker_id: format!("w-{item}"),
                 started_at_secs,

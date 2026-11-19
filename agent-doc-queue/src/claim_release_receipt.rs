@@ -167,6 +167,7 @@ impl ClaimReleaseReceipt {
             lost_from: None,
             completion_recovered_after_loss: self.completion_recovered_after_loss,
             publication_state: self.publication_state,
+            native_spawn_pending: false,
             worker: self.worker_id.as_ref().map(|worker_id| {
                 crate::queue_claim::QueueWorkerBinding {
                     worker_id: worker_id.clone(),
@@ -631,6 +632,7 @@ mod tests {
             lost_from: None,
             completion_recovered_after_loss: false,
             publication_state: None,
+            native_spawn_pending: false,
             worker: Some(crate::queue_claim::QueueWorkerBinding {
                 worker_id: format!("worker:{owner}"),
                 started_at_secs: 1,

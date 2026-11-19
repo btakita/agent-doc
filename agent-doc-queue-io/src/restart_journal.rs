@@ -286,6 +286,16 @@ pub(crate) fn sync_claims_with_conn(
                 .unwrap_or_else(|| boot_id.clone()),
             phase: if claim.replacement_pending() {
                 WorkerPhase::Cancelled
+            } else if claim.native_spawn_pending {
+                WorkerPhase::NativeSpawnPending
+            } else if claim.lost_from == Some(QueueClaimState::Claimed)
+                && claim.worker.is_none()
+                && claim
+                    .frozen
+                    .as_ref()
+                    .is_some_and(|freeze| freeze.is_abandon())
+            {
+                WorkerPhase::Cancelled
             } else {
                 worker_phase(claim.state)
             },
@@ -601,6 +611,51 @@ mod tests {
             projection.main.map(|main| main.action),
             Some(RecoveryAction::ResumeMain)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn native_spawn_hold_survives_expiry_and_cold_reconciliation() -> Result<()> {
+        use crate::queue_claim;
+        use agent_doc_queue::queue_claim::{ClaimOutcome, QueueClaimState};
+
+        let dir = tempfile::tempdir()?;
+        std::fs::create_dir(dir.path().join(".agent-doc"))?;
+        let file = dir.path().join("task.md");
+        let item = "Describe the sample";
+        let owner = "subagent:conservation";
+        std::fs::write(
+            &file,
+            format!("<!-- agent:queue subagents go -->\n- {item}\n<!-- /agent:queue -->\n"),
+        )?;
+        let clock = queue_claim::claim_clock_now_secs();
+        let pin = queue_claim::pin_claim_clock_for_current_thread(clock);
+        let (outcome, claimed) = queue_claim::claim(&file, item, owner, 1)?;
+        assert_eq!(outcome, ClaimOutcome::Created);
+        assert!(queue_claim::reserve_native_spawn(&file, &claimed)?);
+        assert!(!queue_claim::reserve_native_spawn(&file, &claimed)?);
+        drop(pin);
+
+        let now = clock + 100;
+        let _pin = queue_claim::pin_claim_clock_for_current_thread(now);
+        let projection = reconcile(&file, now)?;
+        assert_eq!(projection.workers.len(), 1, "{projection:?}");
+        assert_eq!(projection.workers[0].phase, WorkerPhase::NativeSpawnPending);
+        assert_eq!(projection.workers[0].action, RecoveryAction::NeedsOperator);
+        assert!(queue_claim::abandon_attempt(&file, item, Some(claimed.generation)).is_err());
+        let stored = queue_claim::load_ledger(&file)?
+            .resolve_selector(item)?
+            .cloned()
+            .unwrap();
+        assert_eq!(stored.state, QueueClaimState::Claimed);
+        assert!(stored.blocks_dispatch(now));
+        let bound =
+            queue_claim::start_attempt(&file, item, owner, "worker:sample", 1, claimed.generation)?;
+        assert_eq!(bound.generation, claimed.generation);
+        assert!(!bound.native_spawn_pending);
+        let bound =
+            queue_claim::start_attempt(&file, item, owner, "worker:sample", 1, claimed.generation)?;
+        assert_eq!(bound.worker.unwrap().worker_id, "worker:sample");
         Ok(())
     }
 

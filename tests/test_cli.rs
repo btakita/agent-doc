@@ -27950,13 +27950,10 @@ fn test_database_only_gc_prunes_history_and_dry_run_preserves_bytes() {
     assert!(!missing.path().join(".agent-doc").exists());
 }
 
-/// `#livebuffergc`: `.agent-doc/live-buffer/` was retired in 0.34.160 and no
-/// current code writes or prunes it. `gc --retired-stores --dry-run` lists it
-/// with file count and bytes and deletes nothing; `gc --retired-stores` removes
-/// only that store, never follows a symlink out of it, and leaves every other
-/// `.agent-doc/` entry alone.
+/// Explicit retired-store GC lists and removes the allowlisted legacy
+/// directories while preserving nearby state and symlink targets.
 #[test]
-fn test_gc_retired_stores_lists_then_removes_only_the_live_buffer_store() {
+fn test_gc_retired_stores_lists_then_removes_only_allowlisted_stores() {
     let dir = tempfile::tempdir().unwrap();
     let agent_doc = dir.path().join(".agent-doc");
     let live_buffer = agent_doc.join("live-buffer");
@@ -27967,9 +27964,17 @@ fn test_gc_retired_stores_lists_then_removes_only_the_live_buffer_store() {
     )
     .unwrap();
     fs::write(live_buffer.join("00e03c1ed796d7d9"), "abcde").unwrap();
+    let other_retired = ["patches", "plugin-owner", "ack-content", "op-capture"];
+    for name in other_retired {
+        let store = agent_doc.join(name);
+        fs::create_dir(&store).unwrap();
+        fs::write(store.join("old-state"), "legacy").unwrap();
+    }
     fs::create_dir_all(agent_doc.join("snapshots")).unwrap();
     fs::write(agent_doc.join("snapshots/keep.md"), "snapshot").unwrap();
     fs::write(agent_doc.join("project.md"), "---\n---\n").unwrap();
+    fs::create_dir(agent_doc.join("patches-archive")).unwrap();
+    fs::write(agent_doc.join("patches-archive/keep.md"), "archive").unwrap();
     let outside = dir.path().join("outside");
     fs::create_dir_all(&outside).unwrap();
     fs::write(outside.join("precious.md"), "operator data").unwrap();
@@ -27997,17 +28002,37 @@ fn test_gc_retired_stores_lists_then_removes_only_the_live_buffer_store() {
         live_buffer.join("00e03c1ed796d7d9").is_file(),
         "dry run deleted"
     );
+    for name in other_retired {
+        let listing = format!("retired store {name}: would remove");
+        assert!(dry_err.contains(&listing), "{dry_err}");
+        assert_eq!(
+            fs::read_to_string(agent_doc.join(name).join("old-state")).unwrap(),
+            "legacy"
+        );
+    }
 
     agent_doc_cmd()
         .args(["gc", "--root", root, "--retired-stores"])
         .assert()
         .success();
-    assert!(!live_buffer.exists(), "apply must remove the retired store");
+    for name in [
+        "live-buffer",
+        "patches",
+        "plugin-owner",
+        "ack-content",
+        "op-capture",
+    ] {
+        assert!(!agent_doc.join(name).exists(), "{name} was not removed");
+    }
     assert_eq!(
         fs::read_to_string(agent_doc.join("snapshots/keep.md")).unwrap(),
         "snapshot"
     );
     assert!(agent_doc.join("project.md").is_file());
+    assert_eq!(
+        fs::read_to_string(agent_doc.join("patches-archive/keep.md")).unwrap(),
+        "archive"
+    );
     assert_eq!(
         fs::read_to_string(outside.join("precious.md")).unwrap(),
         "operator data"

@@ -2838,7 +2838,7 @@ enum Commands {
         /// Only prune superseded database history and reclaim free pages; leave files and actors alone
         #[arg(long)]
         database_only: bool,
-        /// Only remove retired .agent-doc/ stores (live-buffer/); with --dry-run, list them with file count and bytes
+        /// Only remove retired .agent-doc/ stores. With --dry-run, list each store with file count and bytes
         #[arg(long, conflicts_with = "database_only")]
         retired_stores: bool,
     },

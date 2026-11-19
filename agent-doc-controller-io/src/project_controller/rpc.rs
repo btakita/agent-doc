@@ -24357,8 +24357,13 @@ pub(crate) fn serve_client(
     match reader.read_line(&mut line) {
         Ok(0) => Ok(()),
         Ok(_) => {
-            let request: ControllerRequest = serde_json::from_str(line.trim())?;
-            if request.command == "document_turn_authority_stream" {
+            #[derive(Deserialize)]
+            struct CommandSelector {
+                command: String,
+            }
+            let selector: CommandSelector = serde_json::from_str(line.trim())?;
+            if selector.command == "document_turn_authority_stream" {
+                let request = serde_json::from_str(line.trim())?;
                 return serve_document_turn_authority_stream(
                     runtime,
                     request,
@@ -24503,6 +24508,13 @@ pub(crate) fn handle_request_locked(
     // concurrent documents keep separate memos.
     let _turn_attribution = agent_doc_ops_log_io::begin_turn_attribution_scope();
     let request_value = serde_json::from_str::<serde_json::Value>(line.trim())?;
+    if request_value["command"] == "api" {
+        let bootstrap = runtime.bootstrap_snapshot()?;
+        return Ok(serde_json::to_string(&public_api_response(
+            &request_value,
+            &bootstrap.project_root,
+        ))?);
+    }
     let request: ControllerRequest = serde_json::from_value(request_value.clone())?;
     // #af88 B enforcement: read the caller's stamped binary version (skew-safe;
     // absent from older clients). A value that differs from this controller's own
@@ -25457,6 +25469,54 @@ fn document_turn_authority_stream_frame(
 
 fn stale_mutating_client_binary(client_version: Option<&str>) -> Option<&str> {
     client_version.filter(|version| *version != identity_version())
+}
+
+const PUBLIC_API_VERSION: &str = "agent-doc/v1";
+const API_CAPABILITIES: &str = "api.capabilities";
+
+/// Public requests negotiate their own version at ingress. They cannot select
+/// an internal RPC or submit a caller-authored command-plane envelope.
+fn public_api_response(request: &serde_json::Value, project_root: &Path) -> serde_json::Value {
+    let reject = |code, message| {
+        serde_json::json!({
+            "api": PUBLIC_API_VERSION,
+            "ok": false,
+            "error": { "code": code, "message": message, "retryable": false }
+        })
+    };
+    match request["api"].as_str() {
+        Some(PUBLIC_API_VERSION) => {}
+        Some(_) => {
+            return reject(
+                "api_version_unsupported",
+                "The controller supports agent-doc/v1.",
+            );
+        }
+        None => return reject("invalid_request", "A string api version is required."),
+    }
+    if request
+        .get("params")
+        .is_some_and(|params| !params.is_object())
+    {
+        return reject("invalid_request", "params must be a JSON object.");
+    }
+    match request["op"].as_str() {
+        Some(API_CAPABILITIES) => serde_json::json!({
+            "api": PUBLIC_API_VERSION,
+            "ok": true,
+            "data": {
+                "api_version": PUBLIC_API_VERSION,
+                "supported_ops": [API_CAPABILITIES],
+                "binary_version": identity_version(),
+                "project_root": project_root.to_string_lossy()
+            }
+        }),
+        Some(_) => reject(
+            "api_operation_unsupported",
+            "The operation is not supported.",
+        ),
+        None => reject("invalid_request", "A string op is required."),
+    }
 }
 
 /// A closeout-owner release is safe across binary skew because it cannot grant
@@ -66236,6 +66296,85 @@ mod tests {
             ops,
             ["during-load-0", "seed-0", "seed-1", "seed-2", "seed-3"],
             "the append that raced the reload survives the swap"
+        );
+    }
+
+    #[test]
+    fn public_api_uses_declared_version_without_weakening_internal_submit() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let project_root = bootstrap.project_root.clone();
+        let runtime = test_controller_runtime(&bootstrap);
+        let call = |body: serde_json::Value| {
+            let (response, should_stop) =
+                handle_request_for_client(&body.to_string(), &runtime).unwrap();
+            assert!(!should_stop);
+            serde_json::from_str::<serde_json::Value>(&response).unwrap()
+        };
+        let mut request = serde_json::json!({
+            "command": "api",
+            "api": "agent-doc/v1",
+            "op": "api.capabilities",
+            "binary_version": "0.0.0-older-client",
+            "params": {},
+            "file": { "additive_extension": true }
+        });
+        let expected = serde_json::json!({
+            "api": "agent-doc/v1",
+            "ok": true,
+            "data": {
+                "api_version": "agent-doc/v1",
+                "supported_ops": ["api.capabilities"],
+                "binary_version": identity_version(),
+                "project_root": project_root
+            }
+        });
+        assert_eq!(call(request.clone()), expected);
+        request.as_object_mut().unwrap().remove("binary_version");
+        assert_eq!(call(request.clone()), expected);
+
+        request["api"] = serde_json::json!("agent-doc/v2");
+        request["binary_version"] = serde_json::json!(identity_version());
+        let unsupported_version = call(request.clone());
+        assert_eq!(unsupported_version["ok"], false);
+        assert_eq!(
+            unsupported_version["error"]["code"],
+            "api_version_unsupported"
+        );
+        assert_eq!(unsupported_version["error"]["retryable"], false);
+
+        request["api"] = serde_json::json!("agent-doc/v1");
+        request["op"] = serde_json::json!("closeout_owner_claim");
+        let unsupported_op = call(request.clone());
+        assert_eq!(unsupported_op["ok"], false);
+        assert_eq!(unsupported_op["error"]["code"], "api_operation_unsupported");
+        request["op"] = serde_json::json!("api.capabilities");
+        request["params"] = serde_json::json!([]);
+        assert_eq!(call(request.clone())["error"]["code"], "invalid_request");
+        request.as_object_mut().unwrap().remove("api");
+        assert_eq!(call(request)["error"]["code"], "invalid_request");
+
+        let submit = super::command_plane::build_supervisor_recycle_submit(
+            "cmd-internal",
+            "cycle_state",
+            "root:example",
+            "example",
+            1,
+        )
+        .unwrap();
+        let internal = call(serde_json::json!({
+            "command": "command_plane_submit",
+            "api": "agent-doc/v1",
+            "op": "api.capabilities",
+            "binary_version": "0.0.0-older-client",
+            "diagnostic_payload": serde_json::to_string(&submit).unwrap(),
+        }));
+        assert_eq!(internal["ok"], false);
+        assert!(
+            internal["error"]
+                .as_str()
+                .unwrap()
+                .contains("controller_binary_stale")
         );
     }
 

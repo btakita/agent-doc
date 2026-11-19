@@ -48,6 +48,22 @@ projections, and tmux transcript inference.
   transport drop; a request panic is a deterministic failure of that request
   and must not be retried as one (GH #264, GH #354).
 
+### Public API version negotiation
+
+The local socket's `api` command uses its public protocol version independently
+of the running build. A request with `"command": "api"`, `"api": "agent-doc/v1"`,
+and `"op": "api.capabilities"` returns the supported operations, the project's
+root, and the running controller's binary version. A caller may omit
+`binary_version` or send a different build version. An unsupported API version
+returns `api_version_unsupported` even when the build versions match.
+
+The public command currently serves only the read-only capabilities operation.
+It refuses unknown operations with `api_operation_unsupported` and malformed
+requests with `invalid_request`. Internal RPCs retain their existing
+build-identity checks, including the separately scoped closeout-owner release
+exception. Future API write operations must construct their own typed commands
+inside the controller after validating the public request.
+
 ### Bootstrap publication is adoptable before status hydration (GH #146)
 
 The project socket is the controller launch publication edge. A launch-claim

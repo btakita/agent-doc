@@ -23,7 +23,7 @@ use agent_doc_sqlite::state_store::{
     Connection, CoordinationLeaseRecord, clear_coordination_lease_if_heartbeat_at_or_before_in_db,
     clear_coordination_lease_if_holder_in_db, clear_coordination_lease_in_db,
     load_coordination_lease_from_db, load_coordination_leases_for_scope_kind_from_db,
-    open_state_db, open_state_db_read_only, upsert_coordination_lease_in_db,
+    open_state_db, open_state_db_read_only, state_db_path, upsert_coordination_lease_in_db,
 };
 use agent_doc_turn::turn_status::{
     TRANSCRIPT_TAIL_PROBE_BYTES, TranscriptTailEvidence, TurnActiveMarker,
@@ -44,6 +44,9 @@ fn now_secs() -> u64 {
         .map(|d| d.as_secs())
         .unwrap_or(0)
 }
+
+/// The admitted document store passed to a managed harness by its supervisor.
+pub const TURN_STATUS_ROOT_ENV: &str = "AGENT_DOC_TURN_STATUS_ROOT";
 
 const TURN_ACTIVE_SCOPE: &str = "turn_active";
 /// `#staleharnessturnlive`: the harness transcript named by the hook that wrote
@@ -966,11 +969,9 @@ pub fn run_with_idle_payload_hook(
     let title = pane_title_for_status(document_name.as_deref(), active, stale);
     set_pane_title(&pane, &title);
 
-    // Also maintain the readable turn-state marker so route/supervisor can tell
-    // the agent is mid-turn (the bridge to a future hard busy-lease). The hook
-    // runs in the agent's CWD = project root; if there is no `.agent-doc`
-    // ancestor, skip the marker (the pane title still updated). Best-effort —
-    // never fail the turn.
+    // Keep the turn lease in the same store the supervisor and route consult.
+    // A managed harness can work in a different directory from its document.
+    // With no usable store, the pane title is still updated.
     if let Some(base) = base {
         let payload = hook_payload_from_stdin();
         let result =
@@ -1303,17 +1304,47 @@ fn hook_payload_from_stdin() -> Option<String> {
     receiver.recv_timeout(HOOK_STDIN_WAIT).ok()
 }
 
-/// Resolve the project root for the turn-active marker from the current working
-/// directory (the harness hook runs there). `None` when there is no
-/// `.agent-doc` ancestor.
 fn resolve_marker_base() -> Option<PathBuf> {
-    agent_doc_project_root_io::project_root_from_cwd().ok()
+    match std::env::var_os(TURN_STATUS_ROOT_ENV) {
+        Some(root) => existing_managed_marker_root(Path::new(&root)),
+        None => agent_doc_project_root_io::project_root_from_cwd().ok(),
+    }
+}
+
+/// A missing managed store must not be recreated by a late hook, or replaced
+/// by a store in the harness working directory.
+fn existing_managed_marker_root(root: &Path) -> Option<PathBuf> {
+    if !root.is_absolute() {
+        return None;
+    }
+    let root = root.canonicalize().ok()?;
+    if agent_doc_project_root_io::project_root_containing(&root).as_ref() != Some(&root) {
+        return None;
+    }
+    state_db_path(&root).is_file().then_some(root)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use agent_doc_turn::turn_status::TURN_ACTIVE_TTL_SECS;
+
+    #[test]
+    fn managed_hook_root_requires_an_existing_database_at_the_exact_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let child = root.join("notes");
+        std::fs::create_dir(&child).unwrap();
+        std::fs::create_dir(root.join(".agent-doc")).unwrap();
+        assert_eq!(existing_managed_marker_root(&root), None);
+        assert!(!state_db_path(&root).exists());
+
+        open_state_db(&root).unwrap();
+        assert_eq!(existing_managed_marker_root(&root), Some(root));
+        assert_eq!(existing_managed_marker_root(&child), None);
+        assert!(!child.join(".agent-doc").exists());
+        assert_eq!(existing_managed_marker_root(Path::new("relative")), None);
+    }
 
     fn seed_actor_dispatch(base: &Path, document_id: &str, pane: &str, dispatched_at: u64) {
         let conn = open_state_db(base).unwrap();

@@ -707,7 +707,7 @@ mod tests {
         let target = address_review_target(revision).unwrap();
         let effect = (revision.to_string(), target.clone());
         let before = snapshot("fa3a3f449986d565f21aeb6e0f792323bc8d1d58", vec![]);
-        reserve_inline_execution(&file, "first-cycle", &[effect.clone()], |_| {
+        reserve_inline_execution(&file, "first-cycle", std::slice::from_ref(&effect), |_| {
             Some(before.clone())
         })
         .unwrap();

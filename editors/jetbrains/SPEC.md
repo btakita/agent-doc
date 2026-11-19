@@ -507,23 +507,33 @@ the backend keeps the existing
 `frontend_authority_absent_or_generation_mismatched` readiness, so it holds
 rather than acting on a half-upgraded pair.
 
-- **Recommended policy, `SHELL_ONLY`:** the frontend module is shell code and
-  hosts no implementation generation. The frontend's receipt reports
-  `impl_sha256=none`. Any frontend change is a shell change and restarts both
-  sides, as today. That cost is small: 11 of the 187 plugin commits in the
-  window above touched the frontend. In return, a Remote Dev backend never
-  executes new code inside the operator's local client JVM.
-- **Operator decision, `SAME_IMPL` (not adopted):** the frontend also loads
-  the implementation jar at the same epoch. The JetBrains Client usually runs
-  on another machine, and the agent-doc installer runs on the backend host, so
-  the jar would have to be pushed over the RPC and verified on the client. That
-  would let a Remote Dev backend run new code in the client without a plugin
-  install, which is a security-boundary change. Only the operator can make
-  that choice.
-- The fence proves that both JVMs reported the same verified artifacts at the
-  same epoch. It does not make the swap atomic across JVMs. Between the backend
-  activating and the client's receipt arriving, frontend-dependent work is held,
-  not wrong. Under `SHELL_ONLY`, that window is only the latency of the receipt.
+- **`SHELL_ONLY` is the installed R1 behavior.** The frontend's receipt reports
+  `impl_sha256=none`. A frontend change is a shell change and restarts both JVMs.
+- **`SAME_IMPL` with client-owned release verification was approved on
+  2026-11-19.** The backend supplies the expected implementation digest and
+  epoch. The JetBrains Client independently authenticates a signed, published
+  Agent Doc plugin ZIP against a release signer trusted on the client host and
+  verifies that the implementation bytes it loads are the matching `impl/`
+  entry. The client retains the active generation when proof fails. Backend
+  metadata and an activation receipt carry no authority to change local signer
+  trust.
+- **Ingress fence.** A shell-only backend accepts legacy and shell-only
+  snapshots. When the backend host reports an implementation digest and
+  epoch, ingress requires a matching schema-5 receipt from a distinct frontend
+  JVM before it publishes either presentation or measured layout. The receipt
+  must agree on shell digest, SPI, implementation digest and epoch. A mismatch
+  after an accepted snapshot withdraws the rejected lease's published authority
+  and holds the remote layout lane until the next authenticated lease. When a
+  backend generation changes, its shell must replace or rebind its ingress and
+  retire the former generation's leases.
+- **Activation prerequisites.** R2/R3 still need packaged implementation JARs
+  and a production child-loader host with quiesce, rollback and retirement.
+  The modular release workflow currently publishes unsigned ZIPs and needs a
+  signed distribution path and client-local signer provisioning. Before
+  enabling a swap, verify on both exact platform ranges that scope stays on
+  the same descriptor, module graph and registrations, both JVMs report the
+  same digest and epoch, and the retired loaders are collected. Receipt
+  pairing holds frontend-dependent work between the two activations.
 
 This design never replaces the module graph, so point (1) of the "Exact-263
 decision" reopen rule was restated (operator-agreed 2026-10-26) to what the
@@ -607,9 +617,11 @@ outcome=impl_swapped impl_version=<v> epoch=<n>` and, when the shell changed,
 - **R3, live swap on the classic 242 to 261 line:** where the attach upgrader
   still backs it up, the installer swaps when the shell digest is unchanged.
   Soak on `impl_generation_leak` and on how long the quiesce takes.
-- **R4, live swap on the exact-262/263 backend with a `SHELL_ONLY` frontend:**
-  activation admitted only behind the receipt fence, plus the operator-agreed
-  restatement of the "Exact-263 decision" reopen rule (adopted 2026-10-26).
+- **R4, live swap on exact-262/263:** the client activates the same
+  implementation as the backend under independently verified release signer
+  trust (approved 2026-11-19). Enable activation after the client and backend
+  hosts and signed artifacts exist, and the "Exact-263 decision" reopen
+  conditions pass.
 - **R5 and later:** move CrdtReplicaManager, PatchWatcher, EditorTabSyncListener
   and route orchestration into the implementation one subsystem per release.
   Each move brings its own handoff schema and a collectability test. Pure policy
@@ -674,7 +686,8 @@ Where it is published:
   null), and `forSchema` drops it for a schema-4 backend.
 - The backend records the latest receipt for each connection and logs
   `[shell] frontend client=<id> connection_generation=<n> <receipt>` when it
-  changes. Nothing fences on receipts yet; that starts at R4.
+  changes. The ingress fence can require a paired implementation receipt.
+  Both shipped JVMs currently report `impl_sha256=none`.
 - Every controller registration (`Register` op) from the backend carries the
   backend receipt as `activation_receipt` (see "Controller identity" above).
 

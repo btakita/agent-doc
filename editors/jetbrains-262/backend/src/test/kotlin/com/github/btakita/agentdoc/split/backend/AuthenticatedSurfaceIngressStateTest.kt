@@ -9,6 +9,7 @@ import com.github.btakita.agentdoc.split.FrontendPresentationReceiptOutcome
 import com.github.btakita.agentdoc.split.FrontendSurfaceIdentity
 import com.github.btakita.agentdoc.split.SurfaceIngressStatus
 import com.github.btakita.agentdoc.split.SurfaceRole
+import com.github.btakita.agentdoc.split.forSchema
 import com.intellij.platform.project.ProjectId
 import fleet.util.UID
 import kotlin.test.Test
@@ -107,6 +108,98 @@ class AuthenticatedSurfaceIngressStateTest {
         assertEquals(mapOf("client-a" to receipt), state.frontendActivationReceipts())
         state.retire("client-a", lease)
         assertEquals(emptyMap(), state.frontendActivationReceipts())
+    }
+
+    @Test
+    fun shellOnlyBackendAcceptsLegacySnapshotsAndRejectsUnpairedImplementationClaims() = runBlocking {
+        val publisher = RecordingPublisher()
+        val state = AuthenticatedSurfaceIngressState(publisher, RecordingForwarder())
+        val lease = state.open("client-a", "frontend-a")
+
+        val unexpected = snapshot("frontend-a", 1).copy(activationReceipt = frontendActivation.encode())
+        assertEquals(SurfaceIngressStatus.DELIVERY_FAILED, state.publish("client-a", lease, unexpected).status)
+        assertTrue(publisher.published.isEmpty())
+        assertEquals(
+            SurfaceIngressStatus.ACCEPTED,
+            state.publish("client-a", lease, snapshot("frontend-a", 2).forSchema(4)).status,
+        )
+    }
+
+    @Test
+    fun verifiedBackendGenerationRequiresTheMatchingDistinctFrontendReceipt() = runBlocking {
+        val publisher = RecordingPublisher()
+        val forwarder = RecordingForwarder()
+        val state = AuthenticatedSurfaceIngressState(publisher, forwarder, backendActivationReceipt = backendActivation)
+        val lease = state.open("client-a", "frontend-a")
+        val base = snapshot("frontend-a", 1)
+        val valid = base.copy(activationReceipt = frontendActivation.encode())
+        val refused = listOf(
+            base,
+            base.copy(activationReceipt = "malformed receipt"),
+            valid.copy(schemaVersion = 4),
+            base.copy(activationReceipt = frontendActivation.copy(epoch = 0).encode()),
+            base.copy(activationReceipt = frontendActivation.copy(epoch = backendActivation.epoch - 1).encode()),
+            base.copy(activationReceipt = frontendActivation.copy(implSha256 = "c".repeat(64)).encode()),
+            base.copy(activationReceipt = frontendActivation.copy(shellDigest = "d".repeat(64)).encode()),
+            base.copy(activationReceipt = frontendActivation.copy(spiVersion = 2).encode()),
+            base.copy(activationReceipt = frontendActivation.copy(jvmInstanceId = backendActivation.jvmInstanceId).encode()),
+            base.copy(activationReceipt = backendActivation.encode()),
+        )
+        refused.forEach { candidate ->
+            val ack = state.publish("client-a", lease, candidate)
+            assertEquals(SurfaceIngressStatus.DELIVERY_FAILED, ack.status)
+            assertEquals(FRONTEND_AUTHORITY_UNAVAILABLE_READINESS, ack.diagnostic)
+        }
+        assertEquals(LayoutPublicationReadiness.CONNECTED_BLOCKED, state.layoutPublicationReadiness.value)
+        assertTrue(publisher.published.isEmpty())
+        assertTrue(forwarder.forwarded.isEmpty())
+
+        assertEquals(SurfaceIngressStatus.ACCEPTED, state.publish("client-a", lease, valid).status)
+        assertEquals(LayoutPublicationReadiness.ACCEPTED, state.layoutPublicationReadiness.value)
+        assertEquals(mapOf("client-a" to frontendActivation), state.frontendActivationReceipts())
+        assertEquals(1, publisher.published.size)
+        assertEquals(1, forwarder.forwarded.size)
+    }
+
+    @Test
+    fun mismatchedReceiptWithdrawsPublishedAuthorityUntilTheNextConnection() = runBlocking {
+        val publisher = RecordingPublisher()
+        val forwarder = RecordingForwarder()
+        val state = AuthenticatedSurfaceIngressState(publisher, forwarder, backendActivationReceipt = backendActivation)
+        val lease = state.open("client-a", "frontend-a")
+        val valid = snapshot("frontend-a", 1).copy(activationReceipt = frontendActivation.encode())
+        assertEquals(SurfaceIngressStatus.ACCEPTED, state.publish("client-a", lease, valid).status)
+        val wrongJvm = frontendActivation.copy(jvmInstanceId = "replacement-client-jvm")
+        val invalid = valid.copy(sequence = 2, activationReceipt = wrongJvm.encode())
+        assertEquals(
+            SurfaceIngressStatus.STALE_SEQUENCE,
+            state.publish("client-a", lease, invalid.copy(sequence = 1)).status,
+        )
+        assertEquals(LayoutPublicationReadiness.ACCEPTED, state.layoutPublicationReadiness.value)
+        assertEquals(SurfaceIngressStatus.DELIVERY_FAILED, state.publish("client-a", lease, invalid).status)
+        assertTrue(state.layoutAuthorityActive.value, "a mismatched peer cannot revive backend layout guessing")
+        assertEquals(LayoutPublicationReadiness.CONNECTED_BLOCKED, state.layoutPublicationReadiness.value)
+        assertEquals(listOf("client-a" to lease.connectionGeneration), publisher.retired)
+        assertEquals(listOf("client-a" to lease.connectionGeneration), forwarder.held)
+        assertTrue(state.frontendActivationReceipts().isEmpty())
+        assertEquals(
+            SurfaceIngressStatus.DELIVERY_FAILED,
+            state.publishPresentationReceipt("client-a", lease, receipt(lease.connectionGeneration, 1, 1)).status,
+        )
+        assertEquals(
+            SurfaceIngressStatus.DELIVERY_FAILED,
+            state.publish("client-a", lease, valid.copy(sequence = 3)).status,
+        )
+        assertTrue(publisher.receipts.isEmpty())
+        assertEquals(1, publisher.published.size)
+        assertEquals(1, forwarder.forwarded.size)
+
+        val next = state.open("client-a", "frontend-a-reconnected")
+        assertEquals(SurfaceIngressStatus.STALE_LEASE, state.publish("client-a", lease, valid.copy(sequence = 4)).status)
+        val reconnected = snapshot("frontend-a-reconnected", 1).copy(activationReceipt = wrongJvm.encode())
+        assertEquals(SurfaceIngressStatus.ACCEPTED, state.publish("client-a", next, reconnected).status)
+        assertEquals(LayoutPublicationReadiness.ACCEPTED, state.layoutPublicationReadiness.value)
+        assertEquals(mapOf("client-a" to wrongJvm), state.frontendActivationReceipts())
     }
 
     @Test
@@ -252,9 +345,26 @@ class AuthenticatedSurfaceIngressStateTest {
         surfaces = listOf(FrontendSurface("root", 1, SurfaceRole.MAIN, true, emptyList())),
     )
 
+    private val backendActivation = ActivationReceipt(
+        role = ActivationReceipt.ROLE_BACKEND,
+        jvmInstanceId = "backend-jvm",
+        shellDigest = "a".repeat(64),
+        spiVersion = 1,
+        implVersion = "generation-2",
+        implSha256 = "b".repeat(64),
+        generation = 2,
+        epoch = 7,
+    )
+    private val frontendActivation = backendActivation.copy(
+        role = ActivationReceipt.ROLE_FRONTEND,
+        jvmInstanceId = "frontend-jvm",
+        generation = 8,
+    )
+
     private class RecordingForwarder(private val acquiresLayout: Boolean = true) : RemoteClientLayoutForwarder {
         val opened = mutableListOf<Pair<String, Long>>()
         val forwarded = mutableListOf<Triple<String, Long, Long>>()
+        val held = mutableListOf<Pair<String, Long>>()
         val retired = mutableListOf<Pair<String, Long>>()
 
         override fun open(clientId: String, generation: Long): Boolean {
@@ -264,6 +374,10 @@ class AuthenticatedSurfaceIngressStateTest {
 
         override fun forward(clientId: String, generation: Long, snapshot: FrontendSurfaceSnapshot) {
             forwarded += Triple(clientId, generation, snapshot.sequence)
+        }
+
+        override fun hold(clientId: String, generation: Long) {
+            held += clientId to generation
         }
 
         override fun retire(clientId: String, generation: Long) {

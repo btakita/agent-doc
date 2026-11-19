@@ -3,6 +3,8 @@
 package com.github.btakita.agentdoc.split.backend
 
 import com.github.btakita.agentdoc.shell.receipt.ActivationReceipt
+import com.github.btakita.agentdoc.shell.ShellGenerationHost
+import com.github.btakita.agentdoc.split.ACTIVATION_RECEIPT_SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.FrontendSurface
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
 import com.github.btakita.agentdoc.split.FrontendPresentationReceipt
@@ -42,6 +44,7 @@ private class ControllerSurfaceIngress(project: Project) : SurfaceIngress {
     private val state = AuthenticatedSurfaceIngressState(
         ControllerSurfaceSnapshotPublisher(),
         layoutForwarder,
+        backendActivationReceipt = ShellGenerationHost.getInstance().receipt(),
     )
 
     override val frontendAuthorityActive: StateFlow<Boolean> get() = state.frontendAuthorityActive
@@ -88,6 +91,9 @@ internal class AuthenticatedSurfaceIngressState(
      * and needs no wire field or transport identity.
      */
     generationSeed: Long = System.currentTimeMillis(),
+    /** The shell creates this ingress for one backend generation. A swap must replace the ingress. */
+    private val backendActivationReceipt: ActivationReceipt =
+        ActivationReceipt.shellOnly(ActivationReceipt.ROLE_BACKEND),
     /** GH #339 R1: called when a connection reports a new frontend activation receipt. */
     private val onFrontendReceipt: (clientId: String, connectionGeneration: Long, receipt: ActivationReceipt) -> Unit =
         ::logFrontendReceipt,
@@ -150,6 +156,28 @@ internal class AuthenticatedSurfaceIngressState(
                 "sequence ${snapshot.sequence} is not newer than ${current.acceptedSequence}",
             )
         }
+        val receipt = if (snapshot.schemaVersion >= ACTIVATION_RECEIPT_SURFACE_SNAPSHOT_SCHEMA_VERSION) {
+            ActivationReceipt.decodeOrNull(snapshot.activationReceipt)
+        } else {
+            null
+        }
+        if (current.activationRevoked || !admitsFrontendReceipt(current, receipt)) {
+            if (!current.activationRevoked && current.acceptedSequence > 0) {
+                connections[authenticatedClientId] = current.copy(activationRevoked = true, activationReceipt = null)
+                refreshFrontendAuthority()
+                if (current.layoutAuthority) {
+                    layoutForwarder.hold(authenticatedClientId, lease.connectionGeneration)
+                }
+                // A retired controller generation cannot be reused. A fresh authenticated lease
+                // is required to publish again, even if a late matching snapshot arrives.
+                publisher.retire(authenticatedClientId, lease.connectionGeneration)
+            }
+            return@withLock rejected(
+                SurfaceIngressStatus.DELIVERY_FAILED,
+                lease,
+                FRONTEND_AUTHORITY_UNAVAILABLE_READINESS,
+            )
+        }
         val delivery = publisher.publish(
             clientId = authenticatedClientId,
             generation = lease.connectionGeneration,
@@ -162,7 +190,6 @@ internal class AuthenticatedSurfaceIngressState(
                 delivery.diagnostic ?: "controller delivery failed",
             )
         }
-        val receipt = ActivationReceipt.decodeOrNull(snapshot.activationReceipt)
         connections[authenticatedClientId] = current.copy(
             acceptedSequence = snapshot.sequence,
             acceptedSurfaces = snapshot.surfaces.associate { it.paneId to it.surfaceGeneration },
@@ -187,6 +214,29 @@ internal class AuthenticatedSurfaceIngressState(
         )
     }
 
+    private fun admitsFrontendReceipt(current: ConnectionState, receipt: ActivationReceipt?): Boolean {
+        val backend = backendActivationReceipt
+        if (backend.implSha256 == null && backend.epoch == 0L) {
+            // Legacy snapshots and a shell-only frontend remain valid in R1.
+            return receipt == null || (receipt.implSha256 == null && receipt.epoch == 0L)
+        }
+        if (receipt == null || backend.role != ActivationReceipt.ROLE_BACKEND ||
+            receipt.role != ActivationReceipt.ROLE_FRONTEND ||
+            backend.jvmInstanceId.isBlank() || receipt.jvmInstanceId.isBlank() ||
+            backend.jvmInstanceId == receipt.jvmInstanceId ||
+            !SHA_256.matches(backend.shellDigest) || receipt.shellDigest != backend.shellDigest ||
+            backend.spiVersion <= 0 || receipt.spiVersion != backend.spiVersion ||
+            backend.implSha256?.let(SHA_256::matches) != true ||
+            backend.generation <= 0 || backend.epoch <= 0
+        ) {
+            return false
+        }
+        val previousJvm = current.activationReceipt?.jvmInstanceId
+        return (previousJvm == null || previousJvm == receipt.jvmInstanceId) &&
+            receipt.implSha256 == backend.implSha256 &&
+            receipt.generation > 0 && receipt.epoch == backend.epoch
+    }
+
     suspend fun publishPresentationReceipt(
         authenticatedClientId: String,
         lease: SurfaceIngressLease,
@@ -195,6 +245,13 @@ internal class AuthenticatedSurfaceIngressState(
         val current = connections[authenticatedClientId]
         if (current == null || current.lease != lease) {
             return@withLock rejected(SurfaceIngressStatus.STALE_LEASE, lease, "lease is stale")
+        }
+        if (current.activationRevoked) {
+            return@withLock rejected(
+                SurfaceIngressStatus.DELIVERY_FAILED,
+                lease,
+                FRONTEND_AUTHORITY_UNAVAILABLE_READINESS,
+            )
         }
         val expectedClientId = "jetbrains-rd:$authenticatedClientId"
         if (receipt.identity.clientId != expectedClientId ||
@@ -251,7 +308,8 @@ internal class AuthenticatedSurfaceIngressState(
         val layoutConnections = connections.values.filter { it.layoutAuthority }
         mutableLayoutPublicationReadiness.value = when {
             layoutConnections.isEmpty() -> LayoutPublicationReadiness.INACTIVE
-            layoutConnections.any { it.acceptedSequence == 0L } -> LayoutPublicationReadiness.CONNECTED_BLOCKED
+            layoutConnections.any { it.acceptedSequence == 0L || it.activationRevoked } ->
+                LayoutPublicationReadiness.CONNECTED_BLOCKED
             else -> LayoutPublicationReadiness.ACCEPTED
         }
     }
@@ -275,10 +333,12 @@ internal class AuthenticatedSurfaceIngressState(
         val acceptedSurfaces: Map<String, Long>,
         val layoutAuthority: Boolean,
         val activationReceipt: ActivationReceipt? = null,
+        val activationRevoked: Boolean = false,
     )
 
     private companion object {
         val LOG = Logger.getInstance(AuthenticatedSurfaceIngressState::class.java)
+        val SHA_256 = Regex("[0-9a-f]{64}")
 
         fun logFrontendReceipt(clientId: String, connectionGeneration: Long, receipt: ActivationReceipt) {
             LOG.info("[shell] frontend client=$clientId connection_generation=$connectionGeneration ${receipt.encode()}")

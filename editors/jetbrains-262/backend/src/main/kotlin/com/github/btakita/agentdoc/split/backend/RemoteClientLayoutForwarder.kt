@@ -314,12 +314,17 @@ internal interface RemoteClientLayoutForwarder {
 
     fun forward(clientId: String, generation: Long, snapshot: FrontendSurfaceSnapshot)
 
+    /** Withdraw a rejected generation's layout while the remote lease still owns the layout lane. */
+    fun hold(clientId: String, generation: Long)
+
     fun retire(clientId: String, generation: Long)
 
     object Disabled : RemoteClientLayoutForwarder {
         override fun open(clientId: String, generation: Long): Boolean = false
 
         override fun forward(clientId: String, generation: Long, snapshot: FrontendSurfaceSnapshot) = Unit
+
+        override fun hold(clientId: String, generation: Long) = Unit
 
         override fun retire(clientId: String, generation: Long) = Unit
     }
@@ -338,8 +343,10 @@ internal class ControllerRemoteClientLayoutForwarder(private val project: Projec
         Thread(runnable, "agent-doc-remote-client-layout").apply { isDaemon = true }
     }
 
-    /** Endpoints whose connection is still live; read by the transport's re-registration check. */
-    private val liveSurfaces = ConcurrentHashMap.newKeySet<String>()
+    private enum class SurfaceState { PUBLISHABLE, HELD }
+
+    /** Each live endpoint's publication state, also read by the transport's re-registration check. */
+    private val liveSurfaces = ConcurrentHashMap<String, SurfaceState>()
 
     // Worker-confined state.
     private val forwarded = mutableMapOf<String, ForwardedRemoteSurface>()
@@ -352,7 +359,7 @@ internal class ControllerRemoteClientLayoutForwarder(private val project: Projec
             execute { noteUnavailable(surfaceId, "local_client") }
             return false
         }
-        liveSurfaces += surfaceId
+        liveSurfaces[surfaceId] = SurfaceState.PUBLISHABLE
         RemoteClientLayoutAuthority.activate(project, surfaceId)
         return true
     }
@@ -362,14 +369,20 @@ internal class ControllerRemoteClientLayoutForwarder(private val project: Projec
         execute { deliver(clientId, surfaceId, snapshot) }
     }
 
+    override fun hold(clientId: String, generation: Long) {
+        val surfaceId = remoteClientSurfaceId(clientId, generation)
+        liveSurfaces.replace(surfaceId, SurfaceState.HELD) ?: return
+        execute { withdrawSurface(surfaceId, reason = FRONTEND_AUTHORITY_UNAVAILABLE_READINESS) }
+    }
+
     override fun retire(clientId: String, generation: Long) {
         val surfaceId = remoteClientSurfaceId(clientId, generation)
-        liveSurfaces -= surfaceId
+        liveSurfaces.remove(surfaceId)
         execute { retireSurface(surfaceId, reason = "frontend_connection_retired") }
     }
 
     fun dispose() {
-        val retiring = liveSurfaces.toList()
+        val retiring = liveSurfaces.keys.toList()
         liveSurfaces.clear()
         // Pending leases may not have forwarded a first snapshot yet, but they
         // already own frontend authority and must release it on disposal.
@@ -392,7 +405,7 @@ internal class ControllerRemoteClientLayoutForwarder(private val project: Projec
     }
 
     private fun deliver(clientId: String, surfaceId: String, snapshot: FrontendSurfaceSnapshot) {
-        if (surfaceId !in liveSurfaces || project.isDisposed) return
+        if (!canPublish(surfaceId) || project.isDisposed) return
         if (!isRemoteClient(clientId)) {
             // A monolithic IDE's own frontend: the classic window path already measures this
             // process's splits, so there is nothing to forward.
@@ -422,7 +435,7 @@ internal class ControllerRemoteClientLayoutForwarder(private val project: Projec
             projectRoot = pending.projectRoot,
             surfaceJson = pending.surfaceJson,
             surfaceId = surfaceId,
-            mayReregister = { surfaceId in liveSurfaces },
+            mayReregister = { canPublish(surfaceId) },
         )
         if (receipt.exitCode != 0) {
             forwarded.remove(surfaceId)
@@ -438,12 +451,19 @@ internal class ControllerRemoteClientLayoutForwarder(private val project: Projec
     }
 
     private fun retireSurface(surfaceId: String, reason: String) {
-        lastUnavailable.remove(surfaceId)
         RemoteClientLayoutAuthority.release(project, surfaceId)
+        withdrawSurface(surfaceId, reason)
+    }
+
+    private fun canPublish(surfaceId: String): Boolean =
+        liveSurfaces[surfaceId] == SurfaceState.PUBLISHABLE
+
+    private fun withdrawSurface(surfaceId: String, reason: String) {
+        lastUnavailable.remove(surfaceId)
         val previous = forwarded.remove(surfaceId) ?: return
         val forgotten = CpRouteClient.forgetRemoteClientSurface(previous.projectRoot, surfaceId)
         LOG.info(
-            "[rd-layout] retired measured layout surface=$surfaceId root=${previous.projectRoot} " +
+            "[rd-layout] withdrew measured layout surface=$surfaceId root=${previous.projectRoot} " +
                 "reason=$reason forgotten=$forgotten",
         )
     }

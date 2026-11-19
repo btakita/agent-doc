@@ -67,6 +67,11 @@ pub struct QueuePromptIdentityProjection {
 /// Admit stable ids for every executable queue node that lacks an authored id,
 /// then derive document-local `Related` navigation from the resulting cut.
 pub fn project(content: &str, document_id: &str) -> QueuePromptIdentityProjection {
+    // Duplicate diagnostics are a projection, not operator text. Remove the
+    // previous cut before deriving ids so a stale diagnostic can never become
+    // continuation text or influence identity, then regenerate it below.
+    let without_duplicate_diagnostics = strip_duplicate_directive_diagnostics(content);
+    let content = without_duplicate_diagnostics.as_str();
     let nodes = executable_queue_nodes(content);
     let ancestor_paths = queue_ancestor_paths(content);
     let mut owned_ids: HashMap<String, String> = identified_queue_nodes(content)
@@ -122,6 +127,7 @@ pub fn project(content: &str, document_id: &str) -> QueuePromptIdentityProjectio
     }
     projected =
         agent_doc_element_queue::repair_generated_id_before_list_marker(&projected).into_owned();
+    projected = project_duplicate_directive_diagnostics(&projected);
     let mut relations = relation_graph(&projected);
     relations.diagnostics.extend(identity_diagnostics);
     QueuePromptIdentityProjection {
@@ -129,6 +135,100 @@ pub fn project(content: &str, document_id: &str) -> QueuePromptIdentityProjectio
         assignments,
         relations,
     }
+}
+
+/// Whether `line` is the exact display-only duplicate-directive projection.
+///
+/// The terminal hollow-square glyph is the binary-ownership sentinel. The
+/// shape is deliberately a blockquote rather than a list item, and parsers use
+/// this predicate to discard it before any prompt, selection, claim, steering,
+/// or answer-evidence logic can observe it.
+pub fn is_duplicate_directive_diagnostic_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.starts_with("> **Duplicate #") && trimmed.ends_with("▫️")
+}
+
+fn strip_duplicate_directive_diagnostics(content: &str) -> String {
+    let queue_ranges = agent_doc_element::element::parse(content)
+        .map(|components| {
+            components
+                .into_iter()
+                .filter(|component| component.name == "queue")
+                .map(|component| component.open_end..component.close_start)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if queue_ranges.is_empty() {
+        return content.to_string();
+    }
+
+    let mut out = String::with_capacity(content.len());
+    let mut offset = 0usize;
+    for segment in content.split_inclusive('\n') {
+        let line_start = offset;
+        offset += segment.len();
+        let in_queue = queue_ranges.iter().any(|range| range.contains(&line_start));
+        let line = segment.trim_end_matches(['\r', '\n']);
+        if in_queue && is_duplicate_directive_diagnostic_line(line) {
+            continue;
+        }
+        out.push_str(segment);
+    }
+    out
+}
+
+fn project_duplicate_directive_diagnostics(content: &str) -> String {
+    let mut families = BTreeMap::<String, Vec<MutationItemNode>>::new();
+    for node in executable_queue_nodes(content) {
+        if let Some(id) = node_id(&node) {
+            families.entry(id).or_default().push(node);
+        }
+    }
+
+    let mut insertions = Vec::<(usize, String)>::new();
+    for (id, occurrences) in families
+        .into_iter()
+        .filter(|(_, occurrences)| occurrences.len() > 1)
+    {
+        let total = occurrences.len();
+        let held = occurrences.iter().enumerate().find_map(|(index, node)| {
+            agent_doc_document::queue_projection::owner_projection(&node.item.text)
+                .map(|owner| (index + 1, owner))
+        });
+        for (index, node) in occurrences.iter().enumerate() {
+            let occurrence = index + 1;
+            let state = match &held {
+                Some((held_occurrence, owner)) if *held_occurrence == occurrence => format!(
+                    "claim {}#{} is held here; this occurrence owns the dispatch",
+                    owner.owner, owner.generation
+                ),
+                Some((held_occurrence, owner)) => format!(
+                    "claim {}#{} is held by occurrence {held_occurrence} of {total}; this occurrence is fenced from a second dispatch",
+                    owner.owner, owner.generation
+                ),
+                None => "no claim is held; claim fencing admits only one occurrence".to_string(),
+            };
+            let indent = source_indent(content, node.item.start_byte) + 2;
+            let line_end = content[node.item.start_byte..]
+                .find('\n')
+                .map(|relative| node.item.start_byte + relative)
+                .unwrap_or(content.len());
+            insertions.push((
+                line_end,
+                format!(
+                    "\n{}> **Duplicate #{id} · {occurrence} of {total}:** {state}. ▫️",
+                    " ".repeat(indent)
+                ),
+            ));
+        }
+    }
+
+    let mut projected = content.to_string();
+    insertions.sort_by_key(|(offset, _)| *offset);
+    for (offset, diagnostic) in insertions.into_iter().rev() {
+        projected.insert_str(offset, &diagnostic);
+    }
+    projected
 }
 
 fn available_generated_id(
@@ -182,13 +282,34 @@ pub fn relation_graph(content: &str) -> QueueRelationGraph {
     }
 
     let mut diagnostics = Vec::new();
-    for (id, owners) in &by_id {
+    let mut executable_by_id = BTreeMap::<String, Vec<MutationItemNode>>::new();
+    for node in executable_queue_nodes(content) {
+        if let Some(id) = node_id(&node) {
+            executable_by_id.entry(id).or_default().push(node);
+        }
+    }
+    for (id, owners) in &executable_by_id {
         if owners.len() > 1 {
+            let claim = owners.iter().enumerate().find_map(|(index, node)| {
+                agent_doc_document::queue_projection::owner_projection(&node.item.text)
+                    .map(|owner| (index + 1, owner))
+            });
+            let claim = claim.map_or_else(
+                || "no claim is held".to_string(),
+                |(occurrence, owner)| {
+                    format!(
+                        "claim {}#{} is held by occurrence {occurrence} of {}",
+                        owner.owner,
+                        owner.generation,
+                        owners.len()
+                    )
+                },
+            );
             diagnostics.push(diag(
                 "queue_prompt_identity_duplicate",
                 format!(
-                    "queue prompt id [#{id}] names {} executable rows; identity was preserved and no row was silently reassigned",
-                    owners.len()
+                    "queue prompt id [#{id}] names {} executable rows; {claim}; identities were preserved",
+                    owners.len(),
                 ),
             ));
         }
@@ -648,6 +769,115 @@ mod tests {
         assert!(!projection.content.contains("**Choices:** [#q-"));
         assert!(!projection.content.contains("**retry**: try again [#q-"));
         assert!(projection.content.contains("operator child prompt [#q-"));
+    }
+
+    #[test]
+    fn duplicate_directives_project_inert_blockquotes_without_rewriting_authored_rows() {
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "- do [#build] first authored occurrence\n",
+            "- do [#build] second authored occurrence\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let projection = project(content, "doc-a");
+
+        let lines = projection.content.lines().collect::<Vec<_>>();
+        assert_eq!(lines[1], "- do [#build] first authored occurrence");
+        assert_eq!(
+            lines[2],
+            "  > **Duplicate #build · 1 of 2:** no claim is held; claim fencing admits only one occurrence. ▫️"
+        );
+        assert_eq!(lines[3], "- do [#build] second authored occurrence");
+        assert_eq!(
+            lines[4],
+            "  > **Duplicate #build · 2 of 2:** no claim is held; claim fencing admits only one occurrence. ▫️"
+        );
+        assert!(projection.relations.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "queue_prompt_identity_duplicate"
+                && diagnostic.message
+                    == "queue prompt id [#build] names 2 executable rows; no claim is held; identities were preserved"
+        }));
+
+        let queue = agent_doc_element::element::parse(&projection.content)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let entries =
+            crate::document_queue::parse(&projection.content[queue.open_end..queue.close_start])
+                .unwrap();
+        assert_eq!(
+            entries.len(),
+            2,
+            "generated blockquotes never enter queue IR"
+        );
+        assert_eq!(crate::document_queue::prompts(&entries).len(), 2);
+        assert!(
+            crate::document_queue::prompts(&entries)
+                .iter()
+                .all(|prompt| !prompt.text.contains("Duplicate #build"))
+        );
+        assert_eq!(
+            all_item_nodes(&projection.content)
+                .into_iter()
+                .filter(|node| node.component == "queue")
+                .count(),
+            2,
+            "the diagnostic is not selectable, claimable, or steerable work"
+        );
+        assert_eq!(
+            project(&projection.content, "doc-a").content,
+            projection.content,
+            "the binary-owned diagnostic is regenerated idempotently"
+        );
+    }
+
+    #[test]
+    fn claimed_duplicate_names_the_held_occurrence_and_keeps_icons_after_list_markers() {
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "- 🟡 [#worker-a#7] do [#build] held occurrence\n",
+            "- 📥 do [#build] fenced occurrence\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let projection = project(content, "doc-a");
+
+        let lines = projection.content.lines().collect::<Vec<_>>();
+        assert_eq!(
+            lines[1], "- 🟡 [#worker-a#7] do [#build] held occurrence",
+            "lifecycle state remains after the operator's list marker"
+        );
+        assert_eq!(
+            lines[2],
+            "  > **Duplicate #build · 1 of 2:** claim worker-a#7 is held here; this occurrence owns the dispatch. ▫️"
+        );
+        assert_eq!(lines[3], "- 📥 do [#build] fenced occurrence");
+        assert_eq!(
+            lines[4],
+            "  > **Duplicate #build · 2 of 2:** claim worker-a#7 is held by occurrence 1 of 2; this occurrence is fenced from a second dispatch. ▫️"
+        );
+        assert!(projection.relations.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "queue_prompt_identity_duplicate"
+                && diagnostic.message
+                    == "queue prompt id [#build] names 2 executable rows; claim worker-a#7 is held by occurrence 1 of 2; identities were preserved"
+        }));
+
+        let queue = agent_doc_element::element::parse(&projection.content)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let entries =
+            crate::document_queue::parse(&projection.content[queue.open_end..queue.close_start])
+                .unwrap();
+        let prompts = crate::document_queue::prompts(&entries);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(prompts.len(), 2);
+        assert_eq!(
+            prompts[0].text,
+            "🟡 [#worker-a#7] do [#build] held occurrence"
+        );
+        assert_eq!(prompts[1].text, "📥 do [#build] fenced occurrence");
     }
 
     #[test]

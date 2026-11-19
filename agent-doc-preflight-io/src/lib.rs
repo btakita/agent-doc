@@ -8320,27 +8320,32 @@ fn run_queue_maintenance_with_options_under_apply_guard(
     // therefore rebases/refuses instead of accepting a heuristic disk rewrite.
     let prompt_identity_projection =
         agent_doc_queue::prompt_identity::project(&current_content, &document_id);
-    let prompt_identity_admitted = !prompt_identity_projection.assignments.is_empty();
+    // Prompt identity admission also owns display-only duplicate diagnostics.
+    // Persist any projection delta, even when every executable row already had
+    // an authored id and therefore no claim alias transfer is required.
+    let prompt_identity_admitted = prompt_identity_projection.content != current_content;
     if prompt_identity_admitted {
         let admitted_count = prompt_identity_projection.assignments.len();
-        let claim_admissions = prompt_identity_projection
-            .assignments
-            .iter()
-            .map(|assignment| {
-                (
-                    assignment.source_text.clone(),
-                    assignment.target_text.clone(),
-                )
-            })
-            .collect::<Vec<_>>();
-        effect_phase.stage_claim_write(
-            file,
-            agent_doc_queue_io::queue_claim::plan_transfer_prompt_identity_admissions(
+        if admitted_count > 0 {
+            let claim_admissions = prompt_identity_projection
+                .assignments
+                .iter()
+                .map(|assignment| {
+                    (
+                        assignment.source_text.clone(),
+                        assignment.target_text.clone(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            effect_phase.stage_claim_write(
                 file,
-                &claim_admissions,
-            ),
-            queue_maintenance_effect_phase::ClaimWriteKind::PromptIdentityAdmission,
-        );
+                agent_doc_queue_io::queue_claim::plan_transfer_prompt_identity_admissions(
+                    file,
+                    &claim_admissions,
+                ),
+                queue_maintenance_effect_phase::ClaimWriteKind::PromptIdentityAdmission,
+            );
+        }
         current_content = prompt_identity_projection.content;
         let comps = agent_doc_element::element::parse(&current_content)?;
         if let Some(queue) = agent_doc_queue::queue_set::component_for_id(
@@ -8353,10 +8358,16 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             )?;
         }
         mutated = true;
-        eprintln!(
-            "[preflight] queue: admitted stable ids for {} executable prompt(s) through editor authority",
-            admitted_count
-        );
+        if admitted_count > 0 {
+            eprintln!(
+                "[preflight] queue: admitted stable ids for {} executable prompt(s) through editor authority",
+                admitted_count
+            );
+        } else {
+            eprintln!(
+                "[preflight] queue: refreshed display-only duplicate prompt diagnostics through editor authority"
+            );
+        }
     }
 
     // Phase 3: halt detection — stop fences and item modification

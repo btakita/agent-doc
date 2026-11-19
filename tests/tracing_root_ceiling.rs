@@ -128,3 +128,32 @@ fn nearest_project_root_owns_the_debug_log_even_without_a_logs_dir() {
         "an outer project must not receive the nested project's debug log"
     );
 }
+
+#[test]
+fn unbounded_tracing_does_not_adopt_an_implicit_home_project() {
+    let layout = layout();
+    let home_store = layout.home.join(".agent-doc");
+    let state = layout._tmp.path().join("state");
+    std::fs::create_dir(&home_store).unwrap();
+    let run = |allow: bool| {
+        std::process::Command::new(assert_cmd::cargo::cargo_bin!("agent-doc"))
+            .args(["version", "--json"])
+            .env("HOME", &layout.home)
+            .env("XDG_STATE_HOME", &state)
+            .env("AGENT_DOC_LOG", "debug")
+            .env("AGENT_DOC_ROOT_CEILING_DIRECTORIES", "")
+            .env_remove("AGENT_DOC_TEST_RUNTIME_SCOPE")
+            .env("AGENT_DOC_ALLOW_HOME_ROOT", if allow { "1" } else { "0" })
+            .current_dir(&layout.home)
+            .output()
+            .unwrap()
+    };
+    let refused = run(false);
+    assert!(refused.status.success(), "{refused:?}");
+    assert!(files_under(&home_store).is_empty());
+    assert!(!debug_logs(&state.join("agent-doc")).is_empty());
+
+    let opted_in = run(true);
+    assert!(opted_in.status.success(), "{opted_in:?}");
+    assert!(!debug_logs(&home_store.join("logs")).is_empty());
+}

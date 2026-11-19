@@ -1,6 +1,6 @@
 //! Project-root resolution adapters.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use std::path::{Path, PathBuf};
 
 /// Resolve the current working directory to the nearest `.agent-doc` project
@@ -34,6 +34,7 @@ fn explicit_root(project_root: Option<&Path>) -> Option<&Path> {
 /// ancestor of the current directory.
 pub fn project_root_or_cwd(project_root: Option<&Path>) -> Result<PathBuf> {
     if let Some(root) = explicit_root(project_root) {
+        ensure_project_root_allowed(root)?;
         return Ok(root.to_path_buf());
     }
     let cwd = std::env::current_dir().context("failed to read current directory")?;
@@ -48,6 +49,7 @@ pub fn project_root_for_target_or_cwd(
     document: Option<&Path>,
 ) -> Result<PathBuf> {
     if let Some(root) = explicit_root(project_root) {
+        ensure_project_root_allowed(root)?;
         return Ok(root.to_path_buf());
     }
     if let Some(document) = document
@@ -67,9 +69,23 @@ pub fn project_root_or_file_parent(file: &Path) -> Result<PathBuf> {
             let canonical = file
                 .canonicalize()
                 .with_context(|| format!("failed to canonicalize {}", file.display()))?;
-            Ok(canonical.parent().unwrap_or(Path::new(".")).to_path_buf())
+            let parent = canonical
+                .parent()
+                .with_context(|| format!("{} has no parent directory", canonical.display()))?;
+            ensure_project_root_allowed(parent)?;
+            Ok(parent.to_path_buf())
         }
     }
+}
+
+pub fn ensure_project_root_allowed(root: &Path) -> Result<()> {
+    ensure!(
+        agent_doc_fs::project_root_allowed(root),
+        "cannot use {} as an agent-doc project root; use a child project directory or explicitly opt in to a home project with {}=1",
+        root.display(),
+        agent_doc_fs::ALLOW_HOME_ROOT_ENV,
+    );
+    Ok(())
 }
 
 /// Resolve an optional CLI project-root argument to an agent-doc project root.
@@ -85,9 +101,14 @@ pub fn project_root_from_arg(root: Option<&Path>) -> Result<PathBuf> {
         None => cwd,
     };
     let start = start.canonicalize().unwrap_or(start);
+    if root.is_some() {
+        ensure_project_root_allowed(&start)?;
+    }
     agent_doc_fs::find_project_root(&start)
         .or_else(|| {
-            if start.join(".git").exists() || start.join(".agent-doc").exists() {
+            if agent_doc_fs::project_root_allowed(&start)
+                && (start.join(".git").exists() || start.join(".agent-doc").exists())
+            {
                 Some(start.to_path_buf())
             } else {
                 None

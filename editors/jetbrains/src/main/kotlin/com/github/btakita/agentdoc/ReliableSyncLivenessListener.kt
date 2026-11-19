@@ -116,6 +116,10 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
         // The owning controller is the nearest agent-doc root, not necessarily
         // the IntelliJ project base. A nested submodule has its own controller.
         val root = NativePatching.resolveProjectPath(filePath)?.first ?: fallbackRoot
+        val parent = File(filePath).absoluteFile.parentFile ?: return LivenessReportOutcome.NotSessionDocument
+        if (!ProjectRoots.processPolicy.allowsFallback(parent, File(root))) {
+            return LivenessReportOutcome.NotSessionDocument
+        }
         projectRoots[documentHash] = root
         val opsJson =
             if (republish) {
@@ -255,6 +259,7 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
         documentHash: String,
         opsJson: String,
     ): Boolean {
+        if (!ProjectRoots.processPolicy.allows(File(projectRoot))) return false
         if (lib.agent_doc_reliable_sync_liveness_enqueue(projectRoot, documentHash, opsJson) != 0) {
             return false
         }

@@ -65,6 +65,7 @@ pub fn prepare_editor_session(
     config: &Config,
 ) -> Result<SessionPreparation> {
     prepare_editor_session_with(file, title, agent, config, || {
+        agent_doc_project_root_io::ensure_project_root_allowed(&std::env::current_dir()?)?;
         if !Path::new(".agent-doc").exists() {
             init_project()?;
         }
@@ -113,6 +114,7 @@ fn prepare_editor_session_with(
 
 /// Initialize a project (no file given): check prereqs, create .agent-doc/, install skill.
 fn init_project() -> Result<()> {
+    agent_doc_project_root_io::ensure_project_root_allowed(&std::env::current_dir()?)?;
     // Check prerequisites
     crate::install::check_prereqs();
 
@@ -173,6 +175,7 @@ fn init_file(
     mode: Option<&str>,
     config: &Config,
 ) -> Result<()> {
+    agent_doc_project_root_io::ensure_project_root_allowed(&std::env::current_dir()?)?;
     // Lazy project init: if .agent-doc/ doesn't exist, run project init first.
     if !Path::new(".agent-doc").exists() {
         eprintln!("[init] No .agent-doc/ found — running project init first.");

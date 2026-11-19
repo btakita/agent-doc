@@ -5445,12 +5445,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         (pendingLocalEdits[filePath]?.get() ?: 0) > 0
 
     private fun resolveProjectRoot(filePath: String): String? {
-        var dir: File? = File(filePath).absoluteFile.parentFile
-        while (dir != null) {
-            if (File(dir, ".agent-doc").isDirectory) return dir.absolutePath
-            dir = dir.parentFile
+        val start = File(filePath).absoluteFile.parentFile ?: return null
+        val policy = ProjectRoots.processPolicy
+        return policy.find(start)?.absolutePath ?: project.basePath?.takeIf {
+            val candidate = File(it)
+            File(candidate, ".agent-doc").isDirectory && policy.allowsFallback(start, candidate)
         }
-        return project.basePath?.takeIf { File(it, ".agent-doc").isDirectory }
     }
 
     private fun logSlow(

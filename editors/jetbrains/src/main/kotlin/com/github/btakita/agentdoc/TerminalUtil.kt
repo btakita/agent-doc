@@ -368,7 +368,10 @@ object TerminalUtil {
             return detectedRoot to relativePathUnder(detectedRoot, normalizedFile.toString())
         }
 
-        if (basePath != null) {
+        if (basePath != null && normalizedFile.parent?.let {
+                ProjectRoots.processPolicy.allowsFallback(it.toFile(), File(basePath))
+            } == true
+        ) {
             val root = File(basePath).toPath().toAbsolutePath().normalize().toString()
             return root to relativePathUnder(root, normalizedFile.toString())
         }
@@ -380,16 +383,9 @@ object TerminalUtil {
         val normalizedFile = File(filePath).toPath().toAbsolutePath().normalize()
         val cacheKey = normalizedFile.toString()
         agentDocProjectRoots[cacheKey]?.let { return it }
-        var current = normalizedFile.parent?.toFile()
-        while (current != null) {
-            if (File(current, ".agent-doc").isDirectory) {
-                val root = current.toPath().toAbsolutePath().normalize().toString()
-                agentDocProjectRoots[cacheKey] = root
-                return root
-            }
-            current = current.parentFile
+        return normalizedFile.parent?.toFile()?.let(ProjectRoots.processPolicy::find)?.absolutePath?.also {
+            agentDocProjectRoots[cacheKey] = it
         }
-        return null
     }
 
     private fun relativePathUnder(root: String, filePath: String): String {

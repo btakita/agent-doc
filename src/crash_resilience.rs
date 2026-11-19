@@ -122,20 +122,15 @@ fn log_panic_to_dir(dir: &std::path::Path, line: &str) {
     }
 }
 
-/// Walk up from the current directory to the nearest `.agent-doc/` and return its
-/// `logs` subdirectory. Best-effort: returns `None` outside a project.
+/// Resolve the project logs or, for an unbounded user process, user state logs.
 fn resolve_logs_dir() -> Option<PathBuf> {
     resolve_logs_dir_from(std::env::current_dir().ok()?)
 }
 
-/// Walk up from `start` to the nearest `.agent-doc/`. Pure apart from the
-/// `is_dir` probes, so it needs no ambient cwd.
 fn resolve_logs_dir_from(start: PathBuf) -> Option<PathBuf> {
-    // `#testisolationtests`: bounded by `AGENT_DOC_ROOT_CEILING_DIRECTORIES`.
-    agent_doc_fs::ancestors_within_root_ceiling(&start)
-        .into_iter()
-        .find(|dir| dir.join(".agent-doc").is_dir())
-        .map(|dir| dir.join(".agent-doc").join("logs"))
+    agent_doc_fs::find_project_root(&start)
+        .map(|dir| dir.join(".agent-doc/logs"))
+        .or_else(agent_doc_fs::user_log_directory)
 }
 
 #[cfg(test)]

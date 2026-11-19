@@ -1217,6 +1217,10 @@ pub struct PreparedObservation {
     pub report: Option<SteeringReport>,
     /// The observation happened at/after the turn boundary.
     pub boundary: bool,
+    /// Authoritative cut used to derive this observation. The PostToolUse
+    /// checkpoint fan-out reuses it instead of asking the controller for the
+    /// same large document again.
+    observed_content: Option<String>,
     /// The settle decisions behind the report, for the completion-gate
     /// decision log (`#steergatelog`); recorded only when acknowledged.
     gate: Option<crate::steering_gate_log::GateObservation>,
@@ -1224,11 +1228,11 @@ pub struct PreparedObservation {
 }
 
 impl PreparedObservation {
-    fn apply_claim_cancellations(&mut self, file: &Path) -> Result<()> {
+    fn apply_claim_cancellations(&mut self, file: &Path) -> Result<usize> {
         if let Some(report) = &mut self.report {
-            apply_claim_cancellations(file, &mut report.items)?;
+            return apply_claim_cancellations(file, &mut report.items);
         }
-        Ok(())
+        Ok(0)
     }
 
     /// Persist the advanced watermark (and log what surfaced).
@@ -1470,7 +1474,8 @@ fn prepare_with_gate_at(
     let prepared = |next: Option<SteeringWatermark>,
                     report: Option<SteeringReport>,
                     boundary: bool,
-                    gate: Option<crate::steering_gate_log::GateObservation>| {
+                    gate: Option<crate::steering_gate_log::GateObservation>,
+                    observed_content: Option<String>| {
         Ok(Some(PreparedObservation {
             consumer: consumer.to_string(),
             consumer_key: consumer_key.clone(),
@@ -1478,6 +1483,7 @@ fn prepare_with_gate_at(
             next,
             report,
             boundary,
+            observed_content,
             gate,
             max_hold_ms,
         }))
@@ -1495,7 +1501,7 @@ fn prepare_with_gate_at(
         && watermark.last_observed_stat.as_deref() == Some(fingerprint.as_str())
         && !editor_attached
     {
-        return prepared(None, None, boundary, None);
+        return prepared(None, None, boundary, None, None);
     }
     let content = match delivered {
         Some(delivered) => delivered.to_string(),
@@ -1523,7 +1529,7 @@ fn prepare_with_gate_at(
         && watermark.last_observed_content_hash.as_deref() == Some(content_hash.as_str())
     {
         watermark.last_observed_stat = observed_stat;
-        return prepared(Some(watermark), None, boundary, None);
+        return prepared(Some(watermark), None, boundary, None, Some(content));
     }
 
     let disk_changed_ms = mtime_ms(&meta);
@@ -1706,7 +1712,13 @@ fn prepare_with_gate_at(
         recheck_after_ms: observation.recheck_after_ms,
         harness,
     };
-    prepared(Some(next), Some(report), boundary, Some(gate))
+    prepared(
+        Some(next),
+        Some(report),
+        boundary,
+        Some(gate),
+        Some(content),
+    )
 }
 
 /// The document's configured harness (frontmatter `agent:`), for the
@@ -2683,8 +2695,10 @@ fn status_sync_evidence_suffix(file: &Path, content: &str) -> String {
 /// the active agent. It publishes the completed tool boundary into the live
 /// controller's Lazily graph; the controller-owned Computed derives and consumes
 /// the due edge. The one-shot hook neither polls nor arbitrates through SQLite.
-fn status_sync_checkpoint_with(
+fn status_sync_checkpoint_with_content(
     file: &Path,
+    cycle: &agent_doc_cycle_state_io::CycleState,
+    content: &str,
     observed_at_ms: u64,
     observe_boundary: impl FnOnce(
         &Path,
@@ -2692,14 +2706,10 @@ fn status_sync_checkpoint_with(
         &agent_doc_controller_io::project_controller::StatusSyncCheckpointObservation,
     ) -> Result<bool>,
 ) -> Result<Option<String>> {
-    let Some(cycle) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
-        return Ok(None);
-    };
-    if !cycle_accepts_steering(&cycle, &cycle.cycle_id) {
+    if !cycle_accepts_steering(cycle, &cycle.cycle_id) {
         return Ok(None);
     }
-    let content = crate::resolve_current_document_content(file, "status_sync_checkpoint")?;
-    let directive = agent_doc_document::status_projection::status_sync_directive(&content)?;
+    let directive = agent_doc_document::status_projection::status_sync_directive(content)?;
     let Some(root) = project_root(file) else {
         return Ok(None);
     };
@@ -2740,16 +2750,8 @@ fn status_sync_checkpoint_with(
         ),
     );
     Ok(Some(render_status_sync_checkpoint(
-        file, &content, &directive,
+        file, content, &directive,
     )))
-}
-
-fn status_sync_checkpoint(file: &Path, observed_at_ms: u64) -> Result<Option<String>> {
-    status_sync_checkpoint_with(
-        file,
-        observed_at_ms,
-        agent_doc_controller_io::project_controller::observe_status_sync_checkpoint,
-    )
 }
 
 /// `project_runtime_state` key prefix of the last surfaced pool refill.
@@ -2791,18 +2793,19 @@ fn subagent_pool_refill_fingerprint(refill: &agent_doc_queue::subagent_pool::Poo
 /// claimed head still owed its spawn, or a worker heartbeat coming due before
 /// its claim expires) is surfaced in the PostToolUse context with the exact
 /// commands, once per distinct refill.
-fn subagent_pool_checkpoint(file: &Path, observed_at_ms: u64) -> Result<Option<String>> {
-    let Some(cycle) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
-        return Ok(None);
-    };
+fn subagent_pool_checkpoint_with_content(
+    file: &Path,
+    cycle: &agent_doc_cycle_state_io::CycleState,
+    content: &str,
+    observed_at_ms: u64,
+) -> Result<Option<String>> {
     // A captured cycle no longer accepts steering, but the harness turn can
     // still be waiting on workers. New heads added then used to stay silent
     // until the next report-complete (infra.md, 2026-11-10). Dispatch debt is
     // surfaced anyway. Heartbeat-only refills stay on the idle wake.
-    let accepts = cycle_accepts_steering(&cycle, &cycle.cycle_id);
-    let content = crate::resolve_current_document_content(file, "subagent_pool_checkpoint")?;
+    let accepts = cycle_accepts_steering(cycle, &cycle.cycle_id);
     if !agent_doc_queue_io::subagent_dispatch::queue_subagent_dispatch_enabled_for_content(
-        file, &content,
+        file, content,
     )? {
         return Ok(None);
     }
@@ -2815,7 +2818,7 @@ fn subagent_pool_checkpoint(file: &Path, observed_at_ms: u64) -> Result<Option<S
         agent_doc_queue::subagent_pool::PoolRefillTrigger::RunningTurn
     };
     let refill =
-        agent_doc_queue_io::subagent_pool::pool_refill_for_content(file, &content, trigger)?;
+        agent_doc_queue_io::subagent_pool::pool_refill_for_content(file, content, trigger)?;
     let dispatch_now = !refill.unstarted.is_empty() || !refill.next_heads.is_empty();
     if !accepts && !dispatch_now {
         return Ok(None);
@@ -2856,6 +2859,15 @@ fn subagent_pool_checkpoint(file: &Path, observed_at_ms: u64) -> Result<Option<S
     Ok(refill.render())
 }
 
+#[cfg(test)]
+fn subagent_pool_checkpoint(file: &Path, observed_at_ms: u64) -> Result<Option<String>> {
+    let Some(cycle) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+        return Ok(None);
+    };
+    let content = crate::resolve_current_document_content(file, "subagent_pool_checkpoint")?;
+    subagent_pool_checkpoint_with_content(file, &cycle, &content, observed_at_ms)
+}
+
 /// `project_runtime_state` key prefix of the last surfaced reported closeout.
 const REPORTED_CLOSEOUT_MIDTURN_KEY_PREFIX: &str = "reported_closeout_midturn";
 
@@ -2888,12 +2900,22 @@ pub fn reported_closeout_midturn_checkpoint(
     let Some(cycle) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(None);
     };
+    let content = crate::resolve_current_document_content(file, "reported_closeout_midturn")?;
+    reported_closeout_midturn_checkpoint_with_content(file, &cycle, &content, consumer, record)
+}
+
+fn reported_closeout_midturn_checkpoint_with_content(
+    file: &Path,
+    cycle: &agent_doc_cycle_state_io::CycleState,
+    content: &str,
+    consumer: &str,
+    record: bool,
+) -> Result<Option<String>> {
     if !cycle.phase.is_open() {
         return Ok(None);
     }
-    let content = crate::resolve_current_document_content(file, "reported_closeout_midturn")?;
     let obligations =
-        agent_doc_queue_io::queue_claim::reported_closeout_obligations_for_content(file, &content)?;
+        agent_doc_queue_io::queue_claim::reported_closeout_obligations_for_content(file, content)?;
     let commands: Vec<String> = obligations
         .iter()
         .flat_map(|obligation| obligation.required_commands())
@@ -2950,14 +2972,15 @@ pub fn reported_closeout_midturn_checkpoint(
 /// A changed needs-write fingerprint, a sync revert, or an elapsed `interval`
 /// publishes one checkpoint. `mode=sync` without `interval` stays on preflight
 /// and Stop. The hook never writes the answer.
-fn place_checkpoint(file: &Path, observed_at_ms: u64) -> Result<Option<String>> {
-    let Some(cycle) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
-        return Ok(None);
-    };
-    if !cycle_accepts_steering(&cycle, &cycle.cycle_id) {
+fn place_checkpoint_with_content(
+    file: &Path,
+    cycle: &agent_doc_cycle_state_io::CycleState,
+    content: &str,
+    observed_at_ms: u64,
+) -> Result<Option<String>> {
+    if !cycle_accepts_steering(cycle, &cycle.cycle_id) {
         return Ok(None);
     }
-    let content = crate::resolve_current_document_content(file, "place_checkpoint")?;
     let answers = match agent_doc_snapshot_io::load_place_answers(file) {
         Ok(answers) => answers,
         Err(error) => {
@@ -2971,7 +2994,7 @@ fn place_checkpoint(file: &Path, observed_at_ms: u64) -> Result<Option<String>> 
             BTreeMap::new()
         }
     };
-    let assessment = match agent_doc_document::place::assess(&content, &answers) {
+    let assessment = match agent_doc_document::place::assess(content, &answers) {
         Ok(assessment) => assessment,
         Err(error) => {
             agent_doc_ops_log_io::log_op(
@@ -3077,7 +3100,31 @@ fn place_checkpoint(file: &Path, observed_at_ms: u64) -> Result<Option<String>> 
 fn post_tool_use_response_at_with_checkpoint(
     payload: &str,
     observed_at_ms: u64,
-    checkpoint: impl FnOnce(&Path, u64) -> Result<Option<String>>,
+    checkpoint: impl FnOnce(
+        &Path,
+        &agent_doc_cycle_state_io::CycleState,
+        &str,
+        u64,
+    ) -> Result<Option<String>>,
+) -> Result<Option<serde_json::Value>> {
+    post_tool_use_response_at_with_checkpoint_and_budget(
+        payload,
+        observed_at_ms,
+        checkpoint,
+        || false,
+    )
+}
+
+fn post_tool_use_response_at_with_checkpoint_and_budget(
+    payload: &str,
+    observed_at_ms: u64,
+    checkpoint: impl FnOnce(
+        &Path,
+        &agent_doc_cycle_state_io::CycleState,
+        &str,
+        u64,
+    ) -> Result<Option<String>>,
+    mut budget_exhausted: impl FnMut() -> bool,
 ) -> Result<Option<serde_json::Value>> {
     let input: PostToolUseInput =
         serde_json::from_str(payload).context("parse PostToolUse payload")?;
@@ -3093,15 +3140,42 @@ fn post_tool_use_response_at_with_checkpoint(
     // revision-aware projection for this tool boundary; a new editor revision
     // or a locked claim-cancellation write still forces a fresh authority read.
     crate::with_current_document_pass(|| {
-        post_tool_use_document_response(&file, observed_at_ms, checkpoint)
+        post_tool_use_document_response(&file, observed_at_ms, checkpoint, &mut budget_exhausted)
     })
+}
+
+const POST_TOOL_USE_IN_PROGRESS_MARKER: &str = "#posttooluseinprogress";
+
+fn post_tool_use_in_progress_context(file: &Path) -> String {
+    format!(
+        "[agent-doc] mid-turn checkpoint is in progress ({POST_TOOL_USE_IN_PROGRESS_MARKER}) for {}. \
+         The route-owned supervisor retains the authoritative work and will wake or re-enter this \
+         session when it settles; its supervisor diagnostic will surface a failed or stalled \
+         continuation. Do not start a duplicate checkpoint.",
+        file.display(),
+    )
+}
+
+fn finish_post_tool_use_contexts(contexts: &[String]) -> Option<serde_json::Value> {
+    (!contexts.is_empty()).then(|| post_tool_use_output(&contexts.join("\n\n")))
 }
 
 fn post_tool_use_document_response(
     file: &Path,
     observed_at_ms: u64,
-    checkpoint: impl FnOnce(&Path, u64) -> Result<Option<String>>,
+    checkpoint: impl FnOnce(
+        &Path,
+        &agent_doc_cycle_state_io::CycleState,
+        &str,
+        u64,
+    ) -> Result<Option<String>>,
+    budget_exhausted: &mut impl FnMut() -> bool,
 ) -> Result<Option<serde_json::Value>> {
+    let mut contexts = Vec::new();
+    if budget_exhausted() {
+        contexts.push(post_tool_use_in_progress_context(file));
+        return Ok(finish_post_tool_use_contexts(&contexts));
+    }
     let prepared = match prepare(file, CONSUMER_HOOK, ClosedCyclePolicy::Hook) {
         Ok(prepared) => prepared,
         Err(err) => {
@@ -3112,12 +3186,19 @@ fn post_tool_use_document_response(
                     file.display()
                 ),
             );
+            if budget_exhausted() {
+                contexts.push(post_tool_use_in_progress_context(file));
+                return Ok(finish_post_tool_use_contexts(&contexts));
+            }
             return Err(err);
         }
     };
-    let mut contexts = Vec::new();
+    let mut shared_content = None;
     if let Some(mut prepared) = prepared {
-        prepared.apply_claim_cancellations(file)?;
+        let cancellations = prepared.apply_claim_cancellations(file)?;
+        if cancellations == 0 {
+            shared_content.clone_from(&prepared.observed_content);
+        }
         let context = prepared
             .report
             .as_ref()
@@ -3139,7 +3220,36 @@ fn post_tool_use_document_response(
             contexts.push(context);
         }
     }
-    match checkpoint(file, observed_at_ms) {
+    if budget_exhausted() {
+        contexts.push(post_tool_use_in_progress_context(file));
+        return Ok(finish_post_tool_use_contexts(&contexts));
+    }
+    // All remaining owner checkpoints consume one cycle snapshot and one
+    // authoritative document cut. Before this shared cut, a 600KB live
+    // document paid four extra controller revision RPCs and four full-text
+    // clones at every tool boundary.
+    let Some(cycle) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+        return Ok(finish_post_tool_use_contexts(&contexts));
+    };
+    let content = match shared_content {
+        Some(content) => content,
+        None => match crate::resolve_current_document_content(file, "post_tool_use_checkpoints") {
+            Ok(content) => content,
+            Err(err) if budget_exhausted() => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "post_tool_use_checkpoint_in_progress file={} error={err:#} ({POST_TOOL_USE_IN_PROGRESS_MARKER})",
+                        file.display(),
+                    ),
+                );
+                contexts.push(post_tool_use_in_progress_context(file));
+                return Ok(finish_post_tool_use_contexts(&contexts));
+            }
+            Err(err) => return Err(err),
+        },
+    };
+    match checkpoint(file, &cycle, &content, observed_at_ms) {
         Ok(Some(context)) => contexts.push(context),
         Ok(None) => {}
         Err(err) => {
@@ -3159,7 +3269,11 @@ fn post_tool_use_document_response(
             );
         }
     }
-    match place_checkpoint(file, observed_at_ms) {
+    if budget_exhausted() {
+        contexts.push(post_tool_use_in_progress_context(file));
+        return Ok(finish_post_tool_use_contexts(&contexts));
+    }
+    match place_checkpoint_with_content(file, &cycle, &content, observed_at_ms) {
         Ok(Some(context)) => contexts.push(context),
         Ok(None) => {}
         Err(err) => {
@@ -3176,7 +3290,11 @@ fn post_tool_use_document_response(
             );
         }
     }
-    match subagent_pool_checkpoint(file, observed_at_ms) {
+    if budget_exhausted() {
+        contexts.push(post_tool_use_in_progress_context(file));
+        return Ok(finish_post_tool_use_contexts(&contexts));
+    }
+    match subagent_pool_checkpoint_with_content(file, &cycle, &content, observed_at_ms) {
         Ok(Some(context)) => contexts.push(context),
         Ok(None) => {}
         Err(err) => {
@@ -3190,7 +3308,17 @@ fn post_tool_use_document_response(
             );
         }
     }
-    match reported_closeout_midturn_checkpoint(file, CONSUMER_HOOK, true) {
+    if budget_exhausted() {
+        contexts.push(post_tool_use_in_progress_context(file));
+        return Ok(finish_post_tool_use_contexts(&contexts));
+    }
+    match reported_closeout_midturn_checkpoint_with_content(
+        file,
+        &cycle,
+        &content,
+        CONSUMER_HOOK,
+        true,
+    ) {
         Ok(Some(context)) => contexts.push(context),
         Ok(None) => {}
         Err(err) => {
@@ -3204,14 +3332,58 @@ fn post_tool_use_document_response(
             );
         }
     }
-    Ok((!contexts.is_empty()).then(|| post_tool_use_output(&contexts.join("\n\n"))))
+    if budget_exhausted() {
+        contexts.push(post_tool_use_in_progress_context(file));
+    }
+    Ok(finish_post_tool_use_contexts(&contexts))
 }
 
 fn post_tool_use_response_at(
     payload: &str,
     observed_at_ms: u64,
 ) -> Result<Option<serde_json::Value>> {
-    post_tool_use_response_at_with_checkpoint(payload, observed_at_ms, status_sync_checkpoint)
+    post_tool_use_response_at_with_checkpoint(
+        payload,
+        observed_at_ms,
+        |file, cycle, content, observed_at_ms| {
+            status_sync_checkpoint_with_content(
+                file,
+                cycle,
+                content,
+                observed_at_ms,
+                agent_doc_controller_io::project_controller::observe_status_sync_checkpoint,
+            )
+        },
+    )
+}
+
+/// Claude/Grok configure this hook with a ten-second harness timeout. Leave a
+/// three-second process/output margin after all nested controller waits have
+/// been clamped by the shared admission-deadline mechanism.
+const POST_TOOL_USE_HARNESS_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
+const POST_TOOL_USE_WORK_BUDGET: std::time::Duration = std::time::Duration::from_secs(7);
+
+fn post_tool_use_response_bounded(payload: &str) -> Result<Option<serde_json::Value>> {
+    let _deadline = agent_doc_debounce::admission_deadline::install(
+        agent_doc_debounce::admission_deadline::AdmissionDeadline {
+            at: std::time::Instant::now() + POST_TOOL_USE_WORK_BUDGET,
+            budget: POST_TOOL_USE_HARNESS_BUDGET,
+        },
+    );
+    post_tool_use_response_at_with_checkpoint_and_budget(
+        payload,
+        now_ms(),
+        |file, cycle, content, observed_at_ms| {
+            status_sync_checkpoint_with_content(
+                file,
+                cycle,
+                content,
+                observed_at_ms,
+                agent_doc_controller_io::project_controller::observe_status_sync_checkpoint,
+            )
+        },
+        agent_doc_debounce::admission_deadline::exhausted,
+    )
 }
 
 /// Pure hook decision: the JSON to print, or `None` for silence.
@@ -3229,7 +3401,7 @@ pub fn handle_post_tool_use() -> Result<()> {
         eprintln!("[agent-doc] steering hook payload read failed: {err}");
         return Ok(());
     }
-    match post_tool_use_response(&payload) {
+    match post_tool_use_response_bounded(&payload) {
         Ok(Some(output)) => println!("{output}"),
         Ok(None) => {}
         Err(err) => eprintln!("[agent-doc] steering hook skipped: {err:#}"),
@@ -5654,6 +5826,51 @@ mod tests {
         payload.to_string()
     }
 
+    /// The external harness kills this hook at ten seconds. A spent internal
+    /// budget must produce a useful, successful hook response without sleeping,
+    /// starting a second checkpoint, or telling the agent to retry. The
+    /// route-owned supervisor continues observing the unacknowledged document.
+    #[test]
+    fn spent_post_tool_budget_reports_route_owned_in_progress_without_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let file = root.join("plan.md");
+        let baseline = "---\nagent_doc_steering_debounce_ms: 0\n---\n# Session\n\n<!-- agent:queue -->\n- task\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
+                .unwrap();
+        seed_for_cycle(&file, &cycle.cycle_id, baseline, Some("task"), Vec::new()).unwrap();
+        let edited = baseline.replace("- task\n", "- task\n- inspect issue 42\n");
+        std::fs::write(&file, &edited).unwrap();
+        bind_session(root, &file, "coord");
+        let payload = hook_payload(root, None);
+
+        let output = post_tool_use_response_at_with_checkpoint_and_budget(
+            &payload,
+            10_000,
+            |_, _, _, _| panic!("an exhausted hook must not begin checkpoint work"),
+            || true,
+        )
+        .unwrap()
+        .expect("an in-progress hook response");
+        let context = output["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap();
+        assert!(
+            context.contains(POST_TOOL_USE_IN_PROGRESS_MARKER),
+            "{context}"
+        );
+        assert!(context.contains("route-owned supervisor"), "{context}");
+        assert!(context.contains("Do not start a duplicate"), "{context}");
+        assert!(!context.to_ascii_lowercase().contains("retry"), "{context}");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), edited);
+        let wake = observe_for_wake(&file).unwrap();
+        assert_eq!(wake.items.len(), 1, "the supervisor must retain the edit");
+        assert_eq!(wake.items[0].verbatim, "inspect issue 42");
+    }
+
     #[test]
     fn owner_post_tool_use_shares_one_unchanged_document_resolution() {
         let dir = tempfile::tempdir().unwrap();
@@ -5733,14 +5950,23 @@ mod tests {
         let first_due = started_at_ms + configured_interval_ms;
         let decisions = RefCell::new(VecDeque::from([false, true, false, true, false]));
         let observations = RefCell::new(Vec::new());
-        let checkpoint = |file: &Path, observed_at_ms: u64| {
-            status_sync_checkpoint_with(file, observed_at_ms, |_, _, observation| {
-                observations.borrow_mut().push(observation.clone());
-                Ok(decisions
-                    .borrow_mut()
-                    .pop_front()
-                    .expect("one mocked controller decision per owner boundary"))
-            })
+        let checkpoint = |file: &Path,
+                          cycle: &agent_doc_cycle_state_io::CycleState,
+                          content: &str,
+                          observed_at_ms: u64| {
+            status_sync_checkpoint_with_content(
+                file,
+                cycle,
+                content,
+                observed_at_ms,
+                |_, _, observation| {
+                    observations.borrow_mut().push(observation.clone());
+                    Ok(decisions
+                        .borrow_mut()
+                        .pop_front()
+                        .expect("one mocked controller decision per owner boundary"))
+                },
+            )
         };
 
         // Preflight already supplied the contract; an immediate first tool call
@@ -5818,8 +6044,18 @@ mod tests {
         // Removing the opt-in interval leaves sync active for the next
         // preflight but disables all periodic PostToolUse checkpoints.
         std::fs::write(&file, baseline.replace(" interval=5m", "")).unwrap();
+        let current_cycle = agent_doc_cycle_state_io::load_with_closeout_projection(&file)
+            .unwrap()
+            .unwrap();
+        let current_content = std::fs::read_to_string(&file).unwrap();
         assert_eq!(
-            checkpoint(&file, second_due + configured_interval_ms).unwrap(),
+            checkpoint(
+                &file,
+                &current_cycle,
+                &current_content,
+                second_due + configured_interval_ms,
+            )
+            .unwrap(),
             None
         );
         assert_eq!(

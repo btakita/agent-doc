@@ -115,7 +115,8 @@ default: `AGENT_DOC_SUBAGENT_POOL_SIZE` when set, else twice the build gate's
 pool's running, dispatching, frozen, and free counts.
 
 - A claimed head with no worker holds a slot and is the most urgent debt:
-  spawn it (preamble from `queue brief`) and run its `queue start` before new
+  reserve its spawn and obtain the preamble using the generated brief command.
+  Spawn once and run its `queue start` before new
   claims and before integrating any reported (`☑️`) result. Plan lists these
   first. After that spawn, complete every already-ready `☑️` closeout in the
   same step (`#reportedmidturn`); do not leave them until Stop.

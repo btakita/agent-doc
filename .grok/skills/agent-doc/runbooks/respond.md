@@ -358,8 +358,9 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      Dispatch only after the command succeeds: success includes projecting the
      claimed row's visible `🟡` marker through the current editor/CRDT authority.
      This means reserved/dispatching, not running.
-  2. Paste the entry's `authorization.subagent_prompt_preamble` VERBATIM at the
-     top of the subagent's Agent prompt (`#waypostauthorization`). The binary
+  2. Run the entry's `brief_command` with the generation printed by the claim.
+     It reserves one native launch. Paste its `authorization.subagent_prompt_preamble` VERBATIM
+     at the top of the subagent's Agent prompt (`#waypostauthorization`). The binary
      resolved it from the document: the verbatim item, the backlog text a
      `do [#id]` head names, and the queue/item preset bodies (for example
      `preset="#spec-test-build-install-commit-push"` → "update spec + tests.
@@ -371,8 +372,10 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      no authorization beyond the item text was resolved, so do not add any.
      `conflicting_preset_attrs` means the marker's `preset=` and `presets=`
      disagree: neither spelling is authorization, so do not pick one.
-     `agent-doc queue brief <FILE> --item <...>` (or the entry's
-     `brief_command`; `--json` for the whole object) re-prints the same text.
+     A repeat reservation requires reconciliation through the harness for that
+     generation. Bind a confirmed worker with `start_command`. Release with
+     `--requeue --spawn-failed <reason>` only after the harness proves no launch.
+     `agent-doc queue brief <FILE> --item <...>` inspects authorization.
   3. Dispatch one background subagent per item. When it touches a repo, give it
      its own git worktree OUTSIDE the IDE-watched project, and never run two subagents in
      one checkout. agent-doc worktree setup is the paired layout

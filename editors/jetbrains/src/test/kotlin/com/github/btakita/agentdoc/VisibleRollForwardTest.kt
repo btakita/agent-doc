@@ -177,7 +177,7 @@ class VisibleRollForwardTest {
         )
         assertTrue(
             "the stale-baseline batch is subsumed; later keystrokes are kept",
-            body.contains("shadows[filePath] = visibleText") &&
+            body.contains("shadows[filePath] = ReplicaShadow(visibleText)") &&
                 body.contains("fenceCapturedEditsSubsumedByPublishedBuffer(filePath, visibleText, \"visible-roll-forward\")"),
         )
         assertTrue(

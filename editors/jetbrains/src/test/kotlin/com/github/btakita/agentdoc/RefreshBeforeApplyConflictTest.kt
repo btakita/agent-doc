@@ -263,7 +263,7 @@ class RefreshBeforeApplyConflictTest {
             replay.indexOf("publishedEditorCut == null") <
                 replay.indexOf("NativePatching.projectDeferredWritePostRegister") &&
                 replay.contains("hasPendingLocal(filePath)") &&
-                replay.contains("shadows[filePath] != publishedEditorCut") &&
+                replay.contains("shadows[filePath]?.matches(publishedEditorCut) != true") &&
                 replay.contains("projectDeferredWritePostRegister(filePath, publishedEditorCut)") &&
                 replay.contains(
                     "requestUrgentRemoteDrain(filePath, \"post-register-projected-intent\")"

@@ -383,7 +383,7 @@ class RegistrationProjectionTest {
         assertTrue(
             "registration falls back to the durable shadow after memory",
             registration.contains(
-                "settledShadows[filePath] ?: nativeReloadSettledShadows[filePath] ?: restorePersistedSettledShadow(filePath)",
+                "(settledShadows[filePath] ?: nativeReloadSettledShadows[filePath])?.toString() ?: restorePersistedSettledShadow(filePath)",
             ),
         )
         assertTrue(
@@ -393,7 +393,7 @@ class RegistrationProjectionTest {
         val settle =
             source.substringAfter("    private fun projectSettledVisibleState(")
                 .substringBefore("    private fun restorePersistedSettledShadow(")
-        assertTrue(settle.contains("settledShadowStore.save(filePath, visibleText)"))
+        assertTrue(settle.contains("settledShadowStore.save(filePath, visibleShadow)"))
         assertTrue(
             "only an accepted projection is persisted",
             settle.indexOf("if (projected) {") < settle.indexOf("settledShadowStore.save("),

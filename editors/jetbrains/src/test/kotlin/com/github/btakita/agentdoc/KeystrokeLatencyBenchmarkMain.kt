@@ -281,7 +281,7 @@ internal class KeystrokeBenchmark(
         private val remoteClientId = clientId + 0x1000
         private val node = NativeReplicaNode()
         private val remote = NativeReplicaNode()
-        private var shadow = fixture
+        private var shadow = ReplicaShadow(fixture)
         private var anchor = typingAnchor(fixture)
         /** The peer types at the end of the backlog, ahead of the operator anchor. */
         private var remoteAnchorUtf16 = fixture.indexOf("<!-- /agent:backlog -->").coerceIn(0, anchor)
@@ -320,7 +320,7 @@ internal class KeystrokeBenchmark(
             remoteAnchorUtf16 += 1
             anchor += 1
             check(text.length == shadow.length + 1 && text[remoteAnchorUtf16 - 1] == 'r') { "remote update landed elsewhere" }
-            shadow = text
+            shadow = ReplicaShadow(text)
             if (recording) record("remote_apply", elapsed)
         }
 
@@ -355,7 +355,7 @@ internal class KeystrokeBenchmark(
             val t3 = System.nanoTime()
             node.diff(before) ?: error("diff unavailable")
             val t4 = System.nanoTime()
-            shadow = batch.resultingText
+            shadow = batch.resultingShadow
             if (recording) {
                 record("state_vector", t1 - t0)
                 record("prepare", t2 - t1)

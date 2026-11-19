@@ -836,7 +836,7 @@ class TypingTrackerEdtBudgetTest {
         assertTrue(
             "the first local edit should reconstruct its pre-edit base and enter the ordinary delta queue",
             listenerBody.contains("reconstructLocalEditorBaseTextUtil(visibleText, edit)") &&
-                listenerBody.contains("shadows.putIfAbsent(filePath, beforeText)") &&
+                listenerBody.contains("shadows.putIfAbsent(filePath, ReplicaShadow(beforeText))") &&
                 listenerBody.contains("recordLocalEditorEdit(filePath, edit)"),
         )
         assertFalse(
@@ -944,9 +944,9 @@ class TypingTrackerEdtBudgetTest {
             .substringBefore("fun requestRemoteDrain(")
         assertTrue(
             "a stale local baseline must retain its typed delta and rebootstrap from exact controller canonical",
-            localDeltaBody.contains("prepareLocalEditorEditsUtil(beforeText, currentEdits)") &&
+            localDeltaBody.contains("prepareLocalEditorEditsUtil(beforeShadow, currentEdits)") &&
                 localDeltaBody.contains("forwarder.forwardLocalEdits(batch)") &&
-                localDeltaBody.contains("localReplicaBaselineDecisionUtil(replicaText, beforeText)") &&
+                localDeltaBody.contains("localReplicaBaselineDecisionUtil(replicaShadow, beforeShadow)") &&
                 localDeltaBody.contains("retainedCanonicalProjectionPaths.add(filePath)") &&
                 localDeltaBody.contains("expectedCanonicalTextAtSwap = canonical") &&
                 localDeltaBody.contains("requestRemoteDrain(filePath, \"captured-local-delta-retry\")") &&
@@ -970,7 +970,7 @@ class TypingTrackerEdtBudgetTest {
         assertTrue(
             "the serialized local delta must install its exact resulting shadow in the forwarder projection",
             localDeltaBody.contains("forwarder.forwardLocalEdits(batch)") &&
-                localDeltaBody.contains("shadows[filePath] = editorText"),
+                localDeltaBody.contains("shadows[filePath] = editorShadow"),
         )
         assertTrue(
             "forced refresh must register and atomically swap before retiring the cached client",

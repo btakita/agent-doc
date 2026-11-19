@@ -146,7 +146,7 @@ class AgentDocDocumentTextTest {
         val forwarderFor =
             manager.substringAfter("private fun forwarderFor(")
                 .substringBefore("private fun finalizeRegistrationProjection(")
-        val factoryGuard = forwarderFor.indexOf("!isAgentDocDocumentTextUtil(initialEditorText)")
+        val factoryGuard = forwarderFor.indexOf("!isAgentDocDocumentTextUtil(it)")
         val internalPathGuard = forwarderFor.indexOf("!isAgentDocUserDocumentPathUtil(filePath)")
         val transportRegister = forwarderFor.indexOf("if (!forwarder.register())")
         assertTrue("the shared factory must reject project-internal state", internalPathGuard >= 0)

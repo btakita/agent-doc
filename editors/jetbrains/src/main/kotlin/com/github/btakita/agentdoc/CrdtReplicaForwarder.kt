@@ -9,8 +9,6 @@ import java.io.File
 import java.net.UnixDomainSocketAddress
 import java.nio.channels.Channels
 import java.nio.channels.SocketChannel
-import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
 import java.util.Base64
 import java.util.concurrent.TimeUnit
 
@@ -145,7 +143,7 @@ class CrdtReplicaForwarder(
      * keystroke. A native text read is still performed once at registration and
      * after remote updates, where the resulting editor text is required anyway.
      */
-    private var knownReplicaText: String? = null
+    private var knownReplicaShadow: ReplicaShadow? = null
     private val ownership = MergeOwnershipStateChart(ownershipContext)
 
     /** True once [register] succeeded and the replica is bound. */
@@ -277,11 +275,11 @@ class CrdtReplicaForwarder(
                 return false
             }
             val textStarted = System.nanoTime()
-            knownReplicaText = node.text()
+            knownReplicaShadow = node.text()?.let(::ReplicaShadow)
             logSlow(
                 "native.text",
                 textStarted,
-                details = "reason=register chars=${knownReplicaText?.length ?: -1}",
+                details = "reason=register chars=${knownReplicaShadow?.length ?: -1}",
             )
             check(ownership.send(MergeOwnershipEvent.EditorAttached)) {
                 "merge-ownership chart rejected editor attach from ${ownership.phase}"
@@ -343,7 +341,7 @@ class CrdtReplicaForwarder(
         // Production supplies the manager's already-computed next shadow. Tests
         // and compatibility callers may omit it; in that case the cache becomes
         // unknown and the next explicit baseline check performs one native read.
-        knownReplicaText = resultingText
+        knownReplicaShadow = resultingText?.let(::ReplicaShadow)
         logSlow("native.applyLocal", applyStarted, details = "offset=$offset delete_cp=$deleteLen insert_chars=${insert.length}")
         val publish = publishIncremental("local-delta")
         logSlow("forwardLocalDelta", started, warnMs = 100, details = "update_bytes=${publish.updateBytes}")
@@ -354,11 +352,14 @@ class CrdtReplicaForwarder(
      * incremental CRDT update. Each changed range remains structurally bounded;
      * batching only amortizes the controller transport round trip.
      */
-    internal fun forwardLocalEdits(batch: PreparedLocalEditorBatch): Boolean {
+    internal fun forwardLocalEdits(batch: PreparedLocalEditorBatch): Boolean =
+        forwardLocalEdits(batch.toReplicaBatch())
+
+    internal fun forwardLocalEdits(batch: PreparedReplicaSpliceBatch): Boolean {
         if (!attached) return false
         val edits = batch.edits
         if (edits.isEmpty()) {
-            knownReplicaText = batch.resultingText
+            knownReplicaShadow = batch.resultingShadow
             return true
         }
         val started = System.nanoTime()
@@ -375,7 +376,7 @@ class CrdtReplicaForwarder(
                 // Some preceding splices may already be retained by the native
                 // replica. Force the recovery path to read that exact projection
                 // instead of trusting the pre-batch cache on retry.
-                knownReplicaText = null
+                knownReplicaShadow = null
                 return false
             }
             logSlow(
@@ -386,7 +387,7 @@ class CrdtReplicaForwarder(
                         "insert_chars=${edit.insert.length}",
             )
         }
-        knownReplicaText = batch.resultingText
+        knownReplicaShadow = batch.resultingShadow
         val publish = publishIncremental("local-splice-batch")
         logSlow(
             "forwardLocalEdits",
@@ -420,7 +421,7 @@ class CrdtReplicaForwarder(
     fun ensureEditorText(editorText: String): Boolean {
         if (!attached) return false
         val started = System.nanoTime()
-        val current = knownReplicaText ?: run {
+        val current = knownReplicaShadow?.toString() ?: run {
             val textStarted = System.nanoTime()
             node.text().also { currentText ->
                 logSlow(
@@ -433,7 +434,7 @@ class CrdtReplicaForwarder(
         if (current == editorText) {
             // Canonicalize on the editor's String instance. The manager shadow
             // then compares by identity on the ordinary next-keystroke path.
-            knownReplicaText = editorText
+            knownReplicaShadow = ReplicaShadow(editorText)
             return true
         }
         // Keep alignment edits bounded to the bytes that actually differ. A
@@ -456,7 +457,7 @@ class CrdtReplicaForwarder(
                 )
             ) return false
         }
-        knownReplicaText = editorText
+        knownReplicaShadow = ReplicaShadow(editorText)
         logSlow(
             "native.applyLocal",
             applyStarted,
@@ -531,7 +532,7 @@ class CrdtReplicaForwarder(
         logSlow("native.applyUpdate", applyStarted, details = "update_bytes=${update.size}")
         val textStarted = System.nanoTime()
         val text = node.text()
-        knownReplicaText = text
+        knownReplicaShadow = text?.let(::ReplicaShadow)
         logSlow("native.text", textStarted, details = "reason=applyRemoteUpdate chars=${text?.length ?: -1}")
         logSlow("applyRemoteUpdate", started, warnMs = 100, details = "update_bytes=${update.size} chars=${text?.length ?: -1}")
         return text
@@ -543,12 +544,11 @@ class CrdtReplicaForwarder(
      * The controller bootstrap remains authoritative; a mismatch makes the
      * manager retain its canonical projection before mutating this replica
      * further. This does not cross FFI on each keystroke: all native mutations
-     * are serialized and update [knownReplicaText] at their boundary.
+     * are serialized and update [knownReplicaShadow] at their boundary.
      */
-    fun replicaText(): String? {
-        if (!attached) return null
-        return knownReplicaText
-    }
+    fun replicaText(): String? = replicaShadow()?.toString()
+
+    internal fun replicaShadow(): ReplicaShadow? = if (attached) knownReplicaShadow else null
 
     /**
      * `#divergentapplyreregister`: true once a remote update was refused because
@@ -618,10 +618,13 @@ class CrdtReplicaForwarder(
     }
 
     /** Publish the editor's complete visible/disk state projection. */
-    fun projectVisibleState(text: String, diskPersisted: Boolean = false): Boolean {
+    fun projectVisibleState(text: String, diskPersisted: Boolean = false): Boolean =
+        projectVisibleState(ReplicaShadow(text), diskPersisted)
+
+    internal fun projectVisibleState(shadow: ReplicaShadow, diskPersisted: Boolean = false): Boolean {
         if (!attached) return false
         val started = System.nanoTime()
-        val contentHash = sha256Text(text)
+        val contentHash = shadow.contentHash
         return transport.projectState(
             filePath,
             identity,
@@ -658,7 +661,7 @@ class CrdtReplicaForwarder(
         undurableLocalFrontier = null
         lineage = null
         historyLineage = null
-        knownReplicaText = null
+        knownReplicaShadow = null
         logSlow("native.close", closeStarted)
         check(ownership.send(MergeOwnershipEvent.EditorDetached)) {
             "merge-ownership chart rejected editor detach from ${ownership.phase}"
@@ -748,11 +751,6 @@ data class ReplicaRemoteUpdate(
      */
     val pulledAtMs: Long = 0L,
 )
-
-private fun sha256Text(text: String): String =
-    MessageDigest.getInstance("SHA-256")
-        .digest(text.toByteArray(StandardCharsets.UTF_8))
-        .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
 /**
  * The outcome of a `replica_pull` (D2). The CP decides which kind to send

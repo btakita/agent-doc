@@ -2517,7 +2517,10 @@ queue: go
         assert_eq!(from_brief.presets[0].body.as_deref(), Some("commit + push"));
         let free = subagent_authorization_for_item(&file, "tidy docs").unwrap();
         assert!(free.tracked_items.is_empty());
-        assert!(brief_command("task.md", "do [#a]").ends_with("--item '#a'"));
+        assert!(
+            brief_command("task.md", "do [#a]")
+                .ends_with("--item '#a' --reserve-spawn <generation>")
+        );
 
         let missing = content("#nosuch");
         std::fs::write(&file, &missing).unwrap();

@@ -762,6 +762,13 @@ fn parse_spans_uncached(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<u
             } else {
                 rest
             };
+            // `#embeddedterminalqueueheading`: a completed heading can be
+            // accidentally re-admitted as the literal text of another queue
+            // row (`- 📥 - ### ~~done~~`). Normalize that projection echo
+            // back to its terminal form before prompt classification.
+            let item_content =
+                agent_doc_markdown_ast::overlay::embedded_terminal_queue_heading(item_content)
+                    .unwrap_or(item_content);
             if let Some(end_i) = agent_doc_markdown_ast::overlay::tracked_do_context_block_end(
                 &lines,
                 i,

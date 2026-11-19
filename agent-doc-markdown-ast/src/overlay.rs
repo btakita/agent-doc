@@ -1648,6 +1648,22 @@ fn strip_queue_heading(body: &str) -> &str {
     body.trim_start().strip_prefix("### ").unwrap_or(body)
 }
 
+/// Recover a completed queue heading that was accidentally embedded as the
+/// text of another list row (for example, `- 📥 - ### ~~done~~`).  The
+/// outer list marker belongs to the queue projection; the inner marker and
+/// heading are terminal presentation state, not a new operator prompt.
+///
+/// Requiring both the embedded list marker and `### ~~...~~` keeps ordinary
+/// operator-authored Markdown untouched. In particular, a canonical
+/// `- ### ~~done~~` row reaches this function as `### ~~done~~` after its real
+/// list marker has already been stripped and does not match this recovery.
+pub fn embedded_terminal_queue_heading(body: &str) -> Option<&str> {
+    let projected = agent_doc_element_queue::strip_attempt_projection_prefix(body).trim_start();
+    let embedded = strip_bullet(projected)?.trim_start();
+    let headed = embedded.strip_prefix("### ")?;
+    split_struck_body(headed).0.then_some(headed)
+}
+
 fn parse_item(
     raw_line_content: &str,
     start_byte: usize,
@@ -1666,6 +1682,9 @@ fn parse_item(
     // older rows may carry it inside the strike wrapper (`~~### …~~`).
     if queue_item {
         body = strip_queue_heading(body);
+        if let Some(terminal_heading) = embedded_terminal_queue_heading(body) {
+            body = terminal_heading;
+        }
     }
 
     // Strikethrough wrapper. Tolerates an `#qstrikenote` annotation appended
@@ -3514,6 +3533,67 @@ trailing residue
         assert_eq!(q.items[2].text, "do [#legacy]");
         assert_eq!(q.items[2].id, "legacy");
         assert!(q.items[2].struck);
+    }
+
+    #[test]
+    fn embedded_completed_heading_does_not_reenter_queue_with_nested_siblings() {
+        let doc = "\
+<!-- agent:queue -->
+- ### operator-authored parent
+  - operator-authored child before the echo
+  - 📥 - ### ~~agent-doc issue in agent-doc-bugs.md: `agent:loop interval=\"1h\" priority keep` has an orphaned subtree corrupting the nested list.~~
+  - operator-authored child after the echo
+- - ### ~~terminal heading echoed without a projection glyph~~
+- ### operator task that quotes `- ### ~~Markdown~~` inline
+- ### ~~canonical operator-authored completed row~~
+<!-- /agent:queue -->
+";
+        let q = components(doc)
+            .into_iter()
+            .find(|c| c.name == "queue")
+            .unwrap();
+
+        let malformed = q
+            .items
+            .iter()
+            .find(|item| {
+                item.text
+                    .starts_with("agent-doc issue in agent-doc-bugs.md:")
+            })
+            .expect("the malformed projection remains represented as terminal history");
+        assert!(malformed.struck);
+        assert!(!malformed.text.starts_with("- ###"));
+
+        let glyphless_echo = q
+            .items
+            .iter()
+            .find(|item| item.text == "terminal heading echoed without a projection glyph")
+            .expect("the same malformed terminal shape is recognized without a glyph");
+        assert!(glyphless_echo.struck);
+
+        for text in [
+            "operator-authored parent",
+            "operator-authored child before the echo",
+            "operator-authored child after the echo",
+            "operator task that quotes `- ### ~~Markdown~~` inline",
+        ] {
+            let item = q
+                .items
+                .iter()
+                .find(|item| item.text == text)
+                .unwrap_or_else(|| panic!("missing legitimate operator row: {text}"));
+            assert!(
+                !item.struck,
+                "legitimate operator row became terminal: {text}"
+            );
+        }
+
+        let canonical = q
+            .items
+            .iter()
+            .find(|item| item.text == "canonical operator-authored completed row")
+            .expect("canonical operator Markdown still parses normally");
+        assert!(canonical.struck);
     }
 
     #[test]

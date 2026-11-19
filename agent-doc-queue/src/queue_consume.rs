@@ -9505,6 +9505,21 @@ mod tests {
     }
 
     #[test]
+    fn embedded_completed_heading_is_never_readmitted_as_a_queue_prompt() {
+        let malformed = "agent-doc issue in agent-doc-bugs.md: `agent:loop interval=\"1h\" priority keep` has an orphaned subtree corrupting the nested list.";
+        let body =
+            format!("- 📥 - ### ~~{malformed}~~\n- ### legitimate operator-authored follow-up\n");
+        let entries = document_queue::parse(&body).unwrap();
+        let prompts = document_queue::prompts(&entries)
+            .into_iter()
+            .map(|prompt| prompt.text.clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(prompts, ["legitimate operator-authored follow-up"]);
+        assert!(prompts.iter().all(|text| !text.contains(malformed)));
+    }
+
+    #[test]
     fn summary_falls_back_to_the_first_paragraph_when_nothing_names_the_row() {
         // The prompt echo names the row but describes no outcome, and the
         // `#gammaray` mention is a different id sharing a prefix.

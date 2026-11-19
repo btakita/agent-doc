@@ -356,6 +356,7 @@ across the three languages — no platform `Hasher` drift).
 | type_tag | entity_key | source |
 |---|---|---|
 | `agent_doc.document.baseline` | document_hash | `BaselineProjection` |
+| `agent_doc.document.authority` | document_hash | `DocumentAuthorityProjection` |
 | `agent_doc.queue` | document_hash | `QueueProjection` (singleton) |
 | `agent_doc.queue.head` | node_key | `QueueHeadProjection` |
 | `agent_doc.closeout.cycle` | cycle_id | `CloseoutProjection` |
@@ -400,9 +401,10 @@ projection:
   history is available; either response converges identically to a fresh
   snapshot.
 
-The `type_tag` table is the in-repo producer half of the wire vocabulary. The
-canonical schema pin (`lazily-spec/schemas/agent-doc-state.json` + a conformance
-snapshot/delta pair) is `#lazilyspecpin`, a sibling `lazily-spec` change.
+Agent-doc owns the domain-specific `type_tag` vocabulary in
+[`schemas/agent-doc-state.json`](../schemas/agent-doc-state.json) and its
+[snapshot/delta conformance fixtures](../conformance/agent-doc/README.md).
+The fixtures use the generic lazily-spec graph envelope.
 
 ## Actor Ownership
 

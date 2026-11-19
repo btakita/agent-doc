@@ -1,0 +1,227 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lazily.dev/schemas/agent-doc-state.json",
+  "title": "agent-doc state projection vocabulary",
+  "description": "Canonical type_tag vocabulary for the agent-doc state projection mirrored over the lazily-IPC snapshot/delta wire format. Pins the nine agent-doc state node kinds (and their per-node phase vocabularies) so the kt / js / rs mirrors address the same nodes and decode the same phases. Derived from agent-doc-state-wire (AgentDocNodeType), agent-doc-state-backbone (projection structs and phase enums), and agent-doc-turn (CyclePhase). Each node has a stable type_tag and a JSON payload encoded by the transport. slot_id = fnv1a(document_hash, type_tag, entity_key).",
+  "schema_version": "1.2.0",
+  "protocol_version": 1,
+
+  "$defs": {
+    "TypeTag": {
+      "type": "string",
+      "description": "Stable cross-process key for an agent-doc state node. Exactly the nine values below; kt/js/rs MUST treat any other tag as an unknown forward-compatible node and skip it.",
+      "enum": [
+        "agent_doc.document.baseline",
+        "agent_doc.document.authority",
+        "agent_doc.queue",
+        "agent_doc.queue.head",
+        "agent_doc.closeout.cycle",
+        "agent_doc.transport.patch",
+        "agent_doc.supervisor.owner",
+        "agent_doc.route",
+        "agent_doc.proof.marker"
+      ]
+    },
+
+    "DocumentAuthority": {
+      "type": "string",
+      "description": "DocumentAuthorityProjection.authority (serde snake_case).",
+      "enum": [
+        "disk_replica",
+        "editor_relay",
+        "editor_attached_missing_replica",
+        "editor_sync_pending"
+      ]
+    },
+    "QueueHeadPhase": {
+      "type": "string",
+      "description": "QueueHeadProjection.phase (agent-doc-state-backbone::QueueHeadPhase, serde snake_case).",
+      "enum": ["pending", "selected", "deferred", "completed"]
+    },
+    "CyclePhase": {
+      "type": "string",
+      "description": "CloseoutProjection.phase (agent-doc-turn::CyclePhase, serde snake_case).",
+      "enum": [
+        "preflight_started",
+        "response_captured",
+        "write_applied",
+        "committed",
+        "abandoned"
+      ]
+    },
+    "TransportPatchPhase": {
+      "type": "string",
+      "description": "TransportPatchProjection.phase (agent-doc-state-backbone::TransportPatchPhase, serde snake_case).",
+      "enum": [
+        "queued",
+        "applied",
+        "rejected",
+        "insufficient_proof",
+        "retrying",
+        "force_disk_fallback"
+      ]
+    },
+    "ActorLifecyclePhase": {
+      "type": "string",
+      "description": "OwnerProjection.phase (agent-doc-state-backbone::ActorLifecyclePhase, serde snake_case).",
+      "enum": [
+        "starting",
+        "ready",
+        "busy",
+        "waiting_input",
+        "restarting",
+        "stale",
+        "closed"
+      ]
+    },
+    "RouteReadinessPhase": {
+      "type": "string",
+      "description": "RouteProjection.readiness (agent-doc-state-backbone::RouteReadinessPhase, serde snake_case).",
+      "enum": [
+        "unknown",
+        "pane_known",
+        "prompt_ready",
+        "dispatch_authorized",
+        "dispatch_accepted",
+        "dispatch_proven",
+        "blocked"
+      ]
+    },
+    "ProofGatePhase": {
+      "type": "string",
+      "description": "ProofMarkerProjection.phase (agent-doc-state-backbone::ProofGatePhase, serde snake_case).",
+      "enum": ["unknown", "observed", "disproved"]
+    },
+
+    "StateOwner": {
+      "type": "string",
+      "description": "OwnerProjection identity key (agent-doc-state-backbone::StateOwner, serde snake_case); also the entity_key for an agent_doc.supervisor.owner node.",
+      "enum": [
+        "document_writer",
+        "editor_ipc_bridge",
+        "route_dispatch",
+        "supervisor",
+        "queue_orchestrator"
+      ]
+    },
+
+    "NodeKind": {
+      "type": "object",
+      "description": "Registry entry describing one of the nine agent-doc state node kinds: its stable type_tag, the source struct its payload decodes to, the entity_key used in the slot_id hash, and the phase vocabulary (if any) carried in state/payload.",
+      "properties": {
+        "type_tag": { "$ref": "#/$defs/TypeTag" },
+        "source_struct": {
+          "type": "string",
+          "description": "Rust struct the base64 payload decodes to (serde_json)."
+        },
+        "entity_key": {
+          "type": "string",
+          "description": "Per-node entity key folded into slot_id alongside document_hash and type_tag. At-most-one-per-document nodes use document_hash."
+        },
+        "phase_field": {
+          "type": ["string", "null"],
+          "description": "Field on source_struct carrying the lifecycle phase, or null if the node has no phase enum."
+        },
+        "phase_vocabulary": {
+          "type": ["string", "null"],
+          "description": "$ref name (under $defs) of the phase enum carried by phase_field, or null."
+        }
+      },
+      "required": ["type_tag", "source_struct", "entity_key", "phase_field", "phase_vocabulary"],
+      "additionalProperties": false
+    }
+  },
+
+  "type": "object",
+  "properties": {
+    "type": {
+      "const": "agent_doc_state_vocabulary",
+      "description": "Discriminant marking this document as the pinned agent-doc state node-kind registry."
+    },
+    "schema_version": {
+      "type": "string",
+      "description": "SemVer of this vocabulary pin. Additive node kinds / phases bump minor; a renamed or removed type_tag or phase bumps major."
+    },
+    "node_kinds": {
+      "type": "array",
+      "description": "The nine agent-doc state node kinds. Exactly one entry per TypeTag value.",
+      "items": { "$ref": "#/$defs/NodeKind" },
+      "minItems": 9,
+      "maxItems": 9
+    }
+  },
+  "required": ["type", "schema_version", "node_kinds"],
+  "additionalProperties": false,
+
+  "examples": [
+    {
+      "type": "agent_doc_state_vocabulary",
+      "schema_version": "1.2.0",
+      "node_kinds": [
+        {
+          "type_tag": "agent_doc.document.baseline",
+          "source_struct": "BaselineProjection",
+          "entity_key": "document_hash",
+          "phase_field": null,
+          "phase_vocabulary": null
+        },
+        {
+          "type_tag": "agent_doc.document.authority",
+          "source_struct": "DocumentAuthorityProjection",
+          "entity_key": "document_hash",
+          "phase_field": "authority",
+          "phase_vocabulary": "DocumentAuthority"
+        },
+        {
+          "type_tag": "agent_doc.queue",
+          "source_struct": "QueueProjection",
+          "entity_key": "document_hash",
+          "phase_field": null,
+          "phase_vocabulary": null
+        },
+        {
+          "type_tag": "agent_doc.queue.head",
+          "source_struct": "QueueHeadProjection",
+          "entity_key": "node_key",
+          "phase_field": "phase",
+          "phase_vocabulary": "QueueHeadPhase"
+        },
+        {
+          "type_tag": "agent_doc.closeout.cycle",
+          "source_struct": "CloseoutProjection",
+          "entity_key": "cycle_id",
+          "phase_field": "phase",
+          "phase_vocabulary": "CyclePhase"
+        },
+        {
+          "type_tag": "agent_doc.transport.patch",
+          "source_struct": "TransportPatchProjection",
+          "entity_key": "patch_id",
+          "phase_field": "phase",
+          "phase_vocabulary": "TransportPatchPhase"
+        },
+        {
+          "type_tag": "agent_doc.supervisor.owner",
+          "source_struct": "OwnerProjection",
+          "entity_key": "state_owner",
+          "phase_field": "phase",
+          "phase_vocabulary": "ActorLifecyclePhase"
+        },
+        {
+          "type_tag": "agent_doc.route",
+          "source_struct": "RouteProjection",
+          "entity_key": "document_hash",
+          "phase_field": "readiness",
+          "phase_vocabulary": "RouteReadinessPhase"
+        },
+        {
+          "type_tag": "agent_doc.proof.marker",
+          "source_struct": "ProofMarkerProjection",
+          "entity_key": "marker",
+          "phase_field": "phase",
+          "phase_vocabulary": "ProofGatePhase"
+        }
+      ]
+    }
+  ]
+}

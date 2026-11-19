@@ -2049,12 +2049,25 @@ pub fn refresh_waiting_on_you_tree_under_apply_guard(
         )
         .context("Waiting on you projection: failed to converge document")?;
     }
+    // The retained editor intent may have become visible before its delivery
+    // receipt settled. An operator can answer inside that new tree during this
+    // interval. Re-read authority after convergence and fold only the marked
+    // tree into the checkpoint candidate: this commits the early answer without
+    // absorbing unrelated concurrent steering elsewhere in the document.
+    let checkpoint_target = if force_disk {
+        target.clone()
+    } else {
+        let authoritative =
+            effects.current_document_content(file, "waiting_on_you_tree settled")?;
+        agent_doc_queue::queue_consume::fold_authoritative_waiting_tree(&target, &authoritative)?
+            .unwrap_or_else(|| target.clone())
+    };
     agent_doc_snapshot_io::checkpoint_document_baseline(
         file,
-        &target,
+        &checkpoint_target,
         agent_doc_ops_log_io::log_op,
     )?;
-    observe_authoritative_queue_state_under_apply_guard(file, &target, apply_guard)?;
+    observe_authoritative_queue_state_under_apply_guard(file, &checkpoint_target, apply_guard)?;
     Ok(true)
 }
 
@@ -2184,7 +2197,21 @@ pub fn annotate_newly_completed_queue_prompts_with_response_id_under_apply_guard
         // This projection owns both sides of the lookup: inert queue children
         // and the identity-neutral marker inside the exchange response. A
         // queue-only structural batch would silently drop the exchange edit.
-        effects.converge_document_or_disk(file, &target, &current, "queue_response_backlink")?;
+        converge_awaiting_retained_delivery(
+            effects,
+            file,
+            &target,
+            &HashSet::new(),
+            "queue_response_backlink",
+            || {
+                effects.converge_document_or_disk(
+                    file,
+                    &target,
+                    &current,
+                    "queue_response_backlink",
+                )
+            },
+        )?;
     }
 
     if let Some(snapshot) = load_snapshot_recovery_only(file, "queue response backlink snapshot") {
@@ -5872,17 +5899,22 @@ mod core_tests {
             ))
             .response_id()
             .to_string();
+        let effects = RetainedDeliveryEffects {
+            lands: true,
+            awaited: AtomicUsize::new(0),
+        };
 
         let count = annotate_newly_completed_queue_prompts_with_response_id(
-            &doc,
-            before,
-            response,
-            false,
-            &TEST_EFFECTS,
+            &doc, before, response, false, &effects,
         )
         .unwrap();
 
         assert_eq!(count, 1);
+        assert_eq!(
+            effects.awaited.load(Ordering::SeqCst),
+            1,
+            "response backlink closeout waits for the retained editor delivery"
+        );
         let updated = fs::read_to_string(&doc).unwrap();
         let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
             .unwrap()
@@ -6097,6 +6129,101 @@ mod core_tests {
                 .unwrap()
                 .unwrap(),
             projected
+        );
+    }
+
+    struct EarlyAnswerDuringDeliveryEffects;
+
+    impl QueueConsumeWriteEffects for EarlyAnswerDuringDeliveryEffects {
+        fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            Ok(std::fs::read_to_string(file)?)
+        }
+
+        fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+            agent_doc_fs::write_atomic(file, content.as_bytes())
+        }
+
+        fn converge_document_or_disk(
+            &self,
+            file: &Path,
+            target_content: &str,
+            _source_content: &str,
+            _reason: &str,
+        ) -> Result<()> {
+            agent_doc_fs::write_atomic(file, target_content.as_bytes())?;
+            anyhow::bail!(
+                "retained editor write [{}] [{}]",
+                agent_doc_turn::write_ownership::AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN,
+                agent_doc_turn::write_ownership::RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN,
+            )
+        }
+
+        fn await_retained_queue_write_landed(
+            &self,
+            file: &Path,
+            target_content: &str,
+            _retired_completion_keys: &HashSet<String>,
+        ) -> Result<bool> {
+            assert!(
+                target_content.contains(agent_doc_queue::queue_consume::WAITING_ON_YOU_ROOT_MARKER)
+            );
+            let current = std::fs::read_to_string(file)?;
+            let close = current
+                .find("<!-- /agent:queue -->")
+                .expect("the projected queue closes");
+            let mut answered = current;
+            answered.insert_str(close, "    - choose the recommended option\n");
+            agent_doc_fs::write_atomic(file, answered.as_bytes())?;
+            Ok(true)
+        }
+    }
+
+    #[test]
+    fn waiting_tree_refresh_commits_and_recognizes_an_answer_typed_during_delivery() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("waiting-early-answer.md");
+        let response = "### Re: approval — test\n\nWaiting for approval.";
+        let content = format!(
+            "<!-- agent:exchange -->\n{response}\n<!-- /agent:exchange -->\n\n\
+             <!-- agent:queue id=\"main\" -->\n<!-- /agent:queue -->\n\n\
+             <!-- agent:todo -->\n- [ ] [#approve-pr] Approve and merge PR #42.\n<!-- /agent:todo -->\n"
+        );
+        fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        assert!(
+            refresh_waiting_on_you_tree(&doc, response, false, &EarlyAnswerDuringDeliveryEffects,)
+                .unwrap()
+        );
+
+        let visible = fs::read_to_string(&doc).unwrap();
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .expect("snapshot");
+        assert!(
+            snapshot.contains("    - choose the recommended option\n"),
+            "the commit candidate keeps the answer typed after the tree appeared: {snapshot}"
+        );
+        assert!(visible.contains("    - choose the recommended option\n"));
+
+        let queue = agent_doc_element::element::parse(&snapshot)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .expect("queue");
+        let entries = agent_doc_queue::document_queue::parse(queue.content(&snapshot)).unwrap();
+        let head = entries
+            .iter()
+            .position(agent_doc_queue::waiting_packet::is_waiting_item_head)
+            .expect("waiting item");
+        assert!(
+            agent_doc_queue::waiting_packet::has_operator_reply(&entries, head),
+            "the ordinary decision parser recognizes the early child answer"
         );
     }
 

@@ -6683,6 +6683,40 @@ pub fn project_waiting_on_you_tree(document: &str, response_body: &str) -> Resul
     Ok((out != document).then_some(out))
 }
 
+/// Fold the settled editor-authoritative Waiting-on-you subtree into the
+/// binary-owned projection that closeout will checkpoint and commit.
+///
+/// The tree can become visible before its retained editor delivery settles.
+/// An operator may answer in that interval. Copying the whole authoritative
+/// document would absorb unrelated concurrent steering into the closeout
+/// baseline, while checkpointing the pre-delivery projection would lose the
+/// answer. Restricting the fold to the marked tree preserves the operator's
+/// exact child rows and leaves every edit outside the tree for its normal turn.
+pub fn fold_authoritative_waiting_tree(
+    projected_document: &str,
+    authoritative_document: &str,
+) -> Result<Option<String>> {
+    let Some(projected) = waiting_tree_location(projected_document)? else {
+        return Ok(None);
+    };
+    let Some(authoritative) = waiting_tree_location(authoritative_document)? else {
+        return Ok(None);
+    };
+    if projected.start == projected.end || authoritative.start == authoritative.end {
+        return Ok(None);
+    }
+
+    let authoritative_tree = &authoritative_document[authoritative.start..authoritative.end];
+    let projected_tree = &projected_document[projected.start..projected.end];
+    if authoritative_tree == projected_tree {
+        return Ok(None);
+    }
+
+    let mut folded = projected_document.to_string();
+    folded.replace_range(projected.start..projected.end, authoritative_tree);
+    Ok(Some(folded))
+}
+
 fn project_waiting_on_you_tree_pass(
     document: &str,
     response_body: &str,
@@ -8118,6 +8152,39 @@ mod tests {
              <!-- agent:todo -->\n{todo_body}<!-- /agent:todo -->\n\
              <!-- agent:exchange -->\n{response}\n<!-- /agent:exchange -->\n"
         )
+    }
+
+    #[test]
+    fn authoritative_waiting_tree_fold_keeps_early_answer_but_not_unrelated_steering() {
+        let projected = concat!(
+            "<!-- agent:queue id=\"main\" -->\n",
+            "- ### Waiting on you — answer by adding a child line under an item ",
+            "<!-- agent-doc:waiting-on-you -->\n",
+            "  - [#approve] Approve the release <!-- agent-doc:waiting-item -->\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:exchange -->\nsettled response\n<!-- /agent:exchange -->\n",
+        );
+        let authoritative = concat!(
+            "<!-- agent:queue id=\"main\" -->\n",
+            "- ### Waiting on you — answer by adding a child line under an item ",
+            "<!-- agent-doc:waiting-on-you -->\n",
+            "  - [#approve] Approve the release <!-- agent-doc:waiting-item -->\n",
+            "    - use the recommended release target\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:exchange -->\nsettled response\n",
+            "operator added another prompt\n<!-- /agent:exchange -->\n",
+        );
+
+        let folded = fold_authoritative_waiting_tree(projected, authoritative)
+            .unwrap()
+            .expect("the early answer changes the committed tree");
+
+        assert!(folded.contains("    - use the recommended release target\n"));
+        assert!(
+            !folded.contains("operator added another prompt"),
+            "only the marked waiting tree belongs to this commit: {folded}"
+        );
+        assert!(folded.contains("settled response\n<!-- /agent:exchange -->"));
     }
 
     /// `#answerack`: the `tdclireleasedownloads` shape from `sdk-dev.md`. The

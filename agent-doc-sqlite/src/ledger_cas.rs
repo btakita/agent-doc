@@ -43,8 +43,8 @@ pub use agent_doc_supervisor::actor_generation::{
 
 use crate::state_store::{
     FencedStateEventInsert, StateEventInsert, TerminalTurnFenceCheck,
-    apply_actor_record_write_in_tx, delete_actor_document_rows_in_tx, insert_state_event_in_db,
-    load_actor_record_with_revision_from_db,
+    apply_actor_record_write_in_tx, delete_actor_document_rows_in_tx, insert_actor_transition,
+    insert_state_event_in_db, load_actor_record_with_revision_from_db,
 };
 
 /// The single actor generation of these in-process cores: every append owns
@@ -369,6 +369,13 @@ pub struct ActorRecordStore {
 pub enum ActorGenerationMutation {
     /// Write a new actor record.
     Store(Box<ActorRecordStore>),
+    /// Compare the binding and correct its physical window without changing lifecycle evidence.
+    CorrectWindow {
+        window: String,
+        caller: String,
+        reason: String,
+        timestamp: u64,
+    },
     /// Hard-delete the record with its history and lease rows (`#actorprune`).
     Delete,
 }
@@ -380,6 +387,7 @@ pub enum ActorGenerationReceipt {
         write: Box<ActorStoreWrite>,
         released_dispatches: usize,
     },
+    WindowCorrected,
     Deleted {
         removed: usize,
     },
@@ -523,6 +531,36 @@ impl<'c> ActorGenerationWrite<'c> {
                     released_dispatches,
                 }
             }
+            ActorGenerationMutation::CorrectWindow {
+                window,
+                caller,
+                reason,
+                timestamp,
+            } => {
+                let previous = previous.as_ref().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "cannot correct the window of an absent actor {}",
+                        key.document_id
+                    )
+                })?;
+                if !window.is_empty() && *window != previous.window_id {
+                    let mut corrected = previous.clone();
+                    corrected.window_id.clone_from(window);
+                    corrected.last_transition = agent_doc_controller::actor::ActorLastTransition {
+                        caller: caller.clone(),
+                        reason: reason.clone(),
+                        timestamp: *timestamp,
+                        prior_generation: previous.generation,
+                        new_generation: previous.generation,
+                    };
+                    let transition_id = insert_actor_transition(&tx, Some(previous), &corrected)?;
+                    tx.execute(
+                        "UPDATE documents SET window_id = ?2, window_transition_id = ?3 WHERE document_id = ?1",
+                        params![key.document_id, window, transition_id],
+                    )?;
+                }
+                ActorGenerationReceipt::WindowCorrected
+            }
             ActorGenerationMutation::Delete => ActorGenerationReceipt::Deleted {
                 removed: delete_actor_document_rows_in_tx(&tx, &key.document_id)?,
             },
@@ -538,7 +576,7 @@ impl<'c> ActorGenerationWrite<'c> {
 fn absent_prior_generation(mutation: &ActorGenerationMutation) -> u64 {
     match mutation {
         ActorGenerationMutation::Store(store) => store.record.last_transition.prior_generation,
-        ActorGenerationMutation::Delete => 0,
+        ActorGenerationMutation::CorrectWindow { .. } | ActorGenerationMutation::Delete => 0,
     }
 }
 
@@ -591,12 +629,15 @@ pub fn write_if_actor_generation(
     let key = ActorGenerationKey {
         document_id: document_id.to_string(),
     };
+    let operation = match mutation {
+        ActorGenerationMutation::Store(_) => "store",
+        ActorGenerationMutation::CorrectWindow { .. } => "window",
+        ActorGenerationMutation::Delete => "delete",
+    };
     let delete = matches!(mutation, ActorGenerationMutation::Delete);
     let identity = EffectIdentity::new(format!(
-        "actor-generation-write:{document_id}:{}:{:?}:{}#1",
-        expected.generation,
-        expected.revision.last_transition_id,
-        if delete { "delete" } else { "store" }
+        "actor-generation-write:{document_id}:{}:{:?}:{operation}#1",
+        expected.generation, expected.revision.last_transition_id,
     ))
     .map_err(|error| anyhow::anyhow!("invalid actor generation effect identity: {error:?}"))?;
     let mut core = ActorGenerationCore::new(GENERATION);

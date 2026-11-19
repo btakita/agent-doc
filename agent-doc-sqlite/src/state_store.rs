@@ -1353,7 +1353,8 @@ fn create_canonical_tables(conn: &Connection) -> Result<()> {
             actor_state TEXT NOT NULL,
             launch_mode TEXT,
             controller_epoch INTEGER,
-            last_transition_id INTEGER
+            last_transition_id INTEGER,
+            window_transition_id INTEGER
         );
 
         CREATE TABLE IF NOT EXISTS actor_transitions (
@@ -3445,6 +3446,11 @@ fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str)
 /// the normal open path.
 const CANONICAL_ADDED_COLUMNS: &[(&str, &str, &str)] = &[
     (
+        "documents",
+        "window_transition_id",
+        "window_transition_id INTEGER",
+    ),
+    (
         "queue_controls",
         "actor_generation",
         "actor_generation INTEGER",
@@ -3812,7 +3818,7 @@ pub fn load_actor_record_with_revision_from_db(
             t.timestamp,
             t.prior_generation,
             t.new_generation,
-            d.last_transition_id AS revision
+            COALESCE(d.window_transition_id, d.last_transition_id) AS revision
         FROM documents d
         JOIN actor_transitions t ON t.id = d.last_transition_id
         WHERE d.document_id = ?1
@@ -3837,7 +3843,7 @@ pub fn load_actor_record_with_revision_from_db(
 fn load_actor_revision(conn: &Connection, document_id: &str) -> Result<ActorRevision> {
     let last_transition_id = conn
         .query_row(
-            "SELECT last_transition_id FROM documents WHERE document_id = ?1",
+            "SELECT COALESCE(window_transition_id, last_transition_id) FROM documents WHERE document_id = ?1",
             params![document_id],
             |row| row.get::<_, Option<i64>>(0),
         )
@@ -5407,7 +5413,8 @@ pub fn upsert_actor_document(
             actor_state = excluded.actor_state,
             launch_mode = excluded.launch_mode,
             controller_epoch = excluded.controller_epoch,
-            last_transition_id = excluded.last_transition_id
+            last_transition_id = excluded.last_transition_id,
+            window_transition_id = NULL
         "#,
         params![
             record.document_id,

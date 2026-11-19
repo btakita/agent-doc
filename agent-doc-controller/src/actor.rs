@@ -67,9 +67,9 @@ pub struct ActorRecord {
 /// A generation fence alone does not detect a write that keeps the generation:
 /// lifecycle transitions (`Starting`/`Ready`/`Busy`/`Closed`), a same-pane
 /// binding projection, a harness writeback, and a cross-document pane eviction
-/// all commit at the current generation. Every one of them inserts a fresh
-/// `actor_transitions` row and points the durable `documents.last_transition_id` at it, so
-/// that id names the exact write a decision was made against. `None` means the
+/// all commit at the current generation. The latest actor transition id
+/// identifies the exact record revision. Window-only corrections advance this
+/// revision independently of the last lifecycle transition. `None` means the
 /// document had no actor row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ActorRevision {

@@ -447,41 +447,33 @@ pub fn binding_fence_lost(err: &anyhow::Error) -> bool {
 /// Correct the recorded window of an existing binding, fenced on the record the
 /// caller decided against (`#syncbindingfence`).
 ///
-/// A window refresh corrects a stale FACT about a binding (`#panewindowbindingrebind`):
-/// the pane, session, generation, and lifecycle state stand exactly as the
-/// observed record had them, and only `window_id` (and the re-derived harness)
-/// change. Writing it through [`project_binding_in`] re-projected the record as
-/// `Ready`, overwriting an owner's `Busy`/`Starting`, and, because it re-reads
-/// the generation, bound the observed pane back over an owner that had moved the
-/// document to another pane in between. This fails with a generation
-/// compare-and-swap error (see [`binding_fence_lost`]) when anything committed
-/// after `observed_revision`.
+/// A window refresh preserves the binding and its lifecycle evidence, and
+/// advances the actor revision only when the physical window changes. An empty
+/// or unchanged window still checks the fence. A newer actor write produces a
+/// generation compare-and-swap error (see [`binding_fence_lost`]).
 pub fn correct_binding_window_fenced_in(
     base_dir: &Path,
-    file: &str,
-    observed: &ActorRecord,
-    observed_revision: ActorRevision,
+    document_id: &str,
+    expected: ledger_cas::ActorGenerationAuthority,
     window_id: &str,
     caller: &str,
     reason: &str,
-) -> Result<ActorRecord> {
-    let harness = detect_document_harness_in(base_dir, file);
-    store_record_in(
-        base_dir,
-        file,
-        ActorRecordUpdate {
-            session_id: &observed.session_id,
-            pane_id: &observed.pane_id,
-            window_id,
-            harness: &harness,
-            state: observed.state,
-            caller,
-            reason,
-            generation: observed.generation,
-            expected_prior_generation: Some(observed.generation),
-            expected_prior_revision: Some(observed_revision),
+) -> Result<()> {
+    let mut conn = state_store::open_state_db(base_dir)?;
+    match ledger_cas::write_if_actor_generation(
+        &mut conn,
+        document_id,
+        expected,
+        ledger_cas::ActorGenerationMutation::CorrectWindow {
+            window: window_id.trim().to_string(),
+            caller: caller.to_string(),
+            reason: reason.to_string(),
+            timestamp: timestamp_secs(),
         },
-    )
+    )? {
+        ledger_cas::ActorGenerationReceipt::WindowCorrected => Ok(()),
+        other => anyhow::bail!("actor window correction returned {other:?}"),
+    }
 }
 
 pub fn record_session_start_direct(

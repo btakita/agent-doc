@@ -1,5 +1,6 @@
 //! Route dispatch target registry binding.
 
+use agent_doc_controller::actor::ActorState;
 use anyhow::Result;
 use std::path::Path;
 use tmux_router::Tmux;
@@ -94,11 +95,9 @@ pub fn bind_dispatch_target_after_owner_launch(
 /// Bind `pane_id` as `file_path`'s dispatch target before the route dispatches
 /// into a pane whose owner is already running (`#predispatchreadyoverwrite`).
 ///
-/// The record already binding this session to `pane_id` in a live state is
-/// left exactly as the owner wrote it (no `Ready` over `Busy`/`Starting`);
-/// only the registry metadata is refreshed. An owner on another live pane is
-/// never bound over: the route fails closed instead of bumping the generation
-/// and retiring that owner's supervisor. See
+/// The matching actor keeps its lifecycle state. Physical window and registry
+/// metadata are refreshed after pane movement. A blocked or closed actor and
+/// a competing live owner prevent dispatch. See
 /// [`agent_doc_session_registry_io::registration::bind_running_dispatch_target_in`].
 pub fn bind_running_dispatch_target(
     tmux: &Tmux,
@@ -132,9 +131,16 @@ pub fn bind_running_dispatch_target(
                     generation
                 ),
             );
+            if matches!(state, ActorState::Blocked | ActorState::Closed) {
+                anyhow::bail!(
+                    "actor for {file_path} is {} at generation {generation} on pane {pane_id}; route will not dispatch into that actor",
+                    state.as_str()
+                );
+            }
         }
         PreDispatchDispatchBind::Bound { .. } => {}
         PreDispatchDispatchBind::LiveOwnerElsewhere {
+            session_id: owner_session,
             pane_id: owner_pane,
             generation,
             state,
@@ -144,10 +150,11 @@ pub fn bind_running_dispatch_target(
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "route_pre_dispatch_bind_live_owner_elsewhere file={} pane={} owner_pane={} owner_generation={} owner_state={} owner_caller={} owner_reason={}",
+                    "route_pre_dispatch_bind_live_owner_elsewhere file={} pane={} owner_pane={} owner_session={} owner_generation={} owner_state={} owner_caller={} owner_reason={}",
                     file_path,
                     pane_id,
                     owner_pane,
+                    owner_session,
                     generation,
                     state.as_str(),
                     caller,
@@ -155,7 +162,7 @@ pub fn bind_running_dispatch_target(
                 ),
             );
             anyhow::bail!(
-                "{caller}/{reason} owns {file_path} at generation {generation} ({}) on live pane {owner_pane}; route will not bind pane {pane_id} over that owner. Run `agent-doc {file_path}` from pane {owner_pane}, or `agent-doc claim {file_path}` to move it deliberately",
+                "{caller}/{reason} owns {file_path} in session {owner_session} at generation {generation} ({}) on live pane {owner_pane}; route will not bind pane {pane_id} over that owner. Run `agent-doc {file_path}` from pane {owner_pane}, or `agent-doc claim {file_path}` to move it deliberately",
                 state.as_str()
             );
         }

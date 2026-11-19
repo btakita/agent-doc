@@ -459,34 +459,12 @@ pub struct AdmitOutput {
 /// proof that can never exist (GH #119).
 pub const COMMIT_REFUSED_IGNORED_PATH_EVENT: &str = "commit_refused_ignored_path";
 
-/// `#suprecyclespin` — seconds an open cycle may sit untouched (no IPC advisory
-/// connection in flight) at a harness turn boundary before the supervisor
-/// recycle/restart defer path force-closes it as abandoned. Bounded so a
-/// crashed/superseded older turn cannot wedge the recycle in `DeferCycleOpen`
-/// (~2/sec `cycle_open` spin-loop, `idle_watch.rs`) forever.
-///
-/// `#suprecyclespin-falseabandon`: the earlier 45s value assumed "each phase
-/// ticks `updated_at` and finalize holds IPC inflight", so a live cycle could
-/// never look stale. That assumption is FALSE for a slow first response: the
-/// cycle sits in `preflight_started` with an untouched `updated_at` and
-/// `inflight == 0` for the ENTIRE harness generation, which for a large prompt
-/// routinely exceeds 45s. Combined with a transiently-misread `turn_boundary`
-/// (`prompt_visible && !turn_active`, both pane-scraped) that abandoned a live
-/// turn mid-generation. The deadline is now generous enough to clear normal
-/// first-response latency; the primary guard is the consecutive-tick debounce
-/// below. Supervisor generation transition no longer consumes this timeout:
-/// elapsed watch ticks and prompt scraping are not proof that an uncaptured
-/// preflight is replayable.
+/// The former quiet-cycle threshold kept as a diagnostic and regression
+/// fixture. Crossing it carries no authority to retire a preflight.
 pub const STALLED_CYCLE_RESOLVE_SECS: u64 = 120;
 
-/// `#suprecyclespin-falseabandon` — consecutive idle-watch polls
-/// (`AUTO_TRIGGER_POLL_INTERVAL`, 500ms) for which `stalled_before_response_capture_cycle`
-/// must hold at a `turn_boundary` before the supervisor force-abandons the
-/// cycle. A live harness generation never sustains `turn_boundary && stalled`
-/// for this long (the pane is not at a ready prompt while it streams output), so
-/// the debounce rejects the transient boundary misread that abandoned a live
-/// turn, while a genuinely orphaned/superseded cycle stays stalled every poll
-/// and still resolves after the confirm window (~10s at 20 ticks).
+/// The former idle-watch quiet-cycle confirmation count. These observations
+/// carry no authority to retire an uncaptured cycle.
 pub const STALLED_CYCLE_RESOLVE_CONFIRM_TICKS: u32 = 20;
 
 impl CycleState {
@@ -525,22 +503,13 @@ impl CycleState {
             && self.response_sha256.is_some()
     }
 
-    /// `#suprecyclespin` — whether this open cycle has stalled past
-    /// `deadline_secs`: still open, no IPC advisory connection in flight, and untouched
-    /// (`now_secs - updated_at > deadline_secs`). A stalled open cycle is an
-    /// abandoned older turn that a newer committed cycle has superseded; the
-    /// supervisor recycle-defer path force-closes such a cycle (`mark_abandoned`)
-    /// so the `execve` recycle reaches its boundary instead of deferring forever.
-    /// Pure so the deadline policy is unit-testable without the live idle watch.
+    /// Observe quiet time for an open cycle. This is a diagnostic; retirement
+    /// requires explicit cancellation or a harness terminal receipt.
     pub fn open_stalled(&self, inflight: u64, now_secs: u64, deadline_secs: u64) -> bool {
         self.is_open() && inflight == 0 && now_secs.saturating_sub(self.updated_at) > deadline_secs
     }
 
-    /// `#suprecyclespin`: whether a stalled open cycle may be force-abandoned at
-    /// a supervisor recycle boundary. Only cycles before response capture are disposable.
-    /// Once a response has been captured or written, the open cycle is durable
-    /// recovery evidence and must survive recycle so the fresh process can retry
-    /// or reconcile it instead of silently losing the response.
+    /// Observe quiet time specifically before any durable response capture.
     pub fn stalled_before_response_capture_cycle(
         &self,
         inflight: u64,
@@ -571,20 +540,12 @@ impl CycleState {
     /// document (queue convergence, baseline checkpoint), so the hook's run and a
     /// later run in the same turn legitimately see different bytes.
     ///
-    /// A **stalled** open cycle is excluded: that is a crashed or superseded
-    /// older turn, and a genuinely new turn must not inherit its identity. The
-    /// same `stalled_before_response_capture_cycle` policy the supervisor uses to
-    /// force-abandon one decides it here, so the two cannot drift.
-    pub fn reusable_by_reentrant_preflight(
-        &self,
-        inflight: u64,
-        now_secs: u64,
-        deadline_secs: u64,
-    ) -> bool {
+    /// Re-entry preserves an unanswered cycle regardless of how long the
+    /// harness has been quiet. Only lifecycle evidence can end the cycle.
+    pub fn reusable_by_reentrant_preflight(&self) -> bool {
         matches!(self.phase, CyclePhase::PreflightStarted)
             && self.capture_id.is_none()
             && self.response_sha256.is_none()
-            && !self.stalled_before_response_capture_cycle(inflight, now_secs, deadline_secs)
     }
 
     /// Derive the live finalize-pipeline view (`#fm-run-id-step` / `#fmrunid-wire`)
@@ -1899,7 +1860,7 @@ fn start_preflight_with_task_queue_selection_and_after_checkpoint(
 ) -> Result<CycleState> {
     let now = now_secs();
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let prior = load(file).ok().flatten();
+    let prior = load(file)?;
     // `#queueskip`: carry forward the skipped-head accumulator so a head marked
     // skippable in a prior cycle stays skipped until it is consumed or removed
     // (preflight recomputes/clears it each cycle). Without this the flag would
@@ -1921,8 +1882,15 @@ fn start_preflight_with_task_queue_selection_and_after_checkpoint(
     // that replayed the opening snapshot would report a stale document.
     let reentrant = prior
         .as_ref()
-        .filter(|open| open.reusable_by_reentrant_preflight(0, now, STALLED_CYCLE_RESOLVE_SECS));
-    if let Some(open) = reentrant.as_ref() {
+        .filter(|open| open.reusable_by_reentrant_preflight());
+    if let Some(open) = reentrant {
+        if let (Some(existing), Some(requested)) = (open.turn_id.as_deref(), turn_id) {
+            anyhow::ensure!(
+                existing == requested,
+                "preflight cycle {} still belongs to turn {existing}; settle it before admitting {requested}",
+                open.cycle_id,
+            );
+        }
         eprintln!(
             "[preflight] re-entrant preflight kept open cycle {} for {}",
             open.cycle_id,
@@ -1957,9 +1925,15 @@ fn start_preflight_with_task_queue_selection_and_after_checkpoint(
         required_backlog_targets: Vec::new(),
         required_explicit_backlog_item_count: 0,
         required_plan_reference_count: 0,
-        prompt_targets: Vec::new(),
-        queue_task_id: queue_task_id.map(|s| s.to_string()),
-        turn_id: turn_id.map(|s| s.to_string()),
+        prompt_targets: reentrant
+            .map(|open| open.prompt_targets.clone())
+            .unwrap_or_default(),
+        queue_task_id: queue_task_id
+            .map(str::to_string)
+            .or_else(|| reentrant.and_then(|open| open.queue_task_id.clone())),
+        turn_id: turn_id
+            .map(str::to_string)
+            .or_else(|| reentrant.and_then(|open| open.turn_id.clone())),
         recycle_resume_consumed: false,
         pending_done_ids: Vec::new(),
         pending_only_commit_target_hash: None,
@@ -1994,9 +1968,14 @@ fn start_preflight_with_task_queue_selection_and_after_checkpoint(
         active_free_text_queue_heads: file_content
             .map(agent_doc_queue::queue_heads::active_free_text_queue_heads)
             .unwrap_or_default(),
-        selected_free_text_queue_heads: Vec::new(),
-        queue_selection_authority,
-        queue_selection_preempted: false,
+        selected_free_text_queue_heads: reentrant
+            .map(|open| open.selected_free_text_queue_heads.clone())
+            .unwrap_or_default(),
+        queue_selection_authority: match (queue_selection_authority, reentrant) {
+            (QueueSelectionAuthority::LegacyUnknown, Some(open)) => open.queue_selection_authority,
+            (authority, _) => authority,
+        },
+        queue_selection_preempted: reentrant.is_some_and(|open| open.queue_selection_preempted),
         // A re-entrant preflight of the same open cycle keeps the chat prompts
         // the first admission carried; the hook ledger was cleared by then.
         chat_prompts: reentrant
@@ -6512,7 +6491,7 @@ mod reentrant_preflight_tests {
     #[test]
     fn a_second_preflight_in_the_same_open_turn_reuses_the_cycle() {
         let open = state(CyclePhase::PreflightStarted, 1_000);
-        assert!(open.reusable_by_reentrant_preflight(0, 1_005, STALLED_CYCLE_RESOLVE_SECS));
+        assert!(open.reusable_by_reentrant_preflight());
     }
 
     /// A committed turn is a real boundary — the next preflight is a new turn
@@ -6520,7 +6499,7 @@ mod reentrant_preflight_tests {
     #[test]
     fn a_committed_cycle_is_not_reused() {
         let committed = state(CyclePhase::Committed, 1_000);
-        assert!(!committed.reusable_by_reentrant_preflight(0, 1_005, STALLED_CYCLE_RESOLVE_SECS));
+        assert!(!committed.reusable_by_reentrant_preflight());
     }
 
     #[test]
@@ -6535,31 +6514,62 @@ mod reentrant_preflight_tests {
     fn a_cycle_with_a_captured_response_is_not_reused() {
         let mut captured = state(CyclePhase::PreflightStarted, 1_000);
         captured.capture_id = Some("capture-1".to_string());
-        assert!(!captured.reusable_by_reentrant_preflight(0, 1_005, STALLED_CYCLE_RESOLVE_SECS));
+        assert!(!captured.reusable_by_reentrant_preflight());
 
         let mut written = state(CyclePhase::PreflightStarted, 1_000);
         written.response_sha256 = Some("deadbeef".to_string());
-        assert!(!written.reusable_by_reentrant_preflight(0, 1_005, STALLED_CYCLE_RESOLVE_SECS));
+        assert!(!written.reusable_by_reentrant_preflight());
     }
 
     /// A crashed or superseded older turn must not be inherited by a new one.
     /// Uses the same staleness policy the supervisor force-abandons on, so the
     /// two cannot drift.
     #[test]
-    fn a_stalled_open_cycle_is_not_inherited_by_a_new_turn() {
+    fn a_quiet_open_cycle_stays_reentrant_past_the_former_deadline() {
         let stalled = state(CyclePhase::PreflightStarted, 1_000);
         let now = 1_000 + STALLED_CYCLE_RESOLVE_SECS + 1;
         assert!(stalled.stalled_before_response_capture_cycle(0, now, STALLED_CYCLE_RESOLVE_SECS));
-        assert!(!stalled.reusable_by_reentrant_preflight(0, now, STALLED_CYCLE_RESOLVE_SECS));
+        assert!(stalled.reusable_by_reentrant_preflight());
     }
 
-    /// Inflight IPC means the cycle is live, so it is not stalled and stays
-    /// reusable even well past the deadline.
     #[test]
-    fn an_inflight_cycle_stays_reusable_past_the_deadline() {
-        let live = state(CyclePhase::PreflightStarted, 1_000);
-        let now = 1_000 + STALLED_CYCLE_RESOLVE_SECS + 1;
-        assert!(live.reusable_by_reentrant_preflight(1, now, STALLED_CYCLE_RESOLVE_SECS));
+    fn long_reentry_keeps_the_exact_admitted_cycle_and_prompt() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        let content = "# Session\n";
+        std::fs::write(&file, content).unwrap();
+        let admitted = start_preflight_with_task(
+            &file,
+            Some(content),
+            Some(content),
+            Some("row"),
+            Some("turn-a"),
+        )
+        .unwrap();
+        record_selected_free_text_queue_heads(&file, &["Finish the pending prompt".into()])
+            .unwrap();
+        age_current_cycle_for_tests(&file, STALLED_CYCLE_RESOLVE_SECS + 1).unwrap();
+
+        assert!(
+            start_preflight_with_task(
+                &file,
+                Some(content),
+                Some(content),
+                Some("other-row"),
+                Some("turn-b"),
+            )
+            .is_err(),
+            "a different turn cannot supersede the open admission"
+        );
+        let reentered = start_preflight(&file, Some(content), Some(content)).unwrap();
+        assert_eq!(reentered.cycle_id, admitted.cycle_id);
+        assert_eq!(reentered.turn_id.as_deref(), Some("turn-a"));
+        assert_eq!(reentered.queue_task_id.as_deref(), Some("row"));
+        assert_eq!(
+            reentered.selected_free_text_queue_heads,
+            ["Finish the pending prompt"]
+        );
     }
 }
 

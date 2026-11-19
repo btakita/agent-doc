@@ -249,6 +249,11 @@ mod tests {
             .unwrap();
     }
 
+    fn record_fixture_turn_end(file: &Path) {
+        let state = agent_doc_cycle_state_io::load(file).unwrap().unwrap();
+        agent_doc_test_support::record_fixture_harness_turn_end(file, state.updated_at + 1);
+    }
+
     fn age_cycle_state(file: &Path, age_secs: u64) {
         agent_doc_cycle_state_io::age_current_cycle_for_tests(file, age_secs).unwrap();
     }
@@ -771,12 +776,10 @@ mod tests {
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Abandoned);
     }
 
-    /// `#duplicatepreflightunblock`: a released owner plus the pre-capture
-    /// stall deadline is the second reclaim proof, so a duplicate invocation
-    /// has a bounded exit that does not wait on an operator typing `session
-    /// cancel-turn`.
+    /// Owner release cannot retire a quiet cycle. The harness's terminal
+    /// event can authorize that exact recovery.
     #[test]
-    fn cancel_preflight_cycle_after_owner_release_abandons_a_stalled_empty_preflight() {
+    fn cancel_preflight_cycle_after_owner_release_requires_a_harness_receipt() {
         let dir = setup_project();
         let doc = dir.path().join("test.md");
         let content = "# Doc\n\n## User\n\nDo the thing\n";
@@ -793,6 +796,11 @@ mod tests {
             CancelOutcome::Protected
         );
 
+        assert_eq!(
+            agent_doc_repair_command_io::cancel_preflight_cycle_after_owner_release(&doc).unwrap(),
+            CancelOutcome::Protected
+        );
+        record_fixture_turn_end(&doc);
         assert_eq!(
             agent_doc_repair_command_io::cancel_preflight_cycle_after_owner_release(&doc).unwrap(),
             CancelOutcome::Abandoned
@@ -822,6 +830,8 @@ mod tests {
             &doc,
             agent_doc_cycle_state_io::STALLED_CYCLE_RESOLVE_SECS + 1,
         );
+
+        record_fixture_turn_end(&doc);
 
         let applied = agent_doc_closeout_runtime_io::apply_closeout_recovery(&doc).unwrap();
         assert!(
@@ -4772,6 +4782,7 @@ mod tests {
         .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         age_cycle_state(&doc, STALE_EMPTY_PREFLIGHT_TTL_SECS + 1);
+        record_fixture_turn_end(&doc);
 
         let repaired = run(&doc).unwrap();
         assert_eq!(
@@ -4828,6 +4839,7 @@ mod tests {
         .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         age_cycle_state(&doc, STALE_EMPTY_PREFLIGHT_TTL_SECS + 1);
+        record_fixture_turn_end(&doc);
 
         let repaired = run(&doc).unwrap();
         assert_eq!(repaired, RepairOutcome::TemplateNormalized);
@@ -4875,6 +4887,7 @@ mod tests {
         );
         std::fs::write(&doc, &live).unwrap();
         age_cycle_state(&doc, STALE_EMPTY_PREFLIGHT_TTL_SECS + 1);
+        record_fixture_turn_end(&doc);
 
         let repaired = run(&doc).unwrap();
         assert_eq!(repaired, RepairOutcome::StalePreflightLockRepaired);
@@ -4921,6 +4934,7 @@ mod tests {
         );
         std::fs::write(&doc, &live).unwrap();
         age_cycle_state(&doc, STALE_EMPTY_PREFLIGHT_TTL_SECS + 1);
+        record_fixture_turn_end(&doc);
 
         let outcome = run(&doc).unwrap();
         assert_eq!(outcome, RepairOutcome::StalePreflightCycleAbandoned);
@@ -4984,6 +4998,7 @@ mod tests {
         )
         .unwrap();
         age_cycle_state(&doc, STALE_EMPTY_PREFLIGHT_TTL_SECS + 1);
+        record_fixture_turn_end(&doc);
 
         let outcome = run(&doc).unwrap();
         assert!(matches!(
@@ -5036,6 +5051,7 @@ mod tests {
         );
         std::fs::write(&doc, &live).unwrap();
         age_cycle_state(&doc, STALE_EMPTY_PREFLIGHT_TTL_SECS + 1);
+        record_fixture_turn_end(&doc);
 
         let outcome = run(&doc).unwrap();
         assert_eq!(outcome, RepairOutcome::StalePreflightCycleAbandoned);
@@ -5226,6 +5242,7 @@ mod tests {
         let state =
             agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         age_cycle_state(&doc, STALE_EMPTY_PREFLIGHT_TTL_SECS + 1);
+        record_fixture_turn_end(&doc);
 
         // Only the queue churned (halt: auto stripped + queue_active cleared +
         // body drained). The exchange/response is byte-identical. Commit it so

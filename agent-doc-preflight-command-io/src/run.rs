@@ -9160,13 +9160,21 @@ mod tests {
             "do [#root-empty-preflight]. spec-test-build-install-commit-push\n<!-- agent:boundary:abc123 -->\n",
         );
         std::fs::write(&doc, &live).unwrap();
+        agent_doc_preflight_io::gc::record_auto_gc_run(root, prior.updated_at).unwrap();
         for _ in 0..3 {
             age_cycle_state(
                 &doc,
                 agent_doc_turn::repair::STALE_EMPTY_PREFLIGHT_TTL_SECS + 1,
             );
 
-            run(&doc).unwrap();
+            let active = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+            agent_doc_test_support::record_fixture_harness_turn_end(&doc, active.updated_at + 1);
+            with_test_pane_authority_observations(
+                agent_doc_state_backbone::pane_execution_authority::InvocationIdentity::Headless,
+                agent_doc_state_backbone::pane_execution_authority::OwnerObservation::Absent,
+                || run(&doc),
+            )
+            .unwrap();
 
             let head = Command::new("git")
                 .current_dir(root)
@@ -9252,12 +9260,20 @@ mod tests {
             &format!("{prompt}\n<!-- agent:boundary:abc123 -->\n"),
         );
         std::fs::write(&doc, &live).unwrap();
+        agent_doc_preflight_io::gc::record_auto_gc_run(root, prior.updated_at).unwrap();
         age_cycle_state(
             &doc,
             agent_doc_turn::repair::STALE_EMPTY_PREFLIGHT_TTL_SECS + 1,
         );
 
-        run(&doc).unwrap();
+        let active = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        agent_doc_test_support::record_fixture_harness_turn_end(&doc, active.updated_at + 1);
+        with_test_pane_authority_observations(
+            agent_doc_state_backbone::pane_execution_authority::InvocationIdentity::Headless,
+            agent_doc_state_backbone::pane_execution_authority::OwnerObservation::Absent,
+            || run(&doc),
+        )
+        .unwrap();
 
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);

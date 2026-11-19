@@ -172,7 +172,6 @@ legacy ownership evidence falls back to whole-document equality.
 |----------|---------|-------------|
 | `AGENT_DOC_ALLOW_HOME_ROOT` | — | Set to `1` to allow your home directory to own an agent-doc project without its own `.git` entry. Filesystem and temp roots are ineligible. Child projects remain eligible. |
 | `AGENT_DOC_LOG` | — | Structured log filter (e.g. `debug`, `agent_doc::preflight=debug`). Logs to the eligible project's `.agent-doc/logs/debug.log.<date>`. Unbounded processes outside a project use `$XDG_STATE_HOME/agent-doc` or `$HOME/.local/state/agent-doc`. |
-| `AGENT_DOC_RUN_AGENT_TIMEOUT_SECS` | `1800` | Max agent run time before timeout (30 min) |
 | `AGENT_DOC_RUN_HEARTBEAT_SECS` | `30` | Run heartbeat interval |
 | `AGENT_DOC_QUEUE_MAX_ITERATIONS_HARD_CAP` | `50` | Hard cap on auto-loop queue iterations |
 | `AGENT_DOC_TSIFT_BIN` | — | Override tsift binary path |

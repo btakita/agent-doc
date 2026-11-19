@@ -681,24 +681,10 @@ pub fn run_once(
     }
 
     let fork = resume_id.is_none();
-    let response_result = {
-        let _heartbeat = RunHeartbeat::start(
-            file,
-            "child_agent_wait",
-            agent_name,
-            Some(&session_id),
-            Some(agent_doc_agent_io::agent::run_agent_timeout()),
-        );
-        backend.send(&prompt, resume_id, fork, resolved_model.as_deref())
-    };
-    let response = match response_result {
-        Ok(response) => response,
-        Err(err) if agent_doc_harness::timeout::error_chain_is_timeout(&err) => {
-            let diagnostic = run_dispatch_timeout_diagnostic(file, agent_name);
-            record_run_preflight_timeout(file, OpsLogEvent::DirectInvocationTimeout, &diagnostic)?;
-            anyhow::bail!("{}\n\nsource: {}", diagnostic, err);
-        }
-        Err(err) => return Err(err),
+    let response = {
+        let _heartbeat =
+            RunHeartbeat::start(file, "child_agent_wait", agent_name, Some(&session_id));
+        backend.send(&prompt, resume_id, fork, resolved_model.as_deref())?
     };
 
     let response_text = match run_mode {
@@ -706,10 +692,10 @@ pub fn run_once(
         RunMode::Template => response.text.clone(),
     };
     enforce_imperative_response_contract_for_diff(file, &the_diff, &response_text)?;
-    record_run_progress(file, "response_capture", agent_name, None);
+    record_run_progress(file, "response_capture", agent_name);
     agent_doc_repair_io::pending::save_pending(file, &response_text)?;
 
-    record_run_progress(file, "response_write", agent_name, None);
+    record_run_progress(file, "response_write", agent_name);
     match run_mode {
         RunMode::Append => apply_append_response_with_authority(
             effects,
@@ -740,7 +726,7 @@ pub fn run_once(
     let mut queue_consumption = None;
     if !no_git {
         let _heartbeat =
-            RunHeartbeat::start(file, "commit_closeout", agent_name, Some(&session_id), None);
+            RunHeartbeat::start(file, "commit_closeout", agent_name, Some(&session_id));
         let queue_guard_content =
             agent_doc_document_realtime_io::try_resolve_current_document_content(
                 file,
@@ -1344,7 +1330,6 @@ impl RunHeartbeat {
         phase: &'static str,
         agent_name: &str,
         session_id: Option<&str>,
-        timeout: Option<Duration>,
     ) -> Self {
         let file = file.to_path_buf();
         let agent_name = agent_name.to_string();
@@ -1358,15 +1343,11 @@ impl RunHeartbeat {
                     break;
                 }
                 let elapsed = started.elapsed();
-                let timeout_detail = timeout
-                    .map(|timeout| format!(" timeout_s={}", timeout.as_secs()))
-                    .unwrap_or_default();
                 let event = format!(
-                    "run_heartbeat phase={} agent={} elapsed_s={}{}",
+                    "run_heartbeat phase={} agent={} elapsed_s={}",
                     phase,
                     agent_name,
-                    elapsed.as_secs(),
-                    timeout_detail
+                    elapsed.as_secs()
                 );
                 let state = agent_doc_cycle_state_io::record_open_cycle_progress(&file, &event)
                     .ok()
@@ -1398,10 +1379,9 @@ impl RunHeartbeat {
                     })
                     .unwrap_or(("<unknown>", "<unknown>", 0));
                 eprintln!(
-                    "[run] heartbeat phase={} elapsed_s={}{} cycle_id={} cycle_phase={} cycle_age_s={}",
+                    "[run] heartbeat phase={} elapsed_s={} cycle_id={} cycle_phase={} cycle_age_s={}",
                     phase,
                     elapsed.as_secs(),
-                    timeout_detail,
                     cycle_id,
                     cycle_phase,
                     last_event_age
@@ -1432,13 +1412,10 @@ fn run_heartbeat_interval() -> Duration {
     Duration::from_secs(secs.max(1))
 }
 
-pub fn record_run_progress(file: &Path, phase: &str, agent_name: &str, timeout: Option<Duration>) {
-    let timeout_detail = timeout
-        .map(|timeout| format!(" timeout_s={}", timeout.as_secs()))
-        .unwrap_or_default();
-    let event = format!("run_progress phase={phase} agent={agent_name}{timeout_detail}");
+pub fn record_run_progress(file: &Path, phase: &str, agent_name: &str) {
+    let event = format!("run_progress phase={phase} agent={agent_name}");
     let _ = agent_doc_cycle_state_io::record_open_cycle_progress(file, &event);
-    eprintln!("[run] progress phase={phase}{timeout_detail}");
+    eprintln!("[run] progress phase={phase}");
 }
 
 pub fn mark_run_write_applied(file: &Path, event: &str) -> Result<()> {
@@ -1464,27 +1441,6 @@ pub fn start_run_cycle(file: &Path) -> Result<()> {
         )
         .map(|resolved| resolved.content)
     })?;
-    Ok(())
-}
-
-pub fn record_run_preflight_timeout(
-    file: &Path,
-    event: OpsLogEvent,
-    diagnostic: &str,
-) -> Result<()> {
-    let compact = diagnostic.split_whitespace().collect::<Vec<_>>().join(" ");
-    let event = format!("{event} {}", compact.chars().take(700).collect::<String>());
-    agent_doc_cycle_state_io::mark_recoverable_preflight_timeout(file, &event)?;
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "{} file={} event={} diagnostic={}",
-            OpsLogEvent::RunPreflightTimeout,
-            file.display(),
-            event.split_whitespace().next().unwrap_or(event.as_str()),
-            compact
-        ),
-    );
     Ok(())
 }
 
@@ -1792,51 +1748,6 @@ pub fn recursive_codex_start_invocation_diagnostic(
         &file.display().to_string(),
         &detail,
     ))
-}
-
-pub fn run_dispatch_timeout_diagnostic(file: &Path, agent_name: &str) -> String {
-    let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)
-        .ok()
-        .flatten();
-    let actor = actor_record_for_file(file).ok().flatten();
-    let tmux = agent_doc_tmux_io::configured_tmux();
-    let current_pane = agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux);
-    let (cycle_id, phase, last_event) = state
-        .as_ref()
-        .map(|state| {
-            (
-                state.cycle_id.as_str(),
-                state.phase.as_str(),
-                state.last_event.as_str(),
-            )
-        })
-        .unwrap_or(("<unknown>", "<unknown>", "<unknown>"));
-    let actor_detail = actor
-        .as_ref()
-        .map(|record| {
-            format!(
-                "actor_generation={} actor_state={} actor_pane={}",
-                record.generation,
-                record.state.as_str(),
-                record.pane_id
-            )
-        })
-        .unwrap_or_else(|| {
-            "actor_generation=<unknown> actor_state=<unknown> actor_pane=<unknown>".to_string()
-        });
-    format!(
-        "direct `agent-doc {}` invocation timed out after waiting {}s for {} to return after preflight. cycle_id={} phase={} last_event={} current_pane={} {}. The cycle is recoverable; inspect with `agent-doc session-check {}` or restart the managed owner with `agent-doc start {}`.",
-        file.display(),
-        agent_doc_agent_io::agent::run_agent_timeout().as_secs(),
-        agent_name,
-        cycle_id,
-        phase,
-        last_event,
-        current_pane.as_deref().unwrap_or("<unknown>"),
-        actor_detail,
-        file.display(),
-        file.display()
-    )
 }
 
 fn actor_record_for_file(file: &Path) -> Result<Option<agent_doc_controller::actor::ActorRecord>> {

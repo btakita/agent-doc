@@ -62,16 +62,8 @@ pub trait CloseoutEffects {
 
     fn cancel_preflight_cycle(&self, file: &Path) -> Result<agent_doc_turn::repair::CancelOutcome>;
 
-    /// Reclaim an empty preflight the controller proved its owner RELEASED.
-    ///
-    /// `#suprecyclespin-staleopencycle`: [`Self::cancel_preflight_cycle`] carries
-    /// only `Unproven` authority, so it refuses an ORPHANED empty preflight exactly
-    /// as it refuses a live one. That left the operator's own
-    /// `repair --apply-recovery` unable to clear a cycle whose
-    /// `closeout_owner_released` fact is already durable, with `session cancel-turn`
-    /// the only way out — and that interrupts the pane. The authority behind this
-    /// call still requires the release proof AND a cycle stalled past
-    /// `STALLED_CYCLE_RESOLVE_SECS`, so a generating first response stays protected.
+    /// Reclaim an empty preflight after its closeout owner releases it and
+    /// the authoritative harness reports that the turn ended.
     fn cancel_preflight_cycle_after_owner_release(
         &self,
         file: &Path,
@@ -1894,18 +1886,8 @@ pub fn apply_closeout_recovery(
                     Ok(RecoveryApplication::NothingToDo)
                 }
                 agent_doc_turn::repair::CancelOutcome::Protected => {
-                    // `#suprecyclespin-staleopencycle`: before reporting this
-                    // unclearable, try the release proof. `cancel_preflight_cycle`
-                    // above carries only `Unproven` authority, so it refuses an
-                    // ORPHAN — an empty preflight whose owner already recorded
-                    // `closeout_owner_released` — identically to a live cycle. The
-                    // route closeout drain has always had this second attempt
-                    // (`#duplicatepreflightunblock`); the operator's own
-                    // `repair --apply-recovery` did not, leaving `session
-                    // cancel-turn` (which interrupts the pane) as the only exit.
-                    // The authority still demands the release fact AND a cycle
-                    // stalled past `STALLED_CYCLE_RESOLVE_SECS`, so this cannot
-                    // overtake a first response that is still generating.
+                    // Writer release can precede a first response. The
+                    // recovery adapter also requires the harness turn-end receipt.
                     match effects.cancel_preflight_cycle_after_owner_release(file)? {
                         agent_doc_turn::repair::CancelOutcome::Abandoned => {
                             Ok(RecoveryApplication::Applied {
@@ -1920,7 +1902,7 @@ pub fn apply_closeout_recovery(
                         agent_doc_turn::repair::CancelOutcome::Protected => {
                             Ok(RecoveryApplication::NotApplied {
                                 state,
-                                reason: "empty preflight may still belong to a generating run; neither run cancellation nor a stalled owner release was proven".to_string(),
+                                reason: "empty preflight may still belong to a generating run; neither run cancellation nor a harness turn-end receipt was proven".to_string(),
                                 recommended: "cancel the harness run first, then retry closeout recovery"
                                     .to_string(),
                             })

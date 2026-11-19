@@ -1091,7 +1091,7 @@ impl Codex {
             }
             child.stdin.take();
         }
-        let output = super::wait_with_output_timeout(child, super::run_agent_timeout())?;
+        let output = child.wait_with_output()?;
 
         if !output.status.success() {
             let stderr = filter_codex_stderr_noise(&String::from_utf8_lossy(&output.stderr));

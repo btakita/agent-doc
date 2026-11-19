@@ -18,10 +18,7 @@
 use agent_doc_turn_executor::opencode_launch::{default_base_args, opencode_run_args};
 use anyhow::Result;
 
-use super::{
-    Agent, AgentResponse, configure_agent_child_process_group, run_agent_timeout,
-    wait_with_output_timeout,
-};
+use super::{Agent, AgentResponse, configure_agent_child_process_group};
 
 pub struct OpenCode {
     command: String,
@@ -61,7 +58,7 @@ impl Agent for OpenCode {
         cmd.stderr(std::process::Stdio::piped());
         configure_agent_child_process_group(&mut cmd);
 
-        let output = wait_with_output_timeout(cmd.spawn()?, run_agent_timeout())?;
+        let output = cmd.spawn()?.wait_with_output()?;
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 

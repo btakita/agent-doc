@@ -7,10 +7,7 @@ use serde::Deserialize;
 use std::io::Write;
 use std::process::Stdio;
 
-use super::{
-    Agent, AgentResponse, configure_agent_child_process_group, run_agent_timeout,
-    wait_with_output_timeout,
-};
+use super::{Agent, AgentResponse, configure_agent_child_process_group};
 
 pub struct Grok {
     command: String,
@@ -133,8 +130,7 @@ impl Agent for Grok {
             .stderr(Stdio::piped());
         configure_agent_child_process_group(&mut command);
         let child = command.spawn().with_context(launch_context)?;
-        let output =
-            wait_with_output_timeout(child, run_agent_timeout()).context("wait for Grok Build")?;
+        let output = child.wait_with_output().context("wait for Grok Build")?;
         if !output.status.success() {
             let message = protocol_error(&output.stdout)
                 .unwrap_or_else(|| String::from_utf8_lossy(&output.stderr).trim().to_string());

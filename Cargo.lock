@@ -2923,6 +2923,7 @@ dependencies = [
 name = "agent-doc-test-support"
 version = "0.35.581"
 dependencies = [
+ "agent-doc-controller",
  "agent-doc-controller-io",
  "agent-doc-crdt-relay-io",
  "agent-doc-harness",
@@ -2934,6 +2935,7 @@ dependencies = [
  "agent-doc-sqlite",
  "agent-doc-template",
  "agent-doc-tmux-io",
+ "agent-doc-turn-status-io",
  "parking_lot",
  "serde_json",
  "tempfile",

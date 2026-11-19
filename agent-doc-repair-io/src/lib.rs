@@ -264,9 +264,8 @@ pub trait RepairIoEffects {
     /// True only when the authoritative actor's exact pane still owns a live
     /// harness turn for this document.
     ///
-    /// Stale-preflight recovery is timeout-based and therefore must consult
-    /// this reactive fact before it closes a cycle whose model may still be
-    /// producing a response.
+    /// Recovery consults the authoritative turn binding and terminal receipt
+    /// before it closes an unanswered preflight.
     fn preflight_turn_fence(&self, file: &Path) -> Result<PreflightTurnFence>;
 
     fn mark_committed_frontmatter_if_turn_fence(
@@ -3189,16 +3188,8 @@ pub fn cancel_preflight_cycle_after_stable_dispatch_ready_pane(
     )
 }
 
-/// Reclaim the empty preflight left behind by an owner the controller proved
-/// RELEASED the cycle.
-///
-/// `#duplicatepreflightunblock`: this is the second proof that makes the
-/// reclaim reachable without an operator. The route closeout drain awaits the
-/// controller's closeout projection for a bounded 30s; an `OwnerReleased`
-/// change means no run is generating into the cycle any more, which is the
-/// same fact run cancellation proves. Without it, the drain's own
-/// `cancel_empty_preflight` step could never succeed and a duplicate
-/// invocation refused indefinitely.
+/// Reconcile an empty preflight after a closeout-owner release. The
+/// authoritative pane must also report that its harness turn ended.
 pub fn cancel_preflight_cycle_after_owner_release(
     effects: &impl RepairIoEffects,
     file: &Path,
@@ -3232,30 +3223,6 @@ fn cancel_preflight_cycle_with_authority(
             file,
             &format!(
                 "cancel_preflight_cycle_protected file={} cycle_id={} reason={}",
-                file.display(),
-                state.cycle_id,
-                authority.proof(),
-            ),
-        );
-        return Ok(agent_doc_turn::repair::CancelOutcome::Protected);
-    }
-    // `#duplicatepreflightunblock`: an owner-release projection also reports a
-    // release when there was no owner to release, which is indistinguishable
-    // from a fresh cycle whose model has not answered yet. Pair it with the
-    // pre-capture stall deadline — chosen in `#suprecyclespin-falseabandon` to
-    // clear normal first-response latency — so the reclaim stays bounded and
-    // operator-free without overtaking a live turn.
-    if authority.requires_stalled_cycle()
-        && !state.stalled_before_response_capture_cycle(
-            0,
-            now_secs(),
-            agent_doc_cycle_state_io::STALLED_CYCLE_RESOLVE_SECS,
-        )
-    {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "cancel_preflight_cycle_protected file={} cycle_id={} reason={}_cycle_not_stalled",
                 file.display(),
                 state.cycle_id,
                 authority.proof(),
@@ -3404,7 +3371,7 @@ pub fn repair_stale_preflight_started_cycle(
     // matching cycle hashes bind that exact visible patchback to the open
     // preflight, while HEAD proves it is still uncommitted. Diagnose the normal
     // closeout requirement immediately, but do not transition the fresh cycle.
-    // The stale-age gate below governs only automatic closure.
+    // Automatic closure requires a terminal turn receipt.
     if (raw_hashes_match || normalized_hashes_match)
         && !cycle_capture_exists
         && !head_already_matches_current_doc(file, &file_content)?
@@ -3426,9 +3393,7 @@ pub fn repair_stale_preflight_started_cycle(
         );
     }
 
-    let turn_fence = if !cycle_capture_exists
-        && age_secs >= agent_doc_turn::repair::STALE_EMPTY_PREFLIGHT_TTL_SECS
-    {
+    let terminal_turn = if !cycle_capture_exists {
         let fence = effects.preflight_turn_fence(file)?;
         if fence.active {
             agent_doc_ops_log_io::log_op(
@@ -3442,14 +3407,18 @@ pub fn repair_stale_preflight_started_cycle(
             );
             return Ok(agent_doc_turn::repair::RepairOutcome::Noop);
         }
-        Some(fence)
+        agent_doc_turn::repair::harness_turn_end_proves_orphaned_preflight(
+            fence.active,
+            fence.turn_ended_at,
+            state.updated_at,
+        )
+        .then_some(fence)
     } else {
         None
     };
 
     if (raw_hashes_match || normalized_hashes_match)
-        && !cycle_capture_exists
-        && age_secs >= agent_doc_turn::repair::STALE_EMPTY_PREFLIGHT_TTL_SECS
+        && let Some(turn_fence) = &terminal_turn
     {
         let committed_baseline =
             restore_empty_preflight_baseline_to_head(file, "repair_preflight_stale_lock")?;
@@ -3457,9 +3426,7 @@ pub fn repair_stale_preflight_started_cycle(
             .mark_committed_frontmatter_if_turn_fence(
                 file,
                 &state.cycle_id,
-                turn_fence
-                    .as_ref()
-                    .expect("stale empty cycle has a turn fence"),
+                turn_fence,
                 "repair_preflight_stale_lock",
                 committed_baseline.as_deref(),
                 Some(&file_content),
@@ -3556,7 +3523,7 @@ pub fn repair_stale_preflight_started_cycle(
     } {
         let steering = agent_doc_session_check_io::realtime_steering_since_turn_baseline(file)?;
         let preview = steering.preview().unwrap_or_default();
-        if age_secs >= agent_doc_turn::repair::STALE_EMPTY_PREFLIGHT_TTL_SECS {
+        if let Some(turn_fence) = &terminal_turn {
             let committed_baseline = restore_empty_preflight_baseline_to_head(
                 file,
                 "repair_preflight_stale_prompt_cycle_abandoned",
@@ -3565,9 +3532,7 @@ pub fn repair_stale_preflight_started_cycle(
                 .mark_abandoned_frontmatter_if_turn_fence(
                     file,
                     &state.cycle_id,
-                    turn_fence
-                        .as_ref()
-                        .expect("stale empty cycle has a turn fence"),
+                    turn_fence,
                     "repair_preflight_stale_prompt_cycle_abandoned",
                     committed_baseline.as_deref(),
                     Some(&file_content),
@@ -3616,26 +3581,21 @@ pub fn repair_stale_preflight_started_cycle(
             agent_doc_turn::closeout_guard::CloseoutGuardReason::OpenCycle,
         );
         anyhow::bail!(
-            "{} for {}: previous cycle `{}` is still `preflight_started`, the live document has unresolved prompt_target: {preview}, and no response exists to replay. The cycle is only {}s old; wait until it is stale or restart the harness pane and rerun `agent-doc {}` (or use `agent-doc start {}` from a fresh pane) so the prompt is handled by a new response cycle.",
+            "{} for {}: previous cycle `{}` is still `preflight_started`, the live document has unresolved prompt_target: {preview}, and no response exists to replay. The owning turn has no terminal receipt. Let it finish or explicitly cancel it before admitting a replacement.",
             agent_doc_turn::repair::EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR,
             file.display(),
             state.cycle_id,
-            age_secs,
-            file.display(),
-            file.display(),
         );
     }
 
-    if age_secs >= agent_doc_turn::repair::STALE_EMPTY_PREFLIGHT_TTL_SECS && !cycle_capture_exists {
+    if let Some(turn_fence) = &terminal_turn {
         let committed_baseline =
             restore_empty_preflight_baseline_to_head(file, "repair_preflight_stale_empty_cycle")?;
         if effects
             .mark_committed_frontmatter_if_turn_fence(
                 file,
                 &state.cycle_id,
-                turn_fence
-                    .as_ref()
-                    .expect("stale empty cycle has a turn fence"),
+                turn_fence,
                 "repair_preflight_stale_empty_cycle",
                 committed_baseline.as_deref(),
                 Some(&file_content),
@@ -5073,6 +5033,7 @@ mod tests {
 
         let effects = TestRepairIoEffects {
             activate_on_fenced_transition: Cell::new(true),
+            turn_ended_at: Cell::new(Some(cycle.updated_at)),
             ..Default::default()
         };
         assert_eq!(
@@ -5159,7 +5120,7 @@ mod tests {
     /// that was missing: it must reclaim at once, with no stall wait.
     #[test]
     fn harness_turn_end_receipt_reclaims_a_fresh_empty_preflight_after_clear() {
-        let (dir, doc, cycle) = fresh_empty_preflight_world();
+        let (dir, doc, _) = fresh_empty_preflight_world();
         let effects = TestRepairIoEffects::default();
 
         // Before /clear: no receipt. Every non-operator proof refuses.
@@ -5177,6 +5138,17 @@ mod tests {
             agent_doc_turn::repair::CancelOutcome::Protected,
             "no receipt, no proof"
         );
+        agent_doc_cycle_state_io::age_current_cycle_for_tests(
+            &doc,
+            agent_doc_cycle_state_io::STALLED_CYCLE_RESOLVE_SECS + 1,
+        )
+        .unwrap();
+        assert_eq!(
+            cancel_preflight_cycle_after_owner_release(&effects, &doc).unwrap(),
+            agent_doc_turn::repair::CancelOutcome::Protected,
+            "an expired heartbeat and missing closeout owner prove no terminal boundary"
+        );
+        let cycle = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         // A receipt in the same second as the preflight is ambiguous.
         effects.turn_ended_at.set(Some(cycle.updated_at));
         assert_eq!(

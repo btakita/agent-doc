@@ -18,18 +18,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Marker file, under a project's `.agent-doc/`, naming the cdylib version whose
 /// reload was deferred because an attached document was mid-cycle.
 pub const PENDING_NATIVE_RELOAD_FILE: &str = "pending-lib-reload";
-
-fn now_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
 
 /// Path of the deferred-reload marker for `project_root`.
 pub fn pending_native_reload_path(project_root: &Path) -> PathBuf {
@@ -38,24 +30,11 @@ pub fn pending_native_reload_path(project_root: &Path) -> PathBuf {
         .join(PENDING_NATIVE_RELOAD_FILE)
 }
 
-/// Whether `file` holds an open agent-doc cycle that a native generation handoff
-/// would strand.
-///
-/// A *stalled* open cycle does not block: an abandoned older turn must not freeze
-/// every editor in the project on the build it happened to load, and the
-/// supervisor recycle path already force-closes that shape past the same
-/// deadline. An unreadable projection blocks — the safe outcome is the editor
-/// keeping a generation that demonstrably works.
+/// An open cycle blocks a native handoff until closeout or recovery settles
+/// it. An unreadable projection also keeps the editor on its current build.
 pub fn document_cycle_blocks_native_reload(file: &Path) -> bool {
     match agent_doc_cycle_state_io::load_with_closeout_projection(file) {
-        Ok(Some(state)) => {
-            state.is_open()
-                && !state.open_stalled(
-                    0,
-                    now_secs(),
-                    agent_doc_cycle_state_io::STALLED_CYCLE_RESOLVE_SECS,
-                )
-        }
+        Ok(Some(state)) => state.is_open(),
         Ok(None) => false,
         Err(_) => true,
     }

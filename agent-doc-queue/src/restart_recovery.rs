@@ -64,6 +64,7 @@ pub enum WorkerPhase {
     Running,
     Reported,
     Lost,
+    Orphaned,
     QuotaBlocked,
     Cancelled,
     Completed,
@@ -258,10 +259,17 @@ impl RestartJournal {
                         RecoveryAction::PreserveReceipt
                     }
                     WorkerPhase::Reported => RecoveryAction::PreserveReceipt,
-                    WorkerPhase::Lost => RecoveryAction::Redispatch,
-                    WorkerPhase::Dispatching if !same_boot => RecoveryAction::Redispatch,
+                    WorkerPhase::Lost | WorkerPhase::Orphaned => RecoveryAction::NeedsOperator,
+                    // A reservation is an intent. A crash between native
+                    // spawn and bind can leave no worker id in this journal.
+                    WorkerPhase::Dispatching if !same_boot => RecoveryAction::NeedsOperator,
                     WorkerPhase::Running if !same_boot => {
-                        if checkpoint.artifact.is_some() {
+                        if checkpoint.artifact.as_ref().is_some_and(|artifact| {
+                            artifact
+                                .git_commit
+                                .as_ref()
+                                .is_some_and(|sha| !sha.trim().is_empty())
+                        }) {
                             RecoveryAction::IntegrateArtifacts
                         } else {
                             RecoveryAction::NeedsOperator
@@ -299,6 +307,9 @@ impl RestartJournal {
             if worker.identity_hash != previous_identity {
                 previous_identity.clone_from(&worker.identity_hash);
                 kept_for_identity = 0;
+            }
+            if !worker.phase.terminal() {
+                return true;
             }
             kept_for_identity += 1;
             kept_for_identity <= limits.recent_generations.max(1)
@@ -404,7 +415,7 @@ mod tests {
     }
 
     #[test]
-    fn restart_projects_resume_redispatch_and_fail_closed_rows() {
+    fn restart_projects_resume_artifact_recovery_and_fail_closed_rows() {
         let limits = RestartJournalLimits::default();
         let mut journal = RestartJournal::default();
         journal.record_main(
@@ -420,6 +431,14 @@ mod tests {
         );
         journal.record_worker(worker("dispatch", 1, WorkerPhase::Dispatching, 2), limits);
         journal.record_worker(worker("running", 1, WorkerPhase::Running, 3), limits);
+        journal.record_worker(worker("lost", 1, WorkerPhase::Lost, 3), limits);
+        journal.record_worker(worker("orphaned", 1, WorkerPhase::Orphaned, 3), limits);
+        let mut path_only = worker("path", 1, WorkerPhase::Running, 4);
+        path_only.artifact = Some(ArtifactReference {
+            locator_hash: "path-hash".to_string(),
+            git_commit: None,
+        });
+        journal.record_worker(path_only, limits);
         let mut with_artifact = worker("artifact", 1, WorkerPhase::Running, 4);
         with_artifact.artifact = Some(ArtifactReference {
             locator_hash: "path-hash".to_string(),
@@ -436,8 +455,16 @@ mod tests {
             projection.workers[0].action,
             RecoveryAction::IntegrateArtifacts
         );
-        assert_eq!(projection.workers[1].action, RecoveryAction::Redispatch);
-        assert_eq!(projection.workers[2].action, RecoveryAction::NeedsOperator);
+        assert_eq!(projection.workers.len(), 6);
+        assert!(
+            projection.workers[1..]
+                .iter()
+                .all(|worker| worker.action == RecoveryAction::NeedsOperator)
+        );
+        assert_eq!(
+            journal.reconcile("boot-a").workers[1].action,
+            RecoveryAction::Reattach
+        );
     }
 
     #[test]
@@ -507,6 +534,21 @@ mod tests {
         assert!(journal.workers.is_empty(), "old terminal workers are GC'd");
         assert!(journal.transitions.len() <= 4);
         assert!(journal.compacted_through > 0);
+    }
+
+    #[test]
+    fn compaction_never_discards_an_unresolved_older_generation() {
+        let limits = RestartJournalLimits {
+            recent_generations: 1,
+            ..RestartJournalLimits::default()
+        };
+        let mut journal = RestartJournal::default();
+        journal.record_worker(worker("same", 1, WorkerPhase::Orphaned, 1), limits);
+        journal.record_worker(worker("same", 2, WorkerPhase::Completed, 2), limits);
+        journal.record_worker(worker("same", 3, WorkerPhase::Completed, 3), limits);
+        assert_eq!(journal.workers.len(), 2);
+        assert_eq!(journal.workers[0].generation, 3);
+        assert_eq!(journal.workers[1].phase, WorkerPhase::Orphaned);
     }
 
     #[test]

@@ -202,16 +202,21 @@ pub fn queue_skip_diagnostic_for_response(content: &str, response: &str) -> Resu
     };
     let queue_head_display = display_queue_prompt_text(&queue_head);
     if crate::queue_response::latest_echo_cell_omits_address_fix(content, response, &queue_head) {
-        if crate::address_completion_proof::address_effect_unproven(&queue_head)
-            && !crate::queue_response::address_echo_lacks_written_fix(
-                content,
-                response,
-                &queue_head,
-            )
-        {
-            return Ok(format!(
-                "[queue] kept address head `{queue_head_display}` open. The response claims the address is done, but nothing observed the pull-request head change or a review reply on the addressed thread (#addressproof). `FIX-ON-HEAD` and `NO-WRITTEN-FIX` are not that observation. Next: commit the written fix onto the pull-request head, or post the review reply, and run the address again so the binary can read that fact."
-            ));
+        use crate::address_completion_proof::{AddressCompletion, queued_address_completion};
+        if !crate::queue_response::address_echo_lacks_written_fix(content, response, &queue_head) {
+            match queued_address_completion(content, &queue_head) {
+                Some(AddressCompletion::Unseen) => {
+                    return Ok(format!(
+                        "[queue] kept address head `{queue_head_display}` open. The exact before/current pull-request head and review reply evidence is unavailable (#addressproof). Reconcile the prior execution's evidence before making another remote change."
+                    ));
+                }
+                Some(AddressCompletion::NoEffect { .. }) => {
+                    return Ok(format!(
+                        "[queue] kept address head `{queue_head_display}` open. The observed pull-request head and review replies were unchanged (#addressproof). Land the written fix on the pull-request head, or post the review reply."
+                    ));
+                }
+                _ => {}
+            }
         }
         return Ok(format!(
             "[queue] kept address head `{queue_head_display}` open. The response does not land the review's written fix on the current head (#reviewfixonhead). A later review or a different behavior does not address it. Next: land that written fix on the exact current head and finish with `FIX-ON-HEAD <review-url> head=<sha>`, or finish with `NO-WRITTEN-FIX head=<sha>` when every review states no code change."

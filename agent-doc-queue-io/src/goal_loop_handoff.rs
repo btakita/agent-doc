@@ -225,9 +225,31 @@ pub fn requeue_nonterminal_hand_back(
     let address_lands = address_run
         && agent_doc_queue::address_fix_on_head::address_run_lands_written_fix(response);
     let address_pending = address_run && !address_lands;
-    // `#addressproof`: install the remote read before the completion decision.
-    // A forced observation (tests) replaces the network. No read is not proof.
-    let effect_observation = crate::address_effect::observation_for_item(file, &claim.item_text);
+    // Reject a stale hand-back before it can publish an observation on the
+    // current generation.
+    if address_run && let Some(generation) = generation {
+        anyhow::ensure!(
+            generation == claim.generation,
+            "stale queue claim generation {generation}; current generation is {}",
+            claim.generation,
+        );
+    }
+    let effect_observation = if address_run && claim.worker_binding_holds_attempt() {
+        crate::address_effect::observation_for_claim(file, &claim)
+    } else {
+        agent_doc_queue::address_completion_proof::AddressObservation::Unseen
+    };
+    let effect_unknown = address_run
+        && crate::address_effect::worker_observation_requires_reconciliation(
+            &claim,
+            &effect_observation,
+        );
+    if effect_unknown {
+        anyhow::ensure!(
+            generation == Some(claim.generation) && claim.worker_binding_holds_attempt(),
+            "unknown address effect requires the exact started worker generation"
+        );
+    }
     let _effect_guard = agent_doc_queue::address_completion_proof::AddressEffectGuard::install_item(
         &claim.item_text,
         effect_observation,
@@ -322,6 +344,7 @@ pub fn requeue_nonterminal_hand_back(
         address_fix_pending: address_pending,
         inline_threads_pending: inline_pending,
         address_effect_unproven: effect_unproven,
+        address_effect_unknown: effect_unknown,
     };
     mutate(file, |ledger| {
         if let Some(live) = live.as_ref() {
@@ -329,6 +352,14 @@ pub fn requeue_nonterminal_hand_back(
         }
         ledger.record(handoff);
     })?;
+    if effect_unknown {
+        // This is a retained nonterminal hand-back, not a completion
+        // receipt. Recovery must not promote it or release work for replay.
+        anyhow::bail!(
+            "address effect is unknown for worker generation {}; retained the exact hand-back. Reconcile the before and current pull-request evidence and retry the report for this generation. Do not redispatch the address.",
+            claim.generation,
+        );
+    }
     crate::cross_harness_handoff::record_goal_requeue(file, content, &claim, response)?;
     let requeued = crate::claim_release_receipt::release_attempt(
         file,
@@ -470,6 +501,7 @@ pub fn requeue_with_prompt_pressure(
         address_fix_pending: false,
         inline_threads_pending: false,
         address_effect_unproven: false,
+        address_effect_unknown: false,
     };
     mutate(file, |ledger| {
         if let Some(live) = live.as_ref() {
@@ -517,6 +549,7 @@ pub fn record_quota_requeue(file: &Path, claim: &QueueClaim) -> Result<()> {
         address_fix_pending: false,
         inline_threads_pending: false,
         address_effect_unproven: false,
+        address_effect_unknown: false,
     };
     mutate(file, |ledger| ledger.record(handoff))
 }

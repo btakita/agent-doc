@@ -1216,7 +1216,7 @@ fn claim_with_runtime_projection_under_apply_guard(
         && claim.state == agent_doc_queue::queue_claim::QueueClaimState::Claimed
         && claim.owner.starts_with("subagent:")
     {
-        crate::address_effect::capture_before_execution(file, &claim.item_text)
+        crate::address_effect::capture_before_worker(file, &claim)
     } else {
         Ok(())
     };
@@ -4418,6 +4418,63 @@ mod tests {
             crate::queue_claim::load_ledger(&doc)
                 .unwrap()
                 .claims
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn missing_address_receipt_keeps_the_exact_attempt_and_retains_handback() {
+        use agent_doc_queue::address_completion_proof::{AddressObservation, ForcedObservation};
+
+        let dir = tempfile::tempdir().unwrap();
+        let url = "https://github.com/sample-org/sample-repo/pull/11";
+        let item = format!("{url}: #address");
+        let doc =
+            write_named_claim_projection_doc(dir.path(), &format!("- ### {url}\n  - #address\n"));
+        std::fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            "---\npresets:\n  '#address': 'Address every actionable review item on the current head.'\n---\n",
+        )
+        .unwrap();
+        let effects = FakeEffects::default();
+        let (_, claim) =
+            claim_with_runtime_projection(&effects, &doc, &item, "subagent:first", 600).unwrap();
+        crate::queue_claim::start_attempt(
+            &doc,
+            &item,
+            "subagent:first",
+            "worker:first",
+            600,
+            claim.generation,
+        )
+        .unwrap();
+        project_claim_item_runtime_state_with_effects(&effects, &doc, &item, false).unwrap();
+        let running = std::fs::read_to_string(&doc).unwrap();
+        let _observation = ForcedObservation::install(AddressObservation::MissingBaseline);
+        let handback = "NO-WRITTEN-FIX head=abc123";
+        let error = crate::goal_loop_handoff::requeue_nonterminal_hand_back(
+            &doc,
+            &running,
+            &item,
+            Some(claim.generation),
+            handback,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("address effect is unknown"));
+        let retained = crate::goal_loop_handoff::load(&doc).unwrap();
+        let retained = retained.latest_for(&claim.identity).unwrap();
+        assert_eq!(retained.response, handback);
+        assert_eq!(retained.generation, claim.generation);
+        assert!(retained.address_effect_unknown);
+        assert!(
+            crate::claim_release_receipt::load(&doc)
+                .unwrap()
+                .receipts
+                .is_empty()
+        );
+        assert!(
+            crate::subagent_dispatch::pending_subagent_dispatch_for_content(&doc, &running)
+                .unwrap()
                 .is_empty()
         );
     }

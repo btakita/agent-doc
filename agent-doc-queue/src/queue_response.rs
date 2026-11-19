@@ -2412,7 +2412,7 @@ pub fn latest_echo_cell_omits_address_fix(content: &str, text: &str, head_text: 
     }
     let presets = crate::goal_preset_terminal::effective_presets_for_content(content);
     crate::address_fix_on_head::head_is_address_run(head_text, &presets)
-        && crate::address_completion_proof::address_effect_unproven(head_text)
+        && crate::address_completion_proof::queued_address_effect_unproven(content, head_text)
         && latest_echo_cell(content, text, head_text).is_some()
 }
 
@@ -2444,7 +2444,7 @@ fn address_answer_lacks_effect_proof(content: &str, response_body: &str, head_te
     if !crate::address_fix_on_head::head_is_address_run(head_text, &presets) {
         return false;
     }
-    if !crate::address_completion_proof::address_effect_unproven(head_text) {
+    if !crate::address_completion_proof::queued_address_effect_unproven(content, head_text) {
         return false;
     }
     let echoed = response_explicit_queue_prompt_echoes_head(response_body, head_text)

@@ -591,6 +591,10 @@ pub struct GoalLoopHandoff {
     /// observation showed a pull-request head change or a review reply.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub address_effect_unproven: bool,
+    /// Before/current evidence was unavailable, so a later claim cannot
+    /// silently repeat the external effect.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub address_effect_unknown: bool,
 }
 
 /// Why a prompt hand-back was requeued instead of reported (`#promptpressure`).

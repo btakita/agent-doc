@@ -18,9 +18,8 @@
 //!   is the property `#queuestatemachine` / `#qdedupsync` build on.
 //!
 //! The wire structs here match `src/lazily-spec/schemas/{snapshot,delta}.json`
-//! directly so kt/js/rs import one canonical vocabulary. The `lazily-spec`
-//! schema-pin half of `#lazilyspecpin` lands in the sibling `lazily-spec`
-//! session; this module is the in-repo producer.
+//! directly. The agent-doc-specific node vocabulary is pinned in
+//! `schemas/agent-doc-state.json`; this module is its producer.
 
 pub mod lazily_convert;
 
@@ -586,8 +585,8 @@ pub enum AgentDocNodeType {
 }
 
 impl AgentDocNodeType {
-    /// Wire-stable, versioned `type_tag` string. Never rename without bumping
-    /// the lazily-spec schema.
+    /// Wire-stable, versioned `type_tag` string. Renames require a version bump
+    /// in the agent-doc state vocabulary schema.
     pub const fn type_tag(self) -> &'static str {
         match self {
             Self::DocumentBaseline => "agent_doc.document.baseline",
@@ -1341,6 +1340,21 @@ mod tests {
     }
 
     #[test]
+    fn schema_pins_the_produced_node_type_tags() {
+        let schema: serde_json::Value =
+            serde_json::from_str(include_str!("../../schemas/agent-doc-state.json")).unwrap();
+        let expected = serde_json::json!(AgentDocNodeType::ALL.map(AgentDocNodeType::type_tag));
+        assert_eq!(schema["$defs"]["TypeTag"]["enum"], expected);
+
+        let registry = schema["examples"][0]["node_kinds"].as_array().unwrap();
+        let registered: Vec<_> = registry.iter().map(|kind| &kind["type_tag"]).collect();
+        assert_eq!(
+            registered,
+            expected.as_array().unwrap().iter().collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn cold_read_emits_snapshot_for_empty_document() {
         let ledger = EventLedger::new();
         let result = subscribe(&ledger, "no-such-doc", 0);
@@ -1629,10 +1643,9 @@ mod tests {
 
     /// `#lazilystatesync5` / `#6n5j` — cross-editor convergence parity.
     ///
-    /// The shared canonical input is the lazily-spec conformance fixture pair
-    /// (`conformance/agent-doc/{snapshot,delta}_agent_doc_state.json`, vendored
-    /// byte-identical from `src/lazily-spec/conformance/agent-doc/`). The
-    /// fixtures use the lazily-spec *generic graph* wire shape; the agent-doc
+    /// The shared canonical input is the fixture pair under
+    /// `conformance/agent-doc/` at the repository root. The fixtures use the
+    /// lazily-spec generic graph wire shape; the agent-doc
     /// FFI emits the flattened `state_wire` shape. The three implementations are
     /// pinned to ONE derived expectation declared in the fixture `assertions`
     /// block:
@@ -1677,9 +1690,8 @@ mod tests {
         }
 
         /// (a) The canonical fixture assertions ARE the pinned cross-language
-        /// expectation. If the lazily-spec source drifts and the vendored copy is
-        /// re-synced with different values, this test forces a deliberate update
-        /// here (and in the kt/js mirrors that assert the same numbers).
+        /// expectation. A change must be reflected here and in the Kotlin and
+        /// JavaScript mirrors that assert the same values.
         #[test]
         fn fixtures_declare_the_canonical_expectation() {
             let snapshot = load_fixture("snapshot_agent_doc_state.json");

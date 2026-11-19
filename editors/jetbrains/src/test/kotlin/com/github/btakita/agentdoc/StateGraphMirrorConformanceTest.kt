@@ -11,11 +11,10 @@ import org.junit.Test
 /**
  * `#lzsync` 3B — cross-editor convergence parity (Kotlin half), native wire.
  *
- * The shared canonical input is the lazily-spec conformance fixture pair
+ * The shared canonical input is the agent-doc conformance fixture pair
  * (`conformance/agent-doc/{snapshot,delta}_agent_doc_state.json`), vendored into
- * this module's test resources byte-identical from
- * `src/lazily-spec/conformance/agent-doc/`. The Rust authoritative graph
- * (`state_wire.rs mod conformance_parity`) and the VS Code view
+ * this module's test resources as byte-identical copies. The Rust authoritative graph
+ * (`agent-doc-state-wire/src/lib.rs`, `mod conformance_parity`) and the VS Code view
  * (`stateMirrorConformance.test.ts`) assert the SAME expectation against the SAME
  * fixtures, so the three implementations are pinned to one canonical answer
  * without a live cross-language harness:

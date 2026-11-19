@@ -16,11 +16,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /**
  * `#lzsync` 3B — cross-editor convergence parity (JS half), native wire.
  *
- * The shared canonical input is the lazily-spec conformance fixture pair
+ * The shared canonical input is the agent-doc conformance fixture pair
  * (`conformance/agent-doc/{snapshot,delta}_agent_doc_state.json`), vendored into
- * `editors/vscode/test-fixtures/` byte-identical from
- * `src/lazily-spec/conformance/agent-doc/`. The Rust authoritative graph
- * (`state_wire.rs mod conformance_parity`) and the JetBrains view
+ * `editors/vscode/test-fixtures/` as byte-identical copies. The Rust authoritative graph
+ * (`agent-doc-state-wire/src/lib.rs`, `mod conformance_parity`) and the JetBrains view
  * (`StateGraphMirrorConformanceTest.kt`) assert the SAME expectation against the
  * SAME fixtures, so all three implementations are pinned to one canonical answer
  * without a live cross-language harness:

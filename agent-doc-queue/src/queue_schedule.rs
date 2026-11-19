@@ -1304,7 +1304,8 @@ pub fn plan_loop_restore_for_queue(
             continue;
         }
         kept_body.push_str(&body[cursor..range.start]);
-        let (child_end, next_index) = closed_by_children_end(body, &spans, index, prompt.indent);
+        let (child_end, next_index) =
+            generated_projection_children_end(body, &spans, index, prompt.indent);
         if child_end > range.end {
             children_by_id.insert(id, body[range.end..child_end].to_string());
         }
@@ -1341,21 +1342,22 @@ pub fn plan_loop_restore_for_queue(
     Ok(Some(updated))
 }
 
-/// End of the nested `**Closed by:**` block that belongs to the completed row
-/// at `parent_index`, and the span index just after that block.
+/// End of the nested binary-owned projection block that belongs to the completed
+/// row at `parent_index`, and the span index just after that block.
 ///
-/// The block is the contiguous deeper list rows that are `**Closed by:**`
-/// back-references, plus any list rows indented beneath those back-references.
-/// A blank line may sit between them. Anything else stays where it is, so a
-/// sibling row is not pulled into the restore.
-fn closed_by_children_end(
+/// The block is the contiguous deeper list rows rooted at `**Closed by:**` or a
+/// canonical `**Response [#r-…]**` row. A blank line may sit between them.
+/// Anything else stays where it is, so a sibling row is not pulled into the
+/// restore. Moving the whole generated response subtree prevents a loop reset
+/// from leaving it orphaned after the completed parent is unstruck.
+fn generated_projection_children_end(
     body: &str,
     spans: &[(QueueEntry, std::ops::Range<usize>)],
     parent_index: usize,
     parent_indent: usize,
 ) -> (usize, usize) {
     let mut end = spans[parent_index].1.end;
-    let mut closed_by_indent: Option<usize> = None;
+    let mut generated_root_indent: Option<usize> = None;
     let mut index = parent_index + 1;
     while index < spans.len() {
         let range = &spans[index].1;
@@ -1375,13 +1377,19 @@ fn closed_by_children_end(
         if indent <= parent_indent {
             break;
         }
-        let closed_by = content.starts_with("**Closed by:**");
-        let nested_under_closed_by = closed_by_indent.is_some_and(|marker| indent > marker);
-        if !closed_by && !nested_under_closed_by {
+        let response_row = agent_doc_markdown_ast::overlay::response_row_child_end(
+            std::slice::from_ref(&first_line),
+            0,
+            indent,
+        )
+        .is_some();
+        let generated_root = content.starts_with("**Closed by:**") || response_row;
+        let nested_under_generated = generated_root_indent.is_some_and(|marker| indent > marker);
+        if !generated_root && !nested_under_generated {
             break;
         }
-        if closed_by && closed_by_indent.is_none() {
-            closed_by_indent = Some(indent);
+        if generated_root && generated_root_indent.is_none() {
+            generated_root_indent = Some(indent);
         }
         end = range.end;
         index += 1;
@@ -2120,6 +2128,51 @@ mod tests {
             .expect("the struck watch row is restored");
         let expected = format!(
             "# Doc\n\n## Loop <!-- agent:loop interval=\"1h\" priority keep stop -->\n- ~~other~~\n  - **Closed by:** [#r-aaaaaaaaaaaa]\n- {WATCH}\n  - **Closed by:** [#r-7fd5420c7f28]\n  - **Closed by:** [#r-2e5433bdab4b]\n<!-- /agent:loop -->\n"
+        );
+        assert_eq!(restored, expected);
+    }
+
+    /// A completed loop row can carry the full generated response projection,
+    /// not only legacy `**Closed by:**` backlinks. Resetting the pass must move
+    /// that subtree with the unstruck row instead of leaving an indented orphan
+    /// at the top of the component (agent-doc-bugs, 2026-11-19).
+    #[test]
+    fn restore_keeps_generated_response_subtree_under_the_unstruck_loop_item() {
+        const NEEDS_COMPLETE: &str = "do [#needscomplete]";
+        const RESPONSE: &str = concat!(
+            "  - **Response [#r-99872204c75f]**\n",
+            "    - **Timestamp:** 2026-11-19T20:12:28.000Z\n",
+            "    - **Summary:** The archived work is already complete.\n",
+            "    - **State:** Complete.\n",
+            "    - **Guidance:** Safe to delete this completed row.\n",
+        );
+        let content = format!(
+            concat!(
+                "# Doc\n\n",
+                "## Loop <!-- agent:loop interval=\"1h\" priority keep -->\n",
+                "- ~~{needs_complete}~~\n",
+                "{response}",
+                "- ~~other~~\n",
+                "<!-- /agent:loop -->\n",
+            ),
+            needs_complete = NEEDS_COMPLETE,
+            response = RESPONSE,
+        );
+
+        let restored = plan_loop_restore(&content, &heads(&[NEEDS_COMPLETE]))
+            .unwrap()
+            .expect("the completed loop row is restored");
+        let expected = format!(
+            concat!(
+                "# Doc\n\n",
+                "## Loop <!-- agent:loop interval=\"1h\" priority keep -->\n",
+                "- ~~other~~\n",
+                "- {needs_complete}\n",
+                "{response}",
+                "<!-- /agent:loop -->\n",
+            ),
+            needs_complete = NEEDS_COMPLETE,
+            response = RESPONSE,
         );
         assert_eq!(restored, expected);
     }

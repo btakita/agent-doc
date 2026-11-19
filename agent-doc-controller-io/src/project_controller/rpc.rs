@@ -20553,6 +20553,7 @@ fn install_controller_request_thread_context(runtime: &Arc<ControllerRuntime>) {
 #[cfg(feature = "test-support")]
 pub fn start_state_actor_for_tests(project_root: &Path) -> Result<StateActorTestHandle> {
     let sock = socket_path(project_root);
+    prepare_controller_socket_parent(&sock, &sock)?;
     // A Windows controller pipe (`\\.\pipe\...`) has no filesystem parent.
     // Creating `\\.\pipe` fails, and the pipe disappears with its listener.
     if !agent_doc_controller::paths::is_named_pipe_path(&sock) {
@@ -20560,17 +20561,10 @@ pub fn start_state_actor_for_tests(project_root: &Path) -> Result<StateActorTest
             std::fs::remove_file(&sock)
                 .with_context(|| format!("remove stale test actor socket {}", sock.display()))?;
         }
-        if let Some(parent) = sock.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
     }
     let bootstrap = write_bootstrap(project_root, LaunchMode::Lazy)?;
     let runtime = ControllerRuntime::new_arc(bootstrap)?;
-    let name = sock.clone().to_fs_name::<GenericFilePath>()?;
-    let listener = ListenerOptions::new()
-        .name(name)
-        .create_sync()
-        .with_context(|| format!("failed to listen on {}", sock.display()))?;
+    let listener = bind_controller_listener(&sock)?;
     listener
         .set_nonblocking(ListenerNonblockingMode::Accept)
         .context("failed to set test state actor listener nonblocking")?;
@@ -20876,6 +20870,85 @@ fn detached_temp_project_root_under(project_root: &Path, extra_temp_base: &Path)
     })
 }
 
+#[cfg(unix)]
+fn controller_user() -> libc::uid_t {
+    // SAFETY: geteuid only reads the effective ID of this process.
+    unsafe { libc::geteuid() }
+}
+
+fn prepare_controller_socket_parent(sock: &Path, public_sock: &Path) -> Result<()> {
+    if agent_doc_controller::paths::is_named_pipe_path(sock) {
+        return Ok(());
+    }
+    let parent = sock
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .context("controller socket needs a parent directory")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+
+        let managed = Some(parent) == public_sock.parent();
+        if managed
+            && let Err(err) = std::fs::DirBuilder::new().mode(0o700).create(parent)
+            && err.kind() != ErrorKind::AlreadyExists
+        {
+            return Err(err)
+                .with_context(|| format!("create controller directory {}", parent.display()));
+        }
+        // Validate and restrict the same directory inode. A symlink must never
+        // redirect the permission change to an unrelated directory.
+        let directory = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+            .open(parent)
+            .with_context(|| format!("open controller directory {}", parent.display()))?;
+        let metadata = directory.metadata()?;
+        anyhow::ensure!(
+            metadata.uid() == controller_user(),
+            "controller directory {} is not owned by the current user",
+            parent.display()
+        );
+        if metadata.mode() & 0o7777 != 0o700 {
+            anyhow::ensure!(
+                managed,
+                "custom controller socket directory {} must have mode 0700",
+                parent.display()
+            );
+            directory
+                .set_permissions(std::fs::Permissions::from_mode(0o700))
+                .with_context(|| format!("restrict controller directory {}", parent.display()))?;
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = public_sock;
+        std::fs::create_dir_all(parent)?;
+    }
+    Ok(())
+}
+
+fn bind_controller_listener(sock: &Path) -> Result<interprocess::local_socket::Listener> {
+    let name = sock.to_path_buf().to_fs_name::<GenericFilePath>()?;
+    let options = ListenerOptions::new().name(name);
+    #[cfg(target_os = "linux")]
+    let options = {
+        use interprocess::os::unix::local_socket::ListenerOptionsExt as _;
+        options.mode(0o600)
+    };
+    let listener = options
+        .create_sync()
+        .with_context(|| format!("failed to listen on {}", sock.display()))?;
+    #[cfg(all(unix, not(target_os = "linux")))]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        // The parent is already private on platforms without pre-bind chmod.
+        std::fs::set_permissions(sock, std::fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("restrict controller socket {}", sock.display()))?;
+    }
+    Ok(listener)
+}
+
 pub(crate) fn serve_with_options(
     project_root: &Path,
     launch_mode: LaunchMode,
@@ -20913,6 +20986,12 @@ pub(crate) fn serve_with_options(
     let root_incarnation = ProjectRootIncarnation::capture(project_root)?;
     let public_sock = socket_path(project_root);
     let mut sock = listen_socket.unwrap_or_else(|| public_sock.clone());
+    // Measure the path actually being bound (including handoff overrides)
+    // before touching its filesystem parent.
+    if let Some(reason) = agent_doc_controller::paths::resolved_socket_path_rejection(&sock) {
+        anyhow::bail!(reason);
+    }
+    prepare_controller_socket_parent(&sock, &public_sock)?;
     if sock == public_sock
         && handoff_state == ControllerHandoffState::Stable
         && let Some(active_status) = active_public_controller_blocks_public_launch(project_root)
@@ -20942,22 +21021,11 @@ pub(crate) fn serve_with_options(
     // loop (renames the temp socket onto `public_sock`), after which it serves as the
     // authoritative public controller and is no longer a replacement.
     let mut handoff_temp_socket: Option<PathBuf> = (sock != public_sock).then(|| sock.clone());
-    // Refuse before touching the filesystem: a `sun_path` overflow makes the bind
-    // below fail with a bare OS error that reads as a transient startup problem,
-    // and every client then polls for a controller that can never appear
-    // (`#ctrlsockpathtoolong`). `sock` may be a longer generation-scoped handoff
-    // path than `public_sock`, so measure the one actually being bound.
-    if let Some(reason) = agent_doc_controller::paths::resolved_socket_path_rejection(&sock) {
-        anyhow::bail!(reason);
-    }
     // A Windows controller pipe (`\\.\pipe\...`) has no filesystem parent.
     // Creating `\\.\pipe` fails before interprocess can bind the name.
     if !agent_doc_controller::paths::is_named_pipe_path(&sock) {
         if sock.exists() {
             let _ = std::fs::remove_file(&sock);
-        }
-        if let Some(parent) = sock.parent() {
-            std::fs::create_dir_all(parent)?;
         }
     }
     if !root_incarnation.still_matches(project_root) {
@@ -20990,12 +21058,8 @@ pub(crate) fn serve_with_options(
     // between the bind below and the first `accept()` must therefore be bounded
     // and cheap; this fold is neither.
     let reliable_sync_recovery = hydrate_reliable_sync_liveness(&durable_project_root)?;
-    let name = sock.clone().to_fs_name::<GenericFilePath>()?;
     let listener_bound_at = Instant::now();
-    let mut listener = ListenerOptions::new()
-        .name(name)
-        .create_sync()
-        .with_context(|| format!("failed to listen on {}", sock.display()))?;
+    let mut listener = bind_controller_listener(&sock)?;
     let socket_incarnation = ControllerSocketIncarnation::capture(&sock);
     if !root_incarnation.still_matches(project_root) {
         drop(listener);
@@ -24334,10 +24398,25 @@ fn controller_request_peer_pid() -> Option<u32> {
     CONTROLLER_REQUEST_PEER_PID.get()
 }
 
-fn stream_peer_pid(stream: &interprocess::local_socket::Stream) -> Option<u32> {
+fn controller_stream_peer_pid(stream: &interprocess::local_socket::Stream) -> Result<Option<u32>> {
     use interprocess::local_socket::traits::StreamCommon as _;
-    let pid = stream.peer_creds().ok()?.pid()?;
-    u32::try_from(pid).ok().filter(|pid| *pid != 0)
+    #[cfg(unix)]
+    let credentials = {
+        let credentials = stream
+            .peer_creds()
+            .context("read project controller client peer credentials")?;
+        anyhow::ensure!(
+            credentials.euid() == Some(controller_user()),
+            "project controller client does not belong to the current user"
+        );
+        Some(credentials)
+    };
+    #[cfg(not(unix))]
+    let credentials = stream.peer_creds().ok();
+    Ok(credentials
+        .and_then(|credentials| credentials.pid())
+        .and_then(|pid| u32::try_from(pid).ok())
+        .filter(|pid| *pid != 0))
 }
 
 pub(crate) fn serve_client(
@@ -24346,8 +24425,9 @@ pub(crate) fn serve_client(
     should_stop: &AtomicBool,
     sock: &Path,
 ) -> Result<()> {
+    let peer_pid = controller_stream_peer_pid(&stream)?;
     install_controller_request_thread_context(runtime);
-    let _peer = enter_controller_request_peer(stream_peer_pid(&stream));
+    let _peer = enter_controller_request_peer(peer_pid);
     stream
         .set_recv_timeout(Some(CONTROLLER_IDLE_CLIENT_TIMEOUT))
         .context("failed to set project controller client read timeout")?;
@@ -24898,14 +24978,18 @@ pub(crate) fn handle_request_locked(
             controller_envelope(handle_turn_admission_projection(runtime.as_ref(), request))
         }
         "command_plane_submit" => {
+            let client_version = client_binary_version
+                .as_deref()
+                .filter(|version| !version.trim().is_empty())
+                .context("command_plane_submit refused: controller_binary_version_required")?;
             // #af88 B enforcement: a command-plane submit persists facts (the
             // durable sink), so refuse it when the caller proves this controller
             // is serving a stale binary. Reuse `controller_binary_stale` so the
             // client's existing one-retry reconnect loop promotes the fresh
             // binary — same rule as `dispatch` / Compact Exchange.
+            let stale_client = stale_mutating_client_binary(Some(client_version));
             let stale_release = stale_client_may_release_closeout_owner(&request);
-            if let Some(client_version) =
-                stale_mutating_client_binary(client_binary_version.as_deref())
+            if let Some(client_version) = stale_client
                 && !stale_release
             {
                 agent_doc_ops_log_io::log_op(
@@ -24922,9 +25006,7 @@ pub(crate) fn handle_request_locked(
                     client_version
                 );
             }
-            if stale_mutating_client_binary(client_binary_version.as_deref()).is_some()
-                && stale_release
-            {
+            if stale_client.is_some() && stale_release {
                 // `#closeoutreleaseversionskew`: the process that acquired a
                 // closeout owner can outlive an install/controller promotion.
                 // Releasing that exact `(cycle_id, owner_id)` capability is a
@@ -51248,7 +51330,10 @@ mod tests {
             .unwrap();
         let client = connect_path(&sock).unwrap();
         let accepted = interprocess::local_socket::traits::Listener::accept(&listener).unwrap();
-        assert_eq!(stream_peer_pid(&accepted), Some(std::process::id()));
+        assert_eq!(
+            controller_stream_peer_pid(&accepted).unwrap(),
+            Some(std::process::id())
+        );
         drop(client);
     }
 
@@ -65763,6 +65848,46 @@ mod tests {
     }
 
     #[test]
+    fn command_plane_submit_requires_a_nonempty_string_binary_version() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let request = ControllerRequest::command_plane_submit("".to_string());
+        let unstamped = serde_json::to_value(request).unwrap();
+        let mut invalid_requests = vec![unstamped.clone()];
+        for invalid in [
+            serde_json::Value::Null,
+            serde_json::json!(""),
+            serde_json::json!("   "),
+            serde_json::json!(123),
+        ] {
+            let mut request = unstamped.clone();
+            request["binary_version"] = invalid;
+            invalid_requests.push(request);
+        }
+        for request in invalid_requests {
+            let (response, should_stop) =
+                handle_request_for_client(&serde_json::to_string(&request).unwrap(), &runtime)
+                    .unwrap();
+            let envelope: serde_json::Value = serde_json::from_str(&response).unwrap();
+            assert_eq!(envelope["ok"], false, "{envelope}");
+            assert!(
+                envelope["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains("controller_binary_version_required"),
+                "{envelope}"
+            );
+            assert!(!should_stop);
+        }
+    }
+
+    fn stamped_command_plane_request(request: &ControllerRequest) -> String {
+        let mut value = serde_json::to_value(request).unwrap();
+        value["binary_version"] = serde_json::Value::String(identity_version());
+        serde_json::to_string(&value).unwrap()
+    }
+
+    #[test]
     fn command_plane_submit_dispatch_reaches_closeout_authority_and_returns_receipt() {
         // `#lzdurablesink` live transport (server half): a `command_plane_submit`
         // controller request carries a `CommandSubmit` envelope, the dispatch
@@ -65805,7 +65930,7 @@ mod tests {
         // serialized into the request's `diagnostic_payload`.
         let request =
             ControllerRequest::command_plane_submit(serde_json::to_string(&submit).unwrap());
-        let line = serde_json::to_string(&request).unwrap();
+        let line = stamped_command_plane_request(&request);
         let mut should_stop = false;
         let response = handle_request_locked(&line, &runtime, &mut should_stop).unwrap();
 
@@ -66260,7 +66385,7 @@ mod tests {
         submit.name = "nonexistent_op".to_string();
         let request =
             ControllerRequest::command_plane_submit(serde_json::to_string(&submit).unwrap());
-        let line = serde_json::to_string(&request).unwrap();
+        let line = stamped_command_plane_request(&request);
         let mut should_stop = false;
         let response = handle_request_locked(&line, &runtime, &mut should_stop).unwrap();
 
@@ -66299,7 +66424,7 @@ mod tests {
         submit.namespace = "not-agent-doc".to_string();
         let request =
             ControllerRequest::command_plane_submit(serde_json::to_string(&submit).unwrap());
-        let line = serde_json::to_string(&request).unwrap();
+        let line = stamped_command_plane_request(&request);
         let mut should_stop = false;
         let response = handle_request_locked(&line, &runtime, &mut should_stop).unwrap();
 
@@ -69017,6 +69142,46 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[test]
+    #[cfg(unix)]
+    fn controller_public_and_handoff_sockets_are_user_private() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        let root = tempfile::TempDir::new().unwrap();
+        let public = socket_path(root.path());
+        let handoff =
+            agent_doc_controller::paths::handoff_socket_path(root.path(), std::process::id(), 2);
+        let parent = public.parent().unwrap();
+        std::fs::create_dir(parent).unwrap();
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        for socket in [&public, &handoff] {
+            prepare_controller_socket_parent(socket, &public).unwrap();
+            let _listener = bind_controller_listener(socket).unwrap();
+            assert_eq!(std::fs::metadata(parent).unwrap().mode() & 0o777, 0o700);
+            assert_eq!(std::fs::metadata(socket).unwrap().mode() & 0o777, 0o600);
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn controller_never_changes_permissions_of_a_symlink_target() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+
+        let root = tempfile::TempDir::new().unwrap();
+        let target = root.path().join("other");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let socket = socket_path(root.path());
+        symlink(&target, socket.parent().unwrap()).unwrap();
+
+        assert!(prepare_controller_socket_parent(&socket, &socket).is_err());
+        assert_eq!(
+            std::fs::metadata(target).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+    }
+
     #[test]
     fn controller_socket_incarnation_tracks_the_bound_listener_file() {
         let dir = tempfile::tempdir().unwrap();
@@ -75048,7 +75213,7 @@ mod tests {
             .find("pub(crate) fn serve_with_options(")
             .expect("controller serve entrypoint")..];
         let listener_bound = serve
-            .find("let mut listener = ListenerOptions::new()")
+            .find("let mut listener = bind_controller_listener(&sock)?")
             .expect("controller listener bind");
         let listener_nonblocking = serve
             .find("set_nonblocking(ListenerNonblockingMode::Accept)")

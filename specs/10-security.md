@@ -2,12 +2,12 @@
 
 # Security
 
-agent-doc is designed for single-user, local operation. There is no authentication, authorization, or multi-user access control.
+agent-doc is designed for a single operator. Controller connections are local to a machine. The optional browser editor uses bearer tokens on non-loopback binds. These boundaries do not provide a multi-user access-control model.
 
 ## Threat Model
 
 - **Trusted user, untrusted content.** The user is trusted; document content may contain prompt injection from external sources (pasted emails, web pages, chat logs).
-- **Local filesystem scope.** All data (documents, snapshots, exchange history, links cache) resides on the local filesystem. No network services are exposed unless the operator runs `agent-doc serve` (see [Browser editor writes](#browser-editor-writes-agent-doc-serve-servesavebypass)).
+- **Local state and listener scope.** Session data lives on the local filesystem. The project controller uses local IPC. Running `agent-doc serve` opens an HTTP listener and may expose document content to network clients when the operator selects a non-loopback address. See [Browser editor writes](#browser-editor-writes-agent-doc-serve-servesavebypass).
 - **Git as audit trail.** All agent responses are committed to git, providing a complete audit trail. However, git history may contain sensitive content if documents reference private data.
 
 ## Known Risks
@@ -29,6 +29,12 @@ agent-doc is designed for single-user, local operation. There is no authenticati
 ## Browser editor writes (`agent-doc serve`, `#servesavebypass`)
 
 `agent-doc serve` is the one network listener agent-doc exposes. It binds loopback by default and requires bearer tokens (edit and read-only) on any other bind. An edit token is a whole-document write capability, so `POST /save` is held to the editor authority rules: it never writes with a bare `std::fs::write`, it is refused with `409 Conflict` while an editor replica holds the document (so a remote or stale browser tab can never overwrite operator-typed editor text), and otherwise it writes through `atomic_write_through_authority`. See [Core Commands: serve](07-core-commands.md#serve).
+
+## Local controller access
+
+On Unix, the project controller requires an owner-owned, non-symlink socket directory. It creates or restricts the project `.agent-doc` directory to mode `0700` and binds public and replacement sockets with mode `0600`. A custom socket directory outside that project directory must already have mode `0700`. Before reading a request, the controller requires kernel peer credentials with an effective UID matching its own. Linux uses `SO_PEERCRED`. Windows uses a local named pipe.
+
+The internal `command_plane_submit` operation requires a non-empty string `binary_version`. The controller rejects a different version before dispatch, except that an already-issued closeout-owner capability can still release its exact owner across an upgrade. A missing version is refused even for that release.
 
 ## Live tmux server guard (`#tmuxkittyterminal`)
 

@@ -4358,6 +4358,8 @@ fn submit_closeout_advance_via_socket(
     let payload_json = serde_json::to_string(&submit).context("encode command_plane_submit")?;
     let request = serde_json::json!({
         "command": "command_plane_submit",
+        "binary_version": agent_doc_state_wire::process_binary_version()
+            .unwrap_or(env!("CARGO_PKG_VERSION")),
         "file": canonical,
         "caller": "cycle_state",
         "diagnostic_payload": payload_json,

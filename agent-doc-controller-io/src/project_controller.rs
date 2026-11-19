@@ -4076,25 +4076,17 @@ mod blocking_effect_gate {
     }
 }
 
-/// `#orchver` — stamp the binary crate's `CARGO_PKG_VERSION` into controller identity.
-/// This keeps stale-binary warnings tied to the installed `agent-doc` executable even if
-/// an internal crate version diverges in a future packaging layout. Library-only callers
-/// and tests fall back to the orchestration crate version.
-static BINARY_VERSION: OnceLock<String> = OnceLock::new();
-
 /// Record the real top-level `agent-doc` binary version for identity reporting. Called once
 /// from `main()`; the first writer wins and any later call is intentionally a no-op.
 pub fn set_binary_version(version: &str) {
-    if BINARY_VERSION.set(version.to_string()).is_err() {
-        // Already initialized (e.g. a second call in tests) — keep the first version.
-    }
+    agent_doc_state_wire::set_process_binary_version(version);
 }
 
 /// Resolve the version stamped into [`ControllerBinaryIdentity`]. Prefers the binary-injected
 /// value; falls back to the orchestration crate version only when unset.
 fn identity_version() -> String {
     resolve_controller_identity_version(
-        BINARY_VERSION.get().map(String::as_str),
+        agent_doc_state_wire::process_binary_version(),
         env!("CARGO_PKG_VERSION"),
     )
 }

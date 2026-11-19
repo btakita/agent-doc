@@ -115,6 +115,9 @@ pub struct Reconciliation {
     /// `true` when a clean editor buffer differs from disk. Disk wins, but this
     /// is a drift signal worth logging.
     pub diverged: bool,
+    /// Live replicas holding operator text not present in the canonical cut.
+    /// Zero for a disk or standalone buffer observation.
+    pub quarantined_replicas: usize,
     /// Stable reason code for ops/log markers and diagnostics.
     pub reason: &'static str,
 }
@@ -133,24 +136,28 @@ pub fn reconcile_current_doc(disk: &str, buffer: Option<&BufferState>) -> Reconc
             authority: DocAuthority::Disk,
             content: disk.to_string(),
             diverged: false,
+            quarantined_replicas: 0,
             reason: "editor_absent",
         },
         Some(buf) if buf.content == disk => Reconciliation {
             authority: DocAuthority::Disk,
             content: disk.to_string(),
             diverged: false,
+            quarantined_replicas: 0,
             reason: "in_sync",
         },
         Some(buf) if buf.dirty => Reconciliation {
             authority: DocAuthority::EditorBuffer,
             content: buf.content.clone(),
             diverged: false,
+            quarantined_replicas: 0,
             reason: "editor_unsaved_newer",
         },
         Some(clean_but_differs) => Reconciliation {
             authority: DocAuthority::EditorBuffer,
             content: clean_but_differs.content.clone(),
             diverged: true,
+            quarantined_replicas: 0,
             reason: "live_editor_diverged_disk_pending_reconciliation",
         },
     }
@@ -174,6 +181,7 @@ pub fn crdt_relay_reconciliation(
         authority: DocAuthority::EditorBuffer,
         content,
         diverged: quarantined_replicas > 0,
+        quarantined_replicas,
         reason,
     }
 }

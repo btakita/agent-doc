@@ -596,6 +596,7 @@ dependencies = [
  "agent-doc-lease",
  "agent-doc-log-time",
  "agent-doc-merge",
+ "agent-doc-op-capture-io",
  "agent-doc-ops-log-io",
  "agent-doc-process-owner-io",
  "agent-doc-project-config-io",

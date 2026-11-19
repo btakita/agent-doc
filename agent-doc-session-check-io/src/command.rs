@@ -1680,22 +1680,24 @@ fn try_run_with_options_pass(
         } else {
             pending_evidence_heal = effects.pending_committed_response_evidence_repair(file)?;
         }
-        let content = crate::resolve_current_document_content(
-            file,
-            "session_check_response_archive_orphan_guard",
-        )?;
-        let orphan_disposition = response_orphan_guard(file, &content, true).map_err(|error| {
-            let interruption = response_orphan_interruption(error);
-            match pending_evidence_heal.as_deref() {
-                Some(detail) => pending_self_heal_appended(
-                    interruption,
-                    file,
-                    SelfHeal::RestoreCommittedResponseEvidence,
-                    detail,
-                ),
-                None => interruption,
-            }
-        })?;
+        let current =
+            crate::resolve_current_document(file, "session_check_response_archive_orphan_guard")?;
+        if let Some(interruption) = quarantined_replica_interruption(&current) {
+            return Err(interruption.into());
+        }
+        let orphan_disposition =
+            response_orphan_guard(file, current.content(), true).map_err(|error| {
+                let interruption = response_orphan_interruption(error);
+                match pending_evidence_heal.as_deref() {
+                    Some(detail) => pending_self_heal_appended(
+                        interruption,
+                        file,
+                        SelfHeal::RestoreCommittedResponseEvidence,
+                        detail,
+                    ),
+                    None => interruption,
+                }
+            })?;
         if let Some(detail) = pending_evidence_heal.as_deref() {
             eprintln!(
                 "{}",
@@ -1841,10 +1843,16 @@ fn read_only_retained_projection_before_effects(
         )));
     }
 
-    let authority_content = crate::resolve_current_document_content(
+    let current = crate::resolve_current_document(
         file,
         "session_check_retained_projection_pre_effect_fence",
     )?;
+    if let Some(interruption) = quarantined_replica_interruption(&current) {
+        return Ok(Some(ReadOnlyRetainedProjectionFence::Interrupted(
+            interruption,
+        )));
+    }
+    let authority_content = current.into_content();
     let disk_content = crate::resolve_disk_document_content(
         file,
         "session_check_retained_projection_pre_effect_fence",
@@ -1892,6 +1900,20 @@ fn read_only_retained_projection_before_effects(
             DEFERRED_PROJECTION_OWNER_NOTE,
         )),
     )))
+}
+
+fn quarantined_replica_interruption(
+    current: &agent_doc_document_realtime_io::CurrentDocument,
+) -> Option<SessionCheckInterrupted> {
+    let quarantined = current.reconciliation().quarantined_replicas;
+    (quarantined > 0).then(|| {
+        SessionCheckInterrupted(format!(
+            "[session-check] INTERRUPTED: {} (quarantined_replicas={quarantined}). Wait for the editor's projection receipt. A force-disk write would discard the operator's text",
+            agent_doc_turn::write_ownership::quarantined_replica_state_description(
+                &current.key().display().to_string(),
+            )
+        ))
+    })
 }
 
 /// `#splicesessionack` (GH #273 remainder): the INTERRUPTED line for a durable
@@ -2521,8 +2543,11 @@ fn run_with_options_inner(
     // `session-check` is the final proof boundary. It must not report a clean
     // cycle for a document whose component tree cannot be parsed, regardless
     // of lifecycle sidecar state.
-    let integrity_content =
-        crate::resolve_current_document_content(file, "session_check_integrity_gate")?;
+    let current = crate::resolve_current_document(file, "session_check_integrity_gate")?;
+    if let Some(interruption) = quarantined_replica_interruption(&current) {
+        return Err(interruption.into());
+    }
+    let integrity_content = current.into_content();
     let integrity = agent_doc_lint_io::validate_integrity_on_content_with_logger(
         file,
         &integrity_content,
@@ -3964,6 +3989,10 @@ fn inspect_with_warnings_sweep(
         // current document. Active editors resolve through the CRDT relay; disk
         // is consulted only when no editor is attached.
         let current_document = crate::resolve_current_document(file, "session_check_guard_sweep")?;
+        if let Some(interruption) = quarantined_replica_interruption(&current_document) {
+            report.status = SessionCheckStatus::Interrupted(interruption.0);
+            return Ok(report);
+        }
         // Phase 1 lossless-tree shadow projection (#lzlosstree): audit the tree
         // round-trip against the same authoritative text the guard sweep uses.
         // Logged, never load-bearing — the flat CRDT stays the closeout authority.
@@ -7140,6 +7169,28 @@ mod terminal_convergence_tests {
                 "captured or terminal phase {phase:?} must stay on its identity-checked closeout path",
             );
         }
+    }
+
+    #[test]
+    fn session_check_names_live_quarantine_even_with_equal_authority_and_disk() {
+        let text = "Canonical and disk agree\n";
+        let current = agent_doc_document_realtime_io::CurrentDocument::new(
+            "session.md",
+            agent_doc_document_realtime::crdt_relay_reconciliation(text.into(), "test", 1),
+        );
+        let interruption = quarantined_replica_interruption(&current)
+            .expect("a quarantined replica still holds text beyond the equal cuts");
+        assert!(
+            interruption
+                .0
+                .contains(agent_doc_turn::write_ownership::QUARANTINED_REPLICA_COMMIT_STATE)
+        );
+        assert!(interruption.0.contains("quarantined_replicas=1"));
+        let converged = agent_doc_document_realtime_io::CurrentDocument::new(
+            "session.md",
+            agent_doc_document_realtime::crdt_relay_reconciliation(text.into(), "test", 0),
+        );
+        assert!(quarantined_replica_interruption(&converged).is_none());
     }
 
     #[test]

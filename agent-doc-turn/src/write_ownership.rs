@@ -798,6 +798,14 @@ pub fn retained_operator_text_conflict_remedy(file: &str) -> String {
 pub const QUARANTINED_REPLICA_COMMIT_STATE: &str =
     "crdt_commit_barrier_refused_quarantined_replica";
 
+pub fn quarantined_replica_state_description(file: &str) -> String {
+    format!(
+        "A live editor replica of {file} is quarantined (state={QUARANTINED_REPLICA_COMMIT_STATE}): \
+         the editor holds operator text beyond canonical. Quarantine releases when that editor \
+         rolls forward onto the canonical projection while keeping its text, or departs"
+    )
+}
+
 /// The one instruction for a commit the relay barrier refused because a live
 /// editor replica is quarantined (`#clobberfollowups`, named by
 /// `#inflighttypinghold`).
@@ -809,16 +817,12 @@ pub const QUARANTINED_REPLICA_COMMIT_STATE: &str =
 /// for publishes a cut without that text or perturbs the replica being awaited.
 pub fn quarantined_replica_commit_remedy(file: &str) -> String {
     format!(
-        "A live editor replica of {file} is quarantined (state={QUARANTINED_REPLICA_COMMIT_STATE}): \
-         its updates hold operator text the canonical does not, typically typing that reached the \
-         relay after a write replaced the cut it was typed over. The operator's text is held by \
-         the editor and NOT lost, and nothing was committed. This is not a convergence wait: the \
-         quarantine releases only when that editor rolls forward onto the canonical projection \
-         (keeping its text) or departs. Do NOT force disk (it discards the operator's text), \
+        "{}. The commit was refused. Do NOT force disk (it discards the operator's text), \
          re-send the response, or run `agent-doc commit {file}` again until it releases; do not \
          run `admin reload-lib` or `admin recycle` on your own. Run `agent-doc session-check \
          {file}`: retry the same command once it reports the editor converged, and follow its \
-         remedy if it reports state={EDITOR_HOLDS_UNMERGED_VISIBLE_TEXT_STATE} instead"
+         remedy if it reports state={EDITOR_HOLDS_UNMERGED_VISIBLE_TEXT_STATE} instead",
+        quarantined_replica_state_description(file)
     )
 }
 

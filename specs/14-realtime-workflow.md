@@ -2101,6 +2101,10 @@ replacement replica.
   relay builds its reconciliation through `crdt_relay_reconciliation`, so
   `diverged=true` exactly while a live replica is quarantined, and the log
   line and `crdt_current_text` carry `quarantined_replicas=N`.
+  Read-only `session-check` preserves this count and reports
+  `state=crdt_commit_barrier_refused_quarantined_replica` even when canonical
+  text and disk bytes match. It waits for the editor to roll forward with its
+  text and observes the quarantine without driving the commit barrier.
 - **`session-check` names both operator-owned states.** The controller writes
   a `document_runtime_state` row (kind
   `retained_transition_operator_text_conflict`) when it reports
@@ -2123,15 +2127,21 @@ replacement replica.
   in-process or over the controller RPC) had no hold: it
   CAS'd its target against the visible relay text while the editor had
   reported a burst over that text whose delta was still in flight. Before
-  issuing a CP write over a relay text other than the target, it now reads
-  the active op-capture epoch (`editor_ops_in_flight_over`) and, by the same
-  rule as the controller (below), waits in the caller's convergence loop
+  issuing a CP write over a relay text other than the target, the direct
+  CLI requests typing evidence with its existing `crdt_current_text` read
+  (`include_write_typing`). The controller answers against its active
+  op-capture projection and the exact returned text. A controller that omits
+  the field, or an in-process reader, uses `editor_ops_in_flight_over`.
+  By the same rule as the retained controller path (below), the writer holds
+  in its convergence loop
   (`reason=awaiting_editor_ops`; ops log `{source}_crdt_write_held_for_editor_ops
   ... pending_from=K pending_ops=N recovery=await_editor_delta_then_rebase`,
   once per attested tip). When the delta lands, the relay text reaches the
   tip and the ordinary rebase rolls the agent target forward onto the typing.
-  The wait shares the write's convergence deadline; on expiry nothing is
-  written. An unreadable ledger never holds
+  After two seconds of foreground convergence work, a confirmed hold retains
+  the original base and target for the controller's reactive writer. Editor
+  and disk projection remain untouched while that intent waits for the same
+  attested delta. An unreadable ledger never holds
   (`..._crdt_write_editor_ops_unreadable action=proceed_unheld`).
 - **A mid-epoch burst is held.** The hold used to require the epoch base to be
   exactly the visible cut, so once an earlier delta of the same epoch landed

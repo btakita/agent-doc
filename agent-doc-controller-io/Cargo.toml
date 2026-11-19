@@ -37,6 +37,7 @@ agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.581" }
 agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.581" }
 agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.35.581" }
 agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.35.581" }
+agent-doc-op-capture-io = { path = "../agent-doc-op-capture-io", version = "0.35.581" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.581" }
 agent-doc-process-owner-io = { path = "../agent-doc-process-owner-io", version = "0.35.581" }
 agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.35.581" }

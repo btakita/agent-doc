@@ -1186,19 +1186,32 @@ fn finish_structured_inline_response(
 /// direct `Summary` child proves content. A `Blocker` child may lead the
 /// structure (`#blockerfront`); it is the reason the row stopped, not a second
 /// summary and not a reason to reject the projection. The binary's later
-/// structured metadata (`State`, `Guidance`, integration coordinates, decision
-/// fields, choices, and next actions) may follow that summary without changing
-/// its identity. Identical copies in several prompt trees collapse to one
+/// structured metadata may follow that summary without changing its identity.
+/// This includes generated worker hand-back fields and their nested content.
+/// Identical copies in several prompt trees collapse to one
 /// value;
 /// conflicting summaries remain multiple values and are rejected by the
 /// caller's exact-one compatibility gate.
 fn structured_inline_response_summaries(content: &str, response_id: &str) -> BTreeSet<String> {
+    use agent_doc_document::worker_handback::SectionKind;
+    use agent_doc_markdown_ast::overlay::RESPONSE_DETAIL_MARKER;
+
     let response_item = format!("**Response {response_id}**");
     let mut summaries = BTreeSet::new();
     let mut candidate: Option<StructuredInlineResponse> = None;
     let mut fence: Option<String> = None;
 
     for raw_line in content.lines() {
+        let space_trimmed = raw_line.trim_start_matches(' ');
+        let indent = raw_line.len() - space_trimmed.len();
+        if candidate
+            .as_ref()
+            .is_some_and(|active| active.nested_metadata_allowed && indent > active.indent + 2)
+        {
+            // A recognized metadata container owns this subtree. Ordered list
+            // items and prose in a worker detail do not supply summary evidence.
+            continue;
+        }
         let trimmed = raw_line.trim_start();
         let fence_marker = trimmed
             .strip_prefix("```")
@@ -1208,8 +1221,6 @@ fn structured_inline_response_summaries(content: &str, response_id: &str) -> BTr
             if fence.is_none()
                 && let Some(active) = candidate.as_mut()
             {
-                let space_trimmed = raw_line.trim_start_matches(' ');
-                let indent = raw_line.len() - space_trimmed.len();
                 if indent > active.indent {
                     active.invalid = true;
                 }
@@ -1231,8 +1242,6 @@ fn structured_inline_response_summaries(content: &str, response_id: &str) -> BTr
 
         // Binary projections use space indentation. Tabs and non-list
         // continuations never prove a structured response child.
-        let space_trimmed = raw_line.trim_start_matches(' ');
-        let indent = raw_line.len() - space_trimmed.len();
         let item = space_trimmed.strip_prefix("- ");
 
         if let Some(active) = candidate.as_mut() {
@@ -1267,6 +1276,15 @@ fn structured_inline_response_summaries(content: &str, response_id: &str) -> BTr
                         }
                     } else if active.timestamp_seen && active.summary.is_some() {
                         let metadata = item.trim();
+                        let handback_section = metadata
+                            .strip_prefix("**")
+                            .and_then(|bold| bold.split_once(":** "))
+                            .is_some_and(|(heading, value)| {
+                                !value.trim().is_empty()
+                                    && SectionKind::ALL
+                                        .iter()
+                                        .any(|kind| kind.heading() == heading)
+                            });
                         let has_value = [
                             "**State:**",
                             "**Guidance:**",
@@ -1284,21 +1302,13 @@ fn structured_inline_response_summaries(content: &str, response_id: &str) -> BTr
                                 .strip_prefix(prefix)
                                 .is_some_and(|value| !value.trim().is_empty())
                         });
-                        if has_value {
-                            // Canonical scalar response metadata is evidence
-                            // context, not part of the response identity.
-                        } else if matches!(metadata, "**Choices:**" | "**Next actions:**") {
-                            active.nested_metadata_allowed = true;
-                        } else {
-                            active.invalid = true;
-                        }
+                        let container = matches!(metadata, "**Choices:**" | "**Next actions:**");
+                        active.nested_metadata_allowed = container
+                            || (handback_section && metadata.ends_with(RESPONSE_DETAIL_MARKER));
+                        active.invalid |= !handback_section && !has_value && !container;
                     } else {
                         active.invalid = true;
                     }
-                } else if indent > active.indent + 2 && active.nested_metadata_allowed {
-                    // Choice and next-action descendants are binary-owned
-                    // response context. Their prose is deliberately not used
-                    // to reconstruct the response identity.
                 } else if !raw_line.trim().is_empty() {
                     active.invalid = true;
                 }
@@ -2332,12 +2342,18 @@ mod tests {
                 "  - **Response {id}**\n",
                 "    - **Timestamp:** 2026-11-01T20:01:15.000Z\n",
                 "    - **Summary:** {summary}\n",
+                "    - **What changed:** {detail}\n",
+                "      1. Updated the fixture. {detail}\n",
+                "         - Retained nested evidence. {detail}\n",
                 "    - **State:** Integrated\n",
                 "    - **Guidance:** No operator action remains.\n",
                 "- ~~second prompt~~ — auto-struck: response: {id}\n",
                 "  - **Response {id}**\n",
                 "    - **Timestamp:** 2026-11-01T20:01:15.000Z\n",
                 "    - **Summary:** {summary}\n",
+                "    - **What changed:** Updated the fixture.\n",
+                "    - **Verification:** The review passed.\n",
+                "    - **Action items:** None.\n",
                 "    - **State:** Integrated\n",
                 "    - **Guidance:** No operator action remains.\n",
                 "<!-- /agent:queue -->\n",
@@ -2348,6 +2364,7 @@ mod tests {
             ),
             id = RESPONSE_ID,
             summary = SUMMARY,
+            detail = agent_doc_markdown_ast::overlay::RESPONSE_DETAIL_MARKER,
         );
         std::fs::write(&doc, &historical).unwrap();
         git(dir.path(), &["add", "session.md"]);

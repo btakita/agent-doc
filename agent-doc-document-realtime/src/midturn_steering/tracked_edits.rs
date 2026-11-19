@@ -4,10 +4,11 @@ use std::collections::{BTreeMap, HashSet};
 use agent_doc_element::{element, todo};
 use agent_doc_element_backlog::backlog;
 use agent_doc_queue::queue_claim::{QueueClaim, QueueClaimState, claim_identity};
+use agent_doc_queue::subagent_brief::tracked_ids_for_item;
 
 use super::{
     Candidate, SteeringChange, SteeringDispatch, SteeringItem, SteeringSource, SteeringWatermark,
-    content_hash, executable_queue_items, referenced_queue_ids,
+    content_hash, executable_queue_items,
 };
 
 /// Changes to tracked text belong to the claim that consumed the brief. They
@@ -52,11 +53,19 @@ pub fn claimed_tracked_edits(
         if claim.state != QueueClaimState::Running || !live.contains(&claim.identity) {
             continue;
         }
-        for id in referenced_queue_ids(&claim.item_text) {
-            let (Some(old), Some(new)) = (before.get(&id), after.get(&id)) else {
-                continue;
-            };
-            if old.source != new.source {
+        let targets: Vec<_> = tracked_ids_for_item(&claim.item_text)
+            .into_iter()
+            .filter_map(|id| after.get(&id).map(|item| (id, item)))
+            .collect();
+        // Id-backed claims retain the task text they originally briefed.
+        // Only use that alias when its tracked target is unambiguous.
+        let claim_time_text = match (targets.as_slice(), claim.tracked_item_aliases.as_slice()) {
+            ([_], [text]) if claim.identity.is_id_backed() => Some(text.as_str()),
+            _ => None,
+        };
+        for (id, new) in targets {
+            let old = before.get(&id);
+            if old.as_ref().is_some_and(|old| old.source != new.source) {
                 continue;
             }
             let key = format!(
@@ -66,10 +75,15 @@ pub fn claimed_tracked_edits(
                 claim.generation,
                 content_hash(&worker.worker_id),
             );
-            let previous = watermark
+            let Some(previous) = watermark
                 .acknowledged_tracked
                 .get(&key)
-                .unwrap_or(&old.text);
+                .map(String::as_str)
+                .or(claim_time_text)
+                .or_else(|| old.as_ref().map(|old| old.text.as_str()))
+            else {
+                continue;
+            };
             let normalized = task_text(&new.text, &id, new.source);
             if task_text(previous, &id, new.source) == normalized {
                 continue;
@@ -102,7 +116,7 @@ pub fn claimed_tracked_edits(
                     dispatch: SteeringDispatch::ForwardToOwner,
                     current_item: false,
                     verbatim: new.text,
-                    previous: Some(previous.clone()),
+                    previous: Some(previous.to_owned()),
                     presets: Vec::new(),
                     possibly_partial: false,
                     owner: Some(claim.owner.clone()),

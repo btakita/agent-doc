@@ -285,6 +285,20 @@ fn queue_preset_names(
     names
 }
 
+/// A queue item's structural own id, if any, and its explicit tracked
+/// references in brief order. Tracking and steering share this resolver.
+pub fn tracked_ids_for_item(item: &str) -> Vec<String> {
+    let mut ids = crate::queue_claim::referenced_queue_ids(item);
+    if let agent_doc_element_queue::QueueItemIdentity::Id(id) =
+        crate::queue_claim::claim_identity(item)
+    {
+        let id = id.to_ascii_lowercase();
+        ids.retain(|reference| reference != &id);
+        ids.insert(0, id);
+    }
+    ids
+}
+
 /// Resolve the operator authorization for dispatch item `item` of `content`.
 /// `document` is the path the preamble names.
 pub fn subagent_authorization(document: &str, content: &str, item: &str) -> SubagentAuthorization {
@@ -379,17 +393,7 @@ pub fn subagent_authorization_with_presets(
         push_preset(&name, PresetSource::Item);
     }
 
-    let mut ids: Vec<String> = Vec::new();
-    if let agent_doc_element_queue::QueueItemIdentity::Id(id) =
-        crate::queue_claim::claim_identity(item)
-    {
-        ids.push(id.to_ascii_lowercase());
-    }
-    for id in crate::queue_claim::referenced_queue_ids(item) {
-        if !ids.contains(&id) {
-            ids.push(id);
-        }
-    }
+    let ids = tracked_ids_for_item(item);
     let mut tracked_items = Vec::new();
     let mut unresolved_ids = Vec::new();
     for id in ids {

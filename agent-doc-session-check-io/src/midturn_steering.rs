@@ -5909,7 +5909,7 @@ mod tests {
         let baseline = concat!(
             "# Plan\n\n",
             "<!-- agent:queue subagents go -->\n",
-            "- do [#impl]\n- do [#verify]\n- do [#ended]\n- do [#unclaimed]\n",
+            "- do [#impl]\n- [#verify]\n- do [#ended]\n- do [#unclaimed]\n",
             "<!-- /agent:queue -->\n\n",
             "<!-- agent:backlog -->\n",
             "- [ ] [#impl] Implement the search.\n  - Use the public endpoint.\n",
@@ -5920,14 +5920,21 @@ mod tests {
             "- [ ] [#verify] Check the new results.\n  - Check the default page.\n",
             "<!-- /agent:todo -->\n",
         );
-        std::fs::write(&file, baseline).unwrap();
+        // The Todo is added to this turn after admission. The worker's
+        // claim-time brief still gives it a previous text for steering.
+        let admitted = baseline.replace(
+            "- [ ] [#verify] Check the new results.\n  - Check the default page.\n",
+            "",
+        );
+        std::fs::write(&file, &admitted).unwrap();
         let cycle =
-            agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&admitted), Some(&admitted))
                 .unwrap();
-        seed_for_cycle(&file, &cycle.cycle_id, baseline, None, Vec::new()).unwrap();
+        seed_for_cycle(&file, &cycle.cycle_id, &admitted, None, Vec::new()).unwrap();
+        std::fs::write(&file, baseline).unwrap();
         let runs = [
             ("do [#impl]", "subagent:impl", "worker:impl"),
-            ("do [#verify]", "subagent:verify", "worker:verify"),
+            ("[#verify]", "subagent:verify", "worker:verify"),
         ]
         .map(|(head, owner, worker)| {
             let (_, claim) =

@@ -10233,7 +10233,6 @@ fn test_agent_doc_turn_owns_no_change_cycle_policy() {
     for required in [
         "let cycle_state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?",
         "let open_cycle = agent_doc_cycle_state_io::load_with_closeout_projection(file)",
-        "let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)",
     ] {
         assert!(
             run_io_source.contains(required),

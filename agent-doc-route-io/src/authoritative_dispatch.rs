@@ -9,7 +9,7 @@ fn actor_transport_harness(recorded_harness: &str) -> HarnessConfig {
 use std::time::Duration;
 
 use agent_doc_controller::dispatch::{
-    AuthoritativeActorDispatchAction, AuthoritativeActorDispatchActionFacts,
+    ActorDispatchState, AuthoritativeActorDispatchAction, AuthoritativeActorDispatchActionFacts,
     AuthoritativeActorDispatchIntent, CloseoutBlockDispatchDecision, DispatchOnlyBusyRefusalFacts,
     DispatchOnlyReopenDelivery, ReopenMode, RouteCloseoutBlockContext, RouteCloseoutDrainOutcome,
     RouteCloseoutEntryFacts, RouteCloseoutEntryPlan, RouteExplicitSendDecision,
@@ -2415,7 +2415,7 @@ pub fn route_via_authoritative_actor(
         actor_state = agent_doc_controller::actor::ActorState::Ready;
     }
 
-    if waited_and_timed_out && actor_state == agent_doc_controller::actor::ActorState::Busy {
+    if waited_and_timed_out && actor_dispatch_state(actor_state) == ActorDispatchState::Busy {
         // The wait has a transport budget. Ending it says nothing about
         // whether the current turn can still produce a response.
         crate::invocation::record_route_deferral(format!(

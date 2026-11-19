@@ -2051,16 +2051,20 @@ pub fn refresh_waiting_on_you_tree_under_apply_guard(
     }
     // The retained editor intent may have become visible before its delivery
     // receipt settled. An operator can answer inside that new tree during this
-    // interval. Re-read authority after convergence and fold only the marked
-    // tree into the checkpoint candidate: this commits the early answer without
-    // absorbing unrelated concurrent steering elsewhere in the document.
+    // interval, including deleting another generated queue/response subtree.
+    // Re-read authority after convergence and fold only the owning queue
+    // component into the checkpoint candidate: this commits those early queue
+    // edits without absorbing unrelated steering elsewhere in the document.
     let checkpoint_target = if force_disk {
         target.clone()
     } else {
         let authoritative =
             effects.current_document_content(file, "waiting_on_you_tree settled")?;
-        agent_doc_queue::queue_consume::fold_authoritative_waiting_tree(&target, &authoritative)?
-            .unwrap_or_else(|| target.clone())
+        agent_doc_queue::queue_consume::fold_authoritative_waiting_queue_component(
+            &target,
+            &authoritative,
+        )?
+        .unwrap_or_else(|| target.clone())
     };
     agent_doc_snapshot_io::checkpoint_document_baseline(
         file,
@@ -6132,9 +6136,15 @@ mod core_tests {
         );
     }
 
-    struct EarlyAnswerDuringDeliveryEffects;
+    const UNCOMMITTED_RELEASE_QUEUE_SUBTREE: &str = concat!(
+        "- ### ~~release + publish~~\n",
+        "  - **Response [#r-release]**\n",
+        "    - generated release receipt\n",
+    );
 
-    impl QueueConsumeWriteEffects for EarlyAnswerDuringDeliveryEffects {
+    struct EarlyQueueEditDuringDeliveryEffects;
+
+    impl QueueConsumeWriteEffects for EarlyQueueEditDuringDeliveryEffects {
         fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
             Ok(std::fs::read_to_string(file)?)
         }
@@ -6168,37 +6178,52 @@ mod core_tests {
                 target_content.contains(agent_doc_queue::queue_consume::WAITING_ON_YOU_ROOT_MARKER)
             );
             let current = std::fs::read_to_string(file)?;
-            let close = current
+            let without_deleted_parent = current.replace(UNCOMMITTED_RELEASE_QUEUE_SUBTREE, "");
+            assert_ne!(
+                without_deleted_parent, current,
+                "the retained target contains the generated subtree the operator deletes"
+            );
+            let close = without_deleted_parent
                 .find("<!-- /agent:queue -->")
                 .expect("the projected queue closes");
-            let mut answered = current;
+            let mut answered = without_deleted_parent;
             answered.insert_str(close, "    - choose the recommended option\n");
+            answered = answered.replace(
+                "<!-- /agent:exchange -->",
+                "operator added unrelated steering\n<!-- /agent:exchange -->",
+            );
             agent_doc_fs::write_atomic(file, answered.as_bytes())?;
             Ok(true)
         }
     }
 
     #[test]
-    fn waiting_tree_refresh_commits_and_recognizes_an_answer_typed_during_delivery() {
+    fn waiting_tree_refresh_commits_early_queue_edits_without_outside_steering() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("waiting-early-answer.md");
         let response = "### Re: approval — test\n\nWaiting for approval.";
         let content = format!(
             "<!-- agent:exchange -->\n{response}\n<!-- /agent:exchange -->\n\n\
-             <!-- agent:queue id=\"main\" -->\n<!-- /agent:queue -->\n\n\
+             <!-- agent:queue id=\"main\" -->\n{UNCOMMITTED_RELEASE_QUEUE_SUBTREE}<!-- /agent:queue -->\n\n\
              <!-- agent:todo -->\n- [ ] [#approve-pr] Approve and merge PR #42.\n<!-- /agent:todo -->\n"
         );
         fs::write(&doc, &content).unwrap();
+        let committed_before = content.replace(UNCOMMITTED_RELEASE_QUEUE_SUBTREE, "");
         agent_doc_snapshot_io::checkpoint_document_baseline(
             &doc,
-            &content,
+            &committed_before,
             agent_doc_ops_log_io::log_op,
         )
         .unwrap();
 
         assert!(
-            refresh_waiting_on_you_tree(&doc, response, false, &EarlyAnswerDuringDeliveryEffects,)
-                .unwrap()
+            refresh_waiting_on_you_tree(
+                &doc,
+                response,
+                false,
+                &EarlyQueueEditDuringDeliveryEffects,
+            )
+            .unwrap()
         );
 
         let visible = fs::read_to_string(&doc).unwrap();
@@ -6210,6 +6235,17 @@ mod core_tests {
             "the commit candidate keeps the answer typed after the tree appeared: {snapshot}"
         );
         assert!(visible.contains("    - choose the recommended option\n"));
+        for settled in [&visible, &snapshot] {
+            assert!(
+                !settled.contains("release + publish"),
+                "the operator-deleted generated parent stays deleted: {settled}"
+            );
+        }
+        assert!(visible.contains("operator added unrelated steering\n"));
+        assert!(
+            !snapshot.contains("operator added unrelated steering\n"),
+            "the checkpoint must not absorb edits outside the owned queue: {snapshot}"
+        );
 
         let queue = agent_doc_element::element::parse(&snapshot)
             .unwrap()

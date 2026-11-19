@@ -6683,16 +6683,17 @@ pub fn project_waiting_on_you_tree(document: &str, response_body: &str) -> Resul
     Ok((out != document).then_some(out))
 }
 
-/// Fold the settled editor-authoritative Waiting-on-you subtree into the
-/// binary-owned projection that closeout will checkpoint and commit.
+/// Fold the settled editor-authoritative queue component that owns the
+/// Waiting-on-you projection into the closeout checkpoint candidate.
 ///
 /// The tree can become visible before its retained editor delivery settles.
-/// An operator may answer in that interval. Copying the whole authoritative
-/// document would absorb unrelated concurrent steering into the closeout
-/// baseline, while checkpointing the pre-delivery projection would lose the
-/// answer. Restricting the fold to the marked tree preserves the operator's
-/// exact child rows and leaves every edit outside the tree for its normal turn.
-pub fn fold_authoritative_waiting_tree(
+/// An operator may answer it or delete another just-generated queue/response
+/// subtree in that interval. Copying the whole authoritative document would
+/// absorb unrelated concurrent steering into the closeout baseline, while
+/// checkpointing the pre-delivery projection would lose the queue edit.
+/// Restricting the fold to the exact queue component preserves both actions
+/// and leaves edits outside that component for their normal turn.
+pub fn fold_authoritative_waiting_queue_component(
     projected_document: &str,
     authoritative_document: &str,
 ) -> Result<Option<String>> {
@@ -6702,18 +6703,23 @@ pub fn fold_authoritative_waiting_tree(
     let Some(authoritative) = waiting_tree_location(authoritative_document)? else {
         return Ok(None);
     };
-    if projected.start == projected.end || authoritative.start == authoritative.end {
+    if projected.queue != authoritative.queue {
         return Ok(None);
     }
 
-    let authoritative_tree = &authoritative_document[authoritative.start..authoritative.end];
-    let projected_tree = &projected_document[projected.start..projected.end];
-    if authoritative_tree == projected_tree {
+    let authoritative_queue = &authoritative_document
+        [authoritative.component_open_end..authoritative.component_close_start];
+    let projected_queue =
+        &projected_document[projected.component_open_end..projected.component_close_start];
+    if authoritative_queue == projected_queue {
         return Ok(None);
     }
 
     let mut folded = projected_document.to_string();
-    folded.replace_range(projected.start..projected.end, authoritative_tree);
+    folded.replace_range(
+        projected.component_open_end..projected.component_close_start,
+        authoritative_queue,
+    );
     Ok(Some(folded))
 }
 
@@ -8155,9 +8161,12 @@ mod tests {
     }
 
     #[test]
-    fn authoritative_waiting_tree_fold_keeps_early_answer_but_not_unrelated_steering() {
+    fn authoritative_waiting_queue_fold_keeps_early_answer_and_operator_deletion_only() {
         let projected = concat!(
             "<!-- agent:queue id=\"main\" -->\n",
+            "- ### ~~release + publish~~\n",
+            "  - **Response [#r-release]**\n",
+            "    - generated release receipt\n",
             "- ### Waiting on you — answer by adding a child line under an item ",
             "<!-- agent-doc:waiting-on-you -->\n",
             "  - [#approve] Approve the release <!-- agent-doc:waiting-item -->\n",
@@ -8175,14 +8184,18 @@ mod tests {
             "operator added another prompt\n<!-- /agent:exchange -->\n",
         );
 
-        let folded = fold_authoritative_waiting_tree(projected, authoritative)
+        let folded = fold_authoritative_waiting_queue_component(projected, authoritative)
             .unwrap()
-            .expect("the early answer changes the committed tree");
+            .expect("the operator changed the projection-owned queue component");
 
         assert!(folded.contains("    - use the recommended release target\n"));
         assert!(
+            !folded.contains("release + publish"),
+            "the deleted generated parent must not be resurrected: {folded}"
+        );
+        assert!(
             !folded.contains("operator added another prompt"),
-            "only the marked waiting tree belongs to this commit: {folded}"
+            "edits outside the projection-owned queue stay out: {folded}"
         );
         assert!(folded.contains("settled response\n<!-- /agent:exchange -->"));
     }

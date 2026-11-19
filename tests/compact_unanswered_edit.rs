@@ -44,7 +44,7 @@ const COMMITTED_DOC: &str = concat!(
     "<!-- /agent:queue -->\n",
 );
 
-fn agent_doc(root: &Path, args: &[&str]) -> std::process::Output {
+fn agent_doc(root: &Path, args: &[&str], caller_env: &[(&str, &str)]) -> std::process::Output {
     let mut command = cargo_bin_cmd!("agent-doc");
     command.env(
         agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
@@ -57,6 +57,22 @@ fn agent_doc(root: &Path, args: &[&str]) -> std::process::Output {
         command.env(agent_doc_fs::TEST_RUNTIME_SCOPE_ENV, std::env::temp_dir());
     }
     command.env_remove("TMUX").env_remove("TMUX_PANE");
+    for key in [
+        "AGENT_DOC_COMPACT_REQUESTER",
+        "GROK_SESSION_ID",
+        "CLAUDE_CODE_SESSION",
+        "CLAUDE_CODE",
+        "CLAUDECODE",
+        "CODEX_SESSION",
+        "CODEX_THREAD_ID",
+        "CODEX_CLI",
+        "CODEX",
+        "OPENCODE_CLIENT",
+        "OPENCODE",
+    ] {
+        command.env_remove(key);
+    }
+    command.envs(caller_env.iter().copied());
     command.current_dir(root).args(args).output().unwrap()
 }
 
@@ -109,10 +125,10 @@ fn compact_exchange_commit_leaves_an_unanswered_queue_row_uncommitted() {
     assert_ne!(edited, COMMITTED_DOC);
     fs::write(&doc, &edited).unwrap();
 
-    // The IDE's Compact Exchange action.
     let output = agent_doc(
         root,
         &["compact", path, "--component", "exchange", "--commit"],
+        &[],
     );
     assert!(
         output.status.success(),
@@ -149,7 +165,7 @@ fn compact_exchange_commit_leaves_an_unanswered_queue_row_uncommitted() {
     );
 
     // The next preflight still sees the row as the operator's unanswered edit.
-    let output = agent_doc(root, &["preflight", path]);
+    let output = agent_doc(root, &["preflight", path], &[]);
     assert!(
         output.status.success(),
         "preflight failed: {}",
@@ -179,4 +195,51 @@ fn compact_exchange_commit_leaves_an_unanswered_queue_row_uncommitted() {
             .any(|line| line == format!("[user+] {OPERATOR_ROW}")),
         "preflight must attribute the row to the operator: {preflight:#}"
     );
+}
+
+#[test]
+fn compact_controller_records_the_requester() {
+    for (requester, caller_env) in [
+        ("cli", &[][..]),
+        ("agent", &[("CODEX_THREAD_ID", "synthetic-thread")][..]),
+        (
+            "editor",
+            &[
+                ("CODEX_THREAD_ID", "synthetic-thread"),
+                ("AGENT_DOC_COMPACT_REQUESTER", "editor"),
+            ][..],
+        ),
+    ] {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let doc = committed_session(root);
+        let output = agent_doc(
+            root,
+            &[
+                "compact",
+                doc.to_str().unwrap(),
+                "--component",
+                "exchange",
+                "--commit",
+                "--tag",
+                "skip",
+            ],
+            caller_env,
+        );
+        assert!(
+            output.status.success(),
+            "compact from {requester} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.lines().any(|line| {
+                line.contains("controller_compact_document file=")
+                    && line
+                        .split_whitespace()
+                        .any(|field| field.strip_prefix("requester=") == Some(requester))
+            }),
+            "missing controller compact requester {requester} in log:\n{ops_log}"
+        );
+    }
 }

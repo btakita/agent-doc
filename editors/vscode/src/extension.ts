@@ -343,6 +343,7 @@ function resolveProject(
 interface RunCliOptions {
     timeoutMs?: number;
     signal?: AbortSignal;
+    env?: NodeJS.ProcessEnv;
     /** Resolve with stdout and stderr combined, as JetBrains reads a session command. */
     combineStderr?: boolean;
 }
@@ -380,6 +381,7 @@ env: {
 ...(vscode.env.remoteName
 ? { AGENT_DOC_VSCODE_REMOTE_NAME: vscode.env.remoteName }
 : {}),
+...options?.env,
 },
 }, (err, stdout, stderr) => {
             if (settled) return;
@@ -1978,7 +1980,9 @@ async function compactExchangeAction(): Promise<void> {
             throw new Error('the open editor replica could not be attached to its project controller');
         }
         const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
-        const output = await runCli(['compact', rel, '--component', 'exchange', '--commit'], cwd);
+        const output = await runCli(['compact', rel, '--component', 'exchange', '--commit'], cwd, {
+            env: { AGENT_DOC_COMPACT_REQUESTER: 'editor' },
+        });
         showHint(output || `Compacted exchange for ${rel}`);
     } catch (err: any) {
         showError(`compact exchange failed: ${err.message}`);

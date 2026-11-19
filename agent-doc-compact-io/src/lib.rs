@@ -540,18 +540,34 @@ pub fn run(
         .map(|_| ())
     }
     #[cfg(not(test))]
-    agent_doc_controller_io::project_controller::compact_document_via_controller(
-        file,
-        agent_doc_controller_io::project_controller::ControllerCompactDocumentInvocation {
-            keep,
-            component_name: component_name.map(str::to_string),
-            message: message.map(str::to_string),
-            tag: tag.map(str::to_string),
-            commit,
-            force_disk,
-            lint: lint.map(|mode| mode.as_str().to_string()),
-        },
-    )
+    {
+        use agent_doc_controller_io::project_controller::{
+            CompactRequester, ControllerCompactDocumentInvocation, compact_document_via_controller,
+        };
+
+        // An editor action can inherit a harness environment when the IDE
+        // was launched from an agent. Its explicit hint takes precedence.
+        let requester = if std::env::var("AGENT_DOC_COMPACT_REQUESTER").as_deref() == Ok("editor") {
+            CompactRequester::Editor
+        } else if agent_doc_model_tier::detect_harness() != "default" {
+            CompactRequester::Agent
+        } else {
+            CompactRequester::Cli
+        };
+        compact_document_via_controller(
+            file,
+            ControllerCompactDocumentInvocation {
+                keep,
+                component_name: component_name.map(str::to_string),
+                message: message.map(str::to_string),
+                tag: tag.map(str::to_string),
+                commit,
+                force_disk,
+                lint: lint.map(|mode| mode.as_str().to_string()),
+                requester: Some(requester),
+            },
+        )
+    }
 }
 
 /// `#commitoutsidegit`: `compact --commit` outside a git work tree used to
@@ -6403,6 +6419,7 @@ mod tests {
             serde_json::from_str(r#"{"keep":null,"component_name":"exchange","message":null,"tag":null,"commit":true,"force_disk":false}"#)
                 .unwrap();
         assert_eq!(legacy.lint, None);
+        assert_eq!(legacy.requester, None);
     }
 
     fn git(dir: &Path, args: &[&str]) {

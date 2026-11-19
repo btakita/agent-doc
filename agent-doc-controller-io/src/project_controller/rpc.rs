@@ -12030,6 +12030,9 @@ fn handle_compact_document_rpc(
     let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
     let invocation: ControllerCompactDocumentInvocation =
         serde_json::from_str(&payload_json).context("failed to parse compact_document payload")?;
+    let requester = invocation
+        .requester
+        .map_or("unknown", CompactRequester::as_str);
     let document_hash = agent_doc_hash::document_id_for_path(&canonical);
     let projection = runtime.document_state_projection(&document_hash)?;
     match compact_document_admission(projection.as_ref(), controller_now_ms()) {
@@ -12038,7 +12041,7 @@ fn handle_compact_document_rpc(
             agent_doc_ops_log_io::log_op(
                 &canonical,
                 &format!(
-                    "controller_compact_document_deferred file={} reason=active_typing retry_after_ms={retry_after_ms}",
+                    "controller_compact_document_deferred file={} reason=active_typing retry_after_ms={retry_after_ms} requester={requester}",
                     canonical.display(),
                 ),
             );
@@ -12054,7 +12057,7 @@ fn handle_compact_document_rpc(
             agent_doc_ops_log_io::log_op(
                 &canonical,
                 &format!(
-                    "controller_compact_document_already_pending file={} continuation_id={} commit={} action=return_existing_without_rewrite",
+                    "controller_compact_document_already_pending file={} continuation_id={} commit={} action=return_existing_without_rewrite requester={requester}",
                     canonical.display(),
                     continuation_id,
                     commit,
@@ -12071,7 +12074,7 @@ fn handle_compact_document_rpc(
     agent_doc_ops_log_io::log_op(
         &canonical,
         &format!(
-            "controller_compact_document file={} component={} commit={} barrier_ready={}",
+            "controller_compact_document file={} component={} commit={} barrier_ready={} requester={requester}",
             canonical.display(),
             invocation.component_name.as_deref().unwrap_or("exchange"),
             invocation.commit,

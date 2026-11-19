@@ -1545,6 +1545,7 @@ object TerminalUtil {
             project = project,
             file = file,
             command = buildCompactExchangeCommand(resolveAgentDoc(cwd), relativePath),
+            env = mapOf("AGENT_DOC_COMPACT_REQUESTER" to "editor"),
             startedMessage = "Compacting exchange for ${file.name}",
             failureAction = "compact this document",
             onSuccess = { resolvedPath, output ->
@@ -1773,12 +1774,14 @@ object TerminalUtil {
         onSuccess: (String, String) -> Unit,
         onFailure: ((String, Int, String) -> Unit)? = null,
         onComplete: (() -> Unit)? = null,
+        env: Map<String, String> = emptyMap(),
     ) {
         val (cwd, relativePath) = resolveProject(project, file)
         try {
             val process = ProcessBuilder(command)
                 .directory(java.io.File(cwd))
                 .redirectErrorStream(true)
+                .apply { environment().putAll(env) }
                 .start()
 
             showHint(project, startedMessage)

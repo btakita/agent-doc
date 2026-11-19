@@ -34,6 +34,7 @@ agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.581" }
 agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.35.581" }
 agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.581" }
 agent-doc-merge-io = { path = "../agent-doc-merge-io", version = "0.35.581" }
+agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.35.581" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.581" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.581" }
 agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.581" }

@@ -191,6 +191,25 @@ pub struct ControllerCommitDocumentOutcome {
     pub vcs_refresh_signaled: Option<bool>,
 }
 
+/// Caller context for compact diagnostics.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactRequester {
+    Editor,
+    Cli,
+    Agent,
+}
+
+impl CompactRequester {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Editor => "editor",
+            Self::Cli => "cli",
+            Self::Agent => "agent",
+        }
+    }
+}
+
 /// Complete Compact Exchange invocation executed inside the CP process. The
 /// editor/CLI is only a command submitter; all reads, CRDT mutation, archive,
 /// commit, and delivery acknowledgement remain under controller ownership.
@@ -207,6 +226,9 @@ pub struct ControllerCompactDocumentInvocation {
     /// means "resolve from frontmatter / project config", exactly as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lint: Option<String>,
+    /// Optional for compact requests submitted before requester attribution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requester: Option<CompactRequester>,
 }
 
 /// Authoritative result of one controller-owned Compact Exchange request.

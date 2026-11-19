@@ -7,6 +7,19 @@ import org.junit.Test
 
 class CompactExchangeActionTest {
     @Test
+    fun `compact exchange labels its CLI subprocess as an editor request`() {
+        val terminalSource = Paths.get(
+            "src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt",
+        ).toFile().readText()
+        val compact = terminalSource.substringAfter("fun compactExchange(")
+            .substringBefore("fun lintDocument(")
+        val runner = terminalSource.substringAfter("private fun runDocumentCommand(")
+            .substringBefore("internal fun agentDocCandidates(")
+        assertTrue(compact.contains("env = mapOf(\"AGENT_DOC_COMPACT_REQUESTER\" to \"editor\")"))
+        assertTrue(runner.contains("environment().putAll(env)"))
+    }
+
+    @Test
     fun `compact exchange saves only its target document before routing`() {
         val source = Paths.get(
             "src/main/kotlin/com/github/btakita/agentdoc/CompactExchangeAction.kt",

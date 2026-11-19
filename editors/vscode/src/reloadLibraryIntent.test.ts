@@ -42,6 +42,7 @@ describe('typed reload_library intent', () => {
         const compact = extension.slice(compactStart, compactEnd);
         assert.ok(compact.includes('nativeReloadGate.awaitReady('));
         assert.ok(compact.includes('patchWatcher?.ensureOpenReplica('));
+        assert.ok(compact.includes("AGENT_DOC_COMPACT_REQUESTER: 'editor'"));
 
         const syncStart = extension.indexOf('async function syncLayoutInternal(');
         const syncEnd = extension.indexOf('// Feature 4: Editor Surface Reporting', syncStart);

@@ -535,6 +535,8 @@ pub fn closed_list_item(document: &str, verbatim: &str) -> bool {
 pub enum GateComponent {
     Queue,
     Exchange,
+    Backlog,
+    Todo,
 }
 
 impl GateComponent {
@@ -542,6 +544,8 @@ impl GateComponent {
         match self {
             Self::Queue => "queue",
             Self::Exchange => "exchange",
+            Self::Backlog => "backlog",
+            Self::Todo => "todo",
         }
     }
 
@@ -549,6 +553,8 @@ impl GateComponent {
         match text {
             "queue" => Some(Self::Queue),
             "exchange" => Some(Self::Exchange),
+            "backlog" => Some(Self::Backlog),
+            "todo" => Some(Self::Todo),
             _ => None,
         }
     }

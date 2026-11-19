@@ -60,6 +60,9 @@ use sha2::{Digest, Sha256};
 
 use crate::baseline_comparison::{RealtimeSteering, exchange_steering_set_between};
 
+mod tracked_edits;
+pub use tracked_edits::{TrackedEdits, claimed_tracked_edits};
+
 /// Default quiet period before an edited item counts as settled.
 pub const DEFAULT_STEERING_DEBOUNCE_MS: u64 = 2500;
 
@@ -125,6 +128,33 @@ impl SteeringDispatch {
 pub enum SteeringSource {
     Exchange,
     Queue,
+    Backlog,
+    Todo,
+}
+
+impl SteeringSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Exchange => "exchange",
+            Self::Queue => "queue",
+            Self::Backlog => "backlog",
+            Self::Todo => "todo",
+        }
+    }
+
+    fn gate_component(self) -> agent_doc_debounce::edit_settle::GateComponent {
+        use agent_doc_debounce::edit_settle::GateComponent;
+        match self {
+            Self::Exchange => GateComponent::Exchange,
+            Self::Queue => GateComponent::Queue,
+            Self::Backlog => GateComponent::Backlog,
+            Self::Todo => GateComponent::Todo,
+        }
+    }
+
+    fn is_tracked(self) -> bool {
+        matches!(self, Self::Backlog | Self::Todo)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -271,6 +301,10 @@ pub struct SteeringWatermark {
     /// Normalized queue prompts as of the last surfacing.
     #[serde(default)]
     pub acknowledged_queue: Vec<String>,
+    /// The last task text sent to each exact claim, keyed by the tracked source
+    /// identity and attempt. Queue acknowledgement cannot stand in for it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub acknowledged_tracked: BTreeMap<String, String>,
     /// Surfaced exchange directive identity → verbatim text.
     #[serde(default)]
     pub surfaced_exchange: BTreeMap<String, String>,
@@ -342,6 +376,7 @@ impl SteeringWatermark {
                 .into_iter()
                 .map(|item| item.norm)
                 .collect(),
+            acknowledged_tracked: BTreeMap::new(),
             surfaced_exchange: BTreeMap::new(),
             pending: BTreeMap::new(),
             last_observed_content_hash: Some(content_hash(baseline)),
@@ -435,7 +470,7 @@ pub fn gate_text_tail(text: &str) -> String {
 /// The candidate-key family: versions of one item being typed share it.
 fn candidate_family(key: &str) -> &str {
     match key.rsplit_once(':') {
-        Some((family, _)) if key.starts_with("queue:") => family,
+        Some((family, _)) if key.starts_with("queue:") || key.starts_with("tracked:") => family,
         _ => "exchange",
     }
 }
@@ -486,6 +521,26 @@ pub fn observe_with_mode_and_presets(
     mode: ObserveMode,
     prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
 ) -> Observation {
+    observe_with_claimed_tracked_edits(
+        watermark,
+        current,
+        ctx,
+        mode,
+        prompt_presets,
+        &TrackedEdits::default(),
+    )
+}
+
+/// Observe exchange, queue, and attributed edits to claimed tracked work
+/// through the same typing gate and consumer acknowledgement.
+pub fn observe_with_claimed_tracked_edits(
+    watermark: &SteeringWatermark,
+    current: &str,
+    ctx: &ObserveContext<'_>,
+    mode: ObserveMode,
+    prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
+    tracked: &TrackedEdits,
+) -> Observation {
     let boundary = mode == ObserveMode::Boundary;
     let mut candidates: Vec<Candidate> = Vec::new();
     candidates.extend(exchange_candidates(
@@ -512,11 +567,12 @@ pub fn observe_with_mode_and_presets(
     candidates.extend(queue.candidates.iter().cloned());
     let queue_modes = queue_mode_candidates(watermark, current, prompt_presets);
     candidates.extend(queue_modes.candidates.iter().cloned());
+    candidates.extend(tracked.candidates.iter().cloned());
 
     use agent_doc_debounce::edit_settle::{
-        CompletionSignal, GateComponent, GateFeatures, SettleDecision, SettleInputs,
-        closed_list_item, completion_signal, deterministic_tier, has_unbalanced_delimiters,
-        settle_decision, trailing_token, typing_chars_per_min,
+        CompletionSignal, GateFeatures, SettleDecision, SettleInputs, closed_list_item,
+        completion_signal, deterministic_tier, has_unbalanced_delimiters, settle_decision,
+        trailing_token, typing_chars_per_min,
     };
     // `#steergatelog`: a version that vanished from the candidates was
     // superseded by a re-edit; its successor in the same family inherits the
@@ -594,10 +650,7 @@ pub fn observe_with_mode_and_presets(
                 last_edit_ms.saturating_sub(item_started_ms),
             ),
             item_age_ms: ctx.now_ms.saturating_sub(item_started_ms),
-            component: match candidate.item.source {
-                SteeringSource::Queue => GateComponent::Queue,
-                SteeringSource::Exchange => GateComponent::Exchange,
-            },
+            component: candidate.item.source.gate_component(),
             debounce_ms: ctx.debounce_ms,
             max_hold_ms: ctx.max_hold_ms,
         };
@@ -664,7 +717,7 @@ pub fn observe_with_mode_and_presets(
 
     let mut next = watermark.clone();
     next.pending = next_pending;
-    next.last_observed_content_hash = Some(content_hash(current));
+    next.last_observed_content_hash = (!tracked.awaiting_provenance).then(|| content_hash(current));
     let mut acknowledged_modes = queue_modes.acknowledged.clone();
     for (key, queue, subagents) in &queue_modes.changes {
         if ready_keys.contains(key) {
@@ -682,6 +735,12 @@ pub fn observe_with_mode_and_presets(
                 .insert(identity.clone(), candidate.item.verbatim.clone());
         }
         let mut item = candidate.item.clone();
+        if item.source.is_tracked() {
+            next.acknowledged_tracked.insert(
+                candidate_family(&candidate.key).to_string(),
+                item.verbatim.clone(),
+            );
+        }
         // `#explicitqueueaddress`: passive queue additions stay ordered behind
         // the active head, but Run Agent Doc is an explicit send to the owning
         // turn. Preserve stronger subagent/claim routing; only upgrade the
@@ -1635,9 +1694,10 @@ impl PresetContext {
             .collect();
         let literal_subagent_tag =
             agent_doc_queue::subagent_intent::carries_subagent_intent_tag(raw);
-        let scoped = match source {
+        let scoped: &[PresetIntent] = match source {
             SteeringSource::Queue => &self.queue,
             SteeringSource::Exchange => &self.exchange,
+            SteeringSource::Backlog | SteeringSource::Todo => &[],
         };
         intents.extend(scoped.iter().cloned());
         intents.extend(self.cycle.iter().cloned());
@@ -1647,6 +1707,7 @@ impl PresetContext {
                     && !agent_doc_queue::subagent_intent::opts_out_of_queue_subagents(raw)
             }
             SteeringSource::Exchange => self.exchange_subagents,
+            SteeringSource::Backlog | SteeringSource::Todo => false,
         };
         let subagent = literal_subagent_tag
             || component_attr_subagent
@@ -1659,6 +1720,7 @@ impl PresetContext {
             match source {
                 SteeringSource::Queue => SteeringDispatch::DrainAfterCurrent,
                 SteeringSource::Exchange => SteeringDispatch::AddressNow,
+                SteeringSource::Backlog | SteeringSource::Todo => SteeringDispatch::ForwardToOwner,
             }
         };
         (dispatch, intents)
@@ -1821,10 +1883,7 @@ pub fn render_steering_context_for_harness(
             idx + 1,
             ready.len(),
             item.dispatch.as_str(),
-            match item.source {
-                SteeringSource::Exchange => "exchange",
-                SteeringSource::Queue => "queue",
-            },
+            item.source.as_str(),
             match item.change {
                 SteeringChange::Added => "added",
                 SteeringChange::Edited => "edited",
@@ -2244,13 +2303,18 @@ fn forward_to_owner_instruction(document: &str, item: &SteeringItem, harness: &s
         shell_single_quote(item.claim_text()),
         generation,
     );
+    let edit_location = if item.source.is_tracked() {
+        "the tracked item"
+    } else {
+        "the queue"
+    };
     let body = if grok_claimed_owner_forward(harness, item) {
         grok_send_subagent_message_instruction(item, &requeue)
     } else {
         format!(
             "{} If the harness reports that the exact worker stopped, exited, or no longer exists, the \
              handoff did NOT happen: do not drop this operator answer/edit, claim it was forwarded, \
-             or keep routing only to the unreachable owner. Preserve `verbatim` in the queue and run \
+             or keep routing only to the unreachable owner. Preserve `verbatim` in {edit_location} and run \
              `{requeue}`. That generation-fenced transition abandons only the stale attempt and makes \
              the edited row redispatchable; let the normal queue dispatcher start its replacement \
              under a fresh generation.",
@@ -2292,6 +2356,11 @@ fn cross_harness_control_sentence(document: &str, item: &SteeringItem, generatio
 /// steering `worker=` id, never `parent`. `delivery` is `steer`.
 fn grok_send_subagent_message_instruction(item: &SteeringItem, requeue: &str) -> String {
     let worker = item.worker_id.as_deref().unwrap_or("").trim();
+    if item.source.is_tracked() {
+        return format!(
+            "the operator edited tracked work referenced by this running attempt. Call `send_subagent_message` with `subagent_id` `{worker}`, `delivery` `steer`, and a message containing `previous` and `verbatim`. Keep the queue row and claim intact. If the harness reports the exact worker stopped, exited, or no longer exists, run `{requeue}` so a fresh attempt reads the tracked edit from the document."
+        );
+    }
     let lead = match item.change {
         SteeringChange::Added => {
             "the operator added a note on a queue item a worker already claimed (`owner` above)"
@@ -2487,6 +2556,11 @@ pub fn instruction_for(item: &SteeringItem) -> &'static str {
             "a struck-row deletion conflicts with durable work evidence. Preserve/fence it and report the mismatch; do not interrupt, release, or integrate automatically."
         }
         (SteeringDispatch::ForwardToOwner, _, SteeringChange::Added, _) => FORWARD_ADDED,
+        (SteeringDispatch::ForwardToOwner, source, SteeringChange::Edited, _)
+            if source.is_tracked() =>
+        {
+            "the operator edited tracked work referenced by this running attempt. Forward the previous and edited text to the exact bound worker; keep its claim and queue row intact."
+        }
         (SteeringDispatch::ForwardToOwner, _, SteeringChange::Edited, _) => FORWARD_EDITED,
         (SteeringDispatch::QueueModeChanged, _, _, _) => {
             "the operator changed this queue's subagent mode: re-run `agent-doc plan` and follow \
@@ -2498,6 +2572,9 @@ pub fn instruction_for(item: &SteeringItem) -> &'static str {
              result in THIS turn with the closeout that strikes the item (`agent-doc finalize` \
              with the verbatim `> **Queue prompt:** <line>` echo, or `--done <id>`). Do NOT \
              dispatch a new subagent for it and do NOT re-claim it."
+        }
+        (SteeringDispatch::AddressNow | SteeringDispatch::Subagent, _, _, _) => {
+            "tracked edits are forwarded only to their existing worker attempt."
         }
         (SteeringDispatch::DrainAfterCurrent, _, _, _) => {
             "queued in operator order: it runs AFTER the current item closes, through the normal \
@@ -2602,10 +2679,7 @@ pub fn render_closeout_steering_context_for_harness(
             idx + 1,
             ready.len(),
             item.dispatch.as_str(),
-            match item.source {
-                SteeringSource::Exchange => "exchange",
-                SteeringSource::Queue => "queue",
-            },
+            item.source.as_str(),
             match item.change {
                 SteeringChange::Added => "added",
                 SteeringChange::Edited => "edited",

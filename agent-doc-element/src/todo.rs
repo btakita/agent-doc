@@ -854,7 +854,7 @@ fn action_with_source_reference(action: &str, id: &str, linked: Option<&str>) ->
 ///
 /// This intentionally recognizes only the binary-owned spelling. Free-form
 /// prose containing `source:` is operator text and must not be rewritten.
-fn strip_trailing_source_reference(action: &str) -> Option<&str> {
+pub fn strip_trailing_source_reference(action: &str) -> Option<&str> {
     let marker = " (source: agent:";
     let start = action.rfind(marker)?;
     let tail = &action[start + marker.len()..];

@@ -554,15 +554,18 @@ thread_local! {
     static PROVENANCE_READ_FAULT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// Route queue items a worker claimed to their owner (`#claimedsteerwake`) and
-/// synthesize authoritative cancellation for claimed rows the operator removed
-/// (`#queue-removal-cancels`).
-fn route_claimed_items(
+/// Read one authority cut for both tracked-text forwarding and queue routing.
+struct ClaimedSteeringCut {
+    ledger: agent_doc_queue::queue_claim::QueueClaimLedger,
+    editor_attached: bool,
+    operator_cut: Option<String>,
+}
+
+fn read_claimed_steering_cut(
     file: &Path,
     content: &str,
     watermark: &SteeringWatermark,
-    items: &mut Vec<SteeringItem>,
-) -> Result<BTreeSet<String>> {
+) -> Result<ClaimedSteeringCut> {
     #[cfg(test)]
     if PROVENANCE_READ_FAULT.with(std::cell::Cell::get) {
         anyhow::bail!(
@@ -577,6 +580,53 @@ fn route_claimed_items(
         agent_doc_queue_io::queue_claim::load_ledger_following(file, content)
     }
     .with_context(|| format!("read queue claims while routing {}", file.display()))?;
+    // Attached document text includes both editor and binary projection
+    // changes. Only captured operator edits can authorize tracked forwarding
+    // or prove that the operator removed a claimed row.
+    let editor_attached =
+        agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(file);
+    let operator_cut = if editor_attached {
+        agent_doc_op_capture_io::operator_text_for_base(file, &watermark.baseline).with_context(
+            || {
+                format!(
+                    "read operator edit provenance while routing claimed removals for {}",
+                    file.display()
+                )
+            },
+        )?
+    } else {
+        None
+    };
+    Ok(ClaimedSteeringCut {
+        ledger,
+        editor_attached,
+        operator_cut,
+    })
+}
+
+impl ClaimedSteeringCut {
+    fn tracked_edits(&self, watermark: &SteeringWatermark, content: &str) -> core::TrackedEdits {
+        let authored = if self.editor_attached {
+            self.operator_cut.as_deref()
+        } else {
+            Some(content)
+        };
+        core::claimed_tracked_edits(watermark, content, authored, &self.ledger.claims)
+    }
+}
+
+/// Route queue items a worker claimed to their owner (`#claimedsteerwake`) and
+/// synthesize authoritative cancellation for claimed rows the operator removed
+/// (`#queue-removal-cancels`).
+fn route_claimed_items(
+    file: &Path,
+    content: &str,
+    watermark: &SteeringWatermark,
+    cut: &ClaimedSteeringCut,
+    items: &mut Vec<SteeringItem>,
+) -> Result<BTreeSet<String>> {
+    let status_only = crate::status_only_pass_active();
+    let ledger = &cut.ledger;
     let now = agent_doc_queue_io::queue_claim::claim_clock_now_secs();
     let mut attempts = ledger
         .active(now, None)
@@ -698,32 +748,14 @@ fn route_claimed_items(
             }
         });
     }
-    // A live editor can transiently publish a stale whole-buffer projection
-    // while its actual operator ops touch only an unrelated queue row. The
-    // projection is authoritative for text display, but it is not sufficient
-    // provenance for the irreversible cancellation tombstone. In that case,
-    // authorize removals only when the editor's captured operations replayed
-    // onto this cycle's baseline remove the same claim identity. Detached disk
-    // edits have no competing editor authority and retain the classic path.
-    let operator_removed =
-        if agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(file) {
-            let operator_cut =
-                agent_doc_op_capture_io::operator_text_for_base(file, &watermark.baseline)
-                    .with_context(|| {
-                        format!(
-                            "read operator edit provenance while routing claimed removals for {}",
-                            file.display()
-                        )
-                    })?;
-            Some(
-                operator_cut
-                    .as_deref()
-                    .map(|cut| removed_queue_claim_identities(&watermark.baseline, cut))
-                    .unwrap_or_default(),
-            )
-        } else {
-            None
-        };
+    // Require captured removal evidence when editor projection could have
+    // removed a row independently of the operator's edits.
+    let operator_removed = cut.editor_attached.then(|| {
+        cut.operator_cut
+            .as_deref()
+            .map(|text| removed_queue_claim_identities(&watermark.baseline, text))
+            .unwrap_or_default()
+    });
     core::append_claimed_queue_removals(items, watermark, content, |text| {
         let identity = agent_doc_queue::queue_claim::claim_identity(text);
         if operator_removed
@@ -1547,8 +1579,16 @@ fn prepare_with_gate_at(
     };
     let prompt_presets =
         agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(&content, file)?;
-    let mut observation =
-        core::observe_with_mode_and_presets(&watermark, &content, &ctx, mode, &prompt_presets);
+    let cut = read_claimed_steering_cut(file, &content, &watermark)?;
+    let tracked = cut.tracked_edits(&watermark, &content);
+    let mut observation = core::observe_with_claimed_tracked_edits(
+        &watermark,
+        &content,
+        &ctx,
+        mode,
+        &prompt_presets,
+        &tracked,
+    );
     if !boundary && !observation.ready.is_empty() {
         // Rare path: confirm the cycle is still open before handing anything
         // to the agent, and exclude this cycle's own queue bookkeeping.
@@ -1560,7 +1600,7 @@ fn prepare_with_gate_at(
             Some(cycle) if cycle_accepts_steering(&cycle, &watermark.cycle_id) => {
                 let owned = binary_owned_ids(&cycle);
                 if !owned.is_empty() {
-                    observation = core::observe_with_mode_and_presets(
+                    observation = core::observe_with_claimed_tracked_edits(
                         &watermark,
                         &content,
                         &ObserveContext {
@@ -1569,6 +1609,7 @@ fn prepare_with_gate_at(
                         },
                         core::ObserveMode::InTurn,
                         &prompt_presets,
+                        &tracked,
                     );
                 }
             }
@@ -1578,7 +1619,7 @@ fn prepare_with_gate_at(
                 // next cycle), excluding the closed cycle's own bookkeeping.
                 boundary = true;
                 let owned = closed.as_ref().map(binary_owned_ids).unwrap_or_default();
-                observation = core::observe_with_mode_and_presets(
+                observation = core::observe_with_claimed_tracked_edits(
                     &watermark,
                     &content,
                     &ObserveContext {
@@ -1587,6 +1628,7 @@ fn prepare_with_gate_at(
                     },
                     core::ObserveMode::Boundary,
                     &prompt_presets,
+                    &tracked,
                 );
             }
             Some(_) => {
@@ -1598,12 +1640,13 @@ fn prepare_with_gate_at(
                 // whose head can outrank the boundary. Preserve the legacy
                 // committed-baseline fallback for polling-only consumers.
                 boundary = true;
-                observation = core::observe_with_mode_and_presets(
+                observation = core::observe_with_claimed_tracked_edits(
                     &watermark,
                     &content,
                     &ctx,
                     core::ObserveMode::Boundary,
                     &prompt_presets,
+                    &tracked,
                 );
             }
         }
@@ -1633,7 +1676,8 @@ fn prepare_with_gate_at(
         explicit: explicit_send,
         decisions: std::mem::take(&mut observation.decisions),
     };
-    let struck_removals = route_claimed_items(file, &content, &watermark, &mut observation.ready)?;
+    let struck_removals =
+        route_claimed_items(file, &content, &watermark, &cut, &mut observation.ready)?;
     // `#steerbaselineabsorb`: a prompt a cycle already carried or answered is
     // never re-surfaced (the watermark still advances past it).
     if crate::status_only_pass_active() {
@@ -1724,19 +1768,30 @@ pub struct WakeObservation {
 }
 
 fn steering_item_identity(item: &SteeringItem) -> String {
-    format!(
+    let mut identity = format!(
         "{}:{}:{}",
-        match item.source {
-            core::SteeringSource::Exchange => "exchange",
-            core::SteeringSource::Queue => "queue",
-        },
+        item.source.as_str(),
         match item.change {
             core::SteeringChange::Added => "added",
             core::SteeringChange::Edited => "edited",
             core::SteeringChange::Deleted => "deleted",
         },
         core::normalize_queue_text(&item.verbatim)
-    )
+    );
+    if matches!(
+        item.source,
+        core::SteeringSource::Backlog | core::SteeringSource::Todo
+    ) {
+        // A replacement attempt may need the same textual edit. Its wake
+        // must not reuse the old worker's observation fingerprint.
+        identity.push_str(&format!(
+            ":{}:{}:{}",
+            item.claim_text(),
+            item.generation.unwrap_or_default(),
+            item.worker_id.as_deref().unwrap_or_default(),
+        ));
+    }
+    identity
 }
 
 /// Non-consuming observation for the idle steering wake (`#steeringwake`).
@@ -2321,12 +2376,17 @@ pub fn pending_steering_items(file: &Path, current: &str) -> Vec<SteeringItem> {
                     .map(|(fm, _)| fm.prompt_presets)
                     .unwrap_or_default()
             });
-    let mut ready = core::observe_with_mode_and_presets(
+    let Ok(cut) = read_claimed_steering_cut(file, current, &base) else {
+        return Vec::new();
+    };
+    let tracked = cut.tracked_edits(&base, current);
+    let mut ready = core::observe_with_claimed_tracked_edits(
         &base,
         current,
         &ctx,
         core::ObserveMode::Boundary,
         &prompt_presets,
+        &tracked,
     )
     .ready;
     if let Some(cycle) = cycle
@@ -2340,7 +2400,7 @@ pub fn pending_steering_items(file: &Path, current: &str) -> Vec<SteeringItem> {
         let _ = err;
         ready.clear();
     }
-    if let Err(err) = route_claimed_items(file, current, &base, &mut ready) {
+    if let Err(err) = route_claimed_items(file, current, &base, &cut, &mut ready) {
         let _ = err;
         ready.clear();
     }
@@ -2371,10 +2431,7 @@ pub fn render_pending_steering_items(items: &[SteeringItem]) -> Option<String> {
             idx + 1,
             items.len(),
             item.dispatch.as_str(),
-            match item.source {
-                core::SteeringSource::Exchange => "exchange",
-                core::SteeringSource::Queue => "queue",
-            },
+            item.source.as_str(),
             match item.change {
                 core::SteeringChange::Added => "added",
                 core::SteeringChange::Edited => "edited",
@@ -5842,6 +5899,152 @@ mod tests {
         let passive = observe(&file, CONSUMER_HOOK, false).unwrap().unwrap();
         assert!(passive.items.is_empty(), "{passive:?}");
         assert_eq!(passive.pending, 1);
+    }
+
+    #[test]
+    fn tracked_edits_forward_to_the_existing_worker_once() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let baseline = concat!(
+            "# Plan\n\n",
+            "<!-- agent:queue subagents go -->\n",
+            "- do [#impl]\n- do [#verify]\n- do [#ended]\n- do [#unclaimed]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#impl] Implement the search.\n  - Use the public endpoint.\n",
+            "- [ ] [#ended] Already reported.\n",
+            "- [ ] [#unclaimed] Still pending.\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:todo -->\n",
+            "- [ ] [#verify] Check the new results.\n  - Check the default page.\n",
+            "<!-- /agent:todo -->\n",
+        );
+        std::fs::write(&file, baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
+                .unwrap();
+        seed_for_cycle(&file, &cycle.cycle_id, baseline, None, Vec::new()).unwrap();
+        let runs = [
+            ("do [#impl]", "subagent:impl", "worker:impl"),
+            ("do [#verify]", "subagent:verify", "worker:verify"),
+        ]
+        .map(|(head, owner, worker)| {
+            let (_, claim) =
+                agent_doc_queue_io::queue_claim::claim(&file, head, owner, 3600).unwrap();
+            agent_doc_queue_io::queue_claim::start_attempt(
+                &file,
+                head,
+                owner,
+                worker,
+                3600,
+                claim.generation,
+            )
+            .unwrap();
+            (head, owner, worker, claim.generation)
+        });
+        report_running(&file, "do [#ended]", "subagent:ended");
+
+        // Numbering, child backfill, and a Todo source locator change the
+        // projection but do not edit the claimed instructions.
+        let formatted = baseline
+            .replace("- [ ] [#impl]", "1. [ ] [#impl]")
+            .replace("  - Use the public", "  - [ ] [#impl-abcd] Use the public")
+            .replace(
+                "Check the new results.",
+                "Check the new results. (source: agent:backlog [#impl])",
+            );
+        std::fs::write(&file, &formatted).unwrap();
+        backdate(&file);
+        let format_report = observe(&file, CONSUMER_HOOK, true).unwrap().unwrap();
+        assert!(format_report.items.is_empty(), "{format_report:?}");
+
+        let edited = formatted
+            .replace("Implement the search.", "Implement the paginated search.")
+            .replace("Check the default page.", "Check the last page.")
+            .replace("Already reported.", "Reported update.")
+            .replace("Still pending.", "Unclaimed update.");
+
+        let watermark = SteeringWatermark::seed("test", baseline, None, Vec::new());
+        let ledger = agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap();
+        let unproven =
+            core::claimed_tracked_edits(&watermark, &edited, Some(&formatted), &ledger.claims);
+        let deterministic = agent_doc_debounce::edit_settle::DeterministicOnly;
+        let ctx = ObserveContext {
+            max_hold_ms: 10_000,
+            classifier: &deterministic,
+            median_pause_ms: None,
+            now_ms: 10_000,
+            document_changed_ms: None,
+            debounce_ms: 0,
+            binary_owned_queue_ids: &BTreeSet::new(),
+            explicit_send: true,
+        };
+        let rejected = core::observe_with_claimed_tracked_edits(
+            &watermark,
+            &edited,
+            &ctx,
+            core::ObserveMode::InTurn,
+            &Default::default(),
+            &unproven,
+        );
+        assert!(rejected.ready.is_empty(), "{rejected:?}");
+        assert!(rejected.next.last_observed_content_hash.is_none());
+
+        std::fs::write(&file, &edited).unwrap();
+        backdate(&file);
+        let report = observe(&file, CONSUMER_HOOK, true).unwrap().unwrap();
+        assert_eq!(report.items.len(), 2, "{report:?}");
+        for ((head, owner, worker, generation), source) in runs
+            .into_iter()
+            .zip([core::SteeringSource::Backlog, core::SteeringSource::Todo])
+        {
+            let item = report
+                .items
+                .iter()
+                .find(|item| item.source == source)
+                .unwrap();
+            assert_eq!(item.dispatch, core::SteeringDispatch::ForwardToOwner);
+            assert_eq!(item.change, core::SteeringChange::Edited);
+            assert_eq!(item.claim_text(), head);
+            assert_eq!(item.owner.as_deref(), Some(owner));
+            assert_eq!(item.worker_id.as_deref(), Some(worker));
+            assert_eq!(item.generation, Some(generation));
+        }
+        let todo = report
+            .items
+            .iter()
+            .find(|item| item.source == core::SteeringSource::Todo)
+            .unwrap();
+        assert!(
+            todo.previous
+                .as_deref()
+                .unwrap()
+                .contains("Check the default page.")
+        );
+        assert!(todo.verbatim.contains("Check the last page."));
+        let rendered = report.render().unwrap();
+        assert!(
+            rendered.contains("source=backlog change=edited"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("source=todo change=edited"), "{rendered}");
+        assert!(rendered.contains("--item 'do [#impl]'"), "{rendered}");
+        assert!(observe(&file, CONSUMER_HOOK, true).unwrap().is_none());
+
+        let revised = edited.replace("Check the last page.", "Check every page.");
+        std::fs::write(&file, revised).unwrap();
+        backdate(&file);
+        let again = observe(&file, CONSUMER_HOOK, true).unwrap().unwrap();
+        assert_eq!(again.items.len(), 1, "{again:?}");
+        assert!(
+            again.items[0]
+                .previous
+                .as_deref()
+                .unwrap()
+                .contains("Check the last page.")
+        );
+        assert!(again.items[0].verbatim.contains("Check every page."));
     }
 
     /// `#claimfollowedit` (agent-doc-bugs.md, 2026-10-15): a claimed queue line

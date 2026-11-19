@@ -28,7 +28,7 @@ class ModularRestartBoundaryContractTest {
         )
         val sharedSpec = Files.readString(
             repositoryFile("../PLUGIN-SPEC.md", "editors/PLUGIN-SPEC.md"),
-        )
+        ).replace(Regex("\\s+"), " ")
 
         assertTrue(descriptor.contains("<module name=\"agent.doc.shared\" loading=\"required\"/>"))
         assertTrue(descriptor.contains("required-if-available=\"intellij.platform.frontend\""))
@@ -38,8 +38,8 @@ class ModularRestartBoundaryContractTest {
         assertTrue(jetBrainsSpec.contains("every platform registration (actions, extensions, listeners,"))
         assertTrue(jetBrainsSpec.contains("generation's classloader becomes unreachable and is collected"))
         assertTrue(jetBrainsSpec.contains("backend/frontend activation receipts"))
-        assertTrue(sharedSpec.contains("Exact-263 whole-package restart-free upgrade is explicitly unsupported"))
-        assertTrue(sharedSpec.contains("generation-fenced backend/frontend activation"))
+        assertTrue(sharedSpec.contains("Exact-263 whole-package upgrades require a restart (GH #339)."))
+        assertTrue(sharedSpec.contains("generation-fenced backend and frontend activation receipts name the same verified artifact"))
 
         assertFalse(
             "the modular descriptor must not advertise the classic attach launcher",

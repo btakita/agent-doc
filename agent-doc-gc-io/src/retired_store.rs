@@ -3,10 +3,9 @@
 //! ## Spec
 //! - Lists and removes retired `.agent-doc/` stores: directories that an older
 //!   agent-doc design wrote and that no current reader or writer touches.
-//! - The only retired store today is `live-buffer/`, the full-buffer editor
-//!   sidecar retired in agent-doc 0.34.160 when the Lazily/CP CRDT became the
-//!   sole live editor authority. Nothing on the hot path reads, writes, or
-//!   prunes it, so it otherwise grows forever.
+//! - The allowlist covers the retired editor buffer, file delivery, ownership,
+//!   acknowledgement, and editor-op directories. The typed Lazily editor
+//!   state and PID-scoped editor IPC replaced these filesystem paths.
 //! - Three modes: `Report` (plain `agent-doc gc`) names the store and how to
 //!   remove it; `DryRun` (`gc --retired-stores --dry-run`) lists the path, file
 //!   count, bytes, and last write; `Remove` (`gc --retired-stores`) deletes it.
@@ -16,9 +15,9 @@
 //! ## Agentic Contracts
 //! - Only `<agent_doc_dir>/<retired name>` is touched; sibling `.agent-doc/`
 //!   entries are never read or removed.
-//! - Symlinks are never followed. A symlink inside the store is unlinked (its
-//!   target is untouched and is not counted); a store root that is itself a
-//!   symlink, or not a directory, is refused and left in place.
+//! - Symlinks are never followed. A symlink inside the store is unlinked and
+//!   its target is kept. A symlink at `.agent-doc/` or the store root is
+//!   refused, as is a store root that is not a directory.
 //! - Removal is best-effort per entry: every entry that fails to delete is
 //!   recorded in `failures` with its error, the walk continues, and the store
 //!   root is removed only when it is empty.
@@ -38,10 +37,28 @@ pub struct RetiredStore {
 }
 
 /// Every retired store `agent-doc gc --retired-stores` may remove.
-pub const RETIRED_STORES: &[RetiredStore] = &[RetiredStore {
-    name: "live-buffer",
-    retired_because: "editor live-buffer sidecar, retired in agent-doc 0.34.160; the Lazily/CP CRDT is the sole live editor authority and nothing reads or writes this store",
-}];
+pub const RETIRED_STORES: &[RetiredStore] = &[
+    RetiredStore {
+        name: "live-buffer",
+        retired_because: "editor live-buffer sidecar, retired in agent-doc 0.34.160; the Lazily/CP CRDT is the sole live editor authority and nothing reads or writes this store",
+    },
+    RetiredStore {
+        name: "patches",
+        retired_because: "file-watcher delivery retired. Live editors use PID-scoped IPC and typed Lazily delivery",
+    },
+    RetiredStore {
+        name: "plugin-owner",
+        retired_because: "editor lease sidecars retired. Live replica registration provides ownership and liveness",
+    },
+    RetiredStore {
+        name: "ack-content",
+        retired_because: "content acknowledgement files retired. Typed Lazily receipts carry delivery evidence",
+    },
+    RetiredStore {
+        name: "op-capture",
+        retired_because: "editor-op sidecars retired. The typed Lazily editor-op epoch holds the captured operations",
+    },
+];
 
 /// What a retired-store pass does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,11 +120,15 @@ pub fn run_retired_stores(
         None => agent_doc_project_root_io::project_root_from_cwd()?,
     };
     let agent_doc_dir = project_root.join(".agent-doc");
-    if !agent_doc_dir.is_dir() {
-        anyhow::bail!(
+    match fs::symlink_metadata(&agent_doc_dir) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            anyhow::bail!(".agent-doc/ is a symlink: {}", agent_doc_dir.display());
+        }
+        Ok(metadata) if metadata.is_dir() => {}
+        _ => anyhow::bail!(
             ".agent-doc/ directory not found in {}",
             project_root.display()
-        );
+        ),
     }
     let result = sweep_retired_stores(&agent_doc_dir, mode);
     if mode != RetiredStoreMode::Report && result.stores.is_empty() {
@@ -424,6 +445,28 @@ mod tests {
             fs::read(elsewhere.join("precious.md")).unwrap(),
             b"operator data"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn retired_store_scan_refuses_a_symlinked_agent_doc_directory() {
+        let project = TempDir::new().unwrap();
+        let elsewhere = TempDir::new().unwrap();
+        let patches = elsewhere.path().join("patches");
+        fs::create_dir(&patches).unwrap();
+        let payload = patches.join("keep.json");
+        fs::write(&payload, b"operator data").unwrap();
+        std::os::unix::fs::symlink(elsewhere.path(), project.path().join(".agent-doc")).unwrap();
+
+        for mode in [
+            RetiredStoreMode::Report,
+            RetiredStoreMode::DryRun,
+            RetiredStoreMode::Remove,
+        ] {
+            let error = run_retired_stores(Some(project.path()), mode).unwrap_err();
+            assert!(error.to_string().contains(".agent-doc/ is a symlink"));
+            assert_eq!(fs::read(&payload).unwrap(), b"operator data");
+        }
     }
 
     #[cfg(unix)]

@@ -660,6 +660,42 @@ fn cited_ids(action: &str) -> Vec<String> {
     out
 }
 
+const FOLLOW_UP_CONTEXT_OPEN: &str = " ⟦todo-follow-up:";
+
+/// Split out the tracked ids that were context when a standalone todo was
+/// added. A later decision stamp or source locator may follow the annotation.
+fn split_follow_up_context(action: &str) -> Option<(&str, &str, &str)> {
+    let (before, tail) = action.split_once(FOLLOW_UP_CONTEXT_OPEN)?;
+    let (ids, after) = tail.split_once('⟧')?;
+    (ids.split(',').all(is_valid_todo_id) && (after.is_empty() || after.starts_with(' ')))
+        .then_some((before, ids, after))
+}
+
+fn without_follow_up_context(action: &str) -> std::borrow::Cow<'_, str> {
+    match split_follow_up_context(action) {
+        Some((before, _, "")) => before.into(),
+        Some((before, _, after)) => format!("{before}{after}").into(),
+        None => action.into(),
+    }
+}
+
+fn with_follow_up_context(action: &str, ids: &[String]) -> String {
+    if ids.is_empty() {
+        action.to_string()
+    } else {
+        let prose = strip_trailing_source_reference(action).unwrap_or(action);
+        let source = &action[prose.len()..];
+        format!("{prose}{FOLLOW_UP_CONTEXT_OPEN}{}⟧{source}", ids.join(","))
+    }
+}
+
+fn non_contextual_citations(action: &str) -> impl Iterator<Item = String> + '_ {
+    let context = split_follow_up_context(action).map(|(_, ids, _)| ids);
+    cited_ids(action)
+        .into_iter()
+        .filter(move |id| !context.is_some_and(|ids| ids.split(',').any(|entry| entry == id)))
+}
+
 /// Normalize one `--todo-add` action into its checklist text.
 ///
 /// A caller may pass a bare action or an already-formatted `- [ ] action`
@@ -828,7 +864,7 @@ fn existing_children(body: &TodoBody, index: usize) -> Vec<String> {
 fn normalize_action_text(action: &str) -> String {
     // `#decisionidstamp`: the binary-owned decision stamp is not part of the
     // action, so a replayed add of the unstamped text still finds its row.
-    crate::decision_stamp::strip_decision_stamps(action)
+    crate::decision_stamp::strip_decision_stamps(&without_follow_up_context(action))
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
@@ -1091,7 +1127,23 @@ pub fn add_todo_item_to_document(
         Some((source_id, component)) => {
             action_with_source_reference(&action, source_id, Some(component.as_str()))
         }
-        None => action,
+        None => {
+            let cited = cited_ids(&action);
+            if cited
+                .iter()
+                .any(|id| links.resolving_this_closeout.contains(id))
+            {
+                let context = cited
+                    .into_iter()
+                    .filter(|id| {
+                        links.resolving_this_closeout.contains(id) || links.is_resolved(id)
+                    })
+                    .collect::<Vec<_>>();
+                with_follow_up_context(&action, &context)
+            } else {
+                action
+            }
+        }
     };
     let mut new_body = String::with_capacity(body.len() + action.len() + 16);
     new_body.push_str(body);
@@ -1286,7 +1338,9 @@ fn single_todo_source(
     {
         candidates.push((normalize_link_id(own), component.to_string()));
     }
-    for id in cited_ids(action) {
+    // Reopening tracked work must not turn a prior follow-up's context into
+    // an automatic-completion link.
+    for id in non_contextual_citations(action) {
         let Some(component) = links.linkable_component(&id) else {
             continue;
         };
@@ -1732,6 +1786,16 @@ pub fn edit_todo_item_in_document(
         );
     }
     let label = item_label(item.own_id.as_deref(), &item.action);
+    if let Some((_, ids, _)) = split_follow_up_context(&item.action) {
+        let plain = without_follow_up_context(&action);
+        let cited = cited_ids(&plain);
+        let context = ids
+            .split(',')
+            .filter(|id| cited.iter().any(|citation| citation == id))
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        action = with_follow_up_context(&plain, &context);
+    }
     // `#nestedtodoadd`: multi-line edit text replaces the item's nested lines
     // with its sub-items; single-line text keeps them as they are.
     let span = body.item_span(&item);
@@ -1840,14 +1904,18 @@ fn same_todo(a: &LocatedItem, b: &LocatedItem) -> Option<bool> {
         normalize_action_text(&a.action),
         normalize_action_text(&b.action),
     );
+    let prefer_b_follow_up = split_follow_up_context(&a.action).is_none()
+        && split_follow_up_context(&b.action).is_some();
     match (&a.own_id, &b.own_id) {
         // Two different own ids are two different items, whatever the text says.
         (Some(x), Some(y)) if x != y => return None,
-        (Some(_), Some(_)) => return Some(b_text.len() > a_text.len()),
+        (Some(_), Some(_)) => {
+            return Some(b_text.len() > a_text.len() || (a_text == b_text && prefer_b_follow_up));
+        }
         _ => {}
     }
     if a_text == b_text {
-        return Some(false);
+        return Some(prefer_b_follow_up);
     }
     // A completion-annotated copy only folds into its original when at least
     // one side is checked: two OPEN items that differ by a trailing note are
@@ -2041,9 +2109,12 @@ pub fn open_todo_audit_items(content: &str) -> Vec<OpenTodoAuditItem> {
         .items
         .into_iter()
         .filter(|item| item.state.is_open())
-        .map(|item| OpenTodoAuditItem {
-            selector: item.own_id.unwrap_or_else(|| item.action.clone()),
-            action: item.action,
+        .map(|item| {
+            let action = without_follow_up_context(&item.action).into_owned();
+            OpenTodoAuditItem {
+                selector: item.own_id.unwrap_or_else(|| action.clone()),
+                action,
+            }
         })
         .collect()
 }
@@ -2546,8 +2617,7 @@ pub fn todo_link_findings(content: &str, links: &TodoLinkIndex) -> Result<Vec<To
             // Linked to OPEN work: nothing to do until the operator acts.
             continue;
         }
-        let cited: Vec<String> = cited_ids(&item.action)
-            .into_iter()
+        let cited: Vec<String> = non_contextual_citations(&item.action)
             .filter(|id| Some(id.as_str()) != own && links.knows(id))
             .collect();
         if !cited.is_empty() && cited.iter().all(|id| links.is_resolved(id)) {
@@ -3822,7 +3892,7 @@ mod tests {
         let id = outcome.id.clone().unwrap();
         assert_eq!(
             todo_body(&outcome.content),
-            format!("- [ ] [#{id}] {action}\n")
+            format!("- [ ] [#{id}] {action} ⟦todo-follow-up:cfs⟧\n")
         );
         // The settling item's open todo is not a fold target either: the
         // follow-up is a separate operator decision.
@@ -3839,6 +3909,46 @@ mod tests {
         // The exemption leaves the item's open evidence alone.
         assert_eq!(index.open_component("cfs"), Some("backlog"));
         assert!(!index.is_resolved("cfs"));
+    }
+
+    #[test]
+    fn same_closeout_follow_up_keeps_its_context_without_hiding_new_links() {
+        let mut closeout = links(&[("finished", "backlog")], &["earlier"]);
+        closeout.mark_resolving_this_closeout("finished");
+        let action = "Decide the policy raised by #finished and #earlier";
+        let added = add_linked(&wrap(""), action, &closeout).unwrap();
+        let id = added.id.as_deref().unwrap();
+        assert!(added.content.contains("⟦todo-follow-up:finished,earlier⟧"));
+        let later = links(&[], &["finished", "earlier", "new"]);
+        assert!(
+            todo_link_findings(&added.content, &later)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(open_todo_audit_items(&added.content)[0].action, action);
+        let replay = add_linked(&added.content, action, &later).unwrap();
+        assert!(!replay.inserted);
+        assert_eq!(replay.content, added.content);
+        assert!(
+            !edit_todo_item_in_document(&added.content, id, action)
+                .unwrap()
+                .changed
+        );
+
+        let legacy = wrap(&format!("- [ ] [#{id}] {action}\n"));
+        let findings = todo_link_findings(&legacy, &later).unwrap();
+        assert_eq!(findings[0].kind, TodoLinkFindingKind::CitedWorkResolved);
+
+        let reopened = links(&[("finished", "backlog")], &["earlier"]);
+        let qualified =
+            qualify_todo_source_references(&added.content, &reopened, &|_| true).unwrap();
+        assert_eq!(qualified.content, added.content);
+
+        let edited =
+            edit_todo_item_in_document(&added.content, id, &format!("{action} and #new")).unwrap();
+        let findings = todo_link_findings(&edited.content, &later).unwrap();
+        assert_eq!(findings[0].kind, TodoLinkFindingKind::CitedWorkResolved);
+        assert_eq!(findings[0].ids, ["new"]);
     }
 
     /// `#todoaddonsamecycledone`: a replay evaluated after the cited item was

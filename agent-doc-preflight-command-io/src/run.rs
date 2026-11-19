@@ -573,6 +573,9 @@ fn run_with_options_to_writer_in_pass(
         let admitted = resolve_admission_preflight_document(file, "initial")?;
         (admitted.content, admitted.replica_hold)
     };
+    if !options.probe {
+        repair_trailing_component_markers_before_admission(file, &mut content)?;
+    }
     // A retained response replay may transiently duplicate only response cells
     // and/or protocol boundary markers. Normalize that evidence-backed shape
     // through Lazily before the generic integrity gate; otherwise the gate
@@ -679,9 +682,7 @@ fn run_with_options_to_writer_in_pass(
         );
     }
     crate::progress::enter("integrity_validation")?;
-    // A preflight may perform recovery and queue/backlog maintenance. Refuse
-    // every mutation when the authoritative document is already structurally
-    // invalid; recovery must never normalize corruption into a new baseline.
+    // Remaining structural errors must fail before queue/backlog maintenance.
     agent_doc_lint_io::validate_integrity_on_content_with_logger(
         file,
         &content,
@@ -3630,6 +3631,36 @@ fn retain_preflight_controller_projection(
             file.display(),
         ))),
     }
+}
+
+fn repair_trailing_component_markers_before_admission(
+    file: &Path,
+    content: &mut String,
+) -> Result<()> {
+    let Some(repaired) =
+        agent_doc_element::element::repair_trailing_text_after_component_marker(content)
+    else {
+        return Ok(());
+    };
+    const SOURCE: &str = "preflight_trailing_component_marker_repair";
+    // A separator-only repair must preserve the existing retained response
+    // lineage. Its exact CRDT CAS uses the same projection and replica
+    // delivery path as other binary-authored editor changes.
+    if let Some(receipt) = agent_doc_document_realtime_io::apply_cp_write_through_relay_authority(
+        file, content, &repaired, SOURCE,
+    )? {
+        *content = resolve_current_preflight_document(file, SOURCE)?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "{SOURCE} file={} repaired_hash={} current_hash={}",
+                file.display(),
+                receipt.content_hash,
+                agent_doc_hash::content_hash(content),
+            ),
+        );
+    }
+    Ok(())
 }
 
 fn converge_exact_document_replay_before_preflight(file: &Path) -> Result<(String, Option<usize>)> {
@@ -11038,6 +11069,36 @@ mod tests {
         assert!(err.to_string().contains("[integrity-gate] INTERRUPTED"));
         assert_eq!(fs::read_to_string(&doc).unwrap(), malformed);
         assert!(!dir.path().join(".agent-doc").exists());
+    }
+
+    #[test]
+    fn preflight_repairs_joined_run_markers_through_the_current_editor_cut() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let header = "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n";
+        let welded = format!(
+            "{header}## Scratch <!-- agent:run id=\"scratch\" -->- review this\n<!-- /agent:run -->4\n"
+        );
+        let repaired = format!(
+            "{header}## Scratch <!-- agent:run id=\"scratch\" -->\n- review this\n<!-- /agent:run -->\n4\n"
+        );
+        std::fs::write(&doc, &repaired).unwrap();
+        agent_doc_test_support::publish_editor_text_via_crdt_relay(
+            &doc,
+            "preflight-joined-markers",
+            &welded,
+        );
+        let mut stale = format!("{welded}An older operator edit.\n");
+        let err = repair_trailing_component_markers_before_admission(&doc, &mut stale)
+            .expect_err("a stale observed cut cannot replace the live CRDT");
+        assert!(format!("{err:#}").contains("retry_crdt_merge"));
+        let mut current = resolve_current_preflight_document(&doc, "test_joined_markers").unwrap();
+        assert_eq!(current, welded);
+
+        repair_trailing_component_markers_before_admission(&doc, &mut current).unwrap();
+
+        assert_eq!(current, repaired);
+        agent_doc_lint_io::validate_structure_on_content(&doc, &current).unwrap();
     }
 
     #[test]

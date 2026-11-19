@@ -4752,12 +4752,9 @@ fn retained_pending_write_message(
 /// controller's compact relay revision is the fresher delivery observation:
 /// when it reports zero members (or an attached editor with no replica), the
 /// response stays durable but needs an editor reopen/restart before it can move.
-/// Unknown controller state still fails closed to the durable liveness fact.
+/// A live controller replica also supersedes a missing local open-set entry.
+/// Use the durable liveness fact when the controller revision is unavailable.
 fn retained_projection_editor_live(file: &Path) -> bool {
-    let durable_editor_live = agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file);
-    if !durable_editor_live {
-        return false;
-    }
     let revision =
         agent_doc_controller_io::project_controller::revision_via_controller_model_read_for_doc(
             file,
@@ -4765,6 +4762,8 @@ fn retained_projection_editor_live(file: &Path) -> bool {
         )
         .ok()
         .flatten();
+    let durable_editor_live =
+        revision.is_none() && agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file);
     retained_projection_editor_live_from_revision(durable_editor_live, revision.as_ref())
 }
 
@@ -4853,6 +4852,16 @@ fn retained_pending_write_message_from_observation(
         );
     }
 
+    if converged_but_unsettleable && !capture_resume_available && retained_write_resume_available {
+        return format!(
+            "[session-check] INTERRUPTED: binary-owned document projection `{intent_id}` is retained for `{}` (reason={reason}, source={source}, target_hash={target_hash}); {RETAINED_PENDING_NEEDS_OPERATOR_TOKEN} state=retained_document_replay_stranded.{} The exact retained Base -> Target bytes are still durable. Run `agent-doc repair {} --resume-retained-write --intent-id {intent_id} --target-hash {target_hash}` once; it identity-fences this transition and three-way merges it through current editor authority, then rerun `agent-doc session-check {}`. Do not submit another closeout payload, run `commit`, or force disk.",
+            file.display(),
+            resume_detail,
+            file.display(),
+            file.display(),
+        );
+    }
+
     // `#retainednoeditor`: "resumes automatically after editor/controller delivery
     // converges" is only possible while an editor replica can still project. When the
     // editor is GONE (IDE closed or restarted), there is nothing to converge
@@ -4898,23 +4907,6 @@ fn retained_pending_write_message_from_observation(
                     resume_detail,
                     convergence_detail,
                     file.display(),
-                    file.display(),
-                );
-            }
-            if retained_write_resume_available {
-                return format!(
-                    "[session-check] INTERRUPTED: binary-owned response delivery `{}` is retained for `{}` (reason={}, source={}, target_hash={}); {} state=retained_capture_replay_metadata_missing.{}{} The exact retained Base -> Target bytes are still durable. Run `agent-doc repair {} --resume-retained-write --intent-id {} --target-hash {}` once; it identity-fences this transition and three-way merges it through current editor authority, then rerun `agent-doc session-check {}`. Do not submit another replay/closeout payload, run `commit`, or force disk.",
-                    intent_id,
-                    file.display(),
-                    reason,
-                    source,
-                    target_hash,
-                    RETAINED_PENDING_NEEDS_OPERATOR_TOKEN,
-                    resume_detail,
-                    convergence_detail,
-                    file.display(),
-                    intent_id,
-                    target_hash,
                     file.display(),
                 );
             }
@@ -8154,6 +8146,21 @@ mod terminal_convergence_tests {
         assert!(!message.contains("retry only `agent-doc session-check"));
     }
 
+    #[test]
+    fn missing_durable_liveness_does_not_hide_a_live_controller_replica() {
+        let revision = agent_doc_crdt_relay_io::CurrentRevision::Current {
+            lineage: "retained-target".to_string(),
+            state_vector: vec![1, 2, 3],
+            live_editors: 1,
+            delivery_converged: true,
+        };
+        assert!(retained_projection_editor_live_from_revision(
+            false,
+            Some(&revision)
+        ));
+        assert!(!retained_projection_editor_live_from_revision(false, None));
+    }
+
     /// `#retainedcapturereplayterminal`: after a replica reconnect, exact
     /// authority/disk equality without the captured payload is a fixed point,
     /// not an in-flight delivery. The status-only CLI must terminate its wait
@@ -8243,6 +8250,31 @@ mod terminal_convergence_tests {
         ));
         assert!(message.contains("three-way merges it through current editor authority"));
         assert!(!message.contains("--resume-capture` once"));
+    }
+
+    #[test]
+    fn stranded_queue_ack_prescribes_exact_retained_write_replay() {
+        let message = retained_pending_write_message_from_observation(
+            Path::new("session.md"),
+            RetainedPendingWriteMessage {
+                intent_id: "queue-ack",
+                reason: "editor_projection_pending",
+                source: "queue_consume_ack_text",
+                target_hash: "ack-target",
+                resume_reason: None,
+                captured_closeout: false,
+                capture_resume_available: false,
+                retained_write_resume_available: true,
+            },
+            agent_doc_turn::write_ownership::RetainedWriteOwnership::new(true, true),
+            true,
+            true,
+        );
+        assert!(message.contains("state=retained_document_replay_stranded"));
+        assert!(
+            message
+                .contains("--resume-retained-write --intent-id queue-ack --target-hash ack-target")
+        );
     }
 
     #[test]

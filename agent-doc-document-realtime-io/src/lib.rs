@@ -6160,10 +6160,8 @@ pub fn pending_document_write(
         .clone()
 }
 
-/// Exact identity of a legacy retained Base -> Target transition (or its
-/// identity-fenced recovery successor) whose capture continuation was not
-/// persisted. The full bytes remain durable in the document-write projection
-/// even when captured-finalize lookup cannot recover a response checkpoint.
+/// Exact identity of a retained Base -> Target transition recoverable without
+/// captured-finalize metadata, or its identity-fenced recovery successor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RetainedWriteResumeKey {
     pub intent_id: String,
@@ -6183,7 +6181,7 @@ fn is_exact_retained_write_recovery_lineage(
     pending.continuation.is_none()
         && matches!(
             pending.source.token(),
-            "start_resume_id_capture" | "resume_retained_write"
+            "start_resume_id_capture" | "queue_consume_ack_text" | "resume_retained_write"
         )
         && pending.expected_content.as_deref().is_some_and(|expected| {
             agent_doc_hash::content_hash(expected).eq_ignore_ascii_case(&pending.expected_hash)
@@ -6249,9 +6247,15 @@ pub fn resume_retained_write_through_authority(
         .as_deref()
         .context("retained write has no content-bearing merge base")?;
     let canonical = try_resolve_current_document_content(file, "resume_retained_write")?;
+    let queue_ack = pending.source.token() == "queue_consume_ack_text";
     let candidate = if agent_doc_hash::content_hash(&canonical)
         .eq_ignore_ascii_case(&pending.target_hash)
-    {
+        || (queue_ack
+            && agent_doc_merge::captured_splice::current_contains_delta(
+                merge_base,
+                &pending.target_content,
+                &canonical,
+            )) {
         canonical.clone()
     } else if agent_doc_hash::content_hash(&canonical).eq_ignore_ascii_case(&pending.expected_hash)
     {
@@ -6285,6 +6289,17 @@ pub fn resume_retained_write_through_authority(
     validate_canonical_document_target(file, &candidate, "resume_retained_write")?;
 
     if candidate != canonical {
+        if queue_ack {
+            let lines = write_policy::operator_lines_lost(
+                merge_base,
+                &pending.target_content,
+                &canonical,
+                &candidate,
+            );
+            if !lines.is_empty() {
+                return Err(write_policy::OperatorTextWouldBeLost { lines }.into());
+            }
+        }
         // Recheck immediately before the editor mutation. A successor may be
         // published after the initial snapshot; never replay its bytes under
         // this operation's stale identity.
@@ -21341,8 +21356,43 @@ scratch
         assert_eq!(
             retained_write_resume_key(&unrelated_file).unwrap(),
             None,
-            "only the legacy captured-response source is eligible",
+            "unrelated queue synchronization has no exact replay capability",
         );
+    }
+
+    #[test]
+    fn retained_queue_ack_recovery_keeps_newer_editor_content() {
+        let base =
+            "## Work <!-- agent:run id=\"work\" -->\n- completed task\n<!-- /agent:run -->\n";
+        let target = base.replace("- completed task", "- ~~completed task~~");
+        let operator_cut = format!("{target}\nAn unrelated editor note.\n");
+        let (_dir, file, _) = temp_doc(&operator_cut);
+        let identity = "retained-queue-ack";
+        seed_reliable_sync_open(&file, identity);
+        test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .unwrap();
+        let intent_id = ensure_deferred_document_write_intent(
+            &file,
+            base,
+            &target,
+            "queue_consume_ack_text",
+            DocumentWriteDeferredReason::EditorProjectionPending,
+        )
+        .unwrap();
+        let key = retained_write_resume_key(&file).unwrap().unwrap();
+        assert_eq!(key.intent_id, intent_id);
+        assert_eq!(key.target_hash, agent_doc_hash::content_hash(&target));
+        assert_eq!(
+            try_resolve_current_document_content(&file, "retained_queue_ack_test").unwrap(),
+            operator_cut,
+        );
+        assert_eq!(
+            resume_retained_write_through_authority(&file, &key).unwrap(),
+            RetainedWriteResumeOutcome::Applied,
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), operator_cut);
+        assert!(pending_document_write(&file).is_none());
     }
 
     #[test]

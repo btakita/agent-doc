@@ -3364,7 +3364,7 @@ enum Commands {
         /// response, and never a disk-authority fallback.
         #[arg(long, conflicts_with = "apply_recovery")]
         resume_capture: bool,
-        /// Replay an exact legacy retained Base -> Target transition through
+        /// Replay an exact retained Base -> Target transition through
         /// editor-authoritative three-way merge. Requires `--intent-id` and
         /// `--target-hash`; refuses if either identity no longer matches.
         #[arg(

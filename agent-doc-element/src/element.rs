@@ -2972,34 +2972,12 @@ pub fn recover_spliced_queue_close_from_projection(
     Some(repaired.clone())
 }
 
-/// Split operator text that got appended AFTER a component marker back onto its
-/// own line (`#markertrailingtypo`).
+/// Separate trailing text from a line-leading marker or a valid heading-anchored
+/// opener by inserting only a line ending. The text stays on its original side
+/// of the component boundary. Other prefixes require separate recovery evidence
+/// (see [`repair_welded_queue_close_marker`]).
 ///
-/// [`repair_welded_queue_close_marker`] handles text welded BEFORE a marker and
-/// explicitly bails when there is also text after it. Nothing handled the
-/// trailing-only case, so a single stray keystroke on a marker line wedged the
-/// entire session: `structural_corruption_reason` returns
-/// `non_standalone_component_marker:<tag>:<kind>:line<n>`, every write refuses,
-/// and — because the poisoned copy also lives in the durable intent — every
-/// reconnect re-fails identically. Observed 2026-08-23 on
-/// `tasks/software/tsift.md`: an operator meant to press their tmux prefix
-/// (`Ctrl+B`) and hit it in the IDE instead, where it is *toggle bold*, leaving
-/// `<!-- /agent:queue -->****`. Four characters, and the document could not be
-/// written by any path.
-///
-/// The two sides are not symmetric in risk, which is why only this one repairs:
-///
-/// - Text BEFORE a marker means the operator's line and binary scaffolding have
-///   been merged into one line, and which bytes belong to which is a guess.
-///   Fail closed — that stays [`repair_welded_queue_close_marker`]'s narrow,
-///   evidence-gated job.
-/// - Text AFTER a well-formed, line-leading marker is unambiguous: it is already
-///   on the far side of the marker, so moving it to the next line changes which
-///   *line* it sits on and nothing else. The bytes are preserved verbatim; this
-///   never deletes operator text.
-///
-/// Returns `None` when no marker carries a trailing artifact, so sound documents
-/// are never rewritten.
+/// Returns a replacement only when the entire repaired structure validates.
 pub fn repair_trailing_text_after_component_marker(doc: &str) -> Option<String> {
     let components = parse(doc).ok()?;
     // Collect every marker, then apply strictly back-to-front so each earlier
@@ -3020,19 +2998,21 @@ pub fn repair_trailing_text_after_component_marker(doc: &str) -> Option<String> 
         let line_end = repaired[marker_end..]
             .find('\n')
             .map_or(repaired.len(), |relative| marker_end + relative);
-        // A marker that does not lead its own line is the ambiguous case above.
-        // The final `structural_corruption_reason` gate would reject such a
-        // half-repair anyway; this early-out states the intent and keeps the
-        // function from rewriting a line it has no business touching.
-        if !repaired[line_start..marker_start].trim().is_empty() {
+        let prefix = &repaired[line_start..marker_start];
+        let tag = component_marker_tag(&repaired, marker_start, marker_end)?;
+        if !(prefix.trim().is_empty() || component_heading_prefix_matches_tag(prefix, tag)) {
             continue;
         }
-        let trailing = repaired[marker_end..line_end].trim();
-        if trailing.is_empty() {
+        let trailing = &repaired[marker_end..line_end];
+        if trailing.trim().is_empty() {
             continue;
         }
-        let replacement = format!("\n{trailing}");
-        repaired.replace_range(marker_end..line_end, &replacement);
+        let line_ending = if trailing.ends_with('\r') && line_end < repaired.len() {
+            "\r\n"
+        } else {
+            "\n"
+        };
+        repaired.insert_str(marker_end, line_ending);
         changed = true;
     }
 
@@ -5885,6 +5865,25 @@ Agreed:\n- **On by default for an active queue.**\n{prose}\
             "<!-- agent:queue -->\n**\n- do [#x] a prompt\n<!-- /agent:queue -->\n"
         );
         assert_eq!(structural_corruption_reason(&repaired), None);
+    }
+
+    #[test]
+    fn a_heading_anchored_run_with_welded_suffixes_preserves_every_byte() {
+        let welded = concat!(
+            "## Scratch <!-- agent:run id=\"scratch\" priority go -->  - review the change \r\n",
+            "<!-- /agent:run -->4\r\n",
+        );
+        let repaired = repair_trailing_text_after_component_marker(welded).unwrap();
+        assert_eq!(
+            repaired,
+            concat!(
+                "## Scratch <!-- agent:run id=\"scratch\" priority go -->\r\n",
+                "  - review the change \r\n",
+                "<!-- /agent:run -->\r\n",
+                "4\r\n",
+            ),
+        );
+        assert_eq!(repair_trailing_text_after_component_marker(&repaired), None);
     }
 
     /// Text BEFORE a marker stays fail-closed: which bytes are the operator's and

@@ -130,7 +130,7 @@ fn project_actions(file: &Path, content: &str) -> Result<Vec<Action>> {
         matches!(
             entry.state,
             QueueClaimState::Claimed | QueueClaimState::Running
-        )
+        ) || entry.native_spawn_result_required()
     }) {
         let mut argv = agent_doc_argv(file, "start", &claim_item_handle(&entry.item_text));
         argv.extend([
@@ -165,7 +165,7 @@ fn project_actions(file: &Path, content: &str) -> Result<Vec<Action>> {
         ))?);
         // Running receipts are needed after a crash between bind and MCP
         // acknowledgement. Publish no spawn handoff for those attempts.
-        if entry.worker.is_none() && !entry.native_spawn_pending {
+        if entry.worker.is_none() && !entry.native_spawn_result_required() {
             let authorization = subagent_dispatch::subagent_authorization_for_content(
                 file,
                 content,
@@ -182,7 +182,7 @@ fn project_actions(file: &Path, content: &str) -> Result<Vec<Action>> {
         if let Some(worker) = &entry.worker {
             action.receipt = Some(Receipt::Applied);
             action.handoff = Some(json!({ "bound_worker_id": worker.worker_id }));
-        } else if entry.native_spawn_pending {
+        } else if entry.native_spawn_result_required() {
             if action.receipt.is_none() {
                 action.receipt = Some(Receipt::SpawnReserved);
             }
@@ -654,7 +654,7 @@ fn run_action(
             return Ok(Receipt::SpawnReserved);
         }
         anyhow::ensure!(
-            claim.native_spawn_pending || previous == Some(Receipt::SpawnReserved),
+            claim.native_spawn_result_required() || previous == Some(Receipt::SpawnReserved),
             "reserve the start action before spawning a native worker"
         );
         // Bind is a generation-fenced idempotent state transition, so a

@@ -157,10 +157,12 @@ pub struct QueueClaim {
     /// `owner` are coordinator-chosen and are not worker-liveness evidence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worker: Option<QueueWorkerBinding>,
-    /// The harness was offered exactly one native spawn handoff. Until bound
-    /// or disproved, the attempt may already be executing and cannot expire.
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub native_spawn_pending: bool,
+    /// `Some(true)` records an issued spawn handoff and `Some(false)` records
+    /// an attempt protected by reserve-before-spawn without an open handoff.
+    /// Older unbound attempts omitted this field and may have launched before
+    /// any reservation could be recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_spawn_pending: Option<bool>,
     /// Resolved subagent launch policy captured when this attempt was claimed.
     /// `None` preserves the historical inherit-the-coordinator behavior.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -267,6 +269,7 @@ pub struct LostContinueRecord {
 /// Reason recorded by `queue release --requeue`. A harness `queue freeze`
 /// uses the reported text and is not an abandon.
 pub const ABANDONED_REQUEUE_REASON: &str = "abandoned for requeue";
+const NATIVE_SPAWN_NO_LAUNCH_PREFIX: &str = "native harness confirmed no spawn: ";
 
 /// Recorded stop of one bound worker (`#subagentworkpool`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -351,7 +354,7 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
-/// Durable audit tombstone for one exact operator-cancelled claim attempt.
+/// Durable audit tombstone for one exact response-free claim attempt.
 ///
 /// This is deliberately separate from live claims: cancellation never
 /// projects lifecycle state onto a queue row. Keeping the full fenced attempt
@@ -379,6 +382,8 @@ pub enum QueueResponseFreeTerminalProof {
     /// The operator deleted/cancelled the exact fenced attempt.
     #[default]
     OperatorCancelled,
+    /// The originating harness confirmed the exact launch did not occur.
+    NativeSpawnNotLaunched,
 }
 
 impl QueueClaimCancellationReceipt {
@@ -476,7 +481,7 @@ pub const DISPATCH_EVIDENCE_GRACE_SECS: u64 = 10;
 pub fn dispatch_evidence_missing(claim: &QueueClaim, now_secs: u64, grace_secs: u64) -> bool {
     claim.state == QueueClaimState::Claimed
         && claim.worker.is_none()
-        && !claim.native_spawn_pending
+        && !claim.native_spawn_result_required()
         && !claim.is_expired(now_secs)
         && now_secs.saturating_sub(claim.claimed_at_secs) >= grace_secs
 }
@@ -620,7 +625,7 @@ impl QueueClaimState {
 impl QueueClaim {
     /// Move this attempt into lost state without erasing its previous phase.
     pub fn mark_lost(&mut self) {
-        if self.state != QueueClaimState::Lost && !self.native_spawn_pending {
+        if self.state != QueueClaimState::Lost && !self.native_spawn_result_required() {
             self.lost_from = Some(self.state);
             self.state = QueueClaimState::Lost;
         }
@@ -900,8 +905,37 @@ pub struct ClaimFollowOutcome {
 const FOLLOWED_FROM_LIMIT: usize = 8;
 
 impl QueueClaim {
+    /// An unbound attempt that may already have launched. Only a concrete
+    /// start receipt or a harness-confirmed no-launch can release this fence.
+    pub fn native_spawn_result_required(&self) -> bool {
+        self.worker.is_none()
+            && self.native_spawn_pending != Some(false)
+            && matches!(self.state, QueueClaimState::Claimed | QueueClaimState::Lost)
+            && self
+                .lost_from
+                .is_none_or(|prior| prior == QueueClaimState::Claimed)
+            && !self.native_spawn_confirmed_failed()
+    }
+
+    /// Whether the exact attempt carries binary-owned no-launch evidence.
+    /// Older binaries omitted a false reservation bit, but recorded this
+    /// positive proof in an abandoned, never-bound claim.
+    pub fn native_spawn_confirmed_failed(&self) -> bool {
+        self.native_spawn_pending != Some(true)
+            && self.state == QueueClaimState::Lost
+            && self.lost_from == Some(QueueClaimState::Claimed)
+            && self.worker.is_none()
+            && self.frozen.as_ref().is_some_and(|freeze| {
+                freeze.is_abandon()
+                    && freeze
+                        .reason
+                        .strip_prefix(NATIVE_SPAWN_NO_LAUNCH_PREFIX)
+                        .is_some_and(|evidence| !evidence.trim().is_empty())
+            })
+    }
+
     pub fn is_expired(&self, now_secs: u64) -> bool {
-        !self.native_spawn_pending
+        !self.native_spawn_result_required()
             && !matches!(
                 self.state,
                 QueueClaimState::Reported | QueueClaimState::QuotaBlocked
@@ -944,7 +978,8 @@ impl QueueClaim {
         if self.retains_frozen_worker_claim() {
             return true;
         }
-        self.state.blocks_dispatch() && !self.is_expired(now_secs)
+        self.native_spawn_result_required()
+            || (self.state.blocks_dispatch() && !self.is_expired(now_secs))
     }
 
     /// Whether this attempt still owns its worker id against `start` of a
@@ -1419,8 +1454,10 @@ fn rekey_claim_supersedes(candidate: &QueueClaim, kept: &QueueClaim) -> bool {
         || (candidate.generation == kept.generation
             && (state_rank(candidate.state) > state_rank(kept.state)
                 || (candidate.state == kept.state
-                    && (candidate.native_spawn_pending && !kept.native_spawn_pending
-                        || (candidate.native_spawn_pending == kept.native_spawn_pending
+                    && (candidate.native_spawn_result_required()
+                        && !kept.native_spawn_result_required()
+                        || (candidate.native_spawn_result_required()
+                            == kept.native_spawn_result_required()
                             && candidate.expires_at_secs > kept.expires_at_secs)))))
 }
 
@@ -1633,7 +1670,7 @@ impl QueueClaimLedger {
             lost_from: None,
             completion_recovered_after_loss: false,
             publication_state: None,
-            native_spawn_pending: false,
+            native_spawn_pending: Some(false),
             worker: None,
             dispatch_policy: None,
             tracked_item_aliases: Vec::new(),
@@ -1664,7 +1701,7 @@ impl QueueClaimLedger {
                 // Idempotent same-owner claim. It is the same worker attempt;
                 // only explicit `--refresh` supplies running evidence.
                 existing.expires_at_secs = expires_at_secs;
-                if fresh.owner_session.is_some() {
+                if fresh.owner_session.is_some() && !existing.native_spawn_result_required() {
                     existing.owner_session = fresh.owner_session;
                 }
                 ClaimOutcome::Refreshed
@@ -1734,6 +1771,50 @@ impl QueueClaimLedger {
         Ok(self.record_cancellation(claim, cancelled_at_secs, completion_key))
     }
 
+    /// Record an exact harness no-launch receipt in the same transaction as
+    /// settlement so it remains available after a replacement claims the row.
+    pub fn confirm_native_spawn_failed(
+        &mut self,
+        item: &str,
+        generation: u64,
+        now_secs: u64,
+        evidence: &str,
+    ) -> anyhow::Result<QueueClaim> {
+        let evidence = evidence.trim();
+        anyhow::ensure!(
+            !evidence.is_empty(),
+            "native spawn failure requires harness evidence"
+        );
+        let identity = claim_identity(item);
+        let claim = self
+            .claims
+            .iter_mut()
+            .find(|claim| claim.identity == identity && claim.generation == generation)
+            .ok_or_else(|| anyhow::anyhow!("native spawn failure requires the exact generation"))?;
+        if !claim.native_spawn_confirmed_failed() {
+            anyhow::ensure!(
+                claim.native_spawn_result_required(),
+                "native spawn failure requires an unbound attempt whose launch is uncertain"
+            );
+            claim.native_spawn_pending = Some(false);
+            claim.mark_lost();
+            claim.lost_from = Some(QueueClaimState::Claimed);
+            claim.frozen = Some(QueueWorkerFreeze {
+                frozen_at_secs: now_secs,
+                reason: format!("{NATIVE_SPAWN_NO_LAUNCH_PREFIX}{evidence}"),
+                abandoned: true,
+            });
+        }
+        let claim = claim.clone();
+        self.record_response_free_terminal(
+            claim.clone(),
+            now_secs,
+            None,
+            QueueResponseFreeTerminalProof::NativeSpawnNotLaunched,
+        );
+        Ok(claim)
+    }
+
     /// Record cancellation for an exact attempt reconstructed from a durable
     /// reported-release receipt after the live claim was already removed.
     pub fn record_cancellation(
@@ -1741,6 +1822,21 @@ impl QueueClaimLedger {
         claim: QueueClaim,
         cancelled_at_secs: u64,
         completion_key: Option<String>,
+    ) -> QueueClaimCancellationReceipt {
+        self.record_response_free_terminal(
+            claim,
+            cancelled_at_secs,
+            completion_key,
+            QueueResponseFreeTerminalProof::OperatorCancelled,
+        )
+    }
+
+    fn record_response_free_terminal(
+        &mut self,
+        claim: QueueClaim,
+        cancelled_at_secs: u64,
+        completion_key: Option<String>,
+        proof: QueueResponseFreeTerminalProof,
     ) -> QueueClaimCancellationReceipt {
         if let Some(existing) = self.cancellations.iter().find(|receipt| {
             receipt.claim.identity == claim.identity && receipt.claim.generation == claim.generation
@@ -1751,7 +1847,7 @@ impl QueueClaimLedger {
             claim,
             cancelled_at_secs,
             completion_key,
-            response_free_proof: Some(QueueResponseFreeTerminalProof::OperatorCancelled),
+            response_free_proof: Some(proof),
         };
         self.cancellations.push(receipt.clone());
         receipt
@@ -1799,8 +1895,9 @@ impl QueueClaimLedger {
             });
         }
         let resumes_frozen = claim.retains_frozen_worker_claim();
+        let can_bind_lost = resumes_frozen || claim.native_spawn_result_required();
         if (claim.unbound_reservation_expired(now_secs) || claim.state == QueueClaimState::Lost)
-            && !resumes_frozen
+            && !can_bind_lost
         {
             return Err(QueueClaimStartRefused::Expired {
                 holder: claim.owner.clone(),
@@ -1818,7 +1915,7 @@ impl QueueClaimLedger {
             }
         })?;
         if claim.state == QueueClaimState::Reported
-            || (claim.state == QueueClaimState::Lost && !resumes_frozen)
+            || (claim.state == QueueClaimState::Lost && !can_bind_lost)
         {
             return Err(QueueClaimStartRefused::Terminal {
                 generation: claim.generation,
@@ -1891,7 +1988,7 @@ impl QueueClaimLedger {
             });
         }
         claim.state = QueueClaimState::Running;
-        claim.native_spawn_pending = false;
+        claim.native_spawn_pending = claim.native_spawn_pending.map(|_| false);
         claim.lost_from = None;
         claim.frozen = None;
         claim.lost_continue = None;
@@ -2442,7 +2539,7 @@ impl QueueClaimLedger {
         if enforce_generation {
             validate_generation(&self.claims[index], expected_generation)?;
         }
-        if self.claims[index].native_spawn_pending {
+        if self.claims[index].native_spawn_result_required() {
             return Err(QueueClaimTransitionRefused::NativeSpawnUncertain {
                 generation: self.claims[index].generation,
             });
@@ -3254,7 +3351,9 @@ impl QueueClaimLedger {
                     pruned.push((claim.clone(), ClaimPruneCause::Expired));
                 }
                 kept.push(claim);
-            } else if live_heads.is_some_and(|live| !live.contains(&claim.identity)) {
+            } else if !claim.native_spawn_result_required()
+                && live_heads.is_some_and(|live| !live.contains(&claim.identity))
+            {
                 pruned.push((claim, ClaimPruneCause::Closed));
             } else {
                 kept.push(claim);
@@ -5576,7 +5675,7 @@ mod tests {
                     lost_from: None,
                     completion_recovered_after_loss: false,
                     publication_state: None,
-                    native_spawn_pending: false,
+                    native_spawn_pending: Some(false),
                     worker: None,
                     dispatch_policy: None,
                     tracked_item_aliases: Vec::new(),
@@ -5602,7 +5701,7 @@ mod tests {
                     lost_from: None,
                     completion_recovered_after_loss: false,
                     publication_state: None,
-                    native_spawn_pending: false,
+                    native_spawn_pending: Some(false),
                     worker: None,
                     dispatch_policy: None,
                     tracked_item_aliases: Vec::new(),

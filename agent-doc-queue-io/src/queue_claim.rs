@@ -1162,7 +1162,7 @@ fn restored_reported_claim(
         lost_from: None,
         completion_recovered_after_loss: false,
         publication_state: None,
-        native_spawn_pending: false,
+        native_spawn_pending: Some(false),
         worker,
         dispatch_policy: None,
         tracked_item_aliases: Vec::new(),
@@ -1418,7 +1418,7 @@ pub fn start_attempt(
 /// Reserve the one outward spawn for an exact live claim. The existing
 /// claim transaction also sinks this checkpoint into the restart journal.
 pub fn reserve_native_spawn(file: &Path, claim: &QueueClaim) -> Result<bool> {
-    if claim.native_spawn_pending {
+    if claim.native_spawn_result_required() {
         return Ok(false);
     }
     let (target, view) = resolve_live_claim_target(file, &claim.item_text, "queue_spawn_reserve")?;
@@ -1455,10 +1455,10 @@ fn reserve_native_spawn_in_view(
                 && !stored.unbound_reservation_expired(now_secs()),
             "native spawn requires an unexpired, unbound claim"
         );
-        if stored.native_spawn_pending {
+        if stored.native_spawn_result_required() {
             return Ok(false);
         }
-        stored.native_spawn_pending = true;
+        stored.native_spawn_pending = Some(true);
         Ok(true)
     })
 }
@@ -1471,34 +1471,11 @@ pub fn confirm_native_spawn_failed(
     generation: u64,
     reason: &str,
 ) -> Result<QueueClaim> {
-    anyhow::ensure!(
-        !reason.trim().is_empty(),
-        "native spawn failure requires harness evidence"
-    );
     let (target, heads) = resolve_live_claim_target(file, item, "queue_spawn_failed")?;
     let now = now_secs();
     mutate_ledger(file, |ledger| {
         log_followed(file, &ledger.follow_edits_in_view(now, &heads));
-        let identity = claim_identity(&target);
-        let claim = ledger
-            .claims
-            .iter_mut()
-            .find(|claim| claim.identity == identity && claim.generation == generation)
-            .context("native spawn failure requires the exact generation")?;
-        anyhow::ensure!(
-            claim.state == QueueClaimState::Claimed
-                && claim.native_spawn_pending
-                && claim.worker.is_none(),
-            "native spawn failure requires a pending, unbound handoff"
-        );
-        claim.native_spawn_pending = false;
-        claim.mark_lost();
-        claim.frozen = Some(agent_doc_queue::queue_claim::QueueWorkerFreeze {
-            frozen_at_secs: now,
-            reason: format!("native harness confirmed no spawn: {}", reason.trim()),
-            abandoned: true,
-        });
-        Ok(claim.clone())
+        ledger.confirm_native_spawn_failed(&target, generation, now, reason)
     })
 }
 
@@ -2331,7 +2308,8 @@ pub fn rollback_unstarted_admission(
         );
         anyhow::ensure!(
             current.state == agent_doc_queue::queue_claim::QueueClaimState::Claimed
-                && current.worker.is_none(),
+                && current.worker.is_none()
+                && !current.native_spawn_result_required(),
             "refusing projection rollback for generation {} after worker dispatch acknowledgement",
             admitted.generation,
         );
@@ -3163,6 +3141,22 @@ fn claim_assessment(claim: &QueueClaim, owner_session_state: &str) -> (&'static 
             "This generation was requeued and cannot be continued. Its hand-back, when recorded, remains in the queue brief.".to_string(),
         );
     }
+    if claim.native_spawn_result_required() {
+        return (
+            if claim.native_spawn_pending == Some(true) {
+                "native_spawn_pending"
+            } else {
+                "legacy_spawn_result_required"
+            },
+            if claim.native_spawn_pending == Some(true) {
+                "The native spawn handoff was issued. Recover the exact worker ID from the harness and bind it with queue start."
+            } else {
+                "This legacy attempt predates durable reservation evidence. Recover the original harness spawn result and bind its exact worker ID with queue start."
+            }
+            .to_string()
+                + " Use queue release --requeue --spawn-failed only with a harness receipt proving the launch did not occur.",
+        );
+    }
     match claim.state {
         QueueClaimState::Lost => (
             "lost",
@@ -3175,10 +3169,6 @@ fn claim_assessment(claim: &QueueClaim, owner_session_state: &str) -> (&'static 
         QueueClaimState::Reported => (
             "reported_pending_integration",
             "The worker reported completion; coordinator integration, verification, and queue closeout are still pending. `reported_closeout` lists the exact commands, and `next_action_argv` is the first. When it is absent, settle `reported_closeout.decision` first (present `reported_closeout.operator_request_packet` when only the operator can).".to_string(),
-        ),
-        QueueClaimState::Claimed if claim.native_spawn_pending => (
-            "native_spawn_pending",
-            "The native spawn handoff was issued. Recover the exact worker ID from the harness and bind it with queue start. Use queue release --requeue --spawn-failed only with a harness receipt proving the launch did not occur.".to_string(),
         ),
         QueueClaimState::Claimed => (
             if owner_session_state == "ended" {
@@ -3500,7 +3490,7 @@ pub fn in_flight_claimed_items_for_content(file: &Path, content: &str) -> Claime
                     matches!(
                         claim.state,
                         QueueClaimState::Claimed | QueueClaimState::Running
-                    )
+                    ) || claim.native_spawn_result_required()
                 })
                 .map(|claim| claim.identity),
         ),
@@ -4007,9 +3997,121 @@ mod tests {
 
         let durable = load_ledger(&doc)?;
         let reserved = durable.resolve_selector(annotated)?.unwrap();
-        assert!(reserved.native_spawn_pending);
+        assert_eq!(reserved.native_spawn_pending, Some(true));
         assert_eq!(reserved.identity, current.identity);
         assert_eq!(std::fs::read_to_string(&doc)?, disk_text);
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_unbound_spawn_uses_exact_harness_evidence_for_recovery() -> Result<()> {
+        use agent_doc_queue::queue_sync_payload::{
+            QueueSyncDocumentScope, QueueSyncOperation, project_document_queue_sync,
+        };
+
+        let dir = tempfile::tempdir()?;
+        let item = "Describe the sample";
+        for recovery in ["bind", "confirmed no launch", "operator cancellation"] {
+            let fixture = dir.path().join(recovery);
+            let doc = subagents_doc(&fixture, &[item]);
+            let owner = "subagent:sample";
+            let clock = claim_clock_now_secs();
+            let legacy = mutate_ledger(&doc, |ledger| {
+                ledger.claim(item, owner, clock - 100, 1);
+                let claim = &mut ledger.claims[0];
+                claim.mark_lost(); // A prior executable had already projected expiry.
+                claim.native_spawn_pending = None;
+                Ok(claim.clone())
+            })?;
+            crate::queue_lineage::record_claim(&doc, &legacy)?;
+            let content = std::fs::read_to_string(&doc)?;
+            let claims = load_ledger(&doc)?.claims;
+            let stored = &claims[0];
+            assert_eq!(stored.native_spawn_pending, None);
+            assert!(stored.native_spawn_result_required());
+            let lineage = crate::queue_lineage::load(&doc)?;
+            assert!(!crate::queue_lineage::attempt_never_started(
+                &lineage, stored
+            ));
+            assert!(crate::queue_lineage::latest_unstarted_identities(&lineage).is_empty());
+            let sync = project_document_queue_sync(
+                doc.display().to_string(),
+                QueueSyncDocumentScope::Current,
+                &content,
+                None,
+                &claims,
+            )?;
+            assert_eq!(
+                sync.reconcile_unknown[0].operation,
+                QueueSyncOperation::Reconcile
+            );
+            assert!(!sync.reconcile_unknown[0].retry_safe);
+            assert!(
+                crate::subagent_dispatch::observe_subagent_dispatch_candidates_for_content(
+                    &doc, &content
+                )?
+                .is_empty()
+            );
+            assert!(!reserve_native_spawn(&doc, stored)?);
+            assert!(abandon_attempt(&doc, item, Some(stored.generation)).is_err());
+            assert!(claim(&doc, item, "subagent:replacement", 60).is_err());
+
+            match recovery {
+                "bind" => {
+                    let bound =
+                        start_attempt(&doc, item, owner, "worker:original", 60, stored.generation)?;
+                    assert_eq!(bound.generation, stored.generation);
+                    assert_eq!(bound.worker.unwrap().worker_id, "worker:original");
+                    continue;
+                }
+                "confirmed no launch" => {
+                    assert!(
+                        confirm_native_spawn_failed(&doc, item, stored.generation + 1, recovery)
+                            .is_err()
+                    );
+                    let closed =
+                        confirm_native_spawn_failed(&doc, item, stored.generation, recovery)?;
+                    assert!(closed.native_spawn_confirmed_failed());
+                }
+                "operator cancellation" => {
+                    let removed = content.replace(&format!("- {item}\n"), "");
+                    std::fs::write(&doc, &removed)?;
+                    assert_eq!(prune_closed_claims(&doc, &removed)?, 0);
+                    let tombstone = cancel_removed_attempt(&doc, item, Some(stored.generation))?;
+                    assert_eq!(tombstone.claim.generation, stored.generation);
+                    assert!(tombstone.claim.native_spawn_result_required());
+                    assert!(tombstone.response_free_proof.is_some());
+                    std::fs::write(&doc, &content)?;
+                }
+                _ => unreachable!(),
+            }
+            assert!(
+                start_attempt(&doc, item, owner, "worker:stale", 60, stored.generation).is_err()
+            );
+            let (_, replacement) = claim(&doc, item, "subagent:replacement", 60)?;
+            assert_eq!(replacement.generation, stored.generation + 1);
+            assert!(reserve_native_spawn(&doc, &replacement)?);
+            if recovery == "confirmed no launch" {
+                use agent_doc_queue::queue_claim::QueueResponseFreeTerminalProof;
+
+                let ledger = load_ledger(&doc)?;
+                let receipt = ledger.cancellations.last().unwrap();
+                assert_eq!(receipt.claim.generation, stored.generation);
+                assert_eq!(
+                    receipt.response_free_proof,
+                    Some(QueueResponseFreeTerminalProof::NativeSpawnNotLaunched)
+                );
+                assert!(
+                    receipt
+                        .claim
+                        .frozen
+                        .as_ref()
+                        .unwrap()
+                        .reason
+                        .ends_with(recovery)
+                );
+            }
+        }
         Ok(())
     }
 

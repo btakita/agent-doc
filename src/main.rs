@@ -6157,7 +6157,7 @@ enum QueueAction {
         /// result from releasing a replacement attempt.
         #[arg(long)]
         generation: Option<u64>,
-        /// Record why the harness confirms that the reserved native spawn did not occur.
+        /// Record the original harness evidence that an uncertain native spawn did not occur.
         #[arg(long, requires_all = ["generation", "requeue"])]
         spawn_failed: Option<String>,
     },
@@ -11467,7 +11467,7 @@ fn try_main() -> anyhow::Result<()> {
                         .context("native spawn requires the current claimed generation")?;
                     anyhow::ensure!(
                         agent_doc_queue_io::queue_claim::reserve_native_spawn(&file, claim)?,
-                        "native spawn for generation {generation} is already reserved; reconcile the harness result and bind its worker ID with queue start"
+                        "native spawn for generation {generation} requires the original harness result; bind its exact worker ID with queue start or record a confirmed no-launch receipt with queue release --requeue --spawn-failed"
                     );
                 }
                 if json {

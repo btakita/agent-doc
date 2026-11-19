@@ -171,7 +171,7 @@ pub fn build_project_queue_sync_payload(
                     &retained_capture_targets,
                 );
                 if let Some(lineage) = lineage.as_ref() {
-                    apply_lineage_evidence(&mut document_payload, lineage);
+                    apply_lineage_evidence(&mut document_payload, lineage, &claims);
                 }
                 // A claim whose coordinator session ended is durable reconcile
                 // evidence, not proof that a worker is still in flight. Keep
@@ -1123,6 +1123,7 @@ fn parse_claude_subagent_final_response(path: &Path, worker_id: &str) -> History
 fn apply_lineage_evidence(
     payload: &mut QueueSyncPayload,
     lineage: &crate::queue_lineage::QueueLineageLedger,
+    claims: &[agent_doc_queue::queue_claim::QueueClaim],
 ) {
     use crate::queue_lineage::QueueLineageEventKind;
 
@@ -1142,8 +1143,18 @@ fn apply_lineage_evidence(
             continue;
         };
         let identity = agent_doc_queue::queue_claim::claim_identity(&item.item);
+        let claim = claims.iter().find(|claim| {
+            claim.generation == generation
+                && Some(claim.owner.as_str()) == item.owner.as_deref()
+                && claim.identity == identity
+        });
+        if claim.is_some_and(|claim| claim.native_spawn_confirmed_failed()) {
+            apply_attempt_evidence(item, QueueSyncExecutionEvidence::NeverStarted, Vec::new());
+            continue;
+        }
         let Some(attempt) = lineage.attempts.iter().find(|attempt| {
             attempt.generation == generation
+                && Some(attempt.owner.as_str()) == item.owner.as_deref()
                 && (attempt.identity == identity || attempt.identity_history.contains(&identity))
         }) else {
             continue;
@@ -1159,16 +1170,13 @@ fn apply_lineage_evidence(
                     | QueueLineageEventKind::Released
             )
         });
-        let created_only = !attempt.events.is_empty()
-            && attempt
-                .events
-                .iter()
-                .all(|event| event.kind == QueueLineageEventKind::Created);
+        let fenced_before_spawn = claim.is_some_and(|claim| !claim.native_spawn_result_required())
+            && crate::queue_lineage::has_fenced_creation_only(attempt);
         let execution = if item.completion_outbox_recovered {
             QueueSyncExecutionEvidence::CompletedOutbox
         } else if started {
             QueueSyncExecutionEvidence::Started
-        } else if created_only {
+        } else if fenced_before_spawn {
             QueueSyncExecutionEvidence::NeverStarted
         } else {
             QueueSyncExecutionEvidence::Unknown
@@ -1254,16 +1262,21 @@ fn scan_error(document: &Path, error: impl std::fmt::Display) -> QueueSyncScanEr
 mod tests {
     use super::*;
 
-    fn lost_payload() -> QueueSyncPayload {
+    fn lost_claim() -> agent_doc_queue::queue_claim::QueueClaim {
         let mut ledger = agent_doc_queue::queue_claim::QueueClaimLedger::default();
         ledger.claim("lost work", "subagent:test", 10, 60);
-        ledger.claims[0].state = agent_doc_queue::queue_claim::QueueClaimState::Lost;
+        let mut claim = ledger.claims.remove(0);
+        claim.mark_lost();
+        claim
+    }
+
+    fn lost_payload(claim: &agent_doc_queue::queue_claim::QueueClaim) -> QueueSyncPayload {
         agent_doc_queue::queue_sync_payload::project_document_queue_sync(
             "/tmp/lost.md",
             QueueSyncDocumentScope::Current,
             "<!-- agent:run id=run subagents -->\n- ⚠️ lost work\n<!-- /agent:run -->\n",
             None,
-            &ledger.claims,
+            std::slice::from_ref(claim),
         )
         .unwrap()
     }
@@ -1291,15 +1304,32 @@ mod tests {
             kind: crate::queue_lineage::QueueLineageEventKind::Created,
             ..Default::default()
         };
-        let mut unstarted = lost_payload();
-        apply_lineage_evidence(&mut unstarted, &lineage_with(vec![created.clone()]));
+        let claim = lost_claim();
+        let mut legacy_lineage = lost_payload(&claim);
+        apply_lineage_evidence(
+            &mut legacy_lineage,
+            &lineage_with(vec![created.clone()]),
+            std::slice::from_ref(&claim),
+        );
+        assert!(!legacy_lineage.lost[0].retry_safe);
+
+        let fenced_created = crate::queue_lineage::QueueLineageEvent {
+            native_spawn_fenced: true,
+            ..created.clone()
+        };
+        let mut unstarted = lost_payload(&claim);
+        apply_lineage_evidence(
+            &mut unstarted,
+            &lineage_with(vec![fenced_created]),
+            std::slice::from_ref(&claim),
+        );
         assert!(unstarted.lost[0].retry_safe);
         assert_eq!(
             unstarted.lost[0].operation,
             QueueSyncOperation::RecoverRequeue
         );
 
-        let mut started = lost_payload();
+        let mut started = lost_payload(&claim);
         let attached = crate::queue_lineage::QueueLineageEvent {
             kind: crate::queue_lineage::QueueLineageEventKind::Attached,
             worker_id: Some("worker:test".to_string()),
@@ -1313,6 +1343,7 @@ mod tests {
         apply_lineage_evidence(
             &mut started,
             &lineage_with(vec![created, attached, committed]),
+            std::slice::from_ref(&claim),
         );
         assert!(!started.lost[0].retry_safe);
         assert_eq!(started.lost[0].operation, QueueSyncOperation::Reconcile);
@@ -1329,7 +1360,8 @@ mod tests {
 
     #[test]
     fn legacy_unverifiable_integration_is_not_recovered_as_effect() {
-        let mut payload = lost_payload();
+        let claim = lost_claim();
+        let mut payload = lost_payload(&claim);
         let created = crate::queue_lineage::QueueLineageEvent {
             kind: crate::queue_lineage::QueueLineageEventKind::Created,
             ..Default::default()
@@ -1351,6 +1383,7 @@ mod tests {
         apply_lineage_evidence(
             &mut payload,
             &lineage_with(vec![created, integrated, released]),
+            std::slice::from_ref(&claim),
         );
 
         assert_eq!(

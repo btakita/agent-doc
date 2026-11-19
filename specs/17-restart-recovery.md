@@ -69,7 +69,12 @@ receipt adds a worker ID. A reservation with no bind can have crashed on either
 side of native spawn. It holds the same generation and pool slot beyond claim
 TTL. Cold recovery reports `native_spawn_pending` and `needs_operator` on either
 boot until the harness can bind the worker or attest that the launch did not
-occur. A timeout or missing receipt leaves the hold intact.
+occur. A timeout or missing receipt leaves the hold intact. A legacy unbound
+attempt with no stored reservation field has unknown launch status, including
+when its only worktree lineage event is `Created`. It holds the exact
+generation until the originating harness supplies its worker ID or confirms
+that no launch occurred. A new claim persists an explicit pre-spawn state, so
+expiry before reservation remains safe to retry.
 
 For `#address`, the external adapter records the baseline in the admitted
 inline cycle or worker generation and the exact submitted queue revision.

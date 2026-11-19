@@ -286,7 +286,7 @@ pub(crate) fn sync_claims_with_conn(
                 .unwrap_or_else(|| boot_id.clone()),
             phase: if claim.replacement_pending() {
                 WorkerPhase::Cancelled
-            } else if claim.native_spawn_pending {
+            } else if claim.native_spawn_result_required() {
                 WorkerPhase::NativeSpawnPending
             } else if claim.lost_from == Some(QueueClaimState::Claimed)
                 && claim.worker.is_none()
@@ -652,7 +652,7 @@ mod tests {
         let bound =
             queue_claim::start_attempt(&file, item, owner, "worker:sample", 1, claimed.generation)?;
         assert_eq!(bound.generation, claimed.generation);
-        assert!(!bound.native_spawn_pending);
+        assert_eq!(bound.native_spawn_pending, Some(false));
         let bound =
             queue_claim::start_attempt(&file, item, owner, "worker:sample", 1, claimed.generation)?;
         assert_eq!(bound.worker.unwrap().worker_id, "worker:sample");

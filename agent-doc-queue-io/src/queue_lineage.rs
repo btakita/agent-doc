@@ -274,6 +274,9 @@ impl ReleaseState {
 pub struct QueueLineageEvent {
     pub kind: QueueLineageEventKind,
     pub at_secs: u64,
+    /// A binary-owned Created event from a reservation-fenced claim.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub native_spawn_fenced: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worker_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -534,21 +537,29 @@ pub fn attempt_recorded_integrated(
         })
 }
 
-/// Whether durable lineage proves this exact attempt never advanced past
-/// creation. Absence, ambiguity, a bound worker, or any later event all fail
-/// closed so callers cannot turn unknown execution into duplicate work.
+/// A Created-only lineage recorded before reserve-before-spawn cannot prove
+/// what happened between the harness call and worker acknowledgement.
+pub(crate) fn has_fenced_creation_only(attempt: &QueueLineageAttempt) -> bool {
+    !attempt.events.is_empty()
+        && attempt
+            .events
+            .iter()
+            .all(|event| event.kind == QueueLineageEventKind::Created && event.native_spawn_fenced)
+}
+
+/// Whether an exact lost attempt was still fenced before spawn, or the
+/// harness confirmed the uncertain launch never occurred.
 pub fn attempt_never_started(ledger: &QueueLineageLedger, claim: &QueueClaim) -> bool {
     claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost
         && claim.worker.is_none()
-        && ledger.attempts.iter().any(|attempt| {
-            attempt.generation == claim.generation
-                && attempt.matches_identity(&claim.identity)
-                && !attempt.events.is_empty()
-                && attempt
-                    .events
-                    .iter()
-                    .all(|event| event.kind == QueueLineageEventKind::Created)
-        })
+        && !claim.native_spawn_result_required()
+        && (claim.native_spawn_confirmed_failed()
+            || ledger.attempts.iter().any(|attempt| {
+                attempt.generation == claim.generation
+                    && attempt.owner == claim.owner
+                    && attempt.matches_identity(&claim.identity)
+                    && has_fenced_creation_only(attempt)
+            }))
 }
 
 /// Work identities whose newest durable generation was created but never
@@ -576,11 +587,7 @@ pub fn latest_unstarted_identities(
         .iter()
         .filter(|attempt| {
             newest.get(&attempt.identity) == Some(&attempt.generation)
-                && !attempt.events.is_empty()
-                && attempt
-                    .events
-                    .iter()
-                    .all(|event| event.kind == QueueLineageEventKind::Created)
+                && has_fenced_creation_only(attempt)
         })
         .map(|attempt| attempt.identity.clone())
         .collect()
@@ -1062,6 +1069,7 @@ pub fn record_claim(file: &Path, claim: &QueueClaim) -> Result<QueueLineageAttem
         let event = QueueLineageEvent {
             kind: QueueLineageEventKind::Created,
             at_secs: claim.claimed_at_secs,
+            native_spawn_fenced: claim.native_spawn_pending.is_some(),
             detail: Some(format!("owner={}", claim.owner)),
             ..QueueLineageEvent::default()
         };
@@ -1298,6 +1306,7 @@ fn event_from_request(request: RecordRequest) -> Result<QueueLineageEvent> {
     let event = QueueLineageEvent {
         kind: request.kind,
         at_secs,
+        native_spawn_fenced: false,
         worker_id: nonempty(request.worker_id),
         repo_path: request.repo_path.map(durable_path).transpose()?,
         source_repo_path: request.source_repo_path.map(durable_path).transpose()?,

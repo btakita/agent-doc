@@ -796,6 +796,9 @@ fn classify_lifecycle(item: &str, claim: Option<&QueueClaim>) -> QueueSyncLifecy
         return QueueSyncLifecycle::OperatorGated;
     }
     if let Some(claim) = claim {
+        if claim.native_spawn_result_required() {
+            return QueueSyncLifecycle::ReconcileUnknown;
+        }
         return match claim.state {
             QueueClaimState::Claimed => QueueSyncLifecycle::ClaimedUnstarted,
             QueueClaimState::Running => QueueSyncLifecycle::Running,
@@ -873,7 +876,7 @@ fn execution_evidence(claim: Option<&QueueClaim>) -> QueueSyncExecutionEvidence 
         QueueSyncExecutionEvidence::CompletedOutbox
     } else if claim.worker.is_some() {
         QueueSyncExecutionEvidence::Started
-    } else if claim.state == QueueClaimState::Lost {
+    } else if claim.state == QueueClaimState::Lost || claim.native_spawn_result_required() {
         QueueSyncExecutionEvidence::Unknown
     } else {
         QueueSyncExecutionEvidence::NeverStarted

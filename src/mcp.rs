@@ -1533,7 +1533,7 @@ mod tests {
             lost_from: None,
             completion_recovered_after_loss: false,
             publication_state: None,
-            native_spawn_pending: false,
+            native_spawn_pending: Some(false),
             worker: None,
             dispatch_policy: None,
             tracked_item_aliases: Vec::new(),

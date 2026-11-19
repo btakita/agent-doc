@@ -22,7 +22,7 @@ use agent_doc_queue::{
         first_n_queue_prompt_response_echoes, first_n_queue_prompt_texts,
         head_id_names_open_backlog_item, id_backed_head_node_keys,
         mark_entries_completed_by_done_ids, node_replace_ops_from_diff, normalized_done_id_bag,
-        project_committed_heading_replay_free_text_strike_with_claims,
+        project_committed_heading_replay_free_text_strike_with_dispatch,
         queue_consume_count_for_done_ids, queue_consume_node_ops, queue_mark_done_node_ops,
         queue_prompt_node_keys_for_count, queue_prompt_node_keys_for_done_ids,
         queue_prompt_response_echoes_for_done_ids,
@@ -2542,7 +2542,7 @@ pub fn strike_answered_free_text_queue_heads_under_apply_guard(
 /// document already holds an answer under its `### Re:` heading. A head
 /// strikes only when that replay answers it AND the exchange already holds an
 /// answer titled with the head itself
-/// ([`agent_doc_queue::queue_consume::project_committed_heading_replay_free_text_strike_with_claims`]).
+/// ([`project_committed_heading_replay_free_text_strike_with_dispatch`]).
 /// Same write, snapshot sync, baseline gate, and claim release as the
 /// `#ftstrike` closeout strike; returns the number of heads struck.
 pub fn strike_free_text_heads_answered_by_committed_heading_replay(
@@ -2708,13 +2708,13 @@ fn strike_free_text_queue_heads_with_proof(
             )
         }
         AnswerPresenceProof::CommittedHeadingReplay => {
-            project_committed_heading_replay_free_text_strike_with_claims(
+            project_committed_heading_replay_free_text_strike_with_dispatch(
                 doc,
                 response_body,
                 baseline.as_deref(),
                 &claimed_heads,
+                &dispatch_owned_heads,
             )
-            .map(|projected| (projected, Vec::new()))
         }
     };
     let (projected, inline_vetoed) = project(&content)?;
@@ -11238,6 +11238,49 @@ mod core_tests {
         );
         let struck = strike_answered_free_text_queue_heads(&doc, response, true).unwrap();
         assert_eq!(struck, 1, "a worker-backed row strikes on its echo");
+    }
+
+    #[test]
+    fn committed_heading_replay_preserves_unclaimed_subagent_work() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("session.md");
+        let head = "Audit the release checklist";
+        let content = format!(
+            "<!-- agent:exchange -->\n### Re: {head}\n\nThe checklist passed.\n<!-- /agent:exchange -->\n\n\
+             <!-- agent:run subagents go -->\n- {head}\n<!-- /agent:run -->\n"
+        );
+        let replay = format!("### Re: {head}\n\n> **Queue prompt:** {head}\n\nDone.\n");
+        fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let struck = strike_free_text_heads_answered_by_committed_heading_replay(
+            &doc,
+            &replay,
+            &TEST_EFFECTS,
+        )
+        .unwrap();
+        assert_eq!(struck, 0);
+        assert_eq!(fs::read_to_string(&doc).unwrap(), content);
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops.contains("queue_subagent_inline_answer_refused"));
+
+        crate::queue_claim::claim(&doc, head, "subagent:checklist", 3600).unwrap();
+        let struck = strike_free_text_heads_answered_by_committed_heading_replay(
+            &doc,
+            &replay,
+            &TEST_EFFECTS,
+        )
+        .unwrap();
+        assert_eq!(
+            struck, 1,
+            "a worker-backed row still strikes on both proofs"
+        );
     }
 
     #[test]

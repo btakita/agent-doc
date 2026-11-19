@@ -2133,36 +2133,46 @@ pub fn project_answered_free_text_strike_with_dispatch_at(
 ///
 /// - the replay itself answers the head, by the same predicate the finalize
 ///   strike and the session-check `#qheadresidue` guard use (echo, claimed-head
-///   proof, `#deferstrike`, and the `baseline` in-flight-edit gate), and
+///   proof, deferral, the baseline in-flight-edit gate, and the
+///   subagent dispatch veto), and
 /// - the document's `agent:exchange` already holds an answer titled with the
 ///   head's own text (`### Re: <head>`, attribution ignored).
 ///
 /// A head echoed only by the replay, or an answer titled with some other
 /// topic, never strikes: the never-written replay is not an answer.
-pub fn project_committed_heading_replay_free_text_strike_with_claims(
+pub fn project_committed_heading_replay_free_text_strike_with_dispatch(
     content: &str,
     replay_body: &str,
     baseline: Option<&str>,
     claimed_heads: &[String],
-) -> Result<Option<AnsweredFreeTextStrikeProjection>> {
+    dispatch_owned_heads: &[String],
+) -> Result<(Option<AnsweredFreeTextStrikeProjection>, Vec<String>)> {
     if replay_body.trim().is_empty() {
-        return Ok(None);
+        return Ok((None, Vec::new()));
     }
     agent_doc_frontmatter::frontmatter::parse(content)?;
     let titled = exchange_answer_topics(content);
     if titled.is_empty() {
-        return Ok(None);
+        return Ok((None, Vec::new()));
     }
-    let answered: HashSet<String> = answered_free_text_head_node_keys_with_claims(
+    let has_committed_answer =
+        |text: &str| head_answer_topic(text).is_some_and(|topic| titled.contains(&topic));
+    let decision = answered_free_text_strike_decision(
         content,
         replay_body,
         baseline,
         claimed_heads,
-    )?
-    .into_iter()
-    .collect();
+        &[],
+        dispatch_owned_heads,
+    )?;
+    let inline_vetoed_heads = decision
+        .inline_vetoed_heads
+        .into_iter()
+        .filter(|head| has_committed_answer(head))
+        .collect();
+    let answered: HashSet<String> = decision.node_keys.into_iter().collect();
     if answered.is_empty() {
-        return Ok(None);
+        return Ok((None, inline_vetoed_heads));
     }
     let node_keys = agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue")
         .map_err(|err| {
@@ -2170,14 +2180,15 @@ pub fn project_committed_heading_replay_free_text_strike_with_claims(
         })?
         .into_iter()
         .filter(|node| answered.contains(&node.node_key))
-        .filter(|node| {
-            head_answer_topic(&node.item.text).is_some_and(|topic| titled.contains(&topic))
-        })
+        .filter(|node| has_committed_answer(&node.item.text))
         .map(|node| node.node_key)
         .collect();
     // The replay body was never materialized. Its content-derived id therefore
     // cannot be used as the backlink for the already-committed response.
-    project_free_text_strike_of_node_keys(content, None, node_keys, "")
+    Ok((
+        project_free_text_strike_of_node_keys(content, None, node_keys, "")?,
+        inline_vetoed_heads,
+    ))
 }
 
 /// Whether a terminal queue row is owned by one of the exact durable head
@@ -12412,14 +12423,16 @@ mod tests {
              Refreshed.\n<!-- /patch:exchange -->\n"
         );
 
-        let projected = project_committed_heading_replay_free_text_strike_with_claims(
+        let (projected, vetoed) = project_committed_heading_replay_free_text_strike_with_dispatch(
             &content,
             &replay,
             Some(&content),
             &[],
+            &[],
         )
-        .unwrap()
-        .expect("the head the exchange answers by title must strike");
+        .unwrap();
+        assert!(vetoed.is_empty());
+        let projected = projected.expect("the head the exchange answers by title must strike");
         assert!(
             projected.target_content.contains(&format!("~~{titled}")),
             "{}",
@@ -12440,13 +12453,15 @@ mod tests {
             "<!-- patch:exchange -->\n### Re: {titled} — gpt-5\n\nRefreshed.\n<!-- /patch:exchange -->\n"
         );
         assert!(
-            project_committed_heading_replay_free_text_strike_with_claims(
+            project_committed_heading_replay_free_text_strike_with_dispatch(
                 &content,
                 &unanswering,
                 Some(&content),
                 &[],
+                &[],
             )
             .unwrap()
+            .0
             .is_none()
         );
 
@@ -12455,13 +12470,15 @@ mod tests {
         let plain = content.replace("- 🚧 ", "- ");
         let baseline = plain.replace(&format!("- {titled}\n"), "");
         assert!(
-            project_committed_heading_replay_free_text_strike_with_claims(
+            project_committed_heading_replay_free_text_strike_with_dispatch(
                 &plain,
                 &replay,
                 Some(&baseline),
                 &[],
+                &[],
             )
             .unwrap()
+            .0
             .is_none()
         );
     }

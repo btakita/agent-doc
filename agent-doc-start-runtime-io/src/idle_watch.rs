@@ -491,11 +491,25 @@ struct IdleQueueProjectionSelfHealEffects {
     cancel: Arc<AtomicBool>,
 }
 
+struct IdleQueueLifecycleEffects {
+    cancel: Arc<AtomicBool>,
+}
+
 impl IdleQueueProjectionSelfHealEffects {
     fn ensure_active(&self) -> anyhow::Result<()> {
         anyhow::ensure!(
             !self.cancel.load(Ordering::Acquire),
             "queue projection self-heal cancelled before mutation"
+        );
+        Ok(())
+    }
+}
+
+impl IdleQueueLifecycleEffects {
+    fn ensure_active(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !self.cancel.load(Ordering::Acquire),
+            "queue lifecycle self-heal cancelled before mutation"
         );
         Ok(())
     }
@@ -555,6 +569,132 @@ impl agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionEffects
     }
 }
 
+impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for IdleQueueLifecycleEffects {
+    fn current_document_content(&self, file: &Path, source: &str) -> anyhow::Result<String> {
+        self.ensure_active()?;
+        agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
+    }
+
+    fn converge_document_or_disk(
+        &self,
+        file: &Path,
+        target_content: &str,
+        source_content: &str,
+        reason: &str,
+    ) -> anyhow::Result<()> {
+        self.ensure_active()?;
+        agent_doc_write_converge_io::converge_document_or_disk(
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
+            file,
+            target_content,
+            source_content,
+            reason,
+        )?;
+        agent_doc_document_realtime_io::invalidate_current_document_projection(file);
+        Ok(())
+    }
+
+    fn consume_free_text_queue_prompts_force_disk(
+        &self,
+        _file: &Path,
+        _count: usize,
+        _apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
+        anyhow::bail!("route self-heal does not consume a free-text head by count")
+    }
+
+    fn consume_free_text_queue_prompts_with_outcome(
+        &self,
+        _file: &Path,
+        _count: usize,
+        _apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
+        anyhow::bail!("route self-heal does not consume a free-text head by count")
+    }
+
+    fn strike_orphan_id_backed_queue_head(
+        &self,
+        _file: &Path,
+        _id: &str,
+        _apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> anyhow::Result<bool> {
+        anyhow::bail!("route self-heal does not strike an orphan head")
+    }
+
+    fn acknowledge_open_id_backed_queue_head(
+        &self,
+        file: &Path,
+        id: &str,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> anyhow::Result<bool> {
+        self.acknowledge_open_id_backed_queue_head_for_attempt(file, id, None, apply_guard)
+    }
+
+    fn acknowledge_open_id_backed_queue_head_for_attempt(
+        &self,
+        file: &Path,
+        id: &str,
+        attempt: Option<&agent_doc_document::queue_projection::QueueOwnerProjection>,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> anyhow::Result<bool> {
+        self.ensure_active()?;
+        agent_doc_queue_io::queue_consume::acknowledge_open_id_backed_queue_head_under_apply_guard(
+            file,
+            id,
+            attempt,
+            &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
+            apply_guard,
+        )
+    }
+
+    fn acknowledge_paused_free_text_queue_head(
+        &self,
+        file: &Path,
+        expected_head: &str,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
+        self.acknowledge_paused_free_text_queue_head_with_selector(
+            file,
+            expected_head,
+            None,
+            apply_guard,
+        )
+    }
+
+    fn acknowledge_paused_free_text_queue_head_with_selector(
+        &self,
+        file: &Path,
+        expected_head: &str,
+        selector: Option<&agent_doc_queue_io::queue_consume::AckTextSelector>,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
+        self.ensure_active()?;
+        agent_doc_queue_io::queue_consume::acknowledge_paused_free_text_queue_head_under_apply_guard(
+            file,
+            expected_head,
+            selector,
+            &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
+            apply_guard,
+        )
+        .map(|outcome| {
+            outcome.map(|outcome| agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome {
+                consumed_text: outcome.consumed_text,
+                consumed_count: outcome.consumed_count,
+                remaining: outcome.remaining,
+                drained: outcome.drained,
+            })
+        })
+    }
+
+    fn prune_noise_queue_heads(
+        &self,
+        _file: &Path,
+        _apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> anyhow::Result<usize> {
+        anyhow::bail!("route self-heal does not prune noise heads")
+    }
+}
+
 /// Publish new document evidence to captured-finalize recovery, retire any
 /// operator gate, and preempt a retry deadline derived from the previous
 /// document state.
@@ -594,11 +734,78 @@ struct DocumentDeliverySignal {
 struct QueueProjectionSelfHealWorkerOutcome {
     projection: agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionOnceOutcome,
     request: agent_doc_queue::queue_repair_generation::QueueProjectionRepairRequest,
+    mechanical_closeouts: usize,
+    retained_projection_settled: bool,
+    head_converged: bool,
     /// Controller delivery frontier observed after the projection attempt
     /// returned. A superseded attempt owns every delivery edge through this
     /// cursor; only a strictly newer edge may re-arm repair.
     terminal_delivery_cursor:
         Option<agent_doc_controller_io::project_controller::ControllerStatePlaneCursor>,
+}
+
+/// Settle the document lifecycle work that used to depend on a successful Stop
+/// hook. The supervisor invokes this from its single-flight queue repair worker,
+/// so a skipped, crashed, malformed, or harness-timed-out Stop cannot strand a
+/// captured response or leave a mechanically-complete row reported forever.
+fn reconcile_queue_lifecycle_without_stop(
+    effects: &IdleQueueLifecycleEffects,
+    file: &Path,
+) -> anyhow::Result<(usize, bool, bool)> {
+    effects.ensure_active()?;
+    let mut retained_projection_settled =
+        agent_doc_document_realtime_io::settle_retained_non_capture_projection_through_authority(
+            file,
+            "route_owned_queue_lifecycle_reconcile_pre_closeout",
+        )?;
+    if let Some(pending) = agent_doc_document_realtime_io::pending_document_write(file) {
+        anyhow::bail!(
+            "route-owned queue lifecycle remains in progress: retained projection {} ({}) is awaiting authority delivery; the supervisor will resume on the next delivery edge",
+            pending.intent_id,
+            format_args!("{:?}", pending.source),
+        );
+    }
+
+    effects.ensure_active()?;
+    let pass = agent_doc_queue_io::reported_closeout_exec::close_mechanical_reported_attempts(
+        effects, file,
+    )?;
+    let mechanical_closeouts = pass
+        .outcomes
+        .iter()
+        .filter(|outcome| outcome.closed())
+        .count();
+    if pass.document_changed || mechanical_closeouts > 0 {
+        agent_doc_document_realtime_io::invalidate_current_document_projection(file);
+        retained_projection_settled |= agent_doc_document_realtime_io::settle_retained_non_capture_projection_through_authority(
+            file,
+            "route_owned_queue_lifecycle_reconcile_post_closeout",
+        )?;
+    }
+    if let Some(pending) = agent_doc_document_realtime_io::pending_document_write(file) {
+        anyhow::bail!(
+            "route-owned queue lifecycle remains in progress after mechanical closeout: retained projection {} ({}) is awaiting authority delivery; the supervisor will resume on the next delivery edge",
+            pending.intent_id,
+            format_args!("{:?}", pending.source),
+        );
+    }
+    // The response/strike transition is not complete merely because editor and
+    // disk agree. Use the normal document-scoped commit boundary so HEAD is the
+    // durable third authority. `commit` durably records a deferred commit when
+    // editor delivery is still converging, so an interrupted worker does not
+    // have to recapture or duplicate this closeout on its next wake.
+    let head_converged =
+        if pass.document_changed || mechanical_closeouts > 0 || retained_projection_settled {
+            effects.ensure_active()?;
+            agent_doc_commit_io::commit(file)?
+        } else {
+            false
+        };
+    Ok((
+        mechanical_closeouts,
+        retained_projection_settled,
+        head_converged,
+    ))
 }
 
 fn document_delivery_signal_is_newer_than(
@@ -845,15 +1052,34 @@ fn spawn_queue_projection_self_heal_worker(
         .name("queue-projection-self-heal".into())
         .spawn(move || {
             let projection_cancel = Arc::clone(&worker_cancel);
-            let run =
+            let lifecycle_effects = IdleQueueLifecycleEffects {
+                cancel: Arc::clone(&worker_cancel),
+            };
+            let projection_effects = IdleQueueProjectionSelfHealEffects {
+                cancel: worker_cancel,
+            };
+            let run = reconcile_queue_lifecycle_without_stop(&lifecycle_effects, &file).and_then(
+                |(mechanical_closeouts, retained_projection_settled, head_converged)| {
                 agent_doc_queue_io::queue_cmd::project_background_self_heal_runtime_state_once_for_generation_with_effects(
-                    &IdleQueueProjectionSelfHealEffects {
-                        cancel: worker_cancel,
-                    },
+                    &projection_effects,
                     &file,
                     request.generation,
-                );
-            let outcome = run.map(|projection| {
+                )
+                .map(|projection| {
+                    (
+                        projection,
+                        mechanical_closeouts,
+                        retained_projection_settled,
+                        head_converged,
+                    )
+                })
+            });
+            let outcome = run.map(|(
+                projection,
+                mechanical_closeouts,
+                retained_projection_settled,
+                head_converged,
+            )| {
                 let terminal_delivery_cursor = matches!(
                     projection,
                     agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionOnceOutcome::Superseded
@@ -878,6 +1104,9 @@ fn spawn_queue_projection_self_heal_worker(
                 QueueProjectionSelfHealWorkerOutcome {
                     projection,
                     request,
+                    mechanical_closeouts,
+                    retained_projection_settled,
+                    head_converged,
                     terminal_delivery_cursor,
                 }
             });
@@ -2885,6 +3114,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             changed,
                         },
                     request,
+                    mechanical_closeouts,
+                    retained_projection_settled,
+                    head_converged,
                     ..
                 })) => {
                     queue_projection_self_heal_worker = None;
@@ -2928,11 +3160,15 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     agent_doc_ops_log_io::log_op(
                         &path,
                         &format!(
-                            "queue_projection_self_heal_completed file={} changed={} authority=editor_crdt single_flight=true",
-                            path.display(), changed,
+                            "queue_projection_self_heal_completed file={} changed={} mechanical_closeouts={} retained_projection_settled={} head_converged={} authority=editor_crdt single_flight=true stop_independent=true",
+                            path.display(), changed, mechanical_closeouts, retained_projection_settled, head_converged,
                         ),
                     );
-                    if changed {
+                    if changed
+                        || mechanical_closeouts > 0
+                        || retained_projection_settled
+                        || head_converged
+                    {
                         document_delivery_reconcile_pending = true;
                         last_quiescent_maintenance = None;
                     }
@@ -7742,6 +7978,129 @@ pub(super) fn spawn_idle_queue_watch_thread(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn reported_closeout_fixture() -> (tempfile::TempDir, PathBuf, IdleQueueLifecycleEffects) {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("task.md");
+        let prompt = "review the pull request";
+        let content = format!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+## Exchange\n\n\
+<!-- agent:exchange patch=append -->\n\
+### Re: recovered response\n\n\
+Waiting on the reported row.\n\
+<!-- /agent:exchange -->\n\n\
+## Queue\n\n\
+<!-- agent:queue -->\n\
+- {prompt}\n\
+<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        for args in [
+            vec!["init", "-b", "main"],
+            vec!["config", "user.email", "agent-doc@example.invalid"],
+            vec!["config", "user.name", "Agent Doc Test"],
+            vec!["add", "task.md"],
+            vec!["commit", "-m", "initial"],
+        ] {
+            assert!(
+                std::process::Command::new("git")
+                    .args(&args)
+                    .current_dir(dir.path())
+                    .output()
+                    .unwrap()
+                    .status
+                    .success(),
+                "git {args:?}"
+            );
+        }
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&doc, prompt, "subagent:review", 3600).unwrap();
+        let started = agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            prompt,
+            "subagent:review",
+            "worker:review",
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_lineage::record_prose_only(&doc, &started, "prose result")
+            .unwrap();
+        agent_doc_queue_io::claim_release_receipt::capture_response_for_attempt(
+            &doc,
+            prompt,
+            started.generation,
+            "The discussion is already resolved.",
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::report_attempt(&doc, prompt, Some(claim.generation))
+            .unwrap();
+        let effects = IdleQueueLifecycleEffects {
+            cancel: Arc::new(AtomicBool::new(false)),
+        };
+        agent_doc_queue_io::queue_cmd::project_claim_runtime_state_with_effects(
+            &effects, &doc, None,
+        )
+        .unwrap();
+        (dir, doc, effects)
+    }
+
+    #[test]
+    fn route_supervisor_reconciles_reported_closeout_without_any_stop_hook() {
+        let (_dir, doc, effects) = reported_closeout_fixture();
+        let before = std::fs::read_to_string(&doc).unwrap();
+        assert!(before.contains('☑'), "{before}");
+        assert!(!before.contains("The discussion is already resolved."));
+
+        let (closed, settled, head_converged) =
+            reconcile_queue_lifecycle_without_stop(&effects, &doc).unwrap();
+        assert_eq!(closed, 1);
+        assert!(head_converged);
+        let after = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            after.contains("The discussion is already resolved."),
+            "{after}"
+        );
+        assert!(after.contains("### Re: Subagent completed"), "{after}");
+        assert!(after.contains("~~"), "{after}");
+        assert!(!after.contains('☑'), "{after}");
+        let head = std::process::Command::new("git")
+            .args(["show", "HEAD:task.md"])
+            .current_dir(doc.parent().unwrap())
+            .output()
+            .unwrap();
+        assert!(head.status.success());
+        assert_eq!(String::from_utf8(head.stdout).unwrap(), after);
+
+        let (closed_again, settled_again, head_converged_again) =
+            reconcile_queue_lifecycle_without_stop(&effects, &doc).unwrap();
+        assert_eq!(closed_again, 0);
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), after);
+        assert!(!settled_again);
+        assert!(!head_converged_again);
+        let _ = settled;
+    }
+
+    #[test]
+    fn cancelled_route_reconcile_preserves_reported_work_for_a_later_wake() {
+        let (_dir, doc, effects) = reported_closeout_fixture();
+        effects.cancel.store(true, Ordering::Release);
+        let before = std::fs::read_to_string(&doc).unwrap();
+        let error = reconcile_queue_lifecycle_without_stop(&effects, &doc).unwrap_err();
+        assert!(
+            error.to_string().contains("cancelled before mutation"),
+            "{error:#}"
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), before);
+        assert!(before.contains('☑'));
+    }
 
     #[test]
     fn queue_projection_self_heal_fails_closed_until_closeout_absence_is_proven() {

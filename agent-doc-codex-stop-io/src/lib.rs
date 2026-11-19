@@ -1490,6 +1490,7 @@ fn status_sync_synced_payload_for_checkpoint(
     Some(synced)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 struct StopQueueCommandEffects;
 
 impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for StopQueueCommandEffects {
@@ -1617,78 +1618,6 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for StopQueueCommandEffe
     }
 }
 
-fn one_line_error(err: &anyhow::Error) -> String {
-    format!("{err:#}").replace('\n', " | ")
-}
-
-/// Finish a visible mechanical `☑️` before this Stop decides the turn.
-///
-/// A document with no reported glyph does not open the claim ledger. A
-/// closeout error is logged and the turn decision continues, so a row that
-/// stayed `☑️` still holds the turn. Observe-only stops return before this.
-fn finish_visible_reported_rows(file: &Path) {
-    let content = match current_document_content(file, "mechanical_reported_closeout") {
-        Ok(content) => content,
-        Err(err) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "mechanical_reported_closeout_failed file={} error={}",
-                    file.display(),
-                    one_line_error(&err),
-                ),
-            );
-            return;
-        }
-    };
-    if !content.contains('☑') && !content.contains('📫') && !content.contains('📤') {
-        return;
-    }
-    match agent_doc_queue_io::reported_closeout_exec::close_mechanical_reported_attempts(
-        &StopQueueCommandEffects,
-        file,
-    ) {
-        Ok(pass) => {
-            if pass.document_changed || pass.outcomes.iter().any(|outcome| outcome.closed()) {
-                invalidate_stop_document_cache();
-            }
-            for outcome in &pass.outcomes {
-                let status = match &outcome.result {
-                    agent_doc_queue_io::reported_closeout_exec::MechanicalCloseoutResult::Closed => {
-                        "closed".to_string()
-                    }
-                    agent_doc_queue_io::reported_closeout_exec::MechanicalCloseoutResult::ProjectionOutOfSync => {
-                        "projection_out_of_sync".to_string()
-                    }
-                    agent_doc_queue_io::reported_closeout_exec::MechanicalCloseoutResult::LeftReported { reason } => {
-                        format!("left_reported reason={reason}")
-                    }
-                };
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "mechanical_reported_closeout file={} owner={} generation={} item_bytes={} {status}",
-                        file.display(),
-                        outcome.owner,
-                        outcome.generation,
-                        outcome.item.len(),
-                    ),
-                );
-            }
-        }
-        Err(err) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "mechanical_reported_closeout_failed file={} error={}",
-                    file.display(),
-                    one_line_error(&err),
-                ),
-            );
-        }
-    }
-}
-
 /// [`claude_stop_answer`] with the supervisor drain-readiness probe injected.
 fn claude_stop_answer_with_drain_readiness(
     input: &ClaudeStopInput,
@@ -1728,7 +1657,10 @@ fn claude_stop_answer_with_drain_readiness(
     // Finish a mechanical `☑️` before any cycle or writeback decision. Striking
     // the row, with its response in the document, is what lets the turn end.
     // A row that stays `☑️` is held below. An error here does not fail the hook.
-    finish_visible_reported_rows(&file);
+    // Stop is a bounded status gate. Mechanical reported-row closeout and
+    // retained projection settlement are owned by the route supervisor's
+    // single-flight lifecycle worker, so recovery continues even when this
+    // hook is skipped, crashes, times out, or returns malformed output.
 
     // `#stopneedsclosedcycle`: the marker and the stall projection are both
     // document-level and OUTLIVE the cycle that wrote them, so neither one
@@ -11748,7 +11680,7 @@ Reported.\n\
     /// A prose `☑️` whose response was captured is struck, with that response
     /// written, before the turn is allowed to end.
     #[test]
-    fn claude_stop_finishes_a_mechanical_reported_row_before_the_turn_ends() {
+    fn claude_stop_observes_a_mechanical_reported_row_without_reconciling_it() {
         let _claim_clock = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(
             agent_doc_queue_io::queue_claim::claim_clock_now_secs(),
         );
@@ -11818,20 +11750,19 @@ Waiting on the reported row.\n\
             |_: &Path| agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor;
         let held = apply_claude_stop_with_drain_readiness(&input, no_supervisor).unwrap();
         let updated_now = fs::read_to_string(&doc).unwrap();
-        let log_now =
-            fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
-            held.is_none(),
-            "a finished mechanical row lets the turn end\nheld={held:?}\n{updated_now}\n{log_now}"
+            held.is_some(),
+            "Stop is a bounded status gate while the route-owned supervisor reconciles the row\nheld={held:?}\n{updated_now}"
         );
-        let updated = fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("The discussion is already resolved."),
-            "{updated}"
+            !updated_now.contains("The discussion is already resolved."),
+            "Stop must not restore or reconcile response text: {updated_now}"
         );
-        assert!(updated.contains("### Re: Subagent completed"), "{updated}");
-        assert!(updated.contains("~~"), "{updated}");
-        assert!(!updated.contains('☑'), "{updated}");
+        assert!(
+            !updated_now.contains("### Re: Subagent completed"),
+            "{updated_now}"
+        );
+        assert!(updated_now.contains('☑'), "{updated_now}");
     }
 
     /// A painted `☑️` with no claim is not consumed, and the turn stays open.

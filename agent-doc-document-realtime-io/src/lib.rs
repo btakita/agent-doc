@@ -2983,6 +2983,54 @@ pub fn settle_retained_non_capture_projection_through_authority(
         return Ok(true);
     }
     let mut canonical = try_resolve_current_document_content(path, source)?;
+    // A native editor save can advance disk while an earlier retained write is
+    // still waiting for its visible-buffer receipt. The editor remains the
+    // transport authority, but disk is a causal successor of the retained
+    // intent's expected cut rather than disposable recovery bytes. Fold only
+    // its delta from that exact base into the editor cut before replaying the
+    // retained target. Component-aware reconciliation keeps distinct queue
+    // generations as separate rows and never joins a disk-only follow-up onto
+    // an unrelated editor line (`#stoplessreconcile`).
+    let disk_before_settlement = resolve_disk_current_document_content(path, source)?;
+    if disk_before_settlement != canonical
+        && let Some(expected) = pending.expected_content.as_deref()
+        && disk_before_settlement != expected
+    {
+        let merged = rebase_agent_candidate_over_editor_cut(
+            path,
+            expected,
+            &disk_before_settlement,
+            &canonical,
+        )?;
+        if merged != canonical {
+            let editor_hash = agent_doc_hash::content_hash(&canonical);
+            let Some(relay_write) = apply_canonical_replace_if_attached(
+                path,
+                &canonical,
+                &merged,
+                "retained_non_capture_disk_followup_merge",
+            )?
+            else {
+                return Ok(false);
+            };
+            if !relay_write.delivery_converged {
+                return Ok(false);
+            }
+            canonical = try_resolve_current_document_content(path, source)?;
+            agent_doc_ops_log_io::log_op(
+                path,
+                &format!(
+                    "retained_non_capture_disk_followup_merged file={} intent_id={} expected_hash={} disk_hash={} editor_hash={} merged_hash={} authority=editor_crdt (#stoplessreconcile)",
+                    path.display(),
+                    pending.intent_id,
+                    agent_doc_hash::content_hash(expected),
+                    agent_doc_hash::content_hash(&disk_before_settlement),
+                    editor_hash,
+                    agent_doc_hash::content_hash(&merged),
+                ),
+            );
+        }
+    }
     if retire_superseded_compact_projection_intents(path, &canonical, source)? > 0 {
         return Ok(true);
     }
@@ -21693,5 +21741,48 @@ scratch
         );
         assert_eq!(recovered.matches("Recovered response.").count(), 1);
         assert!(pending_document_write(&file).is_none());
+    }
+
+    #[test]
+    fn stopless_disk_followup_merge_preserves_distinct_queue_generations() {
+        let base = concat!(
+            "---\nagent_doc_session: sdk-dev\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ original prompt\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- base row [#q-base]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let editor = base.replace(
+            "- base row [#q-base]\n",
+            concat!(
+                "- Destination question? [#q-destination-1]\n",
+                "- Destination question, clarified? [#q-destination-2]\n",
+                "- do [#q-do]\n",
+            ),
+        );
+        let disk = base.replace(
+            "- base row [#q-base]\n",
+            concat!(
+                "- base row [#q-base]\n",
+                "- #jira follow-up SDK-347 [#q-jira]\n",
+            ),
+        );
+        let (_dir, file, _) = temp_doc(base);
+        let merged = rebase_agent_candidate_over_editor_cut(&file, base, &disk, &editor).unwrap();
+
+        for row in [
+            "- Destination question? [#q-destination-1]",
+            "- Destination question, clarified? [#q-destination-2]",
+            "- do [#q-do]",
+            "- #jira follow-up SDK-347 [#q-jira]",
+        ] {
+            assert_eq!(merged.matches(row).count(), 1, "{merged}");
+        }
+        assert!(!merged.contains("[#q-do]#jira"), "{merged}");
+        assert!(!merged.contains("[#q-do] #jira"), "{merged}");
+        assert!(agent_projection_integrity_valid(&merged), "{merged}");
     }
 }

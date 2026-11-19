@@ -125,7 +125,10 @@
 //!   strictly validated nested sub-items of that one item, never silently split
 //!   into several items (`#nestedtodoadd`).
 
+use std::collections::HashSet;
+
 use anyhow::{Context, Result};
+use pulldown_cmark::{Event, Options, Parser, Tag};
 
 use crate::element::{self, Component};
 
@@ -1938,6 +1941,70 @@ pub fn reconcile_todo_in_document(content: &str) -> Result<(String, usize)> {
     Ok((todo.replace_content(content, &folded), removed))
 }
 
+/// Fold exact copies of identified Todo items during passive maintenance.
+/// Compare complete Markdown item spans within the same parent, so an item
+/// with different state, text, or children remains available for inspection.
+pub fn fold_identical_todo_items(
+    content: &str,
+    is_settled: impl Fn(&str) -> bool,
+) -> Result<Option<(String, usize)>> {
+    let Some(todo) = find_todo_component(content)? else {
+        return Ok(None);
+    };
+    let body = todo.content(content);
+    let mut root_items = HashSet::new();
+    let mut parents = Vec::<(usize, HashSet<&str>)>::new();
+    let mut removed = Vec::<std::ops::Range<usize>>::new();
+    for (event, span) in Parser::new_ext(body, Options::empty()).into_offset_iter() {
+        if !matches!(event, Event::Start(Tag::Item)) {
+            continue;
+        }
+        if removed.last().is_some_and(|range| span.start < range.end) {
+            continue;
+        }
+        while parents.last().is_some_and(|(end, _)| *end <= span.start) {
+            parents.pop();
+        }
+        let siblings = parents
+            .last_mut()
+            .map_or(&mut root_items, |(_, siblings)| siblings);
+        let start = body[..span.start]
+            .rfind('\n')
+            .map_or(0, |offset| offset + 1);
+        let item = body[start..span.end].trim_end_matches(['\r', '\n']);
+        let head = item.lines().next().unwrap_or_default();
+        if parse_todo_line(head).is_some_and(|line| line.own_id.is_some())
+            && is_settled(head)
+            && !siblings.insert(item)
+        {
+            let end = start + item.len();
+            let ending = &body[end..];
+            let newline = if ending.starts_with("\r\n") {
+                2
+            } else {
+                usize::from(ending.starts_with('\n'))
+            };
+            removed.push(start..end + newline);
+        } else {
+            parents.push((span.end, HashSet::new()));
+        }
+    }
+    if removed.is_empty() {
+        return Ok(None);
+    }
+    let mut folded = String::with_capacity(body.len());
+    let mut copied = 0;
+    for range in &removed {
+        folded.push_str(&body[copied..range.start]);
+        copied = range.end;
+    }
+    folded.push_str(&body[copied..]);
+    Ok(Some((
+        todo.replace_content(content, &folded),
+        removed.len(),
+    )))
+}
+
 /// One OPEN todo item that cites tracked work this closeout resolved.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenTodoReference {
@@ -2635,6 +2702,43 @@ pub fn project_todo_except(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fold_identical_todo_items_keeps_literal_and_unsettled_rows() {
+        let content = concat!(
+            "<!-- agent:todo -->\n",
+            "- [ ] [#a] Parent action\n",
+            "  - [ ] [#child] Repeat verification\n",
+            "  - [ ] [#child] Repeat verification\n",
+            "- [ ] [#b] Another action\n",
+            "  - [ ] [#child] Repeat verification\n",
+            "- [ ] [#draft] Incomplete edit\n",
+            "- [ ] [#draft] Incomplete edit\n",
+            "\n```md\n",
+            "- [ ] [#example] Document an example\n",
+            "- [ ] [#example] Document an example\n",
+            "```\n",
+            "<!-- /agent:todo -->\n",
+        );
+        let (folded, removed) =
+            fold_identical_todo_items(content, |line| !line.contains("[#draft]"))
+                .unwrap()
+                .unwrap();
+        assert_eq!(removed, 1);
+        assert_eq!(
+            folded,
+            content.replacen(
+                "  - [ ] [#child] Repeat verification\n  - [ ] [#child] Repeat verification\n",
+                "  - [ ] [#child] Repeat verification\n",
+                1
+            )
+        );
+        assert!(
+            fold_identical_todo_items(&folded, |line| !line.contains("[#draft]"))
+                .unwrap()
+                .is_none()
+        );
+    }
 
     /// `#managedlistnodrift`: the todo projection closes exactly the open
     /// items whose own tracked work is durably resolved, changes nothing else,

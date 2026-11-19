@@ -1727,6 +1727,64 @@ fn write_done_naming_a_todo_own_id_checks_it_off_and_strikes_its_queue_head() {
     }
 }
 
+#[test]
+fn preflight_folds_only_identical_same_id_todo_items() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let original = concat!(
+        "---\nagent_doc_format: template\n---\n\n",
+        "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n",
+        "<!-- agent:todo -->\n",
+        "- [ ] [#rollout] Verify the release\n",
+        "  - Observe the first rollout\n",
+        "- [ ] [#notes] Read the release notes\n",
+        "- [ ] [#rollout] Verify the release\n",
+        "  - Observe the first rollout\n",
+        "- [ ] [#rollout] Verify the release\n",
+        "  - Observe the second rollout\n",
+        "- [x] [#rollout] Verify the release\n",
+        "  - Observe the first rollout\n",
+        "<!-- /agent:todo -->\n",
+    );
+    fs::write(&doc, original).unwrap();
+    let preflight = || {
+        let output = agent_doc()
+            .current_dir(tmp.path())
+            .env(
+                "AGENT_DOC_ROOT_CEILING_DIRECTORIES",
+                tmp.path().parent().unwrap(),
+            )
+            .args(["preflight", doc.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(output.status.success(), "{stderr}");
+        stderr
+    };
+
+    let first = preflight();
+    assert!(first.contains("(#tododupefold)"), "{first}");
+    let expected = concat!(
+        "- [ ] [#rollout] Verify the release\n",
+        "  - Observe the first rollout\n",
+        "- [ ] [#notes] Read the release notes\n",
+        "- [ ] [#rollout] Verify the release\n",
+        "  - Observe the second rollout\n",
+        "- [x] [#rollout] Verify the release\n",
+        "  - Observe the first rollout",
+    );
+    let after = fs::read_to_string(&doc).unwrap();
+    assert_eq!(component_body(&after, "todo"), expected);
+
+    let second = preflight();
+    assert!(!second.contains("(#tododupefold)"), "{second}");
+    assert_eq!(
+        component_body(&fs::read_to_string(&doc).unwrap(), "todo"),
+        expected
+    );
+}
+
 /// `#todoidbackfill`, anonymized from `tasks/docs.md` on 2026-10-15: the
 /// operator re-authenticated the Drive connector, but the hand-written,
 /// id-less todo row stayed open because nothing could address it by id.

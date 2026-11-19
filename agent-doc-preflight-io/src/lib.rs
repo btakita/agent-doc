@@ -495,9 +495,9 @@ pub fn todo_signal_from_finding(finding: &agent_doc_element::todo::TodoLinkFindi
 ///
 /// Runs before queue maintenance, against the same editor/CP authority, behind
 /// the same typing gate (`coin_gate`): a row the operator is still typing keeps
-/// no id or source qualifier until a later pass. Existing ids are preserved;
-/// maintenance changes only a missing id token and/or the canonical trailing
-/// source locator. The snapshot's todo body follows when it matched the
+/// no id or source qualifier until a later pass. This pass also folds exact
+/// copies of settled, identified items before assigning ids. Existing ids are
+/// preserved. The snapshot's todo body follows when it matched the
 /// pre-maintenance body, so the repair does not read as an operator diff. Fail
 /// closed: unreadable tracked-work evidence, an editor head that is not
 /// current, or a refused write changes nothing this pass. Returns ids assigned
@@ -548,9 +548,21 @@ fn run_todo_id_maintenance_with_options(
     {
         return Ok(Vec::new());
     }
+    let folded = if force_disk {
+        None
+    } else {
+        agent_doc_element::todo::fold_identical_todo_items(&content, |line| {
+            coin_gate.allows_cosmetic_pending(line)
+        })?
+    };
+    let (todo_content, duplicates_removed) = folded
+        .as_ref()
+        .map_or((content.as_str(), 0), |(text, removed)| {
+            (text.as_str(), *removed)
+        });
     let links = match agent_doc_element_backlog_io::backlog_cmd::todo_link_index_in_content(
         file,
-        &content,
+        todo_content,
         true,
         &[],
     ) {
@@ -562,13 +574,13 @@ fn run_todo_id_maintenance_with_options(
             return Ok(Vec::new());
         }
     };
-    let reserved = agent_doc_element_backlog::backlog::document_reserved_identity_ids(&content);
+    let reserved = agent_doc_element_backlog::backlog::document_reserved_identity_ids(todo_content);
     let doc_id = agent_doc_hash::document_id_for_path(file);
     let id_for = |action: &str, counter: u64| {
         agent_doc_element_backlog::backlog::generate_hash_n(action, &doc_id, counter, 4)
     };
     let id_outcome = agent_doc_element::todo::assign_missing_todo_ids(
-        &content,
+        todo_content,
         &id_for,
         &reserved,
         &links,
@@ -579,7 +591,10 @@ fn run_todo_id_maintenance_with_options(
         &links,
         &|line| coin_gate.allows_coining(line),
     )?;
-    if id_outcome.assigned.is_empty() && source_outcome.qualified.is_empty() {
+    if duplicates_removed == 0
+        && id_outcome.assigned.is_empty()
+        && source_outcome.qualified.is_empty()
+    {
         for finding in &source_outcome.findings {
             eprintln!(
                 "[preflight] todo: legacy source audit {} -> agent:{} #{} held by typing gate (#todocontextmigration)",
@@ -600,12 +615,20 @@ fn run_todo_id_maintenance_with_options(
         )?;
         source_outcome.content.clone()
     } else {
-        persist_queue_maintenance_doc(
+        // The fold proved identity in this exact authority cut. If an operator
+        // edits a copy before the write, leave the row for the next observation
+        // instead of rebasing the deletion by its now-ambiguous own id.
+        let admitted_hash =
+            (duplicates_removed > 0).then(|| agent_doc_hash::content_hash(&content));
+        persist_queue_maintenance_doc_with_admitted_authority(
             file,
             &source_outcome.content,
             &content,
             project_root.as_deref(),
             source,
+            admitted_hash.as_deref(),
+            None,
+            None,
         )?
     };
     if let Ok(Some(snapshot)) = agent_doc_snapshot_io::load_document_baseline(file)
@@ -618,6 +641,18 @@ fn run_todo_id_maintenance_with_options(
         )
     {
         eprintln!("[preflight] todo: snapshot sync warning: {err}");
+    }
+    if duplicates_removed > 0 {
+        eprintln!(
+            "[preflight] todo: folded {duplicates_removed} identical same-id item(s) (#tododupefold)"
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "todo_duplicates_folded file={} copies={duplicates_removed}",
+                file.display(),
+            ),
+        );
     }
     let mut ids = Vec::with_capacity(id_outcome.assigned.len());
     for assignment in &id_outcome.assigned {

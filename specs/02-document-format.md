@@ -931,8 +931,11 @@ action is finished or moot:
   source its canonical locator names, is resolved tracked work (including the
   done archive) is checked off `[x]`; nothing else in the list changes. Items
   that only cite resolved work, id-less items, and ids the evidence does not
-  know stay open. A duplicate own id is reported (`[preflight] todo: [#id]
-  names N items; reported, not merged`), never folded by preflight. The
+  know stay open. Before queue admission, authority-fenced Todo maintenance
+  folds exact copies of settled items with their own id (`#tododupefold`).
+  Matching includes the full item and its children under the same parent.
+  The first copy stays in place. Same-id items that differ are reported
+  (`[preflight] todo: [#id] names N items; reported, not merged`). The
   closeout's automatic completion is the same projection followed by its
   `#tododupdone` fold, and `session-check` reports any `agent:todo` line that
   differs from the projection. Such an item therefore stops raising

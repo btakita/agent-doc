@@ -188,7 +188,11 @@ function steeringLabel(state: TurnSteeringState | undefined): string | null {
 export function buildSessionCommandArgs(
     command: SessionCommandName,
     relativePath: string,
+    expectAgent?: string | null,
 ): string[] {
+    if (command === 'restart-agent' && expectAgent) {
+        return ['session', command, '--expect-agent', expectAgent, relativePath];
+    }
     return ['session', command, relativePath];
 }
 

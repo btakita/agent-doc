@@ -211,6 +211,7 @@ export function removePidLock(): void {
 }
 
 function resetBindings(): void {
+    _frontmatter_agent = null;
     _reposition_boundary_to_end = null;
     _reposition_boundary_to_end_preserve_head = null;
     _reposition_boundary_to_end_preserve_head_with_id = null;
@@ -467,6 +468,7 @@ let _reposition_boundary_to_end_with_id: any = null;
 let _reposition_boundary_to_end_preserve_head: any = null;
 let _reposition_boundary_to_end_preserve_head_with_id: any = null;
 let _normalize_template_structure: any = null;
+let _frontmatter_agent: ((doc: string) => FfiPatchResult) | null = null;
 let _apply_node_patches: any = null;
 let _admin_inspect_json: any = null;
 let _tmux_focus_state_json: any = null;
@@ -553,6 +555,11 @@ function bindFunctions(): void {
         ['str', 'str'],
     );
     _normalize_template_structure = lib.func('agent_doc_normalize_template_structure', FfiPatchResultType, ['str']);
+    try {
+        _frontmatter_agent = lib.func('agent_doc_frontmatter_agent', FfiPatchResultType, ['str']);
+    } catch {
+        _frontmatter_agent = null;
+    }
     try {
         _apply_node_patches = lib.func('agent_doc_apply_node_patches', FfiPatchResultType, ['str', 'str']);
     } catch (e: any) {
@@ -1731,6 +1738,27 @@ export function recordRouteBlocked(
 
 function hashText(value: string): string {
     return crypto.createHash('sha256').update(value, 'utf-8').digest('hex').slice(0, 16);
+}
+
+/** Read the visible buffer's `agent:` using the same frontmatter parser as the CLI. */
+export function frontmatterAgent(doc: string, projectRoot?: string): string | null {
+    try {
+        if (!ensureLoaded(projectRoot)) return null;
+        bindFunctions();
+        if (!_frontmatter_agent) return null;
+
+        const result = _frontmatter_agent(doc);
+        try {
+            if (result.error || !result.text) return null;
+            return koffi.decode(result.text, 'char', -1).trim() || null;
+        } finally {
+            freeOwnedCString(result.error);
+            freeOwnedCString(result.text);
+        }
+    } catch {
+        // Evidence is optional when the native reader cannot answer.
+        return null;
+    }
 }
 
 /**

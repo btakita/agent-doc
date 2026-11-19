@@ -1588,7 +1588,10 @@ async function runSessionCommandForActiveFile(
         const resolved = resolveProject(root, editor.document.uri.fsPath);
         cwd = resolved.cwd;
         rel = resolved.relativePath;
-        const output = await runCli(buildSessionCommandArgs(command, rel), cwd);
+        const expectAgent = command === 'restart-agent'
+            ? native.frontmatterAgent(editor.document.getText(), cwd)
+            : null;
+        const output = await runCli(buildSessionCommandArgs(command, rel, expectAgent), cwd);
         onSuccess(output, rel);
     } catch (err: any) {
         if (onFailure) {
@@ -1672,9 +1675,8 @@ async function restartSessionAction(): Promise<void> {
     );
 }
 
-// Restart Agent replaces the harness child and re-resolves current `agent:`
-// frontmatter. Recycle Supervisor remains a controller-code refresh that
-// preserves the child.
+// Restart Agent replaces the harness child using the visible `agent:`
+// frontmatter as evidence when controller authority is behind the buffer.
 async function restartAgentAction(): Promise<void> {
     await runSessionCommandForActiveFile(
         'restart-agent',

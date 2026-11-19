@@ -28,6 +28,10 @@ Extends `editors/SPEC.md` with VS Code-specific behavior.
 
 - `Initialize Session` is available from the active editor, command palette, and Explorer context menu and delegates the initialize-or-claim branch to `agent-doc init-session`.
 - `Show Session Status` runs `agent-doc session status <relative-path>` and surfaces the exact output in the Agent Doc Session output channel.
+- `Restart Agent` reads the visible buffer through `agent_doc_frontmatter_agent`
+  and passes an available `agent:` as `--expect-agent <agent>` to
+  `agent-doc session restart-agent`. It uses the unsaved buffer as evidence and
+  works without the flag when the optional native reader cannot supply a value.
 - `Fix Document` runs `agent-doc fix <relative-path>` from the nearest agent-doc project root.
 - `Load Tmux Window` runs the explicit autostart layout sync path through Project Controller `sync_tmux_layout` with `no_autostart=false`, equivalent to full `agent-doc sync ...`, for the current visible markdown projection.
 - `Clear Session Context` runs `agent-doc session clear <relative-path>` so Codex/Claude clear semantics stay aligned with the binary-owned clear command path while leaving the next `Run Agent Doc` dispatch-only reroute on the same live session. If a non-interrupting clear meets a busy active auto-loop, the binary queues exactly one deferred clear for the next proven idle boundary; repeated clears report the existing queued clear instead of injecting another `/clear`, and VS Code surfaces that output as accepted deferred work.

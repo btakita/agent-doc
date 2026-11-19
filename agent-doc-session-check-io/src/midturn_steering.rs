@@ -1099,6 +1099,9 @@ fn apply_claim_cancellations(file: &Path, candidates: &mut [SteeringItem]) -> Re
     #[cfg(test)]
     pause_claim_cancellation_after_completion_lock(file);
     let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    // Fence the destructive transaction against the authority observed under
+    // these locks, even when the surrounding hook already read this revision.
+    crate::invalidate_current_document_pass(file);
     let current = crate::resolve_current_document_content(file, "claim_cancellation_apply")?;
     let current_identities = all_queue_item_identities(&current);
     let mut applied = 0;
@@ -1117,6 +1120,9 @@ fn apply_claim_cancellations(file: &Path, candidates: &mut [SteeringItem]) -> Re
         item.generation = Some(receipt.claim.generation);
         item.worker_id = receipt.claim.worker.map(|worker| worker.worker_id);
         applied += 1;
+    }
+    if applied > 0 {
+        crate::invalidate_current_document_pass(file);
     }
     Ok(applied)
 }
@@ -3082,11 +3088,24 @@ fn post_tool_use_response_at_with_checkpoint(
     let Some(file) = session_document(&input)? else {
         return Ok(None);
     };
-    let prepared = match prepare(&file, CONSUMER_HOOK, ClosedCyclePolicy::Hook) {
+    // All owner checkpoints observe the same document. Reuse the existing
+    // revision-aware projection for this tool boundary; a new editor revision
+    // or a locked claim-cancellation write still forces a fresh authority read.
+    crate::with_current_document_pass(|| {
+        post_tool_use_document_response(&file, observed_at_ms, checkpoint)
+    })
+}
+
+fn post_tool_use_document_response(
+    file: &Path,
+    observed_at_ms: u64,
+    checkpoint: impl FnOnce(&Path, u64) -> Result<Option<String>>,
+) -> Result<Option<serde_json::Value>> {
+    let prepared = match prepare(file, CONSUMER_HOOK, ClosedCyclePolicy::Hook) {
         Ok(prepared) => prepared,
         Err(err) => {
             agent_doc_ops_log_io::log_op(
-                &file,
+                file,
                 &format!(
                     "midturn_steering_hook_error file={} error={err:#}",
                     file.display()
@@ -3097,7 +3116,7 @@ fn post_tool_use_response_at_with_checkpoint(
     };
     let mut contexts = Vec::new();
     if let Some(mut prepared) = prepared {
-        prepared.apply_claim_cancellations(&file)?;
+        prepared.apply_claim_cancellations(file)?;
         let context = prepared
             .report
             .as_ref()
@@ -3108,18 +3127,18 @@ fn post_tool_use_response_at_with_checkpoint(
                     .as_ref()
                     .map(|report| report.cycle_id.as_str())
                     .unwrap_or_default();
-                issue_steering_surrogate_at(&file, cycle_id, &payload, observed_at_ms)
+                issue_steering_surrogate_at(file, cycle_id, &payload, observed_at_ms)
             })
             .transpose()?;
         // Persist only after the full payload is durably retrievable. A failed
         // issue leaves the hook watermark untouched, so the next tool event
         // can retry without losing operator intent.
-        prepared.acknowledge(&file)?;
+        prepared.acknowledge(file)?;
         if let Some(context) = context {
             contexts.push(context);
         }
     }
-    match checkpoint(&file, observed_at_ms) {
+    match checkpoint(file, observed_at_ms) {
         Ok(Some(context)) => contexts.push(context),
         Ok(None) => {}
         Err(err) => {
@@ -3127,7 +3146,7 @@ fn post_tool_use_response_at_with_checkpoint(
             // or fail the parent tool call. Leave a durable diagnostic and keep
             // the existing PostToolUse output intact.
             agent_doc_ops_log_io::log_op(
-                &file,
+                file,
                 &format!(
                     "status_sync_checkpoint_error file={} error={err:#}",
                     file.display()
@@ -3139,12 +3158,12 @@ fn post_tool_use_response_at_with_checkpoint(
             );
         }
     }
-    match place_checkpoint(&file, observed_at_ms) {
+    match place_checkpoint(file, observed_at_ms) {
         Ok(Some(context)) => contexts.push(context),
         Ok(None) => {}
         Err(err) => {
             agent_doc_ops_log_io::log_op(
-                &file,
+                file,
                 &format!(
                     "place_checkpoint_error file={} error={err:#}",
                     file.display()
@@ -3156,13 +3175,13 @@ fn post_tool_use_response_at_with_checkpoint(
             );
         }
     }
-    match subagent_pool_checkpoint(&file, observed_at_ms) {
+    match subagent_pool_checkpoint(file, observed_at_ms) {
         Ok(Some(context)) => contexts.push(context),
         Ok(None) => {}
         Err(err) => {
             // A pool reminder must never steal steering or fail the tool call.
             agent_doc_ops_log_io::log_op(
-                &file,
+                file,
                 &format!(
                     "subagent_pool_checkpoint_error file={} error={err:#}",
                     file.display()
@@ -3170,13 +3189,13 @@ fn post_tool_use_response_at_with_checkpoint(
             );
         }
     }
-    match reported_closeout_midturn_checkpoint(&file, CONSUMER_HOOK, true) {
+    match reported_closeout_midturn_checkpoint(file, CONSUMER_HOOK, true) {
         Ok(Some(context)) => contexts.push(context),
         Ok(None) => {}
         Err(err) => {
             // A closeout reminder must never steal steering or fail the tool call.
             agent_doc_ops_log_io::log_op(
-                &file,
+                file,
                 &format!(
                     "reported_closeout_midturn_error file={} error={err:#}",
                     file.display()
@@ -5632,6 +5651,45 @@ mod tests {
             payload["agent_type"] = serde_json::json!("general-purpose");
         }
         payload.to_string()
+    }
+
+    #[test]
+    fn owner_post_tool_use_shares_one_unchanged_document_resolution() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let file = root.join("plan.md");
+        let content = "---\nagent_doc_format: template\n---\n\n<!-- agent:queue go -->\n- current task\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, content).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(content), Some(content)).unwrap();
+        seed_for_cycle(&file, &cycle.cycle_id, content, None, Vec::new()).unwrap();
+        bind_session(root, &file, "coord");
+
+        post_tool_use_response(&hook_payload(root, None)).unwrap();
+
+        let ops = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        let hook_resolutions: Vec<_> = ops
+            .lines()
+            .filter(|line| line.contains("realtime_doc_resolve "))
+            .filter(|line| {
+                [
+                    "midturn_steering",
+                    "status_sync_checkpoint",
+                    "place_checkpoint",
+                    "subagent_pool_checkpoint",
+                    "reported_closeout_midturn",
+                ]
+                .iter()
+                .any(|source| line.contains(&format!("source=session-check:{source} ")))
+            })
+            .collect();
+        assert_eq!(
+            hook_resolutions.len(),
+            1,
+            "unchanged hook checkpoints repeated authority resolution: {hook_resolutions:#?}"
+        );
+        assert!(hook_resolutions[0].contains("pass=miss"));
     }
 
     #[test]

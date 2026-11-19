@@ -497,15 +497,39 @@ pub fn dangling_response_references_with_pins(
     content: &str,
     pinned: impl IntoIterator<Item = String>,
 ) -> Result<Vec<String>> {
-    let indexed = verified_indexed_response_ids(doc)?;
     let live = response_nodes(content)
         .into_iter()
         .map(|(id, _)| id)
         .collect::<BTreeSet<_>>();
     let mut refs = extract_response_reference_ids(content);
     refs.extend(pinned);
+    let indexed_candidates = indexed_response_ids(doc)?;
+    let candidate_resolved = live
+        .union(&indexed_candidates)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let raw_dangling = refs
+        .difference(&candidate_resolved)
+        .cloned()
+        .collect::<Vec<_>>();
+    // The tracked index cannot possibly prove these ids. Several simultaneous
+    // misses are already a terminal corruption result, so return it before
+    // parsing and hashing a multi-megabyte archive whose unrelated entries
+    // cannot change the answer.
+    if raw_dangling.len() > 1 {
+        return Ok(raw_dangling);
+    }
+    let indexed = verified_indexed_response_ids(doc)?;
     let resolved = live.union(&indexed).cloned().collect::<BTreeSet<_>>();
     let mut dangling = refs.difference(&resolved).cloned().collect::<Vec<_>>();
+    // Compatibility history is a narrow single-id bridge for documents from
+    // before the response index existed. Multiple simultaneous orphans are a
+    // corruption signal, not five independent legacy migrations: fail closed
+    // immediately instead of serializing several expensive whole-history
+    // pickaxe scans on the session-check/hook path.
+    if dangling.len() > 1 {
+        return Ok(dangling);
+    }
     dangling.retain(|response_id| {
         let Some(compatibility) = compatibility_git_history_response(doc, response_id)
             .ok()
@@ -513,11 +537,11 @@ pub fn dangling_response_references_with_pins(
         else {
             return true;
         };
-        let Some(historical_summary) = compatibility.inline_summary else {
+        let Some(historical_summary) = compatibility.inline_summary.as_deref() else {
             return false;
         };
         let current_summaries = inline_response_summaries(content, response_id);
-        !current_summaries.is_empty() && current_summaries != [historical_summary]
+        !current_summaries.is_empty() && current_summaries.as_slice() != [historical_summary]
     });
     Ok(dangling)
 }
@@ -2468,6 +2492,60 @@ mod tests {
             restore_inline_response_references_from_git(&doc, &historical).unwrap(),
             Vec::<String>::new(),
             "restoration is idempotent once the tracked index resolves the id"
+        );
+    }
+
+    #[test]
+    fn orphan_guard_fails_closed_without_history_walk_for_many_ids() {
+        const FIRST: &str = "[#r-52dbef4205aa]";
+        const SECOND: &str = "[#r-6506a8f157a8]";
+        const ABSENT_A: &str = "[#r-a88c13011b60]";
+        const ABSENT_B: &str = "[#r-dc3f2ef88a68]";
+        const ABSENT_C: &str = "[#r-e87f1e24d1ee]";
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "<!-- agent:queue -->\n<!-- /agent:queue -->\n").unwrap();
+        git(dir.path(), &["add", "session.md"]);
+        git(dir.path(), &["commit", "-q", "-m", "initial"]);
+        let historical = format!(
+            concat!(
+                "<!-- agent:queue -->\n",
+                "- ~~first~~ — auto-struck: response: {first}\n",
+                "  - **Response {first}:** first completed response\n",
+                "- ~~second~~ — auto-struck: response: {second}\n",
+                "  - **Response {second}:** second completed response\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            first = FIRST,
+            second = SECOND,
+        );
+        std::fs::write(&doc, &historical).unwrap();
+        git(dir.path(), &["add", "session.md"]);
+        git(
+            dir.path(),
+            &["commit", "-q", "-m", "two historical responses"],
+        );
+
+        let requested = BTreeSet::from([
+            FIRST.to_string(),
+            SECOND.to_string(),
+            ABSENT_A.to_string(),
+            ABSENT_B.to_string(),
+            ABSENT_C.to_string(),
+        ]);
+        let dangling =
+            dangling_response_references_with_pins(&doc, "live\n", requested.iter().cloned())
+                .unwrap();
+        assert_eq!(
+            dangling,
+            vec![
+                FIRST.to_string(),
+                SECOND.to_string(),
+                ABSENT_A.to_string(),
+                ABSENT_B.to_string(),
+                ABSENT_C.to_string(),
+            ]
         );
     }
 

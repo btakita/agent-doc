@@ -6,7 +6,7 @@ use agent_doc_commit_io::{
     canonicalize_and_commit_duplicate_queue_response_projections, commit,
     commit_document_only_drift, commit_proven_response_replay_canonicalization,
     commit_with_authoritative_compaction, detach_and_commit_orphaned_queue_response_projections,
-    restore_and_commit_historical_response_evidence,
+    pending_committed_response_evidence_repair, restore_and_commit_historical_response_evidence,
 };
 use agent_doc_document::transient_markers::normalize_transient_agent_doc_markers;
 
@@ -914,6 +914,96 @@ Duplicate replay should stay live.
         assert!(
             !restore_and_commit_historical_response_evidence(&doc)
                 .expect("indexed response should be idempotent")
+        );
+    }
+
+    /// A completed worker response can outlive the editor projection that was
+    /// supposed to materialize it. The hash-verified capture checkpoint is
+    /// durable authorship proof, so repair archives that exact cell instead of
+    /// leaving the reported row permanently blocked behind an orphan backlink.
+    #[test]
+    fn retained_checkpoint_heals_completed_response_behind_reported_row() {
+        const RESPONSE_ID: &str = "[#r-52dbef4205aa]";
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        th::init_repo(root);
+        fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let committed = format!(
+            concat!(
+                "<!-- agent:queue -->\n",
+                "- ☑️ [#subagent:docs_retention_ticket_update#1] Create a JIRA ticket for the docs archive.\n",
+                "  - **Response {id}:** ticket created\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            id = RESPONSE_ID,
+        );
+        th::commit_file(
+            root,
+            "session.md",
+            &committed,
+            "reported row missing exchange cell",
+        );
+        let doc = root.join("session.md");
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&committed), Some(&committed))
+            .unwrap();
+        let state = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+            .unwrap()
+            .expect("cycle state");
+        let response_body = format!(
+            concat!(
+                "<!-- patch:exchange -->\n",
+                "### Re: docs retention ticket\n\n",
+                "**Response {id}**\n\n",
+                "Created the archive-retention ticket.\n",
+                "<!-- /patch:exchange -->\n",
+            ),
+            id = RESPONSE_ID,
+        );
+        let response_sha256 = agent_doc_hash::content_hash(&response_body);
+        let file_hash = agent_doc_hash::content_hash(&committed);
+        agent_doc_cycle_state_io::append_response_captured_body(
+            &doc,
+            agent_doc_cycle_state_io::CapturedResponseFactInput {
+                cycle_id: &state.cycle_id,
+                capture_id: "retained-orphan-index-test",
+                response_sha256: &response_sha256,
+                response_body: &response_body,
+                intent_body: None,
+                mutation_plan_json: None,
+                file_hash: Some(&file_hash),
+                snapshot_hash: Some(&file_hash),
+                baseline_content: Some(&committed),
+            },
+        )
+        .unwrap();
+
+        let pending = pending_committed_response_evidence_repair(&doc)
+            .expect("read-only plan")
+            .expect("verified retained response should be repairable");
+        assert!(pending.contains(RESPONSE_ID), "{pending}");
+        assert!(!agent_doc_archive_io::response_index_path(&doc).exists());
+
+        assert!(
+            restore_and_commit_historical_response_evidence(&doc)
+                .expect("verified retained response should be archived")
+        );
+        assert_eq!(fs::read_to_string(&doc).unwrap(), committed);
+        assert!(
+            agent_doc_archive_io::indexed_response_ids(&doc)
+                .unwrap()
+                .contains(RESPONSE_ID)
+        );
+        assert!(
+            agent_doc_archive_io::dangling_response_references(&doc, &committed)
+                .unwrap()
+                .is_empty()
+        );
+        let archive =
+            fs::read_to_string(agent_doc_archive_io::exchange_archive_path(&doc)).unwrap();
+        assert!(archive.contains("Created the archive-retention ticket."));
+        assert!(
+            !restore_and_commit_historical_response_evidence(&doc)
+                .expect("restored checkpoint evidence should be idempotent")
         );
     }
 

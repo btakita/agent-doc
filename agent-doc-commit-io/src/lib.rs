@@ -27,6 +27,11 @@ use agent_doc_git_io::{
 };
 use anyhow::{Context, Result};
 
+/// Bounded durable response history considered for response-index repair.
+/// This matches structural repair's evidence window without letting a damaged
+/// document turn session-check into an unbounded state-ledger scan.
+const RETAINED_RESPONSE_EVIDENCE_HISTORY_LIMIT: usize = 16;
+
 #[cfg(any(test, feature = "test-support"))]
 use agent_doc_crdt_relay_io::commit_barrier_verdict_for_file as test_support_commit_barrier_verdict_for_file;
 
@@ -2087,14 +2092,39 @@ fn historical_response_evidence_restore_plan(
     let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
         return Ok(None);
     };
+    let retained = retained_checkpoint_response_evidence(file, &authority)?;
+    let retained_ids = retained
+        .iter()
+        .flat_map(|(_, response_ids)| response_ids.iter().cloned())
+        .collect::<BTreeSet<_>>();
+    if !retained_ids.is_empty() {
+        return Ok(Some(retained_ids));
+    }
+    let referenced = agent_doc_archive_io::extract_response_reference_ids(&authority);
+    let multi_orphan = if referenced.is_empty() {
+        false
+    } else {
+        let mut resolved = agent_doc_archive_io::indexed_response_ids(file)?;
+        resolved.extend(agent_doc_archive_io::response_ids_in_content(&authority));
+        referenced.difference(&resolved).count() > 1
+    };
+    if multi_orphan {
+        // One missing id may be a legacy pre-index response and gets the
+        // bounded compatibility history lookup below. Multiple missing ids
+        // are corruption: absent retained checkpoint evidence above, preserve
+        // the fail-closed result without turning every hook into a sequence of
+        // whole-history pickaxe scans.
+        return Ok(None);
+    }
     let reproven = agent_doc_archive_io::unproven_response_index_entries_restorable_from_git(file)?;
     // `#archivedupid`: the repair restores these archive bytes FIRST; until
     // then every verified index read below refuses the unproven entry. Their
-    // pending restoration alone already proves the repair would run.
+    // pending restoration alone already proves the repair would run. This
+    // potentially expensive bounded history scan follows the multi-orphan
+    // refusal above because that terminal guard already determines the check.
     if !reproven.is_empty() {
         return Ok(Some(reproven.into_iter().collect()));
     }
-    let referenced = agent_doc_archive_io::extract_response_reference_ids(&authority);
     if referenced.is_empty() {
         return Ok(None);
     }
@@ -2106,6 +2136,64 @@ fn historical_response_evidence_restore_plan(
     affected.retain(|response_id| referenced.contains(response_id));
     affected.extend(restored);
     Ok((!affected.is_empty()).then_some(affected))
+}
+
+/// Return checkpoint response bodies that cryptographically own unresolved
+/// response references in the authoritative document.
+///
+/// A checkpoint is evidence only when both its captured response and baseline
+/// hashes verify. The response cell itself supplies the public response id; we
+/// never infer an id from queue text. Newest checkpoints win and each unresolved
+/// id is selected once.
+fn retained_checkpoint_response_evidence(
+    file: &Path,
+    authority: &str,
+) -> Result<Vec<(String, BTreeSet<String>)>> {
+    let referenced = agent_doc_archive_io::extract_response_reference_ids(authority);
+    if referenced.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut resolved = agent_doc_archive_io::indexed_response_ids(file)?;
+    resolved.extend(agent_doc_archive_io::response_ids_in_content(authority));
+    let mut unresolved = referenced
+        .difference(&resolved)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    if unresolved.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut evidence = Vec::new();
+    for checkpoint in agent_doc_cycle_state_io::load_recent_captured_response_checkpoints(
+        file,
+        RETAINED_RESPONSE_EVIDENCE_HISTORY_LIMIT,
+    )? {
+        if agent_doc_hash::content_hash(&checkpoint.response_body) != checkpoint.response_sha256
+            || !checkpoint
+                .baseline_content
+                .as_deref()
+                .zip(checkpoint.file_hash.as_deref())
+                .is_some_and(|(baseline, file_hash)| {
+                    agent_doc_hash::content_hash(baseline) == file_hash
+                })
+        {
+            continue;
+        }
+        let body_ids = agent_doc_archive_io::response_ids_in_content(&checkpoint.response_body);
+        let owned = body_ids
+            .intersection(&unresolved)
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if owned.is_empty() {
+            continue;
+        }
+        unresolved.retain(|response_id| !owned.contains(response_id));
+        evidence.push((checkpoint.response_body, owned));
+        if unresolved.is_empty() {
+            break;
+        }
+    }
+    Ok(evidence)
 }
 
 /// Read-only plan for
@@ -2147,6 +2235,13 @@ fn orphaned_queue_response_projection_plan(
         .into_iter()
         .collect::<BTreeSet<_>>();
     if dangling.is_empty() {
+        return Ok(None);
+    }
+    if dangling.len() > 1 {
+        // Detachment is a compatibility repair for one legacy projection.
+        // Several missing ids are corruption and must reach the orphan guard
+        // unchanged; attempting each queue rewrite here is both destructive
+        // guesswork and expensive on large documents.
         return Ok(None);
     }
     let project_root = agent_doc_project_root_io::project_root_or_file_parent(file)?;
@@ -2201,16 +2296,30 @@ pub fn restore_and_commit_historical_response_evidence(file: &Path) -> Result<bo
         let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
             return Ok(false);
         };
-        // `#archivedupid`: first restore archive bytes an index entry already
-        // committed to but its archive lost. Every other response-index reader
-        // refuses such an entry, so this must run before them; only the
-        // archive file changes and the commit below stages HEAD's document.
-        let reproven =
-            agent_doc_archive_io::restore_unproven_response_index_entries_from_git(file)?;
+        let retained = retained_checkpoint_response_evidence(file, &authority)?;
+        // A verified retained response is already exact local evidence and is
+        // the bounded repair selected by the plan. Do not precede it with an
+        // unrelated archive-history scan; any independent unproven index
+        // entry remains eligible for the next repair pass.
+        let reproven = if retained.is_empty() {
+            // `#archivedupid`: restore archive bytes an index entry already
+            // committed to but its archive lost; only the archive changes and
+            // the commit below stages HEAD's document.
+            agent_doc_archive_io::restore_unproven_response_index_entries_from_git(file)?
+        } else {
+            Vec::new()
+        };
         if reproven.is_empty()
+            && retained.is_empty()
             && agent_doc_archive_io::extract_response_reference_ids(&authority).is_empty()
         {
             return Ok(false);
+        }
+
+        let mut retained_restored = BTreeSet::new();
+        for (response_body, response_ids) in retained {
+            agent_doc_archive_io::write_exchange_archive(file, &response_body)?;
+            retained_restored.extend(response_ids);
         }
 
         let restored = agent_doc_archive_io::restore_committed_inline_response_references_from_git(
@@ -2222,6 +2331,7 @@ pub fn restore_and_commit_historical_response_evidence(file: &Path) -> Result<bo
         affected.retain(|response_id| referenced.contains(response_id));
         affected.extend(restored);
         affected.extend(reproven.iter().cloned());
+        affected.extend(retained_restored);
         if affected.is_empty() {
             return Ok(false);
         }

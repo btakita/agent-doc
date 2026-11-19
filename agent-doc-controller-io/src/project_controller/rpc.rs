@@ -20632,11 +20632,9 @@ pub fn start_state_actor_for_tests(project_root: &Path) -> Result<StateActorTest
     prepare_controller_socket_parent(&sock, &sock)?;
     // A Windows controller pipe (`\\.\pipe\...`) has no filesystem parent.
     // Creating `\\.\pipe` fails, and the pipe disappears with its listener.
-    if !agent_doc_controller::paths::is_named_pipe_path(&sock) {
-        if sock.exists() {
-            std::fs::remove_file(&sock)
-                .with_context(|| format!("remove stale test actor socket {}", sock.display()))?;
-        }
+    if !agent_doc_controller::paths::is_named_pipe_path(&sock) && sock.exists() {
+        std::fs::remove_file(&sock)
+            .with_context(|| format!("remove stale test actor socket {}", sock.display()))?;
     }
     let bootstrap = write_bootstrap(project_root, LaunchMode::Lazy)?;
     let runtime = ControllerRuntime::new_arc(bootstrap)?;
@@ -21100,10 +21098,8 @@ pub(crate) fn serve_with_options(
     let mut handoff_temp_socket: Option<PathBuf> = (sock != public_sock).then(|| sock.clone());
     // A Windows controller pipe (`\\.\pipe\...`) has no filesystem parent.
     // Creating `\\.\pipe` fails before interprocess can bind the name.
-    if !agent_doc_controller::paths::is_named_pipe_path(&sock) {
-        if sock.exists() {
-            let _ = std::fs::remove_file(&sock);
-        }
+    if !agent_doc_controller::paths::is_named_pipe_path(&sock) && sock.exists() {
+        let _ = std::fs::remove_file(&sock);
     }
     if !root_incarnation.still_matches(project_root) {
         let _ = std::fs::remove_file(&sock);

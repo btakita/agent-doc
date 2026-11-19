@@ -207,7 +207,7 @@ use crate::CrossRootDocumentPaneObservation;
 #[cfg(test)]
 use crate::SyncLockAcquire;
 use crate::acquire_sync_lock;
-use agent_doc_controller::dispatch::{is_stash_window_name, normalize_context_session};
+use agent_doc_controller::dispatch::is_stash_window_name;
 use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_state_scope::LocalProcessScope;
 use agent_doc_supervisor::ipc_protocol::IpcMethod;
@@ -233,7 +233,7 @@ use agent_doc_tmux::{
 use agent_doc_tmux_io::pane_project_root;
 use tmux_router::{PaneMoveOp, Tmux};
 
-use agent_doc_frontmatter::frontmatter;
+use agent_doc_frontmatter::{frontmatter, project_config::ProjectConfig};
 
 use crate::resync;
 use agent_doc_session_registry_io::registration as sessions;
@@ -2485,43 +2485,6 @@ fn current_tmux_session_name(tmux: &Tmux) -> Option<String> {
     agent_doc_tmux_io::ambient_current_session_for_process(tmux).map(|ambient| ambient.session)
 }
 
-fn current_agent_doc_session_name(tmux: &Tmux) -> Option<String> {
-    let current = current_tmux_session_name(tmux)?;
-    if agent_doc_tmux_io::has_window_named(tmux, &current, "agent-doc") {
-        Some(current)
-    } else {
-        None
-    }
-}
-
-fn resolve_preferred_session(
-    tmux: &Tmux,
-    context_session: Option<&str>,
-    log_prefix: &str,
-) -> Option<String> {
-    if let Some(ctx) = normalize_context_session(context_session) {
-        return Some(ctx.to_string());
-    }
-
-    if let Some(current) = current_agent_doc_session_name(tmux) {
-        return Some(current);
-    }
-
-    let configured = agent_doc_project_config_io::project_tmux_session();
-    if configured.as_ref().is_some_and(|s| tmux.session_alive(s)) {
-        return configured;
-    }
-
-    if let Some(ref stale) = configured {
-        eprintln!(
-            "{log_prefix} configured tmux_session '{}' is not alive, ignoring stale pin",
-            stale
-        );
-    }
-
-    current_tmux_session_name(tmux)
-}
-
 fn session_name_for_target_window(tmux: &Tmux, window: &str) -> Option<String> {
     agent_doc_tmux_io::target_session_name(tmux, window)
 }
@@ -2601,24 +2564,40 @@ fn skip_sync_status_updates_for_mode(auto_start_mode: AutoStartMode) -> bool {
 /// Load the multi-session policy (`tmux_sessions`, GH #17) for a project root.
 /// A missing or empty list is the single-session default.
 pub fn tmux_session_policy_for_root(root: &Path) -> agent_doc_sync::TmuxSessionPolicy {
-    let config_path = root.join(".agent-doc").join("config.toml");
-    let config = agent_doc_project_config_io::load_project_from(&config_path);
+    tmux_session_policy(agent_doc_project_config_io::load_project_for_root(root))
+}
+
+fn tmux_session_policy(config: ProjectConfig) -> agent_doc_sync::TmuxSessionPolicy {
     let navigation_lanes = agent_doc_project_config_io::editor_navigation_lanes(&config);
     agent_doc_sync::TmuxSessionPolicy::new(config.tmux_sessions)
         .with_navigation_lanes(navigation_lanes)
 }
 
-/// Load the multi-session policy that governs a sync/route candidate set: the
-/// `.agent-doc` root shared by the documents, else the focused document's
-/// project, else the cwd project.
-pub fn tmux_session_policy_for_scope(
+/// Read the allow-list and live pin together from the project governing the
+/// candidate set. A standalone request without documents may use the supplied
+/// directory or controller root as its scope.
+pub fn tmux_session_config_for_scope(
+    tmux: &Tmux,
     col_args: &[String],
     focus: Option<&str>,
-) -> agent_doc_sync::TmuxSessionPolicy {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    agent_doc_sync::sync_scope_root(col_args, focus, &cwd)
-        .map(|root| tmux_session_policy_for_root(&root))
-        .unwrap_or_default()
+    caller_root: &Path,
+    log_prefix: &str,
+) -> (agent_doc_sync::TmuxSessionPolicy, Option<String>) {
+    let Some(root) = agent_doc_sync::sync_scope_root(col_args, focus, caller_root) else {
+        return (agent_doc_sync::TmuxSessionPolicy::default(), None);
+    };
+    let mut config = agent_doc_project_config_io::load_project_for_root(&root);
+    let live_pin = config.tmux_session.take().filter(|session| {
+        let alive = tmux.session_alive(session);
+        if !alive {
+            eprintln!(
+                "{log_prefix} configured tmux_session '{session}' is not alive for scope {}, ignoring stale pin",
+                root.display()
+            );
+        }
+        alive
+    });
+    (tmux_session_policy(config), live_pin)
 }
 
 /// A document's own `tmux_session` frontmatter binding, if any.
@@ -2901,23 +2880,6 @@ pub fn adopt_stale_navigation_lane_panes(
     adoptions
 }
 
-pub fn configured_session_for_root(tmux: &Tmux, root: &Path) -> Option<String> {
-    let config_path = root.join(".agent-doc").join("config.toml");
-    let configured = agent_doc_project_config_io::load_project_from(&config_path).tmux_session;
-    match configured {
-        Some(session) if tmux.session_alive(&session) => Some(session),
-        Some(session) => {
-            eprintln!(
-                "[sync] configured tmux_session '{}' is not alive for scope {}, ignoring stale pin",
-                session,
-                root.display()
-            );
-            None
-        }
-        None => None,
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ActorPanePlacement {
     session: String,
@@ -2961,8 +2923,18 @@ fn resolve_sync_target_session(
     focus: Option<&str>,
     actor_bindings: &[agent_doc_controller_io::project_controller::ControllerTmuxActorBinding],
 ) -> Result<Option<String>> {
-    let policy = tmux_session_policy_for_scope(col_args, focus);
-    resolve_sync_target_session_with_policy(tmux, window, col_args, focus, actor_bindings, &policy)
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let (policy, scoped_project) =
+        tmux_session_config_for_scope(tmux, col_args, focus, &cwd, "[sync]");
+    resolve_sync_target_session_with_policy(
+        tmux,
+        window,
+        col_args,
+        focus,
+        actor_bindings,
+        &policy,
+        scoped_project,
+    )
 }
 
 fn resolve_sync_target_session_with_policy(
@@ -2972,6 +2944,7 @@ fn resolve_sync_target_session_with_policy(
     focus: Option<&str>,
     actor_bindings: &[agent_doc_controller_io::project_controller::ControllerTmuxActorBinding],
     policy: &agent_doc_sync::TmuxSessionPolicy,
+    scoped_project: Option<String>,
 ) -> Result<Option<String>> {
     let explicit = window.and_then(|target| session_name_for_target_window(tmux, target));
     let focused_actor = focused_actor_session_from_bindings(focus, actor_bindings, |pane_id| {
@@ -2984,10 +2957,11 @@ fn resolve_sync_target_session_with_policy(
             in_agent_doc_window,
         })
     });
-    let current_agent_doc = current_agent_doc_session_name(tmux);
-    let scoped_project = agent_doc_sync::shared_sync_scope_root(col_args, focus)
-        .and_then(|scope_root| configured_session_for_root(tmux, &scope_root));
-    let fallback = resolve_preferred_session(tmux, None, "[sync]");
+    let fallback = current_tmux_session_name(tmux);
+    let current_agent_doc = fallback
+        .as_ref()
+        .filter(|session| agent_doc_tmux_io::has_window_named(tmux, session, "agent-doc"))
+        .cloned();
     let document_binding = scoped_document_tmux_session_binding(policy, col_args, focus);
     let decision = match agent_doc_sync::select_layout_session_with_policy(
         agent_doc_sync::LayoutSessionCandidates {
@@ -3801,7 +3775,8 @@ fn run_with_options_internal_at_root_with_column_authority(
     );
     let window_resolution_start = Instant::now();
     let target_session_start = Instant::now();
-    let tmux_session_policy = tmux_session_policy_for_scope(&col_args, focus);
+    let (tmux_session_policy, scoped_project) =
+        tmux_session_config_for_scope(tmux, &col_args, focus, project_root, "[sync]");
     let target_session = resolve_sync_target_session_with_policy(
         tmux,
         window,
@@ -3809,6 +3784,7 @@ fn run_with_options_internal_at_root_with_column_authority(
         focus,
         reactive_actor_bindings,
         &tmux_session_policy,
+        scoped_project,
     )?;
     // `#ridernavp6switchback`: a stale lane session (shared mode, before gc)
     // is never a shared sync's target; arrange the project session instead.
@@ -12133,6 +12109,35 @@ mod tests {
         assert_eq!(
             resolve_agent_doc_window_id(&iso, "0", "agent-doc").as_deref(),
             Some("@0")
+        );
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run make tmux-ci"]
+    fn windowless_sync_uses_one_explicit_project_for_pin_and_policy() {
+        let caller = tempfile::TempDir::new().unwrap();
+        let target = tempfile::TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(caller.path());
+        for (root, session) in [(caller.path(), "caller"), (target.path(), "target")] {
+            std::fs::create_dir(root.join(".agent-doc")).unwrap();
+            std::fs::write(
+                root.join(".agent-doc/config.toml"),
+                format!("tmux_session = \"{session}\"\ntmux_sessions = [\"{session}\"]\n"),
+            )
+            .unwrap();
+        }
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-explicit-session-scope");
+        iso.new_session("target", target.path()).unwrap();
+        iso.new_session("caller", caller.path()).unwrap();
+        let (policy, pin) = tmux_session_config_for_scope(&iso, &[], None, target.path(), "[sync]");
+
+        assert!(policy.allows("target"));
+        assert!(!policy.allows("caller"));
+        assert_eq!(
+            resolve_sync_target_session_with_policy(&iso, None, &[], None, &[], &policy, pin)
+                .unwrap()
+                .as_deref(),
+            Some("target")
         );
     }
     #[test]

@@ -3549,11 +3549,9 @@ fn committed_prompt_diff_stop_response_with(
         .find(|item| item.dispatch.as_str() != "forward_to_owner");
     let coordinator_prompt = coordinator_item.map(|item| item.verbatim.clone());
     let disp = file.display().to_string();
-    // `#reportedrelease`: a queue line whose worker already reported is not
-    // fresh work to answer; its result exists only in this turn's context.
-    // Name the exact persistence (the closeout that strikes the line) so the
-    // agent neither re-dispatches it nor persists a heading-only answer that
-    // leaves the line queued to be re-served.
+    // `#reportedrelease`: a queue line whose worker already reported is
+    // coordinator closeout work. Use the same attempt-specific instructions
+    // as mid-turn steering.
     if let Some(item) = coordinator_item
         && item.dispatch.as_str() == "persist_reported"
     {
@@ -3568,13 +3566,8 @@ fn committed_prompt_diff_stop_response_with(
         return Ok(Some(StopResponse::ContinueTurn {
             class: StopContinuationClass::SessionWriteback,
             reason: format!(
-                "agent-doc Stop hook found a reported worker result for {disp} that was never persisted. {} Do NOT send the final answer yet.",
-                agent_doc_queue::claim_release_receipt::persist_reported_instruction(
-                    &disp,
-                    &item.verbatim,
-                    item.owner.as_deref().unwrap_or("its worker"),
-                    item.generation,
-                ),
+                "agent-doc Stop hook found a reported worker attempt for {disp} that still needs coordinator closeout. {} Do NOT send the final answer yet.",
+                item.reported_instruction(&disp),
             ),
         }));
     }

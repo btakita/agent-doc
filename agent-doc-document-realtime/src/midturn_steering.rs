@@ -94,10 +94,9 @@ pub enum SteeringDispatch {
     /// evidence. Markdown presentation cannot override that conflict; the
     /// harness preserves the attempt and reports degraded state.
     DegradedClaimMismatch,
-    /// The item's worker already reported and its claim was released with a
-    /// receipt (`#reportedrelease`): the coordinator persists that result in
-    /// the current turn, with the closeout that strikes the line. Never a new
-    /// subagent dispatch. [`SteeringItem::owner`] names the reported worker.
+    /// The item's worker already reported. The coordinator owns reconciling
+    /// the reported attempt or its release receipt (`#reportedrelease`).
+    /// [`SteeringItem::owner`] names the reported worker.
     PersistReported,
     /// The operator changed a queue marker's subagent mode mid-turn
     /// (`#queuemodesteer`): adding or removing `subagents` / `fan-out` / `=N`,
@@ -247,6 +246,29 @@ impl SteeringItem {
     /// rendering hands the agent (`claim`, `start`, `brief`, `release`) uses it.
     pub fn claim_text(&self) -> &str {
         self.vector.as_deref().unwrap_or(&self.verbatim)
+    }
+
+    /// Coordinator instructions for a reported attempt or release receipt.
+    pub fn reported_instruction(&self, document: &str) -> String {
+        let owner = self.owner.as_deref().unwrap_or("its worker");
+        if let Some(generation) = self.generation.filter(|_| self.worker_id.is_some()) {
+            return format!(
+                "{owner} already reported on generation {generation}. Review that attempt's \
+                 response and delivery evidence for {}. Use `agent-doc queue claims {}` for \
+                 its closeout steps. Verify that the result covers the current instruction \
+                 and that any required integration is complete before closing the row. \
+                 Preserve any work the result does not cover. Do NOT forward to the finished \
+                 worker, re-claim the row, or dispatch a replacement.",
+                shell_single_quote(self.claim_text()),
+                shell_single_quote(document),
+            );
+        }
+        agent_doc_queue::claim_release_receipt::persist_reported_instruction(
+            document,
+            &self.verbatim,
+            owner,
+            self.generation,
+        )
     }
 }
 
@@ -2034,11 +2056,12 @@ pub fn apply_claim_owners(items: &mut [SteeringItem], owner_of: impl Fn(&str) ->
     }
 }
 
-/// Route live claimed items with their generation-fenced worker attempt.
+/// Route claimed items with their generation-fenced worker attempt.
 ///
 /// This is the typed form used by the harness-facing IO layer. The older
 /// [`apply_claim_owners`] remains for compatibility callers that only know an
-/// owner label.
+/// owner label. A Reported attempt still holds the row against redispatch,
+/// but the coordinator owns its closeout and the worker cannot take edits.
 pub fn apply_claim_attempts(
     items: &mut [SteeringItem],
     claim_of: impl Fn(&str) -> Option<agent_doc_queue::queue_claim::QueueClaim>,
@@ -2057,7 +2080,14 @@ pub fn apply_claim_attempts(
             if item.current_item && !claim.owner.starts_with("subagent:") {
                 continue;
             }
-            item.dispatch = SteeringDispatch::ForwardToOwner;
+            item.dispatch = if claim.state
+                == agent_doc_queue::queue_claim::QueueClaimState::Reported
+                && item.change != SteeringChange::Deleted
+            {
+                SteeringDispatch::PersistReported
+            } else {
+                SteeringDispatch::ForwardToOwner
+            };
             item.presets.clear();
             item.owner = Some(claim.owner);
             item.generation = Some(claim.generation);
@@ -2187,8 +2217,8 @@ pub fn append_claimed_queue_removals(
 /// (`#closeoutguidanceagree`). Such an item becomes
 /// [`SteeringDispatch::PersistReported`]: its answer exists in the
 /// coordinator's context, so the action is to persist it now, never to offer
-/// it to a NEW subagent. Runs after [`apply_claim_owners`]; a claimed item
-/// keeps its forward routing.
+/// it to a NEW subagent. Runs after claim-attempt routing, which takes priority
+/// over a release receipt.
 pub fn apply_release_receipts(
     items: &mut [SteeringItem],
     reported_owner: impl Fn(&str) -> Option<(String, u64)>,
@@ -2197,7 +2227,10 @@ pub fn apply_release_receipts(
         if item.source != SteeringSource::Queue
             || item.current_item
             || item.change == SteeringChange::Deleted
-            || item.dispatch == SteeringDispatch::ForwardToOwner
+            || matches!(
+                item.dispatch,
+                SteeringDispatch::ForwardToOwner | SteeringDispatch::PersistReported
+            )
         {
             continue;
         }
@@ -2229,14 +2262,7 @@ fn action_for(document: &str, item: &SteeringItem, harness: &str) -> String {
         SteeringDispatch::DegradedClaimMismatch => {
             "the deleted row looked struck/terminal in Markdown, but durable claim, report, or completion-outbox evidence still owns that exact work. Treat this as a degraded state mismatch: preserve and fence the claim/outbox and recoverable artifacts; do NOT interrupt or release the worker, integrate/apply its result, or infer terminality from strikethrough. Report the mismatch to the operator and wait for an explicit authoritative resolution.".to_string()
         }
-        SteeringDispatch::PersistReported => {
-            agent_doc_queue::claim_release_receipt::persist_reported_instruction(
-                document,
-                &item.verbatim,
-                item.owner.as_deref().unwrap_or("its worker"),
-                item.generation,
-            )
-        }
+        SteeringDispatch::PersistReported => item.reported_instruction(document),
         SteeringDispatch::ForwardToOwner if item.change != SteeringChange::Deleted => {
             forward_to_owner_instruction(document, item, harness)
         }
@@ -2568,10 +2594,9 @@ pub fn instruction_for(item: &SteeringItem) -> &'static str {
              parallel; off: stop new dispatch, let running workers finish, drain the rest inline)."
         }
         (SteeringDispatch::PersistReported, _, _, _) => {
-            "this queue item's worker already reported and its claim was released: persist that \
-             result in THIS turn with the closeout that strikes the item (`agent-doc finalize` \
-             with the verbatim `> **Queue prompt:** <line>` echo, or `--done <id>`). Do NOT \
-             dispatch a new subagent for it and do NOT re-claim it."
+            "this queue item's worker already reported. Reconcile the reported attempt through \
+             the coordinator's closeout path in THIS turn. Do NOT dispatch a new subagent for it \
+             and do NOT re-claim it."
         }
         (SteeringDispatch::AddressNow | SteeringDispatch::Subagent, _, _, _) => {
             "tracked edits are forwarded only to their existing worker attempt."
@@ -5627,6 +5652,95 @@ mod tests {
             assert!(text.contains("not a chat reply"), "{text}");
             assert!(!text.contains("DISPATCH NOW"), "{text}");
             assert!(!text.contains("dispatch this item NOW"), "{text}");
+        }
+    }
+
+    #[test]
+    fn reporting_an_attempt_with_existing_nested_rows_is_not_an_operator_edit() {
+        let owned = BTreeSet::new();
+        let content = |parent_marker, child_marker, publication| {
+            doc(
+                &format!(
+                    "- {parent_marker}Prepare the release\n  - {child_marker}Package the artifacts.{publication}\n  - Verify the checksums.\n"
+                ),
+                EX,
+            )
+        };
+        let running = "🚧 [#subagent:release#1] ";
+        let reported = "☑️ [#subagent:release#1] ";
+        let cases = [
+            (content("", running, ""), content("", reported, " ⟦local⟧")),
+            (content(running, "", ""), content(reported, "", "")),
+        ];
+        for (baseline, current) in cases {
+            let watermark = seeded(&baseline, None);
+            assert_eq!(watermark.acknowledged_queue.len(), 2);
+            for mode in [ObserveMode::InTurn, ObserveMode::Boundary] {
+                let obs = observe_with_mode(&watermark, &current, &quiet_ctx(&owned), mode);
+                assert!(obs.ready.is_empty(), "{mode:?}: {:?}", obs.ready);
+                assert_eq!(obs.pending, 0, "{mode:?}");
+                assert_eq!(obs.next.acknowledged_queue, watermark.acknowledged_queue);
+            }
+        }
+    }
+
+    #[test]
+    fn edited_reported_attempt_routes_to_the_coordinator() {
+        use agent_doc_queue::queue_claim::{QueueClaimLedger, claim_identity};
+
+        let owned = BTreeSet::new();
+        let baseline = doc(
+            "- Prepare the release\n  - 🚧 [#subagent:release#1] Package the artifacts.\n  - Verify the checksums.\n",
+            EX,
+        );
+        let current = doc(
+            "- Prepare the release\n  - ☑️ [#subagent:release#1] Package the artifacts, including Linux.\n  - Verify the checksums.\n",
+            EX,
+        );
+        let mut obs = observe_with_mode(
+            &seeded(&baseline, None),
+            &current,
+            &quiet_ctx(&owned),
+            ObserveMode::Boundary,
+        );
+        assert_eq!(obs.ready.len(), 1, "{:?}", obs.ready);
+        let target = "Prepare the release: Package the artifacts, including Linux.";
+        let mut ledger = QueueClaimLedger::default();
+        let owner = "subagent:release";
+        ledger.claim(target, owner, 100, 3600);
+        let generation = ledger.claims[0].generation;
+        ledger
+            .start(target, owner, "worker:release", 101, 3600, Some(generation))
+            .unwrap();
+        let claim = ledger.report(target, Some(generation)).unwrap();
+        apply_claim_attempts(&mut obs.ready, |text| {
+            (claim_identity(text) == claim.identity).then(|| claim.clone())
+        });
+        // Older release evidence must not replace the exact reported attempt.
+        apply_release_receipts(&mut obs.ready, |_| Some(("subagent:old".into(), 0)));
+        let item = &obs.ready[0];
+        assert_eq!(item.change, SteeringChange::Edited);
+        assert_eq!(item.dispatch, SteeringDispatch::PersistReported);
+        assert_eq!(item.owner.as_deref(), Some(owner));
+        assert_eq!(item.generation, Some(generation));
+        assert_eq!(item.worker_id.as_deref(), Some("worker:release"));
+        for rendered in [
+            render_steering_context("bugs.md", &obs.ready, 0).unwrap(),
+            render_closeout_steering_context("bugs.md", &obs.ready, 0).unwrap(),
+        ] {
+            assert!(rendered.contains("dispatch=persist_reported"), "{rendered}");
+            assert!(
+                rendered.contains("agent-doc queue claims 'bugs.md'"),
+                "{rendered}"
+            );
+            assert!(
+                rendered.contains("covers the current instruction"),
+                "{rendered}"
+            );
+            assert!(
+                !rendered.contains("already reported and its claim was released"),
+                "{rendered}"
+            );
         }
     }
 

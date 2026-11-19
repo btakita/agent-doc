@@ -633,9 +633,9 @@ fn route_claimed_items(
         .into_iter()
         .map(|claim| (claim.identity.clone(), claim.clone()))
         .collect::<std::collections::HashMap<_, _>>();
-    // Only a live claim owns edit forwarding. Report receipts are added below
-    // as cancellation/mismatch evidence, but must continue through
-    // `apply_release_receipts` to become `persist_reported`.
+    // A live attempt owns the row. Typed routing distinguishes worker
+    // forwarding from coordinator closeout once the attempt has reported.
+    // Released attempts are routed separately from their receipts below.
     if !attempts.is_empty() {
         // The steering line is the authored row. A nested leaf's claim key is
         // its nest vector, so the row text alone does not find the attempt

@@ -354,14 +354,14 @@ pub struct ActorGenerationKey {
 }
 
 /// An actor record write: the record plus the `documents` bootstrap columns,
-/// and, for a lifecycle `Ready`, the time its turn's dispatch receipts are
-/// released in the same transaction (`#queuedclearflake`).
+/// and, for a lifecycle transition, the time used to settle dispatch receipts
+/// when entering `Ready` (`#queuedclearflake`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActorRecordStore {
     pub record: ActorRecord,
     pub launch_mode: Option<String>,
     pub controller_epoch: Option<i64>,
-    pub release_ready_dispatches_as_of: Option<i64>,
+    pub lifecycle_as_of: Option<i64>,
 }
 
 /// Payload of one actor-generation epoch.
@@ -524,7 +524,7 @@ impl<'c> ActorGenerationWrite<'c> {
                     &store.record,
                     store.launch_mode.clone(),
                     store.controller_epoch,
-                    store.release_ready_dispatches_as_of,
+                    store.lifecycle_as_of,
                 )?;
                 ActorGenerationReceipt::Stored {
                     write: Box::new(write),
@@ -1108,7 +1108,7 @@ mod tests {
             },
             launch_mode: None,
             controller_epoch: None,
-            release_ready_dispatches_as_of: None,
+            lifecycle_as_of: None,
         }
     }
 

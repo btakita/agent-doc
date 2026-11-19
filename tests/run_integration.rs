@@ -192,19 +192,6 @@ fn write_mock_streaming_agent(root: &Path) -> (PathBuf, PathBuf) {
     (script, release)
 }
 
-fn write_sleeping_agent(root: &Path) -> PathBuf {
-    let script = root.join("mock-sleeping-agent.sh");
-    fs::write(&script, "#!/bin/sh\ncat >/dev/null\nsleep 30\n").unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&script).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&script, perms).unwrap();
-    }
-    script
-}
-
 fn write_marker_agent(root: &Path, response: &str) -> (PathBuf, PathBuf) {
     let script = root.join("mock-marker-agent.sh");
     let marker = root.join("mock-agent-called");
@@ -963,31 +950,43 @@ fn run_auto_queue_stop_fence_halts_continuation_before_next_prompt() {
 }
 
 #[test]
-fn run_times_out_agent_child_and_marks_recoverable_preflight() {
+fn run_waits_past_the_removed_deadline_and_commits_the_admitted_prompt() {
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
     fs::write(&doc, template_doc()).unwrap();
     init_git_repo(tmp.path(), &doc);
 
-    let script = write_sleeping_agent(tmp.path());
+    let script = write_delayed_mock_agent(
+        tmp.path(),
+        "<!-- patch:exchange -->\n### Re: delayed answer — gpt-5\nThe original prompt completed.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n",
+        3,
+    );
     let config_root = write_config(tmp.path(), &script);
 
-    agent_doc()
+    let assert = agent_doc()
         .current_dir(tmp.path())
         .env("XDG_CONFIG_HOME", &config_root)
-        .env("AGENT_DOC_RUN_AGENT_TIMEOUT_SECS", "2")
+        .env("AGENT_DOC_RUN_AGENT_TIMEOUT_SECS", "1")
         .env("AGENT_DOC_RUN_HEARTBEAT_SECS", "1")
         .args(["run", doc.to_str().unwrap()])
         .assert()
-        .failure()
-        .stderr(predicate::str::contains(
-            "[run] heartbeat phase=child_agent_wait",
-        ))
-        .stderr(predicate::str::contains("timed out after waiting 2s"));
-
+        .success();
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     let state = read_cycle_state(&doc);
-    assert_eq!(state.phase.as_str(), "preflight_started");
-    assert!(state.last_event.contains("direct_invocation_timeout"));
+    assert_eq!(state.phase.as_str(), "committed");
+    let heartbeat_cycle = format!("cycle_id={}", state.cycle_id);
+    assert!(
+        stderr.lines().any(|line| {
+            line.contains("[run] heartbeat phase=child_agent_wait")
+                && line.contains(&heartbeat_cycle)
+        }),
+        "{stderr}"
+    );
+    assert!(
+        fs::read_to_string(&doc)
+            .unwrap()
+            .contains("The original prompt completed.")
+    );
 }
 
 #[test]
@@ -1078,7 +1077,6 @@ fn run_heartbeats_are_visible_and_persisted_while_child_is_waiting() {
         .current_dir(tmp.path())
         .env("XDG_CONFIG_HOME", &config_root)
         .env("AGENT_DOC_TMUX_INPUT_DIAG", "1")
-        .env("AGENT_DOC_RUN_AGENT_TIMEOUT_SECS", "10")
         .env("AGENT_DOC_RUN_HEARTBEAT_SECS", "1")
         .args(["run", doc.to_str().unwrap()])
         .stderr(std::process::Stdio::from(stderr))
@@ -1133,7 +1131,6 @@ fn run_heartbeats_redirect_stderr_under_managed_tui_but_persist_progress() {
         )
         .current_dir(tmp.path())
         .env("XDG_CONFIG_HOME", &config_root)
-        .env("AGENT_DOC_RUN_AGENT_TIMEOUT_SECS", "10")
         .env("AGENT_DOC_RUN_HEARTBEAT_SECS", "1")
         .env("AGENT_DOC_FORCE_RUN_STDERR_REDIRECT", "1")
         .env_remove("CLAUDECODE")

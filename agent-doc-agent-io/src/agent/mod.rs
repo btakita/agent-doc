@@ -30,9 +30,8 @@ pub mod junie;
 pub mod opencode;
 
 use anyhow::Result;
-use std::io::Read;
 use std::path::Path;
-use std::process::{Child, Command, Output};
+use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
 use agent_doc_config::AgentConfig;
@@ -46,9 +45,6 @@ pub struct AgentResponse {
     pub session_id: Option<String>,
 }
 
-pub const AGENT_DOC_RUN_AGENT_TIMEOUT_SECS_ENV: &str = "AGENT_DOC_RUN_AGENT_TIMEOUT_SECS";
-pub const DEFAULT_RUN_AGENT_TIMEOUT_SECS: u64 = 30 * 60;
-
 /// Agent backend trait — send a prompt, get a response.
 pub trait Agent {
     fn send(
@@ -58,14 +54,6 @@ pub trait Agent {
         fork: bool,
         model: Option<&str>,
     ) -> Result<AgentResponse>;
-}
-
-pub fn run_agent_timeout() -> Duration {
-    let secs = std::env::var(AGENT_DOC_RUN_AGENT_TIMEOUT_SECS_ENV)
-        .ok()
-        .and_then(|raw| raw.trim().parse::<u64>().ok())
-        .unwrap_or(DEFAULT_RUN_AGENT_TIMEOUT_SECS);
-    Duration::from_secs(secs.max(1))
 }
 
 /// Build the `Command` for a headless harness launch (`#headlessharnesspath`,
@@ -141,9 +129,8 @@ pub fn harness_command(
     Ok(command)
 }
 
-/// Isolate an agent backend in a child-owned process group so a timeout can
-/// terminate and reap the backend together with any preflight/background
-/// descendants it started.
+/// Isolate a harness in a child-owned process group. Bounded probes can
+/// cancel and reap the group together with its descendants.
 pub fn configure_agent_child_process_group(command: &mut Command) {
     // The child harness publishes its own identity. Carrying a parent Grok ID
     // into another harness would misattribute its tools/admission to Grok.
@@ -183,8 +170,7 @@ fn agent_process_group_exists(child_pid: u32) -> std::io::Result<bool> {
     }
 }
 
-/// Classify timeout shutdown as cancellation and synchronously reap the child
-/// process tree before a later preflight can contend with it.
+/// Cancel and synchronously reap a child process group.
 pub fn terminate_agent_child_process_group(child: &mut Child) -> std::io::Result<()> {
     #[cfg(unix)]
     {
@@ -209,69 +195,6 @@ pub fn terminate_agent_child_process_group(child: &mut Child) -> std::io::Result
         let _reaped_status = child.wait()?;
         Ok(())
     }
-}
-
-pub fn wait_with_output_timeout(mut child: Child, timeout: Duration) -> std::io::Result<Output> {
-    let mut stdout = child.stdout.take();
-    let mut stderr = child.stderr.take();
-    let stdout_handle = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(ref mut stream) = stdout {
-            stream.read_to_end(&mut buf)?;
-        }
-        Ok::<_, std::io::Error>(buf)
-    });
-    let stderr_handle = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(ref mut stream) = stderr {
-            stream.read_to_end(&mut buf)?;
-        }
-        Ok::<_, std::io::Error>(buf)
-    });
-
-    let started = Instant::now();
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if started.elapsed() >= timeout {
-            let termination = terminate_agent_child_process_group(&mut child);
-            if termination.is_ok() {
-                for (name, handle) in [("stdout", stdout_handle), ("stderr", stderr_handle)] {
-                    match handle.join() {
-                        Ok(Ok(_)) => {}
-                        Ok(Err(err)) => {
-                            eprintln!("[agent] timed-out {name} reader failed: {err}");
-                        }
-                        Err(_) => {
-                            eprintln!("[agent] timed-out {name} reader thread panicked");
-                        }
-                    }
-                }
-            }
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                format!(
-                    "agent child process group timed out after {}s; classification=cancellation; process_group_reaped={}",
-                    timeout.as_secs(),
-                    termination.is_ok()
-                ),
-            ));
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    };
-
-    let stdout = stdout_handle
-        .join()
-        .map_err(|_| std::io::Error::other("stdout reader thread panicked"))??;
-    let stderr = stderr_handle
-        .join()
-        .map_err(|_| std::io::Error::other("stderr reader thread panicked"))??;
-    Ok(Output {
-        status,
-        stdout,
-        stderr,
-    })
 }
 
 /// Resolve an agent backend by name. `env` is applied to the spawned child process
@@ -387,7 +310,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn timed_out_agent_reaps_background_descendants() {
+    fn cancelling_a_process_group_reaps_background_descendants() {
         let temp = tempfile::tempdir().unwrap();
         let descendant_pid_path = temp.path().join("descendant.pid");
         let mut command = Command::new("sh");
@@ -400,7 +323,7 @@ mod tests {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
         configure_agent_child_process_group(&mut command);
-        let child = command.spawn().unwrap();
+        let mut child = command.spawn().unwrap();
 
         // Wait for a pid that PARSES, not merely for the path to exist.
         // `echo $! > file` creates the file and writes it in two observable
@@ -424,10 +347,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         };
 
-        let err = wait_with_output_timeout(child, Duration::from_millis(100)).unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
-        assert!(err.to_string().contains("classification=cancellation"));
-        assert!(err.to_string().contains("process_group_reaped=true"));
+        terminate_agent_child_process_group(&mut child).unwrap();
 
         let started = Instant::now();
         while process_exists(descendant_pid) && started.elapsed() < Duration::from_secs(2) {

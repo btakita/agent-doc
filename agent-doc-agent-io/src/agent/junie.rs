@@ -33,10 +33,7 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::process::Command;
 
-use super::{
-    Agent, AgentResponse, configure_agent_child_process_group, run_agent_timeout,
-    wait_with_output_timeout,
-};
+use super::{Agent, AgentResponse, configure_agent_child_process_group};
 
 pub struct Junie {
     command: String,
@@ -152,7 +149,7 @@ impl Agent for Junie {
             }
             child.stdin.take();
         }
-        let output = wait_with_output_timeout(child, run_agent_timeout())?;
+        let output = child.wait_with_output()?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);

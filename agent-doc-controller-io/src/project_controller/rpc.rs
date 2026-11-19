@@ -30518,6 +30518,15 @@ pub(crate) fn handle_mark_lifecycle(
             current.pane_id
         );
     }
+    // A lifecycle update can settle the current owner, but cannot reopen a
+    // closed generation. The effect sink also fences a close after this read.
+    if !current.permits_lifecycle_state(current.generation, state) {
+        anyhow::bail!(
+            "controller lifecycle transition refused for {}: actor generation {} is closed",
+            document_id,
+            current.generation
+        );
+    }
     // `#netadv3` SIM-F1: within one generation the newest SENT update wins,
     // not the last to arrive.
     if let Err(newest) = admit_level_update(
@@ -71416,6 +71425,114 @@ mod tests {
                 .state,
             agent_doc_controller::actor::ActorState::Busy
         );
+    }
+
+    #[test]
+    fn owner_lifecycle_cannot_reopen_a_closed_generation_or_release_its_dispatch() {
+        use agent_doc_controller::actor::ActorState;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("closed-actor.md");
+        std::fs::write(
+            &file,
+            "---\nagent_doc_session: closed-actor\nagent: codex\n---\n",
+        )
+        .unwrap();
+        let starting = agent_doc_session_actor_io::record_session_start_direct(
+            &file,
+            "closed-actor",
+            "%51",
+            "@1",
+            1,
+        )
+        .unwrap();
+        let document_id = &starting.document_id;
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new(bootstrap.clone()).unwrap();
+        let conn = open_state_db(dir.path()).unwrap();
+        let now = timestamp_secs() as i64;
+        state_store::insert_dispatch_attempt_in_db(
+            &conn,
+            &state_store::DispatchAttemptInsert {
+                document_id,
+                generation: 1,
+                command_kind: "supervisor_inject",
+                accepted_stage: Some("ready"),
+                failed_stage: None,
+                diagnostic_payload: "owner dispatch",
+                result_status: "accepted",
+                proof_scope: "accepted_only",
+                dispatch_start_proven: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            state_store::mark_open_dispatches_turn_started(&conn, document_id).unwrap(),
+            1
+        );
+
+        // Land the close after the runtime obtained its actor projection.
+        let mut closed = starting.clone();
+        closed.state = ActorState::Closed;
+        store_actor_record(dir.path(), Some(1), &closed).unwrap();
+        assert_eq!(
+            runtime.actor_record(document_id).unwrap().unwrap().state,
+            ActorState::Starting,
+        );
+        let (_, closed_revision) =
+            state_store::load_actor_record_with_revision_from_db(&conn, document_id).unwrap();
+        let lifecycle = |state: ActorState, generation| ControllerRequest {
+            command: "mark_lifecycle".into(),
+            file: Some(file.clone()),
+            session_id: Some(starting.session_id.clone()),
+            pane_id: Some(starting.pane_id.clone()),
+            window_id: None,
+            generation: Some(generation),
+            state: Some(state.as_str().into()),
+            caller: Some("supervisor".into()),
+            reason: Some("test transition".into()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+            sequence: None,
+        };
+        for state in [ActorState::Ready, ActorState::Busy] {
+            let error = handle_mark_lifecycle(&bootstrap, Some(&runtime), lifecycle(state, 1))
+                .expect_err("the stale runtime owner cannot reopen the closed durable actor");
+            assert!(
+                error.to_string().contains("actor generation 1 is closed"),
+                "{error:#}"
+            );
+        }
+        let (stored, revision) =
+            state_store::load_actor_record_with_revision_from_db(&conn, document_id).unwrap();
+        assert_eq!(stored.unwrap().state, ActorState::Closed);
+        assert_eq!(
+            revision, closed_revision,
+            "neither refusal writes a transition"
+        );
+        assert!(state_store::has_running_dispatch_turn_as_of(&conn, document_id, now).unwrap());
+
+        // The actorless path observes Closed immediately and rejects as well.
+        assert!(
+            handle_mark_lifecycle(&bootstrap, None, lifecycle(ActorState::Ready, 1))
+                .unwrap_err()
+                .to_string()
+                .contains("actor generation 1 is closed")
+        );
+
+        // An explicit replacement may acquire a new generation and settle normally.
+        let mut replacement = starting.clone();
+        replacement.generation = 2;
+        replacement.last_transition.new_generation = 2;
+        store_actor_record_for_runtime(dir.path(), Some(1), &replacement, Some(&runtime)).unwrap();
+        let ready =
+            handle_mark_lifecycle(&bootstrap, Some(&runtime), lifecycle(ActorState::Ready, 2))
+                .expect("a new generation has its own lifecycle");
+        assert_eq!(ready.state, ActorState::Ready);
+        assert_eq!(ready.generation, 2);
     }
 
     /// `#netadv3` SIM-F2: a reordered older queue pause must not flip queue

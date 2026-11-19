@@ -173,7 +173,7 @@ fn store_actor_record_in(
                     record: record.clone(),
                     launch_mode: None,
                     controller_epoch: None,
-                    release_ready_dispatches_as_of: None,
+                    lifecycle_as_of: None,
                 },
             )?;
         }

@@ -6818,6 +6818,22 @@ pub(crate) fn apply_actor_record_write_in_tx(
             record.generation
         );
     }
+    // Lifecycle requests carry no geometry. The durable actor may already know
+    // about a pane move that the controller's cached record has yet to see.
+    let with_durable_window = previous
+        .filter(|prior| {
+            lifecycle_as_of.is_some()
+                && prior.generation == record.generation
+                && prior.session_id == record.session_id
+                && prior.pane_id == record.pane_id
+                && prior.window_id != record.window_id
+        })
+        .map(|prior| {
+            let mut record = record.clone();
+            record.window_id.clone_from(&prior.window_id);
+            record
+        });
+    let record = with_durable_window.as_ref().unwrap_or(record);
     let evicted_document_ids = if record.state != ActorState::Closed {
         evict_cross_document_actor_pane_bindings_tx(
             tx,
@@ -9760,6 +9776,65 @@ mod tests {
             load_actor_record_from_db(&conn, "doc")?.unwrap().pane_id,
             "%2"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn actor_lifecycle_keeps_corrected_window_even_when_the_controller_cached_the_old_one()
+    -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let mut conn = open_state_db(dir.path())?;
+        let mut actor = ActorRecord {
+            document_id: "doc".to_string(),
+            session_id: "session".to_string(),
+            generation: 1,
+            pane_id: "%1".to_string(),
+            window_id: "@1".to_string(),
+            harness: "codex".to_string(),
+            state: ActorState::Starting,
+            last_transition: ActorLastTransition {
+                caller: "start".to_string(),
+                reason: "session_start".to_string(),
+                timestamp: 1,
+                prior_generation: 0,
+                new_generation: 1,
+            },
+        };
+        store_actor_record_tx(&mut conn, None, &actor, Some("active".to_string()), Some(2))?;
+        let (_, revision) = load_actor_record_with_revision_from_db(&conn, "doc")?;
+        let expected = crate::ledger_cas::ActorGenerationAuthority {
+            generation: 1,
+            revision,
+        };
+        crate::ledger_cas::write_if_actor_generation(
+            &mut conn,
+            "doc",
+            expected,
+            crate::ledger_cas::ActorGenerationMutation::CorrectWindow {
+                window: "@5".to_string(),
+                caller: "route".to_string(),
+                reason: "pre_dispatch_window_refresh".to_string(),
+                timestamp: 2,
+            },
+        )?;
+        let (moved, moved_revision) = load_actor_record_with_revision_from_db(&conn, "doc")?;
+        let moved = moved.unwrap();
+        assert_eq!(moved.last_transition, actor.last_transition);
+
+        actor.state = ActorState::Busy;
+        actor.last_transition.caller = "supervisor".to_string();
+        actor.last_transition.reason = "turn_started".to_string();
+        let stale =
+            store_actor_lifecycle_record_fenced_tx(&mut conn, 1, revision, &actor, None, None, 3);
+        assert!(stale.is_err_and(|error| crate::ledger_cas::actor_generation_superseded(&error)));
+
+        let (write, _) =
+            store_actor_lifecycle_record_tx(&mut conn, Some(1), &actor, None, None, 3)?;
+        let (stored, stored_revision) = load_actor_record_with_revision_from_db(&conn, "doc")?;
+        actor.window_id = "@5".to_string();
+        assert_eq!(write.record, actor);
+        assert_eq!(stored, Some(actor));
+        assert_ne!(stored_revision, moved_revision);
         Ok(())
     }
 

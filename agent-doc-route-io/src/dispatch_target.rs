@@ -106,7 +106,6 @@ pub fn bind_running_dispatch_target(
     file_path: &str,
 ) -> Result<PreDispatchDispatchBind> {
     let (requested_str, base_dir) = guarded_dispatch_bind_target(tmux, pane_id, file_path)?;
-    let window = agent_doc_tmux_io::target_window_id(tmux, pane_id).unwrap_or_default();
     let cwd = base_dir.to_string_lossy().to_string();
     let outcome = agent_doc_session_registry_io::registration::bind_running_dispatch_target_in(
         &base_dir,
@@ -114,7 +113,7 @@ pub fn bind_running_dispatch_target(
         pane_id,
         &requested_str,
         std::process::id(),
-        &window,
+        &|| agent_doc_tmux_io::target_window_id(tmux, pane_id).unwrap_or_default(),
         &cwd,
         &|owner_pane| tmux.pane_alive(owner_pane),
     )?;

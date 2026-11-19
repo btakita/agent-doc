@@ -656,10 +656,12 @@ deterministic tests.
   (`Starting`/`Ready`/`Busy`/`WaitingInput`/`Closed`), a binding projection onto
   the pane the record already names, the supervisor's harness writeback, stale
   and dead-pane closes, registry prune, and a cross-document pane eviction all
-  commit at the current generation. A generation is therefore not a write
-  identity. Every one of these writes inserts an `actor_transitions` row and
-  points `documents.last_transition_id` at it, so that id (`ActorRevision`) is
-  the record's write identity (`#syncbindingfence`). A binding writer that
+  commit at the current generation. Each write inserts an `actor_transitions`
+  row. The newest transition id is the record's write identity
+  (`ActorRevision`, `#syncbindingfence`). Route and sync window corrections
+  advance this identity while preserving the last lifecycle transition. A
+  lifecycle update to the same binding carries forward the durable window
+  (`#predispatchblockedaudit`). A binding writer that
   decides from one read of the actor record and writes later is fenced on BOTH
   the generation and the revision it read
   (`state_store::store_actor_record_fenced_tx`): an owner's same-generation

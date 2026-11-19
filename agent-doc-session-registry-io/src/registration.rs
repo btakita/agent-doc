@@ -764,7 +764,7 @@ pub fn bind_running_dispatch_target_in(
     pane_id: &str,
     file: &str,
     pid: u32,
-    window: &str,
+    window_of_target: &dyn Fn() -> String,
     cwd: &str,
     owner_pane_alive: &dyn Fn(&str) -> bool,
 ) -> Result<PreDispatchDispatchBind> {
@@ -774,7 +774,7 @@ pub fn bind_running_dispatch_target_in(
         pane_id,
         file,
         pid,
-        window,
+        window_of_target,
         cwd,
         owner_pane_alive,
         &mut || {},
@@ -792,7 +792,7 @@ pub fn bind_running_dispatch_target_with_hook_in(
     pane_id: &str,
     file: &str,
     pid: u32,
-    window: &str,
+    window_of_target: &dyn Fn() -> String,
     cwd: &str,
     owner_pane_alive: &dyn Fn(&str) -> bool,
     between_decision_and_write: &mut dyn FnMut(),
@@ -825,13 +825,15 @@ pub fn bind_running_dispatch_target_with_hook_in(
                 ),
                 PreDispatchBindDecision::Bind(fence) => (ActorBindingWrite::Fenced(fence), None),
             };
+            // A retry needs a new observation of the pane's physical window.
+            let window = window_of_target();
             between_decision_and_write();
             Ok(ActorGenerationDecision::Write {
                 authority: bind_write_authority(binding, record.as_ref(), revision),
-                write: (binding, preserved),
+                write: (binding, preserved, window),
             })
         },
-        &mut |expected, (binding, preserved)| {
+        &mut |expected, (binding, preserved, window)| {
             let _lock = crate::registry_lock::acquire(
                 &session_registry_io::registry_path_in(base_dir),
                 "bind a running dispatch target",
@@ -2501,7 +2503,7 @@ mod tests {
             pane,
             file,
             4242,
-            "@1",
+            &|| "@1".to_string(),
             "/pre-dispatch/cwd",
             &|owner_pane| alive.iter().any(|pane| pane == owner_pane),
             hook,
@@ -2737,7 +2739,7 @@ mod tests {
                 "%10",
                 &file,
                 4242,
-                "@5",
+                &|| "@5".to_string(),
                 "/pre-dispatch/cwd",
                 &|_| true,
             )
@@ -2784,6 +2786,43 @@ mod tests {
                 if session_id == "s" && pane_id == "%10"
         ));
         assert_eq!(actor(root, &file), before);
+    }
+
+    #[test]
+    fn pre_dispatch_bind_reobserves_the_window_after_a_same_generation_race() {
+        let (dir, file) = post_launch_project();
+        let root = dir.path();
+        route_bind(root, "s", "%10", &file);
+        owner_start(&file, "s", "%10", 2);
+        let moved = std::cell::Cell::new(false);
+
+        let outcome = bind_running_dispatch_target_with_hook_in(
+            root,
+            "s",
+            "%10",
+            &file,
+            4242,
+            &|| if moved.get() { "@6" } else { "@5" }.to_string(),
+            "/pre-dispatch/cwd",
+            &|_| true,
+            &mut || {
+                if !moved.replace(true) {
+                    supervisor_transition(root, &file, "%10", 2, ActorState::Busy);
+                }
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            outcome,
+            PreDispatchDispatchBind::OwnerStatePreserved {
+                state: ActorState::Busy,
+                generation: 2,
+            }
+        );
+        let record = actor(root, &file);
+        assert_eq!(record.window_id, "@6");
+        assert_eq!(record.last_transition.reason, "turn_started");
     }
 
     /// The preserving bind revalidates a Closed observation after an owner

@@ -10487,8 +10487,6 @@ mod tests {
         // automatic names only for windows a client is viewing, so set the
         // name it would choose and leave `automatic-rename` on, exactly the
         // state of the live `N:agent-doc` windows.
-        let program = tmp.path().join("agent-doc");
-        std::os::unix::fs::symlink("/bin/sleep", &program).unwrap();
         let stray_pane = iso
             .raw_cmd(&[
                 "new-window",
@@ -10498,11 +10496,17 @@ mod tests {
                 "-P",
                 "-F",
                 "#{pane_id}",
-                &format!("{} 600", program.display()),
+                crate::resync::IDLE_MOCK_AGENT_DOC,
             ])
             .unwrap()
             .trim()
             .to_string();
+        assert!(crate::resync::wait_for_pane_current_command(
+            &iso,
+            &stray_pane,
+            "agent-doc",
+            Duration::from_secs(3),
+        ));
         let stray_window = iso.pane_window(&stray_pane).unwrap();
         iso.raw_cmd(&["rename-window", "-t", &stray_window, "agent-doc"])
             .unwrap();

@@ -2107,6 +2107,12 @@ pub(crate) use th::{
     wait_for_process_pid, wait_for_shell, wait_for_window_relation, write_mock_agent_doc,
 };
 
+// Set the process name without renaming a system utility. Multi-call coreutils
+// dispatches based on argv[0], so a copy of sleep named agent-doc can exit.
+#[cfg(test)]
+pub(crate) const IDLE_MOCK_AGENT_DOC: &str =
+    "exec bash -c \"exec -a agent-doc perl -e 'sleep 600'\"";
+
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]

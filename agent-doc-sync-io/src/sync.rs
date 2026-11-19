@@ -499,9 +499,11 @@ fn refresh_drifted_pane_window_binding_with_hook(
     if actor_drifted {
         match agent_doc_session_actor_io::correct_binding_window_fenced_in(
             &base_dir,
-            &file_key,
-            &record,
-            revision,
+            &record.document_id,
+            agent_doc_sqlite::ledger_cas::ActorGenerationAuthority {
+                generation: record.generation,
+                revision,
+            },
             &live_window,
             caller,
             reason,
@@ -14612,21 +14614,18 @@ mod tests {
         let root = dir.path();
         let (doc, file_key) = window_drift_fixture(root);
         owner_transition(root, &file_key, ActorState::Busy);
+        let (before, revision) =
+            agent_doc_session_actor_io::load_record_with_revision_in(root, &file_key).unwrap();
 
         let note = refresh_window(&doc, &mut || {}).expect("a drifted window is corrected");
         assert!(note.contains(STALE_WINDOW), "{note}");
 
-        let record = agent_doc_session_actor_io::load_record_in(root, &file_key)
-            .unwrap()
-            .unwrap();
-        assert_eq!(record.window_id, "@5");
-        assert_eq!(record.pane_id, "%5");
-        assert_eq!(record.generation, 1);
-        assert_eq!(
-            record.state,
-            ActorState::Busy,
-            "the correction must not re-project the owner as Ready"
-        );
+        let (after, moved_revision) =
+            agent_doc_session_actor_io::load_record_with_revision_in(root, &file_key).unwrap();
+        let mut expected = before.unwrap();
+        expected.window_id = "@5".to_string();
+        assert_eq!(after, Some(expected));
+        assert_ne!(moved_revision, revision);
     }
 
     /// The owner moves the document to another pane between the refresh's

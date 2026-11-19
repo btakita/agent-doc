@@ -3386,6 +3386,10 @@ mod tests {
         );
         assert_eq!(record.last_transition.caller, "supervisor");
         assert_eq!(record.generation, 2);
+        assert_eq!(
+            Some(record.window_id.as_str()),
+            agent_doc_tmux_io::target_window_id(&iso, &busy_pane).as_deref()
+        );
 
         // Binding a different pane while the Busy owner's pane is alive fails
         // closed and writes nothing.
@@ -3395,6 +3399,26 @@ mod tests {
         let record = load();
         assert_eq!(record.pane_id, busy_pane);
         assert_eq!(record.state, agent_doc_controller::actor::ActorState::Busy);
+
+        let err = bind_running_dispatch_target(&iso, "different-session", &busy_pane, &file_path)
+            .expect_err("a different session must not take the live pane");
+        assert!(err.to_string().contains(session_id), "{err:#}");
+
+        agent_doc_session_actor_io::transition_state_in(
+            dir.path(),
+            &key,
+            session_id,
+            &busy_pane,
+            Some(2),
+            agent_doc_controller::actor::ActorState::Blocked,
+            "route",
+            STARTING_ACTOR_TIMEOUT_REASON,
+        )
+        .unwrap();
+        let err = bind_running_dispatch_target(&iso, session_id, &busy_pane, &file_path)
+            .expect_err("a blocked actor must not receive a dispatch");
+        assert!(err.to_string().contains("blocked"), "{err:#}");
+        assert_eq!(load().last_transition.reason, STARTING_ACTOR_TIMEOUT_REASON);
 
         // Once the owner's pane is gone, the route takes the binding over.
         iso.kill_pane(&busy_pane).unwrap();

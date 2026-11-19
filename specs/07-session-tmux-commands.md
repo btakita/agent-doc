@@ -1189,21 +1189,17 @@ route closed. Pre-launch provisioning binds keep the plain
 associated-pane rebind, the registered-pane and lazy-claim rebinds, the stash
 rescue, and the busy-pane optimistic dispatch in `pane_resolution.rs`; the
 stranded-trigger resubmits and the pre-send binds in `dispatch_only.rs`; and the
-authoritative-actor dispatch in `authoritative_dispatch.rs`. The route never
-writes `Ready` over a live owner. When the actor record already binds the
-session to the pane in a live state (`Starting`, `Ready`, `Busy`,
-`WaitingInput`), no actor record is written: the owner's state, generation, and
-last transition (including a readiness-proving reason such as `prompt_ready`)
-stand, and only the registry metadata is refreshed. When an owner (any writer
-other than a `route`/`sync` projection) holds the document in a non-`Closed`
-state on another live pane, the route writes nothing and fails closed, because
-binding the new pane would advance the generation and retire that owner's
-supervisor. Otherwise (no record, a `Closed`/`Blocked` record on the pane, a
-projection binding, or an owner whose pane is gone) the route binds `Ready`,
-compare-and-swapped on the generation and record revision it decided against;
-an owner commit in between, including a same-generation transition such as the
-supervisor going `Busy` (`#syncbindingfence`), fails the write and the route
-re-decides against the newer record.
+authoritative-actor dispatch in `authoritative_dispatch.rs`. When the actor
+record already binds the session to the pane, the route keeps its state,
+generation, harness, and lifecycle evidence (including `prompt_ready` and
+`starting_actor_timeout`). It corrects a stale window after pane movement and
+refreshes registry metadata. A matching `Blocked` or `Closed` actor prevents
+dispatch. A competing session on the same pane, or an owner or starting-timeout
+latch on another live pane, also prevents dispatch. When the existing binding
+can be replaced, the route projects `Ready` at a new generation. Both window
+corrections and replacement binds compare the actor generation and revision.
+After supersession, the route reads the current record and observes the pane's
+window again before retrying (`#predispatchblockedaudit`, `#syncbindingfence`).
 Dispatch admission needs only the binding: the authoritative route reads the
 supervisor's runtime state, which overrides a live record state, and the
 controller's `authorize_dispatch` checks the record's pane, session, and
@@ -1270,9 +1266,10 @@ revision (see the same-generation lifecycle invariant in
     evicting that project's registry entries on the same pane) even for a
     registry-only refresh, where no reader of the document ever looks.
   - The pane-window correction (`#panewindowbindingrebind`, doctor and the
-    post-layout pass) keeps the observed pane, session, generation, and state
-    and rewrites only the window (`correct_binding_window_fenced_in`). A record
-    that changed after the read is left for the next pass.
+    post-layout pass) preserves binding identity, harness, and lifecycle
+    evidence. It updates the window and advances the actor revision
+    (`correct_binding_window_fenced_in`). A record that changed after the read
+    is left for the next pass.
 - If a registered pane is stashed, sync must rescue it back into the visible `agent-doc` window rather than treating the stash copy as disposable.
 - An active actor pane outside the exact visible editor projection is
   detachable, not terminal layout ownership. Reconciliation moves it to

@@ -37,10 +37,9 @@
 //!   revision as well as the generation, so a same-generation owner transition
 //!   between decision and write is detected.
 //! - `bind_running_dispatch_target_in` is the route's bind of an already-running
-//!   pane before it dispatches (`#predispatchreadyoverwrite`): it writes no actor
-//!   record over a live owner's record for that pane (registry metadata only),
-//!   writes nothing when an owner holds another live pane, and otherwise binds
-//!   `Ready` fenced on the generation it decided against.
+//!   pane before it dispatches: it preserves the lifecycle of the matching
+//!   binding, updates its physical window when needed, and rejects competing
+//!   live ownership. New bindings project `Ready` through the generation fence.
 //! ## Agentic Contracts
 //! - Registry snapshot IO is not self-locking. Any read-modify-write cycle must
 //!   acquire `RegistryLock` first; prefer `tmux_router::with_registry` for safe
@@ -652,23 +651,20 @@ pub fn bind_dispatch_target_after_owner_launch_with_hook_in(
 /// (`#predispatchreadyoverwrite`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PreDispatchDispatchBind {
-    /// The actor record already binds this session to the pane in a live
-    /// lifecycle state (`Starting`, `Ready`, `Busy`, `WaitingInput`). No actor
-    /// record was written, so the owner's state, generation, and last
-    /// transition stand; only the registry metadata was refreshed.
+    /// The actor record already binds this session to the pane. The owner's
+    /// lifecycle and generation are preserved while window and registry
+    /// metadata are refreshed.
     OwnerStatePreserved {
         state: agent_doc_controller::actor::ActorState,
         generation: u64,
     },
-    /// No live owner held the binding (no record, a `Closed`/`Blocked` record
-    /// on this pane, a projection binding, or an owner whose pane is gone). The
-    /// pane was bound as `Ready`, compare-and-swapped on the generation the bind
-    /// decided against.
+    /// The pane was bound as `Ready` at a new generation, compare-and-swapped
+    /// on the actor revision the bind decided against.
     Bound { generations: OwnershipGeneration },
-    /// An owner (not a route/sync projection) holds the document on another
-    /// live pane in a non-`Closed` state. Nothing was written: binding this pane
-    /// would bump the generation over that owner and retire its supervisor.
+    /// A competing session is bound to this pane, or an owner (including a
+    /// starting-timeout latch) holds the document on another live pane.
     LiveOwnerElsewhere {
+        session_id: String,
         pane_id: String,
         generation: u64,
         state: agent_doc_controller::actor::ActorState,
@@ -685,14 +681,6 @@ enum PreDispatchBindDecision {
         generation: u64,
     },
     Bind(agent_doc_session_actor_io::BindingFence),
-}
-
-fn actor_state_is_live_owner(state: agent_doc_controller::actor::ActorState) -> bool {
-    use agent_doc_controller::actor::ActorState;
-    matches!(
-        state,
-        ActorState::Starting | ActorState::Ready | ActorState::Busy | ActorState::WaitingInput
-    )
 }
 
 fn decide_pre_dispatch_bind(
@@ -717,19 +705,23 @@ fn decide_pre_dispatch_bind(
         ));
     };
     let same_pane = record.pane_id == pane_id;
-    if same_pane && record.session_id == session_id && actor_state_is_live_owner(record.state) {
+    if same_pane && record.session_id == session_id {
         return Ok(PreDispatchBindDecision::Preserve {
             state: record.state,
             generation: record.generation,
         });
     }
-    if !same_pane
-        && record.state != ActorState::Closed
-        && !binding_projection_write(record)
-        && owner_pane_alive(&record.pane_id)
+    let starting_timeout_latched = record.state == ActorState::Blocked
+        && record.last_transition.reason
+            == agent_doc_controller::dispatch::STARTING_ACTOR_TIMEOUT_REASON;
+    if record.state != ActorState::Closed
+        && (same_pane
+            || ((!binding_projection_write(record) || starting_timeout_latched)
+                && owner_pane_alive(&record.pane_id)))
     {
         return Ok(PreDispatchBindDecision::Done(
             PreDispatchDispatchBind::LiveOwnerElsewhere {
+                session_id: record.session_id.clone(),
                 pane_id: record.pane_id.clone(),
                 generation: record.generation,
                 state: record.state,
@@ -741,7 +733,7 @@ fn decide_pre_dispatch_bind(
     Ok(PreDispatchBindDecision::Bind(
         agent_doc_session_actor_io::BindingFence {
             prior_generation: record.generation,
-            prior_names_pane: same_pane,
+            prior_names_pane: false,
             prior_revision: revision,
         },
     ))
@@ -759,14 +751,12 @@ fn decide_pre_dispatch_bind(
 /// and the controller's dispatch gate needs only the pane/session/generation
 /// binding. This bind decides from one read of the record:
 ///
-/// - record names this session and pane in a live state: writes no actor
-///   record and refreshes registry metadata only;
-/// - an owner holds another live pane (`owner_pane_alive`): writes nothing;
-/// - otherwise (no record, `Closed`/`Blocked` on this pane, a projection
-///   binding, or a gone owner pane): binds `Ready`, fenced on the generation and
-///   record revision it decided against; a commit in between, including a
-///   same-generation owner transition (`#syncbindingfence`), re-decides against
-///   the newer record.
+/// - the record names this session and pane: preserves its lifecycle, checks
+///   the actor revision, and refreshes physical window and registry metadata;
+/// - a different session is active on this pane, or an owner holds another
+///   live pane: writes nothing;
+/// - otherwise: binds `Ready` at a new generation. A commit after the
+///   decision read triggers a fresh decision against the newer record.
 #[allow(clippy::too_many_arguments)]
 pub fn bind_running_dispatch_target_in(
     base_dir: &Path,
@@ -774,7 +764,7 @@ pub fn bind_running_dispatch_target_in(
     pane_id: &str,
     file: &str,
     pid: u32,
-    window: &str,
+    window_of_target: &dyn Fn() -> String,
     cwd: &str,
     owner_pane_alive: &dyn Fn(&str) -> bool,
 ) -> Result<PreDispatchDispatchBind> {
@@ -784,7 +774,7 @@ pub fn bind_running_dispatch_target_in(
         pane_id,
         file,
         pid,
-        window,
+        window_of_target,
         cwd,
         owner_pane_alive,
         &mut || {},
@@ -802,7 +792,7 @@ pub fn bind_running_dispatch_target_with_hook_in(
     pane_id: &str,
     file: &str,
     pid: u32,
-    window: &str,
+    window_of_target: &dyn Fn() -> String,
     cwd: &str,
     owner_pane_alive: &dyn Fn(&str) -> bool,
     between_decision_and_write: &mut dyn FnMut(),
@@ -835,17 +825,29 @@ pub fn bind_running_dispatch_target_with_hook_in(
                 ),
                 PreDispatchBindDecision::Bind(fence) => (ActorBindingWrite::Fenced(fence), None),
             };
+            // A retry needs a new observation of the pane's physical window.
+            let window = window_of_target();
             between_decision_and_write();
             Ok(ActorGenerationDecision::Write {
                 authority: bind_write_authority(binding, record.as_ref(), revision),
-                write: (binding, preserved),
+                write: (binding, preserved, window),
             })
         },
-        &mut |_, (binding, preserved)| {
+        &mut |expected, (binding, preserved, window)| {
             let _lock = crate::registry_lock::acquire(
                 &session_registry_io::registry_path_in(base_dir),
                 "bind a running dispatch target",
             )?;
+            if preserved.is_some() {
+                agent_doc_session_actor_io::correct_binding_window_fenced_in(
+                    base_dir,
+                    &registry_key,
+                    *expected,
+                    window,
+                    "route",
+                    "pre_dispatch_window_refresh",
+                )?;
+            }
             let mut registry = session_registry_io::load_in(base_dir)?;
             let generations = register_full_internal_fenced(
                 base_dir,
@@ -2501,7 +2503,7 @@ mod tests {
             pane,
             file,
             4242,
-            "@1",
+            &|| "@1".to_string(),
             "/pre-dispatch/cwd",
             &|owner_pane| alive.iter().any(|pane| pane == owner_pane),
             hook,
@@ -2673,29 +2675,158 @@ mod tests {
     }
 
     #[test]
-    fn pre_dispatch_bind_rebinds_a_closed_record_on_the_pane() {
+    fn pre_dispatch_bind_preserves_a_closed_record_until_the_binding_changes() {
         let (dir, file) = post_launch_project();
         route_bind(dir.path(), "s", "%10", &file);
         owner_start(&file, "s", "%10", 2);
         supervisor_transition(dir.path(), &file, "%10", 2, ActorState::Closed);
+        let before = actor(dir.path(), &file);
 
         let outcome = pre_dispatch_bind(dir.path(), "s", "%10", &file, &["%10"], &mut || {});
 
-        assert!(
-            matches!(
-                &outcome,
-                PreDispatchDispatchBind::Bound { generations }
-                    if generations.prior_generation == 2 && generations.new_generation == 2
-            ),
-            "{outcome:?}"
+        assert_eq!(
+            outcome,
+            PreDispatchDispatchBind::OwnerStatePreserved {
+                state: ActorState::Closed,
+                generation: 2,
+            }
         );
-        assert_eq!(actor(dir.path(), &file).state, ActorState::Ready);
+        assert_eq!(actor(dir.path(), &file), before);
+
+        let rebound = pre_dispatch_bind(dir.path(), "next", "%10", &file, &["%10"], &mut || {});
+        assert_eq!(
+            rebound,
+            PreDispatchDispatchBind::Bound {
+                generations: OwnershipGeneration {
+                    prior_generation: 2,
+                    new_generation: 3,
+                },
+            }
+        );
+        let record = actor(dir.path(), &file);
+        assert_eq!(record.session_id, "next");
+        assert_eq!(record.state, ActorState::Ready);
     }
 
-    /// An owner `start_session` that commits between the bind's decision read
-    /// (a `Closed` record, which it would rebind `Ready`) and its write fails the
-    /// fenced write; the bind re-decides against the live `Starting` record and
-    /// preserves it instead of writing `Ready` over the restarted owner.
+    #[test]
+    fn pre_dispatch_bind_keeps_blocked_lifecycle_and_refreshes_the_moved_window() {
+        use agent_doc_controller::dispatch::STARTING_ACTOR_TIMEOUT_REASON;
+        for (caller, reason) in [
+            ("supervisor", "operator_cancelled"),
+            ("route", STARTING_ACTOR_TIMEOUT_REASON),
+        ] {
+            let (dir, file) = post_launch_project();
+            let root = dir.path();
+            route_bind(root, "s", "%10", &file);
+            owner_start(&file, "s", "%10", 2);
+            let (before, revision) = {
+                agent_doc_session_actor_io::transition_state_in(
+                    root,
+                    &file,
+                    "s",
+                    "%10",
+                    Some(2),
+                    ActorState::Blocked,
+                    caller,
+                    reason,
+                )
+                .unwrap();
+                agent_doc_session_actor_io::load_record_with_revision_in(root, &file).unwrap()
+            };
+            let outcome = bind_running_dispatch_target_in(
+                root,
+                "s",
+                "%10",
+                &file,
+                4242,
+                &|| "@5".to_string(),
+                "/pre-dispatch/cwd",
+                &|_| true,
+            )
+            .unwrap();
+
+            assert_eq!(
+                outcome,
+                PreDispatchDispatchBind::OwnerStatePreserved {
+                    state: ActorState::Blocked,
+                    generation: 2,
+                }
+            );
+            let (after, moved_revision) =
+                agent_doc_session_actor_io::load_record_with_revision_in(root, &file).unwrap();
+            let mut expected = before.unwrap();
+            expected.window_id = "@5".to_string();
+            assert_eq!(after, Some(expected));
+            assert_ne!(moved_revision, revision);
+            assert_eq!(registry_entry(root, &file).window, "@5");
+
+            let other_pane = pre_dispatch_bind(root, "s", "%11", &file, &["%10"], &mut || {});
+            assert!(matches!(
+                other_pane,
+                PreDispatchDispatchBind::LiveOwnerElsewhere {
+                    state: ActorState::Blocked,
+                    ..
+                }
+            ));
+        }
+    }
+
+    #[test]
+    fn pre_dispatch_bind_respects_another_live_session_on_the_same_pane() {
+        let (dir, file) = post_launch_project();
+        let root = dir.path();
+        route_bind(root, "s", "%10", &file);
+        let before = actor(root, &file);
+
+        let outcome = pre_dispatch_bind(root, "other", "%10", &file, &["%10"], &mut || {});
+
+        assert!(matches!(
+            outcome,
+            PreDispatchDispatchBind::LiveOwnerElsewhere { session_id, pane_id, .. }
+                if session_id == "s" && pane_id == "%10"
+        ));
+        assert_eq!(actor(root, &file), before);
+    }
+
+    #[test]
+    fn pre_dispatch_bind_reobserves_the_window_after_a_same_generation_race() {
+        let (dir, file) = post_launch_project();
+        let root = dir.path();
+        route_bind(root, "s", "%10", &file);
+        owner_start(&file, "s", "%10", 2);
+        let moved = std::cell::Cell::new(false);
+
+        let outcome = bind_running_dispatch_target_with_hook_in(
+            root,
+            "s",
+            "%10",
+            &file,
+            4242,
+            &|| if moved.get() { "@6" } else { "@5" }.to_string(),
+            "/pre-dispatch/cwd",
+            &|_| true,
+            &mut || {
+                if !moved.replace(true) {
+                    supervisor_transition(root, &file, "%10", 2, ActorState::Busy);
+                }
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            outcome,
+            PreDispatchDispatchBind::OwnerStatePreserved {
+                state: ActorState::Busy,
+                generation: 2,
+            }
+        );
+        let record = actor(root, &file);
+        assert_eq!(record.window_id, "@6");
+        assert_eq!(record.last_transition.reason, "turn_started");
+    }
+
+    /// The preserving bind revalidates a Closed observation after an owner
+    /// explicitly starts the next generation in the same pane.
     #[test]
     fn pre_dispatch_bind_preserves_an_owner_that_restarted_between_decision_and_write() {
         let (dir, file) = post_launch_project();
@@ -2832,6 +2963,7 @@ mod tests {
         assert_eq!(
             outcome,
             PreDispatchDispatchBind::LiveOwnerElsewhere {
+                session_id: "s".to_string(),
                 pane_id: "%7".to_string(),
                 generation: projected,
                 state: ActorState::Busy,

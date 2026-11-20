@@ -5,6 +5,7 @@ import com.github.btakita.agentdoc.shell.receipt.SHELL_SPI_VERSION
 import com.github.btakita.agentdoc.shell.receipt.ShellIdentity
 import com.github.btakita.agentdoc.split.FrontendImplementation
 import com.github.btakita.agentdoc.split.FrontendImplementationRelease
+import com.intellij.openapi.diagnostic.Logger
 import java.io.ByteArrayInputStream
 import java.lang.ref.ReferenceQueue
 import java.lang.ref.WeakReference
@@ -134,5 +135,19 @@ private class BackendFrontendImplClassLoader(
             if (resolve) resolveClass(loaded)
             return loaded
         }
+    }
+}
+
+/** Implementation-owned bridge served through [FrontendReleaseBridge] to the Fleet RPC shell. */
+internal class BackendFrontendReleaseBridge : FrontendReleaseBridge {
+    override fun current(): FrontendImplementationRelease? =
+        FrontendImplementationReleaseSource.current()?.takeIf { release ->
+            runCatching { BackendFrontendReleaseActivation.activate(release) }
+                .onFailure { LOG.warn("[frontend-impl] backend peer activation refused", it) }
+                .isSuccess
+        }
+
+    private companion object {
+        val LOG = Logger.getInstance(BackendFrontendReleaseBridge::class.java)
     }
 }

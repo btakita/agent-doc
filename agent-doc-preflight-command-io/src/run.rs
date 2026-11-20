@@ -421,11 +421,44 @@ pub fn run_with_options_to_writer(
     // disk hash), so an operator or agent edit mid-run still invalidates it.
     let state_db_io_before = agent_doc_sqlite::state_store::state_db_io_counters();
     let probe = options.probe;
+    let retry_options = options.clone();
     let mut opened_cycle_id = None;
     let result = agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
         run_with_options_to_writer_in_pass(file, options, writer, &mut opened_cycle_id)
     });
-    let result = if let Some(cycle_id) = opened_cycle_id.as_deref() {
+    let reconciled_address_effect = result
+        .as_ref()
+        .is_err_and(agent_doc_queue_io::address_effect::committed_effect_reconciled);
+    let (result, refused_cycle_released) =
+        close_cycle_after_refused_admission(file, opened_cycle_id.as_deref(), result);
+    let result = if reconciled_address_effect && refused_cycle_released {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "preflight_address_effect_reconciled_retry file={} attempts=1 duplicate_execution=false",
+                file.display()
+            ),
+        );
+        let mut retry_cycle_id = None;
+        let retry = agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
+            run_with_options_to_writer_in_pass(file, retry_options, writer, &mut retry_cycle_id)
+        });
+        close_cycle_after_refused_admission(file, retry_cycle_id.as_deref(), retry).0
+    } else {
+        result
+    };
+    if !probe {
+        log_admission_state_db_io(file, state_db_io_before, result.is_ok());
+    }
+    result
+}
+
+fn close_cycle_after_refused_admission(
+    file: &Path,
+    opened_cycle_id: Option<&str>,
+    result: Result<()>,
+) -> (Result<()>, bool) {
+    if let Some(cycle_id) = opened_cycle_id {
         // `#admissionrefusalclose`: once preflight opens its cycle, any later
         // error means no prompt contract reached the harness and therefore no
         // model response can legitimately target that newly-opened cycle. Do
@@ -434,7 +467,7 @@ pub fn run_with_options_to_writer(
         // turn-fenced; a capture, phase advance, rebind, or replacement cycle
         // wins and leaves the original error untouched.
         match result {
-            Ok(()) => Ok(()),
+            Ok(()) => (Ok(()), false),
             Err(error) => match cancel_cycle_opened_by_refused_admission(file, cycle_id) {
                 Ok(agent_doc_turn::repair::CancelOutcome::Abandoned) => {
                     agent_doc_ops_log_io::log_op(
@@ -444,24 +477,21 @@ pub fn run_with_options_to_writer(
                             file.display()
                         ),
                     );
-                    Err(error)
+                    (Err(error), true)
                 }
-                Ok(
-                    agent_doc_turn::repair::CancelOutcome::NoOpenCycle
-                    | agent_doc_turn::repair::CancelOutcome::Protected,
-                ) => Err(error),
-                Err(cleanup_error) => Err(error.context(format!(
-                    "preflight admission opened cycle `{cycle_id}`, and automatic exact-cycle cleanup failed: {cleanup_error:#}"
-                ))),
+                Ok(agent_doc_turn::repair::CancelOutcome::NoOpenCycle) => (Err(error), true),
+                Ok(agent_doc_turn::repair::CancelOutcome::Protected) => (Err(error), false),
+                Err(cleanup_error) => (
+                    Err(error.context(format!(
+                        "preflight admission opened cycle `{cycle_id}`, and automatic exact-cycle cleanup failed: {cleanup_error:#}"
+                    ))),
+                    false,
+                ),
             },
         }
     } else {
-        result
-    };
-    if !probe {
-        log_admission_state_db_io(file, state_db_io_before, result.is_ok());
+        (result, false)
     }
-    result
 }
 
 fn cancel_cycle_opened_by_refused_admission(

@@ -9,6 +9,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+use std::{error::Error, fmt};
 
 use agent_doc_queue::address_completion_proof::{
     AddressCompletion, AddressEffectFacts, AddressEffectGuard, AddressObservation, AddressSnapshot,
@@ -21,6 +22,35 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 static GITHUB: AtomicBool = AtomicBool::new(false);
+
+#[derive(Debug)]
+struct CommittedAddressEffectReconciled {
+    attempts: Vec<(String, String)>,
+}
+
+impl fmt::Display for CommittedAddressEffectReconciled {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "#addressproof: reconciled committed prior effect(s) {}; retry admission from the newly durable proof",
+            self.attempts
+                .iter()
+                .map(|(cycle, target)| format!("{cycle}:{target}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    }
+}
+
+impl Error for CommittedAddressEffectReconciled {}
+
+/// A before-observation was reconciled during admission. The selected prompt
+/// must not execute, but the now-durable proof permits one fresh queue read.
+pub fn committed_effect_reconciled(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<CommittedAddressEffectReconciled>()
+        .is_some()
+}
 
 /// Allow this process to read pull requests with `gh`.
 pub fn enable_github_observation() {
@@ -187,14 +217,10 @@ fn reserve_inline_execution(
         baselines.push((revision, target, baseline));
     }
     if !reconciled_prior_cycles.is_empty() {
-        anyhow::bail!(
-            "#addressproof: reconciled committed prior effect(s) {}; queue maintenance owns consumption before this prompt revision may be selected again",
-            reconciled_prior_cycles
-                .iter()
-                .map(|(cycle, target)| format!("{cycle}:{target}"))
-                .collect::<Vec<_>>()
-                .join(","),
-        );
+        return Err(CommittedAddressEffectReconciled {
+            attempts: reconciled_prior_cycles,
+        }
+        .into());
     }
     // The before receipts are a single admission cut. A failure before the
     // handoff exposes none of the prompts and leaves none with a false hold.
@@ -881,6 +907,7 @@ mod tests {
             |_| Some(after.clone()),
         )
         .unwrap_err();
+        assert!(committed_effect_reconciled(&error));
         assert!(
             error
                 .to_string()

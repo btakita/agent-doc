@@ -4544,6 +4544,22 @@ pub fn inspect_queue_state_from_content(
     diff: Option<&str>,
     content: String,
 ) -> Result<QueueState> {
+    inspect_queue_state_from_content_with_skipped(file, diff, content, &HashSet::new())
+}
+
+/// Queue admission from an authoritative cut with one-turn exact exclusions.
+///
+/// Reconciliation may prove that a previously admitted `#address` prompt
+/// already produced its remote effect before comprehensive queue maintenance
+/// has painted that row terminal in the editor. The immediate retry supplies
+/// only those proven queue ids here, allowing admission to reach the next real
+/// head without deleting the durable execution receipts.
+pub fn inspect_queue_state_from_content_with_skipped(
+    file: &Path,
+    diff: Option<&str>,
+    content: String,
+    retry_skipped_queue_head_ids: &HashSet<String>,
+) -> Result<QueueState> {
     let snapshot_content = agent_doc_snapshot_io::load_document_baseline(file)
         .ok()
         .flatten();
@@ -4755,12 +4771,13 @@ pub fn inspect_queue_state_from_content(
     } else {
         Vec::new()
     };
-    let skipped_queue_head_ids: std::collections::HashSet<String> =
+    let mut skipped_queue_head_ids: std::collections::HashSet<String> =
         agent_doc_cycle_state_io::load(file)
             .ok()
             .flatten()
             .map(|state| state.skipped_queue_head_ids.into_iter().collect())
             .unwrap_or_default();
+    skipped_queue_head_ids.extend(retry_skipped_queue_head_ids.iter().cloned());
     let projected_in_progress_queue_heads = load_projected_in_progress_queue_heads(file);
     let projection_entries = entries_without_out_of_loop_heads(
         &activation.entries_after,
@@ -13434,6 +13451,27 @@ mod tests {
                 .iter()
                 .any(|prompt| prompt.contains("#verify") || prompt.contains("#claimed")),
             "operator-verify and claimed rows are not currently relevant inline candidates"
+        );
+    }
+
+    #[test]
+    fn authoritative_queue_admission_skips_exact_reconciled_head_for_retry() {
+        let (_dir, doc) = sdk_queue_lifecycle_fixture("#claimed");
+        let authority = std::fs::read_to_string(&doc).unwrap();
+        let retry_skipped = HashSet::from(["plain".to_string()]);
+
+        let state =
+            inspect_queue_state_from_content_with_skipped(&doc, None, authority, &retry_skipped)
+                .unwrap();
+
+        assert!(
+            state.selected_queue_prompts.is_empty(),
+            "the proven prompt must not be selected again on the immediate retry: {:?}",
+            state.selected_queue_prompts,
+        );
+        assert_eq!(
+            state.queue_drainable_head_count, 1,
+            "the one-turn exclusion must not erase durable queue work before maintenance paints it terminal",
         );
     }
 

@@ -9,7 +9,7 @@ use agent_doc_preflight_io::checkpoint_baseline_content;
 use agent_doc_preflight_io::{
     PendingMaintenanceReport, PreflightResponseContract, QueueState, check_linked_docs,
     enforce_no_dropped_backlog, explicit_backlog_target_requirements, inspect_queue_state,
-    inspect_queue_state_from_content, read_and_truncate_claims, read_claims,
+    inspect_queue_state_from_content_with_skipped, read_and_truncate_claims, read_claims,
     resolve_pipeline_state, run_gate_verify, shadow_open_backlog_admission,
     sweep::{
         current_sweep_budget, current_sweep_owner, load_sweep_cursor,
@@ -40,6 +40,7 @@ use agent_doc_turn::drain_stall::{StallFacts, StallVerdict, classify_stall};
 use agent_doc_turn::op_log::OpsLogEvent;
 use agent_doc_workflow::session_cycle::{compute_user_intent_prompt_changes, derive_turn_scope};
 use anyhow::Context;
+use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
@@ -423,25 +424,43 @@ pub fn run_with_options_to_writer(
     let probe = options.probe;
     let retry_options = options.clone();
     let mut opened_cycle_id = None;
+    let retry_skipped_queue_head_ids = HashSet::new();
     let result = agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
-        run_with_options_to_writer_in_pass(file, options, writer, &mut opened_cycle_id)
+        run_with_options_to_writer_in_pass(
+            file,
+            options,
+            writer,
+            &mut opened_cycle_id,
+            &retry_skipped_queue_head_ids,
+        )
     });
-    let reconciled_address_effect = result
+    let reconciled_queue_head_ids = result
         .as_ref()
-        .is_err_and(agent_doc_queue_io::address_effect::committed_effect_reconciled);
+        .err()
+        .and_then(agent_doc_queue_io::address_effect::reconciled_effect_queue_head_ids)
+        .unwrap_or_default()
+        .into_iter()
+        .collect::<HashSet<_>>();
     let (result, refused_cycle_released) =
         close_cycle_after_refused_admission(file, opened_cycle_id.as_deref(), result);
-    let result = if reconciled_address_effect && refused_cycle_released {
+    let result = if !reconciled_queue_head_ids.is_empty() && refused_cycle_released {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "preflight_address_effect_reconciled_retry file={} attempts=1 duplicate_execution=false",
-                file.display()
+                "preflight_address_effect_reconciled_retry file={} attempts=1 skipped_ids={} duplicate_execution=false",
+                file.display(),
+                reconciled_queue_head_ids.len(),
             ),
         );
         let mut retry_cycle_id = None;
         let retry = agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
-            run_with_options_to_writer_in_pass(file, retry_options, writer, &mut retry_cycle_id)
+            run_with_options_to_writer_in_pass(
+                file,
+                retry_options,
+                writer,
+                &mut retry_cycle_id,
+                &reconciled_queue_head_ids,
+            )
         });
         close_cycle_after_refused_admission(file, retry_cycle_id.as_deref(), retry).0
     } else {
@@ -559,6 +578,7 @@ fn run_with_options_to_writer_in_pass(
     options: PreflightOptions,
     writer: &mut dyn Write,
     opened_cycle_id: &mut Option<String>,
+    retry_skipped_queue_head_ids: &HashSet<String>,
 ) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -1596,10 +1616,11 @@ fn run_with_options_to_writer_in_pass(
         // Claim filtering and current candidate relevance remain synchronous;
         // backlog mirroring, lifecycle painting, auto-strike and editor-native
         // persistence are a detached Effect.
-        inspect_queue_state_from_content(
+        inspect_queue_state_from_content_with_skipped(
             file,
             diff_result.as_deref(),
             queue_admission_content,
+            retry_skipped_queue_head_ids,
         )
         .unwrap_or_else(|error| {
             eprintln!(

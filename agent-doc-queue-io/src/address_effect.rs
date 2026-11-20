@@ -25,7 +25,7 @@ static GITHUB: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug)]
 struct CommittedAddressEffectReconciled {
-    attempts: Vec<(String, String)>,
+    attempts: Vec<(String, String, Option<String>)>,
 }
 
 impl fmt::Display for CommittedAddressEffectReconciled {
@@ -35,7 +35,7 @@ impl fmt::Display for CommittedAddressEffectReconciled {
             "#addressproof: reconciled committed prior effect(s) {}; retry admission from the newly durable proof",
             self.attempts
                 .iter()
-                .map(|(cycle, target)| format!("{cycle}:{target}"))
+                .map(|(cycle, target, _)| format!("{cycle}:{target}"))
                 .collect::<Vec<_>>()
                 .join(",")
         )
@@ -50,6 +50,20 @@ pub fn committed_effect_reconciled(error: &anyhow::Error) -> bool {
     error
         .downcast_ref::<CommittedAddressEffectReconciled>()
         .is_some()
+}
+
+/// Queue ids whose exact prior inline effects were proven during admission.
+///
+/// The caller may exclude these ids from one immediate admission retry. The
+/// durable before/proven receipts remain intact, so the exclusion advances the
+/// queue without turning the reconciled prompt into a fresh execution.
+pub fn reconciled_effect_queue_head_ids(error: &anyhow::Error) -> Option<Vec<String>> {
+    error
+        .downcast_ref::<CommittedAddressEffectReconciled>()?
+        .attempts
+        .iter()
+        .map(|(_, _, queue_head_id)| queue_head_id.clone())
+        .collect()
 }
 
 /// Allow this process to read pull requests with `gh`.
@@ -205,7 +219,11 @@ fn reserve_inline_execution(
                     judge_address_completion(&observation, None),
                     AddressCompletion::Proven(_)
                 ) {
-                    reconciled_prior_cycles.push((prior_cycle, target.key()));
+                    reconciled_prior_cycles.push((
+                        prior_cycle,
+                        target.key(),
+                        agent_doc_queue::queue_response::queue_prompt_done_id(revision),
+                    ));
                     continue;
                 }
             }
@@ -879,7 +897,7 @@ mod tests {
         std::fs::create_dir(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("task.md");
         std::fs::write(&file, "task").unwrap();
-        let item = "#address https://github.com/sample-org/sample-repo/pull/338";
+        let item = "#address https://github.com/sample-org/sample-repo/pull/338 [#q-reconciled]";
         let target = address_review_target(item).unwrap();
         let before = snapshot("12a0c93e", vec![]);
         reserve_inline_execution(
@@ -908,6 +926,10 @@ mod tests {
         )
         .unwrap_err();
         assert!(committed_effect_reconciled(&error));
+        assert_eq!(
+            reconciled_effect_queue_head_ids(&error),
+            Some(vec!["q-reconciled".to_string()]),
+        );
         assert!(
             error
                 .to_string()

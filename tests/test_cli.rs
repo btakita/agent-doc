@@ -6549,7 +6549,7 @@ fn test_agent_doc_model_tier_owns_context_usage_policy() {
     assert!(
         preflight_run_source
             .contains("resolve_current_preflight_document(file, \"preflight_queue_admission\")")
-            && preflight_run_source.contains("inspect_queue_state_from_content(")
+            && preflight_run_source.contains("inspect_queue_state_from_content_with_skipped(")
             && !preflight_run_source.contains("run_queue_maintenance_with_coin_gate_and_snapshot("),
         "preflight admission must remain a bounded read-only queue decision"
     );

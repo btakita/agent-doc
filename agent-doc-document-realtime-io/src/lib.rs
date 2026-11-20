@@ -14724,6 +14724,83 @@ mod tests {
     }
 
     #[test]
+    fn captured_replay_recovery_restores_response_whose_body_leaked_prompt_prefixes() {
+        let captured_response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: CLI-only validation for CLI releases\n\n",
+            "Opened the validation PR and preserved the required checks.\n\n",
+            "The exact merge candidate selected CLI and docs only.\n\n",
+            "[Owning checkout](/tmp/sdk)\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let baseline = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Validate CLI-only releases.\n",
+            "<!-- agent:boundary:old -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let leaked = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Validate CLI-only releases.\n\n",
+            "### Re: CLI-only validation for CLI releases\n\n",
+            "❯ Opened the validation PR and preserved the required checks.\n\n",
+            "❯ The exact merge candidate selected CLI and docs only.\n\n",
+            "❯ [Owning checkout](/tmp/sdk)\n",
+            "<!-- agent:boundary:latest -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let (_dir, file, _) = temp_doc(baseline);
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
+                .unwrap();
+        let response_sha = agent_doc_hash::content_hash(captured_response);
+        agent_doc_cycle_state_io::append_response_captured_body(
+            &file,
+            agent_doc_cycle_state_io::CapturedResponseFactInput {
+                cycle_id: &cycle.cycle_id,
+                capture_id: &cycle.cycle_id,
+                response_sha256: &response_sha,
+                response_body: captured_response,
+                intent_body: Some(captured_response),
+                mutation_plan_json: None,
+                file_hash: Some(&agent_doc_hash::content_hash(baseline)),
+                snapshot_hash: Some(&agent_doc_hash::content_hash(baseline)),
+                baseline_content: Some(baseline),
+            },
+        )
+        .unwrap();
+
+        let candidate = prepare_recoverable_response_replay_recovery_for_file(
+            &file,
+            leaked,
+            "test_prompt_prefix_leak",
+        )
+        .unwrap()
+        .expect("the durable capture should prove that the prefixed paragraphs are response body");
+
+        assert!(candidate.restores_interrupted_empty_shell, "{candidate:#?}");
+        assert!(candidate.content.contains("Opened the validation PR"));
+        assert!(
+            !candidate.content.contains("❯ Opened the validation PR"),
+            "{}",
+            candidate.content
+        );
+        assert!(
+            !candidate.content.contains("❯ The exact merge candidate"),
+            "{}",
+            candidate.content
+        );
+        assert!(
+            !candidate.content.contains("❯ [Owning checkout]"),
+            "{}",
+            candidate.content
+        );
+        assert!(candidate.content.contains("agent:boundary:latest"));
+    }
+
+    #[test]
     fn stranded_duplicate_response_heading_is_recoverable_before_integrity_gate() {
         let interrupted = concat!(
             "---\nagent_doc_format: template\n---\n\n",

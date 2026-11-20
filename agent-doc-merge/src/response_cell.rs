@@ -780,6 +780,45 @@ fn restore_interrupted_empty_response_shell(
     }
 
     let mut restored_lines = captured.lines.clone();
+    let mut restored_nodes = nodes.to_vec();
+
+    // A harness transcript leak can put `❯ ` in front of every captured body
+    // paragraph. The exchange parser then sees the response heading as an
+    // empty shell and the body as fresh operator prompts. Restoring the capture
+    // without removing that exact prompt-shaped replay leaves both copies in
+    // the document and the integrity gate still reports "prompt follows
+    // response heading".
+    //
+    // Remove only the complete contiguous tail whose non-empty lines all carry
+    // the leaked prefix and whose stripped bytes exactly equal the captured
+    // body. Any extra, missing, reordered, or edited operator text fails this
+    // proof and keeps the existing fail-closed behavior.
+    let captured_body = &captured_provenance[1..];
+    let mut prefixed_tail = Vec::new();
+    let mut tail_boundaries = Vec::new();
+    let mut tail_is_exact_prefixed_capture = !captured_body.is_empty();
+    for node in nodes.iter().skip(*shell_index + 1) {
+        for line in &node.lines {
+            if boundary_line(line) {
+                tail_boundaries.push(line.clone());
+                continue;
+            }
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Some(unprefixed) = trimmed.strip_prefix('❯').map(str::trim_start) else {
+                tail_is_exact_prefixed_capture = false;
+                break;
+            };
+            prefixed_tail.push(unprefixed.to_string());
+        }
+        if !tail_is_exact_prefixed_capture {
+            break;
+        }
+    }
+    tail_is_exact_prefixed_capture &= prefixed_tail == captured_body;
+
     restored_lines.extend(
         shell
             .lines
@@ -787,7 +826,10 @@ fn restore_interrupted_empty_response_shell(
             .filter(|line| boundary_line(line))
             .cloned(),
     );
-    let mut restored_nodes = nodes.to_vec();
+    if tail_is_exact_prefixed_capture {
+        restored_lines.extend(tail_boundaries);
+        restored_nodes.truncate(*shell_index + 1);
+    }
     restored_nodes[*shell_index].lines = restored_lines;
     let restored_exchange = render_exchange_nodes(&restored_nodes);
     Some(exchange.replace_content(doc, &restored_exchange))

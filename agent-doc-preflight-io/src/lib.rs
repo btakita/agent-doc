@@ -14202,13 +14202,18 @@ agent_doc_write: crdt\n\
             .unwrap_or_else(|| panic!("issues loop missing:\n{updated}"));
         assert_eq!(
             without_admitted_queue_ids(issues),
-            "- 🟡 [#subagent:layout_liveverify#2] do [#layout]\n\
-             - 📥 We need to work on making agent-doc easy to onboard.\n",
+            concat!(
+                "- 🟡 [#subagent:layout_liveverify#2] do [#layout]\n",
+                "  > **Duplicate #layout · 2 of 2:** claim subagent:layout_liveverify#1 is held here; this occurrence owns the dispatch. ▫️\n",
+                "- 📥 We need to work on making agent-doc easy to onboard.\n",
+            ),
             "{updated}"
         );
         assert!(
             without_admitted_queue_ids(&updated)
-                .contains("- 🟡 [#subagent:layout_liveverify#2] do [#layout]\n- "),
+                .contains(
+                    "- ### 🟡 [#subagent:layout_liveverify#2] do [#layout]\n  > **Duplicate #layout · 1 of 2:** claim subagent:layout_liveverify#1 is held by occurrence 2 of 2; this occurrence is fenced from a second dispatch. ▫️\n- "
+                ),
             "main shows the same attempt:\n{updated}"
         );
     }

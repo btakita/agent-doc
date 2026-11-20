@@ -685,9 +685,7 @@ fn explicit_queue_row_identity(body: &str) -> Option<String> {
     let mut remaining = body;
     while let Some(start) = remaining.find("[#") {
         let after_start = &remaining[start + 2..];
-        let Some(end) = after_start.find(']') else {
-            return None;
-        };
+        let end = after_start.find(']')?;
         let identity = &after_start[..end];
         let attempt_id = identity
             .rsplit_once('#')

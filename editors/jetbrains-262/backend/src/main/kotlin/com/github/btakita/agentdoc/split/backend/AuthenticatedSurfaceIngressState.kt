@@ -36,6 +36,17 @@ import kotlinx.coroutines.sync.withLock
 /** The `SurfaceIngressFactory` the implementation generation serves (`AgentDocImplGeneration`). */
 internal class ControllerSurfaceIngressFactory : SurfaceIngressFactory {
     override fun create(project: Project): SurfaceIngress = ControllerSurfaceIngress(project)
+
+    override fun currentFrontendRelease() =
+        FrontendImplementationReleaseSource.current()?.takeIf { release ->
+            runCatching { BackendFrontendReleaseActivation.activate(release) }
+                .onFailure { LOG.warn("[frontend-impl] backend peer activation refused", it) }
+                .isSuccess
+        }
+
+    private companion object {
+        val LOG = Logger.getInstance(ControllerSurfaceIngressFactory::class.java)
+    }
 }
 
 /** One project's ingress: the controller publisher and layout forwarder behind the lease state. */

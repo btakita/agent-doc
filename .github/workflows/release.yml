@@ -304,6 +304,27 @@ jobs:
           cp "editors/jetbrains-262/build/distributions/agent-doc-jetbrains-263-$modern_version.zip" editor-packages/
           ls -la editor-packages
 
+      - name: Sign restart-free JetBrains frontend release packages
+        shell: bash
+        env:
+          FRONTEND_RELEASE_PRIVATE_KEY: ${{ secrets.JETBRAINS_FRONTEND_RELEASE_ED25519_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$FRONTEND_RELEASE_PRIVATE_KEY" ]; then
+            echo "::warning::JETBRAINS_FRONTEND_RELEASE_ED25519_PRIVATE_KEY is missing; restart-free frontend generations will remain disabled for this release"
+            exit 0
+          fi
+          umask 077
+          key_file=$(mktemp)
+          trap 'rm -f "$key_file"' EXIT
+          printf '%s\n' "$FRONTEND_RELEASE_PRIVATE_KEY" > "$key_file"
+          for package in editor-packages/agent-doc-jetbrains-262-*.zip editor-packages/agent-doc-jetbrains-263-*.zip; do
+            scripts/sign-jetbrains-frontend-release.sh "$key_file" "$package" "$package.sig"
+          done
+          openssl pkey -in "$key_file" -pubout -outform DER 2>/dev/null |
+            base64 -w0 > editor-packages/jetbrains-frontend-release-ed25519.pub
+          printf '\n' >> editor-packages/jetbrains-frontend-release-ed25519.pub
+
       # JetBrains' simple custom-repository format allows a plugin ID only once
       # per listing. Publish one stable feed URL per compatibility range (served
       # from `releases/latest/download/`); each listing pins its ZIP to THIS tag

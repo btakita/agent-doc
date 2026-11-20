@@ -162,6 +162,22 @@ class AuthenticatedSurfaceIngressStateTest {
     }
 
     @Test
+    fun ingressCreatedBeforeBackendPeerActivationUsesTheLiveDigestAndEpoch() = runBlocking {
+        var backend = ActivationReceipt.shellOnly(ActivationReceipt.ROLE_BACKEND)
+        val state = AuthenticatedSurfaceIngressState(
+            RecordingPublisher(),
+            backendActivationReceiptProvider = { backend },
+        )
+        val lease = state.open("client-a", "frontend-a")
+
+        backend = backendActivation
+        val paired = snapshot("frontend-a", 1).copy(activationReceipt = frontendActivation.encode())
+
+        assertEquals(SurfaceIngressStatus.ACCEPTED, state.publish("client-a", lease, paired).status)
+        assertEquals(mapOf("client-a" to frontendActivation), state.frontendActivationReceipts())
+    }
+
+    @Test
     fun mismatchedReceiptWithdrawsPublishedAuthorityUntilTheNextConnection() = runBlocking {
         val publisher = RecordingPublisher()
         val forwarder = RecordingForwarder()

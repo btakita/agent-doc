@@ -2,9 +2,9 @@
 
 package com.github.btakita.agentdoc.split.frontend
 
-import com.github.btakita.agentdoc.shell.receipt.ActivationReceipt
 import com.github.btakita.agentdoc.split.FrontendSurface
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
+import com.github.btakita.agentdoc.split.FrontendImplementationRelease
 import com.github.btakita.agentdoc.split.FrontendPresentationCapability
 import com.github.btakita.agentdoc.split.FrontendPresentationReceipt
 import com.github.btakita.agentdoc.split.FrontendPresentationReceiptOutcome
@@ -33,6 +33,7 @@ import fleet.rpc.client.durable
 import java.awt.AWTEvent
 import java.awt.Toolkit
 import java.awt.event.AWTEventListener
+import java.net.URI
 import java.util.IdentityHashMap
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
@@ -90,7 +91,45 @@ class FrontendSurfaceSnapshotService(
                 maintainIngress()
             }
         }
+        coroutineScope.launch {
+            pollFrontendImplementationReleases()
+        }
         requestCapture()
+    }
+
+    private suspend fun pollFrontendImplementationReleases() {
+        while (true) {
+            try {
+                SurfaceSnapshotRpcApi.getInstance().frontendImplementationRelease()?.let { release ->
+                    val active = FrontendReleaseActivation.receipt()
+                    if (active.implSha256 != release.implSha256 || active.epoch != release.epoch) {
+                        when (val outcome = activateFrontendImplementationRelease(release)) {
+                            is FrontendActivationOutcome.Activated -> {
+                                LOG.info(
+                                    "[frontend-impl] activated digest=${outcome.receipt.implSha256} " +
+                                        "epoch=${outcome.receipt.epoch}",
+                                )
+                                requestCapture()
+                            }
+                            is FrontendActivationOutcome.Refused ->
+                                LOG.warn("[frontend-impl] refused: ${outcome.reason}")
+                            is FrontendActivationOutcome.RestartRequired ->
+                                LOG.warn("[frontend-impl] restart required: ${outcome.reason}")
+                            is FrontendActivationOutcome.RolledBack ->
+                                LOG.warn("[frontend-impl] rolled back: ${outcome.reason}")
+                        }
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                LOG.info(
+                    "[frontend-impl] backend release candidate unavailable " +
+                        "(${failure.javaClass.simpleName}: ${failure.message})",
+                )
+            }
+            delay(FRONTEND_IMPLEMENTATION_POLL_MS)
+        }
     }
 
     /**
@@ -282,6 +321,7 @@ class FrontendSurfaceSnapshotService(
 
 /** Intentional event-burst quiet window before the next authoritative snapshot capture. */
 internal const val FRONTEND_CAPTURE_DEBOUNCE_MS = 75L
+internal const val FRONTEND_IMPLEMENTATION_POLL_MS = 30_000L
 
 /** Hang guard for first-lease schema negotiation; authority is already pending during this wait. */
 internal const val FRONTEND_SCHEMA_NEGOTIATION_TIMEOUT_MS = 5_000L
@@ -318,18 +358,27 @@ internal suspend fun maintainFrontendIngress(
  * The snapshot schema to publish, from the backend's advertised newest schema (null when the
  * backend predates negotiation). Never above what this frontend writes, never below schema 1.
  */
-/**
- * GH #339 R1: this JVM's frontend activation receipt. The frontend is shell-only
- * (`SHELL_ONLY`), so it reports no implementation generation; the line is logged once per JVM
- * and travels to the backend in every schema-5 snapshot.
- */
+/** This JVM's current frontend activation receipt, published in every schema-5 snapshot. */
 internal object FrontendActivationReceipt {
-    val line: String by lazy {
-        ActivationReceipt.shellOnly(ActivationReceipt.ROLE_FRONTEND).encode().also { receipt ->
-            Logger.getInstance(FrontendActivationReceipt::class.java).info("[shell] $receipt")
-        }
-    }
+    val line: String get() = FrontendReleaseActivation.receipt().encode()
 }
+
+internal fun activateFrontendImplementationRelease(
+    release: FrontendImplementationRelease,
+): FrontendActivationOutcome = FrontendReleaseActivation.activate(
+    request = FrontendReleaseRequest(
+        releaseVersion = release.releaseVersion,
+        packageUrl = URI(release.packageUrl),
+        signatureUrl = URI(release.signatureUrl),
+        implEntry = release.implEntry,
+        implSha256 = release.implSha256,
+        shellDigest = release.shellDigest,
+        spiVersion = release.spiVersion,
+        epoch = release.epoch,
+    ),
+    pluginZip = release.packageBytes,
+    detachedSignature = release.signatureBytes,
+)
 
 internal fun negotiatedSnapshotSchema(backendOffered: Int?): Int =
     (backendOffered ?: LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION)

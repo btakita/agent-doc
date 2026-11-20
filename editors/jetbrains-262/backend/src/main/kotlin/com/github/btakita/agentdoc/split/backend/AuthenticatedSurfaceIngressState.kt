@@ -45,6 +45,7 @@ private class ControllerSurfaceIngress(project: Project) : SurfaceIngress {
         ControllerSurfaceSnapshotPublisher(),
         layoutForwarder,
         backendActivationReceipt = ShellGenerationHost.getInstance().receipt(),
+        backendActivationReceiptProvider = BackendFrontendReleaseActivation::receipt,
     )
 
     override val frontendAuthorityActive: StateFlow<Boolean> get() = state.frontendAuthorityActive
@@ -94,6 +95,8 @@ internal class AuthenticatedSurfaceIngressState(
     /** The shell creates this ingress for one backend generation. A swap must replace the ingress. */
     private val backendActivationReceipt: ActivationReceipt =
         ActivationReceipt.shellOnly(ActivationReceipt.ROLE_BACKEND),
+    /** R2 may advance the backend peer after this platform-held ingress was created. */
+    private val backendActivationReceiptProvider: () -> ActivationReceipt = { backendActivationReceipt },
     /** GH #339 R1: called when a connection reports a new frontend activation receipt. */
     private val onFrontendReceipt: (clientId: String, connectionGeneration: Long, receipt: ActivationReceipt) -> Unit =
         ::logFrontendReceipt,
@@ -215,7 +218,7 @@ internal class AuthenticatedSurfaceIngressState(
     }
 
     private fun admitsFrontendReceipt(current: ConnectionState, receipt: ActivationReceipt?): Boolean {
-        val backend = backendActivationReceipt
+        val backend = backendActivationReceiptProvider()
         if (backend.implSha256 == null && backend.epoch == 0L) {
             // Legacy snapshots and a shell-only frontend remain valid in R1.
             return receipt == null || (receipt.implSha256 == null && receipt.epoch == 0L)

@@ -36,6 +36,7 @@ dependencyResolutionManagement {
 
 include("shared")
 include("frontend")
+include("frontend-impl")
 include("backend")
 
 // CI normally materializes the pinned release in mavenLocal. An explicit

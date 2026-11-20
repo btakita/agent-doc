@@ -368,6 +368,16 @@ fn find_asset<'a>(release: &'a Value, prefix: &str, ext: &str) -> Result<Release
     bail!("No {prefix}*.{ext} asset found in latest release");
 }
 
+fn find_asset_named<'a>(release: &'a Value, name: &str) -> Result<ReleaseAsset<'a>> {
+    release["assets"]
+        .as_array()
+        .context("No assets in release")?
+        .iter()
+        .find(|asset| asset["name"].as_str() == Some(name))
+        .context("release asset is absent")
+        .and_then(read_asset)
+}
+
 fn has_asset(release: &Value, prefix: &str, ext: &str) -> bool {
     find_asset(release, prefix, ext).is_ok()
 }
@@ -930,6 +940,35 @@ fn install_jetbrains_into(release: &Value, target_dir: &Path) -> Result<Jetbrain
 
     let tmp = download_to_temp(&asset)?;
     verify_editor_package(release, &asset, tmp.path())?;
+
+    if matches!(
+        package_range,
+        JetbrainsPackageRange::Modular262 | JetbrainsPackageRange::Modular263
+    ) {
+        let signature_name = format!("{}.sig", asset.name);
+        match find_asset_named(release, &signature_name) {
+            Ok(signature_asset) => {
+                let signature = download_to_temp(&signature_asset)?;
+                let epoch = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .context("system clock predates the Unix epoch")?
+                    .as_millis()
+                    .try_into()
+                    .context("frontend release epoch does not fit u64")?;
+                write_frontend_release_handoff(
+                    tmp.path(),
+                    signature.path(),
+                    target_dir,
+                    asset.url,
+                    signature_asset.url,
+                    epoch,
+                )?;
+            }
+            Err(_) => eprintln!(
+                "Warning: {signature_name} is absent; restart-free frontend activation remains disabled for this release."
+            ),
+        }
+    }
 
     let expected_version = jetbrains_zip_plugin_version(tmp.path())?;
     // Versions are compared only within one compatibility line: a classic
@@ -3109,6 +3148,116 @@ const JETBRAINS_INSTALL_WORK_DIR: &str = agent_doc_fs::plugin_jar::JETBRAINS_INS
 const JETBRAINS_PLUGIN_DIR: &str = "agent-doc-jetbrains";
 const JETBRAINS_MODULAR_PLUGIN_DIR: &str = "agent-doc-jetbrains-262";
 const JETBRAINS_MODERN_PLUGIN_DIR: &str = "agent-doc-jetbrains-263";
+const JETBRAINS_FRONTEND_RELEASE_DIR: &str = ".agent-doc-frontend-release";
+
+struct FrontendReleaseMetadata {
+    version: String,
+    impl_entry: String,
+    impl_sha256: String,
+    shell_digest: String,
+    spi_version: String,
+}
+
+fn jar_manifest_field(bytes: &[u8], field: &str) -> Result<String> {
+    let mut jar =
+        zip::ZipArchive::new(io::Cursor::new(bytes)).context("read implementation JAR")?;
+    let mut manifest = jar
+        .by_name("META-INF/MANIFEST.MF")
+        .context("implementation JAR has no manifest")?;
+    let mut content = String::new();
+    manifest.read_to_string(&mut content)?;
+    content
+        .lines()
+        .filter_map(|line| line.split_once(':'))
+        .find(|(name, _)| name.eq_ignore_ascii_case(field))
+        .map(|(_, value)| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .with_context(|| format!("implementation manifest has no {field}"))
+}
+
+fn frontend_release_metadata(zip_path: &Path) -> Result<FrontendReleaseMetadata> {
+    let file = fs::File::open(zip_path).context("open modular JetBrains package")?;
+    let mut archive = zip::ZipArchive::new(file).context("read modular JetBrains package")?;
+    let mut implementation: Option<(String, Vec<u8>)> = None;
+    let mut shared: Option<Vec<u8>> = None;
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index)?;
+        let name = entry.name().to_string();
+        if name.contains("/impl/") && name.ends_with(".jar") {
+            if implementation.is_some() {
+                bail!("modular JetBrains package contains more than one impl/*.jar");
+            }
+            let relative = name.split_once('/').map(|(_, path)| path).unwrap_or(&name);
+            let mut bytes = Vec::new();
+            entry.read_to_end(&mut bytes)?;
+            implementation = Some((relative.to_string(), bytes));
+        } else if name.ends_with("/lib/modules/agent.doc.shared.jar") {
+            let mut bytes = Vec::new();
+            entry.read_to_end(&mut bytes)?;
+            shared = Some(bytes);
+        }
+    }
+    let (impl_entry, impl_bytes) = implementation.context("modular package has no impl/*.jar")?;
+    let version = jar_manifest_field(&impl_bytes, "Agent-Doc-Impl-Version")?;
+    let spi_version = jar_manifest_field(&impl_bytes, "Agent-Doc-Shell-Spi-Version")?;
+    let mut shared = zip::ZipArchive::new(io::Cursor::new(
+        shared.context("modular package has no agent.doc.shared.jar")?,
+    ))?;
+    let mut identity = shared
+        .by_name("com/github/btakita/agentdoc/shell/receipt/shell-identity.properties")
+        .context("shared module has no shell identity")?;
+    let mut identity_text = String::new();
+    identity.read_to_string(&mut identity_text)?;
+    let shell_digest = identity_text
+        .lines()
+        .find_map(|line| line.strip_prefix("shell_digest="))
+        .map(str::to_string)
+        .context("shared module shell identity has no shell_digest")?;
+    Ok(FrontendReleaseMetadata {
+        version,
+        impl_entry,
+        impl_sha256: agent_doc_hash::bytes_hash(&impl_bytes),
+        shell_digest,
+        spi_version,
+    })
+}
+
+fn write_frontend_release_handoff(
+    zip_path: &Path,
+    signature_path: &Path,
+    target_dir: &Path,
+    package_url: &str,
+    signature_url: &str,
+    epoch: u64,
+) -> Result<()> {
+    let metadata = frontend_release_metadata(zip_path)?;
+    let handoff = target_dir.join(JETBRAINS_FRONTEND_RELEASE_DIR);
+    fs::create_dir_all(&handoff)
+        .with_context(|| format!("create frontend release handoff {}", handoff.display()))?;
+    let package_file = format!("plugin-{}.zip", metadata.impl_sha256);
+    let signature_file = format!("plugin-{}.zip.sig", metadata.impl_sha256);
+    fs::copy(zip_path, handoff.join(&package_file)).context("copy frontend release package")?;
+    fs::copy(signature_path, handoff.join(&signature_file))
+        .context("copy frontend release signature")?;
+    let manifest = format!(
+        "release_version={}\npackage_url={}\nsignature_url={}\nimpl_entry={}\nimpl_sha256={}\nshell_digest={}\nspi_version={}\nepoch={}\npackage_file={}\nsignature_file={}\n",
+        metadata.version,
+        package_url,
+        signature_url,
+        metadata.impl_entry,
+        metadata.impl_sha256,
+        metadata.shell_digest,
+        metadata.spi_version,
+        epoch,
+        package_file,
+        signature_file,
+    );
+    let temporary = handoff.join(format!("release.properties.{epoch}.tmp"));
+    fs::write(&temporary, manifest).context("write frontend release handoff")?;
+    fs::rename(&temporary, handoff.join("release.properties"))
+        .context("publish frontend release handoff")?;
+    Ok(())
+}
 
 fn jetbrains_plugin_jar_version(file_name: &str) -> Option<String> {
     [
@@ -4938,6 +5087,94 @@ mod tests {
             .unwrap();
         archive.write_all(b"backend").unwrap();
         archive.finish().unwrap();
+    }
+
+    fn write_test_frontend_release_zip(path: &Path, version: &str) -> Vec<u8> {
+        fn jar(entries: &[(&str, &[u8])]) -> Vec<u8> {
+            let mut output = std::io::Cursor::new(Vec::new());
+            {
+                let mut archive = zip::ZipWriter::new(&mut output);
+                for (name, bytes) in entries {
+                    archive
+                        .start_file(*name, zip::write::SimpleFileOptions::default())
+                        .unwrap();
+                    archive.write_all(bytes).unwrap();
+                }
+                archive.finish().unwrap();
+            }
+            output.into_inner()
+        }
+        let manifest = format!(
+            "Manifest-Version: 1.0\nAgent-Doc-Impl-Version: {version}\nAgent-Doc-Shell-Spi-Version: 1\n\n"
+        );
+        let implementation = jar(&[
+            ("META-INF/MANIFEST.MF", manifest.as_bytes()),
+            (
+                "com/github/btakita/agentdoc/impl/frontend/Fixture.class",
+                b"fixture",
+            ),
+        ]);
+        let shell_digest = "c".repeat(64);
+        let identity = format!("shell_digest={shell_digest}\n");
+        let shared = jar(&[(
+            "com/github/btakita/agentdoc/shell/receipt/shell-identity.properties",
+            identity.as_bytes(),
+        )]);
+        let file = fs::File::create(path).unwrap();
+        let mut archive = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        archive
+            .start_file(
+                format!("agent-doc-jetbrains-262/impl/agent-doc-frontend-impl-{version}.jar"),
+                options,
+            )
+            .unwrap();
+        archive.write_all(&implementation).unwrap();
+        archive
+            .start_file(
+                "agent-doc-jetbrains-262/lib/modules/agent.doc.shared.jar",
+                options,
+            )
+            .unwrap();
+        archive.write_all(&shared).unwrap();
+        archive.finish().unwrap();
+        implementation
+    }
+
+    #[test]
+    fn modular_release_handoff_pins_the_exact_impl_digest_and_epoch() {
+        let temporary = TempDir::new().unwrap();
+        let package = temporary.path().join("agent-doc-jetbrains-262-0.2.900.zip");
+        let implementation = write_test_frontend_release_zip(&package, "0.2.900");
+        let signature = temporary.path().join("plugin.zip.sig");
+        fs::write(&signature, b"detached signature").unwrap();
+        let plugins = temporary.path().join("plugins");
+
+        super::write_frontend_release_handoff(
+            &package,
+            &signature,
+            &plugins,
+            "https://example.invalid/plugin.zip",
+            "https://example.invalid/plugin.zip.sig",
+            77,
+        )
+        .unwrap();
+
+        let handoff = plugins.join(super::JETBRAINS_FRONTEND_RELEASE_DIR);
+        let manifest = fs::read_to_string(handoff.join("release.properties")).unwrap();
+        assert!(manifest.contains("release_version=0.2.900\n"), "{manifest}");
+        assert!(
+            manifest.contains("impl_entry=impl/agent-doc-frontend-impl-0.2.900.jar\n"),
+            "{manifest}"
+        );
+        let digest = agent_doc_hash::bytes_hash(&implementation);
+        assert!(manifest.contains(&format!("impl_sha256={digest}\n")));
+        assert!(manifest.contains(&format!("shell_digest={}\n", "c".repeat(64))));
+        assert!(manifest.contains("epoch=77\n"), "{manifest}");
+        assert_eq!(
+            fs::read(handoff.join(format!("plugin-{digest}.zip.sig"))).unwrap(),
+            b"detached signature"
+        );
     }
 
     fn write_test_modern_jetbrains_zip(path: &std::path::Path, version: &str, plugin: &[u8]) {

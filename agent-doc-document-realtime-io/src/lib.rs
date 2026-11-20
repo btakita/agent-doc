@@ -11656,6 +11656,41 @@ fn observe_retained_write_settlement(file: &Path, source: &str) -> RetainedWrite
         return settlement;
     };
 
+    // Exact target materialization is the strongest settlement proof and does
+    // not depend on semantic response/delta evidence. Resolve the two content
+    // planes before constructing that evidence: `intent_added_lines` is a full
+    // expected->target comparison and became the dominant session-check cost on
+    // large, long-lived documents even when both planes already held the exact
+    // retained target (`#retainedexacttargetfastpath`).
+    let authority_content = try_resolve_current_document_content(file, source);
+    let disk_content = peek_disk_document_content(file, source);
+    let exact_target_materialized = authority_content
+        .as_ref()
+        .ok()
+        .zip(disk_content.as_ref().ok())
+        .is_some_and(|(authority, disk)| {
+            agent_doc_hash::content_hash(authority) == pending.target_hash
+                && agent_doc_hash::content_hash(disk) == pending.target_hash
+        });
+    if exact_target_materialized {
+        settlement.observe_pending(Some(RetainedIntentFacts {
+            intent_id: pending.intent_id.clone(),
+            target_hash: pending.target_hash.clone(),
+            reason: pending.reason.clone(),
+            source: pending.source.clone(),
+            superseding_stage: None,
+            operator_superseding_hash: None,
+            // Exact target hashes decide the transition before either field is
+            // consulted; keep the unused semantic observations conservative.
+            carries_response_payload: false,
+            carries_content_delta: false,
+            closeout_committed: false,
+        }));
+        settlement.observe_authority(observe_plane(authority_content, None, &[]));
+        settlement.observe_disk(observe_plane(disk_content, None, &[]));
+        return settlement;
+    }
+
     let captured_response = projected_captured_response(file);
     // The intent carries a response payload only if its own target actually
     // contains that response. A delivery-only projection has nothing that can
@@ -11690,18 +11725,10 @@ fn observe_retained_write_settlement(file: &Path, source: &str) -> RetainedWrite
             .flatten()
             .is_some_and(|state| state.phase == agent_doc_turn::CyclePhase::Committed),
     }));
-    settlement.observe_authority(observe_plane(
-        try_resolve_current_document_content(file, source),
-        payload,
-        &added_lines,
-    ));
+    settlement.observe_authority(observe_plane(authority_content, payload, &added_lines));
     // Observation must not claim authority: `peek_disk_document_content` reads
     // the same bytes without recording a disk-replica authority claim.
-    settlement.observe_disk(observe_plane(
-        peek_disk_document_content(file, source),
-        payload,
-        &added_lines,
-    ));
+    settlement.observe_disk(observe_plane(disk_content, payload, &added_lines));
     settlement
 }
 

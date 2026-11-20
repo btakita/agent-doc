@@ -373,11 +373,51 @@ fn append_archived_cell(archive: &mut String, response_id: &str, anchor_marker: 
 /// checksum is any one of them, matching [`verify_entry_in_archive`].
 fn archive_response_checksums(archive: &str) -> BTreeMap<String, BTreeSet<String>> {
     let mut checksums = BTreeMap::<String, BTreeSet<String>>::new();
-    for (response_id, body) in response_nodes(archive) {
-        checksums
-            .entry(response_id)
-            .or_default()
-            .insert(agent_doc_hash::content_hash(&body));
+    const LOCATOR: &str = "❯ Archived response locator ";
+    let starts = archive
+        .match_indices(LOCATOR)
+        .filter_map(|(start, _)| {
+            (start == 0 || archive.as_bytes().get(start - 1) == Some(&b'\n')).then_some(start)
+        })
+        .collect::<Vec<_>>();
+    let mut record = |scope: &str| {
+        for (response_id, body) in response_nodes(scope) {
+            checksums
+                .entry(response_id)
+                .or_default()
+                .insert(agent_doc_hash::content_hash(&body));
+        }
+    };
+    if starts.is_empty() {
+        record(archive);
+        return checksums;
+    }
+    // The archive is append-only and each response cell is framed by a
+    // prompt-shaped locator. Parse one frame at a time instead of feeding the
+    // exchange parser thousands of nodes in one growing scope; this preserves
+    // full-index checksum validation while making the scan streaming/linear
+    // (`#archiveframedstreamverify`).
+    record(&archive[..starts[0]]);
+    let locator_id = |start: usize| {
+        let value = &archive[start + LOCATOR.len()..];
+        value.lines().next().unwrap_or_default()
+    };
+    let mut index = 0usize;
+    while index < starts.len() {
+        let start = starts[index];
+        // Historical recovery could append several prompt/response revisions
+        // behind the same locator before the terminal response-id marker. The
+        // exchange parser resolves that marker across the whole same-locator
+        // run, so keep such a run together while still streaming independent
+        // archive cells (`#archiveframedstreamverify`).
+        let id = locator_id(start);
+        let mut next = index + 1;
+        while next < starts.len() && locator_id(starts[next]) == id {
+            next += 1;
+        }
+        let end = starts.get(next).copied().unwrap_or(archive.len());
+        record(&archive[start..end]);
+        index = next;
     }
     checksums
 }
@@ -2774,6 +2814,25 @@ mod tests {
             archive
         );
         assert_eq!(again.entries, write.entries);
+    }
+
+    #[test]
+    fn framed_archive_scan_preserves_repeated_locator_response_boundaries() {
+        let archive = format!(
+            "❯ Archived response locator {DUP_ID}\n\n<a id=\"r-0a0b0c0d0e0f\"></a>\n### Re: recovered inline queue response\n\nfirst revision\n\n**Response [#r-111111111111]**\n\n\
+❯ Archived response locator {DUP_ID}\n\n### Re: recovered inline queue response\n\nterminal revision\n\n**Response {DUP_ID}**\n"
+        );
+        let expected = response_nodes(&archive).into_iter().fold(
+            BTreeMap::<String, BTreeSet<String>>::new(),
+            |mut checksums, (response_id, body)| {
+                checksums
+                    .entry(response_id)
+                    .or_default()
+                    .insert(agent_doc_hash::content_hash(&body));
+                checksums
+            },
+        );
+        assert_eq!(archive_response_checksums(&archive), expected);
     }
 
     #[test]

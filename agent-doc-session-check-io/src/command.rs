@@ -1563,7 +1563,19 @@ fn response_orphan_guard(
     allow_owned_retained_closeout: bool,
 ) -> Result<ResponseOrphanGuardDisposition> {
     let project_root = agent_doc_project_root_io::project_root_or_file_parent(file)?;
-    let decision_validation = agent_doc_decision_io::validate(&project_root)?;
+    // The response-orphan gate needs only decision-pinned response evidence,
+    // not the decision registry's project-wide dangling-reference audit. The
+    // full validator walks every Markdown file in the project; doing that on
+    // every session-check made an unchanged large workspace spend tens of
+    // seconds proving that the pinned set was empty. Read the cheap registry
+    // projection first and scan the project only when a pinned response can
+    // actually be orphaned (`#responseorphanpinnedfastpath`).
+    let decision_dangling_response_ids =
+        if agent_doc_decision_io::pinned_response_ids(&project_root)?.is_empty() {
+            Vec::new()
+        } else {
+            agent_doc_decision_io::validate(&project_root)?.dangling_response_ids
+        };
     let dangling_response_ids = agent_doc_archive_io::dangling_response_references(file, content)?;
     let retained_response_ids = if allow_owned_retained_closeout {
         durable_retained_closeout_response_ids(file)?
@@ -1572,7 +1584,7 @@ fn response_orphan_guard(
     };
     let disposition = response_orphan_guard_disposition(
         &dangling_response_ids,
-        &decision_validation.dangling_response_ids,
+        &decision_dangling_response_ids,
         &retained_response_ids,
     );
     if disposition != ResponseOrphanGuardDisposition::Refuse {
@@ -1584,9 +1596,9 @@ fn response_orphan_guard(
         dangling_response_ids.join(", ")
     );
     anyhow::ensure!(
-        decision_validation.dangling_response_ids.is_empty(),
+        decision_dangling_response_ids.is_empty(),
         "decision evidence would orphan response id(s): {}",
-        decision_validation.dangling_response_ids.join(", ")
+        decision_dangling_response_ids.join(", ")
     );
     unreachable!("refusal must carry a dangling response or decision id")
 }
@@ -1663,7 +1675,11 @@ fn try_run_with_options_pass(
         // the foreground. Operator-owned conflict/exhaustion wins inside this
         // fence; only a genuinely deferred controller owner becomes
         // BACKGROUND PENDING.
-        if let Some(outcome) = read_only_retained_projection_before_effects(file, effects)? {
+        if let Some(outcome) =
+            crate::profile::timed("read_only_retained_projection_before_effects", || {
+                read_only_retained_projection_before_effects(file, effects)
+            })?
+        {
             return Err(match outcome {
                 ReadOnlyRetainedProjectionFence::BackgroundPending(pending) => pending.into(),
                 ReadOnlyRetainedProjectionFence::Interrupted(interrupted) => interrupted.into(),
@@ -1673,38 +1689,51 @@ fn try_run_with_options_pass(
         // tracked archive/index (or the document) and commits it. Only an
         // explicit repair applies it; the status check reports it.
         let mut pending_evidence_heal = None;
-        if effects.applies_self_heals() {
-            if effects.restore_committed_response_evidence(file)? {
-                crate::invalidate_current_document_pass(file);
-            }
-        } else {
-            pending_evidence_heal = effects.pending_committed_response_evidence_repair(file)?;
+        if effects.applies_self_heals() && effects.restore_committed_response_evidence(file)? {
+            crate::invalidate_current_document_pass(file);
         }
         let current =
             crate::resolve_current_document(file, "session_check_response_archive_orphan_guard")?;
         if let Some(interruption) = quarantined_replica_interruption(&current) {
             return Err(interruption.into());
         }
-        let orphan_disposition =
-            response_orphan_guard(file, current.content(), true).map_err(|error| {
-                let interruption = response_orphan_interruption(error);
-                match pending_evidence_heal.as_deref() {
-                    Some(detail) => pending_self_heal_appended(
-                        interruption,
-                        file,
-                        SelfHeal::RestoreCommittedResponseEvidence,
-                        detail,
-                    ),
-                    None => interruption,
-                }
-            })?;
+        let orphan_result = crate::profile::timed("response_orphan_guard", || {
+            response_orphan_guard(file, current.content(), true)
+        });
+        if orphan_result.is_err() && !effects.applies_self_heals() {
+            // Repair planning walks historical evidence. Keep it off the
+            // ordinary critical path and pay for it only when the orphan guard
+            // needs its concrete remedy (`#sessioncheckrepairplanlazy`).
+            pending_evidence_heal =
+                crate::profile::timed("pending_committed_response_evidence_repair", || {
+                    effects.pending_committed_response_evidence_repair(file)
+                })?;
+        }
+        let orphan_disposition = orphan_result.map_err(|error| {
+            let interruption = response_orphan_interruption(error);
+            match pending_evidence_heal.as_deref() {
+                Some(detail) => pending_self_heal_appended(
+                    interruption,
+                    file,
+                    SelfHeal::RestoreCommittedResponseEvidence,
+                    detail,
+                ),
+                None => interruption,
+            }
+        })?;
+        run_with_options_inner(file, codex_final_gate, effects)?;
+        if !effects.applies_self_heals() {
+            pending_evidence_heal =
+                crate::profile::timed("pending_committed_response_evidence_repair", || {
+                    effects.pending_committed_response_evidence_repair(file)
+                })?;
+        }
         if let Some(detail) = pending_evidence_heal.as_deref() {
             eprintln!(
                 "{}",
                 pending_self_heal_warning(file, SelfHeal::RestoreCommittedResponseEvidence, detail)
             );
         }
-        run_with_options_inner(file, codex_final_gate, effects)?;
         if orphan_disposition == ResponseOrphanGuardDisposition::DeferredToOwnedRetainedCloseout {
             // The pre-check deferred only IDs cryptographically owned by the
             // exact retained response/target pair. Recovery above must now
@@ -2483,13 +2512,19 @@ fn run_with_options_inner(
     effects: &impl SessionCheckEffects,
 ) -> Result<()> {
     let allows_recovery = effects.allows_recovery();
-    if allows_recovery
-        && let Some(message) =
-            agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_turn_stage(
-                file,
-                "session_check_start",
-            )
-    {
+    let stale_supervisor_message = crate::profile::timed(
+        "recycle_stale_supervisor_for_turn_stage",
+        || {
+            allows_recovery.then(|| {
+                agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_turn_stage(
+                    file,
+                    "session_check_start",
+                )
+            })
+        },
+    )
+    .flatten();
+    if let Some(message) = stale_supervisor_message {
         eprintln!("[session-check] WARNING: {message}");
         agent_doc_controller_io::project_controller::note_stale_supervisor_warning_shown(&message);
     }
@@ -2548,11 +2583,13 @@ fn run_with_options_inner(
         return Err(interruption.into());
     }
     let integrity_content = current.into_content();
-    let integrity = agent_doc_lint_io::validate_integrity_on_content_with_logger(
-        file,
-        &integrity_content,
-        agent_doc_ops_log_io::log_op,
-    );
+    let integrity = crate::profile::timed("validate_integrity_on_content", || {
+        agent_doc_lint_io::validate_integrity_on_content_with_logger(
+            file,
+            &integrity_content,
+            agent_doc_ops_log_io::log_op,
+        )
+    });
     if let Err(error) = integrity {
         // A stale cross-lineage delta can corrupt the visible projection after
         // the response was durably captured but before ACK. The retained
@@ -2602,12 +2639,14 @@ fn run_with_options_inner(
         )?;
     }
     if allows_recovery {
-        ensure_terminal_authority_disk_convergence(
-            file,
-            &authority_content,
-            &disk_content,
-            effects,
-        )?;
+        crate::profile::timed("ensure_terminal_authority_disk_convergence", || {
+            ensure_terminal_authority_disk_convergence(
+                file,
+                &authority_content,
+                &disk_content,
+                effects,
+            )
+        })?;
     } else {
         let cycle_phase =
             agent_doc_cycle_state_io::load_with_closeout_projection(file)?.map(|state| state.phase);
@@ -5951,16 +5990,26 @@ mod terminal_convergence_tests {
 <!-- agent:queue -->\n- 🚧 do [#held]\n- 🙋📥 set the flag [#{request}]\n<!-- /agent:queue -->\n"
         );
         std::fs::write(&file, &content).unwrap();
-        let (_, claim) =
-            agent_doc_queue_io::queue_claim::claim(&file, "do [#held]", "subagent:held", 3600)
-                .unwrap();
-        agent_doc_queue_io::queue_claim::start_attempt(
+        // Keep the fixture independent of the harness running `cargo test`.
+        // A live Codex environment would otherwise bind this synthetic
+        // subagent claim to the coordinator and correctly keep it as closeout
+        // debt, defeating the quiescent-worker assertion.
+        let (_, claim) = agent_doc_queue_io::queue_claim::claim_with_session(
+            &file,
+            "do [#held]",
+            "subagent:held",
+            3600,
+            None,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt_with_owner_session(
             &file,
             "do [#held]",
             "subagent:held",
             "worker:held",
             3600,
             claim.generation,
+            None,
         )
         .unwrap();
         std::fs::write(&file, &content).unwrap();

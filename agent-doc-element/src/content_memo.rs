@@ -13,8 +13,8 @@
 //! and there is no invalidation to forget. Entries are evicted
 //! least-recently-used under an entry and byte budget. Memos are meant to live
 //! in a `thread_local!`, so concurrent tests and threads never share one; the
-//! budgets bound what each thread retains (the element memo keeps at most four
-//! documents, 8 MiB of keys; the queue-body memo 2 MiB).
+//! budgets bound what each thread retains (the element memo keeps at most 16
+//! interleaved documents, 16 MiB of keys; the queue-body memo 2 MiB).
 //!
 //! [`ContentMemo::evaluations`] counts real evaluations (misses and inputs
 //! outside the memoized size band).
@@ -127,6 +127,40 @@ pub fn memoized<T: Clone + 'static, E>(
     Ok(value)
 }
 
+/// [`memoized`] with all retained successful inputs made available to `eval`,
+/// newest first.
+///
+/// Cloning the `Rc`s is cheap and releases the memo borrow before evaluation.
+/// An incremental parser can therefore select its own compatible lineage
+/// instead of assuming the immediately preceding parse belonged to the same
+/// document; this matters in a project controller that interleaves several
+/// live documents on one worker thread.
+pub fn memoized_with_candidates<T: Clone + 'static, E>(
+    memo: &'static std::thread::LocalKey<std::cell::RefCell<ContentMemo<T>>>,
+    text: &str,
+    eval: impl FnOnce(&str, &[(Rc<str>, Rc<T>)]) -> Result<T, E>,
+) -> Result<T, E> {
+    let (lookup, candidates) = memo.with(|memo| {
+        let mut memo = memo.borrow_mut();
+        let lookup = memo.lookup(text);
+        let candidates = if matches!(lookup, Lookup::Miss) {
+            memo.entries
+                .iter()
+                .map(|(key, value)| (Rc::clone(key), Rc::clone(value)))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        (lookup, candidates)
+    });
+    if let Lookup::Hit(value) = lookup {
+        return Ok(value);
+    }
+    let value = eval(text, &candidates)?;
+    memo.with(|memo| memo.borrow_mut().record(text, &value, lookup));
+    Ok(value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,6 +202,29 @@ mod tests {
         assert_eq!(nested_len("a/b/c"), Ok(2));
         assert_eq!(nested_len("a/b/c"), Ok(2));
         assert_eq!(NESTED.with(|memo| memo.borrow().evaluations()), 3);
+    }
+
+    #[test]
+    fn memoized_with_candidates_can_select_an_older_document_lineage() {
+        thread_local! {
+            static CANDIDATES: std::cell::RefCell<ContentMemo<String>> =
+                const { std::cell::RefCell::new(ContentMemo::new(1, 4, 1024)) };
+        }
+        for text in ["doc-a-v1", "doc-b-v1"] {
+            memoized_with_candidates(&CANDIDATES, text, |text, _| Ok::<_, ()>(text.to_string()))
+                .unwrap();
+        }
+        let selected = memoized_with_candidates(&CANDIDATES, "doc-a-v2", |_, candidates| {
+            Ok::<_, ()>(
+                candidates
+                    .iter()
+                    .find(|(text, _)| text.starts_with("doc-a"))
+                    .map(|(_, value)| value.to_string())
+                    .unwrap(),
+            )
+        })
+        .unwrap();
+        assert_eq!(selected, "doc-a-v1");
     }
 
     #[test]

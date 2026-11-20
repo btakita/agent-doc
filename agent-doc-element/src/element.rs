@@ -2084,8 +2084,8 @@ thread_local! {
         const {
             std::cell::RefCell::new(crate::content_memo::ContentMemo::new(
                 LARGE_DOCUMENT_BYTES,
-                4,
-                8 * 1024 * 1024,
+                16,
+                16 * 1024 * 1024,
             ))
         };
     static LARGE_PARSE_EVALUATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -2107,7 +2107,174 @@ pub fn large_parse_evaluations() -> u64 {
 /// Errors on unmatched open/close markers or invalid names.
 /// Skips markers inside fenced code blocks and inline code spans.
 pub fn parse(doc: &str) -> Result<Vec<Component>> {
-    crate::content_memo::memoized(&PARSE_MEMO, doc, parse_uncached)
+    crate::content_memo::memoized_with_candidates(&PARSE_MEMO, doc, |doc, candidates| {
+        candidates
+            .iter()
+            .filter(|(prior_doc, _)| same_incremental_document_lineage(prior_doc, doc))
+            .find_map(|(prior_doc, prior)| parse_incremental(prior_doc, prior, doc))
+            .map(Ok)
+            .unwrap_or_else(|| parse_uncached(doc))
+    })
+}
+
+/// Cheap document-lineage key for an interleaved controller parser cache.
+/// Session frontmatter and the first managed heading are stable across ordinary
+/// component-body edits and distinguish the controller's live documents. A
+/// top-of-document edit simply misses this optimization and takes the full
+/// parser; it cannot select a stale result.
+fn same_incremental_document_lineage(prior_doc: &str, doc: &str) -> bool {
+    const PREFIX_BYTES: usize = 256;
+    let prefix = PREFIX_BYTES.min(prior_doc.len()).min(doc.len());
+    prefix == PREFIX_BYTES && prior_doc.as_bytes()[..prefix] == doc.as_bytes()[..prefix]
+}
+
+/// Rebase a successful component index across one structurally inert text
+/// edit (`#incrementalreconcile`).
+///
+/// The common-prefix/suffix delta must stay inside the body of one existing
+/// top-level component. The complete old and new affected lines must contain
+/// no syntax that can change component recognition (component comments,
+/// Markdown fences/inline code, quoted-marker suppression, escapes, or
+/// blockquotes). Under those constraints no marker can be added, removed, or
+/// reclassified: only byte offsets at/after the edit move. Anything less
+/// obvious falls back to [`parse_uncached`].
+fn parse_incremental(prior_doc: &str, prior: &[Component], doc: &str) -> Option<Vec<Component>> {
+    if prior_doc == doc {
+        return Some(prior.to_vec());
+    }
+
+    let mut prefix = prior_doc
+        .as_bytes()
+        .iter()
+        .zip(doc.as_bytes())
+        .take_while(|(left, right)| left == right)
+        .count();
+    while prefix > 0 && (!prior_doc.is_char_boundary(prefix) || !doc.is_char_boundary(prefix)) {
+        prefix -= 1;
+    }
+    let max_suffix = prior_doc.len().min(doc.len()).saturating_sub(prefix);
+    let mut suffix = prior_doc
+        .as_bytes()
+        .iter()
+        .rev()
+        .zip(doc.as_bytes().iter().rev())
+        .take(max_suffix)
+        .take_while(|(left, right)| left == right)
+        .count();
+    while suffix > 0
+        && (!prior_doc.is_char_boundary(prior_doc.len() - suffix)
+            || !doc.is_char_boundary(doc.len() - suffix))
+    {
+        suffix -= 1;
+    }
+    let prior_end = prior_doc.len() - suffix;
+    let new_end = doc.len() - suffix;
+
+    let prior_line_start = prior_doc[..prefix]
+        .rfind('\n')
+        .map_or(0, |offset| offset + 1);
+    let new_line_start = doc[..prefix].rfind('\n').map_or(0, |offset| offset + 1);
+    let prior_line_end = prior_doc[prior_end..]
+        .find('\n')
+        .map_or(prior_doc.len(), |offset| prior_end + offset + 1);
+    let new_line_end = doc[new_end..]
+        .find('\n')
+        .map_or(doc.len(), |offset| new_end + offset + 1);
+    let prior_lines = &prior_doc[prior_line_start..prior_line_end];
+    let new_lines = &doc[new_line_start..new_line_end];
+    if !incremental_component_lines_are_inert(prior_lines)
+        || !incremental_component_lines_are_inert(new_lines)
+    {
+        return None;
+    }
+
+    // The edit must remain inside one old top-level body. A body that begins
+    // or ends in the affected lines is deliberately rejected above because
+    // those lines contain its marker comment.
+    let mut enclosing_end = 0usize;
+    let containing = prior.iter().find(|component| {
+        let top_level = component.open_start >= enclosing_end;
+        if top_level {
+            enclosing_end = component.close_end;
+        }
+        top_level
+            && prior_line_start >= component.open_end
+            && prior_line_end <= component.close_start
+    })?;
+    let delta = isize::try_from(doc.len()).ok()? - isize::try_from(prior_doc.len()).ok()?;
+    let rebased_close = containing.close_start.checked_add_signed(delta)?;
+    if new_line_start < containing.open_end || new_line_end > rebased_close {
+        return None;
+    }
+
+    prior
+        .iter()
+        .map(|component| {
+            Some(Component {
+                name: component.name.clone(),
+                attrs: component.attrs.clone(),
+                open_start: rebase_incremental_offset(
+                    component.open_start,
+                    prior_line_start,
+                    prior_line_end,
+                    delta,
+                )?,
+                open_end: rebase_incremental_offset(
+                    component.open_end,
+                    prior_line_start,
+                    prior_line_end,
+                    delta,
+                )?,
+                close_start: rebase_incremental_offset(
+                    component.close_start,
+                    prior_line_start,
+                    prior_line_end,
+                    delta,
+                )?,
+                close_end: rebase_incremental_offset(
+                    component.close_end,
+                    prior_line_start,
+                    prior_line_end,
+                    delta,
+                )?,
+            })
+        })
+        .collect()
+}
+
+fn incremental_component_lines_are_inert(lines: &str) -> bool {
+    let mut saw_line = false;
+    for line in lines.lines() {
+        saw_line = true;
+        // Blank-line and indented-code transitions can change CommonMark's
+        // interpretation of a later marker even when the changed bytes carry
+        // no marker themselves. Keep those edits on the full parser.
+        if line.trim().is_empty()
+            || line.starts_with('\t')
+            || line.bytes().take_while(|byte| *byte == b' ').count() >= 4
+            || line
+                .bytes()
+                .any(|byte| matches!(byte, b'<' | b'>' | b'`' | b'~' | b'"' | b'\\'))
+        {
+            return false;
+        }
+    }
+    saw_line
+}
+
+fn rebase_incremental_offset(
+    offset: usize,
+    changed_start: usize,
+    changed_end: usize,
+    delta: isize,
+) -> Option<usize> {
+    if offset <= changed_start {
+        Some(offset)
+    } else if offset >= changed_end {
+        offset.checked_add_signed(delta)
+    } else {
+        None
+    }
 }
 
 fn parse_uncached(doc: &str) -> Result<Vec<Component>> {
@@ -3264,6 +3431,87 @@ mod tests {
         format!(
             "<!-- agent:run -->\nrun body\n<!-- /agent:run -->\n<!-- agent:todo -->\n- [ ] {item}\n<!-- /agent:todo -->\n"
         )
+    }
+
+    fn large_incremental_parse_doc(body_line: &str) -> String {
+        format!(
+            "<!-- agent:exchange -->\n{}\n{body_line}\n<!-- agent:salient-response -->\nanswer\n<!-- /agent:salient-response -->\n<!-- /agent:exchange -->\n\n<!-- agent:run -->\n- do [#incrementalparse]\n<!-- /agent:run -->\n",
+            "unchanged history ".repeat(320),
+        )
+    }
+
+    #[test]
+    fn inert_component_body_edit_reuses_the_component_index() {
+        let before = large_incremental_parse_doc("ordinary body line");
+        let after = large_incremental_parse_doc("ordinary body line with more words");
+        assert!(before.len() >= LARGE_DOCUMENT_BYTES);
+
+        let full_before = large_parse_evaluations();
+        let before_components = parse(&before).unwrap();
+        assert_eq!(large_parse_evaluations() - full_before, 1);
+
+        let after_components = parse(&after).unwrap();
+        assert_eq!(
+            large_parse_evaluations() - full_before,
+            1,
+            "the changed component body should shift the prior index without a full scan"
+        );
+        let full_after = parse_uncached(&after).unwrap();
+        assert_eq!(after_components, full_after);
+        assert_eq!(
+            before_components
+                .iter()
+                .map(|component| component.name.as_str())
+                .collect::<Vec<_>>(),
+            after_components
+                .iter()
+                .map(|component| component.name.as_str())
+                .collect::<Vec<_>>()
+        );
+        let delta = after.len() - before.len();
+        let before_run = before_components
+            .iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let after_run = after_components
+            .iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        assert_eq!(after_run.open_start, before_run.open_start + delta);
+    }
+
+    #[test]
+    fn structural_component_body_edit_falls_back_to_a_full_scan() {
+        let before = large_incremental_parse_doc("ordinary structural fallback line");
+        let after = large_incremental_parse_doc("ordinary `structural` fallback line");
+        let full_before = large_parse_evaluations();
+        parse(&before).unwrap();
+        parse(&after).unwrap();
+        assert_eq!(
+            large_parse_evaluations() - full_before,
+            2,
+            "syntax-bearing lines must not reuse component structure"
+        );
+    }
+
+    #[test]
+    fn interleaved_documents_reuse_their_own_incremental_component_index() {
+        let before = large_incremental_parse_doc("interleaved document body");
+        let after = large_incremental_parse_doc("interleaved document body extended");
+        let other = format!(
+            "different controller document prefix {}\n<!-- agent:exchange -->\nother\n<!-- /agent:exchange -->\n",
+            "z".repeat(LARGE_DOCUMENT_BYTES)
+        );
+        let full_before = large_parse_evaluations();
+        parse(&before).unwrap();
+        parse(&other).unwrap();
+        let incremental = parse(&after).unwrap();
+        assert_eq!(
+            large_parse_evaluations() - full_before,
+            2,
+            "the other document must not evict or replace this document's lineage"
+        );
+        assert_eq!(incremental, parse_uncached(&after).unwrap());
     }
 
     #[test]

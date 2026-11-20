@@ -90,6 +90,8 @@ class AgentDocImplGeneration : ImplGeneration {
         internal val MODULE_SERVICES: Map<String, String> = mapOf(
             "com.github.btakita.agentdoc.split.backend.SurfaceIngressFactory" to
                 "com.github.btakita.agentdoc.split.backend.ControllerSurfaceIngressFactory",
+            "com.github.btakita.agentdoc.split.backend.FrontendReleaseBridge" to
+                "com.github.btakita.agentdoc.split.backend.BackendFrontendReleaseBridge",
         )
 
         /**

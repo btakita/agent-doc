@@ -3,6 +3,7 @@
 package com.github.btakita.agentdoc.split.backend
 
 import com.github.btakita.agentdoc.split.FrontendPresentationReceipt
+import com.github.btakita.agentdoc.split.FrontendImplementationRelease
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
 import com.github.btakita.agentdoc.split.SurfaceIngressAck
 import com.github.btakita.agentdoc.split.SurfaceIngressLease
@@ -20,6 +21,14 @@ import kotlinx.coroutines.flow.StateFlow
 /** Creates one project's [SurfaceIngress]; served by the implementation generation. */
 internal interface SurfaceIngressFactory {
     fun create(project: Project): SurfaceIngress
+}
+
+/**
+ * Shell boundary for the backend-selected frontend implementation package.
+ * Its implementation owns package discovery, activation, and failure logging.
+ */
+internal interface FrontendReleaseBridge {
+    fun current(): FrontendImplementationRelease?
 }
 
 /** The authenticated frontend lease, snapshot and presentation-receipt ingress of one project. */

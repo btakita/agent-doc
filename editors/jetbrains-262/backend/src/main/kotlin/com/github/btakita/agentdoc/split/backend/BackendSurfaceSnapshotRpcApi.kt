@@ -2,6 +2,7 @@
 
 package com.github.btakita.agentdoc.split.backend
 
+import com.github.btakita.agentdoc.shell.ShellGenerationHost
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
 import com.github.btakita.agentdoc.split.FrontendImplementationRelease
 import com.github.btakita.agentdoc.split.FrontendPresentationReceipt
@@ -19,8 +20,11 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
 internal class BackendSurfaceSnapshotRpcApi(
-    private val frontendRelease: () -> FrontendImplementationRelease? =
-        FrontendImplementationReleaseSource::current,
+    private val frontendRelease: () -> FrontendImplementationRelease? = {
+        ShellGenerationHost.getInstance().activate()
+            ?.moduleService(FrontendReleaseBridge::class.java)
+            ?.current()
+    },
 ) : SurfaceSnapshotRpcApi {
     private val log = Logger.getInstance(BackendSurfaceSnapshotRpcApi::class.java)
 
@@ -91,10 +95,5 @@ internal class BackendSurfaceSnapshotRpcApi(
 
     override suspend fun supportedSnapshotSchemaVersion(): Int = SURFACE_SNAPSHOT_SCHEMA_VERSION
 
-    override suspend fun frontendImplementationRelease(): FrontendImplementationRelease? =
-        frontendRelease()?.takeIf { release ->
-            runCatching { BackendFrontendReleaseActivation.activate(release) }
-                .onFailure { log.warn("[frontend-impl] backend peer activation refused", it) }
-                .isSuccess
-        }
+    override suspend fun frontendImplementationRelease(): FrontendImplementationRelease? = frontendRelease()
 }

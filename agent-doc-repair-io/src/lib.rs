@@ -3151,6 +3151,63 @@ pub fn cancel_preflight_cycle_after_run_cancel(
     )
 }
 
+/// Retire the exact empty cycle opened by a preflight invocation that then
+/// failed before returning its prompt contract to the harness.
+///
+/// This is narrower than an operator run-cancel: the caller supplies the cycle
+/// id returned by its own `start_preflight`, and the terminal transition is
+/// also fenced by the current actor binding. A response capture, phase advance,
+/// replacement cycle, or concurrent actor transition protects the cycle.
+pub fn cancel_preflight_cycle_after_admission_refusal(
+    effects: &impl RepairIoEffects,
+    file: &Path,
+    expected_cycle_id: &str,
+) -> Result<agent_doc_turn::repair::CancelOutcome> {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+        return Ok(agent_doc_turn::repair::CancelOutcome::NoOpenCycle);
+    };
+    if !state.is_open() {
+        return Ok(agent_doc_turn::repair::CancelOutcome::NoOpenCycle);
+    }
+    if state.cycle_id != expected_cycle_id
+        || !matches!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted)
+        || cycle_has_captured_response_projection(file, &state)?
+    {
+        return Ok(agent_doc_turn::repair::CancelOutcome::Protected);
+    }
+
+    let turn_fence = effects.preflight_turn_fence(file)?;
+    let snapshot_content =
+        restore_empty_preflight_baseline_to_head(file, "preflight_admission_refusal_abandoned")?;
+    let file_content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "preflight_admission_refusal_cancel",
+    )
+    .ok();
+    if effects
+        .mark_abandoned_frontmatter_if_turn_fence(
+            file,
+            expected_cycle_id,
+            &turn_fence,
+            "preflight_admission_refusal_abandoned",
+            snapshot_content.as_deref(),
+            file_content.as_deref(),
+        )?
+        .is_none()
+    {
+        return Ok(agent_doc_turn::repair::CancelOutcome::Protected);
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "cancel_preflight_cycle_abandoned file={} cycle_id={} proof=admission_refused",
+            file.display(),
+            expected_cycle_id,
+        ),
+    );
+    Ok(agent_doc_turn::repair::CancelOutcome::Abandoned)
+}
+
 /// Reclaim the empty preflight whose owning pane's harness reported a turn
 /// boundary (`/clear`, fresh start, resume, or a settled interrupt) after the
 /// cycle was last entered, with no newer turn lease (`#runctrlclaude`).

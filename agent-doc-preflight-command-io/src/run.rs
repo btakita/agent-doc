@@ -421,13 +421,56 @@ pub fn run_with_options_to_writer(
     // disk hash), so an operator or agent edit mid-run still invalidates it.
     let state_db_io_before = agent_doc_sqlite::state_store::state_db_io_counters();
     let probe = options.probe;
+    let mut opened_cycle_id = None;
     let result = agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
-        run_with_options_to_writer_in_pass(file, options, writer)
+        run_with_options_to_writer_in_pass(file, options, writer, &mut opened_cycle_id)
     });
+    let result = if let Some(cycle_id) = opened_cycle_id.as_deref() {
+        // `#admissionrefusalclose`: once preflight opens its cycle, any later
+        // error means no prompt contract reached the harness and therefore no
+        // model response can legitimately target that newly-opened cycle. Do
+        // not leave it looking like a live model turn for the generic
+        // supervisor to protect forever. The repair is exact-cycle and
+        // turn-fenced; a capture, phase advance, rebind, or replacement cycle
+        // wins and leaves the original error untouched.
+        match result {
+            Ok(()) => Ok(()),
+            Err(error) => match cancel_cycle_opened_by_refused_admission(file, cycle_id) {
+                Ok(agent_doc_turn::repair::CancelOutcome::Abandoned) => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "preflight_admission_refusal_cycle_closed file={} cycle_id={cycle_id}",
+                            file.display()
+                        ),
+                    );
+                    Err(error)
+                }
+                Ok(
+                    agent_doc_turn::repair::CancelOutcome::NoOpenCycle
+                    | agent_doc_turn::repair::CancelOutcome::Protected,
+                ) => Err(error),
+                Err(cleanup_error) => Err(error.context(format!(
+                    "preflight admission opened cycle `{cycle_id}`, and automatic exact-cycle cleanup failed: {cleanup_error:#}"
+                ))),
+            },
+        }
+    } else {
+        result
+    };
     if !probe {
         log_admission_state_db_io(file, state_db_io_before, result.is_ok());
     }
     result
+}
+
+fn cancel_cycle_opened_by_refused_admission(
+    file: &Path,
+    cycle_id: &str,
+) -> Result<agent_doc_turn::repair::CancelOutcome> {
+    let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let effects = agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &apply_guard)?;
+    agent_doc_repair_io::cancel_preflight_cycle_after_admission_refusal(&effects, file, cycle_id)
 }
 
 /// `#admissionleasechurn`: record how many state.db round trips this
@@ -485,6 +528,7 @@ fn run_with_options_to_writer_in_pass(
     file: &Path,
     options: PreflightOptions,
     writer: &mut dyn Write,
+    opened_cycle_id: &mut Option<String>,
 ) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -2480,7 +2524,16 @@ fn run_with_options_to_writer_in_pass(
             let snap_len = snap.as_ref().map(|s| s.len()).unwrap_or(0);
             let file_len = file_content.len();
             agent_doc_controller_io::project_controller::ensure_controller_running_for_file(file)?;
-            agent_doc_cycle_state_io::start_preflight(file, snap.as_deref(), Some(&file_content))?;
+            let preexisting_open_cycle_id =
+                agent_doc_cycle_state_io::load_with_closeout_projection(file)?
+                    .filter(|state| state.is_open())
+                    .map(|state| state.cycle_id);
+            let snapshot = snap.as_deref();
+            let current = Some(file_content.as_str());
+            let opened = agent_doc_cycle_state_io::start_preflight(file, snapshot, current)?;
+            if preexisting_open_cycle_id.as_deref() != Some(opened.cycle_id.as_str()) {
+                *opened_cycle_id = Some(opened.cycle_id.clone());
+            }
             // `#dispatchturnstartreceipt`: this cycle IS a dispatched turn starting,
             // whatever harness or route submitted the trigger. Promote the document's
             // open dispatch receipts from that fact instead of leaving them to the
@@ -4439,6 +4492,69 @@ mod tests {
         run(&doc).unwrap();
         // If run() returns Ok(()), the JSON was printed to stdout without error.
         // The test verifies no panic and no error return.
+    }
+
+    /// `#admissionrefusalclose`: sdk-dev.md opened a fresh cycle, then a
+    /// late admission failure prevented the prompt contract from reaching the
+    /// harness. The empty cycle remained `preflight_started`, so every retry
+    /// was refused as though a model still owned it. A writer failure is the
+    /// smallest deterministic late refusal: it occurs after cycle-open but
+    /// before the caller can receive the contract.
+    #[test]
+    fn failed_admission_retires_its_exact_empty_cycle_and_allows_retry() {
+        struct RefuseOutput;
+
+        impl Write for RefuseOutput {
+            fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("simulated prompt contract refusal"))
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let baseline = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let edited = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "❯ reconcile the earlier operation receipt\n<!-- /agent:exchange -->",
+        );
+        std::fs::write(&doc, &edited).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let error =
+            run_with_options_to_writer(&doc, PreflightOptions::default(), &mut RefuseOutput)
+                .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("simulated prompt contract refusal"),
+            "{error:#}"
+        );
+        let refused = agent_doc_cycle_state_io::load(&doc)
+            .unwrap()
+            .expect("refused cycle state");
+        assert_eq!(refused.phase, agent_doc_turn::CyclePhase::Abandoned);
+
+        let mut output = Vec::new();
+        run_with_options_to_writer(&doc, PreflightOptions::default(), &mut output)
+            .expect("the next invocation must admit immediately");
+        let contract: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(contract["no_changes"], false, "{contract:#}");
+        let retry = agent_doc_cycle_state_io::load(&doc)
+            .unwrap()
+            .expect("retry cycle state");
+        assert_eq!(retry.phase, agent_doc_turn::CyclePhase::PreflightStarted);
+        assert_ne!(retry.cycle_id, refused.cycle_id);
     }
 
     #[test]

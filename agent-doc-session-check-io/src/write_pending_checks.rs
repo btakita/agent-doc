@@ -224,6 +224,10 @@ pub fn prewrite_pending_capture_check(
         return Ok(());
     }
 
+    // A reserved harness-owned effect is part of this cycle's outcome. Only
+    // its operation adapter's exact applied/failed observation may settle it.
+    agent_doc_cycle_state_io::inline_effect::ensure_open_cycle_terminal(file)?;
+
     let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
     let has_explicit_targets = state
         .as_ref()

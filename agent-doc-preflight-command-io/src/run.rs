@@ -3165,6 +3165,9 @@ fn run_with_options_to_writer_in_pass(
         preflight_read_projection.queue.selected_prompts.clone()
     };
     if !options.probe && !no_changes {
+        // `#promptconservation`: never deliver another prompt while an earlier
+        // harness-owned operation still lacks its exact adapter result.
+        agent_doc_cycle_state_io::inline_effect::ensure_no_unresolved_before_prompt(file)?;
         // Bind the before observation to the same ordered submissions the
         // harness receives, including the ancestry of repeated nested rows.
         agent_doc_queue_io::address_effect::capture_before_execution(

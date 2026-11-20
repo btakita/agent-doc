@@ -4,6 +4,7 @@ use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod inline_effects;
 mod queue_actions;
 
 const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
@@ -120,6 +121,7 @@ fn message_calls_mutating_tool(line: &str) -> bool {
             "agent_doc_admit"
                 | "agent_doc_preflight"
                 | "agent_doc_finalize"
+                | "agent_doc_inline_effect"
                 | "agent_doc_queue_action"
                 | "agent_doc_session_check"
                 | "agent_doc_steering"
@@ -436,6 +438,25 @@ fn tools_list_result() -> Value {
                 }
             },
             {
+                "name": "agent_doc_inline_effect",
+                "title": "Receipt a harness-owned inline effect",
+                "description": "Before any operator-authorized external effect executed inline by the active harness, reserve one stable operation_id with an operation-specific adapter and JSON observation contract. After the native tool returns, settle the returned receipt_id as applied with its exact observation or failed with its observed reason. An unresolved reservation blocks prompt replay and closeout; this tool records evidence and grants no authorization.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file": { "type": "string", "description": "Path to the admitted session document." },
+                        "operation_id": { "type": "string", "description": "Stable id for one effect in the open cycle; present only when reserving." },
+                        "adapter": { "type": "string", "description": "Operation-specific observer name; present only when reserving." },
+                        "contract": { "type": "object", "description": "Adapter-owned before/expected-state facts; present only when reserving." },
+                        "receipt_id": { "type": "string", "description": "Receipt returned by reservation; present only when settling." },
+                        "outcome": { "type": "string", "enum": ["applied", "failed"], "description": "Exact native result when settling." },
+                        "observation": { "type": "object", "description": "Adapter-owned observed result; required for applied and optional for failed." },
+                        "reason": { "type": "string", "description": "Observed failure; required for failed." }
+                    },
+                    "required": ["file"]
+                }
+            },
+            {
                 "name": "agent_doc_queue_action",
                 "title": "Apply a connected queue action",
                 "description": "Inspect current queue actions when next_action_id is omitted. With an id, apply the exact transition or reserve its native spawn or external command once. Use worker_id to bind the returned native worker or confirm a due heartbeat. A failed receipt stays terminal for unchanged evidence.",
@@ -510,6 +531,7 @@ fn handle_tools_call(params: Option<&Value>) -> std::result::Result<Value, McpPr
         "agent_doc_admit" => tool_admit(&args),
         "agent_doc_preflight" => tool_preflight(&args),
         "agent_doc_plan" => tool_plan(&args),
+        "agent_doc_inline_effect" => inline_effects::tool(&args),
         "agent_doc_queue_action" => queue_actions::tool(&args),
         "agent_doc_session_check" => tool_session_check(&args),
         "agent_doc_steering" => tool_steering(&args),
@@ -1424,6 +1446,7 @@ mod tests {
         assert!(names.contains(&"agent_doc_admit"));
         assert!(names.contains(&"agent_doc_preflight"));
         assert!(names.contains(&"agent_doc_plan"));
+        assert!(names.contains(&"agent_doc_inline_effect"));
         assert!(names.contains(&"agent_doc_session_check"));
         assert!(names.contains(&"agent_doc_steering"));
         assert!(names.contains(&"agent_doc_finalize"));
@@ -1448,6 +1471,85 @@ mod tests {
                 .as_str()
                 .unwrap()
                 .contains("Do not call this after a successful agent_doc_finalize")
+        );
+    }
+
+    #[test]
+    fn inline_effect_tool_reserves_and_settles_the_exact_operation() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, "# Session\n").unwrap();
+        agent_doc_cycle_state_io::start_preflight(&file, Some("# Session\n"), Some("# Session\n"))
+            .unwrap();
+        agent_doc_cycle_state_io::record_turn_checkpoint(
+            &file,
+            &["publish the release".to_string()],
+            None,
+            None,
+        )
+        .unwrap();
+
+        let reserved = response_for(json!({
+            "jsonrpc": "2.0",
+            "id": 21,
+            "method": "tools/call",
+            "params": {
+                "name": "agent_doc_inline_effect",
+                "arguments": {
+                    "file": file.display().to_string(),
+                    "operation_id": "publish-main",
+                    "adapter": "git-ref",
+                    "contract": { "ref": "refs/heads/main", "before": "abc" }
+                }
+            }
+        }));
+        assert_eq!(reserved["result"]["isError"], false, "{reserved:#}");
+        let receipt_id =
+            reserved["result"]["structuredContent"]["inline_effect_receipts"][0]["receipt_id"]
+                .as_str()
+                .unwrap();
+        assert!(
+            agent_doc_cycle_state_io::inline_effect::ensure_open_cycle_terminal(&file).is_err()
+        );
+
+        let settled = response_for(json!({
+            "jsonrpc": "2.0",
+            "id": 22,
+            "method": "tools/call",
+            "params": {
+                "name": "agent_doc_inline_effect",
+                "arguments": {
+                    "file": file.display().to_string(),
+                    "receipt_id": receipt_id,
+                    "outcome": "applied",
+                    "observation": { "ref": "refs/heads/main", "after": "def" }
+                }
+            }
+        }));
+        assert_eq!(settled["result"]["isError"], false, "{settled:#}");
+        agent_doc_cycle_state_io::inline_effect::ensure_open_cycle_terminal(&file).unwrap();
+
+        let conflicting = response_for(json!({
+            "jsonrpc": "2.0",
+            "id": 23,
+            "method": "tools/call",
+            "params": {
+                "name": "agent_doc_inline_effect",
+                "arguments": {
+                    "file": file.display().to_string(),
+                    "receipt_id": receipt_id,
+                    "outcome": "failed",
+                    "reason": "late contradictory result"
+                }
+            }
+        }));
+        assert_eq!(conflicting["result"]["isError"], true);
+        assert!(
+            conflicting["result"]["structuredContent"]["error"]
+                .as_str()
+                .unwrap()
+                .contains("different result")
         );
     }
 
@@ -2152,6 +2254,7 @@ Done.
             "agent_doc_admit",
             "agent_doc_preflight",
             "agent_doc_finalize",
+            "agent_doc_inline_effect",
             "agent_doc_queue_action",
             "agent_doc_session_check",
             "agent_doc_steering",

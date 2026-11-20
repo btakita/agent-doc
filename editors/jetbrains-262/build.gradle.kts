@@ -2,6 +2,8 @@ import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 import org.jetbrains.intellij.platform.gradle.tasks.aware.SplitModeAware
 import org.jetbrains.intellij.platform.gradle.tasks.VerifyPluginTask
+import org.jetbrains.intellij.platform.gradle.tasks.PrepareSandboxTask
+import org.gradle.jvm.tasks.Jar
 import org.w3c.dom.Element
 import java.io.ByteArrayInputStream
 import java.util.EnumSet
@@ -45,6 +47,9 @@ val compatibilitySinceBuild = providers.gradleProperty("compatibilitySinceBuild"
     .orElse("262")
 val compatibilityUntilBuild = providers.gradleProperty("compatibilityUntilBuild")
     .orElse("262.*")
+
+evaluationDependsOn(":frontend-impl")
+val frontendImplementationJar = project(":frontend-impl").tasks.named<Jar>("jar")
 
 subprojects {
     apply(plugin = "org.jetbrains.intellij.platform.module")
@@ -112,6 +117,17 @@ intellijPlatform {
 }
 
 tasks {
+    named<PrepareSandboxTask>("prepareSandbox") {
+        dependsOn(frontendImplementationJar)
+        inputs.file(frontendImplementationJar.flatMap { it.archiveFile })
+        doLast {
+            val source = frontendImplementationJar.get().archiveFile.get().asFile
+            val target = pluginDirectory.get().dir("impl").file(source.name).asFile
+            target.parentFile.mkdirs()
+            source.copyTo(target, overwrite = true)
+        }
+    }
+
     patchPluginXml {
         sinceBuild.set(compatibilitySinceBuild)
         untilBuild.set(compatibilityUntilBuild)
@@ -160,6 +176,35 @@ tasks {
                 ?: error("missing unique split plugin distribution")
             ZipFile(zip).use { archive ->
                 val names = archive.entries().asSequence().map { it.name }.toList()
+                val implementationEntry = archive.entries().asSequence()
+                    .singleOrNull { entry ->
+                        !entry.isDirectory && entry.name.substringAfter('/').startsWith("impl/") &&
+                            entry.name.endsWith(".jar")
+                    } ?: error("split distribution must contain exactly one impl/*.jar")
+                JarInputStream(archive.getInputStream(implementationEntry)).use { implementation ->
+                    val attributes = implementation.manifest?.mainAttributes
+                        ?: error("${implementationEntry.name} is missing its implementation manifest")
+                    val entryClass = attributes.getValue("Agent-Doc-Impl-Class")
+                        ?: error("${implementationEntry.name} has no Agent-Doc-Impl-Class")
+                    check(entryClass.startsWith("com.github.btakita.agentdoc.impl.")) {
+                        "implementation entry escaped the isolated namespace: $entryClass"
+                    }
+                    check(attributes.getValue("Agent-Doc-Impl-Version") == project.version.toString()) {
+                        "implementation version does not match plugin ${project.version}"
+                    }
+                    check(attributes.getValue("Agent-Doc-Shell-Spi-Version") == "1") {
+                        "implementation JAR does not target shell SPI 1"
+                    }
+                    val classes = buildList {
+                        while (true) {
+                            val entry = implementation.nextJarEntry ?: break
+                            if (!entry.isDirectory && entry.name.endsWith(".class")) add(entry.name)
+                        }
+                    }
+                    check(classes.isNotEmpty() && classes.all {
+                        it.startsWith("com/github/btakita/agentdoc/impl/")
+                    }) { "implementation JAR contains shell/platform classes: $classes" }
+                }
                 val expectedModuleNames = setOf("agent.doc.shared", "agent.doc.frontend", "agent.doc.backend")
                 val moduleDescriptors = expectedModuleNames.associateWith { module ->
                     val moduleJar = archive.entries().asSequence()
@@ -189,7 +234,10 @@ tasks {
                     }
                 }
                 val rootJarEntry = archive.entries().asSequence()
-                    .firstOrNull { it.name.endsWith(".jar") && !it.name.contains("/modules/") && !it.name.contains("lazily-") }
+                    .firstOrNull {
+                        it.name.endsWith(".jar") && !it.name.contains("/modules/") &&
+                            !it.name.contains("/impl/") && !it.name.contains("lazily-")
+                    }
                     ?: error("split distribution is missing the root plugin jar")
                 val pluginXml = JarInputStream(archive.getInputStream(rootJarEntry)).use { jar ->
                     var content: String? = null

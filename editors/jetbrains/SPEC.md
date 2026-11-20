@@ -526,14 +526,22 @@ rather than acting on a half-upgraded pair.
   and holds the remote layout lane until the next authenticated lease. When a
   backend generation changes, its shell must replace or rebind its ingress and
   retire the former generation's leases.
-- **Activation prerequisites.** R2/R3 still need packaged implementation JARs
-  and a production child-loader host with quiesce, rollback and retirement.
-  The modular release workflow currently publishes unsigned ZIPs and needs a
-  signed distribution path and client-local signer provisioning. Before
-  enabling a swap, verify on both exact platform ranges that scope stays on
-  the same descriptor, module graph and registrations, both JVMs report the
-  same digest and epoch, and the retired loaders are collected. Receipt
-  pairing holds frontend-dependent work between the two activations.
+- **Activation prerequisites.** The R2 frontend shell now has the production
+  child-loader host, quiesce/state handoff, rollback, weak retirement fence and
+  live receipt publication. Its shell RPC polls a backend-owned release
+  handoff, while the client authenticates the outer ZIP with only locally
+  provisioned Ed25519 keys and verifies the exact `impl/` entry, shell digest,
+  SPI, implementation digest and epoch. The backend handoff can select bytes
+  but carries no signer key. The modular artifacts package the implementation
+  JAR; releases emit detached signatures when the organization release key is
+  configured; and the installer writes the digest/epoch handoff atomically.
+  Enabling release swaps still requires provisioning that organization-owned
+  key and its public half in the JetBrains Client's local trust file. Before
+  enabling a swap, verify on both
+  exact platform ranges that scope stays on the same descriptor, module graph
+  and registrations, both JVMs report the same digest and epoch, and the
+  retired loaders are collected. Receipt pairing holds frontend-dependent work
+  between the two activations.
 
 This design never replaces the module graph, so point (1) of the "Exact-263
 decision" reopen rule was restated (operator-agreed 2026-10-26) to what the

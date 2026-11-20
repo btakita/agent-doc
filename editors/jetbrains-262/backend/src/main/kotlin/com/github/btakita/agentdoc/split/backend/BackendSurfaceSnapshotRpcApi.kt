@@ -3,6 +3,7 @@
 package com.github.btakita.agentdoc.split.backend
 
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
+import com.github.btakita.agentdoc.split.FrontendImplementationRelease
 import com.github.btakita.agentdoc.split.FrontendPresentationReceipt
 import com.github.btakita.agentdoc.split.SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.SurfaceIngressAck
@@ -17,7 +18,10 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
-internal class BackendSurfaceSnapshotRpcApi : SurfaceSnapshotRpcApi {
+internal class BackendSurfaceSnapshotRpcApi(
+    private val frontendRelease: () -> FrontendImplementationRelease? =
+        FrontendImplementationReleaseSource::current,
+) : SurfaceSnapshotRpcApi {
     private val log = Logger.getInstance(BackendSurfaceSnapshotRpcApi::class.java)
 
     override suspend fun openIngress(
@@ -86,4 +90,11 @@ internal class BackendSurfaceSnapshotRpcApi : SurfaceSnapshotRpcApi {
     }
 
     override suspend fun supportedSnapshotSchemaVersion(): Int = SURFACE_SNAPSHOT_SCHEMA_VERSION
+
+    override suspend fun frontendImplementationRelease(): FrontendImplementationRelease? =
+        frontendRelease()?.takeIf { release ->
+            runCatching { BackendFrontendReleaseActivation.activate(release) }
+                .onFailure { log.warn("[frontend-impl] backend peer activation refused", it) }
+                .isSuccess
+        }
 }

@@ -17,6 +17,8 @@ frontend/src/main/
 frontend/build.gradle.kts
 backend/src/main/kotlin/com/github/btakita/agentdoc/split/backend/SurfaceSnapshotRemoteApiProvider.kt
 backend/src/main/kotlin/com/github/btakita/agentdoc/split/backend/BackendSurfaceSnapshotRpcApi.kt
+backend/src/main/kotlin/com/github/btakita/agentdoc/split/backend/BackendFrontendReleaseActivation.kt
+backend/src/main/kotlin/com/github/btakita/agentdoc/split/backend/FrontendImplementationReleaseSource.kt
 backend/src/main/kotlin/com/github/btakita/agentdoc/split/backend/AuthenticatedSurfaceIngressService.kt
 # The ingress SPI the shell service delegates through; the state machine behind it is impl.
 backend/src/main/kotlin/com/github/btakita/agentdoc/split/backend/SurfaceIngressSpi.kt
@@ -27,3 +29,5 @@ shell-sources.txt
 
 [impl]
 backend/src/main/
+frontend-impl/src/main/
+frontend-impl/build.gradle.kts

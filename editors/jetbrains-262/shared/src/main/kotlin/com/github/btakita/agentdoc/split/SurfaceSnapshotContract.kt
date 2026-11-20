@@ -252,6 +252,26 @@ data class SurfaceIngressAck(
     val presentation: FrontendPresentationProjection? = null,
 )
 
+/**
+ * Backend-selected release bytes for the client-owned frontend generation host (GH #339).
+ *
+ * This message is transport, not authority: the JetBrains Client authenticates [packageBytes]
+ * with its own release-signer trust before loading [implEntry].
+ */
+@Serializable
+data class FrontendImplementationRelease(
+    val releaseVersion: String,
+    val packageUrl: String,
+    val signatureUrl: String,
+    val implEntry: String,
+    val implSha256: String,
+    val shellDigest: String,
+    val spiVersion: Int,
+    val epoch: Long,
+    val packageBytes: ByteArray,
+    val signatureBytes: ByteArray,
+)
+
 @Rpc
 interface SurfaceSnapshotRpcApi : RemoteApi<Unit> {
     companion object {
@@ -284,4 +304,7 @@ interface SurfaceSnapshotRpcApi : RemoteApi<Unit> {
      * geometry), so an old peer keeps working without ever decoding a key it does not know.
      */
     suspend fun supportedSnapshotSchemaVersion(): Int
+
+    /** The current backend-selected package, or null while the backend remains shell-only. */
+    suspend fun frontendImplementationRelease(): FrontendImplementationRelease?
 }

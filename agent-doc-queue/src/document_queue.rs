@@ -392,6 +392,46 @@ pub(crate) fn strip_top_level_queue_heading(text: &str) -> &str {
     text.trim_start().strip_prefix("### ").unwrap_or(text)
 }
 
+/// Remove a torn active-work projection that was welded onto a queue prompt.
+///
+/// `#activequeueweld`: active-work groups have both a presentation title and
+/// a stable machine key (`Lost` / `lost`, for example). A partial editor merge
+/// once joined those adjacent representations, followed by the lifecycle
+/// marker and owner annotation of another worker, directly to an operator
+/// prompt. Treat only that exact binary-owned signature as contamination. The
+/// worker annotation is required so ordinary prompt prose mentioning these
+/// words is preserved.
+fn strip_active_projection_weld(text: &str) -> &str {
+    const GROUP_WELDS: [&str; 4] = [
+        "Runningrunning",
+        "Lostlost",
+        "Blocked by quotaquota-blocked",
+        "Needs integrationneeds-integration",
+    ];
+    const LIFECYCLE_MARKERS: [&str; 10] =
+        ["⚠️", "🟡", "🚧", "☑️", "📥", "⛔", "🔄", "❔", "⏭️", "⏳"];
+
+    GROUP_WELDS
+        .iter()
+        .filter_map(|signature| {
+            let index = text.find(signature)?;
+            let prefix = text[..index].trim_end();
+            if prefix.is_empty() {
+                return None;
+            }
+            let leaked = &text[index + signature.len()..];
+            let marker = LIFECYCLE_MARKERS
+                .iter()
+                .find(|marker| leaked.starts_with(**marker))?;
+            leaked[marker.len()..]
+                .trim_start()
+                .starts_with("[#subagent:")
+                .then_some((index, prefix))
+        })
+        .min_by_key(|(index, _)| *index)
+        .map_or(text, |(_, prefix)| prefix)
+}
+
 /// Project the binary-owned `### ` navigation heading onto every non-empty
 /// top-level queue list item without reparsing or re-rendering the row.
 ///
@@ -779,6 +819,10 @@ fn parse_spans_uncached(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<u
             let item_content =
                 agent_doc_markdown_ast::overlay::embedded_terminal_queue_heading(item_content)
                     .unwrap_or(item_content);
+            // A torn active-work projection is binary metadata, not part of
+            // the runnable prompt. Normalize it before any queue identity or
+            // claimability decision so normal projection can heal the row.
+            let item_content = strip_active_projection_weld(item_content);
             if let Some(end_i) = agent_doc_markdown_ast::overlay::tracked_do_context_block_end(
                 &lines,
                 i,
@@ -8598,6 +8642,35 @@ mod tests {
 
     fn ids(value: &[&str]) -> Vec<String> {
         value.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn active_projection_weld_is_not_admitted_as_prompt_text() {
+        let body = concat!(
+            "- 🚧 [#subagent:sdk352_recovered_review#1] ",
+            "#adversarial-prLostlost⚠️ [#subagent:sdk338_release_heading\n",
+        );
+        let entries = parse(body).unwrap();
+
+        assert_eq!(
+            entries,
+            vec![QueueEntry::Prompt(QueuePrompt::new(
+                "🚧 [#subagent:sdk352_recovered_review#1] #adversarial-pr"
+            ))]
+        );
+        assert!(!render(&entries).contains("Lostlost"));
+        assert!(!render(&entries).contains("sdk338_release_heading"));
+    }
+
+    #[test]
+    fn active_projection_weld_guard_preserves_operator_prose() {
+        for text in [
+            "Explain why Lostlost⚠️ appears",
+            "Explain Lostlost without an owner annotation",
+            "Lostlost⚠️ [#subagent:worker#1]",
+        ] {
+            assert_eq!(strip_active_projection_weld(text), text);
+        }
     }
 
     fn nested_claim(parent: &str, row: &str) -> crate::queue_claim::QueueClaim {

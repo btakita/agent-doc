@@ -21,7 +21,7 @@ class RetainedCanonicalOperatorTextTest {
     @Test
     fun `fresh controller reseed publishes a proven live buffer instead of temporary empty canonical`() {
         assertEquals(
-            RetainedRegistrationProjectionAction.PublishOperatorBuffer,
+            RetainedRegistrationProjectionAction.AdoptOperatorBuffer,
             retainedRegistrationProjectionActionForAttachUtil(
                 deferCanonicalProjectionForPendingLocal = false,
                 canonicalProjectionRetained = false,
@@ -34,9 +34,9 @@ class RetainedCanonicalOperatorTextTest {
     }
 
     @Test
-    fun `fresh controller reseed without a settled ancestor holds without mutation`() {
+    fun `fresh controller reseed without a settled ancestor publishes the IDE buffer`() {
         assertEquals(
-            RetainedRegistrationProjectionAction.HoldOperatorBuffer,
+            RetainedRegistrationProjectionAction.AdoptOperatorBuffer,
             retainedRegistrationProjectionActionForAttachUtil(
                 deferCanonicalProjectionForPendingLocal = false,
                 canonicalProjectionRetained = false,
@@ -133,12 +133,13 @@ class RetainedCanonicalOperatorTextTest {
                     val expected =
                         when {
                             pendingLocal -> RetainedRegistrationProjectionAction.DeferCanonicalProjection
-                            publishedShadow != null && bufferText != null ->
-                                RetainedRegistrationProjectionAction.PublishOperatorBuffer
-                            else -> RetainedRegistrationProjectionAction.HoldOperatorBuffer
+                            bufferText != null -> RetainedRegistrationProjectionAction.AdoptOperatorBuffer
+                            else -> RetainedRegistrationProjectionAction.ApplyCanonical
                         }
                     assertEquals(expected, action)
-                    assertFalse(action == RetainedRegistrationProjectionAction.ApplyCanonical)
+                    if (bufferText != null) {
+                        assertFalse(action == RetainedRegistrationProjectionAction.ApplyCanonical)
+                    }
                 }
             }
         }
@@ -176,7 +177,7 @@ class RetainedCanonicalOperatorTextTest {
     fun `a live buffer is published when retained canonical is its exact shadow`() {
         val shadow = "# doc\n\nlast published state\n"
         assertEquals(
-            RetainedRegistrationProjectionAction.PublishOperatorBuffer,
+            RetainedRegistrationProjectionAction.AdoptOperatorBuffer,
             retainedRegistrationProjectionActionUtil(
                 publishedShadow = shadow,
                 bufferText = "$shadow\ndo the thing I just typed\n",
@@ -186,9 +187,9 @@ class RetainedCanonicalOperatorTextTest {
     }
 
     @Test
-    fun `three divergent generations hold without overwriting the operator`() {
+    fun `three divergent generations publish the authoritative IDE buffer`() {
         assertEquals(
-            RetainedRegistrationProjectionAction.HoldOperatorBuffer,
+            RetainedRegistrationProjectionAction.AdoptOperatorBuffer,
             retainedRegistrationProjectionActionUtil(
                 publishedShadow = "# doc\n\nlast published state\n",
                 bufferText = "# doc\n\nlast published state\n\ndo the thing I just typed\n",
@@ -198,7 +199,7 @@ class RetainedCanonicalOperatorTextTest {
     }
 
     @Test
-    fun `a clean three-way merge carries the operator buffer forward instead of holding`() {
+    fun `clean merge availability never outranks the IDE buffer`() {
         // `#editorauth2`: api.md 2026-09-29 15:35 shape. The operator typed after the
         // settled shadow, a handoff moved canonical with an agent write, and the
         // hold had no exit. A clean reconcile publishes both sides; a conflicting
@@ -206,15 +207,11 @@ class RetainedCanonicalOperatorTextTest {
         val shadow = "# doc\n\nlast published state\n"
         val buffer = "${shadow}do the thing I just typed\n"
         val canonical = "# doc\nagent write\n\nlast published state\n"
-        for ((clean, expected) in listOf(
-            true to RetainedRegistrationProjectionAction.MergeForward,
-            false to RetainedRegistrationProjectionAction.HoldOperatorBuffer,
-            null to RetainedRegistrationProjectionAction.HoldOperatorBuffer,
-        )) {
+        for (clean in listOf(true, false, null)) {
             for (retained in listOf(true, false)) {
                 assertEquals(
                     "clean=$clean retained=$retained",
-                    expected,
+                    RetainedRegistrationProjectionAction.AdoptOperatorBuffer,
                     retainedRegistrationProjectionActionForAttachUtil(
                         deferCanonicalProjectionForPendingLocal = false,
                         canonicalProjectionRetained = retained,
@@ -229,12 +226,12 @@ class RetainedCanonicalOperatorTextTest {
     }
 
     @Test
-    fun `a proven rebase still adopts canonical ahead of a merge`() {
+    fun `a proven rebase never outranks the IDE buffer`() {
         val shadow = "# doc\n\nFix api.md issue\n"
         val buffer = "${shadow}typed\n"
         val canonical = "$buffer\n### Re: replayed\n"
         assertEquals(
-            RetainedRegistrationProjectionAction.ApplyCanonical,
+            RetainedRegistrationProjectionAction.AdoptOperatorBuffer,
             retainedRegistrationProjectionActionUtil(
                 publishedShadow = shadow,
                 bufferText = buffer,
@@ -253,13 +250,9 @@ class RetainedCanonicalOperatorTextTest {
         val shadow = "# doc\n\nFix api.md issue\n"
         val buffer = "$shadow```\npasted log\n```\n"
         val canonical = "$buffer\n### Re: replayed\n"
-        for ((proof, expected) in listOf(
-            true to RetainedRegistrationProjectionAction.ApplyCanonical,
-            false to RetainedRegistrationProjectionAction.HoldOperatorBuffer,
-            null to RetainedRegistrationProjectionAction.HoldOperatorBuffer,
-        )) {
+        for (proof in listOf(true, false, null)) {
             assertEquals(
-                expected,
+                RetainedRegistrationProjectionAction.AdoptOperatorBuffer,
                 retainedRegistrationProjectionActionForAttachUtil(
                     deferCanonicalProjectionForPendingLocal = false,
                     canonicalProjectionRetained = true,
@@ -306,7 +299,7 @@ class RetainedCanonicalOperatorTextTest {
         val shadow = "<!-- agent:queue go -->\n- Does PR 591 have a contracts\n<!-- /agent:queue -->\n"
         val buffer = "<!-- agent:queue go -->\n- Does PR 591 have a contracts PR? Also check SDK.\n<!-- /agent:queue -->\n"
         assertEquals(
-            RetainedRegistrationProjectionAction.PublishOperatorBuffer,
+            RetainedRegistrationProjectionAction.AdoptOperatorBuffer,
             reregisterAction(shadow = shadow, buffer = buffer, canonical = shadow),
         )
     }
@@ -315,33 +308,30 @@ class RetainedCanonicalOperatorTextTest {
     fun `a library-reload re-register still adopts remote writes when the operator typed nothing`() {
         val shadow = "# doc\n\nbefore\n"
         assertEquals(
-            RetainedRegistrationProjectionAction.ApplyCanonical,
+            RetainedRegistrationProjectionAction.AdoptOperatorBuffer,
             reregisterAction(shadow = shadow, buffer = shadow, canonical = "# doc\n\nagent response\n"),
         )
     }
 
     @Test
-    fun `a library-reload re-register with three divergent generations holds unless canonical has the edits`() {
+    fun `a library-reload re-register always preserves a differing IDE buffer`() {
         val shadow = "# doc\n\nbase\n"
         val buffer = "# doc\n\nbase plus operator\n"
         val canonical = "# doc\n\nbase plus agent\n"
         assertEquals(
-            RetainedRegistrationProjectionAction.HoldOperatorBuffer,
+            RetainedRegistrationProjectionAction.AdoptOperatorBuffer,
             reregisterAction(shadow = shadow, buffer = buffer, canonical = canonical),
         )
         assertEquals(
-            RetainedRegistrationProjectionAction.ApplyCanonical,
+            RetainedRegistrationProjectionAction.AdoptOperatorBuffer,
             reregisterAction(shadow = shadow, buffer = buffer, canonical = canonical, containsOperatorEdits = true),
         )
     }
 
     @Test
-    fun `a restarted IDE has no shadow, so adoption stays the recovery`() {
-        // The shadow map is in-memory and does not survive a restart. Without it
-        // the buffer is a stale reconstruction and canonical must win — the
-        // behaviour this guard must not regress.
+    fun `a restarted IDE buffer remains authoritative without a shadow`() {
         assertEquals(
-            RetainedRegistrationProjectionAction.ApplyCanonical,
+            RetainedRegistrationProjectionAction.AdoptOperatorBuffer,
             retainedRegistrationProjectionActionUtil(
                 publishedShadow = null,
                 bufferText = "# doc\n\nanything at all\n",
@@ -354,7 +344,7 @@ class RetainedCanonicalOperatorTextTest {
     fun `an unacknowledged local shadow cannot authorize an older controller overwrite`() {
         val localText = "# doc\n\noperator edit accepted only by the retiring controller\n"
         assertEquals(
-            RetainedRegistrationProjectionAction.HoldOperatorBuffer,
+            RetainedRegistrationProjectionAction.AdoptOperatorBuffer,
             retainedRegistrationProjectionActionUtil(
                 publishedShadow = localText,
                 bufferText = localText,
@@ -367,7 +357,7 @@ class RetainedCanonicalOperatorTextTest {
     fun `a causally covered settled buffer accepts retained canonical recovery`() {
         val settledBuffer = "# doc\n\nlast controller-accepted editor projection\n"
         assertEquals(
-            RetainedRegistrationProjectionAction.ApplyCanonical,
+            RetainedRegistrationProjectionAction.AdoptOperatorBuffer,
             retainedRegistrationProjectionActionUtil(
                 canonicalCoversRetainedFrontier = true,
                 publishedShadow = settledBuffer,
@@ -381,7 +371,7 @@ class RetainedCanonicalOperatorTextTest {
     fun `an uncovered settled buffer keeps the ambiguity hold`() {
         val settledBuffer = "# doc\n\nprojection known only to the retiring controller\n"
         assertEquals(
-            RetainedRegistrationProjectionAction.HoldOperatorBuffer,
+            RetainedRegistrationProjectionAction.AdoptOperatorBuffer,
             retainedRegistrationProjectionActionUtil(
                 canonicalCoversRetainedFrontier = false,
                 publishedShadow = settledBuffer,
@@ -516,7 +506,7 @@ class RetainedCanonicalOperatorTextTest {
         // The re-register that replaces the REPLACE publishes the buffer: canonical
         // is exactly the settled shadow the operator edited from.
         assertEquals(
-            RetainedRegistrationProjectionAction.PublishOperatorBuffer,
+            RetainedRegistrationProjectionAction.AdoptOperatorBuffer,
             retainedRegistrationProjectionActionForAttachUtil(
                 deferCanonicalProjectionForPendingLocal = false,
                 canonicalProjectionRetained = false,
@@ -673,7 +663,7 @@ class RetainedCanonicalOperatorTextTest {
             calls,
         )
         assertEquals(
-            RetainedRegistrationProjectionAction.MergeForward,
+            RetainedRegistrationProjectionAction.AdoptOperatorBuffer,
             retainedRegistrationProjectionActionUtil(
                 publishedShadow = queueBase,
                 bufferText = typedBuffer,
@@ -694,7 +684,7 @@ class RetainedCanonicalOperatorTextTest {
         assertEquals(null, refused)
         assertEquals(1, calls.size)
         assertEquals(
-            RetainedRegistrationProjectionAction.HoldOperatorBuffer,
+            RetainedRegistrationProjectionAction.AdoptOperatorBuffer,
             retainedRegistrationProjectionActionUtil(
                 publishedShadow = queueBase,
                 bufferText = typedBuffer,

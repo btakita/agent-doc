@@ -18,9 +18,8 @@ import org.junit.Test
  * so the controller answered `canonical_covers_retained_frontier = unknown`, and
  * a buffer that still equalled its settled shadow (`shadow_hash == buffer_hash`)
  * held as `ambiguous-retained-projection` on every recovery probe for 23 minutes.
- * With the frontier still supplied, canonical (the reseeded replica plus the
- * controller's own queue-claim projection) provably covers it, and adoption is
- * the safe recovery.
+ * Frontier retention remains required for delivery lineage, but it no longer
+ * authorizes canonical adoption over a readable buffer (`#idebufferauthority`).
  */
 class ResumeFrontierRetentionTest {
 

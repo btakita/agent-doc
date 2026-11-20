@@ -252,7 +252,7 @@ class RegistrationProjectionTest {
                 """{"action":"merge_forward","hold_reason":null}"""
             }
         assertEquals("registration_projection", asked)
-        assertEquals(RetainedRegistrationProjectionAction.MergeForward, decision.action)
+        assertEquals(RetainedRegistrationProjectionAction.AdoptOperatorBuffer, decision.action)
         assertNull(decision.holdReason)
         val wire = sent!!
         for (text in listOf(divergent.publishedShadow!!, divergent.bufferText!!, divergent.canonicalText!!)) {
@@ -270,18 +270,19 @@ class RegistrationProjectionTest {
             RegistrationProjection.decide(divergent) { _, _ ->
                 """{"action":"hold_operator_buffer","hold_reason":"a-newer-diagnosis"}"""
             }
-        assertEquals(RetainedRegistrationProjectionAction.HoldOperatorBuffer, native.action)
-        assertEquals("a-newer-diagnosis", native.holdReason)
+        assertEquals(RetainedRegistrationProjectionAction.AdoptOperatorBuffer, native.action)
+        assertNull(native.holdReason)
 
         val bare = RegistrationProjection.decide(divergent) { _, _ -> """{"action":"hold_operator_buffer"}""" }
-        assertEquals(RegistrationProjection.AMBIGUOUS_REREGISTER_PROJECTION, bare.holdReason)
+        assertEquals(RetainedRegistrationProjectionAction.AdoptOperatorBuffer, bare.action)
+        assertNull(bare.holdReason)
     }
 
     @Test
     fun `no native answer, an unknown action, or an unreadable answer takes the frozen floor`() {
         val floor = RegistrationProjection.frozen(divergent)
-        assertEquals(RetainedRegistrationProjectionAction.HoldOperatorBuffer, floor.action)
-        assertEquals(RegistrationProjection.AMBIGUOUS_REREGISTER_PROJECTION, floor.holdReason)
+        assertEquals(RetainedRegistrationProjectionAction.AdoptOperatorBuffer, floor.action)
+        assertNull(floor.holdReason)
         assertEquals(floor, RegistrationProjection.decide(divergent, EditorDerivation.Unavailable))
         // A newer library may name an action this plugin generation cannot execute.
         assertEquals(floor, RegistrationProjection.decide(divergent) { _, _ -> """{"action":"rebase_later"}""" })
@@ -331,45 +332,36 @@ class RegistrationProjectionTest {
     )
 
     @Test
-    fun `a restarted editor never adopts a differing canonical whichever rules answer`() {
-        // #restartadoptscanonical: a plain IDE restart while the controller hub survives. The
-        // frozen floor and an older native generation still answer the restarted-IDE adoption; the
-        // execution guard holds the saved operator buffer instead, with the same reason the native
-        // rules give.
+    fun `a restarted editor always publishes a differing readable IDE buffer`() {
         val saved = "# doc\n\noperator text saved before the restart\n"
         val hub = "# doc\n\nsurviving controller text\n"
         for (retained in listOf(false, true)) {
             val observation = restartedOver(saved, hub, retained)
-            assertTrue(unprovenCanonicalOverShadowlessBufferUtil(observation))
-            val reason = if (retained) "ambiguous-retained-projection" else RegistrationProjection.AMBIGUOUS_REREGISTER_PROJECTION
             assertEquals(
-                "the frozen floor alone still adopts (retained=$retained)",
-                RetainedRegistrationProjectionAction.ApplyCanonical,
+                "the frozen floor preserves IDE authority (retained=$retained)",
+                RetainedRegistrationProjectionAction.AdoptOperatorBuffer,
                 RegistrationProjection.frozen(observation).action,
             )
             val floor = RegistrationProjection.decide(observation, EditorDerivation.Unavailable)
-            assertEquals(RegistrationProjection.Decision(RetainedRegistrationProjectionAction.HoldOperatorBuffer, reason), floor)
+            assertEquals(RegistrationProjection.Decision(RetainedRegistrationProjectionAction.AdoptOperatorBuffer, null), floor)
             val older = RegistrationProjection.decide(observation) { _, _ -> """{"action":"apply_canonical","hold_reason":null}""" }
-            assertEquals(RegistrationProjection.Decision(RetainedRegistrationProjectionAction.HoldOperatorBuffer, reason), older)
+            assertEquals(RegistrationProjection.Decision(RetainedRegistrationProjectionAction.AdoptOperatorBuffer, null), older)
             val native =
-                RegistrationProjection.decide(observation) { _, _ -> """{"action":"hold_operator_buffer","hold_reason":"$reason"}""" }
-            assertEquals(RegistrationProjection.Decision(RetainedRegistrationProjectionAction.HoldOperatorBuffer, reason), native)
+                RegistrationProjection.decide(observation) { _, _ -> """{"action":"hold_operator_buffer","hold_reason":"legacy"}""" }
+            assertEquals(RegistrationProjection.Decision(RetainedRegistrationProjectionAction.AdoptOperatorBuffer, null), native)
         }
         val adopt = """{"action":"apply_canonical","hold_reason":null}"""
-        val apply = RetainedRegistrationProjectionAction.ApplyCanonical
-        // Proof that canonical holds every operator edit still adopts.
+        val preserve = RetainedRegistrationProjectionAction.AdoptOperatorBuffer
+        // Proof that the controller contains older edits does not outrank the buffer.
         val proven = restartedOver(saved, saved + "agent response\n", retained = false, contains = true)
-        assertEquals(apply, RegistrationProjection.decide(proven) { _, _ -> adopt }.action)
-        // Adoption that loses nothing still adopts: convergence, an empty buffer, an unknown canonical.
-        assertEquals(apply, RegistrationProjection.decide(restartedOver(hub, hub, retained = true)) { _, _ -> adopt }.action)
-        assertEquals(apply, RegistrationProjection.decide(restartedOver("", hub, retained = true)) { _, _ -> adopt }.action)
-        assertEquals(apply, RegistrationProjection.decide(restartedOver(saved, null, retained = false)) { _, _ -> adopt }.action)
-        // A restored settled shadow is an ordinary causal decision again.
+        assertEquals(preserve, RegistrationProjection.decide(proven) { _, _ -> adopt }.action)
+        // Exact convergence accepts the controller; every other readable mismatch preserves IDE.
+        assertEquals(RetainedRegistrationProjectionAction.ApplyCanonical, RegistrationProjection.decide(restartedOver(hub, hub, retained = true)) { _, _ -> adopt }.action)
+        assertEquals(preserve, RegistrationProjection.decide(restartedOver("", hub, retained = true)) { _, _ -> adopt }.action)
+        assertEquals(preserve, RegistrationProjection.decide(restartedOver(saved, null, retained = false)) { _, _ -> adopt }.action)
         val restored = restartedOver(saved, saved + "agent response\n", retained = false).copy(publishedShadow = saved)
-        assertFalse(unprovenCanonicalOverShadowlessBufferUtil(restored))
-        assertEquals(apply, RegistrationProjection.decide(restored) { _, _ -> adopt }.action)
+        assertEquals(preserve, RegistrationProjection.decide(restored) { _, _ -> adopt }.action)
         // A captured local delta that owns the buffer defers; the guard never rewrites that.
-        assertFalse(unprovenCanonicalOverShadowlessBufferUtil(restartedOver(saved, hub, retained = false, defer = true)))
     }
 
     @Test

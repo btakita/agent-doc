@@ -897,90 +897,26 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   not which split has keyboard focus. The payload stays JSON, so a field a newer
   library adds reaches the controller without a plugin generation.
 - `registration_projection` (phase 5): the direction a CRDT replica
-  registration projects (`CrdtReplicaManager.forwarderFor`). Evidence is facts,
-  never text: whether a captured local delta owns the buffer, whether the
-  controller retained a canonical projection or awaits a fresh-controller reseed,
-  whether canonical covers the cached native frontier, which of the settled
-  shadow, the live buffer, and the canonical are present, which of them are
-  equal, and the answers of the native containment proof and clean three-way
-  merge. The plugin compares the three texts itself over the exact UTF-16 text it
-  holds, so no document crosses the boundary and no encoding can make two
-  different buffers equal. Native owns the action (adopt canonical, publish the
-  buffer from its proven shadow, merge forward, defer to the captured delta, or
-  hold) and the hold reason the failure records
-  (`ambiguous-retained-projection`, `retained-reseed-missing-settled-shadow`,
-  `ambiguous-reregister-projection`). Executing the action, the
-  publication-edge rechecks, and the order of their effects stay in Kotlin. An
-  action this plugin generation cannot execute takes the frozen floor, so a new
-  action needs a plugin generation; a new hold reason does not.
-  The registration's clean-merge fact also answers true when native proves the
-  live buffer already carries every canonical change since the settled shadow
-  (`#lagcanonicalrollforward`, in `agent-doc-merge` `rebase`); the merge it then
-  publishes is the buffer itself. When canonical also carries a controller
-  change the buffer lacks (a response, an appended row), native answers a
-  row-aware merge instead (`#lagcanonicalrowmerge`): the buffer's text with
-  that change rolled forward and canonical's claim marker on the buffer's row
-  of the same work id. `forwarderFor` releases the retained native
-  resume state only at its two commit points
-  (`releaseRetainedResumeStateOnCommitUtil`, `#resumefrontierlostonfailedattach`),
-  and logs a swap refusal with whether that frontier was kept.
-  `#ackedreplicabase`: the containment proof and the clean merge are first asked
-  from the settled shadow; when that proves neither, they are asked again from
-  the cached endpoint's replica text (`registrationCausalProofUtil`). That text
-  is a proven common ancestor only when the controller answers
-  `canonical_covers_retained_frontier = true` for the state vector captured from
-  the same replica, and the replica text read before and after that capture is
-  identical (`acknowledgedReplicaBaseUtil`; a library-reload resume state has no
-  text and never qualifies). A buffer equal to it reports containment (canonical
-  holds everything the buffer has); a canonical equal to it merges to the buffer
-  itself; otherwise the native containment proof and rebase run from it. The
-  settled shadow advances only on an accepted visible projection, which every
-  keystroke defers, so an operator who kept typing while the controller wrote
-  another line (the resume id) held `ambiguous-retained-projection` although the
-  two sides touched different lines (agent-doc-bugs.md, 2026-10-28 12:57:53).
-  A merge-forward recomputes from the ancestor its decision was proven from, and
-  an adoption proven from the replica text refuses (and retries) unless the live
-  buffer is still exactly the text the proof covered. A same-line conflict still
-  holds. Model: `formal/tla/RegistrationAcknowledgedBase.tla`.
-  `#restartadoptscanonical`: the settled shadow is durable. Every accepted
-  visible projection (`projectSettledVisibleState`) also writes it to
-  `SettledShadowStore` (`<IDE system dir>/agent-doc/settled-shadows/`, one
-  atomic JSON record per document naming its path and content hash), and
-  registration restores it into `settledShadows` when memory holds none, so a
-  restarted IDE decides from the same ancestor it would have held in memory. A
-  record that does not verify is no record. `#shadowstorecost`: the save does no
-  I/O on the replica worker. A newer settle deletes the older record at once (a
-  crash before the write leaves no record, the hold, never an older ancestor),
-  and one debounced write (250 ms up to 5 s, proportional to document size)
-  persists whatever is newest when it runs, so an older settle never lands over
-  a newer one. `CrdtReplicaManager.dispose` flushes, and the plugin generation
-  closes the store on unload and IDE exit. Records whose document is gone, or
-  that were neither written nor read for 30 days, are collected in the
-  background at most daily; a document this session touched never is. With no settled shadow, a
-  registration whose non-empty buffer differs from a known canonical holds
-  unless canonical is proven to contain the operator edits;
-  `RegistrationProjection.guardUnprovenCanonical` enforces that over any answer,
-  including the frozen floor's restarted-IDE adoption.
-  `#attachauthorattribution`: the controller's `replica_register` ack carries
-  `binary_attributed_ancestor_hashes`, the canonical generations from which only
-  agent-doc's own recorded binary-authored writes lead to
-  `canonical_content_hash` (`CrdtReplicaForwarder.binaryAttributedAncestorHashes`).
-  When the buffer hashes to one of them and the bootstrapped canonical hashes to
-  `canonical_content_hash`, `forwarderFor` reports
-  `canonical_contains_operator_edits = true`
-  (`bufferIsBinaryAttributedAncestorUtil`), so a restarted IDE whose canonical
-  differs only by agent-doc's queue marker projections adopts canonical instead
-  of holding `ambiguous-retained-projection`. An absent or empty list, or a
-  canonical the list was not proven against, changes nothing.
-  `#installreattachambiguous`: after a `make install` (native reload plus a
-  controller recycle), a buffer byte-identical to its settled shadow exits the
-  retained-projection hold through `canonical_covers_retained_frontier = true`
-  even when the reseeding registration failed before committing and the plugin
-  kept a reload resume state naming the predecessor's history. The controller's
-  reseed hub takes the retained replica's history id, so that resume state is
-  not foreign (`specs/14-realtime-workflow.md`, `#deliverylineagestamp`). The
-  plugin's decision rules are unchanged; a buffer holding text past its shadow
-  still holds unless containment or a clean merge proves an exit.
+  registration projects (`CrdtReplicaManager.forwarderFor`). The invariant is
+  `#idebufferauthority`: a readable live IDE buffer is the whole-document
+  authority and the controller text is a projection. Native owns the small
+  transition table: pending captured local delivery defers; exact equality
+  converges; any other readable mismatch publishes the buffer; only an
+  unreadable buffer may accept controller text. The Kotlin adapter repeats this
+  guard over native and frozen-floor answers so an older native library cannot
+  apply controller text over a differing buffer.
+  The publication edge rechecks the exact buffer cut, replacement endpoint,
+  and generation before publishing one full-buffer CRDT delta. Retained resume
+  state is released only after that commit point. Settled shadows, acknowledged
+  replica bases, containment, clean-merge candidates, disk equality, binary
+  attribution, restart history, and retained-controller state remain useful
+  diagnostics and recovery lineage, but none chooses registration direction.
+  Controller-authored responses, status corrections, queue markers, and other
+  retained effects are durable owed intents; after the buffer becomes current
+  authority, they replay through the ordinary editor-owned delivery path.
+  `SettledShadowStore` remains a bounded audit/recovery cache and is still
+  maintained off the replica worker, but a restored shadow cannot outrank what
+  the operator currently sees. Model: `formal/tla/RegistrationAcknowledgedBase.tla`.
 - `attach_failure_diagnosis` (phase 5b): what a CRDT replica attach failure
   means for the operator. Evidence is the recorded failure reason, for the
   operator notification the document's file name, and `live_replica_attached`

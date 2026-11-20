@@ -2542,42 +2542,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         return batch
     }
 
-    /**
-     * `#ambiguousholdforever`: only consulted when shadow, buffer and canonical
-     * all differ. The native proof answers true exactly when every operator
-     * change from the shadow is already in canonical; anything else, including a
-     * missing native library, leaves the hold in place.
-     */
-    private fun canonicalContainsOperatorEditsAtRegistration(
-        filePath: String,
-        canonicalProjectionRetained: Boolean,
-        publishedShadow: String?,
-        bufferText: String?,
-        canonicalText: String?,
-    ): Boolean? {
-        // Computed for ordinary re-registers too (`#reloadclobbersoperatortext`):
-        // it is the lossless exit from a hold on either path.
-        if (publishedShadow == null || bufferText == null || canonicalText == null) {
-            return null
-        }
-        if (bufferText == publishedShadow || canonicalText == bufferText || canonicalText == publishedShadow) {
-            return null
-        }
-        // `#ambiguousholdforever2`: the proof runs over operator text only (binary-owned
-        // `(HEAD)` / boundary placement removed). GH #326 phase 5c: native shapes it.
-        val contained =
-            RegistrationSpliceShaping.operatorEditsContained(publishedShadow, bufferText, canonicalText)
-        if (contained) {
-            log.info(
-                "[crdt-replica] retained canonical already contains the operator buffer's edits for " +
-                    "${File(filePath).name}; adopting canonical is lossless. " +
-                    "shadow_hash=${contentHash(publishedShadow)} buffer_hash=${contentHash(bufferText)} " +
-                    "canonical_hash=${contentHash(canonicalText)}",
-            )
-        }
-        return contained
-    }
-
     private fun rebootstrapCanonicalAndForwardCapturedLocalEdit(
         filePath: String,
         capturedBaseText: String,
@@ -3049,11 +3013,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         unsettledOperatorBuffer?.let { bufferText ->
             // The canonical in a REPLACE wholesale-replaces the local replica, so
             // the operator ops it lacks would be destroyed, not merged. Re-register
-            // from the live buffer instead: registration decides causally from
-            // (settled shadow, buffer, canonical) — publish the buffer when
-            // canonical is still the settled shadow, adopt canonical only when it
-            // provably contains the operator edits, merge forward or hold
-            // otherwise. Never retain this canonical for a lazy projection.
+            // from the live buffer instead. Registration publishes the exact
+            // readable IDE buffer; causal proofs remain diagnostic and retained
+            // controller work replays later through the editor-owned path.
             log.warn(
                 "[crdt-replica] REPLACE refused: the live buffer holds operator text the controller never " +
                     "accepted for $filePath; re-registering from the buffer instead of projecting canonical over it. " +
@@ -4213,66 +4175,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             (settledShadows[filePath] ?: nativeReloadSettledShadows[filePath])?.toString() ?: restorePersistedSettledShadow(filePath)
         val bufferTextAtRegistration = editorBufferText(filePath) ?: initialText
         val canonicalTextAtRegistration = forwarder.replicaText()
-        val acknowledgedBaseAtRegistration =
-            acknowledgedReplicaBaseUtil(
-                resumeStateFromCachedEndpoint = cachedResumeState != null,
-                cachedTextBeforeCapture = cachedReplicaTextBeforeCapture,
-                cachedTextAfterCapture = cachedReplicaTextAfterCapture,
-                canonicalCoversRetainedFrontier = forwarder.canonicalCoversRetainedFrontier,
-            )
-        val causalProof =
-            registrationCausalProofUtil(
-                publishedShadow = publishedShadowAtRegistration,
-                bufferText = bufferTextAtRegistration,
-                canonicalText = canonicalTextAtRegistration,
-                acknowledgedBase = acknowledgedBaseAtRegistration,
-                shadowContained =
-                    canonicalContainsOperatorEditsAtRegistration(
-                        filePath = filePath,
-                        canonicalProjectionRetained = forwarder.canonicalProjectionRetained,
-                        publishedShadow = publishedShadowAtRegistration,
-                        bufferText = bufferTextAtRegistration,
-                        canonicalText = canonicalTextAtRegistration,
-                    ),
-                contained = { base, buffer, canonical ->
-                    RegistrationSpliceShaping.operatorEditsContained(base, buffer, canonical)
-                },
-                merge = { base, buffer, canonical -> cleanRegistrationMerge(base, buffer, canonical) },
-            )
-        // `#attachauthorattribution`: the controller's own op record says the buffer is a canonical
-        // generation that only agent-doc's binary-authored writes (queue lifecycle icons, claim
-        // markers, ...) carried forward to this canonical. The buffer then holds no operator text
-        // canonical lacks, so canonical contains every operator edit it has: adoption is lossless.
-        val bufferBinaryAttributed =
-            bufferIsBinaryAttributedAncestorUtil(
-                bufferText = bufferTextAtRegistration,
-                canonicalText = canonicalTextAtRegistration,
-                canonicalContentHash = forwarder.canonicalContentHash,
-                binaryAttributedAncestorHashes = forwarder.binaryAttributedAncestorHashes,
-                contentHash = ::contentHash,
-            )
-        if (bufferBinaryAttributed) {
-            log.info(
-                "[crdt-replica] registration attributed every canonical difference of ${File(filePath).name} " +
-                    "to agent-doc's own recorded writes; adopting canonical is lossless. " +
-                    "buffer_hash=${bufferTextAtRegistration?.let(::contentHash) ?: "unavailable"} " +
-                    "canonical_hash=${forwarder.canonicalContentHash ?: "unknown"} " +
-                    "attributed_ancestors=${forwarder.binaryAttributedAncestorHashes.size} (#attachauthorattribution)",
-            )
-        }
-        val attributedOrProvenContainment =
-            if (bufferBinaryAttributed) true else causalProof.canonicalContainsOperatorEdits
-        if (causalProof.mergeBase != null && causalProof.mergeBase != publishedShadowAtRegistration) {
-            log.info(
-                "[crdt-replica] registration proved ${File(filePath).name} from the acknowledged replica " +
-                    "text, not the stale settled shadow; contained=${causalProof.canonicalContainsOperatorEdits} " +
-                    "clean_merge=${causalProof.cleanMergeAvailable} " +
-                    "shadow_hash=${publishedShadowAtRegistration?.let(::contentHash) ?: "unavailable"} " +
-                    "acknowledged_hash=${contentHash(causalProof.mergeBase)} " +
-                    "buffer_hash=${bufferTextAtRegistration?.let(::contentHash) ?: "unavailable"} " +
-                    "canonical_hash=${forwarder.canonicalContentHash ?: "unknown"} (#ackedreplicabase)",
-            )
-        }
         // GH #326 phase 5: the facts are captured here, in the same order as before; which
         // direction they imply is the native `registration_projection` derivation
         // ([RegistrationProjection], frozen floor when no native generation answers). Executing
@@ -4287,46 +4189,20 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     publishedShadow = publishedShadowAtRegistration,
                     bufferText = bufferTextAtRegistration,
                     canonicalText = canonicalTextAtRegistration,
-                    cleanMergeAvailable = causalProof.cleanMergeAvailable,
-                    canonicalContainsOperatorEdits = attributedOrProvenContainment,
-                    // `#emptycanonicaldeadlock`: the saved document, read only when it can
-                    // decide something (the buffer and canonical differ).
-                    diskText =
-                        if (bufferTextAtRegistration != null && bufferTextAtRegistration != canonicalTextAtRegistration) {
-                            readRawDiskText(filePath)
-                        } else {
-                            null
-                        },
+                    // `#idebufferauthority`: containment, attribution, merge,
+                    // and disk proofs are diagnostics, not authority. Do not
+                    // pay their whole-document cost on registration.
+                    cleanMergeAvailable = null,
+                    canonicalContainsOperatorEdits = null,
+                    diskText = null,
                     attachHeldForOperator = retainedProjectionHoldPaths.contains(filePath),
                 ),
             )
         val retainedProjectionAction = registrationProjection.action
         if (forwarder.canonicalProjectionRetained || forwarder.retainedReplicaReseedPending) {
-            // Controller state survives an IDEA/plugin restart; this local set
-            // does not. Restore the fail-closed baseline before any whole-editor
-            // synchronization can publish a stale restarted buffer.
-            //
-            // `#retainedprojectionclobbersoperatortext`: that reasoning holds for
-            // a RESTARTED buffer and inverts for a live one. When registration is
-            // refused for hours (see `#registeridentitypid`) the operator keeps
-            // typing into a buffer that reaches nothing, and a retained projection
-            // computed before those keystrokes then adopts over them on attach.
-            // Measured 2026-08-12: a compaction computed at 04:14:47 against disk
-            // was retained undelivered, and at 04:23 it replaced a buffer holding a
-            // prompt typed in between. The prompt existed only in that buffer, so
-            // it was not in git, not in the CRDT, and not in the compaction
-            // archive — it was simply gone.
-            //
-            // The settled shadow separates the two cases exactly: unlike the
-            // incremental editing shadow, it advances only after the controller
-            // accepts the visible projection and survives a native-generation
-            // reload in JVM memory. A restarted IDE has none, so that path is
-            // unchanged. A live IDE whose buffer moved past its settled shadow
-            // holds operator text that a replacement controller may not have
-            // seen, and adopting canonical over it is data loss, not recovery.
-            // The live buffer, not the caller's captured cut: this decides whether
-            // operator text is about to be destroyed, so it must read what the
-            // operator can currently see.
+            // `#idebufferauthority`: retained controller state survives an IDE
+            // restart, but it is still only a projection. The readable live
+            // buffer wins every mismatch, including after restart.
             when (retainedProjectionAction) {
                 RetainedRegistrationProjectionAction.ApplyCanonical -> {
                     retainedCanonicalProjectionPaths.add(filePath)
@@ -4490,7 +4366,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         action = retainedProjectionAction,
                         publishedShadow = publishedShadowAtRegistration,
                         bufferText = bufferTextAtRegistration,
-                        mergeBase = causalProof.mergeBase,
+                        mergeBase = publishedShadowAtRegistration,
                         canonicalText = canonicalTextAtRegistration,
                     )
                 ) {
@@ -4528,7 +4404,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 action = retainedProjectionAction,
                 publishedShadow = publishedShadowAtRegistration,
                 bufferText = bufferTextAtRegistration,
-                mergeBase = causalProof.mergeBase,
+                mergeBase = publishedShadowAtRegistration,
                 canonicalText = canonicalTextAtRegistration,
             )
         ) {
@@ -4549,7 +4425,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private fun cleanRegistrationMerge(shadow: String?, buffer: String?, canonical: String?): String? =
         RegistrationSpliceShaping.cleanMerge(shadow, buffer, canonical)
 
-    /** `#emptycanonicaldeadlock`: the decision record for [RetainedRegistrationProjectionAction.AdoptOperatorBuffer]. */
+    /** `#idebufferauthority`: the decision record for [RetainedRegistrationProjectionAction.AdoptOperatorBuffer]. */
     private fun logAdoptOperatorBuffer(
         filePath: String,
         forwarder: CrdtReplicaForwarder,
@@ -4557,11 +4433,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         canonicalText: String?,
     ) {
         log.warn(
-            "[crdt-replica] registration adopting the live operator buffer for ${File(filePath).name}: " +
-                "the controller canonical holds no text independent of this editor " +
-                "(empty=${canonicalText?.isEmpty()} reseed=${forwarder.retainedReplicaReseedPending}); " +
+            "[crdt-replica] registration publishing the authoritative live IDE buffer for ${File(filePath).name}; " +
+                "controller_projection_empty=${canonicalText?.isEmpty()} reseed=${forwarder.retainedReplicaReseedPending} " +
                 "buffer_hash=${bufferText?.let(::contentHash) ?: "unavailable"} " +
-                "replica_hash=${canonicalText?.let(::contentHash) ?: "unavailable"} (#emptycanonicaldeadlock)",
+                "projection_hash=${canonicalText?.let(::contentHash) ?: "unavailable"} (#idebufferauthority)",
         )
     }
 
@@ -4578,9 +4453,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         val committed =
             when (action) {
             RetainedRegistrationProjectionAction.AdoptOperatorBuffer -> {
-                // `#emptycanonicaldeadlock`: recheck at the publication edge that the
-                // operator did not type and the canonical did not move since the
-                // decision; then the exact captured buffer becomes canonical.
+                // `#idebufferauthority`: recheck at the publication edge that the
+                // operator did not type and the controller projection did not
+                // move; then publish the exact captured IDE buffer.
                 if (
                     bufferText == null ||
                     editorBufferText(filePath) != bufferText ||
@@ -4605,10 +4480,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         requestRemoteDrain(filePath, "registration-operator-buffer-adoption-retry")
                     }
                     log.warn(
-                        "[crdt-replica] adopted the live operator buffer as canonical for ${File(filePath).name}; " +
+                        "[crdt-replica] published the authoritative live IDE buffer into the controller projection for ${File(filePath).name}; " +
                             "buffer_hash=${contentHash(bufferText)} " +
                             "replaced_hash=${canonicalText?.let(::contentHash) ?: "unavailable"} " +
-                            "driver=editor-only-canonical (#emptycanonicaldeadlock)",
+                            "driver=ide-buffer-authority (#idebufferauthority)",
                     )
                     true
                 }
@@ -4726,9 +4601,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     }
 
     /**
-     * Registration is controller -> editor projection only. A pre-existing
-     * editor buffer cannot become a whole-document recovery baseline because it
-     * may predate retained queue additions or another editor's projected ops.
+     * Apply a controller projection only when the IDE buffer was unreadable or
+     * byte-identical at the registration decision. Any readable mismatch must
+     * have selected AdoptOperatorBuffer and cannot reach this function.
      */
     private fun retainCanonicalProjectionAfterRegistration(
         filePath: String,
@@ -6808,23 +6683,13 @@ internal fun closingDocumentHoldRequiresPublicationUtil(
 ): Boolean = hasAttachedForwarder || !operatorEvidenceHoldActive
 
 /**
- * Whether adopting a retained controller canonical projection would destroy
- * operator text (`#retainedprojectionclobbersoperatortext`).
+ * Registration direction when an IDE buffer meets a controller projection.
  *
- * [publishedShadow] is the last text this plugin PROVED reached the controller's
- * visible projection, held in memory; [bufferText] is what the operator can
- * currently see. The two cases
- * that reach the retained-canonical branch are opposite and must not be
- * conflated:
- *
- *  - a RESTARTED IDE has no shadow (the map does not survive a restart), so its
- *    buffer is a stale reconstruction and adopting canonical is the recovery;
- *  - a LIVE IDE whose buffer has moved past its shadow is holding text the
- *    controller has never seen — because registration was being refused — and
- *    adopting canonical over it is data loss.
- *
- * Unknown buffer text is not divergence: without both facts this returns false
- * and the historical fail-closed adoption stands.
+ * `#idebufferauthority`: [bufferText] is what the operator can currently see and
+ * is authoritative whenever it can be read. The controller copy is a projection,
+ * not a competing whole-document authority. Shadows, containment, attribution,
+ * disk equality, and restart history may diagnose the mismatch; none licenses
+ * replacing a differing readable IDE buffer.
  */
 internal enum class RetainedRegistrationProjectionAction {
     ApplyCanonical,
@@ -6832,18 +6697,13 @@ internal enum class RetainedRegistrationProjectionAction {
     HoldOperatorBuffer,
     DeferCanonicalProjection,
     /**
-     * `#editorauth2`: three generations differ, but reconciling them (base =
-     * settled shadow, yours = buffer, agent = canonical) is clean. Registration
-     * adopts canonical into the replica, publishes the merged text as a local
-     * delta, and projects it into the buffer. Neither side's text is lost, and the
-     * ambiguity hold gets an exit that does not overwrite the operator.
+     * Legacy wire action retained for older native/plugin parity. The execution
+     * adapter maps it to [AdoptOperatorBuffer] whenever a readable buffer differs.
      */
     MergeForward,
     /**
-     * `#emptycanonicaldeadlock`: the controller canonical holds no text independent of this
-     * editor (it is empty, or a fresh controller's reseed of this editor's own retained replica
-     * while the buffer is the saved document). The live buffer becomes canonical through the
-     * endpoint; no settled shadow is needed and no operator evidence can change the answer.
+     * `#idebufferauthority`: publish the exact readable IDE buffer through the
+     * replacement endpoint. No shadow, attribution, or disk proof is required.
      */
     AdoptOperatorBuffer,
 }
@@ -6902,61 +6762,15 @@ internal fun retainedRegistrationProjectionActionForAttachUtil(
 ): RetainedRegistrationProjectionAction =
     if (deferCanonicalProjectionForPendingLocal) {
         RetainedRegistrationProjectionAction.DeferCanonicalProjection
-    } else if (retainedReplicaReseedPending) {
-        // A fresh controller's empty hub is a synchronization placeholder, not
-        // a document projection. register() has already durably published the
-        // retained replica before this decision. Exact equality between that
-        // post-publication replica and the live buffer is therefore convergence,
-        // even when an earlier attach never produced a JVM-local settled shadow.
-        // Divergent text still needs the independently settled ancestor.
-        if (bufferText != null && canonicalText == bufferText) {
-            RetainedRegistrationProjectionAction.ApplyCanonical
-        } else if (publishedShadow != null && bufferText != null) {
-            RetainedRegistrationProjectionAction.PublishOperatorBuffer
-        } else {
-            RetainedRegistrationProjectionAction.HoldOperatorBuffer
-        }
-    } else if (canonicalProjectionRetained) {
-        retainedRegistrationProjectionActionUtil(
-            canonicalCoversRetainedFrontier = canonicalCoversRetainedFrontier,
-            publishedShadow = publishedShadow,
-            bufferText = bufferText,
-            canonicalText = canonicalText,
-            canonicalContainsOperatorEdits = canonicalContainsOperatorEdits,
-            cleanMergeAvailable = cleanMergeAvailable,
-        )
-    } else if (
-        publishedShadow != null &&
-        bufferText != null &&
-        bufferText != publishedShadow &&
-        canonicalText != bufferText
-    ) {
-        // `#reloadclobbersoperatortext`: an ordinary native-generation re-register
-        // (a `make install` library reload) is not a retained projection, but the
-        // live buffer can still hold text typed while the replica was detached.
-        // tasks/api.md, 2026-09-28 23:08:16: the operator typed and pressed Run
-        // Agent Doc during the reload window; re-register then projected the
-        // controller's pre-edit canonical over that buffer and the text was gone.
-        // A buffer past its settled shadow gets the same causal decision as the
-        // retained path: publish it when canonical is that shadow, adopt canonical
-        // only when it provably contains the edits, otherwise hold.
-        retainedRegistrationProjectionActionUtil(
-            publishedShadow = publishedShadow,
-            bufferText = bufferText,
-            canonicalText = canonicalText,
-            canonicalContainsOperatorEdits = canonicalContainsOperatorEdits,
-            cleanMergeAvailable = cleanMergeAvailable,
-        )
+    } else if (bufferText != null && canonicalText != bufferText) {
+        RetainedRegistrationProjectionAction.AdoptOperatorBuffer
     } else {
         RetainedRegistrationProjectionAction.ApplyCanonical
     }
 
 /**
- * Decide registration direction from causal facts, not wall-clock arrival.
- *
- * A live buffer can be published only when canonical is exactly the in-memory
- * shadow it was derived from. If all three generations differ, registration
- * must hold instead of selecting one by destructive whole-document projection.
+ * Frozen decision floor for older native libraries. Keep the same IDE-authority
+ * invariant as the native derivation.
  */
 internal fun retainedRegistrationProjectionActionUtil(
     canonicalCoversRetainedFrontier: Boolean? = null,
@@ -6967,29 +6781,9 @@ internal fun retainedRegistrationProjectionActionUtil(
     cleanMergeAvailable: Boolean? = null,
 ): RetainedRegistrationProjectionAction =
     when {
-        // Convergence is safe and must win before the three-generation test;
-        // this is also the terminal edge for a prior ambiguity hold.
-        bufferText != null && canonicalText == bufferText ->
-            RetainedRegistrationProjectionAction.ApplyCanonical
-        publishedShadow == null || bufferText == null ->
-            RetainedRegistrationProjectionAction.ApplyCanonical
-        // The buffer has not advanced past the last controller-accepted
-        // projection, and canonical is causally at or beyond the cached native
-        // CRDT frontier. A forced full bootstrap is therefore a safe recovery,
-        // even when its text differs from that settled projection.
-        bufferText == publishedShadow && canonicalCoversRetainedFrontier == true ->
-            RetainedRegistrationProjectionAction.ApplyCanonical
-        canonicalText == publishedShadow -> RetainedRegistrationProjectionAction.PublishOperatorBuffer
-        // `#ambiguousholdforever`: the proven rebase. Every operator change from
-        // the shadow is already present in canonical (the controller ingested
-        // those deltas before the endpoint dropped), so adopting canonical keeps
-        // all operator text. Without this edge the hold had no exit: the cut
-        // never changes, and registration was refused every second for hours.
-        canonicalContainsOperatorEdits == true -> RetainedRegistrationProjectionAction.ApplyCanonical
-        // `#editorauth2`: publish the editor state and merge forward instead of
-        // holding forever, when the three-way reconcile has no conflicts.
-        cleanMergeAvailable == true -> RetainedRegistrationProjectionAction.MergeForward
-        else -> RetainedRegistrationProjectionAction.HoldOperatorBuffer
+        bufferText != null && canonicalText != bufferText ->
+            RetainedRegistrationProjectionAction.AdoptOperatorBuffer
+        else -> RetainedRegistrationProjectionAction.ApplyCanonical
     }
 
 internal fun retainedProjectionHoldNeedsOperatorSurfaceUtil(reason: String): Boolean =

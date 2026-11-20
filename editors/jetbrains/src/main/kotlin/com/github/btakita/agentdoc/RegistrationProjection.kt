@@ -10,10 +10,9 @@ import javax.swing.SwingUtilities
  * GH #326 phase 5: the CRDT replica registration direction, derived by the hot-reloaded native
  * library.
  *
- * `CrdtReplicaManager.forwarderFor` registers a candidate endpoint, then must choose how the three
- * text generations it holds meet: adopt the controller canonical, publish the live buffer from its
- * settled shadow, merge it forward, defer to a captured local delta, or hold the buffer exactly as
- * the operator left it. That choice was the most frequently changed pure decision in
+ * `CrdtReplicaManager.forwarderFor` registers a candidate endpoint, then must converge the
+ * controller projection with the authoritative live IDE buffer. That choice was the most
+ * frequently changed pure decision in
  * `CrdtReplicaManager`, so it is the native `registration_projection` derivation now.
  *
  * The plugin compares the texts itself, over the exact UTF-16 text it holds, and reports only
@@ -127,53 +126,30 @@ internal object RegistrationProjection {
                 derivation.derive("registration_projection", GSON.toJson(evidence(observation)))
                     ?.let { parseNative(it, observation) }
             }
-        return guardUnprovenCanonical(guardEmptyCanonical(native ?: frozen(observation), observation), observation)
+        return guardIdeBufferAuthority(native ?: frozen(observation), observation)
     }
 
     /**
-     * `#restartadoptscanonical`: whichever rules answered (a native generation older than this
-     * plugin, or the frozen floor, both of which still take the restarted-IDE adoption fallback),
-     * a registration with no settled shadow never adopts a canonical that differs from a non-empty
-     * buffer unless canonical is proven to contain the operator edits. Nothing orders the two
-     * generations, so the buffer is held exactly as the operator left it.
+     * `#idebufferauthority`: enforce the invariant at the execution adapter too,
+     * so an older hot-loaded native library cannot project controller text over
+     * a differing readable IDE buffer. Pending local delivery remains deferred.
      */
-    internal fun guardUnprovenCanonical(decision: Decision, observation: Observation): Decision {
+    internal fun guardIdeBufferAuthority(decision: Decision, observation: Observation): Decision {
+        val buffer = observation.bufferText
         if (
-            decision.action != RetainedRegistrationProjectionAction.ApplyCanonical ||
-            !unprovenCanonicalOverShadowlessBufferUtil(observation)
+            observation.deferCanonicalProjectionForPendingLocal ||
+            buffer == null ||
+            buffer == observation.canonicalText
         ) {
             return decision
         }
-        LOG.warn(
-            "[crdt-replica] registration answered apply_canonical over a differing buffer with no settled " +
-                "shadow and no containment proof; holding the operator buffer instead (#restartadoptscanonical)",
-        )
-        return Decision(RetainedRegistrationProjectionAction.HoldOperatorBuffer, frozenHoldReason(observation))
-    }
-
-    /**
-     * `#emptycanonicaldeadlock`: whichever rules answered (a native generation, possibly older
-     * than this plugin, or the frozen floor), an empty canonical is never adopted or merged over a
-     * non-empty buffer. An empty canonical holds no text, so the live buffer becomes canonical
-     * instead ([RetainedRegistrationProjectionAction.AdoptOperatorBuffer]); nothing is lost.
-     */
-    internal fun guardEmptyCanonical(decision: Decision, observation: Observation): Decision {
-        if (!emptyCanonicalWouldClobberBufferUtil(observation.canonicalText, observation.bufferText)) {
-            return decision
+        if (decision.action != RetainedRegistrationProjectionAction.AdoptOperatorBuffer) {
+            LOG.warn(
+                "[crdt-replica] registration answered ${decision.action} over a differing readable IDE buffer; " +
+                    "publishing the IDE buffer instead (#idebufferauthority)",
+            )
         }
-        return when (decision.action) {
-            RetainedRegistrationProjectionAction.ApplyCanonical,
-            RetainedRegistrationProjectionAction.MergeForward,
-            RetainedRegistrationProjectionAction.HoldOperatorBuffer,
-            -> {
-                LOG.warn(
-                    "[crdt-replica] registration answered ${decision.action} with an EMPTY canonical over a " +
-                        "non-empty buffer; adopting the operator buffer instead (#emptycanonicaldeadlock)",
-                )
-                Decision(RetainedRegistrationProjectionAction.AdoptOperatorBuffer, null)
-            }
-            else -> decision
-        }
+        return Decision(RetainedRegistrationProjectionAction.AdoptOperatorBuffer, null)
     }
 
     /** Parse the native output; `null` takes the frozen floor. */
@@ -255,22 +231,3 @@ internal object RegistrationProjection {
  */
 internal fun emptyCanonicalWouldClobberBufferUtil(canonical: String?, buffer: String?): Boolean =
     canonical != null && canonical.isEmpty() && !buffer.isNullOrEmpty()
-
-/**
- * `#restartadoptscanonical`: [observation] registers with no settled shadow (a restarted IDE, or a
- * document this editor never settled) and its readable, non-empty buffer differs from a known
- * canonical that is not proven to contain the operator edits. Adopting that canonical could replace
- * operator text the controller never accepted. A captured local delta that owns the buffer defers
- * instead of adopting, so it is never this case. Mirrors the native
- * `unproven_canonical_over_shadowless_buffer`.
- */
-internal fun unprovenCanonicalOverShadowlessBufferUtil(observation: RegistrationProjection.Observation): Boolean {
-    val buffer = observation.bufferText
-    val canonical = observation.canonicalText
-    return observation.publishedShadow == null &&
-        !observation.deferCanonicalProjectionForPendingLocal &&
-        !buffer.isNullOrEmpty() &&
-        canonical != null &&
-        buffer != canonical &&
-        observation.canonicalContainsOperatorEdits != true
-}

@@ -2,7 +2,6 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { createHash } from 'crypto';
 import {
-    bufferIsBinaryAttributedAncestor,
 CrdtReplicaForwarder,
 CrdtReplicaManager,
 ControllerSocketReplicaTransport,
@@ -950,7 +949,7 @@ it('applies peer remote updates but suppresses self echoes', () => {
         ]);
     });
 
-it('force-refresh never republishes an unproven full editor snapshot', async () => {
+it('force-refresh republishes the exact readable IDE buffer into each replacement replica', async () => {
         const nodes: FakeNode[] = [];
         const transport = new FakeTransport();
         const filePath = '/work/plan.md';
@@ -974,11 +973,14 @@ it('force-refresh never republishes an unproven full editor snapshot', async () 
         assert.strictEqual(transport.registerCount, 2);
         assert.deepStrictEqual(transport.deregistered, [filePath]);
         assert.deepStrictEqual(nodes.map((node) => node.opened), [42, 43]);
-        assert.deepStrictEqual(nodes.flatMap((node) => node.locals), []);
-        assert.strictEqual(transport.broadcasts.length, 0);
+        assert.deepStrictEqual(nodes.flatMap((node) => node.locals), [
+            { clientId: 42, offset: 0, deleteLen: 11, insert: 'base updated' },
+            { clientId: 43, offset: 0, deleteLen: 11, insert: 'base updated' },
+        ]);
+        assert.strictEqual(transport.broadcasts.length, 2);
     });
 
-    it('force-refresh reprojects controller canonical without a deferred editor request', async () => {
+    it('force-refresh never applies controller text over the readable IDE buffer', async () => {
     const nodes: FakeNode[] = [];
     const transport = new FakeTransport();
     const filePath = '/work/plan.md';
@@ -1011,10 +1013,12 @@ it('force-refresh never republishes an unproven full editor snapshot', async () 
         assert.strictEqual(transport.registerCount, 2);
         assert.strictEqual(transport.deregistered.length, 1);
         assert.strictEqual(nodes.length, 2);
-        assert.deepStrictEqual(nodes[1].locals, []);
+        assert.deepStrictEqual(nodes[1].locals, [
+            { clientId: 43, offset: 0, deleteLen: 11, insert: 'base' },
+        ]);
 });
 
-it('non-operator editor events fence queued deltas and never mutate canonical', async () => {
+it('non-operator editor events do not add mutations after registration publishes the IDE buffer', async () => {
     const node = new FakeNode('base');
     const transport = new FakeTransport();
     const filePath = '/work/plan.md';
@@ -1029,6 +1033,8 @@ it('non-operator editor events fence queued deltas and never mutate canonical', 
     });
 
     assert.strictEqual(await manager.attachDocument(filePath, 'base'), true);
+    const registrationLocals = node.locals.slice();
+    const registrationBroadcasts = transport.broadcasts.slice();
     const queuedUserEdit = manager.captureLocalChange(filePath, true);
     const cacheReload = manager.captureLocalChange(filePath, false);
     await manager.handleLocalChangeDelta(
@@ -1042,58 +1048,37 @@ it('non-operator editor events fence queued deltas and never mutate canonical', 
         cacheReload,
     );
 
-    assert.deepStrictEqual(node.locals, []);
-    assert.deepStrictEqual(transport.broadcasts, []);
+    assert.deepStrictEqual(node.locals, registrationLocals);
+    assert.deepStrictEqual(transport.broadcasts, registrationBroadcasts);
 });
 });
 
-describe('#attachattributionvscode binary-attributed canonical adoption', () => {
+describe('#idebufferauthority registration publication', () => {
     const saved = '- https://example.test/pull/14\n  - #adversarial-pr\n- ### do [#implement]\n';
     const canonical =
         '- https://example.test/pull/14\n  - marker #adversarial-pr\n- ### [#subagent:impl#3] do [#implement]\n';
     const hash = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
 
-    it('attributes only a buffer the controller recorded against this canonical', () => {
-        assert.equal(
-            bufferIsBinaryAttributedAncestor(saved, canonical, hash(canonical), [hash(saved)]),
-            true,
-        );
-        assert.equal(
-            bufferIsBinaryAttributedAncestor(saved + '- operator typed this\n', canonical, hash(canonical), [hash(saved)]),
-            false,
-        );
-        assert.equal(bufferIsBinaryAttributedAncestor(saved, canonical, hash(canonical), []), false);
-        assert.equal(
-            bufferIsBinaryAttributedAncestor(saved, canonical, hash('a newer canonical\n'), [hash(saved)]),
-            false,
-        );
-        assert.equal(bufferIsBinaryAttributedAncestor(saved, canonical, null, [hash(saved)]), false);
-        assert.equal(bufferIsBinaryAttributedAncestor(null, canonical, hash(canonical), [hash(saved)]), false);
-        assert.equal(
-            bufferIsBinaryAttributedAncestor(canonical, canonical, hash(canonical), [hash(canonical)]),
-            false,
-        );
-    });
-
-    function attributedTransport(ancestors: string[], canonicalHash: string | null = hash(canonical)) {
+    function registrationTransport() {
         const transport = new FakeTransport();
         transport.register = async () => {
             transport.registerCount += 1;
             return {
                 clientId: 40 + transport.registerCount,
                 bootstrap: Buffer.from([9]),
-                canonicalContentHash: canonicalHash,
-                binaryAttributedAncestorHashes: ancestors,
+                canonicalContentHash: hash(canonical),
+                binaryAttributedAncestorHashes: [hash(saved)],
             };
         };
         return transport;
     }
 
-    it('adopts canonical when the buffer is a recorded binary-authored ancestor', async () => {
-        const transport = attributedTransport([hash(saved)]);
+    it('publishes the readable IDE buffer even when controller attribution names it as an ancestor', async () => {
+        const transport = registrationTransport();
         const filePath = '/work/plan.md';
-        let editorText = saved;
-        const applied: string[] = [];
+        const editorText = saved;
+        let applied = 0;
+        let observed = 0;
         const manager = new CrdtReplicaManager({
             projectRoot: '/work',
             identity: 'vscode-test',
@@ -1101,28 +1086,26 @@ describe('#attachattributionvscode binary-attributed canonical adoption', () => 
             nodeFactory: () => new FakeNode(canonical),
             listDocuments: () => [],
             currentText: () => editorText,
-            applyText: async (_file, text, expectedText) => {
-                assert.equal(expectedText, saved);
-                assert.equal(text, canonical);
-                applied.push(text);
-                editorText = text;
+            applyText: async () => {
+                applied += 1;
                 return true;
             },
-            observeProjection: () => applied.push('observed'),
+            observeProjection: () => { observed += 1; },
         });
 
         assert.equal(await manager.attachDocument(filePath, saved), true);
-        assert.deepEqual(applied, [canonical, 'observed']);
-        assert.equal(editorText, canonical);
-        assert.deepEqual(transport.projected, [{ contentHash: hash(canonical), diskPersisted: false }]);
+        assert.equal(applied, 0);
+        assert.equal(editorText, saved);
+        assert.equal(transport.broadcasts.length, 1);
+        assert.equal(observed, 1);
+        assert.deepEqual(transport.projected, [{ contentHash: hash(saved), diskPersisted: false }]);
         manager.dispose();
     });
 
-    it('adopts on a forced re-register when the still-open buffer is that ancestor', async () => {
-        const transport = attributedTransport([hash(saved)]);
+    it('publishes the still-open IDE buffer on forced re-registration', async () => {
+        const transport = registrationTransport();
         const filePath = '/work/plan.md';
         let editorText = canonical;
-        const applied: Array<{ text: string; expected: string }> = [];
         const nodes = [new FakeNode(canonical), new FakeNode(canonical)];
         const manager = new CrdtReplicaManager({
             projectRoot: '/work',
@@ -1131,24 +1114,21 @@ describe('#attachattributionvscode binary-attributed canonical adoption', () => 
             nodeFactory: () => nodes.shift() ?? new FakeNode(canonical),
             listDocuments: () => [],
             currentText: () => editorText,
-            applyText: async (_file, text, expected) => {
-                applied.push({ text, expected });
-                editorText = text;
-                return true;
-            },
+            applyText: async () => { throw new Error('registration must not replace the IDE buffer'); },
         });
 
         assert.equal(await manager.attachDocument(filePath, canonical), true);
-        assert.deepEqual(applied, []);
+        assert.equal(transport.broadcasts.length, 0);
         editorText = saved;
         assert.equal(await manager.attachDocument(filePath, saved, true), true);
-        assert.deepEqual(applied, [{ text: canonical, expected: saved }]);
-        assert.equal(editorText, canonical);
+        assert.equal(editorText, saved);
+        assert.equal(transport.broadcasts.length, 1);
+        assert.deepEqual(transport.projected, [{ contentHash: hash(saved), diskPersisted: false }]);
         manager.dispose();
     });
 
-    it('leaves an unattributed buffer untouched', async () => {
-        const transport = attributedTransport([hash(saved)]);
+    it('publishes unattributed operator text instead of treating attribution as authority', async () => {
+        const transport = registrationTransport();
         const filePath = '/work/plan.md';
         const editorText = saved + '- operator typed this\n';
         let applied = 0;
@@ -1167,36 +1147,17 @@ describe('#attachattributionvscode binary-attributed canonical adoption', () => 
 
         assert.equal(await manager.attachDocument(filePath, editorText), true);
         assert.equal(applied, 0);
-        assert.deepEqual(transport.projected, []);
+        assert.equal(transport.broadcasts.length, 1);
+        assert.deepEqual(transport.projected, [{ contentHash: hash(editorText), diskPersisted: false }]);
         manager.dispose();
     });
 
-    it('does not adopt when the canonical hash was not the one the record proved', async () => {
-        const transport = attributedTransport([hash(saved)], hash('a newer canonical\n'));
-        const filePath = '/work/plan.md';
-        let applied = 0;
-        const manager = new CrdtReplicaManager({
-            projectRoot: '/work',
-            identity: 'vscode-test',
-            transport,
-            nodeFactory: () => new FakeNode(canonical),
-            listDocuments: () => [],
-            currentText: () => saved,
-            applyText: async () => {
-                applied += 1;
-                return true;
-            },
-        });
-
-        assert.equal(await manager.attachDocument(filePath, saved), true);
-        assert.equal(applied, 0);
-        manager.dispose();
-    });
-
-    it('retries without moving the shadow when the editor races the adoption', async () => {
-        const transport = attributedTransport([hash(saved)]);
+    it('does not acknowledge a registration publication when the IDE buffer races it', async () => {
+        const transport = registrationTransport();
         const filePath = '/work/plan.md';
         let editorText = saved;
+        let releaseBroadcast!: () => void;
+        transport.broadcastGate = new Promise<void>((resolve) => { releaseBroadcast = resolve; });
         const manager = new CrdtReplicaManager({
             projectRoot: '/work',
             identity: 'vscode-test',
@@ -1204,13 +1165,14 @@ describe('#attachattributionvscode binary-attributed canonical adoption', () => 
             nodeFactory: () => new FakeNode(canonical),
             listDocuments: () => [],
             currentText: () => editorText,
-            applyText: async () => {
-                editorText = saved + '- operator typed this\n';
-                return false;
-            },
+            applyText: async () => { throw new Error('registration must not replace the IDE buffer'); },
         });
 
-        assert.equal(await manager.attachDocument(filePath, saved), true);
+        const attach = manager.attachDocument(filePath, saved);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        editorText = saved + '- operator typed this\n';
+        releaseBroadcast();
+        assert.equal(await attach, true);
         assert.equal(editorText, saved + '- operator typed this\n');
         assert.deepEqual(transport.projected, []);
         manager.dispose();

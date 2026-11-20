@@ -1819,91 +1819,31 @@ when one was recorded against disk that is still that baseline
 (`#unsavedcanonicalcarry`); otherwise the editor bootstraps the disk bytes it
 shows. A retained frontier is still the empty reseed, not that record.
 
-An empty or editor-only canonical is never authority over an attached buffer
-(`#emptycanonicaldeadlock`). On 2026-11-04 (`src/haiven-dev/tasks/fpe.md`,
-20:09Z) a fresh controller reseeded from the JetBrains replica, which lagged its
-buffer after 48 raced deferred-write replays; the IDE restart had discarded the
-settled shadow, so the editor held (`retained-reseed-missing-settled-shadow`,
-`retry=await_operator_evidence`) while the controller refused disk because the
-editor was attached. Nothing but the editor held text, so no operator evidence
-could ever arrive. The rules: a pending reseed whose text is empty stays fenced
-(`RelayHub::retained_replica_reseed_empty`, `crdt_replica_reseed_empty_held`),
-so the empty string is never readable, committable, or persistable, and a reseed
-never rolls forward onto an empty committed blob (`committed_blob_empty`). An
-unproven reseed that differs from disk is kept as a content-addressed sidecar
-(`.agent-doc/recovery/<doc-hash>.reseed-<content-hash>.md`, logged as
-`recovery_sidecar=`) before the editor can replace it. The
-`registration_projection` derivation answers `adopt_operator_buffer` (the live
-buffer becomes canonical, no settled shadow needed) when the canonical is empty
-and the buffer is not, on every path, and for a reseed with no settled ancestor
-when the buffer is the saved document (`buffer_equals_disk`). A registration
-that follows this editor's own attach hold (`attach_held_for_operator`) never
-takes the restarted-IDE adoption fallback over the held buffer. The plugin
-refuses an empty canonical over a non-empty buffer whichever rules answer, at
-registration, at `queueRemoteTextApply`, and at the EDT mutation itself.
-`await_operator_evidence` remains only for a genuine two-sided conflict: an
-unsaved buffer and a reseed that hold different real text with no settled
-ancestor. The hold notification names the exact `EditorAttachAwaitsOperator`
-action for the document (`operator_action=close_tab_repair_detached_reopen`)
-and carries a `Copy details` action, since balloon text cannot be selected.
+An empty or editor-only controller projection is never authority over an
+attached buffer (`#emptycanonicaldeadlock`). The 2026-11-04 fpe.md deadlock
+showed why: the controller waited for operator evidence while the only current
+text already lived in the IDE. The general `#idebufferauthority` rule now
+subsumes the old empty-canonical exception and two-sided registration hold. A
+readable buffer publishes its exact bytes into the replacement endpoint,
+including when controller text is empty; an unreadable buffer may accept the
+controller projection. Content-addressed reseed recovery remains backup/audit
+evidence, not a competing source of current document truth.
 
-A plain IDE restart never adopts a surviving canonical over the buffer without
-proof (`#restartadoptscanonical`). The settled shadow lived only in JVM memory,
-so a restart while the controller hub survived registered with no settled
-ancestor, and the rules took the restarted-IDE adoption fallback: the surviving
-canonical was projected over a buffer that could hold operator text saved to
-disk but never accepted by the controller. The `registration_projection`
-derivation now holds (`ambiguous-retained-projection` for a retained
-projection, else `ambiguous-reregister-projection`) whenever a registration has
-no settled shadow and its readable, non-empty buffer differs from a known
-canonical, saved or unsaved, unless canonical is proven to contain the operator
-edits. An unreadable buffer, an unknown canonical, and an empty buffer still
-adopt, since nothing is lost. The JetBrains plugin persists every settled shadow
-(`SettledShadowStore`, one atomic, self-verifying record per document under the
-IDE system directory; written off the replica worker, debounced by document
-size, and flushed on project close, plugin unload, and IDE exit; a newer settle
-first removes the older record, so a crash leaves no record rather than an older
-one; records for deleted or 30-days-unopened documents are collected,
-`#shadowstorecost`) and restores it at registration, so a restart is an
-ordinary causal decision again: a canonical that advanced past an unchanged
-buffer is adopted, a buffer over a hub that never moved is published, and a
-three-generation divergence proves, merges, or holds. A restored shadow
-reproduces any earlier hold from the same texts, so the hold itself need not be
-persisted. The plugin also refuses the unproven adoption whichever rules
-answer (an older native generation or the frozen floor).
+A plain IDE restart never adopts a surviving controller projection over a
+readable buffer (`#restartadoptscanonical`, superseded by
+`#idebufferauthority`). Settled shadows still provide diagnostics and recovery
+lineage, but they no longer choose registration direction. Equality converges;
+a mismatch publishes the IDE buffer; pending local delivery defers. This makes
+restart behavior independent of whether an older process happened to persist a
+shadow or retain a controller generation.
 
-A canonical that differs from the buffer only by agent-doc's own writes is
-adopted (`#attachauthorattribution`). On 2026-11-05, after an IDE restart, a
-JetBrains attach held `ambiguous-retained-projection` although every
-canonical-vs-buffer difference was a queue marker projection (`📥` lifecycle
-icons and subagent claim markers) the document's bound session had written
-itself while no replica was attached. Attribution comes from the controller's
-op record, never from what the text looks like: every binary-authored canonical
-write (`apply_cp_write_for_file`, response and salient cells, the durable
-queue-attempt projection) goes through
-`RelayHub::apply_binary_authored_replace_scoped`, which records the write's
-pre-image hash and `source` in a bounded (64) hash chain
-(`BinaryWriteAttribution`). A write whose pre-image is not the previous write's
-post-image starts a new run, so any canonical change agent-doc did not author
-(an editor relay update, a durable document-op delta, a disk rebuild, a reseed,
-a committed-history roll-forward) ends attribution of everything older, and a
-read returns nothing unless the newest recorded write produced exactly the
-current canonical. The run survives a relay recycle with the retained canonical
-projection and a controller replacement through its durable copy
-(`.agent-doc/state/binary-write-attribution/<doc-hash>.json`, content hashes and
-`source` labels only, rewritten with each recorded write). The copy is
-content-addressed by its tip, so it answers only for a canonical whose hash
-equals that tip; a missing, malformed, or stale record is unattributed, and a
-failure to read or write one never fails the document write. Registration
-returns the run as `binary_attributed_ancestor_hashes` (logged as
-`crdt_replica_register_binary_attributed_ancestors`). The plugin reports
-`canonical_contains_operator_edits = true` when its buffer hashes to one of
-them and its canonical hashes to the `canonical_content_hash` they were proven
-against (`bufferIsBinaryAttributedAncestorUtil`): such a buffer holds no text
-the canonical lacks except what agent-doc's own writes replaced, so adoption is
-lossless under every rule set. Any other difference, including an operator edit
-beside the projections or one that reached the canonical through an earlier
-replica, is unattributed and keeps `ambiguous-retained-projection`.
+Binary-write attribution remains diagnostic (`#attachauthorattribution`). It
+can explain that a controller projection contains agent-doc response or queue
+effects missing from the IDE buffer, but it cannot prove that the buffer has no
+newer operator edit. Registration therefore never uses attribution to apply
+controller text over a readable IDE buffer. Those durable effects remain owed
+intents and replay through the ordinary editor-owned delivery path after the
+buffer has been published as current authority.
 
 Exhaustion is resolved in place, not by a recycle (`#jetbrainsreplicaloops`).
 Measured on sdk.md 2026-10-16T05:57Z-06:05Z: the JetBrains replica looped every
@@ -2397,13 +2337,11 @@ new one is minted). Wire contract:
   the reseeding attempt failed before committing (live: `retained reseed
   lacked a durable publication receipt`), the plugin kept its reload resume
   state, which still named the predecessor's history, so every later
-  registration read as foreign, `canonical_covers_retained_frontier` stayed
-  unanswered, and a buffer byte-identical to its settled shadow held
-  `ambiguous-retained-projection` after each `make install` until the operator
-  closed the tab, repaired, and reopened (sdk-dev.md, 2026-11-15 00:27 and
-  00:56). With the coverage answer, `buffer_equals_shadow` plus coverage
-  adopts canonical on its own. A buffer holding text past its shadow still
-  takes the containment, merge, or hold rules.
+  registration read as foreign and `canonical_covers_retained_frontier` stayed
+  unanswered. Under the historical policy that left the replacement attach in
+  `ambiguous-retained-projection`; under `#idebufferauthority`, the same facts
+  are diagnostic only and the readable IDE buffer publishes into the new
+  replica.
 
 JetBrains (all generations, through the classic sources), VS Code and the Zed
 sidecar refuse a delta delivery whose stamp differs from their registration's
@@ -2517,17 +2455,18 @@ was rebased onto, and the operator has not typed since the captured cut, the
 rebased splices forward on that endpoint. Only otherwise does recovery register
 a replacement from a full canonical bootstrap.
 
-**Registration merge (`#jetbrainscleanregistrati`).** At registration, when the
-settled shadow, the live buffer, and canonical are three distinct generations,
-the merge-forward candidate is exactly the native captured-splice rebase of the
-single shadow-to-buffer splice (`rebase`, above, with its whole-line anchoring),
-and nothing else. It is asked once; its answer is the merge, and a refusal
-means no merge, so the registration decision holds the operator's visible
-buffer byte-for-byte (`HoldOperatorBuffer`, never adopting canonical or a merge
-over it) and the existing recovery (a later registration with fresh cuts, the
-controller-licensed in-place roll-forward on an attached endpoint) settles it;
-the retained response is untouched. The same candidate is recomputed from the
-exact captured bytes at the publication edge before it is merged forward.
+**Registration authority (`#idebufferauthority`).** At registration and
+re-registration, a readable live IDE buffer is the whole-document authority;
+the controller copy is a projection. Exact equality converges, and pending
+captured local delivery defers. Every other mismatch publishes the exact IDE
+buffer into the replacement endpoint after rechecking both the buffer cut and
+endpoint generation at the publication edge. Settled shadows, containment,
+binary attribution, disk equality, clean-merge candidates, restart history, and
+retained-controller state may explain a mismatch but never authorize projecting
+controller text over the IDE buffer. This includes a controller projection that
+provably contains all earlier operator edits: it can still be older than what
+the operator sees now. An unreadable buffer is the only registration state in
+which the controller projection may seed the editor.
 
 There is one queue-semantic answer to the generic deleted-anchor refusal
 (`#struckqueuepruneattach`). When the live buffer differs from the settled

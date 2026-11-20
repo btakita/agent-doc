@@ -12,8 +12,8 @@ import org.junit.Test
  * lifecycle icons on two run rows and three subagent claim markers). The restarted editor's buffer
  * was the saved generation before those writes, and the IDE had discarded its settled shadow, so
  * the attach held `ambiguous-retained-projection` with nothing the operator wrote at stake. The
- * controller's op record now names the canonical generations only its own writes lead from; a
- * buffer that is one of them adopts canonical, and any other buffer keeps the hold.
+ * The controller's op record still identifies those generations for diagnostics, but
+ * `#idebufferauthority` forbids that attribution from overriding the readable IDE buffer.
  */
 class BinaryAttributedAncestorTest {
 
@@ -70,11 +70,8 @@ class BinaryAttributedAncestorTest {
         )
 
     @Test
-    fun `an attributed restart adopts canonical and an unattributed one still holds`() {
-        // The plugin folds attribution into the containment fact, so every rule set that answers
-        // (the frozen floor and its execution guards, an older native generation, the current
-        // native rules) adopts canonical for an attributed buffer.
-        val adopt = RegistrationProjection.Decision(RetainedRegistrationProjectionAction.ApplyCanonical, null)
+    fun `attribution is diagnostic and never overrides the IDE buffer`() {
+        val adopt = RegistrationProjection.Decision(RetainedRegistrationProjectionAction.AdoptOperatorBuffer, null)
         val proven = restarted(contains = if (attributed()) true else null)
         assertEquals(adopt, RegistrationProjection.decide(proven, EditorDerivation.Unavailable))
         assertEquals(
@@ -82,8 +79,8 @@ class BinaryAttributedAncestorTest {
             RegistrationProjection.decide(proven) { _, _ -> """{"action":"apply_canonical","hold_reason":null}""" },
         )
         val held = RegistrationProjection.decide(restarted(contains = null), EditorDerivation.Unavailable)
-        assertEquals(RetainedRegistrationProjectionAction.HoldOperatorBuffer, held.action)
-        assertEquals("ambiguous-retained-projection", held.holdReason)
+        assertEquals(RetainedRegistrationProjectionAction.AdoptOperatorBuffer, held.action)
+        assertEquals(null, held.holdReason)
     }
 
     @Test
@@ -91,6 +88,6 @@ class BinaryAttributedAncestorTest {
         val source = java.io.File("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaForwarder.kt").readText()
         assertTrue(source.contains("data.get(\"binary_attributed_ancestor_hashes\")"))
         val manager = java.io.File("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt").readText()
-        assertTrue(manager.contains("canonicalContainsOperatorEdits = attributedOrProvenContainment"))
+        assertTrue(manager.contains("canonicalContainsOperatorEdits = null"))
     }
 }

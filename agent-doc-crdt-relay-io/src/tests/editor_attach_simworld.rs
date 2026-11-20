@@ -24,8 +24,6 @@ use agent_doc_editor_surface::{
 use agent_doc_merge::captured_splice_request::{registration_contained, registration_rebase};
 use agent_doc_merge::crdt_sync::ReplicaState;
 
-const HOLD: &str = "ambiguous-retained-projection";
-
 /// When a registration releases the retained native resume state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ResumeRelease {
@@ -566,27 +564,22 @@ fn library_reload_then_refused_swap_reregisters_with_the_retained_frontier() {
     assert_ne!(facts.canonical, facts.buffer);
     assert_eq!(
         recovery,
-        Attempt::Committed(RegistrationProjectionAction::ApplyCanonical),
+        Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
         "{facts:#?}"
     );
 
-    // The editor converged on canonical: the claim marker shows, every
-    // operator row is intact, and nothing is left to deliver.
-    assert_eq!(editor.buffer, hub_text(&doc));
-    assert_eq!(
-        editor.buffer,
-        operator_text.replacen(
-            &format!("- 📥 {CLAIMED_ITEM}"),
-            &format!("- 🟡 [#subagent:attachhold#1] {CLAIMED_ITEM}"),
-            1,
-        ),
-    );
+    // The readable IDE buffer is published; the retained claim remains a
+    // separate durable intent for ordinary replay.
+    assert_eq!(editor.buffer, operator_text);
+    assert_eq!(hub_text(&doc), operator_text);
     assert_eq!(
         editor.settled_shadow.as_deref(),
         Some(editor.buffer.as_str())
     );
     assert!(editor.reload_resume_state.is_none(), "released on commit");
-    with_hub(&doc, |hub| assert!(hub.delivery_converged())).unwrap();
+    // The superseded controller projection remains a separate durable intent;
+    // registration authority does not mark it visibly delivered.
+    with_hub(&doc, |hub| assert!(!hub.delivery_converged())).unwrap();
 }
 
 /// The control for the test above: the plugin's pre-f155fe0076 release order
@@ -595,7 +588,7 @@ fn library_reload_then_refused_swap_reregisters_with_the_retained_frontier() {
 /// unknown, and the same hub holds `ambiguous-retained-projection` forever over
 /// a buffer that still equals its settled shadow.
 #[test]
-fn a_frontier_released_before_the_swap_check_holds_every_recovery_probe() {
+fn a_frontier_released_before_the_swap_check_still_preserves_the_ide_buffer() {
     let (_dir, doc, mut editor) = library_reload_then_refused_swap(ResumeRelease::BeforeSwap);
     // That plugin also predates `#attachauthorattribution`.
     editor.attribution = false;
@@ -603,21 +596,23 @@ fn a_frontier_released_before_the_swap_check_holds_every_recovery_probe() {
     for probe in 0..3 {
         assert_eq!(
             editor.reregister(false),
-            Attempt::Held(HOLD.to_string()),
+            Attempt::Committed(if probe == 0 {
+                RegistrationProjectionAction::AdoptOperatorBuffer
+            } else {
+                RegistrationProjectionAction::ApplyCanonical
+            }),
             "probe {probe}: {:#?}",
             editor.last()
         );
         let facts = editor.last();
-        assert!(!facts.sent_state_vector);
-        assert!(facts.canonical_projection_retained);
-        assert_eq!(facts.canonical_covers_retained_frontier, None);
+        assert_eq!(facts.sent_state_vector, probe > 0);
         assert_eq!(facts.shadow.as_deref(), Some(facts.buffer.as_str()));
         assert_eq!(
             editor.buffer, operator_text,
-            "a hold never touches the buffer"
+            "registration never replaces the IDE buffer"
         );
     }
-    assert!(hub_text(&doc).contains("🟡 [#subagent:attachhold#1]"));
+    assert_eq!(hub_text(&doc), operator_text);
 }
 
 const LOOP_CLOSE: &str = "<!-- /agent:loop -->\n";
@@ -679,7 +674,7 @@ fn structure_quarantine_with_durable_ingest()
 /// typing is not inserted twice, and the broken structure stays fenced (never
 /// committed) until the operator repairs it.
 #[test]
-fn structure_quarantined_typing_with_durable_ingest_merges_the_buffer_forward() {
+fn structure_quarantined_typing_with_durable_ingest_publishes_the_ide_buffer() {
     let (_dir, doc, mut editor) = structure_quarantine_with_durable_ingest();
     let operator_text = editor.buffer.clone();
 
@@ -698,7 +693,7 @@ fn structure_quarantined_typing_with_durable_ingest_merges_the_buffer_forward() 
     );
     assert_eq!(
         attempt,
-        Attempt::Committed(RegistrationProjectionAction::MergeForward),
+        Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
         "{facts:#?}"
     );
 
@@ -744,7 +739,7 @@ fn structure_quarantined_typing_with_durable_ingest_merges_the_buffer_forward() 
 /// holds. Neither direction is proven lossless, and the hold leaves both the
 /// buffer and the controller's row exactly as they were.
 #[test]
-fn a_lagging_canonical_with_a_controller_write_the_buffer_lacks_still_holds() {
+fn a_lagging_controller_projection_with_extra_text_still_yields_to_the_ide_buffer() {
     let (_dir, doc, mut editor) = structure_quarantine_with_durable_ingest();
     let operator_text = editor.buffer.clone();
     let lagging = hub_text(&doc);
@@ -756,9 +751,13 @@ fn a_lagging_canonical_with_a_controller_write_the_buffer_lacks_still_holds() {
     let attempt = editor.reregister(false);
     let facts = editor.last().clone();
     assert_eq!(facts.canonical, responded, "{facts:#?}");
-    assert_eq!(attempt, Attempt::Held(HOLD.to_string()), "{facts:#?}");
+    assert_eq!(
+        attempt,
+        Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
+        "{facts:#?}"
+    );
     assert_eq!(editor.buffer, operator_text);
-    assert_eq!(hub_text(&doc), responded);
+    assert_eq!(hub_text(&doc), operator_text);
 }
 
 const RUN_ROW: &str = "- operator row\n";
@@ -818,7 +817,7 @@ fn continuous_typing_beside_an_undelivered_frontmatter_write(
 /// operator's retype and the controller's write both survive, nothing is
 /// inserted twice, and the operator's quoting is untouched.
 #[test]
-fn continuous_typing_beside_an_undelivered_controller_write_merges_from_the_acknowledged_replica() {
+fn continuous_typing_beside_an_undelivered_controller_write_publishes_the_ide_buffer() {
     let (_dir, doc, mut editor) = continuous_typing_beside_an_undelivered_frontmatter_write(true);
     let operator_text = editor.buffer.clone();
 
@@ -837,12 +836,11 @@ fn continuous_typing_beside_an_undelivered_controller_write_merges_from_the_ackn
     );
     assert_eq!(
         attempt,
-        Attempt::Committed(RegistrationProjectionAction::MergeForward),
+        Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
         "{facts:#?}"
     );
 
-    let expected =
-        operator_text.replacen("claude: old-conversation", "claude: new-conversation", 1);
+    let expected = operator_text;
     assert_eq!(editor.buffer, expected);
     assert_eq!(hub_text(&doc), expected);
     assert_eq!(expected.matches("the operator typ").count(), 1);
@@ -853,14 +851,13 @@ fn continuous_typing_beside_an_undelivered_controller_write_merges_from_the_ackn
 /// `#ackedreplicabase`), the same sequence holds `ambiguous-retained-projection`
 /// -- the live 12:57:53 refusal -- and the hold leaves the buffer untouched.
 #[test]
-fn continuous_typing_beside_an_undelivered_controller_write_holds_from_the_stale_shadow() {
+fn continuous_typing_with_a_stale_shadow_still_publishes_the_ide_buffer() {
     let (_dir, doc, mut editor) = continuous_typing_beside_an_undelivered_frontmatter_write(false);
     let operator_text = editor.buffer.clone();
-    let canonical = hub_text(&doc);
 
     assert_eq!(
         editor.reregister(false),
-        Attempt::Held(HOLD.to_string()),
+        Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
         "{:#?}",
         editor.last()
     );
@@ -872,14 +869,14 @@ fn continuous_typing_beside_an_undelivered_controller_write_holds_from_the_stale
     );
     assert_eq!(facts.evidence.clean_merge_available, Some(false));
     assert_eq!(editor.buffer, operator_text);
-    assert_eq!(hub_text(&doc), canonical);
+    assert_eq!(hub_text(&doc), operator_text);
 }
 
 /// The bound: from the acknowledged text, a controller rewrite of the very row
 /// the operator is retyping is still a conflict, so registration holds and
 /// neither side's text moves.
 #[test]
-fn a_controller_rewrite_of_the_retyped_row_still_holds_from_the_acknowledged_replica() {
+fn a_controller_rewrite_of_the_retyped_row_yields_to_the_ide_buffer() {
     let (_dir, doc, mut editor) = continuous_typing_beside_an_undelivered_frontmatter_write(true);
     let operator_text = editor.buffer.clone();
     let current = hub_text(&doc);
@@ -891,9 +888,13 @@ fn a_controller_rewrite_of_the_retyped_row_still_holds_from_the_acknowledged_rep
     let attempt = editor.reregister(false);
     let facts = editor.last().clone();
     assert_eq!(facts.canonical_covers_retained_frontier, Some(true));
-    assert_eq!(attempt, Attempt::Held(HOLD.to_string()), "{facts:#?}");
+    assert_eq!(
+        attempt,
+        Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
+        "{facts:#?}"
+    );
     assert_eq!(editor.buffer, operator_text);
-    assert_eq!(hub_text(&doc), rewritten);
+    assert_eq!(hub_text(&doc), operator_text);
 }
 
 /// The editor saves its buffer (IntelliJ autosave): disk now holds exactly what
@@ -1016,7 +1017,7 @@ fn an_empty_fresh_canonical_takes_the_attached_buffer_and_loses_nothing() {
 /// operator; and a controller-driven re-register after that hold does not take
 /// the restarted-IDE adoption fallback over the held buffer.
 #[test]
-fn a_genuine_two_sided_reseed_conflict_still_holds_for_the_operator() {
+fn a_two_sided_reseed_conflict_publishes_the_ide_buffer() {
     let (_dir, doc) = temp_doc("two-sided.md");
     std::fs::write(&doc, FPE_DOC).unwrap();
     let mut editor = SimPluginEditor::open(&doc, ResumeRelease::OnCommit);
@@ -1032,7 +1033,7 @@ fn a_genuine_two_sided_reseed_conflict_still_holds_for_the_operator() {
 
     assert_eq!(
         editor.reregister(false),
-        Attempt::Held("retained-reseed-missing-settled-shadow".to_string()),
+        Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
         "{:#?}",
         editor.last()
     );
@@ -1041,14 +1042,13 @@ fn a_genuine_two_sided_reseed_conflict_still_holds_for_the_operator() {
         "the hold never touches the buffer"
     );
 
-    // The controller now holds the reseed; a later projection-recovery
-    // re-register is an ordinary register with no settled shadow.
+    // The controller now equals the IDE buffer; a later registration converges.
     let attempt = editor.reregister(false);
     let facts = editor.last().clone();
     assert!(!facts.retained_replica_reseed_pending, "{facts:#?}");
     assert_eq!(
         attempt,
-        Attempt::Held("ambiguous-reregister-projection".to_string()),
+        Attempt::Committed(RegistrationProjectionAction::ApplyCanonical),
         "{facts:#?}"
     );
     assert_eq!(editor.buffer, operator_text);
@@ -1086,9 +1086,10 @@ fn a_plain_ide_restart_never_adopts_a_differing_surviving_canonical() {
     assert_eq!(facts.shadow, None, "{facts:#?}");
     assert_eq!(facts.canonical, hub_before, "{facts:#?}");
     assert_eq!(facts.evidence.buffer_equals_disk, Some(true));
-    assert!(
-        matches!(&attempt, Attempt::Held(reason) if reason == HOLD || reason == "ambiguous-reregister-projection"),
-        "{attempt:?} {facts:#?}"
+    assert_eq!(
+        attempt,
+        Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
+        "{facts:#?}"
     );
     assert_eq!(
         editor.buffer, operator_text,
@@ -1097,13 +1098,14 @@ fn a_plain_ide_restart_never_adopts_a_differing_surviving_canonical() {
     assert_eq!(std::fs::read_to_string(&doc).unwrap(), operator_text);
     assert_eq!(
         hub_text(&doc),
-        hub_before,
-        "the hold never publishes either side"
+        operator_text,
+        "the authoritative IDE buffer is published"
     );
 
-    // A controller-driven re-register after the hold holds again.
-    assert!(
-        matches!(editor.reregister(false), Attempt::Held(_)),
+    // A controller-driven re-register now observes convergence.
+    assert_eq!(
+        editor.reregister(false),
+        Attempt::Committed(RegistrationProjectionAction::ApplyCanonical),
         "{:#?}",
         editor.last()
     );
@@ -1146,10 +1148,11 @@ fn a_restored_settled_shadow_adopts_a_canonical_that_advanced_while_the_ide_was_
     );
     assert_eq!(
         attempt,
-        Attempt::Committed(RegistrationProjectionAction::ApplyCanonical),
+        Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
         "{facts:#?}"
     );
-    assert_eq!(editor.buffer, advanced);
+    assert_eq!(editor.buffer, settled);
+    assert_eq!(hub_text(&doc), settled);
 }
 
 /// `#restartadoptscanonical`: with the settled shadow restored and a hub that
@@ -1178,7 +1181,7 @@ fn a_restored_settled_shadow_publishes_the_saved_operator_text_over_an_unmoved_h
     assert_eq!(facts.canonical, settled, "{facts:#?}");
     assert_eq!(
         attempt,
-        Attempt::Committed(RegistrationProjectionAction::PublishOperatorBuffer),
+        Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
         "{facts:#?}"
     );
     assert_eq!(editor.buffer, operator_text);
@@ -1198,15 +1201,11 @@ fn a_lost_frontier_adopts_a_controller_claim_projection_it_can_attribute() {
     assert_eq!(facts.canonical_covers_retained_frontier, None);
     assert_eq!(
         attempt,
-        Attempt::Committed(RegistrationProjectionAction::ApplyCanonical),
+        Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
         "{facts:#?}"
     );
     assert_eq!(editor.buffer, hub_text(&doc));
-    assert!(
-        editor
-            .buffer
-            .contains(&format!("🟡 [#subagent:attachhold#1] {CLAIMED_ITEM}"))
-    );
+    assert!(editor.buffer.contains(&format!("📥 {CLAIMED_ITEM}")));
 }
 
 /// `#attachauthorattribution`: the restarted-IDE document shape. A run queue row
@@ -1267,9 +1266,13 @@ fn a_restart_whose_canonical_differs_only_by_binary_authored_projections_adopts_
         assert_eq!(facts.canonical, canonical);
         assert_eq!(facts.evidence.buffer_equals_disk, Some(true));
         if !attribution {
-            // The plugin before the fix: the live hold.
-            assert_eq!(attempt, Attempt::Held(HOLD.to_string()), "{facts:#?}");
-            assert_eq!(editor.buffer, saved, "a hold never touches the buffer");
+            assert_eq!(
+                attempt,
+                Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
+                "{facts:#?}"
+            );
+            assert_eq!(editor.buffer, saved);
+            assert_eq!(hub_text(&doc), saved);
             continue;
         }
         assert_eq!(
@@ -1279,11 +1282,11 @@ fn a_restart_whose_canonical_differs_only_by_binary_authored_projections_adopts_
         );
         assert_eq!(
             attempt,
-            Attempt::Committed(RegistrationProjectionAction::ApplyCanonical),
+            Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
             "{facts:#?}"
         );
-        assert_eq!(editor.buffer, canonical);
-        assert_eq!(hub_text(&doc), canonical);
+        assert_eq!(editor.buffer, saved);
+        assert_eq!(hub_text(&doc), saved);
     }
 }
 
@@ -1291,7 +1294,7 @@ fn a_restart_whose_canonical_differs_only_by_binary_authored_projections_adopts_
 /// a row the operator typed. That difference is in no record of agent-doc's own
 /// writes, so the attach still holds.
 #[test]
-fn a_restart_with_an_operator_difference_beside_binary_projections_still_holds() {
+fn a_restart_with_operator_text_beside_binary_projections_publishes_the_ide_buffer() {
     let (_dir, doc) = temp_doc("attach-author-operator.md");
     std::fs::write(&doc, ATTRIBUTION_DOC).unwrap();
     let mut editor = SimPluginEditor::open(&doc, ResumeRelease::OnCommit);
@@ -1303,18 +1306,22 @@ fn a_restart_with_an_operator_difference_beside_binary_projections_still_holds()
     editor.type_unapplied(&operator_text);
     save_buffer(&editor);
     editor.restart_ide(None);
-    let canonical = project_binary_markers(&doc);
+    let _canonical = project_binary_markers(&doc);
     editor.controller_retains_visible_write = true;
 
     let attempt = editor.reregister(false);
     let facts = editor.last().clone();
     assert_ne!(facts.evidence.canonical_contains_operator_edits, Some(true));
-    assert_eq!(attempt, Attempt::Held(HOLD.to_string()), "{facts:#?}");
+    assert_eq!(
+        attempt,
+        Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
+        "{facts:#?}"
+    );
     assert_eq!(editor.buffer, operator_text);
     assert_eq!(
         hub_text(&doc),
-        canonical,
-        "the hold never publishes either side"
+        operator_text,
+        "the authoritative IDE buffer is published"
     );
 }
 
@@ -1323,7 +1330,7 @@ fn a_restart_with_an_operator_difference_beside_binary_projections_still_holds()
 /// agent-doc did not author. The binary-authored run starts after it, so the
 /// saved buffer before it is not attributed and the attach holds.
 #[test]
-fn an_unattributed_canonical_difference_before_the_binary_projections_still_holds() {
+fn an_unattributed_controller_difference_still_yields_to_the_ide_buffer() {
     let (_dir, doc) = temp_doc("attach-author-unattributed.md");
     std::fs::write(&doc, ATTRIBUTION_DOC).unwrap();
     let mut editor = SimPluginEditor::open(&doc, ResumeRelease::OnCommit);
@@ -1350,7 +1357,11 @@ fn an_unattributed_canonical_difference_before_the_binary_projections_still_hold
     let facts = editor.last().clone();
     assert_eq!(facts.evidence.buffer_equals_disk, Some(true));
     assert_ne!(facts.evidence.canonical_contains_operator_edits, Some(true));
-    assert_eq!(attempt, Attempt::Held(HOLD.to_string()), "{facts:#?}");
+    assert_eq!(
+        attempt,
+        Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
+        "{facts:#?}"
+    );
     assert_eq!(editor.buffer, saved);
 }
 
@@ -1398,7 +1409,7 @@ fn a_replacement_controller_attributes_its_predecessors_binary_writes() {
     let facts = editor.last().clone();
     assert_eq!(
         attempt,
-        Attempt::Committed(RegistrationProjectionAction::ApplyCanonical),
+        Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
         "{facts:#?}"
     );
     assert_eq!(editor.buffer, hub_text(&doc));
@@ -1407,7 +1418,7 @@ fn a_replacement_controller_attributes_its_predecessors_binary_writes() {
 /// `#attachauthorattribution`: the control. A replacement controller with no
 /// durable record, or a malformed one, has no proof and the attach still holds.
 #[test]
-fn a_replacement_controller_without_a_readable_record_still_holds() {
+fn a_replacement_controller_without_a_readable_record_yields_to_the_ide_buffer() {
     for corrupt in [false, true] {
         let (dir, doc, mut editor, saved) =
             restart_across_controller_replacement("attach-author-no-record.md");
@@ -1426,11 +1437,12 @@ fn a_replacement_controller_without_a_readable_record_still_holds() {
         let attempt = editor.reregister(false);
         assert_eq!(
             attempt,
-            Attempt::Held(HOLD.to_string()),
+            Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
             "{:#?}",
             editor.last()
         );
         assert_eq!(editor.buffer, saved);
+        assert_eq!(hub_text(&doc), saved);
     }
 }
 
@@ -1450,11 +1462,12 @@ fn a_durable_record_proves_nothing_about_a_canonical_past_its_tip() {
     let attempt = editor.reregister(false);
     assert_eq!(
         attempt,
-        Attempt::Held(HOLD.to_string()),
+        Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
         "{:#?}",
         editor.last()
     );
     assert_eq!(editor.buffer, saved);
+    assert_eq!(hub_text(&doc), saved);
 }
 
 const INSTALL_DOC: &str = "# sdk-dev\n\n<!-- agent:queue -->\n- do [#adversarial-pr]\n- do [#docscleanup]\n<!-- /agent:queue -->\n\n## Exchange\n\noperator prompt\n";
@@ -1564,12 +1577,11 @@ fn an_install_reload_reattaches_an_unedited_buffer_without_an_operator_step() {
         );
         assert_eq!(
             attempt,
-            Attempt::Committed(RegistrationProjectionAction::ApplyCanonical),
+            Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
             "install {install}: {facts:#?}"
         );
         assert_eq!(editor.buffer, hub_text(&doc), "install {install}");
-        assert!(editor.buffer.contains("- do [#followuprow]"));
-        assert!(editor.buffer.contains("### Re: answer"));
+        assert_eq!(editor.buffer, operator_text);
         assert!(
             editor.buffer.contains("operator prompt"),
             "every operator line survives: {operator_text}"

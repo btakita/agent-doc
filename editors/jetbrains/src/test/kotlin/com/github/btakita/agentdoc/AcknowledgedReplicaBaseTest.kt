@@ -15,8 +15,8 @@ import org.junit.Test
  * the frontmatter (undelivered), and a replace delivery made the editor re-register. Canonical
  * held the typing minus the last keystroke (a one-character retype) plus the resume id. From the
  * stale shadow, canonical's copy of the typing and the buffer's copy are two different changes of
- * one line, so neither the containment proof nor the line merge answered, and registration held
- * `ambiguous-retained-projection` although the two sides touched different lines.
+ * one line, so neither the containment proof nor the line merge answered under the former policy.
+ * These helpers remain diagnostic; `#idebufferauthority` now publishes the readable buffer.
  *
  * The merge and proof here are line-granular fakes of the native rebase and containment calls:
  * they refuse any line both sides changed differently, as the native rebase does.
@@ -79,20 +79,20 @@ class AcknowledgedReplicaBaseTest {
         )
 
     @Test
-    fun `the stale settled shadow alone holds the live 12-57 sequence`() {
+    fun `the stale settled shadow cannot outrank the IDE buffer`() {
         val fromShadow = proof(acknowledgedBase = null)
         assertEquals(false, fromShadow.canonicalContainsOperatorEdits)
         assertFalse(fromShadow.cleanMergeAvailable)
         assertEquals(shadow, fromShadow.mergeBase)
-        assertEquals(RetainedRegistrationProjectionAction.HoldOperatorBuffer, decide(fromShadow))
+        assertEquals(RetainedRegistrationProjectionAction.AdoptOperatorBuffer, decide(fromShadow))
     }
 
     @Test
-    fun `the acknowledged replica text merges the retype beside the controller write`() {
+    fun `the acknowledged replica merge remains diagnostic only`() {
         val fromAcknowledged = proof(acknowledgedBase = acknowledged)
         assertTrue(fromAcknowledged.cleanMergeAvailable)
         assertEquals(acknowledged, fromAcknowledged.mergeBase)
-        assertEquals(RetainedRegistrationProjectionAction.MergeForward, decide(fromAcknowledged))
+        assertEquals(RetainedRegistrationProjectionAction.AdoptOperatorBuffer, decide(fromAcknowledged))
         assertEquals(
             "both sides survive: the operator's retype and the controller's resume id",
             "---\nresume: new-conversation\n---\n- run row the operator typod\n",
@@ -101,11 +101,11 @@ class AcknowledgedReplicaBaseTest {
     }
 
     @Test
-    fun `a buffer equal to the acknowledged text adopts canonical losslessly`() {
+    fun `a buffer equal to acknowledged text still publishes when controller differs`() {
         val fromAcknowledged = proof(acknowledgedBase = acknowledged, bufferText = acknowledged)
         assertEquals(true, fromAcknowledged.canonicalContainsOperatorEdits)
         assertEquals(
-            RetainedRegistrationProjectionAction.ApplyCanonical,
+            RetainedRegistrationProjectionAction.AdoptOperatorBuffer,
             decide(fromAcknowledged, bufferText = acknowledged),
         )
     }
@@ -118,7 +118,7 @@ class AcknowledgedReplicaBaseTest {
     }
 
     @Test
-    fun `a controller change of the line the operator retyped still holds`() {
+    fun `a controller conflict still publishes the IDE buffer`() {
         // Canonical rewrote the same row the operator is retyping: no ancestor proves either
         // direction lossless, so the buffer stays exactly as typed.
         val conflicting = "---\nresume: new-conversation\n---\n- run row rewritten by the controller\n"
@@ -127,7 +127,7 @@ class AcknowledgedReplicaBaseTest {
         assertEquals(false, fromAcknowledged.canonicalContainsOperatorEdits)
         assertEquals(shadow, fromAcknowledged.mergeBase)
         assertEquals(
-            RetainedRegistrationProjectionAction.HoldOperatorBuffer,
+            RetainedRegistrationProjectionAction.AdoptOperatorBuffer,
             decide(fromAcknowledged, canonicalText = conflicting),
         )
     }

@@ -483,6 +483,16 @@ new operator intent; an unanswered quoted tail remains actionable.
   deferred-write intent and the cycle fails promptly without file IPC or a disk
   projection. An empty delivery target set is never convergence for an
   editor-owned write.
+  On editor registration and re-registration, an open readable IDE buffer is
+  the whole-document authority and the controller holds only a projection. If
+  their bytes differ, the replacement endpoint must publish the exact observed
+  IDE buffer after generation-fenced rechecks; containment, binary attribution,
+  settled shadows, disk equality, restart history, and retained-controller state
+  are diagnostics only and never authorize projecting controller text over the
+  IDE buffer. Exact equality converges without a write, an unreadable buffer may
+  accept the controller projection, and a captured local delta may defer the
+  registration effect until its existing delivery edge settles
+  (`#idebufferauthority`).
   Editor-selected tmux focus is likewise latest-wins per project. A stale or
   pruned actor projection cannot hide a still-running document owner when the
   latest open session log, live pane, and exact process-tree document binding

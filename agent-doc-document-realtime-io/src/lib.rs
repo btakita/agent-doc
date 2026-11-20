@@ -14748,6 +14748,8 @@ mod tests {
             "❯ Opened the validation PR and preserved the required checks.\n\n",
             "❯ The exact merge candidate selected CLI and docs only.\n\n",
             "❯ [Owning checkout](/tmp/sdk)\n",
+            "### Re: later completed work — agent-doc\n\n",
+            "Later response body must be preserved.\n",
             "<!-- agent:boundary:latest -->\n",
             "<!-- /agent:exchange -->\n",
         );
@@ -14798,6 +14800,16 @@ mod tests {
             candidate.content
         );
         assert!(candidate.content.contains("agent:boundary:latest"));
+        assert!(
+            candidate
+                .content
+                .contains("### Re: later completed work — agent-doc")
+        );
+        assert!(
+            candidate
+                .content
+                .contains("Later response body must be preserved.")
+        );
     }
 
     #[test]

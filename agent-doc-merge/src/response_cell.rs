@@ -746,13 +746,15 @@ fn restore_interrupted_empty_response_shell(
         .iter()
         .rposition(|node| matches!(node.kind, ExchangeNodeKind::Response { .. }))?;
 
+    let captured_body = &captured_provenance[1..];
     let shell_candidates = nodes
         .iter()
         .enumerate()
         .filter(|(index, node)| {
-            *index == latest_response_index
-                && node.kind == captured.kind
+            node.kind == captured.kind
                 && replay_provenance_lines(&node.lines).len() == 1
+                && (*index == latest_response_index
+                    || exact_prefixed_capture_tail_end(nodes, *index, captured_body).is_some())
         })
         .collect::<Vec<_>>();
     let [(shell_index, shell)] = shell_candidates.as_slice() else {
@@ -793,31 +795,7 @@ fn restore_interrupted_empty_response_shell(
     // the leaked prefix and whose stripped bytes exactly equal the captured
     // body. Any extra, missing, reordered, or edited operator text fails this
     // proof and keeps the existing fail-closed behavior.
-    let captured_body = &captured_provenance[1..];
-    let mut prefixed_tail = Vec::new();
-    let mut tail_boundaries = Vec::new();
-    let mut tail_is_exact_prefixed_capture = !captured_body.is_empty();
-    for node in nodes.iter().skip(*shell_index + 1) {
-        for line in &node.lines {
-            if boundary_line(line) {
-                tail_boundaries.push(line.clone());
-                continue;
-            }
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let Some(unprefixed) = trimmed.strip_prefix('❯').map(str::trim_start) else {
-                tail_is_exact_prefixed_capture = false;
-                break;
-            };
-            prefixed_tail.push(unprefixed.to_string());
-        }
-        if !tail_is_exact_prefixed_capture {
-            break;
-        }
-    }
-    tail_is_exact_prefixed_capture &= prefixed_tail == captured_body;
+    let prefixed_tail_end = exact_prefixed_capture_tail_end(nodes, *shell_index, captured_body);
 
     restored_lines.extend(
         shell
@@ -826,13 +804,52 @@ fn restore_interrupted_empty_response_shell(
             .filter(|line| boundary_line(line))
             .cloned(),
     );
-    if tail_is_exact_prefixed_capture {
-        restored_lines.extend(tail_boundaries);
-        restored_nodes.truncate(*shell_index + 1);
+    if let Some(tail_end) = prefixed_tail_end {
+        restored_lines.extend(
+            nodes[*shell_index + 1..tail_end]
+                .iter()
+                .flat_map(|node| node.lines.iter())
+                .filter(|line| boundary_line(line))
+                .cloned(),
+        );
+        restored_nodes.drain(*shell_index + 1..tail_end);
     }
     restored_nodes[*shell_index].lines = restored_lines;
     let restored_exchange = render_exchange_nodes(&restored_nodes);
     Some(exchange.replace_content(doc, &restored_exchange))
+}
+
+/// Exclusive end of the prompt-shaped tail that is exactly one leaked copy of
+/// `captured_body` after `shell_index`.
+///
+/// Stop at the next response so a later completed turn remains independent.
+/// Every substantive line before it must carry the leaked `❯` prefix; protocol
+/// boundaries are carried by the caller. This proof is what permits recovery
+/// of a historical shell after newer responses have already been appended.
+fn exact_prefixed_capture_tail_end(
+    nodes: &[ExchangeNode],
+    shell_index: usize,
+    captured_body: &[String],
+) -> Option<usize> {
+    if captured_body.is_empty() {
+        return None;
+    }
+    let mut prefixed_tail = Vec::new();
+    let mut tail_end = shell_index + 1;
+    for (index, node) in nodes.iter().enumerate().skip(shell_index + 1) {
+        if matches!(node.kind, ExchangeNodeKind::Response { .. }) {
+            break;
+        }
+        tail_end = index + 1;
+        for line in &node.lines {
+            if boundary_line(line) || line.trim().is_empty() {
+                continue;
+            }
+            let unprefixed = line.trim().strip_prefix('❯')?.trim_start();
+            prefixed_tail.push(unprefixed.to_string());
+        }
+    }
+    (tail_end > shell_index + 1 && prefixed_tail == captured_body).then_some(tail_end)
 }
 
 /// `#completioncellslost`: a binary-owned subagent completion cell

@@ -163,15 +163,38 @@ fn reserve_inline_execution(
     let mut conn = state_store::open_state_db(&root)?;
     let document_hash = agent_doc_hash::path_hash(file)?;
     let mut baselines = Vec::new();
+    let mut reconciled_prior_cycles = Vec::new();
     for (revision, target) in effects {
-        refuse_inline_hold(
-            inline_hold(&conn, &document_hash, revision, target)?,
-            target,
-        )?;
+        if let Some(prior_cycle) = inline_hold(&conn, &document_hash, revision, target)? {
+            let committed = inline_cycle_allows_after_observation(file, None, &prior_cycle)?;
+            if committed {
+                let prior_attempt = AddressAttempt::inline(&prior_cycle, revision);
+                let observation =
+                    observe_snapshot(file, &prior_attempt, target, |target| fetch(target))?;
+                if matches!(
+                    judge_address_completion(&observation, None),
+                    AddressCompletion::Proven(_)
+                ) {
+                    reconciled_prior_cycles.push((prior_cycle, target.key()));
+                    continue;
+                }
+            }
+            refuse_inline_hold(Some(prior_cycle), target)?;
+        }
         let baseline = fetch(target).context(
             "could not capture the pull-request baseline before dispatch (#addressproof)",
         )?;
         baselines.push((revision, target, baseline));
+    }
+    if !reconciled_prior_cycles.is_empty() {
+        anyhow::bail!(
+            "#addressproof: reconciled committed prior effect(s) {}; queue maintenance owns consumption before this prompt revision may be selected again",
+            reconciled_prior_cycles
+                .iter()
+                .map(|(cycle, target)| format!("{cycle}:{target}"))
+                .collect::<Vec<_>>()
+                .join(","),
+        );
     }
     // The before receipts are a single admission cut. A failure before the
     // handoff exposes none of the prompts and leaves none with a false hold.
@@ -821,6 +844,69 @@ mod tests {
         assert!(!inline_cycle_allows_after_observation(&file, None, "started-cycle").unwrap());
         assert!(
             inline_cycle_allows_after_observation(&file, Some("live-cycle"), "live-cycle").unwrap()
+        );
+    }
+
+    #[test]
+    fn admission_reconciles_committed_inline_effect_before_refusing_redispatch() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        std::fs::write(&file, "task").unwrap();
+        let item = "#address https://github.com/sample-org/sample-repo/pull/338";
+        let target = address_review_target(item).unwrap();
+        let before = snapshot("12a0c93e", vec![]);
+        reserve_inline_execution(
+            &file,
+            "committed-cycle",
+            &[(item.to_string(), target.clone())],
+            |_| Some(before.clone()),
+        )
+        .unwrap();
+        let conn = state_store::open_state_db(dir.path()).unwrap();
+        let document_id = file.canonicalize().unwrap().to_string_lossy().into_owned();
+        conn.execute(
+            "INSERT INTO document_cycles
+             (document_id, cycle_id, state, response_commit, updated_at)
+             VALUES (?1, 'committed-cycle', 'committed', 'response-commit', 1)",
+            [&document_id],
+        )
+        .unwrap();
+
+        let after = snapshot("4c2c1ab7", vec![]);
+        let error = reserve_inline_execution(
+            &file,
+            "replacement-cycle",
+            &[(item.to_string(), target.clone())],
+            |_| Some(after.clone()),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("reconciled committed prior effect"),
+            "{error:#}"
+        );
+        assert_eq!(
+            load_snapshot(
+                &file,
+                &AddressAttempt::inline("committed-cycle", item),
+                &target,
+                SnapshotKind::Proven,
+            )
+            .unwrap(),
+            Some(after),
+        );
+        assert_eq!(
+            load_snapshot(
+                &file,
+                &AddressAttempt::inline("replacement-cycle", item),
+                &target,
+                SnapshotKind::Before,
+            )
+            .unwrap(),
+            None,
+            "reconciliation must not reserve or execute the repeated prompt"
         );
     }
 

@@ -103,6 +103,46 @@ fn inline_observed_cycle(
     inline_hold(&conn, &agent_doc_hash::path_hash(file)?, revision, target)
 }
 
+/// A before observation may fetch its after-state while its owning turn is
+/// still open, or after that exact turn has durably committed a response.
+///
+/// The committed case is recovery, not a new execution: closeout normally
+/// performs this observation while the cycle is open, but a process/editor
+/// interruption can land the response and miss only the read-only GitHub
+/// observation. Abandoned and merely-started cycles remain fenced because
+/// they do not prove that the agent ever received or answered the prompt.
+fn inline_cycle_allows_after_observation(
+    file: &Path,
+    current_open_cycle: Option<&str>,
+    prior_cycle: &str,
+) -> Result<bool> {
+    if current_open_cycle == Some(prior_cycle) {
+        return Ok(true);
+    }
+    let Some(root) = agent_doc_fs::find_project_root(file) else {
+        return Ok(false);
+    };
+    if !state_store::state_db_path(&root).exists() {
+        return Ok(false);
+    }
+    let conn = state_store::open_state_db_read_only(&root)?;
+    if !state_store::state_table_exists(&conn, "document_cycles")? {
+        return Ok(false);
+    }
+    let document_id = file.canonicalize()?.to_string_lossy().into_owned();
+    conn.query_row(
+        "SELECT EXISTS(
+             SELECT 1 FROM document_cycles
+             WHERE document_id = ?1 AND cycle_id = ?2
+               AND state IN ('committed', 'completed', 'closed')
+               AND response_commit IS NOT NULL
+         )",
+        (&document_id, prior_cycle),
+        |row| row.get(0),
+    )
+    .context("read committed inline address cycle")
+}
+
 fn refuse_inline_hold(cycle: Option<String>, target: &AddressTarget) -> Result<()> {
     if let Some(cycle) = cycle {
         anyhow::bail!(
@@ -340,6 +380,10 @@ pub fn install_for_content(file: &Path, content: &str) -> Option<AddressEffectGu
             None
         }
     };
+    let current_open_cycle = cycle
+        .as_ref()
+        .filter(|cycle| cycle.is_open())
+        .map(|cycle| cycle.cycle_id.as_str());
     let claims = match crate::queue_claim::load_ledger_following_read_only(file, content) {
         Ok(claims) => Some(claims),
         Err(error) => {
@@ -381,8 +425,20 @@ pub fn install_for_content(file: &Path, content: &str) -> Option<AddressEffectGu
                             return AddressObservation::Unseen;
                         }
                     };
-                    let fetch = cycle.as_ref().is_some_and(|cycle| {
-                        cycle.is_open() && prior.as_deref() == Some(cycle.cycle_id.as_str())
+                    let fetch = prior.as_deref().is_some_and(|prior_cycle| {
+                        match inline_cycle_allows_after_observation(
+                            file,
+                            current_open_cycle,
+                            prior_cycle,
+                        ) {
+                            Ok(fetch) => fetch,
+                            Err(error) => {
+                                eprintln!(
+                                    "[queue] could not classify the prior inline address cycle: {error:#}"
+                                );
+                                false
+                            }
+                        }
                     });
                     (
                         prior.map(|cycle| AddressAttempt::inline(&cycle, &submitted)),
@@ -736,6 +792,36 @@ mod tests {
             Some(before.clone())
         })
         .unwrap();
+    }
+
+    #[test]
+    fn committed_inline_cycle_can_reconcile_after_state_but_unanswered_cycles_cannot() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        std::fs::write(&file, "task").unwrap();
+        let conn = state_store::open_state_db(dir.path()).unwrap();
+        let document_id = file.canonicalize().unwrap().to_string_lossy().into_owned();
+        for (cycle_id, state, response_commit) in [
+            ("committed-cycle", "committed", Some("response-commit")),
+            ("abandoned-cycle", "abandoned", None),
+            ("started-cycle", "preflight_started", None),
+        ] {
+            conn.execute(
+                "INSERT INTO document_cycles
+                 (document_id, cycle_id, state, response_commit, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, 1)",
+                (&document_id, cycle_id, state, response_commit),
+            )
+            .unwrap();
+        }
+
+        assert!(inline_cycle_allows_after_observation(&file, None, "committed-cycle").unwrap());
+        assert!(!inline_cycle_allows_after_observation(&file, None, "abandoned-cycle").unwrap());
+        assert!(!inline_cycle_allows_after_observation(&file, None, "started-cycle").unwrap());
+        assert!(
+            inline_cycle_allows_after_observation(&file, Some("live-cycle"), "live-cycle").unwrap()
+        );
     }
 
     #[test]

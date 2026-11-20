@@ -2,6 +2,12 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.584
+
+- **The live editor buffer is authoritative.** Saves and recovery preserve the open document's content and ordering. Incremental parsing reuses unchanged document components.
+- **Queues recover without waiting for Stop.** Reconciliation preserves nested prompt lineage, archived response evidence, and early replies. Operation-specific receipts keep interrupted harness effects tied to the admitted prompt that authorized them.
+- **JetBrains Remote Dev supports signed frontend generations.** The frontend shell verifies each package against a client-local trust root and matches the backend's activation receipt before enabling frontend-dependent operations. Activation supports rollback while retaining the shell's existing service registration.
+
 ## 0.35.583
 
 - **Worker launch recovery keeps the original attempt.** A legacy native launch reservation stays held until the harness settles that exact attempt, preventing duplicate dispatch after restart.

@@ -22,8 +22,8 @@ import kotlinx.coroutines.flow.flow
 internal class BackendSurfaceSnapshotRpcApi(
     private val frontendRelease: () -> FrontendImplementationRelease? = {
         ShellGenerationHost.getInstance().activate()
-            ?.moduleService(FrontendReleaseBridge::class.java)
-            ?.current()
+            ?.moduleService(SurfaceIngressFactory::class.java)
+            ?.currentFrontendRelease()
     },
 ) : SurfaceSnapshotRpcApi {
     private val log = Logger.getInstance(BackendSurfaceSnapshotRpcApi::class.java)

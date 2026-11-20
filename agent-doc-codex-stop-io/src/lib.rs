@@ -304,6 +304,13 @@ enum StopCloseAttempt {
     RepairDeferredToDurableOwner {
         note: String,
     },
+    /// Stop durably captured the exact response and proved that a serving
+    /// supervisor owns captured-finalize replay. Delivery, editor save,
+    /// reconciliation, and commit are background lifecycle work; the hook
+    /// reports progress without running any of them synchronously.
+    CapturedByBackgroundOwner {
+        note: String,
+    },
     /// The commit boundary refused only because the captured response was not
     /// yet projected, while a durable owner (retained capture / keyed worker)
     /// holds the intent and commits it on its own delivery edge. Not an agent
@@ -3162,6 +3169,13 @@ fn apply_bound_stop(
                     StopCloseAttempt::RepairDeferredToDurableOwner { note } => {
                         return await_durable_owner_repair_deferral(file, &note, input);
                     }
+                    StopCloseAttempt::CapturedByBackgroundOwner { note } => {
+                        return Ok(durable_owner_repair_deferral_response(
+                            file,
+                            &note,
+                            input.stop_hook_active,
+                        ));
+                    }
                     StopCloseAttempt::StillOpen { note } => {
                         return Ok(StopResponse::ContinueTurn {
                             class: StopContinuationClass::Recovery,
@@ -3789,6 +3803,13 @@ fn active_session_prompt_requires_writeback_with(
             StopCloseAttempt::RepairDeferredToDurableOwner { note } => {
                 return await_durable_owner_repair_deferral(file, &note, input).map(Some);
             }
+            StopCloseAttempt::CapturedByBackgroundOwner { note } => {
+                return Ok(Some(durable_owner_repair_deferral_response(
+                    file,
+                    &note,
+                    input.stop_hook_active,
+                )));
+            }
             StopCloseAttempt::StillOpen { note } => {
                 return Ok(Some(StopResponse::ContinueTurn {
                     class: StopContinuationClass::SessionWriteback,
@@ -3894,6 +3915,13 @@ fn active_exchange_prompt_requires_writeback(
             }
             StopCloseAttempt::RepairDeferredToDurableOwner { note } => {
                 return await_durable_owner_repair_deferral(file, &note, input).map(Some);
+            }
+            StopCloseAttempt::CapturedByBackgroundOwner { note } => {
+                return Ok(Some(durable_owner_repair_deferral_response(
+                    file,
+                    &note,
+                    input.stop_hook_active,
+                )));
             }
             StopCloseAttempt::StillOpen { note } => {
                 return Ok(Some(StopResponse::ContinueTurn {
@@ -4972,6 +5000,14 @@ fn closeout_repair_retained_note(
     }
 }
 
+fn retained_capture_has_background_owner(
+    ownership: agent_doc_turn::write_ownership::RetainedWriteOwnership,
+) -> bool {
+    ownership.retained_capture
+        && !ownership.capture_resume_unowned
+        && ownership.verdict() == agent_doc_turn::write_ownership::RetainedWriteVerdict::Deferred
+}
+
 fn durable_owner_repair_deferral_response(
     file: &Path,
     note: &str,
@@ -5173,6 +5209,53 @@ fn attempt_stop_closeout(
         });
     }
 
+    let mut note = String::new();
+    match &payload {
+        agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) => {
+            if let Some(capture_id) =
+                materialized_cycle_capture_supersedes(file, response.as_ref())?
+            {
+                note.push_str(&format!(
+                    " The cycle's retained response `{capture_id}` already owns this closeout, so an insufficient or duplicate closing chat message was not recaptured over it."
+                ));
+            } else {
+                agent_doc_repair_io::pending::save_pending(file, response.as_ref())?;
+                agent_doc_ops_log_io::log_op(file, "codex_stop_capture_saved");
+                note.push_str(
+                    " The latest assistant text was captured into the pending/capture ledger before auto-close.",
+                );
+            }
+        }
+        agent_doc_template::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
+            note.push_str(&capture_blocked_stop_payload(
+                file,
+                &input.last_assistant_message,
+                reason,
+                Some(state.last_prompt.as_str()),
+            ));
+        }
+        agent_doc_template::replay_guard::ReplayPayloadClassification::Empty => {}
+    }
+    log_slow_stop_closeout_phase(file, "intent_capture", &mut phase_started);
+
+    stop_phase("closeout_background_handoff");
+    let ownership = agent_doc_capture_io::retained_write_ownership(file);
+    if retained_capture_has_background_owner(ownership) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            "codex_stop_capture_handed_to_supervisor owner=durable_retained_capture action=background_finalize",
+        );
+        note.push_str(
+            " The response is durable and a serving supervisor owns captured-finalize replay; editor delivery, reconciliation, and commit continue in the background.",
+        );
+        return Ok(StopCloseAttempt::CapturedByBackgroundOwner { note });
+    }
+
+    // Queue classification is needed only by the unowned, fail-closed repair
+    // fallback. A retained capture belongs to the supervisor, which derives
+    // the same completion effects from its serialized queue actor. Keeping
+    // this after the handoff removes document parsing and controller reads
+    // from the ordinary Stop critical path.
     stop_phase("closeout_active_queue_prompt");
     let active_queue_prompt = active_auto_queue_prompt(file)?;
     stop_phase("closeout_open_cycle_check");
@@ -5225,39 +5308,11 @@ fn attempt_stop_closeout(
     };
     log_slow_stop_closeout_phase(file, "intent_classification", &mut phase_started);
 
-    let mut note = String::new();
-    match payload {
-        agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) => {
-            if let Some(capture_id) =
-                materialized_cycle_capture_supersedes(file, response.as_ref())?
-            {
-                note.push_str(&format!(
-                    " The cycle's retained response `{capture_id}` already owns this closeout, so an insufficient or duplicate closing chat message was not recaptured over it."
-                ));
-            } else {
-                agent_doc_repair_io::pending::save_pending(file, response.as_ref())?;
-                agent_doc_ops_log_io::log_op(file, "codex_stop_capture_saved");
-                note.push_str(
-                    " The latest assistant text was captured into the pending/capture ledger before auto-close.",
-                );
-            }
-        }
-        agent_doc_template::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
-            note.push_str(&capture_blocked_stop_payload(
-                file,
-                &input.last_assistant_message,
-                &reason,
-                Some(state.last_prompt.as_str()),
-            ));
-        }
-        agent_doc_template::replay_guard::ReplayPayloadClassification::Empty => {}
-    }
-    log_slow_stop_closeout_phase(file, "intent_capture", &mut phase_started);
-
     // `#stopretainedfailclosed`: a repair that cannot finish (typically an editor-owned
     // write retained under a deferred intent while the controller hands off) is a still-open
     // closeout whose owner the ownership predicate derives, not a hook failure. Propagating it here surfaced as "Stop hook failed closed" on fpe.md
     // (2026-09-30) while the same intent settled and committed 29s later.
+    stop_phase("closeout_foreground_repair");
     let repair_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let repair_effects =
         agent_doc_closeout_runtime_io::RuntimeRepairIoEffects::new(file, &repair_guard)?;
@@ -7567,6 +7622,55 @@ Done.\n\
                 "{anchor} must check the existing capture before save_pending"
             );
         }
+    }
+
+    /// `#stopbackgroundhandoff`: once Stop has captured the response and the
+    /// retained-write predicate proves a serving supervisor, no editor save,
+    /// repair replay, queue reconciliation, or commit belongs on the hook's
+    /// synchronous path.
+    #[test]
+    fn stop_hands_a_durable_capture_to_the_supervisor_before_repair() {
+        let source = include_str!("lib.rs");
+        let closeout = source.split("fn attempt_stop_closeout(").nth(1).unwrap();
+        let closeout = &closeout[..closeout.find("\nfn ").unwrap()];
+        let capture = closeout
+            .find("pending::save_pending(file, response.as_ref())")
+            .expect("Stop durably captures the response");
+        let handoff = closeout
+            .find("stop_phase(\"closeout_background_handoff\")")
+            .expect("Stop checks for a background owner");
+        let background_return = closeout
+            .find("StopCloseAttempt::CapturedByBackgroundOwner")
+            .expect("a proven supervisor ends synchronous closeout work");
+        let queue_classification = closeout
+            .find("stop_phase(\"closeout_active_queue_prompt\")")
+            .expect("the unowned fallback retains queue-aware repair");
+        let foreground_repair = closeout
+            .find("stop_phase(\"closeout_foreground_repair\")")
+            .expect("unowned captures retain the fail-closed repair fallback");
+
+        assert!(capture < handoff);
+        assert!(handoff < background_return);
+        assert!(background_return < queue_classification);
+        assert!(queue_classification < foreground_repair);
+    }
+
+    #[test]
+    fn background_handoff_requires_a_retained_capture_and_serving_resume_owner() {
+        use agent_doc_turn::write_ownership::RetainedWriteOwnership;
+
+        assert!(retained_capture_has_background_owner(
+            RetainedWriteOwnership::new(true, true),
+        ));
+        assert!(!retained_capture_has_background_owner(
+            RetainedWriteOwnership::new(true, false),
+        ));
+        assert!(!retained_capture_has_background_owner(
+            RetainedWriteOwnership::new(false, false).with_retained_projection(true),
+        ));
+        assert!(!retained_capture_has_background_owner(
+            RetainedWriteOwnership::new(true, true).with_capture_resume_unowned(true),
+        ));
     }
 
     /// haiven-dev cycle-1790914570041 (2026-10-02): the post-commit closeout

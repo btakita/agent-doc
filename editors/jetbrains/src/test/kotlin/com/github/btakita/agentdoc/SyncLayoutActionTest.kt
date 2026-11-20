@@ -6,6 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
+import java.nio.file.Files
 
 class SyncLayoutActionTest {
 
@@ -461,6 +462,28 @@ class SyncLayoutActionTest {
                 ),
             ),
         )
+    }
+
+    @Test
+    fun `terminal bootstrap keeps the focused nested agent-doc root`() {
+        val workspace = Files.createTempDirectory("agent-doc-sync-terminal-root")
+        try {
+            val nestedRoot = workspace.resolve("src/haiven-dev")
+            Files.createDirectories(nestedRoot.resolve(".agent-doc"))
+            val focused = nestedRoot.resolve("tasks/sdk/sdk-dev.md")
+            Files.createDirectories(focused.parent)
+            Files.writeString(focused, "---\nagent_doc_format: template\n---\n")
+
+            assertEquals(
+                nestedRoot.toString() to "tasks/sdk/sdk-dev.md",
+                SyncLayoutAction.resolveTerminalPreparationTarget(
+                    basePath = workspace.toString(),
+                    focusedFile = focused.toString(),
+                ),
+            )
+        } finally {
+            workspace.toFile().deleteRecursively()
+        }
     }
 
     /** GH #320: only measured window geometry is an `editor` order; a shared origin is not. */

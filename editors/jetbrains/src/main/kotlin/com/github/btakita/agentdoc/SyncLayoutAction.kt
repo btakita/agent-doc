@@ -202,6 +202,19 @@ class SyncLayoutAction : ImplAction {
             return fallbackRoot
         }
 
+        /**
+         * Resolve the focused document's own Agent Doc root for terminal bootstrap.
+         *
+         * The layout root may intentionally widen to the workspace root when visible editors span
+         * several nested projects. Reusing that root for `tmux start` routes the focused document
+         * through the outer controller and can reject a valid nested session as
+         * `not_agent_doc_document`.
+         */
+        internal fun resolveTerminalPreparationTarget(
+            basePath: String?,
+            focusedFile: String,
+        ): Pair<String, String> = TerminalUtil.resolveProjectPath(basePath, focusedFile)
+
         /** GH #326 phase 3: frozen copy of the native `sync_layout` normalization. Never extend it. */
         internal fun normalizeEditorLayout(
             basePath: String?,
@@ -509,17 +522,18 @@ class SyncLayoutAction : ImplAction {
     }
 
     /**
-     * Prepare the agent-doc tmux session at [projectRoot] when this caller asked for it, then
-     * re-read the editor and sync again. `false` when the terminal was already prepared.
+     * Prepare the focused document's own agent-doc tmux session when this caller asked for it,
+     * then re-read the editor and sync again. `false` when the terminal was already prepared.
      */
-    private fun prepareTerminalFirst(request: SyncRequest, projectRoot: String): Boolean {
+    private fun prepareTerminalFirst(request: SyncRequest): Boolean {
         if (request.terminalPrepared || request.noAutostart) return false
-        val relativeFocusedFile = java.io.File(projectRoot).toPath()
-            .relativize(java.io.File(request.focusedFile).toPath())
-            .toString()
+        val (focusedProjectRoot, relativeFocusedFile) = resolveTerminalPreparationTarget(
+            request.basePath,
+            request.focusedFile,
+        )
         IdeTerminalCoordinator.startAndAttach(
             project = request.project,
-            cwd = projectRoot,
+            cwd = focusedProjectRoot,
             relativePath = relativeFocusedFile,
             onReady = {
                 syncLayout(
@@ -582,7 +596,7 @@ class SyncLayoutAction : ImplAction {
                                         "reason=flat_evidence_has_no_column_geometry " +
                                         "action=start_session columns=1",
                                 )
-                                if (prepareTerminalFirst(request, projectRoot)) return@newThread
+                                if (prepareTerminalFirst(request)) return@newThread
                                 if (!awaitNativeGeneration(request)) return@newThread
                                 val layoutAuthority =
                                     if (RemoteClientLayoutAuthority.isActive(request.project)) {
@@ -637,7 +651,7 @@ class SyncLayoutAction : ImplAction {
                             return@newThread
                         }
                     }
-                if (prepareTerminalFirst(request, projectRoot)) return@newThread
+                if (prepareTerminalFirst(request)) return@newThread
                 if (!awaitNativeGeneration(request)) return@newThread
                 val receipt = CpRouteClient.submitSyncTmuxLayout(
                     projectRoot = projectRoot,
@@ -683,7 +697,7 @@ class SyncLayoutAction : ImplAction {
             try {
                 if (project.isDisposed) return@newThread
                 val projectRoot = deriveSyncLayout(request, editorLayout = null).projectRoot
-                if (prepareTerminalFirst(request, projectRoot)) return@newThread
+                if (prepareTerminalFirst(request)) return@newThread
                 if (!awaitNativeGeneration(request)) return@newThread
                 when (
                     val publication = listener.publishCommandSurface(

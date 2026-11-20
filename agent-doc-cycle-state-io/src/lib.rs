@@ -59,6 +59,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 pub mod command_plane;
+pub mod inline_effect;
 pub mod pipeline_frontmatter;
 pub mod post_commit_error;
 

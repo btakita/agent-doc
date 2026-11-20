@@ -164,6 +164,23 @@ pub fn is_live_owner_turn_verdict(message: &str) -> bool {
 pub struct SessionCheckReport {
     pub status: SessionCheckStatus,
     pub warnings: Vec<String>,
+    queue_apply_in_flight: bool,
+}
+
+impl SessionCheckReport {
+    fn from_status(status: SessionCheckStatus) -> Self {
+        Self {
+            status,
+            warnings: Vec::new(),
+            queue_apply_in_flight: false,
+        }
+    }
+
+    /// Another owner has the document apply capability. Callers may observe
+    /// its progress, but cannot start response recovery on this verdict.
+    pub fn queue_apply_in_flight(&self) -> bool {
+        self.queue_apply_in_flight
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3885,25 +3902,43 @@ fn steering_survives_steering_carried_drift(
 fn refuse_transient_queue_closeout(
     file: &Path,
     status: SessionCheckStatus,
-) -> Result<SessionCheckStatus> {
+) -> Result<SessionCheckReport> {
     let SessionCheckStatus::Ok(_) = &status else {
-        return Ok(status);
+        return Ok(SessionCheckReport::from_status(status));
     };
     if closeout_caller_holds_queue_apply_guard() {
-        return refuse_transient_queue_lifecycle_debt(file, status);
+        return refuse_transient_queue_lifecycle_debt(file, status)
+            .map(SessionCheckReport::from_status);
     }
     match agent_doc_queue_io::queue_edit_owner::queue_apply_in_flight(file) {
         Ok(true) => {
-            return Ok(SessionCheckStatus::Interrupted(format!(
-                "[session-check] INTERRUPTED: queue maintenance apply is in flight for {}; terminal closeout is withheld until the apply lock is released (#transientcloseout)",
-                file.display(),
-            )));
+            // The apply lock is shared by strict closeout and queue maintenance.
+            // A commit phase alone cannot distinguish the closeout finishing its
+            // proof from a later queue transaction. The exact terminal receipt
+            // and unchanged authority cut can, and the live debt guards still run.
+            if let Ok(content) =
+                crate::resolve_current_document_content(file, "queue_apply_terminal_proof")
+                && agent_doc_flow_io::closeout::replay_closeout_still_proven(file, &content)?
+            {
+                return refuse_transient_queue_lifecycle_debt(file, status)
+                    .map(SessionCheckReport::from_status);
+            }
+            let mut report = SessionCheckReport::from_status(SessionCheckStatus::Interrupted(
+                format!(
+                    "[session-check] INTERRUPTED: document apply is in flight for {}; its queue maintenance or closeout owner must finish before terminal status can be proved (#transientcloseout)",
+                    file.display(),
+                ),
+            ));
+            report.queue_apply_in_flight = true;
+            return Ok(report);
         }
         Err(error) => {
-            return Ok(SessionCheckStatus::Interrupted(format!(
-                "[session-check] INTERRUPTED: queue maintenance apply state could not be proven for {}: {error:#}; terminal closeout is withheld (#transientcloseout)",
-                file.display(),
-            )));
+            return Ok(SessionCheckReport::from_status(
+                SessionCheckStatus::Interrupted(format!(
+                    "[session-check] INTERRUPTED: queue maintenance apply state could not be proven for {}: {error:#}; terminal closeout is withheld (#transientcloseout)",
+                    file.display(),
+                )),
+            ));
         }
         Ok(false) => {}
     }
@@ -3914,20 +3949,24 @@ fn refuse_transient_queue_closeout(
             dead_holder,
         }) = agent_doc_queue_io::queue_edit_owner::queue_maintenance_request_owner(file)
         {
-            return Ok(SessionCheckStatus::Interrupted(format!(
-                "[session-check] INTERRUPTED: queue maintenance request is pending for {} and its worker is gone (holder={}, holder_pid={}); terminal closeout is withheld until the admitted generation completes. `{}` adopts and runs it now; `respond` and the next preflight also recover it (#transientcloseout #deadmaintworker)",
-                file.display(),
-                dead_holder
-                    .as_ref()
-                    .map_or("none", |lease| lease.holder.as_str()),
-                dead_holder.as_ref().map_or(0, |lease| lease.holder_pid),
-                session_check_heal_command(file),
-            )));
+            return Ok(SessionCheckReport::from_status(
+                SessionCheckStatus::Interrupted(format!(
+                    "[session-check] INTERRUPTED: queue maintenance request is pending for {} and its worker is gone (holder={}, holder_pid={}); terminal closeout is withheld until the admitted generation completes. `{}` adopts and runs it now; `respond` and the next preflight also recover it (#transientcloseout #deadmaintworker)",
+                    file.display(),
+                    dead_holder
+                        .as_ref()
+                        .map_or("none", |lease| lease.holder.as_str()),
+                    dead_holder.as_ref().map_or(0, |lease| lease.holder_pid),
+                    session_check_heal_command(file),
+                )),
+            ));
         }
-        return Ok(SessionCheckStatus::Interrupted(format!(
-            "[session-check] INTERRUPTED: queue maintenance request is pending for {}; terminal closeout is withheld until its admitted generation completes (#transientcloseout)",
-            file.display(),
-        )));
+        return Ok(SessionCheckReport::from_status(
+            SessionCheckStatus::Interrupted(format!(
+                "[session-check] INTERRUPTED: queue maintenance request is pending for {}; terminal closeout is withheld until its admitted generation completes (#transientcloseout)",
+                file.display(),
+            )),
+        ));
     }
     if let Some(attempt) =
         agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(&file.to_string_lossy())
@@ -3935,14 +3974,16 @@ fn refuse_transient_queue_closeout(
             .holder
             .starts_with(agent_doc_queue_io::queue_edit_owner::BACKGROUND_QUEUE_EDIT_OWNER_PREFIX)
     {
-        return Ok(SessionCheckStatus::Interrupted(format!(
-            "[session-check] INTERRUPTED: queue maintenance attempt is incomplete for {} (holder_pid={}, holder={}); terminal closeout is withheld. The next admission will recover a dead owner or coalesce with a live one (#transientcloseout)",
-            file.display(),
-            attempt.holder_pid,
-            attempt.holder,
-        )));
+        return Ok(SessionCheckReport::from_status(
+            SessionCheckStatus::Interrupted(format!(
+                "[session-check] INTERRUPTED: queue maintenance attempt is incomplete for {} (holder_pid={}, holder={}); terminal closeout is withheld. The next admission will recover a dead owner or coalesce with a live one (#transientcloseout)",
+                file.display(),
+                attempt.holder_pid,
+                attempt.holder,
+            )),
+        ));
     }
-    refuse_transient_queue_lifecycle_debt(file, status)
+    refuse_transient_queue_lifecycle_debt(file, status).map(SessionCheckReport::from_status)
 }
 
 fn refuse_transient_queue_lifecycle_debt(
@@ -4003,10 +4044,7 @@ fn inspect_with_warnings_sweep(
     effects: &impl SessionCheckEffects,
     steering_message: &mut Option<String>,
 ) -> Result<SessionCheckReport> {
-    let mut report = SessionCheckReport {
-        status: refuse_transient_queue_closeout(file, inspect_core(file, effects)?)?,
-        warnings: Vec::new(),
-    };
+    let mut report = refuse_transient_queue_closeout(file, inspect_core(file, effects)?)?;
     report.status = retained_write_gate_status(
         report.status,
         effects.retained_document_write_blocks(file),
@@ -5925,7 +5963,8 @@ mod terminal_convergence_tests {
             &file,
             SessionCheckStatus::Ok("[session-check] OK".to_string()),
         )
-        .unwrap();
+        .unwrap()
+        .status;
         match running {
             SessionCheckStatus::Interrupted(message) => {
                 assert!(message.contains("normal closeout refused"));
@@ -5943,7 +5982,8 @@ mod terminal_convergence_tests {
                 "[session-check] ok — recovered the missing commit boundary from head".to_string(),
             ),
         )
-        .unwrap();
+        .unwrap()
+        .status;
         match crash {
             SessionCheckStatus::Interrupted(message) => {
                 assert!(message.contains("crash recovery refused a successful closeout"));
@@ -5962,13 +6002,15 @@ mod terminal_convergence_tests {
             &file,
             SessionCheckStatus::Ok("[session-check] OK".to_string()),
         )
-        .unwrap();
+        .unwrap()
+        .status;
         assert!(matches!(resting, SessionCheckStatus::Ok(_)), "{resting:?}");
         let steering = refuse_transient_queue_closeout(
             &file,
             SessionCheckStatus::SteeringPending("pending".to_string()),
         )
-        .unwrap();
+        .unwrap()
+        .status;
         assert!(matches!(steering, SessionCheckStatus::SteeringPending(_)));
     }
 
@@ -6017,7 +6059,8 @@ mod terminal_convergence_tests {
             &file,
             SessionCheckStatus::Ok("[session-check] OK".to_string()),
         )
-        .unwrap();
+        .unwrap()
+        .status;
         assert!(matches!(quiet, SessionCheckStatus::Ok(_)), "{quiet:?}");
 
         agent_doc_queue_io::queue_claim::abandon(&file, "do [#held]").unwrap();
@@ -6027,6 +6070,7 @@ mod terminal_convergence_tests {
             SessionCheckStatus::Ok("[session-check] OK".to_string()),
         )
         .unwrap()
+        .status
         {
             SessionCheckStatus::Interrupted(message) => {
                 assert!(message.contains("🚧 do [#held]"), "{message}");
@@ -6071,6 +6115,7 @@ mod terminal_convergence_tests {
             SessionCheckStatus::Ok("[session-check] OK".to_string()),
         )
         .unwrap()
+        .status
         {
             SessionCheckStatus::Interrupted(message) => {
                 assert!(message.contains("its worker is gone"), "{message}");
@@ -6102,6 +6147,7 @@ mod terminal_convergence_tests {
             SessionCheckStatus::Ok("[session-check] OK".to_string()),
         )
         .unwrap()
+        .status
         {
             SessionCheckStatus::Interrupted(message) => {
                 assert!(
@@ -6142,7 +6188,8 @@ mod terminal_convergence_tests {
             &file,
             SessionCheckStatus::Ok("[session-check] OK".to_string()),
         )
-        .unwrap();
+        .unwrap()
+        .status;
         match crashed {
             SessionCheckStatus::Interrupted(message) => {
                 assert!(
@@ -6177,7 +6224,8 @@ mod terminal_convergence_tests {
             &file,
             SessionCheckStatus::Ok("[session-check] OK".to_string()),
         )
-        .unwrap();
+        .unwrap()
+        .status;
         assert!(matches!(settled, SessionCheckStatus::Ok(_)), "{settled:?}");
     }
 
@@ -6192,6 +6240,7 @@ mod terminal_convergence_tests {
                     .to_string(),
             ),
             warnings: Vec::new(),
+            queue_apply_in_flight: false,
         };
         let kept = steering_survives_steering_carried_drift(carried, Some(steering.clone()));
         assert_eq!(
@@ -6206,6 +6255,7 @@ mod terminal_convergence_tests {
                     .to_string(),
             ),
             warnings: Vec::new(),
+            queue_apply_in_flight: false,
         };
         let failed = steering_survives_steering_carried_drift(genuine, Some(steering));
         assert!(failed.status.is_failure(), "{:?}", failed.status);

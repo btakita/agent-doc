@@ -2695,10 +2695,30 @@ fn apply_bound_stop(
         );
     }
     stop_phase("session_check_inspect");
-    match agent_doc_session_check_io::inspect_read_only(
+    let report = agent_doc_session_check_io::inspect_read_only_with_warnings(
         file,
         &agent_doc_closeout_runtime_io::session_check_effects(),
-    )? {
+    )?;
+    if report.queue_apply_in_flight() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            "codex_stop_queue_apply_in_flight action=observe_existing_owner",
+        );
+        let reason = format!(
+            "{} The existing document apply owner is still settling the boundary. Preserve its response and capture. After it finishes, check the same cycle with `agent-doc session-check {}`.",
+            report.status.message(),
+            file.display(),
+        );
+        return Ok(if input.stop_hook_active {
+            StopResponse::RefuseExit { reason }
+        } else {
+            StopResponse::ContinueTurn {
+                class: StopContinuationClass::Recovery,
+                reason,
+            }
+        });
+    }
+    match report.status {
         agent_doc_session_check_io::SessionCheckStatus::Ok(_) => {
             // `#codexsubagentstop`: Codex collaboration workers can share the
             // parent session id while owning a distinct turn id. A clean

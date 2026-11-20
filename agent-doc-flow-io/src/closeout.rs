@@ -48,11 +48,7 @@ pub trait CloseoutEffects {
         )
     }
 
-    fn run_pending_maintenance(
-        &self,
-        file: &Path,
-        force_disk: bool,
-    ) -> Result<agent_doc_preflight_io::PendingMaintenanceReport>;
+    fn run_pending_maintenance(&self, file: &Path, force_disk: bool) -> Result<()>;
 
     fn enforce_clean_closeout(&self, file: &Path) -> Result<()>;
 
@@ -243,9 +239,9 @@ pub fn complete_required_closeout_with_options(
     // reap idempotent here for all successful closeouts. `run_pending_maintenance`
     // is the same reap preflight runs at cycle start: it writes the reaped/archived document +
     // snapshot (it does not commit), so the snapshot-vs-HEAD retry immediately
-    // below stages the reap. It is idempotent — a no-op when nothing is `[x]`
-    // (the direct path already reaped), so it only closes the historical reap gap. Errors
-    // are non-fatal: the `completed_pending_reap` guard still catches a miss.
+    // below stages the reap. The runtime checks whether maintenance is needed
+    // before running it, as it does before commit. Errors are non-fatal: the
+    // `completed_pending_reap` guard still catches a miss.
     // During realtime cutover, the shared converge write gate fails closed when
     // no editor endpoint proves delivery. Detached closeout has no editor buffer
     // to protect, so use the explicit force-disk maintenance path there; keep

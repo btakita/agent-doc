@@ -15743,7 +15743,7 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         ),
         (
             "agent-doc-codex-stop-io/src/lib.rs",
-            "agent_doc_session_check_io::inspect_read_only(",
+            "agent_doc_session_check_io::inspect_read_only_with_warnings(",
         ),
     ] {
         let source = fs::read_to_string(manifest_dir.join(production_source)).unwrap();

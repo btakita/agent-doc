@@ -54,11 +54,7 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for LocalCrdtBarrierCloseoutEf
         ))
     }
 
-    fn run_pending_maintenance(
-        &self,
-        file: &Path,
-        force_disk: bool,
-    ) -> Result<agent_doc_preflight_io::PendingMaintenanceReport> {
+    fn run_pending_maintenance(&self, file: &Path, force_disk: bool) -> Result<()> {
         self.delegate.run_pending_maintenance(file, force_disk)
     }
 

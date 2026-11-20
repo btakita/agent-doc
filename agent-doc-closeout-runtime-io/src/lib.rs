@@ -1865,28 +1865,31 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects<'_>
         }
     }
 
-    fn run_pending_maintenance(
-        &self,
-        file: &Path,
-        force_disk: bool,
-    ) -> Result<agent_doc_preflight_io::PendingMaintenanceReport> {
+    fn run_pending_maintenance(&self, file: &Path, force_disk: bool) -> Result<()> {
         let apply_guard = self.require_apply_guard(file)?;
         self.ensure_outer_closeout_fence()?;
-        let report = if force_disk {
-            agent_doc_preflight_io::run_pending_maintenance_force_disk_under_apply_guard(
-                file,
-                &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
-                apply_guard,
-            )
-        } else {
-            agent_doc_preflight_io::run_pending_maintenance_under_apply_guard(
-                file,
-                &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
-                apply_guard,
-            )
-        }?;
-        maybe_pause_closeout_after_pending_maintenance()?;
-        Ok(report)
+        agent_doc_session_check_io::run_closeout_pending_maintenance(
+            file,
+            true,
+            force_disk,
+            |file, force_disk| {
+                if force_disk {
+                    agent_doc_preflight_io::run_pending_maintenance_force_disk_under_apply_guard(
+                        file,
+                        &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                        apply_guard,
+                    )
+                } else {
+                    agent_doc_preflight_io::run_pending_maintenance_under_apply_guard(
+                        file,
+                        &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
+                        apply_guard,
+                    )
+                }
+                .map(|_| ())
+            },
+        )?;
+        maybe_pause_closeout_after_pending_maintenance()
     }
 
     fn enforce_clean_closeout(&self, file: &Path) -> Result<()> {
@@ -2069,8 +2072,31 @@ fn maybe_pause_closeout_after_pending_maintenance() -> Result<()> {
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
+    use agent_doc_flow_io::closeout::CloseoutEffects;
     use agent_doc_session_check_io::{CapturedFinalizeResumeOutcome, SessionCheckEffects};
     use agent_doc_turn::CyclePhase;
+
+    #[test]
+    fn post_commit_maintenance_skips_an_unchanged_tracked_list() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        let content =
+            "<!-- agent:backlog -->\n- [ ] [#later] Do this later\n<!-- /agent:backlog -->\n";
+        std::fs::write(&file, content).unwrap();
+        let guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&file).unwrap();
+        let effects = closeout_effects_under_apply_guard(&file, &guard).unwrap();
+
+        effects.run_pending_maintenance(&file, true).unwrap();
+
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("closeout_pending_maintenance_skipped")
+                && ops.contains("basis=no_tracked_work_closeout"),
+            "{ops}"
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), content);
+    }
 
     #[test]
     fn public_closeout_entries_refuse_apply_contention_before_any_closeout_effect() {

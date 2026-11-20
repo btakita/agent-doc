@@ -715,6 +715,29 @@ fn codex_hook_cli_auto_closes_open_cycle_after_user_prompt_submit() {
         stop.try_wait().unwrap().is_none(),
         "Stop must remain inside the guarded closeout transaction at the barrier"
     );
+    let recursive_stop = agent_doc()
+        .current_dir(tmp.path())
+        .args(["hook", "codex-stop"])
+        .write_stdin(
+            json!({
+                "session_id": "codex-session",
+                "turn_id": "turn-1",
+                "cwd": tmp.path().display().to_string(),
+                "last_assistant_message": "The prior response is committed.",
+                "stop_hook_active": true,
+            })
+            .to_string(),
+        )
+        .assert()
+        .success();
+    let held: serde_json::Value =
+        serde_json::from_slice(&recursive_stop.get_output().stdout).unwrap();
+    assert_eq!(held["continue"], false, "{held}");
+    let reason = held["stopReason"].as_str().unwrap();
+    assert!(reason.contains("existing document apply owner"), "{reason}");
+    assert!(!reason.contains("the cycle is still open"), "{reason}");
+    assert!(reason.contains("session-check"), "{reason}");
+
     fs::write(&release, b"release").unwrap();
     let stop = stop.wait_with_output().unwrap();
     assert!(
@@ -726,12 +749,26 @@ fn codex_hook_cli_auto_closes_open_cycle_after_user_prompt_submit() {
 
     let content = fs::read_to_string(&doc).unwrap();
     assert!(content.contains("### Re: hook proof — gpt-5"));
+    assert!(!content.contains("The prior response is committed."));
 
-    agent_doc()
-        .current_dir(tmp.path())
-        .args(["session-check", doc.to_str().unwrap()])
-        .assert()
-        .success();
+    // A separate apply owner must not hide the exact terminal proof that
+    // just landed. Session-check still runs its real lifecycle/debt guards.
+    let guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+    let terminal = agent_doc_session_check_io::inspect_read_only_with_warnings(
+        &doc,
+        &agent_doc_closeout_runtime_io::session_check_effects(),
+    )
+    .unwrap();
+    assert!(
+        matches!(
+            terminal.status,
+            agent_doc_session_check_io::SessionCheckStatus::Ok(_)
+        ),
+        "{:?}",
+        terminal.status
+    );
+    assert!(!terminal.queue_apply_in_flight());
+    drop(guard);
 
     let log = ProcessCommand::new("git")
         .current_dir(tmp.path())

@@ -884,7 +884,37 @@ internal data class CapturedLocalEditorEdit(
      * at shifted offsets.
      */
     val agentLineage: String? = null,
+    /**
+     * Bounded focus/caret evidence captured with the exact IntelliJ DocumentEvent. It is retained
+     * through retries so the durable local-delta receipt can distinguish a selection-shaped edit
+     * from a one-character insertion without guessing that either one was corruption.
+     */
+    val inputEvidence: EditorInputEvidence? = null,
 )
+
+internal fun editorInputReceiptUtil(
+    edits: List<CapturedLocalEditorEdit>,
+    fragmentHash: (String) -> String,
+): String? {
+    val evidenced = edits.filter { it.inputEvidence != null }
+    if (evidenced.isEmpty()) return null
+    return evidenced.joinToString(separator = ";", prefix = "input_events=", limit = 16, truncated = ";more") { edit ->
+        val evidence = edit.inputEvidence!!
+        val oldLength = edit.oldFragment.length
+        val newLength = edit.newFragment.length
+        "${evidence.eventId}:shape=${editorInputEditShapeUtil(oldLength, newLength).wireName}" +
+            ",range=${edit.offsetUtf16}..${edit.offsetUtf16 + oldLength}" +
+            ",old_chars=$oldLength,new_chars=$newLength" +
+            ",old_hash=${fragmentHash(edit.oldFragment)},new_hash=${fragmentHash(edit.newFragment)}" +
+            ",epoch=${edit.projectionEpoch},lineage=${edit.agentLineage ?: "none"}" +
+            ",focus=${evidence.editorFocused},focus_owner=${evidence.focusOwnerClass}" +
+            ",writable=${evidence.documentWritable}" +
+            ",post_caret=${evidence.postCaretOffset}" +
+            ",post_selection=${evidence.postSelectionStart}..${evidence.postSelectionEnd}" +
+            ",dispatch=${evidence.dispatchEventClass}:${evidence.dispatchEventId}" +
+            ",modifiers=${evidence.dispatchModifiers}"
+    }
+}
 
 /**
  * `#agentpatchlineage`: identity of the last agent-applied (non-operator)
@@ -1558,6 +1588,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     beforeLengthUtf16 =
                         event.document.let { it.textLength } - newFragment.length + oldFragment.length,
                     agentLineage = agentMutationLineages[filePath]?.patchId,
+                    inputEvidence = EditorInputEvidenceCapture.capture(project, event.document),
                 )
             if (!shadows.containsKey(filePath)) {
                 val visibleText = tryReadDocumentText(event.document) ?: return
@@ -2407,13 +2438,32 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         } else if (!projectSettledVisibleState(filePath, forwarders[filePath]!!, editorShadow)) {
             requestRemoteDrain(filePath, "local-visible-projection-retry")
         }
+        val inputReceipt = editorInputReceiptUtil(currentEdits, ::contentHash)
         logSlow(
             "forward-local-delta",
             filePath,
             started,
             details =
-                "splices=${batch.edits.size} before_chars=${beforeShadow.length} after_chars=${editorShadow.length}",
+                buildString {
+                    append("splices=${batch.edits.size} before_chars=${beforeShadow.length} after_chars=${editorShadow.length}")
+                    inputReceipt?.let { append(" receipt=durable ").append(it) }
+                },
         )
+        inputReceipt?.let { receipt ->
+            val containsLargeReplacement =
+                currentEdits.any { edit ->
+                    edit.inputEvidence != null &&
+                        editorInputEditShapeUtil(edit.oldFragment.length, edit.newFragment.length) ==
+                        EditorInputEditShape.Replacement &&
+                        edit.oldFragment.length >= 128
+                }
+            if (containsLargeReplacement) {
+                log.info(
+                    "[crdt-replica] local editor replacement receipt file=${File(filePath).name} " +
+                        "receipt=durable $receipt classification=operator-edit-observed",
+                )
+            }
+        }
         return LocalEditorForwardResult.Applied
     }
 

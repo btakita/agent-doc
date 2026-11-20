@@ -834,6 +834,10 @@ class TypingTrackerEdtBudgetTest {
                 listenerBody.contains("scheduleLocalEditorFlush(filePath)"),
         )
         assertTrue(
+            "the exact DocumentEvent should carry bounded focus, caret, and selection evidence to its worker receipt",
+            listenerBody.contains("inputEvidence = EditorInputEvidenceCapture.capture(project, event.document)"),
+        )
+        assertTrue(
             "the first local edit should reconstruct its pre-edit base and enter the ordinary delta queue",
             listenerBody.contains("reconstructLocalEditorBaseTextUtil(visibleText, edit)") &&
                 listenerBody.contains("shadows.putIfAbsent(filePath, ReplicaShadow(beforeText))") &&

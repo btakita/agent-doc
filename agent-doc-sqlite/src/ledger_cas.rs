@@ -74,9 +74,11 @@ pub struct TerminalTurnAuthority {
 }
 
 impl TerminalTurnFenceCheck<'_> {
-    /// The authority a terminal append expects: the fence's cycle and actor,
-    /// with no live turn. `None` when the fence names a partial actor, which
-    /// no ledger state can equal.
+    /// The authority a terminal append expects: the fence's cycle and actor.
+    /// Ordinary terminal recovery also requires no live turn; an exact
+    /// synchronous admission refusal ignores liveness because its own outer
+    /// harness turn has not ended yet. `None` when the fence names a partial
+    /// actor, which no ledger state can equal.
     pub fn expected_authority(&self) -> Option<TerminalTurnAuthority> {
         let actor = match (self.session_id, self.pane_id, self.generation) {
             (None, None, None) => None,
@@ -149,6 +151,10 @@ pub fn read_terminal_turn_authority(
             )?;
             live_turn_count > 0
         }
+    };
+    let live_turn = match fence.liveness_policy {
+        crate::state_store::TerminalTurnLivenessPolicy::RequireInactive => live_turn,
+        crate::state_store::TerminalTurnLivenessPolicy::Ignore => false,
     };
     Ok(TerminalTurnAuthority {
         cycle_id,
@@ -939,6 +945,7 @@ mod tests {
             pane_id: generation.map(|_| "%88"),
             generation,
             active_after_secs: 150,
+            liveness_policy: crate::state_store::TerminalTurnLivenessPolicy::RequireInactive,
         }
     }
 

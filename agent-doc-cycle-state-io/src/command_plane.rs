@@ -181,14 +181,32 @@ pub enum CommitObservation {
     CommitAlreadyCurrent,
 }
 
-/// Exact actor binding sampled while stale-preflight recovery still observed
-/// no live turn. The controller consumes this together with `cycle_id_hint` in
-/// one state.db transaction; a rebind or active-turn lease wins the CAS.
+/// Exact actor binding sampled for a terminal cycle transition. The controller
+/// consumes this together with `cycle_id_hint` in one state.db transaction; a
+/// rebind always wins the CAS, and ordinary recovery also loses to an active
+/// turn lease.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TerminalTurnFence {
     pub session_id: Option<String>,
     pub pane_id: Option<String>,
     pub generation: Option<u64>,
+}
+
+/// Turn-liveness policy for a terminal fence. Ordinary recovery may only close
+/// an inactive turn. A synchronous admission refusal is narrower: the invoking
+/// harness turn is still active, but no prompt contract was returned and no
+/// response can legitimately target the exact cycle opened by that invocation.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TerminalTurnMode {
+    #[default]
+    RequireInactive,
+    AdmissionRefused,
+}
+
+impl TerminalTurnMode {
+    fn is_default(&self) -> bool {
+        *self == Self::RequireInactive
+    }
 }
 
 impl CommitObservation {
@@ -248,6 +266,8 @@ pub struct CloseoutAdvancePayload {
     pub cycle_id_hint: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_turn_fence: Option<TerminalTurnFence>,
+    #[serde(default, skip_serializing_if = "TerminalTurnMode::is_default")]
+    pub terminal_turn_mode: TerminalTurnMode,
 }
 
 impl CloseoutAdvancePayload {

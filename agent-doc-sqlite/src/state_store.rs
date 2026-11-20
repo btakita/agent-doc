@@ -335,6 +335,14 @@ pub struct TerminalTurnFenceCheck<'a> {
     pub pane_id: Option<&'a str>,
     pub generation: Option<u64>,
     pub active_after_secs: u64,
+    pub liveness_policy: TerminalTurnLivenessPolicy,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TerminalTurnLivenessPolicy {
+    #[default]
+    RequireInactive,
+    Ignore,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -7789,6 +7797,7 @@ mod tests {
                 pane_id: Some("%77"),
                 generation: Some(7),
                 active_after_secs: 150,
+                liveness_policy: TerminalTurnLivenessPolicy::RequireInactive,
             },
             &[StateEventInsert {
                 event_id: "terminal-after-activation",

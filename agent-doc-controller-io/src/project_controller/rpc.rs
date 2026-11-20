@@ -28847,7 +28847,9 @@ fn closeout_advance_outcome(
     runtime: &ControllerRuntime,
     submit: &lazily::CommandSubmit,
 ) -> Result<(), String> {
-    use super::command_plane::{CloseoutPhaseEvent, decode_closeout_advance_payload};
+    use super::command_plane::{
+        CloseoutPhaseEvent, TerminalTurnMode, decode_closeout_advance_payload,
+    };
     let payload = decode_closeout_advance_payload(submit).map_err(|e| format!("{e:#}"))?;
     // Keep the controller's projected closeout decision stable until the
     // fenced state.db append commits. Turn-active/actor writers do not use
@@ -28870,6 +28872,31 @@ fn closeout_advance_outcome(
         }
         None => None,
     };
+    if payload.terminal_turn_mode == TerminalTurnMode::AdmissionRefused {
+        if !matches!(payload.event, CloseoutPhaseEvent::Abandoned) {
+            return Err(
+                "closeout_advance: AdmissionRefused authority requires Abandoned".to_string(),
+            );
+        }
+        let Some(turn_fence) = payload.terminal_turn_fence.as_ref() else {
+            return Err(
+                "closeout_advance: AdmissionRefused authority requires terminal_turn_fence"
+                    .to_string(),
+            );
+        };
+        let actorless = turn_fence.session_id.is_none()
+            && turn_fence.pane_id.is_none()
+            && turn_fence.generation.is_none();
+        let exact_actor = turn_fence.session_id.is_some()
+            && turn_fence.pane_id.is_some()
+            && turn_fence.generation.is_some();
+        if (!actorless && !exact_actor) || payload.cycle_id_hint.is_none() {
+            return Err(
+                "closeout_advance: AdmissionRefused authority requires an exact cycle and either an exact actor binding or an actorless controller"
+                    .to_string(),
+            );
+        }
+    }
     if matches!(
         payload.event,
         CloseoutPhaseEvent::Committed(_) | CloseoutPhaseEvent::Abandoned
@@ -28882,6 +28909,18 @@ fn closeout_advance_outcome(
         // preflight is the successful competing write, so fold this stale
         // request as an applied no-op without emitting any closeout fact.
         return Ok(());
+    }
+    if payload.terminal_turn_mode == TerminalTurnMode::AdmissionRefused
+        && current.as_ref().is_none_or(|state| {
+            state.phase != agent_doc_turn::CyclePhase::PreflightStarted
+                || state.capture_id.is_some()
+                || state.response_sha256.is_some()
+        })
+    {
+        return Err(
+            "closeout_advance: AdmissionRefused authority only closes an empty preflight_started cycle"
+                .to_string(),
+        );
     }
     // The next checkpoint sequence is the last recorded one + 1 (0 when none).
     let checkpoint_sequence = document
@@ -29029,6 +29068,14 @@ fn closeout_advance_outcome(
                 pane_id: turn_fence.pane_id.as_deref(),
                 generation: turn_fence.generation,
                 active_after_secs,
+                liveness_policy: match payload.terminal_turn_mode {
+                    TerminalTurnMode::RequireInactive => {
+                        agent_doc_sqlite::state_store::TerminalTurnLivenessPolicy::RequireInactive
+                    }
+                    TerminalTurnMode::AdmissionRefused => {
+                        agent_doc_sqlite::state_store::TerminalTurnLivenessPolicy::Ignore
+                    }
+                },
             },
             &inserts,
         )
@@ -66066,6 +66113,8 @@ mod tests {
                 response_sha256: None,
                 cycle_id_hint: None,
                 terminal_turn_fence: None,
+                terminal_turn_mode:
+                    agent_doc_cycle_state_io::command_plane::TerminalTurnMode::RequireInactive,
             },
         )
         .unwrap();
@@ -66698,6 +66747,8 @@ mod tests {
                 response_sha256: None,
                 cycle_id_hint: None,
                 terminal_turn_fence: None,
+                terminal_turn_mode:
+                    agent_doc_cycle_state_io::command_plane::TerminalTurnMode::RequireInactive,
             },
         )
         .unwrap();
@@ -66748,6 +66799,8 @@ mod tests {
                     response_sha256: None,
                     cycle_id_hint: None,
                     terminal_turn_fence: None,
+                    terminal_turn_mode:
+                        agent_doc_cycle_state_io::command_plane::TerminalTurnMode::RequireInactive,
                 },
             )
             .unwrap()
@@ -66798,6 +66851,8 @@ mod tests {
                 response_sha256: None,
                 cycle_id_hint: None,
                 terminal_turn_fence: None,
+                terminal_turn_mode:
+                    agent_doc_cycle_state_io::command_plane::TerminalTurnMode::RequireInactive,
             },
         )
         .unwrap();
@@ -66840,6 +66895,8 @@ mod tests {
                 response_sha256: None,
                 cycle_id_hint: None,
                 terminal_turn_fence: None,
+                terminal_turn_mode:
+                    agent_doc_cycle_state_io::command_plane::TerminalTurnMode::RequireInactive,
             },
         )
         .unwrap();
@@ -66897,6 +66954,8 @@ mod tests {
                         generation: Some(1),
                     },
                 ),
+                terminal_turn_mode:
+                    agent_doc_cycle_state_io::command_plane::TerminalTurnMode::RequireInactive,
             },
         )
         .unwrap();
@@ -66911,6 +66970,124 @@ mod tests {
             .unwrap()
             .and_then(|document| document.closeout.phase);
         assert_eq!(phase, Some(agent_doc_turn::CyclePhase::WriteApplied));
+    }
+
+    #[test]
+    fn closeout_advance_admission_refusal_closes_exact_preflight_during_active_turn() {
+        use super::command_plane::{
+            CloseoutAdvancePayload, CloseoutPhaseEvent, TerminalTurnMode,
+            build_closeout_advance_submit,
+        };
+
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/refused.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let opened = agent_doc_cycle_state_io::start_preflight(&doc, None, Some("body")).unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let bootstrap = runtime.bootstrap_snapshot().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
+        let checkpoint = agent_doc_cycle_state_io::build_turn_intent_checkpoint_event(
+            &document_hash,
+            0,
+            &opened,
+        )
+        .unwrap();
+        runtime.apply_state_event(&checkpoint).unwrap();
+
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-refused",
+            "%92",
+            "@9",
+            1,
+        )
+        .unwrap();
+        let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        agent_doc_sqlite::state_store::upsert_coordination_lease_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::CoordinationLeaseRecord {
+                scope_kind: "turn_active".to_string(),
+                scope_id: "%92".to_string(),
+                holder: "%92".to_string(),
+                holder_pid: Some(std::process::id()),
+                heartbeat_secs: timestamp_secs(),
+            },
+        )
+        .unwrap();
+        let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+            &bootstrap.project_root,
+            &doc.to_string_lossy(),
+        );
+        let inactive_fence_check = agent_doc_sqlite::state_store::TerminalTurnFenceCheck {
+            document_id: &document_id,
+            document_hash: &document_hash,
+            expected_cycle_id: &opened.cycle_id,
+            session_id: Some("session-refused"),
+            pane_id: Some("%92"),
+            generation: Some(1),
+            active_after_secs: timestamp_secs()
+                .saturating_sub(agent_doc_turn::turn_status::TURN_ACTIVE_TTL_SECS),
+            liveness_policy:
+                agent_doc_sqlite::state_store::TerminalTurnLivenessPolicy::RequireInactive,
+        };
+        let active_authority = agent_doc_sqlite::ledger_cas::read_terminal_turn_authority(
+            &conn,
+            &inactive_fence_check,
+        )
+        .unwrap();
+        assert!(
+            active_authority.live_turn,
+            "fixture must hold an active lease"
+        );
+        let fence_check = agent_doc_sqlite::state_store::TerminalTurnFenceCheck {
+            liveness_policy: agent_doc_sqlite::state_store::TerminalTurnLivenessPolicy::Ignore,
+            ..inactive_fence_check
+        };
+        let authority =
+            agent_doc_sqlite::ledger_cas::read_terminal_turn_authority(&conn, &fence_check)
+                .unwrap();
+        assert_eq!(authority, fence_check.expected_authority().unwrap());
+
+        let terminal = build_closeout_advance_submit(
+            "refused-terminal",
+            "cycle_state",
+            "doc:cycle:refused-terminal",
+            1,
+            CloseoutAdvancePayload {
+                document_path: doc.to_string_lossy().to_string(),
+                event: CloseoutPhaseEvent::Abandoned,
+                event_label: None,
+                reason: Some("preflight_admission_refusal_abandoned".to_string()),
+                snapshot_content: None,
+                file_content: Some("body".to_string()),
+                response_sha256: None,
+                cycle_id_hint: Some(opened.cycle_id.clone()),
+                terminal_turn_fence: Some(
+                    agent_doc_cycle_state_io::command_plane::TerminalTurnFence {
+                        session_id: Some("session-refused".to_string()),
+                        pane_id: Some("%92".to_string()),
+                        generation: Some(1),
+                    },
+                ),
+                terminal_turn_mode: TerminalTurnMode::AdmissionRefused,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            service_closeout_advance(&bootstrap, &runtime, &terminal).outcome,
+            lazily::ReceiptOutcome::Applied,
+        );
+        let state = runtime
+            .document_state_projection(&document_hash)
+            .unwrap()
+            .and_then(|document| agent_doc_cycle_state_io::reconstruct_cycle_state(&document).ok())
+            .flatten()
+            .expect("refused cycle projection");
+        assert_eq!(state.cycle_id, opened.cycle_id);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Abandoned);
     }
 
     #[test]

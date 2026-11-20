@@ -134,7 +134,7 @@ pub use agent_doc_cycle_state_io::command_plane::{
     CLOSEOUT_ADVANCE_NAME, CLOSEOUT_ADVANCE_PAYLOAD_TYPE, CLOSEOUT_OWNER_CLAIM_NAME,
     CLOSEOUT_OWNER_CLAIM_PAYLOAD_TYPE, CLOSEOUT_OWNER_RELEASE_NAME,
     CLOSEOUT_OWNER_RELEASE_PAYLOAD_TYPE, CloseoutAdvancePayload, CloseoutOwnerClaimPayload,
-    CloseoutOwnerReleasePayload, CloseoutPhaseEvent, CommitObservation,
+    CloseoutOwnerReleasePayload, CloseoutPhaseEvent, CommitObservation, TerminalTurnMode,
     build_closeout_advance_submit, build_closeout_owner_claim_submit,
     build_closeout_owner_release_submit,
 };
@@ -390,6 +390,7 @@ mod tests {
             response_sha256: None,
             cycle_id_hint: None,
             terminal_turn_fence: None,
+            terminal_turn_mode: TerminalTurnMode::RequireInactive,
         };
         let submit = build_closeout_advance_submit(
             "cmd-adv-1",
@@ -421,6 +422,7 @@ mod tests {
             response_sha256: None,
             cycle_id_hint: None,
             terminal_turn_fence: None,
+            terminal_turn_mode: TerminalTurnMode::RequireInactive,
         };
         assert_eq!(write.last_event_label(), "write_applied");
 
@@ -444,6 +446,7 @@ mod tests {
                 response_sha256: None,
                 cycle_id_hint: None,
                 terminal_turn_fence: None,
+                terminal_turn_mode: TerminalTurnMode::RequireInactive,
             };
             assert_eq!(committed.last_event_label(), label);
         }
@@ -459,6 +462,7 @@ mod tests {
             response_sha256: None,
             cycle_id_hint: None,
             terminal_turn_fence: None,
+            terminal_turn_mode: TerminalTurnMode::RequireInactive,
         };
         assert_eq!(abandoned.last_event_label(), "stalled_preflight");
     }
@@ -480,6 +484,7 @@ mod tests {
                 response_sha256: None,
                 cycle_id_hint: None,
                 terminal_turn_fence: None,
+                terminal_turn_mode: TerminalTurnMode::RequireInactive,
             },
         )
         .unwrap();
@@ -508,6 +513,7 @@ mod tests {
                 response_sha256: None,
                 cycle_id_hint: None,
                 terminal_turn_fence: None,
+                terminal_turn_mode: TerminalTurnMode::RequireInactive,
             },
         )
         .unwrap();
@@ -541,6 +547,7 @@ mod tests {
                 response_sha256: None,
                 cycle_id_hint: None,
                 terminal_turn_fence: None,
+                terminal_turn_mode: TerminalTurnMode::RequireInactive,
             },
         )
         .unwrap();

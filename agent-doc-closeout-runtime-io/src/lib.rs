@@ -229,6 +229,30 @@ impl agent_doc_repair_io::RepairIoEffects for RuntimeRepairIoEffects<'_> {
         )
     }
 
+    fn mark_abandoned_frontmatter_after_admission_refusal(
+        &self,
+        file: &Path,
+        expected_cycle_id: &str,
+        turn_fence: &agent_doc_repair_io::PreflightTurnFence,
+        event: &str,
+        snapshot_content: Option<&str>,
+        file_content: Option<&str>,
+    ) -> Result<Option<agent_doc_cycle_state_io::CycleState>> {
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned_after_admission_refusal(
+            &PIPELINE_FRONTMATTER_EFFECTS,
+            file,
+            expected_cycle_id,
+            &agent_doc_cycle_state_io::command_plane::TerminalTurnFence {
+                session_id: turn_fence.session_id.clone(),
+                pane_id: turn_fence.pane_id.clone(),
+                generation: turn_fence.generation,
+            },
+            event,
+            snapshot_content,
+            file_content,
+        )
+    }
+
     fn atomic_write_if_current(
         &self,
         file: &Path,

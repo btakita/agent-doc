@@ -248,6 +248,38 @@ pub fn mark_abandoned_if_cycle_and_turn_fence(
     Ok(state)
 }
 
+pub fn mark_abandoned_after_admission_refusal(
+    effects: &impl PipelineFrontmatterEffects,
+    file: &Path,
+    expected_cycle_id: &str,
+    turn_fence: &crate::command_plane::TerminalTurnFence,
+    event: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+) -> Result<Option<crate::CycleState>> {
+    let state = crate::mark_abandoned_after_admission_refusal(
+        file,
+        expected_cycle_id,
+        turn_fence,
+        event,
+        snapshot_content,
+        file_content,
+    )?;
+    if state.is_some() {
+        if let Some(content) = file_content {
+            if let Err(e) = clear_pipeline_frontmatter_from_content(effects, file, content) {
+                effects.log_op(
+                    file,
+                    &format!("pipeline_clear_failed file={} err={}", file.display(), e),
+                );
+            }
+        } else {
+            clear_pipeline_frontmatter(effects, file);
+        }
+    }
+    Ok(state)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

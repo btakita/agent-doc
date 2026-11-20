@@ -288,6 +288,16 @@ pub trait RepairIoEffects {
         file_content: Option<&str>,
     ) -> Result<Option<agent_doc_cycle_state_io::CycleState>>;
 
+    fn mark_abandoned_frontmatter_after_admission_refusal(
+        &self,
+        file: &Path,
+        expected_cycle_id: &str,
+        turn_fence: &PreflightTurnFence,
+        event: &str,
+        snapshot_content: Option<&str>,
+        file_content: Option<&str>,
+    ) -> Result<Option<agent_doc_cycle_state_io::CycleState>>;
+
     fn atomic_write_if_current(
         &self,
         file: &Path,
@@ -3185,7 +3195,7 @@ pub fn cancel_preflight_cycle_after_admission_refusal(
     )
     .ok();
     if effects
-        .mark_abandoned_frontmatter_if_turn_fence(
+        .mark_abandoned_frontmatter_after_admission_refusal(
             file,
             expected_cycle_id,
             &turn_fence,
@@ -4929,6 +4939,28 @@ mod tests {
                 self.actor_epoch.set(self.actor_epoch.get() + 1);
                 self.preflight_turn_active.set(true);
             }
+            if self.preflight_turn_fence(file)? != *turn_fence {
+                return Ok(None);
+            }
+            self.abandoned_calls.set(self.abandoned_calls.get() + 1);
+            agent_doc_cycle_state_io::mark_abandoned_if_cycle(
+                file,
+                expected_cycle_id,
+                event,
+                snapshot_content,
+                file_content,
+            )
+        }
+
+        fn mark_abandoned_frontmatter_after_admission_refusal(
+            &self,
+            file: &Path,
+            expected_cycle_id: &str,
+            turn_fence: &PreflightTurnFence,
+            event: &str,
+            snapshot_content: Option<&str>,
+            file_content: Option<&str>,
+        ) -> Result<Option<agent_doc_cycle_state_io::CycleState>> {
             if self.preflight_turn_fence(file)? != *turn_fence {
                 return Ok(None);
             }

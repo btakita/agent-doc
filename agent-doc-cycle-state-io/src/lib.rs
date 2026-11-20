@@ -2282,6 +2282,7 @@ pub fn mark_write_applied(
         None,
         None,
         None,
+        command_plane::TerminalTurnMode::RequireInactive,
     )? {
         let state = load(file)?.context(
             "closeout_advance WriteApplied applied through the command plane but no cycle state \
@@ -2352,6 +2353,7 @@ pub fn mark_response_captured(
         Some(response_sha256),
         cycle_id_hint,
         None,
+        command_plane::TerminalTurnMode::RequireInactive,
     )? {
         let state = load(file)?.context(
             "closeout_advance ResponseCaptured applied through the command plane but no cycle \
@@ -3447,6 +3449,7 @@ fn mark_committed_inner_with_turn_fence(
         None,
         expected_cycle_id,
         turn_fence,
+        command_plane::TerminalTurnMode::RequireInactive,
     )? {
         let state = load(file)?.context(
             "closeout_advance Committed applied through the command plane but no cycle state was \
@@ -3582,6 +3585,7 @@ fn mark_abandoned_inner(
         file_content,
         expected_cycle_id,
         None,
+        command_plane::TerminalTurnMode::RequireInactive,
     )
 }
 
@@ -3600,6 +3604,30 @@ pub fn mark_abandoned_if_cycle_and_turn_fence(
         file_content,
         Some(expected_cycle_id),
         Some(turn_fence),
+        command_plane::TerminalTurnMode::RequireInactive,
+    )
+}
+
+/// Abandon the exact empty cycle opened by a preflight invocation whose prompt
+/// contract was refused before it reached the harness. Cycle and actor identity
+/// remain atomically fenced, while the invoking turn's expected active lease is
+/// deliberately not used as a veto.
+pub fn mark_abandoned_after_admission_refusal(
+    file: &Path,
+    expected_cycle_id: &str,
+    turn_fence: &command_plane::TerminalTurnFence,
+    event: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+) -> Result<Option<CycleState>> {
+    mark_abandoned_inner_with_turn_fence(
+        file,
+        event,
+        snapshot_content,
+        file_content,
+        Some(expected_cycle_id),
+        Some(turn_fence),
+        command_plane::TerminalTurnMode::AdmissionRefused,
     )
 }
 
@@ -3610,6 +3638,7 @@ fn mark_abandoned_inner_with_turn_fence(
     file_content: Option<&str>,
     expected_cycle_id: Option<&str>,
     turn_fence: Option<&command_plane::TerminalTurnFence>,
+    terminal_turn_mode: command_plane::TerminalTurnMode,
 ) -> Result<Option<CycleState>> {
     // `#lazily-hot-path`: submit over the command plane when a controller is
     // live. The abandon `event` is descriptive, so it rides the command-plane
@@ -3625,6 +3654,7 @@ fn mark_abandoned_inner_with_turn_fence(
         None,
         expected_cycle_id,
         turn_fence,
+        terminal_turn_mode,
     )? {
         let state = load(file)?.context(
             "closeout_advance Abandoned applied through the command plane but no cycle state was \
@@ -3637,10 +3667,13 @@ fn mark_abandoned_inner_with_turn_fence(
             })
             .then_some(state));
     }
-    // A terminal turn fence is authoritative only when the controller can
-    // validate it and append the terminal fact in the same state.db
-    // transaction. Never degrade a fenced transition to the cold local path.
-    if turn_fence.is_some() {
+    // Ordinary terminal fences are authoritative only when the controller can
+    // validate them in state.db. Admission refusal also has synchronous
+    // exact-cycle authority from this invocation, so actorless bootstrap may
+    // use the local cycle CAS when there is no controller socket.
+    if turn_fence.is_some()
+        && terminal_turn_mode != command_plane::TerminalTurnMode::AdmissionRefused
+    {
         return Ok(None);
     }
     let current = load(file)?;
@@ -4297,6 +4330,7 @@ fn submit_closeout_advance_via_socket(
     response_sha256: Option<&str>,
     cycle_id_hint: Option<&str>,
     terminal_turn_fence: Option<&command_plane::TerminalTurnFence>,
+    terminal_turn_mode: command_plane::TerminalTurnMode,
 ) -> Result<bool> {
     use command_plane::{CloseoutAdvancePayload, build_closeout_advance_submit};
 
@@ -4317,16 +4351,34 @@ fn submit_closeout_advance_via_socket(
         response_sha256: response_sha256.map(str::to_string),
         cycle_id_hint: cycle_id_hint.map(str::to_string),
         terminal_turn_fence: terminal_turn_fence.cloned(),
+        terminal_turn_mode,
     };
     // Stable, replay-safe command id / idempotency key derived from
     // (document, event, content) so a duplicate advance dedupes onto the same
     // command — mirroring the durable sink's idempotent re-delivery.
     let event_label = payload.last_event_label();
+    let fence_key = terminal_turn_fence.map_or_else(String::new, |fence| {
+        format!(
+            "{}:{}:{}",
+            fence.session_id.as_deref().unwrap_or(""),
+            fence.pane_id.as_deref().unwrap_or(""),
+            fence
+                .generation
+                .map_or_else(String::new, |value| value.to_string()),
+        )
+    });
+    let fence_mode_key = match terminal_turn_mode {
+        command_plane::TerminalTurnMode::RequireInactive => "require_inactive",
+        command_plane::TerminalTurnMode::AdmissionRefused => "admission_refused",
+    };
     let content_key = format!(
-        "{}:{}:{}",
+        "{}:{}:{}:{}:{}:{}",
         snapshot_content.unwrap_or(""),
         file_content.unwrap_or(""),
-        response_sha256.unwrap_or("")
+        response_sha256.unwrap_or(""),
+        cycle_id_hint.unwrap_or(""),
+        fence_key,
+        fence_mode_key,
     );
     let command_id = format!(
         "closeout-advance:{document_hash}:{event_label}:{}",

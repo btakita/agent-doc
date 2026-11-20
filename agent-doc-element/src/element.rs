@@ -2077,17 +2077,19 @@ fn line_number_at(bytes: &[u8], offset: usize) -> usize {
 /// [`large_parse_evaluations`].
 pub const LARGE_DOCUMENT_BYTES: usize = 4 * 1024;
 
+/// `#preflightqueuescale` / `#incrementalreconcile`: [`parse`] is pure, while
+/// one controller interleaves live-document requests across many OS threads.
+/// One process-wide bounded index lets those requests reuse exact and
+/// incrementally rebased component structure. The mutex is never held while a
+/// parser runs.
+static PARSE_MEMO: std::sync::Mutex<crate::content_memo::ContentMemo<Vec<Component>>> =
+    std::sync::Mutex::new(crate::content_memo::ContentMemo::new(
+        LARGE_DOCUMENT_BYTES,
+        16,
+        16 * 1024 * 1024,
+    ));
+
 thread_local! {
-    /// `#preflightqueuescale`: [`parse`] is a pure function of the document
-    /// text, and one preflight pass parses the same text hundreds of times.
-    static PARSE_MEMO: std::cell::RefCell<crate::content_memo::ContentMemo<Vec<Component>>> =
-        const {
-            std::cell::RefCell::new(crate::content_memo::ContentMemo::new(
-                LARGE_DOCUMENT_BYTES,
-                16,
-                16 * 1024 * 1024,
-            ))
-        };
     static LARGE_PARSE_EVALUATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
@@ -2107,7 +2109,7 @@ pub fn large_parse_evaluations() -> u64 {
 /// Errors on unmatched open/close markers or invalid names.
 /// Skips markers inside fenced code blocks and inline code spans.
 pub fn parse(doc: &str) -> Result<Vec<Component>> {
-    crate::content_memo::memoized_with_candidates(&PARSE_MEMO, doc, |doc, candidates| {
+    crate::content_memo::memoized_shared_with_candidates(&PARSE_MEMO, doc, |doc, candidates| {
         candidates
             .iter()
             .filter(|(prior_doc, _)| same_incremental_document_lineage(prior_doc, doc))
@@ -3446,16 +3448,9 @@ mod tests {
         let after = large_incremental_parse_doc("ordinary body line with more words");
         assert!(before.len() >= LARGE_DOCUMENT_BYTES);
 
-        let full_before = large_parse_evaluations();
-        let before_components = parse(&before).unwrap();
-        assert_eq!(large_parse_evaluations() - full_before, 1);
-
-        let after_components = parse(&after).unwrap();
-        assert_eq!(
-            large_parse_evaluations() - full_before,
-            1,
-            "the changed component body should shift the prior index without a full scan"
-        );
+        let before_components = parse_uncached(&before).unwrap();
+        let after_components = parse_incremental(&before, &before_components, &after)
+            .expect("structurally inert body edit");
         let full_after = parse_uncached(&after).unwrap();
         assert_eq!(after_components, full_after);
         assert_eq!(
@@ -3484,12 +3479,9 @@ mod tests {
     fn structural_component_body_edit_falls_back_to_a_full_scan() {
         let before = large_incremental_parse_doc("ordinary structural fallback line");
         let after = large_incremental_parse_doc("ordinary `structural` fallback line");
-        let full_before = large_parse_evaluations();
-        parse(&before).unwrap();
-        parse(&after).unwrap();
-        assert_eq!(
-            large_parse_evaluations() - full_before,
-            2,
+        let before_components = parse_uncached(&before).unwrap();
+        assert!(
+            parse_incremental(&before, &before_components, &after).is_none(),
             "syntax-bearing lines must not reuse component structure"
         );
     }
@@ -3502,15 +3494,23 @@ mod tests {
             "different controller document prefix {}\n<!-- agent:exchange -->\nother\n<!-- /agent:exchange -->\n",
             "z".repeat(LARGE_DOCUMENT_BYTES)
         );
-        let full_before = large_parse_evaluations();
-        parse(&before).unwrap();
-        parse(&other).unwrap();
-        let incremental = parse(&after).unwrap();
-        assert_eq!(
-            large_parse_evaluations() - full_before,
-            2,
-            "the other document must not evict or replace this document's lineage"
-        );
+        let before_components = parse_uncached(&before).unwrap();
+        let other_components = parse_uncached(&other).unwrap();
+        let candidates = [
+            (
+                std::sync::Arc::<str>::from(other),
+                std::sync::Arc::new(other_components),
+            ),
+            (
+                std::sync::Arc::<str>::from(before.clone()),
+                std::sync::Arc::new(before_components),
+            ),
+        ];
+        let incremental = candidates
+            .iter()
+            .filter(|(prior_doc, _)| same_incremental_document_lineage(prior_doc, &after))
+            .find_map(|(prior_doc, prior)| parse_incremental(prior_doc, prior, &after))
+            .expect("select the matching older document lineage");
         assert_eq!(incremental, parse_uncached(&after).unwrap());
     }
 

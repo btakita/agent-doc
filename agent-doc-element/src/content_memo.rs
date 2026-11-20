@@ -11,20 +11,21 @@
 //! for a function of that text alone (no file, clock, environment, or ambient
 //! input). A changed input is a different key, so an entry can never be stale
 //! and there is no invalidation to forget. Entries are evicted
-//! least-recently-used under an entry and byte budget. Memos are meant to live
-//! in a `thread_local!`, so concurrent tests and threads never share one; the
-//! budgets bound what each thread retains (the element memo keeps at most 16
-//! interleaved documents, 16 MiB of keys; the queue-body memo 2 MiB).
+//! least-recently-used under an entry and byte budget. Memos may live in a
+//! `thread_local!` for recursive local parsing or behind a process-wide mutex
+//! when controller request threads must share pure results. The budgets bound
+//! either scope (the shared element memo keeps at most 16 interleaved
+//! documents/16 MiB of keys; each local queue-body memo keeps 2 MiB).
 //!
 //! [`ContentMemo::evaluations`] counts real evaluations (misses and inputs
 //! outside the memoized size band).
 
 use std::collections::VecDeque;
-use std::rc::Rc;
+use std::sync::Arc;
 
 /// LRU memo of `f(text) -> T` keyed by the exact `text`.
 pub struct ContentMemo<T> {
-    entries: VecDeque<(Rc<str>, Rc<T>)>,
+    entries: VecDeque<(Arc<str>, Arc<T>)>,
     key_bytes: usize,
     evaluations: u64,
     min_bytes: usize,
@@ -94,7 +95,7 @@ impl<T: Clone> ContentMemo<T> {
         }
         self.key_bytes += text.len();
         self.entries
-            .push_front((Rc::from(text), Rc::new(value.clone())));
+            .push_front((Arc::from(text), Arc::new(value.clone())));
         while self.entries.len() > self.max_entries || self.key_bytes > self.max_key_bytes {
             let Some((key, _)) = self.entries.pop_back() else {
                 break;
@@ -130,7 +131,7 @@ pub fn memoized<T: Clone + 'static, E>(
 /// [`memoized`] with all retained successful inputs made available to `eval`,
 /// newest first.
 ///
-/// Cloning the `Rc`s is cheap and releases the memo borrow before evaluation.
+/// Cloning the `Arc`s is cheap and releases the memo borrow before evaluation.
 /// An incremental parser can therefore select its own compatible lineage
 /// instead of assuming the immediately preceding parse belonged to the same
 /// document; this matters in a project controller that interleaves several
@@ -138,7 +139,7 @@ pub fn memoized<T: Clone + 'static, E>(
 pub fn memoized_with_candidates<T: Clone + 'static, E>(
     memo: &'static std::thread::LocalKey<std::cell::RefCell<ContentMemo<T>>>,
     text: &str,
-    eval: impl FnOnce(&str, &[(Rc<str>, Rc<T>)]) -> Result<T, E>,
+    eval: impl FnOnce(&str, &[(Arc<str>, Arc<T>)]) -> Result<T, E>,
 ) -> Result<T, E> {
     let (lookup, candidates) = memo.with(|memo| {
         let mut memo = memo.borrow_mut();
@@ -146,7 +147,7 @@ pub fn memoized_with_candidates<T: Clone + 'static, E>(
         let candidates = if matches!(lookup, Lookup::Miss) {
             memo.entries
                 .iter()
-                .map(|(key, value)| (Rc::clone(key), Rc::clone(value)))
+                .map(|(key, value)| (Arc::clone(key), Arc::clone(value)))
                 .collect()
         } else {
             Vec::new()
@@ -158,6 +159,46 @@ pub fn memoized_with_candidates<T: Clone + 'static, E>(
     }
     let value = eval(text, &candidates)?;
     memo.with(|memo| memo.borrow_mut().record(text, &value, lookup));
+    Ok(value)
+}
+
+/// Process-wide counterpart of [`memoized_with_candidates`].
+///
+/// The mutex protects only lookup/LRU bookkeeping. Candidate `Arc`s are cloned
+/// out before `eval`, so a large parse neither serializes unrelated parses nor
+/// deadlocks on recursive parser calls. A race may evaluate one cold input
+/// twice; the second record observes the first exact entry and leaves one
+/// canonical cached value.
+pub fn memoized_shared_with_candidates<T: Clone + Send + Sync + 'static, E>(
+    memo: &'static std::sync::Mutex<ContentMemo<T>>,
+    text: &str,
+    eval: impl FnOnce(&str, &[(Arc<str>, Arc<T>)]) -> Result<T, E>,
+) -> Result<T, E> {
+    let (lookup, candidates) = {
+        let mut memo = memo.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let lookup = memo.lookup(text);
+        let candidates = if matches!(lookup, Lookup::Miss) {
+            memo.entries
+                .iter()
+                .map(|(key, value)| (Arc::clone(key), Arc::clone(value)))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        (lookup, candidates)
+    };
+    if let Lookup::Hit(value) = lookup {
+        return Ok(value);
+    }
+    let value = eval(text, &candidates)?;
+    let mut memo = memo.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if !memo
+        .entries
+        .iter()
+        .any(|(key, _)| key.len() == text.len() && **key == *text)
+    {
+        memo.record(text, &value, lookup);
+    }
     Ok(value)
 }
 
@@ -225,6 +266,27 @@ mod tests {
         })
         .unwrap();
         assert_eq!(selected, "doc-a-v1");
+    }
+
+    #[test]
+    fn shared_memo_reuses_results_across_threads() {
+        static SHARED: std::sync::Mutex<ContentMemo<usize>> =
+            std::sync::Mutex::new(ContentMemo::new(1, 4, 1024));
+        let first = std::thread::spawn(|| {
+            memoized_shared_with_candidates(&SHARED, "shared", |text, _| Ok::<_, ()>(text.len()))
+                .unwrap()
+        })
+        .join()
+        .unwrap();
+        let second = std::thread::spawn(|| {
+            memoized_shared_with_candidates(&SHARED, "shared", |_, _| {
+                Err::<usize, _>("must not re-evaluate")
+            })
+            .unwrap()
+        })
+        .join()
+        .unwrap();
+        assert_eq!((first, second), (6, 6));
     }
 
     #[test]

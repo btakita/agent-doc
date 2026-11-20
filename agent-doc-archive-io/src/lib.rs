@@ -8,7 +8,8 @@
 
 use agent_doc_markdown_ast::exchange_tree::{
     ExchangeNode, ExchangeNodeKind, ResponseTurnCellPolicy, is_compact_response_id,
-    parse_exchange_nodes, response_lookup_id,
+    parse_exchange_nodes, response_id_from_heading, response_id_from_lookup_marker,
+    response_lookup_id,
 };
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -147,16 +148,21 @@ fn anchor_for(response_id: &str) -> Result<String> {
 }
 
 fn document_response_nodes(content: &str) -> Vec<ExchangeNode> {
-    let exchange_bodies = agent_doc_element::element::parse(content)
-        .ok()
-        .map(|components| {
-            components
-                .into_iter()
-                .filter(|component| component.name == "exchange")
-                .map(|component| component.content(content))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+    let patch_exchange_bodies = archived_patch_exchange_bodies(content);
+    let exchange_bodies = if patch_exchange_bodies.is_empty() {
+        agent_doc_element::element::parse(content)
+            .ok()
+            .map(|components| {
+                components
+                    .into_iter()
+                    .filter(|component| component.name == "exchange")
+                    .map(|component| component.content(content))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    } else {
+        patch_exchange_bodies
+    };
     let scopes = if exchange_bodies.is_empty() {
         vec![content]
     } else {
@@ -170,31 +176,98 @@ fn document_response_nodes(content: &str) -> Vec<ExchangeNode> {
 }
 
 fn response_nodes(content: &str) -> Vec<(String, String)> {
-    let exchange_bodies = agent_doc_element::element::parse(content)
-        .ok()
-        .map(|components| {
-            components
-                .into_iter()
-                .filter(|component| component.name == "exchange")
-                .map(|component| component.content(content))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+    response_nodes_with_fallback(content, None)
+}
+
+fn archived_patch_exchange_bodies(content: &str) -> Vec<&str> {
+    const OPEN: &str = "<!-- patch:exchange";
+    const CLOSE: &str = "<!-- /patch:exchange -->";
+    let mut bodies = Vec::new();
+    let mut cursor = 0usize;
+    while let Some(relative_open) = content[cursor..].find(OPEN) {
+        let open = cursor + relative_open;
+        if open != 0 && content.as_bytes().get(open - 1) != Some(&b'\n') {
+            cursor = open + OPEN.len();
+            continue;
+        }
+        let Some(relative_open_end) = content[open..].find("-->") else {
+            break;
+        };
+        let mut body_start = open + relative_open_end + 3;
+        if content[body_start..].starts_with("\r\n") {
+            body_start += 2;
+        } else if content.as_bytes().get(body_start) == Some(&b'\n') {
+            body_start += 1;
+        }
+        let Some(relative_close) = content[body_start..].find(CLOSE) else {
+            break;
+        };
+        let close = body_start + relative_close;
+        if close == 0 || content.as_bytes().get(close - 1) == Some(&b'\n') {
+            bodies.push(&content[body_start..close]);
+        }
+        cursor = close + CLOSE.len();
+    }
+    bodies
+}
+
+fn response_nodes_with_fallback(
+    content: &str,
+    fallback_response_id: Option<&str>,
+) -> Vec<(String, String)> {
+    // A committed-response restore archives the retained patch envelope. Its
+    // recap and closeout directives are not part of the response checksum.
+    // When a locator owns the frame, prefer the exact bounded patch payload;
+    // ordinary live-document parsing continues to use agent elements below.
+    let patch_exchange_bodies = if fallback_response_id.is_some() {
+        archived_patch_exchange_bodies(content)
+    } else {
+        Vec::new()
+    };
+    let exchange_bodies = if patch_exchange_bodies.is_empty() {
+        agent_doc_element::element::parse(content)
+            .ok()
+            .map(|components| {
+                components
+                    .into_iter()
+                    .filter(|component| component.name == "exchange")
+                    .map(|component| component.content(content))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    } else {
+        patch_exchange_bodies
+    };
     let scopes = if exchange_bodies.is_empty() {
         vec![content]
     } else {
         exchange_bodies
     };
+    let fallback_response_id = fallback_response_id.unwrap_or_default().to_string();
     scopes
         .into_iter()
         .flat_map(|inner| {
+            let fallback_response_id = fallback_response_id.clone();
             parse_exchange_nodes(inner)
                 .into_iter()
                 .filter(|node| matches!(node.kind, ExchangeNodeKind::Response { .. }))
                 .map(move |node| {
                     let policy =
                         ResponseTurnCellPolicy::from_response_nodes(std::slice::from_ref(&node));
-                    (response_lookup_id(inner, &policy), node.render())
+                    let explicit_response_id = node.lines.iter().find_map(|line| {
+                        response_id_from_lookup_marker(line.trim())
+                            .or_else(|| response_id_from_heading(line.trim()))
+                    });
+                    (
+                        if let Some(response_id) = explicit_response_id {
+                            response_id.to_string()
+                        } else if !fallback_response_id.is_empty() {
+                            fallback_response_id.clone()
+                        } else {
+                            response_lookup_id(inner, &policy)
+                        },
+                        node.render(),
+                    )
                 })
         })
         .filter(|(response_id, body)| !response_id.is_empty() && !body.trim().is_empty())
@@ -230,14 +303,38 @@ pub fn retained_response_ids_in_content(content: &str) -> BTreeSet<String> {
 }
 
 fn terminal_response_cells(content: &str) -> Vec<(String, String, String)> {
-    let nodes = parse_exchange_nodes(content);
-    nodes
-        .iter()
-        .enumerate()
-        .filter(|(_, node)| matches!(node.kind, ExchangeNodeKind::Response { .. }))
-        .map(|(index, node)| {
+    let patch_exchange_bodies = archived_patch_exchange_bodies(content);
+    let legacy_patch_response_ids = if patch_exchange_bodies.is_empty() {
+        Vec::new()
+    } else {
+        response_nodes(content)
+            .into_iter()
+            .map(|(response_id, _)| response_id)
+            .collect::<Vec<_>>()
+    };
+    let scopes = if patch_exchange_bodies.is_empty() {
+        vec![content]
+    } else {
+        patch_exchange_bodies
+    };
+    let mut cells = Vec::new();
+    let mut response_ordinal = 0usize;
+    for inner in scopes {
+        let nodes = parse_exchange_nodes(inner);
+        for (index, node) in nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, node)| matches!(node.kind, ExchangeNodeKind::Response { .. }))
+        {
             let policy = ResponseTurnCellPolicy::from_response_nodes(std::slice::from_ref(node));
-            let response_id = response_lookup_id(content, &policy);
+            // Retained patch envelopes historically derived their public id
+            // from the whole envelope. Preserve that durable id while hashing
+            // only the bounded exchange payload.
+            let response_id = legacy_patch_response_ids
+                .get(response_ordinal)
+                .cloned()
+                .unwrap_or_else(|| response_lookup_id(inner, &policy));
+            response_ordinal += 1;
             let response = node.render();
             let prompt = index
                 .checked_sub(1)
@@ -246,10 +343,12 @@ fn terminal_response_cells(content: &str) -> Vec<(String, String, String)> {
                 .map(|node| node.render())
                 .unwrap_or_default();
             let cell = format!("{prompt}{response}");
-            (response_id, response, cell)
-        })
-        .filter(|(response_id, response, _)| !response_id.is_empty() && !response.trim().is_empty())
-        .collect()
+            if !response_id.is_empty() && !response.trim().is_empty() {
+                cells.push((response_id, response, cell));
+            }
+        }
+    }
+    cells
 }
 
 /// Append complete terminal prompt/response cells to the one ordinary Markdown
@@ -380,8 +479,8 @@ fn archive_response_checksums(archive: &str) -> BTreeMap<String, BTreeSet<String
             (start == 0 || archive.as_bytes().get(start - 1) == Some(&b'\n')).then_some(start)
         })
         .collect::<Vec<_>>();
-    let mut record = |scope: &str| {
-        for (response_id, body) in response_nodes(scope) {
+    let mut record = |scope: &str, fallback_response_id: Option<&str>| {
+        for (response_id, body) in response_nodes_with_fallback(scope, fallback_response_id) {
             checksums
                 .entry(response_id)
                 .or_default()
@@ -389,7 +488,7 @@ fn archive_response_checksums(archive: &str) -> BTreeMap<String, BTreeSet<String
         }
     };
     if starts.is_empty() {
-        record(archive);
+        record(archive, None);
         return checksums;
     }
     // The archive is append-only and each response cell is framed by a
@@ -397,7 +496,7 @@ fn archive_response_checksums(archive: &str) -> BTreeMap<String, BTreeSet<String
     // exchange parser thousands of nodes in one growing scope; this preserves
     // full-index checksum validation while making the scan streaming/linear
     // (`#archiveframedstreamverify`).
-    record(&archive[..starts[0]]);
+    record(&archive[..starts[0]], None);
     let locator_id = |start: usize| {
         let value = &archive[start + LOCATOR.len()..];
         value.lines().next().unwrap_or_default()
@@ -416,7 +515,7 @@ fn archive_response_checksums(archive: &str) -> BTreeMap<String, BTreeSet<String
             next += 1;
         }
         let end = starts.get(next).copied().unwrap_or(archive.len());
-        record(&archive[start..end]);
+        record(&archive[start..end], Some(id));
         index = next;
     }
     checksums
@@ -2833,6 +2932,79 @@ mod tests {
             },
         );
         assert_eq!(archive_response_checksums(&archive), expected);
+    }
+
+    #[test]
+    fn framed_archive_uses_locator_for_wrapped_response_without_inner_id() {
+        let response = "### Re: wrapped retained response\n\nwrapped body\n";
+        let archive = format!(
+            "❯ Archived response locator {DUP_ID}\n\n\
+<a id=\"r-0a0b0c0d0e0f\"></a>\n\
+<!-- patch:exchange mode=\"append\" -->\n\
+{response}\
+<!-- /patch:exchange -->\n\
+<!-- patch:recap -->\nrecap text\n<!-- /patch:recap -->\n"
+        );
+        let checksums = archive_response_checksums(&archive);
+        let bounded_response = parse_exchange_nodes(response)
+            .into_iter()
+            .find(|node| matches!(node.kind, ExchangeNodeKind::Response { .. }))
+            .unwrap()
+            .render();
+        let legacy_response_id = response_nodes(&archive)[0].0.clone();
+        let terminal = terminal_response_cells(&archive);
+
+        assert_eq!(checksums.keys().collect::<Vec<_>>(), vec![DUP_ID]);
+        assert_eq!(checksums[DUP_ID].len(), 1);
+        assert_eq!(terminal.len(), 1);
+        assert_eq!(terminal[0].0, legacy_response_id);
+        assert_eq!(terminal[0].1, bounded_response);
+        assert_eq!(
+            checksums[DUP_ID],
+            BTreeSet::from([agent_doc_hash::content_hash(&terminal[0].1)])
+        );
+    }
+
+    #[test]
+    fn retained_patch_rewrites_partial_index_to_bounded_response_checksum() {
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "live\n").unwrap();
+        let response = "### Re: wrapped retained response\n\nwrapped body\n";
+        let retained = format!(
+            "<!-- patch:exchange mode=\"append\" -->\n{response}\
+<!-- /patch:exchange -->\n\
+<!-- patch:recap -->\nrecap text\n<!-- /patch:recap -->\n"
+        );
+        let legacy = response_nodes(&retained);
+        assert_eq!(legacy.len(), 1);
+        let legacy_id = legacy[0].0.clone();
+        let legacy_checksum = agent_doc_hash::content_hash(&legacy[0].1);
+
+        let first = write_exchange_archive(&doc, &retained).unwrap();
+        let corrected = parse_response_index_file(&first.index_path).unwrap();
+        let corrected_checksum = corrected[&legacy_id].content_sha256.clone();
+        assert_ne!(corrected_checksum, legacy_checksum);
+
+        let stale_entry = ResponseIndexEntry {
+            content_sha256: legacy_checksum,
+            ..corrected[&legacy_id].clone()
+        };
+        std::fs::write(
+            &first.index_path,
+            render_response_index(&doc, [&stale_entry]),
+        )
+        .unwrap();
+
+        write_exchange_archive(&doc, &retained).unwrap();
+        let repaired = parse_response_index_file(&first.index_path).unwrap();
+        assert_eq!(repaired[&legacy_id].content_sha256, corrected_checksum);
+        assert!(
+            verified_indexed_response_ids(&doc)
+                .unwrap()
+                .contains(&legacy_id)
+        );
     }
 
     #[test]

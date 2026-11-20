@@ -2153,13 +2153,24 @@ fn retained_checkpoint_response_evidence(
     if referenced.is_empty() {
         return Ok(Vec::new());
     }
-    let mut resolved = agent_doc_archive_io::indexed_response_ids(file)?;
+    // A prior evidence-heal can be interrupted after writing the sibling
+    // archive/index but before its atomic commit. Keep the verified-index
+    // error until we know whether an exact retained checkpoint can rebuild
+    // that partial projection; never discard the error when no such evidence
+    // exists.
+    let (mut resolved, indexed_error) = match agent_doc_archive_io::indexed_response_ids(file) {
+        Ok(resolved) => (resolved, None),
+        Err(error) => (BTreeSet::new(), Some(error)),
+    };
     resolved.extend(agent_doc_archive_io::response_ids_in_content(authority));
     let mut unresolved = referenced
         .difference(&resolved)
         .cloned()
         .collect::<BTreeSet<_>>();
     if unresolved.is_empty() {
+        if let Some(error) = indexed_error {
+            return Err(error);
+        }
         return Ok(Vec::new());
     }
 
@@ -2192,6 +2203,11 @@ fn retained_checkpoint_response_evidence(
         if unresolved.is_empty() {
             break;
         }
+    }
+    if evidence.is_empty()
+        && let Some(error) = indexed_error
+    {
+        return Err(error);
     }
     Ok(evidence)
 }

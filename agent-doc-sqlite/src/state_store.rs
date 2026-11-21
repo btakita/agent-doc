@@ -12281,6 +12281,53 @@ mod tests {
         );
         Ok(())
     }
+
+    /// The periodic retention pass (not just the individual prune helpers)
+    /// bounds superseded realtime steering snapshots per document-cycle and
+    /// undo checkpoint/clear snapshots per document. Live `haiven-dev` on
+    /// 2026-11-02 retained 36k steering rows (109 MB) and 1,223 undo
+    /// checkpoints (78 MB) because the retention pass never visited them.
+    #[test]
+    fn periodic_retention_bounds_realtime_steering_and_undo_facts() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+        let insert = |event_id: &str, fact_type: &str, payload: &str| {
+            conn.execute(
+                "INSERT INTO state_events (event_id, document_hash, domain, fact_type, payload_json, timestamp) \
+                 VALUES (?1, 'docA', 'closeout', ?2, ?3, 0)",
+                rusqlite::params![event_id, fact_type, payload],
+            )
+        };
+        for i in 0..5 {
+            insert(
+                &format!("steer-{i}"),
+                "realtime_steering_observed",
+                r#"{"fact":{"cycle_id":"cycle-1"}}"#,
+            )?;
+            insert(&format!("checkpoint-{i}"), "undo_checkpointed", "{}")?;
+            insert(&format!("clear-{i}"), "undo_checkpoint_cleared", "{}")?;
+        }
+
+        // Force the interval gate open for this database, as a later open after
+        // the retention interval would.
+        let key = conn.path().unwrap_or_default().to_string();
+        if let Some(stamps) = STATE_EVENT_RETENTION_LAST_RUN_MS.lock().as_mut() {
+            stamps.remove(&key);
+        }
+        run_state_event_retention_if_due(&conn);
+
+        let count = |fact_type: &str| -> Result<i64> {
+            Ok(conn.query_row(
+                "SELECT COUNT(*) FROM state_events WHERE fact_type = ?1",
+                [fact_type],
+                |row| row.get(0),
+            )?)
+        };
+        assert_eq!(count("realtime_steering_observed")?, 1);
+        assert_eq!(count("undo_checkpointed")?, 2);
+        assert_eq!(count("undo_checkpoint_cleared")?, 2);
+        Ok(())
+    }
 }
 
 #[cfg(test)]

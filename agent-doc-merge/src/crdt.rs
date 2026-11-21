@@ -241,6 +241,9 @@ fn merge_inner(
         CrdtDoc::from_text("")
     };
     let mut base_text = base_doc.to_text();
+    // `#dupstrike`: the strike guard below counts rows against the caller's
+    // base, before stale-base detection or prefix advancement rewrites it.
+    let original_base_text = base_text.clone();
 
     // `#qcellmerge1` op-capture rung (default ON; kill-switch via
     // `AGENT_DOC_CELL_MERGE=0`). When the cell-merge master gate is enabled (the
@@ -457,6 +460,11 @@ fn merge_inner(
     // must not delete committed exchange history.
     let merged =
         guard_committed_responses(merged, &committed_response_headings, ours_text, theirs_text);
+
+    // `#dupstrike`: two sides that struck the same row each replaced it, and
+    // the line-diff CRDT keeps both replacements.
+    let merged =
+        collapse_duplicate_concurrent_strikes(merged, &original_base_text, ours_text, theirs_text);
 
     // Post-merge dedup: remove identical adjacent blocks (#15)
     guard_merge_growth(dedup_adjacent_blocks(&merged), ours_text, theirs_text)
@@ -4245,6 +4253,114 @@ fn guard_committed_responses(
     }
 }
 
+/// `#dupstrike`: a list row's identity for the strike guard: its indentation
+/// plus its text without the outer strike wrapper, and whether it is struck.
+/// `None` for a line that is not a list row.
+fn strike_row_identity(line: &str) -> Option<((&str, &str), bool)> {
+    let line = line.trim_end();
+    let body_start = line.len() - line.trim_start_matches([' ', '\t']).len();
+    let (indent, rest) = line.split_at(body_start);
+    let body = rest.strip_prefix("- ")?.trim();
+    match body
+        .strip_prefix("~~")
+        .and_then(|inner| inner.strip_suffix("~~"))
+        .map(str::trim)
+    {
+        Some(inner) if !inner.is_empty() => Some(((indent, inner), true)),
+        _ => (!body.is_empty()).then_some(((indent, body), false)),
+    }
+}
+
+fn strike_row_identity_counts(text: &str) -> std::collections::HashMap<(&str, &str), usize> {
+    let mut counts = std::collections::HashMap::new();
+    for line in text.lines() {
+        if let Some((identity, _)) = strike_row_identity(line) {
+            *counts.entry(identity).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+fn line_indent(line: &str) -> usize {
+    line.len() - line.trim_start_matches([' ', '\t']).len()
+}
+
+/// `#dupstrike`: make a strike idempotent per row in a line-diff merge.
+///
+/// Striking a row replaces its line. When both sides struck the same row
+/// (a retained strike composed with the same strike re-derived over a newer
+/// cut, 2026-11-21 08:09Z), the CRDT receives two independent deletes of the
+/// base line, which coincide, and two independent inserts of the struck line,
+/// which do not: the struck row lands twice. A merge can never hold more rows
+/// of one identity than its base or either side holds, so a struck row beyond
+/// that count is a duplicate of the concurrent strike, not a row anyone wrote.
+/// Remove exactly that excess, only as exact copies of another kept struck
+/// row at the same depth, and only when the removed copy has no remaining
+/// children, so no operator line is reparented or dropped. Rows that an input
+/// accounts for (two base rows with the same text, each struck by one side)
+/// stay.
+fn collapse_duplicate_concurrent_strikes(
+    merged: String,
+    base_text: &str,
+    ours_text: &str,
+    theirs_text: &str,
+) -> String {
+    let merged_counts = strike_row_identity_counts(&merged);
+    let base_counts = strike_row_identity_counts(base_text);
+    let ours_counts = strike_row_identity_counts(ours_text);
+    let theirs_counts = strike_row_identity_counts(theirs_text);
+    let mut excess: std::collections::HashMap<(&str, &str), usize> = merged_counts
+        .iter()
+        .filter_map(|(identity, merged_count)| {
+            let allowed = [&base_counts, &ours_counts, &theirs_counts]
+                .iter()
+                .map(|counts| counts.get(identity).copied().unwrap_or(0))
+                .max()
+                .unwrap_or(0);
+            (*merged_count > allowed).then_some((*identity, merged_count - allowed))
+        })
+        .collect();
+    if excess.is_empty() {
+        return merged;
+    }
+
+    let lines: Vec<&str> = merged.split_inclusive('\n').collect();
+    let mut keep = vec![true; lines.len()];
+    // Walk from the end so a duplicated subtree (a struck parent followed by
+    // its own duplicated struck child) sheds the child first; the parent copy
+    // then has no children left and can go too.
+    for index in (0..lines.len()).rev() {
+        let Some((identity, true)) = strike_row_identity(lines[index]) else {
+            continue;
+        };
+        let Some(remaining) = excess.get_mut(&identity).filter(|n| **n > 0) else {
+            continue;
+        };
+        let text = lines[index].trim_end();
+        let has_other_copy = (0..lines.len())
+            .any(|other| other != index && keep[other] && lines[other].trim_end() == text);
+        let has_children = (index + 1..lines.len())
+            .find(|later| keep[*later] && !lines[*later].trim().is_empty())
+            .is_some_and(|later| line_indent(lines[later]) > line_indent(lines[index]));
+        if has_other_copy && !has_children {
+            keep[index] = false;
+            *remaining -= 1;
+        }
+    }
+    if keep.iter().all(|kept| *kept) {
+        return merged;
+    }
+    eprintln!(
+        "[crdt] dupstrike: collapsed {} duplicate concurrent strike row(s) (#dupstrike)",
+        keep.iter().filter(|kept| !**kept).count()
+    );
+    lines
+        .iter()
+        .zip(&keep)
+        .filter_map(|(line, kept)| kept.then_some(*line))
+        .collect()
+}
+
 /// Remove identical adjacent text blocks separated by blank lines.
 ///
 /// After a CRDT merge, both sides may independently append the same content
@@ -4855,6 +4971,130 @@ mod tests {
             vec![row("Including lazily-spec + lazily").trim_end_matches('\n')],
             "{merged}"
         );
+    }
+
+    /// `#dupstrike` fixture: the 2026-11-21 08:09Z queue of
+    /// tasks/agent-doc/agent-doc-bugs.md, reduced. The Waiting-on-you tree's
+    /// rows all carry their item's `[#id]`, so the queue holds duplicate merge
+    /// keys and the keyed reconcile declines for every cut of this document.
+    fn dupstrike_queue(parent_struck: bool, leaf_struck: bool, typed: &str) -> String {
+        let strike = |struck: bool, indent: &str, text: &str| {
+            if struck {
+                format!("{indent}- ~~{text}~~\n")
+            } else {
+                format!("{indent}- {text}\n")
+            }
+        };
+        format!(
+            concat!(
+                "<!-- agent:queue go -->\n",
+                "- ### 🙋 follow up on an action item from queue item “Prune the worktrees.”: operator: decide [operator-verify]\n",
+                "  - 🙋 follow up on an action item: operator: decide whether to land the publish-token patch\n",
+                "    - Should we integrate it?\n",
+                "      - Complete integration. Ensure full lazily family parity.{}\n",
+                "{}{}",
+                "  - 🙋 follow up on an action item: operator: decide whether to commit the regenerated tsift files\n",
+                "- ### Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n",
+                "  - [#ghrecvpolicypark] Decide whether backlog #ghrecvpolicy stays open\n",
+                "    - **Next:** you — reply under this item [#ghrecvpolicypark]\n",
+                "    - **Response:** Decide whether backlog #ghrecvpolicy stays open [#ghrecvpolicypark]\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            typed,
+            strike(
+                parent_struck,
+                "  ",
+                "follow up on an action item: agent: test-first triage of the conflicting branches",
+            ),
+            strike(leaf_struck, "      ", "Should we integrate these?"),
+        )
+    }
+
+    /// `#dupstrike`: tasks/agent-doc/agent-doc-bugs.md, 2026-11-21 08:09:13Z.
+    /// `queue consume --ack-text` struck a nested leaf and its parent while the
+    /// operator typed in another row of the same queue. The typing hold retained
+    /// the strike, the retry re-derived the same strike over the newer cut, and
+    /// `deferred_write_composed` merged the two retained targets over the
+    /// original cut. That queue body holds duplicate keys (the Waiting-on-you
+    /// rows share `[#ghrecvpolicypark]`), so the keyed reconcile declined and
+    /// the body fell to the line-diff CRDT merge, which read the two identical
+    /// strikes as two independent inserts: `      - ~~Should we integrate
+    /// these?~~` landed twice. A strike is idempotent per row: composing any
+    /// two cuts that struck the same row keeps exactly one struck row, and the
+    /// operator's typing survives.
+    #[test]
+    fn dupstrike_composing_two_retained_strikes_never_doubles_the_row() {
+        let base = dupstrike_queue(false, false, "");
+        let state = CrdtDoc::from_text(&base).encode_state();
+        let typed = " Including lazily-spec";
+        // The retained strike and its re-derived retry are the same operation:
+        // `--ack-text` with a nest vector strikes the leaf and its parent, a
+        // leaf ack strikes only the leaf. The retry is derived over the newer
+        // cut, so it may carry the operator's typing.
+        let pairs = [(true, true), (false, true)]
+            .into_iter()
+            .flat_map(|(parent, leaf)| {
+                [
+                    (
+                        dupstrike_queue(parent, leaf, ""),
+                        dupstrike_queue(parent, leaf, typed),
+                    ),
+                    (
+                        dupstrike_queue(parent, leaf, ""),
+                        dupstrike_queue(parent, leaf, ""),
+                    ),
+                ]
+            })
+            .collect::<Vec<_>>();
+        let count = |merged: &str, line: &str| merged.lines().filter(|l| *l == line).count();
+        for (ours, theirs) in &pairs {
+            for merged in [
+                merge_one_component("queue", Some(&base), ours, theirs).unwrap(),
+                merge_one_component("queue", Some(&base), theirs, ours).unwrap(),
+                merge(Some(&state), ours, theirs).unwrap(),
+                merge(Some(&state), theirs, ours).unwrap(),
+            ] {
+                let leaf = count(&merged, "      - ~~Should we integrate these?~~")
+                    + count(&merged, "      - Should we integrate these?");
+                assert_eq!(leaf, 1, "the leaf must survive exactly once:\n{merged}");
+                let parent = merged
+                    .lines()
+                    .filter(|l| l.contains("test-first triage of the conflicting branches"))
+                    .count();
+                assert_eq!(parent, 1, "the parent must survive exactly once:\n{merged}");
+                if theirs.contains(typed) {
+                    assert!(merged.contains(typed), "operator typing lost:\n{merged}");
+                }
+            }
+        }
+    }
+
+    /// `#dupstrike` controls: the strike guard only removes copies no input
+    /// accounts for. Two distinct base rows with the same text, each struck by
+    /// one side, are two rows; both sides adding the same struck row is one.
+    #[test]
+    fn dupstrike_guard_keeps_rows_an_input_accounts_for() {
+        let doc = |a: &str, b: &str| {
+            format!("<!-- agent:queue -->\n- {a}\n- keep me\n- {b}\n<!-- /agent:queue -->\n")
+        };
+        let base = doc("do it", "do it");
+        let state = CrdtDoc::from_text(&base).encode_state();
+        let merged = merge(
+            Some(&state),
+            &doc("~~do it~~", "do it"),
+            &doc("do it", "~~do it~~"),
+        )
+        .unwrap();
+        assert_eq!(merged.matches("- ~~do it~~\n").count(), 2, "{merged}");
+
+        let base = "<!-- agent:queue -->\n- keep me\n<!-- /agent:queue -->\n";
+        let state = CrdtDoc::from_text(base).encode_state();
+        let added = "<!-- agent:queue -->\n- keep me\n- ~~done~~\n<!-- /agent:queue -->\n";
+        let added_typed =
+            "<!-- agent:queue -->\n- keep me typed\n- ~~done~~\n<!-- /agent:queue -->\n";
+        let merged = merge(Some(&state), added, added_typed).unwrap();
+        assert_eq!(merged.matches("- ~~done~~\n").count(), 1, "{merged}");
+        assert!(merged.contains("- keep me typed\n"), "{merged}");
     }
 
     /// `#inflighttypinghold`: the identity "hash" lets the tests name texts

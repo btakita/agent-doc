@@ -2205,6 +2205,108 @@ pub fn abandon_attempt(
     })
 }
 
+/// `#blockerreportterminal`: end the exact attempt whose worker hand-back was
+/// only a prompt-blocker review, and keep nothing live for it.
+///
+/// A `release --requeue` retains a started `Running` attempt abandoned, so one
+/// replacement can be claimed at once. A review-held row owes no replacement:
+/// the review holds it out of drain, dispatch, and claim until the operator
+/// resolves it. Retaining the attempt read as `replacement_pending` forever,
+/// painted the row `📥 [#subagent:…]` instead of `⛔`, and refused every
+/// closeout. The attempt is removed instead. Its lineage `Created` receipt
+/// still fences the generation, so the claim after the review resolves is a
+/// new generation, and the recorded hand-off still briefs that worker.
+pub fn close_attempt_for_prompt_blocker(
+    file: &Path,
+    item: &str,
+    generation: u64,
+) -> Result<Option<QueueClaim>> {
+    let resolved = resolve_live_claim_target(file, item, "queue_claim_prompt_blocker_close").ok();
+    let target = resolved
+        .as_ref()
+        .map(|(target, _)| target.clone())
+        .unwrap_or_else(|| item.to_string());
+    let heads = resolved.map(|(_, heads)| heads);
+    let now = now_secs();
+    let closed = mutate_ledger(file, |ledger| {
+        if let Some(heads) = heads.as_ref() {
+            log_followed(file, &ledger.follow_edits_in_view(now, heads));
+        }
+        Ok(match ledger.release_fenced(&target, Some(generation))? {
+            Some(claim) => Some(claim),
+            None => ledger.release_fenced(item, Some(generation))?,
+        })
+    })?;
+    if let Some(claim) = closed.as_ref() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_claim_prompt_blocker_closed owner={} generation={} item_bytes={} (#blockerreportterminal)",
+                claim.owner,
+                claim.generation,
+                claim.item_text.trim().len()
+            ),
+        );
+    }
+    Ok(closed)
+}
+
+/// `#blockerreportterminal`: close every retained, abandoned `Running`
+/// attempt (`release --requeue`, including one whose continue already failed
+/// and so reads `replacement_pending`) whose live row an open prompt-blocker
+/// review holds. Such an attempt has no worker, owes no replacement while the
+/// review is open, and only leaves a stale `📥 [#subagent:…]` tag that
+/// refuses closeout. A ledger an older binary wrote heals here. Returns the
+/// closed attempts.
+pub fn close_review_blocked_orphan_attempts(file: &Path, content: &str) -> Result<Vec<QueueClaim>> {
+    let review = agent_doc_queue::prompt_pressure::review_blocked_prompts(content);
+    if review.is_empty() {
+        return Ok(Vec::new());
+    }
+    let Some(live) = live_queue_head_identities(content) else {
+        return Ok(Vec::new());
+    };
+    let orphan = |claim: &QueueClaim, live_rows: &[String]| {
+        live.contains(&claim.identity)
+            && agent_doc_queue::lost_running_recovery::authorized_running_requeue(claim)
+            && (review.contains(&claim.item_text)
+                || live_rows.iter().any(|row| {
+                    agent_doc_queue::queue_claim::claim_identity(row) == claim.identity
+                        && review.contains(row)
+                }))
+    };
+    let live_rows =
+        agent_doc_queue::queue_continuation::all_queue_head_texts(content).unwrap_or_default();
+    let ledger = load_ledger_read_only(file)?;
+    if !ledger.claims.iter().any(|claim| orphan(claim, &live_rows)) {
+        return Ok(Vec::new());
+    }
+    let closed = mutate_ledger(file, |ledger| {
+        let mut closed = Vec::new();
+        ledger.claims.retain(|claim| {
+            if orphan(claim, &live_rows) {
+                closed.push(claim.clone());
+                false
+            } else {
+                true
+            }
+        });
+        Ok(closed)
+    })?;
+    for claim in &closed {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_claim_review_blocked_orphan_closed owner={} generation={} item_bytes={} (#blockerreportterminal)",
+                claim.owner,
+                claim.generation,
+                claim.item_text.trim().len()
+            ),
+        );
+    }
+    Ok(closed)
+}
+
 /// Keep a started attempt after `release --requeue`.
 ///
 /// A worker that had reached `Running` stays `Running` with the abandon

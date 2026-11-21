@@ -1429,7 +1429,16 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                             agent_doc_queue::queue_claim::claim_identity(&prompt.text)
                         });
                     let externally_blocked = review_blockers.holds_external_identity(&identity);
-                    let attempt = lifecycle.attempts.get(&identity).filter(|_| !externally_blocked);
+                    // `#blockerreportterminal`: an open review holds the row,
+                    // so a requeued attempt waiting on a replacement owes
+                    // nothing until the review is resolved; the row rests `⛔`.
+                    let review_hold = review_blockers.holding_review_id(&prompt.text);
+                    let attempt = lifecycle.attempts.get(&identity).filter(|attempt| {
+                        !externally_blocked
+                            && !(review_hold.is_some()
+                                && attempt.marker
+                                    == agent_doc_document::queue_projection::QueueLifecycleMarker::Pending)
+                    });
                     // `#terminalitemstability`: runtime evidence never reopens
                     // a struck row. The operator removes the strike to reopen it.
                     if struck {
@@ -1448,7 +1457,7 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                         )
                     }) {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling
-                    } else if blockers.blocks_row(&prompt.text) {
+                    } else if review_hold.is_some() || blockers.blocks_row(&prompt.text) {
                         // `#queueblocked`: outranks a stale `⏭️`/`⏳`.
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
                     } else if matches!(
@@ -1482,10 +1491,10 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                         blockers: if marker
                             == agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
                         {
-                            blockers
-                                .blockers_for_row(&prompt.text)
-                                .map(<[String]>::to_vec)
-                                .unwrap_or_default()
+                            agent_doc_queue::prompt_pressure::blocked_row_citations(
+                                blockers.blockers_for_row(&prompt.text).unwrap_or_default(),
+                                review_hold,
+                            )
                         } else {
                             Vec::new()
                         },

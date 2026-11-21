@@ -37,12 +37,21 @@ pub struct PromptBlocker {
 }
 
 impl PromptBlocker {
+    /// `#blockerreportterminal`: a review holds its row by work id. An
+    /// external hold compares claim identities. A legacy hold compares the
+    /// normalized prompt text, and also the work id when the prompt names
+    /// tracked work: a row `do [#id]: note` is the same work as a review
+    /// `**Prompt:** do [#id]`.
     pub fn matches_prompt(&self, head: &str) -> bool {
+        // A row's binary-owned lifecycle and `[#owner#generation]` projection
+        // is not part of its work text.
+        let head = &agent_doc_document::queue_projection::strip_in_progress_marker(head);
         if self.evidence.is_some() {
             crate::queue_claim::claim_identity(&self.prompt)
                 == crate::queue_claim::claim_identity(head)
         } else {
             normalize_prompt_text(&self.prompt) == normalize_prompt_text(head)
+                || same_tracked_work(&self.prompt, head)
         }
     }
 
@@ -742,11 +751,27 @@ pub fn review_blocks_prompt(content: &str, head: &str) -> bool {
     open_review_blocking_prompt(content, head).is_some()
 }
 
+/// `#blockerreportterminal`: the tracked-work id both texts name, when both
+/// key to the same [`agent_doc_element_queue::QueueItemIdentity::Id`].
+fn same_tracked_work(prompt: &str, head: &str) -> bool {
+    matches!(
+        crate::queue_claim::claim_identity(prompt),
+        agent_doc_element_queue::QueueItemIdentity::Id(ref id)
+            if crate::queue_claim::claim_identity(head)
+                == agent_doc_element_queue::QueueItemIdentity::Id(id.clone())
+    )
+}
+
 /// Normalized prompts held by open prompt-blocker review items.
 #[derive(Debug, Clone, Default)]
 pub struct ReviewBlockedPrompts {
     legacy: HashSet<String>,
+    /// `#blockerreportterminal`: tracked-work ids legacy holds name, so a row
+    /// annotated after the review was filed (`do [#id]: note`) stays held.
+    legacy_ids: HashSet<String>,
     external: HashSet<agent_doc_element_queue::QueueItemIdentity>,
+    /// Every open hold, in review order, for citing the review that holds a row.
+    holds: Vec<PromptBlocker>,
 }
 
 impl ReviewBlockedPrompts {
@@ -754,8 +779,42 @@ impl ReviewBlockedPrompts {
         self.holds_legacy(head) || self.holds_external(head)
     }
 
+    /// Whether no open review holds any prompt.
+    pub fn is_empty(&self) -> bool {
+        self.holds.is_empty()
+    }
+
     pub fn holds_legacy(&self, head: &str) -> bool {
-        !self.legacy.is_empty() && self.legacy.contains(&normalize_prompt_text(head))
+        if self.legacy.is_empty() {
+            return false;
+        }
+        let head = &agent_doc_document::queue_projection::strip_in_progress_marker(head);
+        if self.legacy.contains(&normalize_prompt_text(head)) {
+            return true;
+        }
+        !self.legacy_ids.is_empty()
+            && matches!(
+                crate::queue_claim::claim_identity(head),
+                agent_doc_element_queue::QueueItemIdentity::Id(ref id) if self.legacy_ids.contains(id)
+            )
+    }
+
+    /// `#blockerreportterminal`: the id of the open review that holds `head`,
+    /// external holds first. The projection cites it on the `⛔` row.
+    pub fn holding_review_id(&self, head: &str) -> Option<&str> {
+        if self.holds.is_empty() {
+            return None;
+        }
+        self.holds
+            .iter()
+            .filter(|blocker| blocker.evidence.is_some())
+            .chain(
+                self.holds
+                    .iter()
+                    .filter(|blocker| blocker.evidence.is_none()),
+            )
+            .find(|blocker| blocker.matches_prompt(head))
+            .map(|blocker| blocker.id.as_str())
     }
 
     pub fn holds_external(&self, head: &str) -> bool {
@@ -782,9 +841,30 @@ pub fn review_blocked_prompts(content: &str) -> ReviewBlockedPrompts {
             blocked
                 .legacy
                 .insert(normalize_prompt_text(&blocker.prompt));
+            if let agent_doc_element_queue::QueueItemIdentity::Id(id) =
+                crate::queue_claim::claim_identity(&blocker.prompt)
+            {
+                blocked.legacy_ids.insert(id);
+            }
         }
+        blocked.holds.push(blocker);
     }
     blocked
+}
+
+/// `#blockerreportterminal`: the ids a `⛔` row cites. `row_blockers` are the
+/// open or external ids its tracked item's stays-open clause names. The open
+/// review that holds the row is cited too, so the row names what it waits on.
+pub fn blocked_row_citations(row_blockers: &[String], review_id: Option<&str>) -> Vec<String> {
+    let mut cited = row_blockers.to_vec();
+    if let Some(review_id) = review_id
+        && !cited
+            .iter()
+            .any(|id| id.trim_start_matches('#').eq_ignore_ascii_case(review_id))
+    {
+        cited.push(review_id.to_string());
+    }
+    cited
 }
 
 /// Insert or replace `blocker` as the first `agent:review` item.
@@ -1259,6 +1339,63 @@ mod tests {
         assert!(!prose_blocker_needs_pressure(STRUCTURE));
         let pointer = exchange_pointer(&parse_prompt_blocker(STRUCTURE).unwrap());
         assert!(!prose_blocker_needs_pressure(&pointer), "{pointer}");
+    }
+
+    /// `#blockerreportterminal` (agent-doc-bugs.md, 2026-11-21): the review
+    /// a worker filed names `do [#ghrecvpolicy]`, while the row carries an
+    /// operator note and the binary's `📥 [#subagent:…#1]` projection. The
+    /// review holds that row by its work id, not by exact text, and the row
+    /// cites it. Another row with the same leading words is not held.
+    #[test]
+    fn blockerreportterminal_a_review_holds_its_row_by_work_id() {
+        let legacy = concat!(
+            "<!-- agent:review -->\n",
+            "<!-- agent-doc:prompt-blocker -->\n",
+            "- [/] [#prompt-blocker-01eda3b6d7de] Recipient policy awaits multi-user support.\n",
+            "  - **Complete by:** enforce it once multi-user workspaces land\n",
+            "  - **Prompt:** do [#ghrecvpolicy]\n",
+            "<!-- /agent-doc:prompt-blocker -->\n",
+            "<!-- /agent:review -->\n",
+        );
+        let row =
+            "📥 [#subagent:ghrecvpolicy#1] do [#ghrecvpolicy]: #advance whatever is actionable.";
+        let blocked = review_blocked_prompts(legacy);
+        assert!(blocked.holds_legacy(row));
+        assert!(blocked.contains("do [#ghrecvpolicy]: #advance whatever is actionable."));
+        assert_eq!(
+            blocked.holding_review_id(row),
+            Some("prompt-blocker-01eda3b6d7de")
+        );
+        assert!(review_blocks_prompt(legacy, row));
+        assert!(!blocked.contains("do [#ghrecvpolicyx]: #advance"));
+        assert!(!blocked.contains("do [#other]: #advance whatever is actionable."));
+        assert!(blocked.holding_review_id("finish the widget").is_none());
+
+        // Free text keeps exact-text matching: no work id, no id match.
+        let text = review_blocked_prompts(&hoist_prompt_blocker(
+            "<!-- agent:queue -->\n- finish the widget\n<!-- /agent:queue -->\n",
+            &parse_prompt_blocker(STRUCTURE).unwrap(),
+        ));
+        assert!(text.contains("📥 [#subagent:widget#1] finish the widget"));
+        assert!(!text.contains("finish the widget later"));
+
+        assert_eq!(
+            blocked_row_citations(
+                &["ghrecvpolicyblocker".into()],
+                Some("prompt-blocker-01eda3b6d7de")
+            ),
+            vec![
+                "ghrecvpolicyblocker".to_string(),
+                "prompt-blocker-01eda3b6d7de".to_string()
+            ]
+        );
+        assert_eq!(
+            blocked_row_citations(
+                &["#prompt-blocker-01eda3b6d7de".into()],
+                Some("prompt-blocker-01eda3b6d7de")
+            ),
+            vec!["#prompt-blocker-01eda3b6d7de".to_string()]
+        );
     }
 
     #[test]

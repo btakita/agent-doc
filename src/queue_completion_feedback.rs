@@ -85,11 +85,31 @@ pub(crate) fn requeue_nonterminal_goal_hand_back(
     )
 }
 
+/// The exact attempt a prompt-pressure hand-back named (`#promptpressure`).
+/// A review hand-back closes the attempt, so this is the attempt's identity,
+/// not a live claim (`#blockerreportterminal`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PressuredAttempt {
+    pub item_text: String,
+    pub owner: String,
+    pub generation: u64,
+}
+
+impl From<QueueClaim> for PressuredAttempt {
+    fn from(claim: QueueClaim) -> Self {
+        Self {
+            item_text: claim.item_text,
+            owner: claim.owner,
+            generation: claim.generation,
+        }
+    }
+}
+
 /// A prompt hand-back `queue report-complete` requeued instead of reporting
 /// (`#promptpressure`).
 #[derive(Debug)]
 pub(crate) struct PromptPressureRequeue {
-    pub claim: QueueClaim,
+    pub claim: PressuredAttempt,
     pub kind: agent_doc_queue::goal_preset_terminal::PromptPressureKind,
     /// Set when the hand-back was a review structure.
     pub review_id: Option<String>,
@@ -123,7 +143,7 @@ pub(crate) fn requeue_prompt_pressure_hand_back(
             .unwrap_or(resolved);
     let ledger = agent_doc_queue_io::queue_claim::load_ledger_following(file, &current)?;
     let Some(claim) = ledger.resolve_selector(item)?.cloned() else {
-        return Ok(None);
+        return recorded_prompt_blocker_hand_back(file, &current, item, generation, response);
     };
     if !claim.owner.starts_with("subagent:")
         || agent_doc_queue_io::queue_claim::bound_attempt_is_structural_context(&current, &claim)
@@ -203,8 +223,16 @@ pub(crate) fn requeue_prompt_pressure_hand_back(
                 "external blocker for {:?} is from a relinquished attempt; current evidence superseded it",
                 claim.item_text
             );
+            // `#blockerreportterminal`: an older binary retained this
+            // attempt abandoned. The review already holds the row, so close
+            // it now rather than leave it reading `replacement_pending`.
+            agent_doc_queue_io::queue_claim::close_attempt_for_prompt_blocker(
+                file,
+                &claim.item_text,
+                claim.generation,
+            )?;
             return Ok(Some(PromptPressureRequeue {
-                claim,
+                claim: claim.into(),
                 kind: agent_doc_queue::goal_preset_terminal::PromptPressureKind::Review,
                 review_id: Some(blocker.id),
                 external_evidence: blocker.evidence,
@@ -254,7 +282,7 @@ pub(crate) fn requeue_prompt_pressure_hand_back(
             agent_doc_queue::goal_preset_terminal::PromptPressureKind::Review,
         )?;
         return Ok(Some(PromptPressureRequeue {
-            claim,
+            claim: claim.into(),
             kind: agent_doc_queue::goal_preset_terminal::PromptPressureKind::Review,
             review_id: Some(blocker.id),
             external_evidence: blocker.evidence,
@@ -278,7 +306,7 @@ pub(crate) fn requeue_prompt_pressure_hand_back(
             agent_doc_queue::goal_preset_terminal::PromptPressureKind::Prose,
         )?;
         return Ok(Some(PromptPressureRequeue {
-            claim,
+            claim: claim.into(),
             kind: agent_doc_queue::goal_preset_terminal::PromptPressureKind::Prose,
             review_id: None,
             external_evidence: None,
@@ -298,12 +326,78 @@ pub(crate) fn requeue_prompt_pressure_hand_back(
         agent_doc_queue::goal_preset_terminal::PromptPressureKind::Prose,
     )?;
     Ok(Some(PromptPressureRequeue {
-        claim,
+        claim: claim.into(),
         kind: agent_doc_queue::goal_preset_terminal::PromptPressureKind::Prose,
         review_id: None,
         external_evidence: None,
         incomplete: String::new(),
         complete_by: String::new(),
+    }))
+}
+
+/// `#blockerreportterminal`: the same prompt-blocker hand-back, reported again
+/// after it closed its attempt (a retry after a lost exit status). When the
+/// hand-off ledger recorded a review hand-back for this exact attempt and the
+/// same review still holds the row, the report is already recorded: answer it
+/// the same way instead of failing with `#reportcompletenomatch`. An external
+/// blocker whose evidence the review no longer carries is from a relinquished
+/// attempt and is refused. Anything else keeps the ordinary path, which
+/// refuses a report that matches no claim.
+fn recorded_prompt_blocker_hand_back(
+    file: &Path,
+    current: &str,
+    item: &str,
+    generation: Option<u64>,
+    response: &str,
+) -> Result<Option<PromptPressureRequeue>> {
+    let Some(mut blocker) = agent_doc_queue::prompt_pressure::parse_prompt_blocker(response) else {
+        return Ok(None);
+    };
+    let identity = agent_doc_queue::queue_claim::claim_identity(item);
+    let handoffs = agent_doc_queue_io::goal_loop_handoff::load(file)?;
+    let Some(handoff) = handoffs.handoffs.iter().rev().find(|handoff| {
+        handoff.identity == identity
+            && handoff.prompt_pressure
+                == Some(agent_doc_queue::goal_preset_terminal::PromptPressureKind::Review)
+            && generation.is_none_or(|generation| generation == handoff.generation)
+    }) else {
+        return Ok(None);
+    };
+    let external = blocker.evidence.is_some();
+    if external {
+        blocker.bind_external_hold(&handoff.item_text);
+    }
+    let held = agent_doc_queue::prompt_pressure::open_review_blocking_prompt(current, item)
+        .is_some_and(|hold| hold.id == blocker.id && hold.evidence == blocker.evidence);
+    if !held {
+        anyhow::ensure!(
+            !external,
+            "external blocker for {:?} is from a relinquished attempt; current evidence superseded it",
+            handoff.item_text
+        );
+        return Ok(None);
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_prompt_blocker_already_recorded owner={} generation={} review={} item_bytes={} (#blockerreportterminal)",
+            handoff.owner,
+            handoff.generation,
+            blocker.id,
+            handoff.item_text.trim().len(),
+        ),
+    );
+    Ok(Some(PromptPressureRequeue {
+        claim: PressuredAttempt {
+            item_text: handoff.item_text.clone(),
+            owner: handoff.owner.clone(),
+            generation: handoff.generation,
+        },
+        kind: agent_doc_queue::goal_preset_terminal::PromptPressureKind::Review,
+        review_id: Some(blocker.id),
+        external_evidence: blocker.evidence,
+        incomplete: blocker.incomplete,
+        complete_by: blocker.complete_by,
     }))
 }
 
@@ -3716,6 +3810,276 @@ mod tests {
         );
         let (_, next) = queue_claim::claim(&doc, ROW, "subagent:retry", 600).unwrap();
         assert_eq!(next.generation, 2);
+    }
+
+    const BRT_GH: &str = "do [#ghrecvpolicy]: #advance whatever is actionable.";
+    const BRT_CHROMIUM: &str =
+        "[#prompt-blocker-b0ddfbae2f94]: Use chromium-bridge to perform the steps.";
+    const BRT_GH_HAND_BACK: &str = concat!(
+        "<!-- agent-doc:prompt-blocker -->\n",
+        "- [/] [#prompt-blocker-01eda3b6d7de] Recipient-side policy awaits multi-user workspace support.\n",
+        "  - **Complete by:** Enforce the recipient policy once multi-user workspace access control lands.\n",
+        "  - **Prompt:** do [#ghrecvpolicy]\n",
+        "<!-- /agent-doc:prompt-blocker -->\n",
+    );
+
+    fn brt_chromium_hand_back() -> String {
+        format!(
+            concat!(
+                "<!-- agent-doc:prompt-blocker -->\n",
+                "- [/] Production activation awaits a published signed JetBrains frontend release.\n",
+                "  - **Complete by:** Verify the signed frontend package, then confirm live activation receipts.\n",
+                "  - **Prompt:** {row}\n",
+                "  - **Evidence:** GitHub release v0.35.585 has no signed frontend assets.\n",
+                "<!-- /agent-doc:prompt-blocker -->\n",
+            ),
+            row = BRT_CHROMIUM
+        )
+    }
+
+    fn brt_doc(dir: &Path) -> std::path::PathBuf {
+        fs::create_dir_all(dir.join(".agent-doc")).unwrap();
+        let doc = dir.join("agent-doc-bugs.md");
+        fs::write(
+            &doc,
+            format!(
+                concat!(
+                    "---\nagent_doc_format: template\nqueue: go\n---\n\n",
+                    "<!-- agent:active -->\n\n<!-- /agent:active -->\n\n",
+                    "<!-- agent:run id=\"main\" subagents go -->\n",
+                    "- ### {gh}\n",
+                    "- ### {chromium}\n",
+                    "<!-- /agent:run -->\n\n",
+                    "<!-- agent:backlog -->\n",
+                    "- [ ] [#ghrecvpolicy] Recipient-side auto_create_components policy. (stays open: workspace access control and session isolation must land before enforcing the recipient policy)\n",
+                    "<!-- /agent:backlog -->\n",
+                ),
+                gh = BRT_GH,
+                chromium = BRT_CHROMIUM,
+            ),
+        )
+        .unwrap();
+        doc
+    }
+
+    fn brt_row<'a>(content: &'a str, needle: &str) -> &'a str {
+        content
+            .lines()
+            .find(|line| line.contains(needle) && line.trim_start().starts_with("- ###"))
+            .unwrap_or_else(|| panic!("no row {needle:?} in {content}"))
+    }
+
+    fn brt_project(doc: &Path) {
+        agent_doc_queue_io::queue_cmd::project_claim_runtime_state_with_effects(
+            &crate::CliQueueCommandEffects,
+            doc,
+            None,
+        )
+        .unwrap();
+    }
+
+    fn brt_live_claims(doc: &Path) -> Vec<QueueClaim> {
+        let ledger = agent_doc_queue_io::queue_claim::load_ledger(doc).unwrap();
+        ledger
+            .claims
+            .into_iter()
+            .filter(|claim| {
+                [BRT_GH, BRT_CHROMIUM]
+                    .iter()
+                    .any(|row| claim.identity == agent_doc_queue::queue_claim::claim_identity(row))
+            })
+            .collect()
+    }
+
+    /// `#blockerreportterminal` (agent-doc-bugs.md rows `#ghrecvpolicy` and
+    /// `#prompt-blocker-b0ddfbae2f94`, 2026-11-21): two workers each handed
+    /// back only a prompt-blocker review, one a legacy review naming the
+    /// short prompt `do [#ghrecvpolicy]`, one an external hold. Recording the
+    /// hand-back used to requeue the attempt; the dispatcher's continue then
+    /// failed, the claim read `running / replacement_pending` with no worker,
+    /// the rows repainted `📥 [#subagent:…#1]`, and the Stop hook refused the
+    /// turn forever. Recording a blocker-only hand-back now closes the claim,
+    /// files the review, and rests the row `⛔` citing it. Nothing owes a
+    /// replacement until the review resolves; the next claim is generation 2.
+    #[test]
+    fn blockerreportterminal_a_blocker_only_hand_back_closes_its_claim_and_rests_blocked() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = brt_doc(dir.path());
+        start_subagent(&doc, BRT_GH, "subagent:ghrecvpolicy");
+        start_subagent(&doc, BRT_CHROMIUM, "subagent:chromium_steps");
+        brt_project(&doc);
+        assert_eq!(brt_live_claims(&doc).len(), 2);
+
+        let chromium_hand_back = brt_chromium_hand_back();
+        let gh = requeue_prompt_pressure_hand_back(&doc, BRT_GH, Some(1), BRT_GH_HAND_BACK, false)
+            .unwrap()
+            .expect("a review hand-back is prompt pressure");
+        assert_eq!(
+            gh.kind,
+            agent_doc_queue::goal_preset_terminal::PromptPressureKind::Review
+        );
+        assert_eq!(gh.review_id.as_deref(), Some("prompt-blocker-01eda3b6d7de"));
+        let chromium = requeue_prompt_pressure_hand_back(
+            &doc,
+            BRT_CHROMIUM,
+            Some(1),
+            &chromium_hand_back,
+            false,
+        )
+        .unwrap()
+        .expect("an external hold is prompt pressure");
+        assert!(chromium.external_evidence.is_some());
+        brt_project(&doc);
+
+        // (1) The claim is closed, not retained as a replacement-pending attempt.
+        assert!(
+            brt_live_claims(&doc).is_empty(),
+            "{:#?}",
+            brt_live_claims(&doc)
+        );
+        assert!(
+            agent_doc_queue_io::lost_running::recover_lost_running_automatically(&doc, true)
+                .unwrap()
+                .is_empty()
+        );
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(
+            agent_doc_queue_io::queue_claim::claim_reports_for_content(&doc, &content)
+                .unwrap()
+                .iter()
+                .all(|report| report.assessment != "replacement_pending"),
+        );
+        // The row rests `⛔` citing the review, with no stale owner tag.
+        let gh_row = brt_row(&content, BRT_GH);
+        assert!(gh_row.contains("⛔"), "{content}");
+        assert!(gh_row.contains("prompt-blocker-01eda3b6d7de"), "{content}");
+        assert!(!gh_row.contains("[#subagent:"), "{content}");
+        let chromium_row = brt_row(&content, BRT_CHROMIUM);
+        assert!(chromium_row.contains("⛔"), "{content}");
+        assert!(!chromium_row.contains("[#subagent:"), "{content}");
+        assert!(!content.contains("📥"), "{content}");
+        let evidence = agent_doc_queue_io::transient_closeout::closeout_evidence(&doc, &content);
+        assert!(
+            agent_doc_queue::transient_closeout::normal_closeout_failure_with(&content, &evidence)
+                .unwrap()
+                .is_none(),
+            "{content}"
+        );
+
+        // (2)+(3) An older projector's stale `📥 [#subagent:…#1]` paint is
+        // quiescent blocked, and the next projection rests it `⛔` again.
+        let stale = content
+            .replace(
+                gh_row,
+                &format!("- ### 📥 [#subagent:ghrecvpolicy#1] {BRT_GH}"),
+            )
+            .replace(
+                chromium_row,
+                &format!("- ### 📥 [#subagent:chromium_steps#1] {BRT_CHROMIUM}"),
+            );
+        let evidence = agent_doc_queue_io::transient_closeout::closeout_evidence(&doc, &stale);
+        let assessment =
+            agent_doc_queue::transient_closeout::assess_transient_closeout(&stale, &evidence)
+                .unwrap();
+        assert!(assessment.debts.is_empty(), "{assessment:#?}");
+        assert_eq!(assessment.quiescent_state(), Some("blocked"));
+        fs::write(&doc, &stale).unwrap();
+        brt_project(&doc);
+        let repainted = fs::read_to_string(&doc).unwrap();
+        assert!(!repainted.contains("[#subagent:"), "{repainted}");
+        assert!(brt_row(&repainted, BRT_GH).contains("⛔"), "{repainted}");
+
+        // A retried report of the same hand-back is already recorded.
+        let replay =
+            requeue_prompt_pressure_hand_back(&doc, BRT_GH, Some(1), BRT_GH_HAND_BACK, false)
+                .unwrap()
+                .expect("the recorded review hand-back answers again");
+        assert_eq!(replay.claim.generation, 1);
+        assert_eq!(replay.claim.owner, "subagent:ghrecvpolicy");
+        let replay = requeue_prompt_pressure_hand_back(
+            &doc,
+            BRT_CHROMIUM,
+            Some(1),
+            &chromium_hand_back,
+            false,
+        )
+        .unwrap()
+        .expect("the recorded external hold answers again");
+        assert_eq!(replay.review_id, chromium.review_id);
+        assert_eq!(fs::read_to_string(&doc).unwrap(), repainted);
+
+        // The review still holds the row; resolving it makes it claimable
+        // again at a fenced new generation.
+        assert!(
+            agent_doc_queue_io::queue_claim::claim(&doc, BRT_GH, "subagent:retry", 600).is_err()
+        );
+        assert_eq!(
+            agent_doc_queue_io::queue_lineage::max_generation(&doc, BRT_GH).unwrap(),
+            1
+        );
+        let resolved = repainted.replace(
+            "- [/] [#prompt-blocker-01eda3b6d7de]",
+            "- [x] [#prompt-blocker-01eda3b6d7de]",
+        );
+        assert_ne!(resolved, repainted);
+        fs::write(&doc, &resolved).unwrap();
+        let (_, next) =
+            agent_doc_queue_io::queue_claim::claim(&doc, BRT_GH, "subagent:retry", 600).unwrap();
+        assert_eq!(next.generation, 2);
+    }
+
+    /// `#blockerreportterminal`: a ledger an older binary wrote still holds the
+    /// abandoned, replacement-pending attempt, and the row shows the stale
+    /// `📥 [#subagent:ghrecvpolicy#1]` tag. The marker reconcile closes that
+    /// orphan attempt and repaints the row `⛔` citing the review.
+    #[test]
+    fn blockerreportterminal_reconcile_closes_a_legacy_orphan_attempt() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = brt_doc(dir.path());
+        start_subagent(&doc, BRT_GH, "subagent:ghrecvpolicy");
+        // The old path: requeue retains the started attempt abandoned, then
+        // the dispatcher's continue fails and authorizes a replacement.
+        agent_doc_queue_io::claim_release_receipt::release_attempt(
+            &doc,
+            BRT_GH,
+            agent_doc_queue_io::claim_release_receipt::ReleaseKind::Requeue,
+            Some(1),
+        )
+        .unwrap();
+        agent_doc_queue_io::lost_running::recover_lost_running_automatically(&doc, true).unwrap();
+        let orphan = brt_live_claims(&doc);
+        assert_eq!(orphan.len(), 1, "{orphan:#?}");
+        assert!(orphan[0].replacement_pending(), "{orphan:#?}");
+
+        let blocker =
+            agent_doc_queue::prompt_pressure::parse_prompt_blocker(BRT_GH_HAND_BACK).unwrap();
+        let content = fs::read_to_string(&doc).unwrap();
+        let stale = agent_doc_queue::prompt_pressure::hoist_prompt_blocker(&content, &blocker)
+            .replace(
+                &format!("- ### {BRT_GH}"),
+                &format!("- ### 📥 [#subagent:ghrecvpolicy#1] {BRT_GH}"),
+            );
+        assert!(stale.contains("📥 [#subagent:ghrecvpolicy#1]"), "{stale}");
+        fs::write(&doc, &stale).unwrap();
+        assert!(
+            agent_doc_queue_io::queue_claim::claim_reports_for_content(&doc, &stale)
+                .unwrap()
+                .iter()
+                .any(|report| report.assessment == "replacement_pending")
+        );
+
+        assert!(crate::plan::reconcile_visible_claim_markers(&doc).unwrap());
+        assert!(
+            brt_live_claims(&doc).is_empty(),
+            "{:#?}",
+            brt_live_claims(&doc)
+        );
+        let healed = fs::read_to_string(&doc).unwrap();
+        let row = brt_row(&healed, BRT_GH);
+        assert!(row.contains("⛔"), "{healed}");
+        assert!(row.contains("prompt-blocker-01eda3b6d7de"), "{healed}");
+        assert!(!row.contains("[#subagent:"), "{healed}");
+        assert!(!crate::plan::reconcile_visible_claim_markers(&doc).unwrap());
     }
 
     /// `#promptpressure`: a prose blocker is not a completion. The same row

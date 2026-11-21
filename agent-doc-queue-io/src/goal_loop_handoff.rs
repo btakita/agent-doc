@@ -471,6 +471,7 @@ fn reopen_if_reportable_lost(
 /// `#promptpressure`: record an unfinished prompt hand-back and requeue the
 /// exact attempt. `stored_response` is what the next brief quotes: the prose
 /// hand-back, or the one-line review pointer. No completion cell is written.
+/// A review hand-back closes the attempt instead (`#blockerreportterminal`).
 pub fn requeue_with_prompt_pressure(
     file: &Path,
     content: &str,
@@ -509,19 +510,33 @@ pub fn requeue_with_prompt_pressure(
         }
         ledger.record(handoff);
     })?;
-    let requeued = crate::claim_release_receipt::release_attempt(
-        file,
-        &claim.item_text,
-        crate::claim_release_receipt::ReleaseKind::Requeue,
-        Some(claim.generation),
-    )?
+    // `#blockerreportterminal`: a review hand-back closes the attempt. The
+    // review holds the row until the operator resolves it, so no replacement
+    // is owed and nothing is left live to read as `replacement_pending`.
+    // A prose hand-back keeps the ordinary requeue: its row is redispatched.
+    let closed = kind == agent_doc_queue::goal_preset_terminal::PromptPressureKind::Review;
+    let requeued = if closed {
+        crate::queue_claim::close_attempt_for_prompt_blocker(
+            file,
+            &claim.item_text,
+            claim.generation,
+        )?
+    } else {
+        crate::claim_release_receipt::release_attempt(
+            file,
+            &claim.item_text,
+            crate::claim_release_receipt::ReleaseKind::Requeue,
+            Some(claim.generation),
+        )?
+    }
     .unwrap_or_else(|| claim.clone());
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "queue_prompt_pressure_requeued owner={} generation={} kind={kind:?} response_bytes={} item_bytes={} (#promptpressure)",
+            "queue_prompt_pressure_requeued owner={} generation={} kind={kind:?} attempt={} response_bytes={} item_bytes={} (#promptpressure)",
             requeued.owner,
             requeued.generation,
+            if closed { "closed" } else { "requeued" },
             stored_response.trim().len(),
             requeued.item_text.trim().len(),
         ),

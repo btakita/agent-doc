@@ -1798,7 +1798,11 @@ fn unchanged_debts_system_message(
 /// `🚧`, `⚠️🚧`, or `☑️`. `📥`, `🚧`, and `⚠️🚧` keep refusing
 /// (`state=inbox_or_running`). A hold that is only `☑️` keeps refusing
 /// (`state=reported_open`): the turn ends once that row's response is written
-/// and the row is struck. Any other unchanged debt set allows,
+/// and the row is struck. `#blockerreportterminal`: an unchanged debt set
+/// whose every row a recorded blocker holds (an open prompt-blocker review or
+/// a stays-open blocker) allows with `state=unchanged_debts` even when those
+/// rows are `📥` or `🚧`, since nothing the agent does moves them before the
+/// operator resolves the blocker. Any other unchanged debt set allows,
 /// names the rows to the operator in a `systemMessage`, and leaves them live;
 /// the agent was told once and nothing it did moved them. A changed debt set
 /// refuses again, a first Stop (`stop_hook_active = false`) always refuses,
@@ -1900,7 +1904,17 @@ fn transient_turn_end_continuation(
             ),
         });
     }
-    if repeats && holds_turn {
+    // `#blockerreportterminal`: a row a recorded blocker holds cannot move
+    // before the operator resolves that blocker, however often the Stop hook
+    // refuses. An unchanged refusal over only such rows ends the turn.
+    let every_row_blocked = repeats
+        && holds_turn
+        && agent_doc_queue_io::transient_closeout::every_debt_gated_by_recorded_blocker(
+            file,
+            &content,
+            &assessment.debts,
+        );
+    if repeats && holds_turn && !every_row_blocked {
         let state = if holds_inbox_or_running {
             "inbox_or_running"
         } else {
@@ -10891,6 +10905,106 @@ agent: grok
                 .debts,
             2
         );
+    }
+
+    /// `#blockerreportterminal` (agent-doc-bugs.md, 2026-11-21): the Stop hook
+    /// refused four identical stops over rows the operator's open
+    /// prompt-blocker reviews hold. A review-held `📥` row is quiescent
+    /// `blocked`. A recursive Stop over an unchanged refusal whose every row
+    /// a recorded blocker gates (here a stale `🚧` no worker backs) ends the
+    /// turn with `state=unchanged_debts` instead of `inbox_or_running`.
+    #[test]
+    fn claude_stop_ends_an_unchanged_refusal_over_blocker_gated_rows() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        let content = "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+## Queue\n\n\
+<!-- agent:queue -->\n\
+- 📥 [#subagent:ghrecvpolicy#1] do [#ghrecvpolicy]: #advance whatever is actionable.\n\
+- 🚧 [#subagent:chromium_steps#1] do [#chromium]: Use chromium-bridge to perform the steps.\n\
+<!-- /agent:queue -->\n\n\
+## Backlog\n\n\
+<!-- agent:backlog -->\n\
+- [ ] [#ghrecvpolicy] Recipient-side policy.\n\
+- [ ] [#chromium] Activate the signed frontend.\n\
+<!-- /agent:backlog -->\n\n\
+## Review\n\n\
+<!-- agent:review -->\n\
+<!-- agent-doc:prompt-blocker -->\n\
+- [/] [#prompt-blocker-01eda3b6d7de] Recipient policy awaits multi-user support.\n  \
+- **Complete by:** enforce it once multi-user workspaces land\n  \
+- **Prompt:** do [#ghrecvpolicy]\n\
+<!-- /agent-doc:prompt-blocker -->\n\
+<!-- agent-doc:prompt-blocker -->\n\
+- [/] [#prompt-blocker-dfc6201b3410] Activation awaits a signed frontend release.\n  \
+- **Complete by:** verify the signed package\n  \
+- **Prompt:** do [#chromium]\n\
+<!-- /agent-doc:prompt-blocker -->\n\
+<!-- /agent:review -->\n";
+        fs::write(&doc, content).unwrap();
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        complete_run(&doc);
+        let no_supervisor =
+            |_: &Path| agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor;
+        let answer = |stop_hook_active: bool| {
+            claude_stop_answer_with_drain_readiness(
+                &ClaudeStopInput {
+                    session_id: "codex-session".to_string(),
+                    cwd: dir.path().display().to_string(),
+                    stop_hook_active,
+                    transcript_path: None,
+                    reason: None,
+                    subagent_type: None,
+                },
+                no_supervisor,
+            )
+            .unwrap()
+        };
+        let first = answer(false)
+            .into_continuation()
+            .expect("the first stop refuses the stale running row");
+        assert!(
+            first
+                .reason
+                .contains("🚧 [#subagent:chromium_steps#1] do [#chromium]"),
+            "{}",
+            first.reason
+        );
+        assert!(
+            !first.reason.contains("do [#ghrecvpolicy]"),
+            "a review-held pending row is quiescent blocked: {}",
+            first.reason
+        );
+        let released = answer(true);
+        let ClaudeStopAnswer::Allow {
+            system_message: Some(notice),
+        } = &released
+        else {
+            panic!("an unchanged refusal over blocker-gated rows ends the turn: {released:?}");
+        };
+        assert!(notice.contains("do [#chromium]"), "{notice}");
+        let log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(log.contains("state=unchanged_debts"), "{log}");
+        assert!(!log.contains("state=inbox_or_running"), "{log}");
+
+        // The same stale row with its review resolved keeps refusing.
+        fs::write(
+            &doc,
+            content.replace(
+                "- [/] [#prompt-blocker-dfc6201b3410]",
+                "- [x] [#prompt-blocker-dfc6201b3410]",
+            ),
+        )
+        .unwrap();
+        complete_run(&doc);
+        invalidate_stop_document_cache();
+        assert!(answer(false).into_continuation().is_some());
+        assert!(answer(true).into_continuation().is_some());
+        let log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(log.contains("state=inbox_or_running"), "{log}");
     }
 
     /// `#transientcloseout`: a normal turn does not end on `📥`, `🚧`, or

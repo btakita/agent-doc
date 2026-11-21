@@ -147,6 +147,21 @@ pub fn assess(file: &Path, content: &str) -> Result<TransientCloseoutAssessment>
     assess_transient_closeout(content, &closeout_evidence(file, content))
 }
 
+/// [`agent_doc_queue::transient_closeout::every_debt_gated_by_recorded_blocker`]
+/// with the external done archive resolved, so an archived (closed) blocker
+/// never counts as one that still holds a row (`#blockerreportterminal`).
+pub fn every_debt_gated_by_recorded_blocker(
+    file: &Path,
+    content: &str,
+    debts: &[agent_doc_queue::transient_closeout::TransientCloseoutDebt],
+) -> bool {
+    agent_doc_queue::transient_closeout::every_debt_gated_by_recorded_blocker(
+        content,
+        debts,
+        agent_doc_element_backlog_io::done_archive::blocker_archive_ids(file, content).as_ref(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::process::Command;

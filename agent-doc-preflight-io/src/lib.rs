@@ -9084,6 +9084,25 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                 }),
         );
     }
+    // `#promptpressure` / `#blockerreportterminal`: a head an open
+    // prompt-blocker review holds (matched by work id) is not drainable until
+    // the review is resolved, so it never becomes the selected head.
+    let review_held = agent_doc_queue::prompt_pressure::review_blocked_prompts(&current_content);
+    if !review_held.is_empty() {
+        selection_holds.extend(
+            activation
+                .entries_after
+                .iter()
+                .filter_map(|entry| match entry {
+                    agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
+                        if review_held.contains(&prompt.text) =>
+                    {
+                        Some(prompt.text.clone())
+                    }
+                    _ => None,
+                }),
+        );
+    }
     let projection_entries = entries_without_out_of_loop_heads(
         &activation.entries_after,
         &in_flight_queue_items,
@@ -9242,6 +9261,9 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         file,
         &current_content,
     );
+    // `#blockerreportterminal`: an open prompt-blocker review holds its row.
+    let review_blockers =
+        agent_doc_queue::prompt_pressure::review_blocked_prompts(&current_content);
     // `#strikeisterminal`, per queue: a struck row whose identity is also live in this queue
     // is an earlier attempt's record, never the claim's row.
     let lifecycle_targets = activation
@@ -9257,9 +9279,22 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             let identity =
                 agent_doc_queue::queue_claim::claim_identity_at(&activation.entries_after, index)
                     .unwrap_or_else(|| agent_doc_queue::queue_claim::claim_identity(&prompt.text));
+            // `#blockerreportterminal`: an open review holds the row, so a
+            // requeued attempt waiting on a replacement owes nothing until
+            // the review is resolved. The row rests `⛔` citing the review,
+            // never `📥` with that attempt's stale owner tag. An external
+            // hold outranks every attempt.
+            let review_hold = review_blockers.holding_review_id(&prompt.text);
+            let externally_blocked = review_blockers.holds_external_identity(&identity);
             let attempt = lifecycle
                 .as_ref()
-                .and_then(|state| state.attempts.get(&identity));
+                .and_then(|state| state.attempts.get(&identity))
+                .filter(|attempt| {
+                    !externally_blocked
+                        && !(review_hold.is_some()
+                            && attempt.marker
+                                == agent_doc_document::queue_projection::QueueLifecycleMarker::Pending)
+                });
             // `#terminalitemstability`: runtime evidence never reopens a
             // struck row. The operator removes the strike to reopen it.
             if matches!(
@@ -9270,6 +9305,8 @@ fn run_queue_maintenance_with_options_under_apply_guard(
             }
             let marker = if lifecycle_state_degraded {
                 agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
+            } else if externally_blocked {
+                agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
             } else if let Some(attempt) = attempt {
                 attempt.marker
             } else if completion_items.iter().any(|item| {
@@ -9278,7 +9315,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                 agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling
             } else if active_identities.contains(&identity) {
                 agent_doc_document::queue_projection::QueueLifecycleMarker::Running
-            } else if row_blockers.blocks_row(&prompt.text) {
+            } else if review_hold.is_some() || row_blockers.blocks_row(&prompt.text) {
                 // `#queueblocked`: held out of drain and dispatch; names the
                 // open ids it waits on.
                 agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
@@ -9316,10 +9353,10 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                 blockers: if marker
                     == agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
                 {
-                    row_blockers
-                        .blockers_for_row(&prompt.text)
-                        .map(<[String]>::to_vec)
-                        .unwrap_or_default()
+                    agent_doc_queue::prompt_pressure::blocked_row_citations(
+                        row_blockers.blockers_for_row(&prompt.text).unwrap_or_default(),
+                        review_hold,
+                    )
                 } else {
                     Vec::new()
                 },
@@ -13839,6 +13876,115 @@ mod tests {
             queue_line(&updated, "stg"),
             "- ### ⛔ ⟦blocked by sbx⟧ do [#stg]",
             "{updated}"
+        );
+    }
+
+    /// `#blockerreportterminal` (agent-doc-bugs.md, 2026-11-21): the worker on
+    /// `do [#ghrecvpolicy]` handed back only a prompt-blocker review naming
+    /// `do [#ghrecvpolicy]`. An older binary requeued the attempt, its
+    /// continue failed, and the attempt read replacement-pending. Preflight
+    /// then painted the row `📥 [#subagent:ghrecvpolicy#1]` over its `⛔`,
+    /// and the Stop hook refused every turn end. The open review holds the
+    /// row by work id, so preflight rests it `⛔` citing the review, with no
+    /// owner tag, and selects the runnable row.
+    #[test]
+    fn run_queue_maintenance_rests_a_review_held_replacement_pending_row_blocked() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        const ROW: &str = "do [#ghrecvpolicy]: #advance whatever is actionable.";
+        let content = format!(
+            concat!(
+                "---\n",
+                "agent_doc_session: test\n",
+                "agent_doc_format: template\n",
+                "agent_doc_write: crdt\n",
+                "queue_active: true\n",
+                "---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: prior — test\n\nDone.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue go subagents -->\n",
+                "- {row}\n",
+                "- do [#runnable]\n",
+                "<!-- /agent:queue -->\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] [#ghrecvpolicy] Recipient-side policy. (stays open: workspace access control and session isolation must land before enforcing the recipient policy)\n",
+                "- [ ] [#runnable] a real open task\n",
+                "<!-- /agent:backlog -->\n",
+            ),
+            row = ROW
+        );
+        // The worker's review lands after it was claimed and started.
+        let review = concat!(
+            "\n<!-- agent:review -->\n",
+            "<!-- agent-doc:prompt-blocker -->\n",
+            "- [/] [#prompt-blocker-01eda3b6d7de] Recipient policy awaits multi-user support.\n",
+            "  - **Complete by:** enforce it once multi-user workspaces land\n",
+            "  - **Prompt:** do [#ghrecvpolicy]\n",
+            "<!-- /agent-doc:prompt-blocker -->\n",
+            "<!-- /agent:review -->\n",
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let owner = "subagent:ghrecvpolicy";
+        let (_, claim) = agent_doc_queue_io::queue_claim::claim(&doc, ROW, owner, 600).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            ROW,
+            owner,
+            "worker:ghrecvpolicy",
+            600,
+            claim.generation,
+        )
+        .unwrap();
+        agent_doc_queue_io::claim_release_receipt::release_attempt(
+            &doc,
+            ROW,
+            agent_doc_queue_io::claim_release_receipt::ReleaseKind::Requeue,
+            Some(claim.generation),
+        )
+        .unwrap();
+        agent_doc_queue_io::lost_running::recover_lost_running_automatically(&doc, true).unwrap();
+        assert!(
+            agent_doc_queue_io::queue_claim::load_ledger(&doc)
+                .unwrap()
+                .claims
+                .iter()
+                .any(|claim| claim.replacement_pending()),
+            "the older binary's replacement-pending attempt is the precondition"
+        );
+        let stale = std::fs::read_to_string(&doc).unwrap().replace(
+            &format!("- {ROW}\n"),
+            &format!("- 📥 [#subagent:ghrecvpolicy#1] {ROW}\n"),
+        ) + review;
+        std::fs::write(&doc, &stale).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &stale,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let row = queue_line(&updated, "ghrecvpolicy");
+        assert!(
+            row.contains("⛔ ⟦blocked by prompt-blocker-01eda3b6d7de⟧ do [#ghrecvpolicy]"),
+            "{updated}"
+        );
+        assert!(!row.contains("[#subagent:"), "{updated}");
+        assert!(
+            !state
+                .selected_queue_prompts
+                .iter()
+                .any(|prompt| prompt.contains("ghrecvpolicy")),
+            "{:?}\n{updated}",
+            state.selected_queue_prompts
         );
     }
 

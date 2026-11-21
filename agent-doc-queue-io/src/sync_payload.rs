@@ -77,6 +77,18 @@ pub fn build_project_queue_sync_payload(
                 }
             }
         };
+        // `#blockerreportterminal`: an abandoned attempt an open review holds
+        // owes no replacement. Close it before this scan offers its row.
+        if let Err(error) =
+            crate::queue_claim::close_review_blocked_orphan_attempts(&document, &content)
+        {
+            agent_doc_ops_log_io::log_op(
+                &document,
+                &format!(
+                    "queue_claim_review_blocked_orphan_close_skipped error={error:#} (#blockerreportterminal)"
+                ),
+            );
+        }
         let claim_ledger = crate::queue_claim::load_ledger_following(&document, &content);
         let cancellations = claim_ledger
             .as_ref()

@@ -678,10 +678,18 @@ fn derive_runtime_projection_scoped(
                     if struck {
                         return None;
                     }
+                    // `#blockerreportterminal`: an open review holds the row,
+                    // so a requeued attempt waiting on a replacement owes
+                    // nothing until the review is resolved.
+                    let review_hold = review_blockers.holding_review_id(&prompt.text);
                     let attempt = lifecycle.as_ref().and_then(|lifecycle| {
                         (cleared_identity.as_ref() != Some(&identity))
                             .then(|| lifecycle.attempts.get(&identity))
                             .flatten()
+                    }).filter(|attempt| {
+                        !(review_hold.is_some()
+                            && attempt.marker
+                                == agent_doc_document::queue_projection::QueueLifecycleMarker::Pending)
                     });
                     let has_completion_evidence = completion_evidence.iter().any(|item| {
                         agent_doc_queue::queue_claim::completion_evidence_matches_row(
@@ -700,7 +708,9 @@ fn derive_runtime_projection_scoped(
                         block.entries, index,
                     );
                     let externally_blocked = review_blockers.holds_external_identity(&identity);
-                    let is_blocked = externally_blocked || blockers.blocks_row(&prompt.text);
+                    let is_blocked = externally_blocked
+                        || review_hold.is_some()
+                        || blockers.blocks_row(&prompt.text);
                     if rows == RuntimeProjectionRows::LifecycleEvidence
                         && observed.is_none()
                         && !state_degraded
@@ -781,10 +791,10 @@ fn derive_runtime_projection_scoped(
                         blockers: if marker
                             == agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
                         {
-                            blockers
-                                .blockers_for_row(&prompt.text)
-                                .map(<[String]>::to_vec)
-                                .unwrap_or_default()
+                            agent_doc_queue::prompt_pressure::blocked_row_citations(
+                                blockers.blockers_for_row(&prompt.text).unwrap_or_default(),
+                                review_hold,
+                            )
                         } else {
                             Vec::new()
                         },
@@ -952,6 +962,8 @@ pub fn project_claim_runtime_state_with_effects(
 /// matters for Grok's passive lifecycle: steering can resume after an unstarted
 /// attempt has been released, and the next plan must not trust the orphan
 /// projection.
+/// An abandoned attempt whose row an open prompt-blocker review holds is closed
+/// first (`#blockerreportterminal`), so its stale owner tag repaints `⛔`.
 /// Already-matching rows are left untouched. The write is the lifecycle-owner
 /// generation converge: it CAS-rebases onto current authority and returns
 /// without waiting for an editor native-save receipt and without forcing disk.
@@ -960,6 +972,20 @@ pub fn reconcile_drifted_claim_markers(
     file: &Path,
 ) -> Result<bool> {
     let current = effects.current_document_content(file, "queue_claim_marker_drift")?;
+    // `#blockerreportterminal`: an abandoned attempt an open review holds
+    // owes no replacement. Close it before reading the reports, so its stale
+    // `📥 [#subagent:…]` tag repaints `⛔` below.
+    // A failure here only leaves the orphan for the next reconcile.
+    match crate::queue_claim::close_review_blocked_orphan_attempts(file, &current) {
+        Ok(closed) if !closed.is_empty() => {
+            return project_claim_runtime_state_with_effects(effects, file, None);
+        }
+        Ok(_) => {}
+        Err(err) => eprintln!(
+            "[queue] could not close review-held orphan attempts in {}: {err:#} (#blockerreportterminal)",
+            file.display()
+        ),
+    }
     let reports = crate::queue_claim::claim_reports_for_content(file, &current)?;
     let orphaned_claim = has_orphaned_claimed_projection(file, &current)?;
     if reports

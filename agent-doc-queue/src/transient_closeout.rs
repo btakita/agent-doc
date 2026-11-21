@@ -827,6 +827,10 @@ fn integration_in_flight_status(
 pub struct PendingItemGates {
     awaiting: HashSet<String>,
     blockers: crate::queue_blocked::QueueBlockers,
+    /// `#blockerreportterminal`: open prompt-blocker reviews. A row a review
+    /// holds is not dispatchable, drainable, or claimable until the review is
+    /// resolved, so it is blocked, not pending work the turn owes.
+    review: crate::prompt_pressure::ReviewBlockedPrompts,
 }
 
 impl PendingItemGates {
@@ -849,12 +853,16 @@ impl PendingItemGates {
         );
         let mut awaiting = deferred.all;
         awaiting.extend(crate::queue_continuation::gated_review_ids(content));
-        Self { awaiting, blockers }
+        Self {
+            awaiting,
+            blockers,
+            review: crate::prompt_pressure::review_blocked_prompts(content),
+        }
     }
 
     /// The gate that holds the row `text`, or `None` when it is runnable.
     pub fn gate(&self, text: &str) -> Option<QuiescentReason> {
-        if self.blockers.blocks_row(text) {
+        if self.blockers.blocks_row(text) || self.review.contains(text) {
             return Some(QuiescentReason::Blocked);
         }
         if crate::queue_continuation::head_answers_operator(text) {
@@ -864,6 +872,27 @@ impl PendingItemGates {
             .is_some_and(|id| self.awaiting.contains(&id.to_ascii_lowercase()))
             .then_some(QuiescentReason::AwaitingOperator)
     }
+}
+
+/// `#blockerreportterminal`: whether every refused row is held by a recorded
+/// blocker: an open prompt-blocker review for its work, or an open or
+/// external blocker its tracked item's stays-open clause names. No agent
+/// transition moves such a row before the operator resolves the blocker, so a
+/// recursive Stop that finds the same refusal ends the turn
+/// (`state=unchanged_debts`) instead of refusing forever. `false` for an
+/// empty debt set.
+pub fn every_debt_gated_by_recorded_blocker(
+    content: &str,
+    debts: &[TransientCloseoutDebt],
+    archived: Option<&HashSet<String>>,
+) -> bool {
+    if debts.is_empty() {
+        return false;
+    }
+    let gates = PendingItemGates::from_content(content, archived);
+    debts
+        .iter()
+        .all(|debt| gates.gate(&debt.row) == Some(QuiescentReason::Blocked))
 }
 
 /// Whether a queue's resolved control is the operator's hold, so none of its
@@ -1448,6 +1477,124 @@ mod tests {
         );
         assert!(failure.contains("do [#plain]"), "{failure}");
         assert!(!failure.contains("do [#licensefix]"), "{failure}");
+    }
+
+    /// `#blockerreportterminal` (agent-doc-bugs.md, 2026-11-21): the exact
+    /// rows an older binary left after their workers handed back only
+    /// prompt-blocker reviews. Each still showed `📥` with a stale
+    /// `[#subagent:…#1]` tag, no worker was live, and an open review held
+    /// it, one by an external hold (`**Evidence:**`) and one by the legacy
+    /// short prompt `do [#ghrecvpolicy]`. Every such row is quiescent
+    /// `blocked`; a runnable row beside them still refuses.
+    fn blockerreportterminal_doc() -> String {
+        concat!(
+            "<!-- agent:run id=\"main\" subagents go -->\n",
+            "- ### 📥 [#subagent:ghrecvpolicy#1] do [#ghrecvpolicy]: #advance whatever is actionable.\n",
+            "- ### 📥 [#subagent:chromium_steps#1] [#prompt-blocker-b0ddfbae2f94]: Use chromium-bridge to perform the steps.\n",
+            "- ### 📥 do [#plain]\n",
+            "<!-- /agent:run -->\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#ghrecvpolicy] Recipient-side policy. (stays open: workspace access control and session isolation must land before enforcing the recipient policy)\n",
+            "- [ ] [#plain] Runnable work.\n",
+            "<!-- /agent:backlog -->\n",
+            "<!-- agent:review -->\n",
+            "<!-- agent-doc:prompt-blocker -->\n",
+            "- [/] [#prompt-blocker-dfc6201b3410] Production activation awaits a signed frontend release.\n",
+            "  - **Complete by:** verify the signed package\n",
+            "  - **Prompt:** [#prompt-blocker-b0ddfbae2f94]: Use chromium-bridge to perform the steps.\n",
+            "<!-- /agent-doc:prompt-blocker -->\n",
+            "<!-- agent-doc:prompt-blocker -->\n",
+            "- [/] [#prompt-blocker-01eda3b6d7de] Recipient policy awaits multi-user support.\n",
+            "  - **Complete by:** enforce it once multi-user workspaces land\n",
+            "  - **Prompt:** do [#ghrecvpolicy]\n",
+            "<!-- /agent-doc:prompt-blocker -->\n",
+            "<!-- /agent:review -->\n",
+        )
+        .to_string()
+    }
+
+    #[test]
+    fn blockerreportterminal_review_held_pending_rows_are_quiescent_blocked() {
+        let content = blockerreportterminal_doc();
+        let assessment = assess_transient_closeout(&content, &CloseoutEvidence::default()).unwrap();
+        assert_eq!(
+            reasons(&assessment),
+            vec![
+                (
+                    "📥 [#subagent:ghrecvpolicy#1] do [#ghrecvpolicy]: #advance whatever is actionable.".to_string(),
+                    QuiescentReason::Blocked
+                ),
+                (
+                    "📥 [#subagent:chromium_steps#1] [#prompt-blocker-b0ddfbae2f94]: Use chromium-bridge to perform the steps.".to_string(),
+                    QuiescentReason::Blocked
+                ),
+            ],
+            "{assessment:?}"
+        );
+        assert_eq!(assessment.debts.len(), 1, "{assessment:?}");
+        assert_eq!(assessment.debts[0].row, "📥 do [#plain]");
+        assert!(!every_debt_gated_by_recorded_blocker(
+            &content,
+            &assessment.debts,
+            None
+        ));
+
+        // Without the runnable row the turn may end over the blocked rows.
+        let only_blocked = content.replace("- ### 📥 do [#plain]\n", "");
+        let assessment =
+            assess_transient_closeout(&only_blocked, &CloseoutEvidence::default()).unwrap();
+        assert!(assessment.debts.is_empty(), "{assessment:?}");
+        assert_eq!(assessment.quiescent_state(), Some("blocked"));
+
+        // Resolving a review makes its row agent work again.
+        let resolved = only_blocked.replace(
+            "- [/] [#prompt-blocker-01eda3b6d7de]",
+            "- [x] [#prompt-blocker-01eda3b6d7de]",
+        );
+        let failure = normal_closeout_failure(&resolved)
+            .unwrap()
+            .expect("a resolved review releases its row");
+        assert!(failure.contains("do [#ghrecvpolicy]"), "{failure}");
+        assert!(!failure.contains("chromium-bridge"), "{failure}");
+    }
+
+    /// `#blockerreportterminal` (4): a debt row a recorded blocker gates
+    /// (here a stale `🚧` no worker backs) is not one the agent can move, so a
+    /// repeated refusal over only such rows may end the turn. Any ungated row
+    /// keeps the refusal.
+    #[test]
+    fn blockerreportterminal_every_gated_debt_is_recognised() {
+        let content = blockerreportterminal_doc()
+            .replace(
+                "- ### 📥 [#subagent:ghrecvpolicy#1] do [#ghrecvpolicy]",
+                "- ### 🚧 [#subagent:ghrecvpolicy#1] do [#ghrecvpolicy]",
+            )
+            .replace("- ### 📥 do [#plain]\n", "");
+        let assessment = assess_transient_closeout(&content, &CloseoutEvidence::default()).unwrap();
+        assert_eq!(assessment.debts.len(), 1, "{assessment:?}");
+        assert_eq!(
+            assessment.debts[0].marker,
+            QueueLifecycleMarker::Running,
+            "{assessment:?}"
+        );
+        assert!(every_debt_gated_by_recorded_blocker(
+            &content,
+            &assessment.debts,
+            None
+        ));
+        assert!(!every_debt_gated_by_recorded_blocker(&content, &[], None));
+
+        let ungated = content.replace(
+            "- ### 🚧 [#subagent:ghrecvpolicy#1]",
+            "- ### 🚧 [#subagent:plain#1] do [#plain]\n- ### 🚧 [#subagent:ghrecvpolicy#1]",
+        );
+        let assessment = assess_transient_closeout(&ungated, &CloseoutEvidence::default()).unwrap();
+        assert_eq!(assessment.debts.len(), 2, "{assessment:?}");
+        assert!(!every_debt_gated_by_recorded_blocker(
+            &ungated,
+            &assessment.debts,
+            None
+        ));
     }
 
     /// The IO evidence carries the external done archive: a blocker that

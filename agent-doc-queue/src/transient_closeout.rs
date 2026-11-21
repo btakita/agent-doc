@@ -479,6 +479,12 @@ const OWED_RUNNING_RECORDED_HANDBACK: &str = "report the hand-back its ended wor
 /// tree's operator request is answered (or when it names none).
 const OWED_REPORTED_RESPONSE_ORIGIN: &str = "the operator answered this reported row's request: act on the answer, then strike the row yourself with `agent-doc queue consume` (by its generated `--ack-id <q-…>`, fenced with `--ack-owner`); its kept response tree makes it a context parent, not an executable leaf, and no worker remains to dispatch. The agent closes this row: never ask the operator to delete it by hand.";
 
+/// `#finishactionable`: what a pending agent-owned `follow up on an action
+/// item` row owes. The worker's hand-back listed it as agent work, so it is
+/// done in this turn under the originating item's authorization; only a
+/// concrete blocker recorded on the row leaves it for later.
+pub const OWED_AGENT_ACTION_ITEM: &str = "do this agent-owned action item now, in this turn (#finishactionable): a worker hand-back listed it as agent work under the originating item's authorization, so it is not an operator question and not work for a later turn. Do it inline (or dispatch this row now when it is a substantial new task), verify the result, and strike the row with `agent-doc queue consume <FILE> --ack-text '<row>'`; if it is genuinely blocked, record the concrete blocker on the row instead";
+
 const OWED_OPERATOR_RECORD: &str = "record this row's operator-request packet in agent:exchange and its open agent:todo action, or act on the operator's answer; a 🙋 row waits on the operator only once both are recorded";
 
 /// Whether a `🙋` row's request is recorded: some id on the row has its packet
@@ -781,6 +787,13 @@ pub fn assess_transient_closeout(
                     assessment
                         .quiescent
                         .push(quiescent(QuiescentReason::ScheduleNotDue));
+                }
+                // `#finishactionable`: an agent-owned action item a worker
+                // hand-back reported is this turn's work, not a later drain.
+                QueueLifecycleMarker::Pending
+                    if crate::followup_owner::is_agent_followup_row(&prompt.text) =>
+                {
+                    assessment.debts.push(debt(OWED_AGENT_ACTION_ITEM));
                 }
                 _ => assessment.debts.push(debt(owed)),
             }
@@ -1686,10 +1699,8 @@ mod tests {
             .unwrap()
             .expect("a pending agent row refuses");
         assert!(failure.contains("agent: rebase PR 7"), "{failure}");
-        assert!(
-            failure.contains("leave pending before the turn ends"),
-            "{failure}"
-        );
+        // `#finishactionable`: an agent-owned action item is this turn's work.
+        assert!(failure.contains(OWED_AGENT_ACTION_ITEM), "{failure}");
         assert!(!failure.contains("tmstorm"), "{failure}");
         assert!(!failure.contains("decide how #244"), "{failure}");
 

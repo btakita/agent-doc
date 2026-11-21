@@ -141,7 +141,10 @@ only the compact routing table that survives context compaction.
   or a completed subagent handback is part of the current work. Execute it and
   verify its result before `respond` / `finalize` and the final `session-check`.
   A worker report or prepared artifact is not completion while its authorized
-  effect remains. A head that requires a pull request is not complete when the
+  effect remains. The same holds for a handback's `agent:` action items
+  (`#finishactionable`): install, CI checks, and small follow-up fixes the
+  item's authorization covers are done in this turn and their rows struck;
+  only operator-owned or concretely blocked items stay open. A head that requires a pull request is not complete when the
   response only cites one that already existed (`#closepressure`); the close
   fails until this turn shows the pull request it created. Queue auto-clear and `next_queue_prompt` apply only after
   those effects finish; they never preempt, defer, or cancel them. If an effect

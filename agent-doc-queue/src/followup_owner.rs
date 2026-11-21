@@ -631,6 +631,25 @@ pub fn followup_row_action_item(work: &str) -> Option<&str> {
     after_origin.strip_prefix(": ")
 }
 
+/// `#finishactionable`: whether a live queue row's text is an agent-owned
+/// `follow up on an action item` row, the agent work a worker hand-back
+/// reported. A heading prefix, lifecycle marker, and attempt projection are
+/// projection. A row that carries [`OPERATOR_OWNED_TAG`] or the `🙋` operator
+/// marker waits on a person, so it is not one; an untagged row is agent work
+/// whatever its wording, because the tag is how the operator hands a row back.
+pub fn is_agent_followup_row(text: &str) -> bool {
+    let text = text.trim_start();
+    let rest = text.strip_prefix("### ").unwrap_or(text);
+    if rest.starts_with("~~")
+        || queue_projection::operator_action_marked(rest)
+        || carries_operator_owned_tag(rest)
+    {
+        return false;
+    }
+    let work = agent_doc_element_queue::strip_attempt_projection_prefix(rest);
+    followup_row_action_item(work).is_some()
+}
+
 /// One follow-up row [`reclassify_human_followup_rows`] tagged.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReclassifiedFollowup {

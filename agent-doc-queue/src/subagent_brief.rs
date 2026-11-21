@@ -612,7 +612,7 @@ pub const SUBAGENT_TMUX_ISOLATION_RULE: &str = subagent_tmux_isolation_rule!();
 #[macro_export]
 macro_rules! subagent_handback_shape_rule {
     () => {
-        "Report back in this shape, one bold label per section, so `agent-doc queue report-complete` renders it into the response structure: **Summary** (one or two sentences); **What changed** (branch, every commit SHA, files changed); **Verification** (the exact commands run and their results); **Action items** (one `- ` bullet per piece of work someone still has to do, or `none`; start each bullet with its owner: `- agent: …` for work an agent can do, `- human (<who>): …` or `- operator: …` for an action only a person can take, such as another reviewer approving a pull request, an org owner or repo admin changing a setting, or an operator decision; report-complete queues each bullet as a follow-up row after the originating head, where an `agent:` row can dispatch with no review and a `human`/`operator` row waits on the operator as `[operator-verify]` (`#humanfollowupowner`), so put nothing else here and do not also list those as follow-ups); **Notes** (one `- ` bullet per limit, state, or FYI that asks for no work, or `none`; never queued); **Next actions** (remaining steps, and any follow-up queue heads in order). Complete the prompt before handing back. A blocker is only the review structure (`<!-- agent-doc:prompt-blocker -->` with the incomplete work, **Complete by:**, and **Prompt:** as quoted in the brief). When further work depends on an external change, add **Evidence:** with the concrete current observation, such as `artifact service status: unavailable`. The exact row then waits until a fresh observation changes that evidence or an operator resolves the review. Otherwise, prose in `agent:exchange` does not complete the prompt, and a non-completing prose blocker is requeued (`#promptpressure`)."
+        "Report back in this shape, one bold label per section, so `agent-doc queue report-complete` renders it into the response structure: **Summary** (one or two sentences); **What changed** (branch, every commit SHA, files changed); **Verification** (the exact commands run and their results); **Action items** (one `- ` bullet per piece of work someone still has to do, or `none`; first do every action the authorization above covers yourself, such as waiting for CI and fixing what it finds, committing, and pushing, so an `agent:` bullet names only agent work you could not do in this attempt, such as an install the coordinator rules reserve for the coordinator; the coordinator does each `agent:` bullet in the same turn, before closeout, so it never waits for the operator (`#finishactionable`); start each bullet with its owner: `- agent: …` for work an agent can do, `- human (<who>): …` or `- operator: …` for an action only a person can take, such as another reviewer approving a pull request, an org owner or repo admin changing a setting, or an operator decision; report-complete queues each bullet as a follow-up row after the originating head, where an `agent:` row is agent work to finish now and a `human`/`operator` row waits on the operator as `[operator-verify]` (`#humanfollowupowner`), so put nothing else here and do not also list those as follow-ups); **Notes** (one `- ` bullet per limit, state, or FYI that asks for no work, or `none`; never queued); **Next actions** (remaining steps, and any follow-up queue heads in order). Complete the prompt before handing back. A blocker is only the review structure (`<!-- agent-doc:prompt-blocker -->` with the incomplete work, **Complete by:**, and **Prompt:** as quoted in the brief). When further work depends on an external change, add **Evidence:** with the concrete current observation, such as `artifact service status: unavailable`. The exact row then waits until a fresh observation changes that evidence or an operator resolves the review. Otherwise, prose in `agent:exchange` does not complete the prompt, and a non-completing prose blocker is requeued (`#promptpressure`)."
     };
 }
 
@@ -2311,6 +2311,17 @@ agent_doc_format: template
         }
         for owner in ["`- agent: …`", "`- human (<who>): …`", "`- operator: …`"] {
             assert!(SUBAGENT_HANDBACK_SHAPE_RULE.contains(owner), "{owner}");
+        }
+        // `#finishactionable`: a worker finishes what its authorization
+        // covers before listing agent work, and an `agent:` bullet is work
+        // for the coordinator's same turn, not a parked follow-up.
+        for clause in [
+            "first do every action the authorization above covers yourself",
+            "an `agent:` bullet names only agent work you could not do in this attempt",
+            "the coordinator does each `agent:` bullet in the same turn, before closeout",
+            "(`#finishactionable`)",
+        ] {
+            assert!(SUBAGENT_HANDBACK_SHAPE_RULE.contains(clause), "{clause}");
         }
         let handback = "**Summary** done\n**What changed** a1b2c3\n**Verification** ok\n**Action items**\n- a gap\n**Notes**\n- a limit\n**Next actions** none";
         assert_eq!(

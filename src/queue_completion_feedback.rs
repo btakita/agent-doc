@@ -740,6 +740,45 @@ pub(crate) fn describe_handback_followups(
             file.display(),
         ));
     }
+    text.push_str(&finish_agent_action_items_directive(file, followups));
+    text
+}
+
+/// `#finishactionable`: the agent-owned action items of this hand-back are
+/// work for this turn, not parked follow-ups.
+///
+/// A worker lists an `agent:` action item for work an agent can do but the
+/// worker did not (an install the coordinator rules reserve for the
+/// coordinator, a CI run still in progress at hand-back, a small follow-up
+/// fix). The queued row tracks it, but a row that waits for a later turn
+/// makes the operator ask for "complete the work" on each one. So the report
+/// line tells the coordinator to do each of them now, under the originating
+/// item's authorization, and to strike each row once its result is verified.
+/// Only operator-owned rows (`[operator-verify]`) and a concrete blocker
+/// leave work for later. Empty when the hand-back has no agent-owned item.
+pub(crate) fn finish_agent_action_items_directive(
+    file: &Path,
+    followups: &agent_doc_queue::handback_followups::HandbackFollowups,
+) -> String {
+    let rows = followups
+        .inserted
+        .iter()
+        .chain(followups.refused_items.iter())
+        .filter(|row| agent_doc_queue::followup_owner::is_agent_followup_row(row))
+        .collect::<Vec<_>>();
+    if rows.is_empty() {
+        return String::new();
+    }
+    let mut text = format!(
+        "\nDo these {} agent-owned action item(s) NOW, in this turn, before closeout (#finishactionable): they are agent work under the originating item's authorization (its queue item and resolved presets), not operator questions and not work for a later turn. Do each one inline, or dispatch its row in this same turn when it is a substantial new task; verify its result, then strike its row with `agent-doc queue consume {} --ack-text '<row>'`. Leave a row open only with its concrete blocker recorded on it (an authorization the item does not grant, an external change that has not happened). Do not end the turn, and do not write \"More work remains\" for them, while one of these rows is open:",
+        rows.len(),
+        file.display(),
+    );
+    for row in rows {
+        text.push_str("\n- ");
+        text.push_str(row);
+    }
+    text.push('\n');
     text
 }
 
@@ -4393,6 +4432,57 @@ The setup pull request is the merged https://github.com/haiven-dev/haiven-sdk/pu
         };
         let text = describe_handback_followups(Path::new("tasks/bugs.md"), "do [#alpha]", &none);
         assert!(!text.contains("human-owned"), "{text}");
+    }
+
+    /// `#finishactionable`: the report line tells the coordinator to do the
+    /// agent-owned action items now, in this turn, and lists exactly those
+    /// rows (placed or refused); human-owned rows are not listed, and a
+    /// hand-back with only human-owned items prints no such instruction.
+    #[test]
+    fn report_line_directs_agent_action_items_to_be_done_this_turn() {
+        let install = "follow up on an action item from queue item “complete the work for this tree”: agent: install `a12e285c55` (`make install` in the agent-doc submodule) and verify `agent-doc --version`.";
+        let ci = "follow up on an action item from queue item “complete the work for this tree”: agent: check that agent-doc CI run 44946906648 for `a12e285c55` on `main` finished green.";
+        let operator = "follow up on an action item from queue item “complete the work for this tree”: operator: apply edits 1–3 above in the editor. [operator-verify]";
+        let followups = agent_doc_queue::handback_followups::HandbackFollowups {
+            queue_id: Some("main".to_string()),
+            inserted: vec![install.to_string(), operator.to_string()],
+            operator_owned: 1,
+            refused: Some("queue follow-up origin is ambiguous".to_string()),
+            refused_origin: Some("complete the work for this tree".to_string()),
+            refused_items: vec![ci.to_string()],
+            ..agent_doc_queue::handback_followups::HandbackFollowups::default()
+        };
+        let text = describe_handback_followups(
+            Path::new("tasks/bugs.md"),
+            "complete the work for this tree",
+            &followups,
+        );
+        assert!(
+            text.contains(
+                "Do these 2 agent-owned action item(s) NOW, in this turn, before closeout (#finishactionable)"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains("agent-doc queue consume tasks/bugs.md --ack-text"),
+            "{text}"
+        );
+        assert!(text.contains(&format!("\n- {install}")), "{text}");
+        assert!(text.contains(&format!("\n- {ci}")), "{text}");
+        assert!(!text.contains(&format!("\n- {operator}")), "{text}");
+
+        let human_only = agent_doc_queue::handback_followups::HandbackFollowups {
+            queue_id: Some("main".to_string()),
+            inserted: vec![operator.to_string()],
+            operator_owned: 1,
+            ..agent_doc_queue::handback_followups::HandbackFollowups::default()
+        };
+        let text = describe_handback_followups(
+            Path::new("tasks/bugs.md"),
+            "complete the work for this tree",
+            &human_only,
+        );
+        assert!(!text.contains("#finishactionable"), "{text}");
     }
 
     /// `#handbackrefusedcommandexact`: the report line's refused-placement

@@ -1,0 +1,6 @@
+[agent-doc build-slot] slot 1/4 acquired after 0s (/run/user/1000/agent-doc/build-slots): cargo run --quiet --bin agent-doc -- skill install --root . --all
+[Grok Build] installed skill v0.35.585 -> ./.grok/skills/agent-doc
+[Claude Code] skill already up to date (v0.35.585).
+[OpenCode] skill already up to date (v0.35.585).
+[Codex] skill already up to date (v0.35.585).
+[Cursor] skill already up to date (v0.35.585).

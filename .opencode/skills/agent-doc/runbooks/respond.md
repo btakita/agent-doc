@@ -521,7 +521,15 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      an approval, an admin or org-owner setting, or an operator decision,
      becomes an `[operator-verify]` row that waits on the operator (`⏳`): no
      agent dispatches it and it does not hold the turn open; the operator
-     strikes it once done (`#humanfollowupowner`). When that
+     strikes it once done (`#humanfollowupowner`). Every other row is
+     agent work for this turn: the report line lists those rows under
+     `#finishactionable`, and the coordinator does each one now under the
+     originating item's authorization (inline, or by dispatching its row in
+     this same turn when it is a substantial new task), verifies it, and
+     strikes its row. Never end the turn, hand the tree back, or write
+     "More work remains" over an open agent row; leave one open only with its
+     concrete blocker recorded on the row. "More work remains" is only for
+     operator-owned or genuinely blocked work. When that
      placement is refused, the report line prints one exact `queue follow-up`
      command on its own line, with the real origin and each unplaced item
      already filled in; run that line as printed

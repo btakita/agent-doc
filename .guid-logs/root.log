@@ -1,0 +1,413 @@
+[agent-doc build-slot] slot 1/4 acquired after 0s (/run/user/1000/agent-doc/build-slots): cargo nextest run --no-fail-fast -p agent-doc -p agent-doc-codex-stop-io -E test(queue_completion_feedback) | binary(subagent_completion_feedback) | package(agent-doc-codex-stop-io)
+info: experimental features enabled: setup-scripts
+   Compiling phf_generator v0.13.1
+   Compiling either v1.17.0
+   Compiling prettyplease v0.2.37
+   Compiling bitflags v2.13.0
+   Compiling regex-syntax v0.8.11
+   Compiling bytes v1.12.0
+   Compiling linux-raw-sys v0.12.1
+   Compiling rustix v1.1.4
+   Compiling getrandom v0.3.4
+   Compiling once_cell v1.21.4
+   Compiling petgraph v0.8.3
+   Compiling protoc-bin-vendored-macos-x86_64 v3.2.0
+   Compiling protoc-bin-vendored-macos-aarch_64 v3.2.0
+   Compiling log v0.4.33
+   Compiling protoc-bin-vendored-linux-s390_64 v3.2.0
+   Compiling protoc-bin-vendored-linux-ppcle_64 v3.2.0
+   Compiling protoc-bin-vendored-win32 v3.2.0
+   Compiling protoc-bin-vendored-linux-aarch_64 v3.2.0
+   Compiling protoc-bin-vendored-linux-x86_64 v3.2.0
+   Compiling multimap v0.10.1
+   Compiling protoc-bin-vendored-linux-x86_32 v3.2.0
+   Compiling string_cache_codegen v0.6.1
+   Compiling phf_codegen v0.13.1
+   Compiling predicates-core v1.0.10
+   Compiling agent-doc v0.35.585 (/home/brian/worktrees/guid/agent-doc)
+   Compiling float-cmp v0.10.0
+   Compiling assert_cmd v2.2.2
+   Compiling termtree v0.5.1
+   Compiling difflib v0.4.0
+   Compiling normalize-line-endings v0.3.0
+   Compiling rusty-fork v0.3.1
+   Compiling clap_complete v4.6.7
+   Compiling lazily-macros v0.23.0 (https://github.com/lazily-hub/lazily-rs.git?rev=92656d6840e9171b3e55a9e6b11205f820ec984c#92656d68)
+   Compiling agent-doc-queue v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-queue)
+   Compiling phf_macros v0.13.1
+   Compiling protoc-bin-vendored v3.2.0
+   Compiling bstr v1.12.3
+   Compiling module-harness v0.2.1
+   Compiling filetime v0.2.29
+   Compiling libloading v0.8.9
+   Compiling rand_core v0.9.5
+   Compiling agent-doc-sim-net v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-sim-net)
+   Compiling predicates-tree v1.0.13
+   Compiling itertools v0.14.0
+   Compiling predicates v3.1.4
+   Compiling rand_xorshift v0.4.0
+   Compiling rand_chacha v0.9.0
+   Compiling rand v0.9.4
+   Compiling web_atoms v0.2.5
+   Compiling existence v0.4.0
+   Compiling phf v0.13.1
+   Compiling proptest v1.11.0
+   Compiling markup5ever v0.38.0
+   Compiling regex-automata v0.4.14
+   Compiling prost-derive v0.14.4
+   Compiling xml5ever v0.38.0
+   Compiling html5ever v0.38.0
+   Compiling tempfile v3.27.0
+   Compiling prost v0.14.4
+   Compiling markup5ever_rcdom v0.38.0+unofficial
+   Compiling htmd v0.5.4
+   Compiling prost-types v0.14.4
+   Compiling regex v1.12.4
+   Compiling prost-build v0.14.4
+   Compiling lazily v0.58.0 (https://github.com/lazily-hub/lazily-rs.git?rev=92656d6840e9171b3e55a9e6b11205f820ec984c#92656d68)
+   Compiling agent-doc-turn v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-turn)
+   Compiling agent-doc-work-projection v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-work-projection)
+   Compiling agent-doc-answer-ledger v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-answer-ledger)
+   Compiling agent-doc-fs v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-fs)
+   Compiling agent-doc-state-backbone v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-state-backbone)
+   Compiling agent-doc-editor-surface v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-editor-surface)
+   Compiling agent-doc-element-exchange-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-element-exchange-io)
+   Compiling agent-doc-prompt-contract v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-prompt-contract)
+   Compiling agent-doc-diff-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-diff-io)
+   Compiling agent-doc-memory-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-memory-io)
+   Compiling agent-doc-lease-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-lease-io)
+   Compiling agent-doc-harness v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-harness)
+   Compiling agent-doc-workflow v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-workflow)
+   Compiling agent-doc-supervisor v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-supervisor)
+   Compiling agent-doc-sync v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-sync)
+   Compiling agent-doc-controller v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-controller)
+   Compiling agent-doc-document-realtime v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-document-realtime)
+   Compiling agent-doc-state-wire v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-state-wire)
+   Compiling agent-doc-sqlite v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-sqlite)
+   Compiling agent-doc-process-owner-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-process-owner-io)
+   Compiling agent-doc-git v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-git)
+   Compiling agent-doc-ffi v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-ffi)
+   Compiling agent-doc-git-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-git-io)
+   Compiling agent-doc-owner-pane-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-owner-pane-io)
+   Compiling agent-doc-turn-scope-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-turn-scope-io)
+   Compiling agent-doc-callback-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-callback-io)
+   Compiling agent-doc-project-root-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-project-root-io)
+   Compiling agent-doc-agent-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-agent-io)
+   Compiling agent-doc-project-config-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-project-config-io)
+   Compiling agent-doc-archive-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-archive-io)
+   Compiling agent-doc-ipc-forensics-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-ipc-forensics-io)
+   Compiling agent-doc-admin-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-admin-io)
+   Compiling agent-doc-frontmatter-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-frontmatter-io)
+   Compiling agent-doc-tmux-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-tmux-io)
+   Compiling agent-doc-session-actor-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-session-actor-io)
+   Compiling agent-doc-session-registry-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-session-registry-io)
+   Compiling agent-doc-supervisor-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-supervisor-io)
+   Compiling agent-doc-snapshot-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-snapshot-io)
+   Compiling agent-doc-turn-status-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-turn-status-io)
+   Compiling agent-doc-focus-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-focus-io)
+   Compiling agent-doc-cycle-state-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-cycle-state-io)
+   Compiling agent-doc-gc-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-gc-io)
+   Compiling agent-doc-ops-log-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-ops-log-io)
+   Compiling agent-doc-run-context-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-run-context-io)
+   Compiling agent-doc-dynamic-context-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-dynamic-context-io)
+   Compiling agent-doc-ipc-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-ipc-io)
+   Compiling agent-doc-supervisor-process v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-supervisor-process)
+   Compiling agent-doc-op-capture-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-op-capture-io)
+   Compiling agent-doc-editor-transport-health-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-editor-transport-health-io)
+   Compiling agent-doc-capture-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-capture-io)
+   Compiling agent-doc-session-accretion-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-session-accretion-io)
+   Compiling agent-doc-codex-hook-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-codex-hook-io)
+   Compiling agent-doc-element-backlog-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-element-backlog-io)
+   Compiling agent-doc-merge-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-merge-io)
+   Compiling agent-doc-reliable-sync-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-reliable-sync-io)
+   Compiling agent-doc-supervisor-process-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-supervisor-process-io)
+   Compiling agent-doc-watch-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-watch-io)
+   Compiling agent-doc-crdt-relay-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-crdt-relay-io)
+   Compiling agent-doc-state-observer-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-state-observer-io)
+   Compiling agent-doc-controller-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-controller-io)
+   Compiling agent-doc-workflow-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-workflow-io)
+   Compiling agent-doc-write-converge-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-write-converge-io)
+   Compiling agent-doc-zed-lsp-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-zed-lsp-io)
+   Compiling agent-doc-editor-surface-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-editor-surface-io)
+   Compiling agent-doc-test-support v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-test-support)
+   Compiling agent-doc-sync-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-sync-io)
+   Compiling agent-doc-queue-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-queue-io)
+   Compiling agent-doc-claim-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-claim-io)
+   Compiling agent-doc-preflight-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-preflight-io)
+   Compiling agent-doc-flow-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-flow-io)
+   Compiling agent-doc-document-realtime-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-document-realtime-io)
+   Compiling agent-doc-template-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-template-io)
+   Compiling agent-doc-lint-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-lint-io)
+   Compiling agent-doc-hooks-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-hooks-io)
+   Compiling agent-doc-response-toc-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-response-toc-io)
+   Compiling agent-doc-element-backlog-runtime-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-element-backlog-runtime-io)
+   Compiling agent-doc-status-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-status-io)
+   Compiling agent-doc-response-replay-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-response-replay-io)
+   Compiling agent-doc-boundary-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-boundary-io)
+   Compiling agent-doc-prompt-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-prompt-io)
+   Compiling agent-doc-prompt-context-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-prompt-context-io)
+   Compiling agent-doc-write-ipc-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-write-ipc-io)
+   Compiling agent-doc-session-check-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-session-check-io)
+   Compiling agent-doc-compact-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-compact-io)
+   Compiling agent-doc-stream-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-stream-io)
+   Compiling agent-doc-repair-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-repair-io)
+   Compiling agent-doc-commit-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-commit-io)
+   Compiling agent-doc-run-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-run-io)
+   Compiling agent-doc-start-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-start-io)
+   Compiling agent-doc-preflight-runtime-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-preflight-runtime-io)
+   Compiling agent-doc-closeout-runtime-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-closeout-runtime-io)
+   Compiling agent-doc-repair-runtime-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-repair-runtime-io)
+   Compiling agent-doc-write-runtime-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-write-runtime-io)
+   Compiling agent-doc-run-runtime-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-run-runtime-io)
+   Compiling agent-doc-route-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-route-io)
+   Compiling agent-doc-preflight-command-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-preflight-command-io)
+   Compiling agent-doc-repair-command-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-repair-command-io)
+   Compiling agent-doc-codex-stop-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-codex-stop-io)
+   Compiling agent-doc-start-runtime-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-start-runtime-io)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 54.75s
+info: using target runner `env -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_COMMON_DIR -u GIT_CONFIG -u GIT_CONFIG_COUNT -u GIT_CONFIG_PARAMETERS -u GIT_DIR -u GIT_GRAFT_FILE -u GIT_IMPLICIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_NO_REPLACE_OBJECTS -u GIT_OBJECT_DIRECTORY -u GIT_PREFIX -u GIT_REPLACE_REF_BASE -u GIT_SHALLOW_FILE -u GIT_WORK_TREE` defined by `target.cfg(unix).runner` within `/home/brian/worktrees/guid/agent-doc/.cargo/config.toml`
+────────────
+ Nextest run ID 9f80a98a-c982-4da5-95ab-84e83d9b163e with nextest profile: default
+    Starting 237 tests across 41 binaries (2319 tests skipped)
+       SETUP [      1/1] test-isolation: scripts/check-test-tmpdir --nextest-env
+/tmp:/home/brian/worktrees/guid/agent-doc
+  SETUP PASS [   0.004s] test-isolation: scripts/check-test-tmpdir --nextest-env
+        PASS [   0.636s] (  1/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::adversarial_review_clean_without_inline_threads_stays_open
+        PASS [   0.639s] (  2/237) agent-doc::subagent_completion_feedback repair_stale_completion_cli_is_dry_run_first_narrow_and_idempotent
+        PASS [   0.720s] (  3/237) agent-doc::subagent_completion_feedback repair_completion_feedback_cli_migrates_bodyless_notices_without_replaying_closeout
+        PASS [   0.861s] (  4/237) agent-doc::subagent_completion_feedback report_complete_apply_contention_fails_before_any_transaction_effect
+        PASS [   0.913s] (  5/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::address_hand_back_without_the_written_fix_requeues_the_same_row
+        PASS [   1.318s] (  6/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::address_hand_back_without_inline_threads_requeues_the_same_row
+        PASS [   0.034s] (  7/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::completion_marker_does_not_hide_a_mixed_operator_prompt
+        PASS [   0.032s] (  8/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::completion_notice_is_deduped_and_not_prompt_bearing
+        PASS [   1.387s] (  9/237) agent-doc::subagent_completion_feedback report_complete_keeps_component_markers_in_worker_response_inert_and_scoped
+        PASS [   1.403s] ( 10/237) agent-doc::subagent_completion_feedback report_complete_holds_open_items_for_triage_instead_of_queueing_them
+        PASS [   1.470s] ( 11/237) agent-doc::subagent_completion_feedback codex_worker_debt_blocks_capture_and_the_final_gate
+        PASS [   1.499s] ( 12/237) agent-doc::subagent_completion_feedback report_complete_without_a_matching_subagent_claim_fails_and_names_candidates
+        PASS [   1.553s] ( 13/237) agent-doc::subagent_completion_feedback report_complete_refuses_an_ambiguous_id_selector_with_the_candidates
+        PASS [   0.037s] ( 14/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::legacy_bodyless_completion_feedback_repair_is_narrow_idempotent_and_integrity_safe
+        PASS [   0.751s] ( 15/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::cancelled_generation_cannot_report_or_attach_to_same_text_readd
+        PASS [   0.900s] ( 16/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::blockerreportterminal_reconcile_closes_a_legacy_orphan_attempt
+        PASS [   1.647s] ( 17/237) agent-doc::subagent_completion_feedback report_complete_finds_the_attempt_on_a_row_whose_state_word_was_fused
+        PASS [   1.669s] ( 18/237) agent-doc::subagent_completion_feedback report_complete_holds_queue_apply_exclusion_across_the_whole_transaction
+        PASS [   0.292s] ( 19/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::contended_cross_process_owner_is_strictly_bounded
+        PASS [   0.838s] ( 20/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::closepressure_setup_hand_back_requeues_until_a_pull_request_is_created
+        PASS [   1.792s] ( 21/237) agent-doc::subagent_completion_feedback report_complete_prints_a_runnable_command_when_placement_is_refused
+        PASS [   1.177s] ( 22/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::blocked_human_review_the_preset_already_answers_stays_open
+        PASS [   1.851s] ( 23/237) agent-doc::subagent_completion_feedback report_complete_joins_repository_provenance_to_the_exact_attempt
+        PASS [   0.461s] ( 24/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::inlinegatefalsereject_a_plain_requeue_does_not_reopen_the_attempt
+        PASS [   1.960s] ( 25/237) agent-doc::subagent_completion_feedback report_complete_retains_the_superseded_parent_result_as_history
+        PASS [   2.049s] ( 26/237) agent-doc::subagent_completion_feedback report_complete_and_follow_up_place_after_a_decorated_heading_row
+        PASS [   0.562s] ( 27/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::lostrowreportreopen_a_plain_requeue_after_the_end_freeze_does_not_reopen
+        PASS [   0.787s] ( 28/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::goal_loop_hand_back_without_final_state_requeues_the_same_row
+        PASS [   2.177s] ( 29/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::attached_editor_reports_are_durable_bounded_and_concurrency_safe
+        PASS [   0.027s] ( 30/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::refused_placement_report_prints_a_command_that_can_be_run_as_printed
+        PASS [   0.023s] ( 31/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::report_line_directs_agent_action_items_to_be_done_this_turn
+        PASS [   0.032s] ( 32/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::repair_does_not_reclassify_or_hide_a_mixed_operator_prompt
+        PASS [   0.541s] ( 33/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::no_written_fix_on_address_then_adversarial_pr_continues_the_review
+        PASS [   2.240s] ( 34/237) agent-doc::subagent_completion_feedback report_complete_resolves_an_id_selector_to_a_row_claimed_by_full_text
+        PASS [   0.038s] ( 35/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::report_line_names_human_owned_followups
+        PASS [   0.476s] ( 36/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::preset_order_review_clean_completes_rebase_then_goal
+        PASS [   0.038s] ( 37/237) agent-doc-codex-stop-io stop_input_tests::stop_input_accepts_null_last_assistant_message
+        PASS [   0.621s] ( 38/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::no_written_fix_does_not_skip_a_later_preset
+        PASS [   0.046s] ( 39/237) agent-doc-codex-stop-io stop_input_tests::stop_input_keeps_present_and_absent_fields
+        PASS [   2.314s] ( 40/237) agent-doc::subagent_completion_feedback followups_of_a_nested_origin_leave_the_parent_children_alone_and_stay_acknowledgeable
+        PASS [   0.045s] ( 41/237) agent-doc-codex-stop-io subagent_quota::tests::a_dual_spelling_payload_without_a_bound_claim_allows_the_stop
+        PASS [   0.098s] ( 42/237) agent-doc-codex-stop-io closeout_guidance_agreement_tests::every_emitter_names_one_strike_per_row_kind
+        PASS [   0.030s] ( 43/237) agent-doc-codex-stop-io subagent_quota::tests::a_still_running_child_is_recorded_as_a_nonterminal_wrapper_exit
+        PASS [   0.066s] ( 44/237) agent-doc-codex-stop-io subagent_quota::tests::a_limit_with_no_matching_claim_still_allows_the_stop
+        PASS [   0.570s] ( 45/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::projection_repair_changes_only_visible_marker_and_keeps_reported_claim
+        PASS [   0.915s] ( 46/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::inlinegatefalsereject_pr412_hand_back_reports_after_the_false_requeue
+        PASS [   0.044s] ( 47/237) agent-doc-codex-stop-io tests::a_payload_that_is_not_json_does_not_refuse_the_final_answer
+        PASS [   1.794s] ( 48/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::blockerreportterminal_a_blocker_only_hand_back_closes_its_claim_and_rests_blocked
+        PASS [   0.026s] ( 49/237) agent-doc-codex-stop-io tests::a_scheduled_loop_reentry_arms_the_continuation
+        PASS [   0.024s] ( 50/237) agent-doc-codex-stop-io tests::a_timed_out_stop_hook_reports_the_phase_it_is_stuck_in
+        PASS [   0.717s] ( 51/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::no_written_fix_without_a_head_change_or_reply_stays_open
+        PASS [   0.019s] ( 52/237) agent-doc-codex-stop-io tests::an_empty_phase_ledger_renders_explicitly
+        PASS [   0.017s] ( 53/237) agent-doc-codex-stop-io tests::background_handoff_requires_a_retained_capture_and_serving_resume_owner
+        PASS [   0.635s] ( 54/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::prompt_pressure_leaves_a_delivery_and_a_goal_final_state_alone
+        PASS [   0.022s] ( 55/237) agent-doc-codex-stop-io tests::both_stop_capture_sites_consult_the_existing_capture_first
+        PASS [   0.034s] ( 56/237) agent-doc-codex-stop-io tests::captured_finalize_owner_race_is_a_durable_deferral_not_an_unfinished_cycle
+        PASS [   0.016s] ( 57/237) agent-doc-codex-stop-io tests::claude_continuation_output_is_non_error_feedback_json
+        PASS [   0.092s] ( 58/237) agent-doc-codex-stop-io tests::blocked_payload_does_not_add_a_cycle_projection_read_before_early_return
+        PASS [   0.636s] ( 59/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::prose_blocker_hand_back_requeues_without_an_exchange_essay
+        PASS [   1.141s] ( 60/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::later_report_rebases_retained_feedback_over_concurrent_editor_queue_edit
+        PASS [   0.174s] ( 61/237) agent-doc-codex-stop-io tests::auto_queue_prompt_uses_editor_authoritative_content_over_stale_disk
+        PASS [   1.024s] ( 62/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::lostrowreportreopen_pr412_sequence_reports_after_freeze_two_gate_requeues_and_release
+        PASS [   0.356s] ( 63/237) agent-doc-codex-stop-io tests::a_committed_content_edit_is_handed_back_as_steering
+        PASS [   0.424s] ( 64/237) agent-doc-codex-stop-io subagent_quota::tests::a_stop_waiting_on_its_own_background_work_is_proof_of_life_not_a_freeze
+        PASS [   0.373s] ( 65/237) agent-doc-codex-stop-io subagent_quota::tests::the_parent_transcript_never_proves_the_worker_alive
+        PASS [   0.912s] ( 66/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::projection_repair_paints_reported_while_a_save_receipt_is_missing
+        PASS [   1.155s] ( 67/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::lostrowreportreopen_legacy_lost_row_with_recorded_hand_back_reports_and_stop_hook_agrees
+        PASS [   0.465s] ( 68/237) agent-doc-codex-stop-io subagent_quota::tests::a_stop_with_only_other_workers_background_work_still_freezes
+        PASS [   0.517s] ( 69/237) agent-doc-codex-stop-io subagent_quota::tests::a_later_waiting_stop_clears_a_freeze_an_earlier_stop_recorded
+        PASS [   0.372s] ( 70/237) agent-doc-codex-stop-io tests::a_visible_cycle_capture_blocks_recapturing_a_restatement
+        PASS [   0.522s] ( 71/237) agent-doc-codex-stop-io subagent_quota::tests::a_subagent_end_freezes_the_bound_claim_before_the_parent_sees_the_handback
+        PASS [   0.840s] ( 72/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::prose_summary_on_address_and_adversarial_pr_returns_to_the_inbox
+        PASS [   0.399s] ( 73/237) agent-doc-codex-stop-io tests::claude_stop_accepts_grok_shaped_payloads
+        PASS [   1.354s] ( 74/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::managed_state_repair_reaps_only_proven_orphans_and_repaints_a_stale_reported_marker
+        PASS [   0.361s] ( 75/237) agent-doc-codex-stop-io tests::claude_stop_blocks_clean_closeout_and_names_loop_reentry
+        PASS [   0.850s] ( 76/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::review_structure_hand_back_is_hoisted_and_blocks_claim
+        PASS [   0.463s] ( 77/237) agent-doc-codex-stop-io tests::claude_stop_bound_survives_a_reconcile_clearing_the_marker
+        PASS [   0.361s] ( 78/237) agent-doc-codex-stop-io tests::claude_stop_does_not_loop_a_cycle_whose_write_is_still_retained
+        PASS [   3.126s] ( 79/237) agent-doc::subagent_completion_feedback repair_completion_cells_cli_restores_deleted_cells_from_saved_responses
+        PASS [   0.491s] ( 80/237) agent-doc-codex-stop-io tests::claude_stop_blocks_an_overdue_claim_without_worker_acknowledgement
+        PASS [   0.381s] ( 81/237) agent-doc-codex-stop-io tests::claude_stop_does_not_strike_a_checkmark_that_has_no_claim
+        PASS [   0.593s] ( 82/237) agent-doc-codex-stop-io tests::claude_stop_allows_a_held_queue_head_and_refuses_it_once_unheld
+        PASS [   0.489s] ( 83/237) agent-doc-codex-stop-io tests::claude_stop_does_not_loop_a_closed_run_that_captured_no_response
+        PASS [   0.569s] ( 84/237) agent-doc-codex-stop-io tests::claude_stop_ends_a_turn_whose_only_rows_wait_on_a_person
+        PASS [   0.765s] ( 85/237) agent-doc-codex-stop-io tests::claude_stop_allows_a_recursive_stop_over_an_unchanged_transient_debt_set
+        PASS [   1.194s] ( 86/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::report_is_immediate_but_keeps_claim_until_release
+        PASS [   0.381s] ( 87/237) agent-doc-codex-stop-io tests::claude_stop_is_exact_session_scoped_and_recursion_bounded
+        PASS [   0.542s] ( 88/237) agent-doc-codex-stop-io tests::claude_stop_held_reported_row_with_its_cell_asks_only_for_the_strike
+        PASS [   0.360s] ( 89/237) agent-doc-codex-stop-io tests::claude_stop_leaves_post_commit_steering_to_a_ready_supervisor_wake
+        PASS [   0.015s] ( 90/237) agent-doc-codex-stop-io tests::closeout_repair_failure_note_carries_error_and_derived_remedy
+        PASS [   0.672s] ( 91/237) agent-doc-codex-stop-io tests::claude_stop_held_reported_row_names_the_completion_cell_only_when_present
+        PASS [   0.512s] ( 92/237) agent-doc-codex-stop-io tests::claude_stop_holds_the_final_answer_once_for_post_commit_steering
+        PASS [   0.022s] ( 93/237) agent-doc-codex-stop-io tests::closeout_repair_failure_note_does_not_repeat_an_embedded_remedy
+        PASS [   0.022s] ( 94/237) agent-doc-codex-stop-io tests::codex_stop_output_shapes_distinguish_continuation_from_refusal
+        PASS [   0.728s] ( 95/237) agent-doc-codex-stop-io tests::claude_stop_ends_an_unchanged_refusal_over_blocker_gated_rows
+        PASS [   0.219s] ( 96/237) agent-doc-codex-stop-io tests::claude_stop_rechecks_status_sync_once_at_the_final_boundary
+        PASS [   0.486s] ( 97/237) agent-doc-codex-stop-io tests::claude_stop_keeps_an_inbox_or_running_row_from_ending_the_turn
+        PASS [   0.810s] ( 98/237) agent-doc-codex-stop-io tests::claude_stop_ends_the_turn_over_fresh_workers_and_operator_rows
+        PASS [   0.737s] ( 99/237) agent-doc-codex-stop-io tests::claude_stop_holds_once_for_a_released_reported_row_left_open
+        PASS [   0.013s] (100/237) agent-doc-codex-stop-io tests::continuation_feedback_is_not_an_operator_prompt
+        PASS [   0.669s] (101/237) agent-doc-codex-stop-io tests::claude_stop_holds_once_for_a_reported_but_unpersisted_worker_result
+        PASS [   0.263s] (102/237) agent-doc-codex-stop-io tests::claude_stop_retained_write_with_running_glyph_still_allows_the_report
+        PASS [   0.015s] (103/237) agent-doc-codex-stop-io tests::continuation_reason_names_the_noop_case_and_a_working_reentry
+        PASS [   0.008s] (104/237) agent-doc-codex-stop-io tests::continuation_reason_previews_a_long_head
+        PASS [   0.481s] (105/237) agent-doc-codex-stop-io tests::claude_stop_never_allows_terminal_success_for_recovered_loss_debt
+        PASS [   0.024s] (106/237) agent-doc-codex-stop-io tests::continuation_never_orders_a_loop_skill_call
+        PASS [   0.560s] (107/237) agent-doc-codex-stop-io tests::claude_stop_leaves_continuation_to_a_ready_supervisor
+        PASS [   0.014s] (108/237) agent-doc-codex-stop-io tests::durable_owner_progress_waits_for_terminal_before_surfacing_a_blocker
+        PASS [   0.014s] (109/237) agent-doc-codex-stop-io tests::durable_owner_resume_surfaces_needs_operator_instead_of_stale_wait
+        PASS [   0.031s] (110/237) agent-doc-codex-stop-io tests::exact_actor_stop_retires_only_the_bound_panes_turn_status
+        PASS [   0.057s] (111/237) agent-doc-codex-stop-io tests::foreign_subagent_turn_does_not_inherit_parent_queue_continuation
+        PASS [   0.677s] (112/237) agent-doc-codex-stop-io tests::claude_stop_keeps_a_visible_reported_row_from_ending_the_turn
+        PASS [   0.008s] (113/237) agent-doc-codex-stop-io tests::harness_stop_uses_the_non_closed_document_actor_identity
+        PASS [   0.143s] (114/237) agent-doc-codex-stop-io tests::final_status_sync_checkpoint_demands_a_resync_over_an_editor_revert
+        PASS [   0.478s] (115/237) agent-doc-codex-stop-io tests::claude_stop_prose_closeout_todo_does_not_suppress_the_strike
+        PASS [   0.146s] (116/237) agent-doc-codex-stop-io tests::final_status_sync_checkpoint_quotes_the_current_payload
+        PASS [   0.014s] (117/237) agent-doc-codex-stop-io tests::missing_captured_response_refusal_with_durable_owner_is_a_deferral
+        PASS [   0.201s] (118/237) agent-doc-codex-stop-io tests::final_place_checkpoint_continues_once_for_an_unanswered_prompt_only
+        PASS [   0.766s] (119/237) agent-doc-codex-stop-io tests::claude_stop_names_integration_for_a_released_row_whose_result_is_recorded
+        PASS [   1.711s] (120/237) agent-doc::bin/agent-doc queue_completion_feedback::tests::unchanged_external_blocker_keeps_one_generation_until_evidence_changes
+        PASS [   0.573s] (121/237) agent-doc-codex-stop-io tests::claude_stop_refuses_each_turn_even_when_an_earlier_gate_answers_its_first_stop
+        PASS [   0.022s] (122/237) agent-doc-codex-stop-io tests::pending_queue_writeback_skips_gated_heads_but_preserves_real_work
+        PASS [   0.733s] (123/237) agent-doc-codex-stop-io tests::claude_stop_observes_a_mechanical_reported_row_without_reconciling_it
+        PASS [   0.469s] (124/237) agent-doc-codex-stop-io tests::committed_mixed_prompt_diff_reenters_for_unclaimed_work
+        PASS [   0.039s] (125/237) agent-doc-codex-stop-io tests::queue_synthetic_classification_reuses_terminal_reopen_cycle_observation
+        PASS [   0.273s] (126/237) agent-doc-codex-stop-io tests::grok_end_turn_refuses_sdk_dev_transient_rows
+        PASS [   0.507s] (127/237) agent-doc-codex-stop-io tests::committed_claimed_prompt_diff_stops_quietly_until_claim_is_released
+        PASS [   0.166s] (128/237) agent-doc-codex-stop-io tests::pending_queue_handoff_requires_exact_committed_work_and_receiver
+        PASS [   0.271s] (129/237) agent-doc-codex-stop-io tests::owner_quote_repair_replaces_retained_capture_and_fences_stale_resume
+        PASS [   0.165s] (130/237) agent-doc-codex-stop-io tests::post_commit_reopen_records_current_authority_not_head_as_file_baseline
+        PASS [   0.630s] (131/237) agent-doc-codex-stop-io tests::committed_reported_release_names_the_unpersisted_worker_result_and_strike
+        PASS [   0.355s] (132/237) agent-doc-codex-stop-io tests::owner_preset_expansion_repair_replaces_retained_capture
+        PASS [   0.015s] (133/237) agent-doc-codex-stop-io tests::replay_paths_read_the_terminal_receipt_after_invalidating_the_memo
+        PASS [   0.017s] (134/237) agent-doc-codex-stop-io tests::retained_delivery_and_write_applied_interruptions_remain_binary_owned
+        PASS [   0.083s] (135/237) agent-doc-codex-stop-io tests::refused_admission_does_not_leak_another_panes_cycle_into_later_prompts
+        PASS [   0.108s] (136/237) agent-doc-codex-stop-io tests::refusal_receipt_for_same_turn_repeat_strands_the_queue_prompt
+        PASS [   0.032s] (137/237) agent-doc-codex-stop-io tests::retained_editor_delivery_pauses_auto_queue_before_prompt_selection
+        PASS [   0.267s] (138/237) agent-doc-codex-stop-io tests::post_commit_reopen_is_a_noop_only_for_a_payload_already_in_head
+        PASS [   0.018s] (139/237) agent-doc-codex-stop-io tests::retained_queue_deferral_names_the_observed_holder_never_a_placeholder
+        PASS [   0.014s] (140/237) agent-doc-codex-stop-io tests::retained_repair_refusal_with_durable_owner_is_a_distinct_deferral
+        PASS [   0.025s] (141/237) agent-doc-codex-stop-io tests::retained_queue_gate_names_recovery_when_the_holder_cannot_converge
+        PASS [   0.021s] (142/237) agent-doc-codex-stop-io tests::stop_actor_delegation_stays_closed_for_external_or_closed_bindings
+        PASS [   0.837s] (143/237) agent-doc-codex-stop-io tests::claude_stop_waits_on_human_owned_followups_and_refuses_agent_ones
+        PASS [   1.153s] (144/237) agent-doc-codex-stop-io tests::claude_stop_makes_at_most_one_continuation_request_per_run
+        PASS [   0.700s] (145/237) agent-doc-codex-stop-io tests::committed_stop_with_open_prompt_and_payload_in_head_hands_back_without_capture
+        PASS [   0.136s] (146/237) agent-doc-codex-stop-io tests::stop_auto_clear_without_ready_supervisor_keeps_in_pane_continuation
+        PASS [   0.148s] (147/237) agent-doc-codex-stop-io tests::stop_auto_clear_yields_queue_boundary_to_ready_supervisor
+        PASS [   0.311s] (148/237) agent-doc-codex-stop-io tests::retained_predecessor_quarantines_already_created_empty_queue_child_metadata_only
+        PASS [   1.764s] (149/237) agent-doc-codex-stop-io tests::claude_stop_does_not_reenter_for_claimed_heads
+        PASS [   4.548s] (150/237) agent-doc::subagent_completion_feedback report_complete_and_freeze_print_the_work_pool_refill
+        PASS [   1.101s] (151/237) agent-doc-codex-stop-io tests::codex_stop_rechecks_status_sync_once_at_the_final_boundary
+        PASS [   1.145s] (152/237) agent-doc-codex-stop-io tests::committed_stop_with_claimed_head_and_payload_in_head_allows_without_capture
+        PASS [   0.533s] (153/237) agent-doc-codex-stop-io tests::stop_allows_repeated_auto_queue_blocks_after_head_advances
+        PASS [   1.220s] (154/237) agent-doc-codex-stop-io tests::committed_stop_with_reported_head_hands_back_writeback_debt
+        PASS [   0.686s] (155/237) agent-doc-codex-stop-io tests::same_turn_repeat_during_closeout_keeps_stop_queue_continuation
+        PASS [   4.989s] (156/237) agent-doc::subagent_completion_feedback preflight_admits_a_document_wedged_by_old_format_completion_feedback
+        PASS [   5.308s] (157/237) agent-doc::subagent_completion_feedback a_completion_cell_under_a_closing_question_is_separated_and_never_prefixed
+        PASS [   0.540s] (158/237) agent-doc-codex-stop-io tests::stop_auto_queue_allows_in_pane_after_tracked_clear_following_compaction
+        PASS [   1.739s] (159/237) agent-doc-codex-stop-io tests::pending_queue_handoff_codex_stop_keeps_the_original_capture
+        PASS [   5.800s] (160/237) agent-doc::subagent_completion_feedback four_cli_reporters_serialize_without_losing_completion_feedback
+        PASS [   1.836s] (161/237) agent-doc-codex-stop-io tests::recursive_stop_hands_answered_residue_to_fresh_typed_edit_without_hook_failure
+        PASS [   0.601s] (162/237) agent-doc-codex-stop-io tests::stop_blocks_clean_closeout_when_auto_queue_has_generic_slash_command
+        PASS [   0.584s] (163/237) agent-doc-codex-stop-io tests::stop_blocks_clean_closeout_when_auto_queue_has_next_prompt
+        PASS [   2.354s] (164/237) agent-doc-codex-stop-io tests::foreign_turn_stop_preserves_binding_for_the_exact_coordinator_turn
+        PASS [   0.012s] (165/237) agent-doc-codex-stop-io tests::stop_closeout_classifies_commit_failure_before_reporting_still_open
+        PASS [   0.301s] (166/237) agent-doc-codex-stop-io tests::stop_blocks_open_cycle_without_recoverable_response
+        PASS [   0.296s] (167/237) agent-doc-codex-stop-io tests::stop_blocks_transcript_shaped_last_assistant_message
+        PASS [   0.572s] (168/237) agent-doc-codex-stop-io tests::stop_blocks_clean_closeout_when_control_less_queue_has_next_prompt
+        PASS [   0.128s] (169/237) agent-doc-codex-stop-io tests::stop_disable_auto_clear_keeps_in_pane_continuation
+        PASS [   1.699s] (170/237) agent-doc-codex-stop-io tests::stop_auto_closes_visible_template_response_without_last_assistant_message
+        PASS [   2.539s] (171/237) agent-doc-codex-stop-io tests::recursive_stop_opens_and_closes_successor_after_empty_cycle_abandoned_with_steering
+        PASS [   0.279s] (172/237) agent-doc-codex-stop-io tests::stop_does_not_block_terminal_closeout_on_coordinator_debt
+        PASS [   0.575s] (173/237) agent-doc-codex-stop-io tests::stop_blocks_when_repeated_auto_queue_head_has_no_replayable_response
+        PASS [   0.653s] (174/237) agent-doc-codex-stop-io tests::stop_codex_continuation_emits_no_clear_proof_when_not_opted_in
+        PASS [   0.011s] (175/237) agent-doc-codex-stop-io tests::stop_hands_a_durable_capture_to_the_supervisor_before_repair
+        PASS [   0.215s] (176/237) agent-doc-codex-stop-io tests::stop_does_not_read_or_open_successor_for_post_commit_queue_work
+        PASS [   0.012s] (177/237) agent-doc-codex-stop-io tests::stop_hook_budget_override_is_positive_and_bounded_by_default
+        PASS [   2.381s] (178/237) agent-doc-codex-stop-io tests::stop_auto_closes_guard_prefixed_patch_payload
+        PASS [   0.014s] (179/237) agent-doc-codex-stop-io tests::stop_hook_budget_returns_a_fail_closed_response_before_outer_timeout
+        PASS [   0.016s] (180/237) agent-doc-codex-stop-io tests::stop_hook_deadline_defaults_to_the_wall_clock_budget_and_opts_into_worker_completion
+        PASS [   0.203s] (181/237) agent-doc-codex-stop-io tests::stop_fails_closed_after_one_auto_continue
+        PASS [   0.019s] (182/237) agent-doc-codex-stop-io tests::stop_hook_worker_completion_deadline_waits_for_the_actual_response
+        PASS [   0.685s] (183/237) agent-doc-codex-stop-io tests::stop_codex_continuation_suppresses_clear_when_token_count_crosses_threshold
+        PASS [   0.731s] (184/237) agent-doc-codex-stop-io tests::stop_codex_continuation_logs_structured_clear_proof_when_opted_in
+        PASS [   2.347s] (185/237) agent-doc-codex-stop-io tests::stop_auto_closes_open_cycle_from_last_assistant_message
+        PASS [   2.388s] (186/237) agent-doc-codex-stop-io tests::stop_auto_closes_open_cycle_across_nested_roots
+        PASS [   2.891s] (187/237) agent-doc-codex-stop-io tests::recursive_stop_persists_answered_free_text_residue_without_replaying_predecessor_text
+        PASS [   0.217s] (188/237) agent-doc-codex-stop-io tests::stop_hands_fresh_post_commit_exchange_prompt_to_background
+        PASS [   0.130s] (189/237) agent-doc-codex-stop-io tests::stop_passes_through_context_clear_from_durable_marker_when_session_state_missing
+        PASS [   2.457s] (190/237) agent-doc-codex-stop-io tests::stop_auto_closes_partial_backlog_patch_against_structured_backlog
+        PASS [   2.829s] (191/237) agent-doc-codex-stop-io tests::stop_auto_closes_active_session_drift_when_prompt_has_instruction_preamble
+        PASS [   7.084s] (192/237) agent-doc::subagent_completion_feedback a_committed_plain_twin_of_a_running_claim_is_never_selected_or_dispatched
+        PASS [   2.836s] (193/237) agent-doc-codex-stop-io tests::stop_auto_closes_active_session_post_commit_drift
+        PASS [   3.438s] (194/237) agent-doc-codex-stop-io tests::hook_committed_response_accepts_late_backlog_only_done_in_one_closeout
+        PASS [   3.150s] (195/237) agent-doc-codex-stop-io tests::recursive_stop_reopens_and_closes_committed_cycle_fresh_prompt
+        PASS [   2.512s] (196/237) agent-doc-codex-stop-io tests::stop_auto_closes_prompt_bearing_diff_when_cycle_never_started
+        PASS [   3.281s] (197/237) agent-doc-codex-stop-io tests::recursive_stop_closes_unmarked_active_session_post_commit_chat_drift
+        PASS [   2.590s] (198/237) agent-doc-codex-stop-io tests::stop_auto_closes_patch_payload_with_safe_leading_commentary
+        PASS [   0.019s] (199/237) agent-doc-codex-stop-io tests::stop_turn_ownership_requires_two_equal_nonempty_ids
+        PASS [   2.871s] (200/237) agent-doc-codex-stop-io tests::stop_auto_closes_open_cycle_then_blocks_for_next_auto_queue_head
+        PASS [   0.031s] (201/237) agent-doc-codex-stop-io tests::terminal_handoff_then_binding_settlement_performs_zero_document_reads
+        PASS [   0.657s] (202/237) agent-doc-codex-stop-io tests::stop_passes_through_committed_cycle
+        PASS [   0.015s] (203/237) agent-doc-codex-stop-io tests::terminal_receipt_reads_bypass_the_pre_repair_memo
+        PASS [   0.010s] (204/237) agent-doc-codex-stop-io tests::the_stop_hook_materializes_a_document_once_per_invocation
+        PASS [   0.012s] (205/237) agent-doc-codex-stop-io tests::the_fail_closed_branch_is_bounded_by_stop_hook_active
+        PASS [   0.735s] (206/237) agent-doc-codex-stop-io tests::stop_passes_through_clean_closeout_when_auto_queue_has_clear_command
+        PASS [   0.718s] (207/237) agent-doc-codex-stop-io tests::stop_passes_through_committed_cycle_with_stopped_queue_head
+        PASS [   0.704s] (208/237) agent-doc-codex-stop-io tests::stop_passes_through_raw_clear_queue_body_with_whitespace
+        PASS [   0.119s] (209/237) agent-doc-codex-stop-io tests::unbound_codex_thread_ignores_another_threads_durable_agent_doc_marker
+        PASS [   0.796s] (210/237) agent-doc-codex-stop-io tests::stop_passes_through_committed_cycle_with_gated_review_head
+        PASS [   1.799s] (211/237) agent-doc-codex-stop-io tests::stop_blocks_when_parent_submodule_pointer_closeout_fails
+        PASS [   3.360s] (212/237) agent-doc-codex-stop-io tests::stop_auto_closes_direct_chat_manual_queue_response_after_recursive_guard
+        PASS [   0.613s] (213/237) agent-doc-codex-stop-io tests::stop_retires_prompt_debt_when_its_observed_open_cycle_commits
+        PASS [   0.661s] (214/237) agent-doc-codex-stop-io tests::stop_retires_prompt_debt_when_a_later_cycle_commits
+        PASS [   0.297s] (215/237) agent-doc-codex-stop-io tests::unanswered_typed_component_refusal_is_next_cycle_stop_state
+        PASS [   0.511s] (216/237) agent-doc-codex-stop-io tests::stop_tracked_state_suppresses_background_clear_continuation
+        PASS [   0.561s] (217/237) agent-doc-codex-stop-io tests::stop_tracked_reset_reason_keeps_mcp_guidance_and_terse_payload
+        PASS [   0.616s] (218/237) agent-doc-codex-stop-io tests::stop_tracked_continuation_prefers_configured_mcp_tools
+        PASS [   0.533s] (219/237) agent-doc-codex-stop-io tests::stop_tracked_session_suppresses_background_clear_after_exchange_compaction
+        PASS [   1.029s] (220/237) agent-doc-codex-stop-io tests::stop_hook_timeout_flushes_response_and_terminates_the_process
+        PASS [   1.236s] (221/237) agent-doc-codex-stop-io tests::stop_does_not_replay_a_restatement_over_the_turns_committed_cycle
+        PASS [   1.303s] (222/237) agent-doc-codex-stop-io tests::stop_does_not_reopen_for_done_archive_projection_after_commit
+        PASS [   0.549s] (223/237) agent-doc-codex-stop-io tests::stop_yields_committed_prompt_diff_to_ready_supervisor
+        PASS [   2.910s] (224/237) agent-doc-codex-stop-io tests::stop_auto_queue_continuation_prefers_configured_mcp_tools
+        PASS [   4.290s] (225/237) agent-doc-codex-stop-io tests::ordinary_same_thread_followup_after_clean_closeout_auto_closes_fresh_cycle
+        PASS [   8.286s] (226/237) agent-doc::subagent_completion_feedback respindexorphan_struck_handback_projections_never_orphan_and_commit_indexes_them
+        PASS [   2.059s] (227/237) agent-doc-codex-stop-io tests::stop_reopens_for_operator_edit_inside_external_done_component
+        PASS [   2.135s] (228/237) agent-doc-codex-stop-io tests::stop_reaps_committed_residue_before_handing_off_adjacent_queue_head
+        PASS [   2.019s] (229/237) agent-doc-codex-stop-io tests::stop_repair_preserves_auto_queue_when_response_targets_other_prompt
+        PASS [   2.169s] (230/237) agent-doc-codex-stop-io tests::stop_reopens_and_closes_prompt_debt_observed_after_cycle_committed
+        PASS [   4.899s] (231/237) agent-doc-codex-stop-io tests::stop_auto_closes_consecutive_direct_chat_manual_queue_answers
+        PASS [   2.359s] (232/237) agent-doc-codex-stop-io tests::stop_replays_plain_final_answer_when_auto_queue_continuation_makes_no_progress
+        PASS [   9.606s] (233/237) agent-doc::subagent_completion_feedback report_complete_then_ack_text_never_reads_back_as_operator_steering
+        PASS [  10.193s] (234/237) agent-doc::subagent_completion_feedback several_reports_then_preflight_admits_the_next_turn
+        PASS [  11.210s] (235/237) agent-doc::subagent_completion_feedback a_running_followup_keeps_its_open_backlog_item_out_of_the_go_mirror
+        PASS [  14.387s] (236/237) agent-doc::subagent_completion_feedback report_complete_structures_the_handback_and_queues_its_action_items
+        PASS [  27.151s] (237/237) agent-doc::subagent_completion_feedback a_claimed_mirrored_id_head_stays_one_row_through_its_whole_attempt
+────────────
+     Summary [  27.158s] 237 tests run: 237 passed, 2319 skipped

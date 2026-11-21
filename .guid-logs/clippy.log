@@ -1,0 +1,204 @@
+[agent-doc build-slot] slot 1/4 acquired after 0s (/run/user/1000/agent-doc/build-slots): cargo clippy -p agent-doc-queue -p agent-doc --all-targets -- -D warnings
+    Checking agent-doc-log-time v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-log-time)
+    Checking agent-doc-topic v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-topic)
+    Checking agent-doc-debounce v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-debounce)
+    Checking agent-doc-lease v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-lease)
+   Compiling fastrand v2.4.1
+    Checking agent-doc-secret-redact v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-secret-redact)
+    Checking agent-doc-element v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-element)
+    Checking agent-doc-hash v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-hash)
+   Compiling agent-doc-reliable-sync-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-reliable-sync-io)
+    Checking agent-doc-queue-icons v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-queue-icons)
+    Checking agent-doc-flow v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-flow)
+    Checking agent-doc-tmux-scope-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-tmux-scope-io)
+    Checking agent-doc-tmux-commands v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-tmux-commands)
+    Checking agent-doc-state-scope v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-state-scope)
+    Checking agent-doc-effect-cas v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-effect-cas)
+    Checking agent-doc-session-registry v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-session-registry)
+    Checking agent-doc-prompt-cache v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-prompt-cache)
+   Compiling anyhow v1.0.103
+    Checking getrandom v0.3.4
+   Compiling foldhash v0.1.5
+   Compiling fixedbitset v0.5.7
+    Checking zerocopy v0.8.52
+    Checking fnv v1.0.7
+    Checking quick-error v1.2.3
+    Checking bit-vec v0.8.0
+    Checking predicates-core v1.0.10
+    Checking float-cmp v0.10.0
+    Checking difflib v0.4.0
+    Checking termtree v0.5.1
+    Checking unarray v0.1.4
+    Checking normalize-line-endings v0.3.0
+   Compiling phf_generator v0.13.1
+    Checking agent-doc-tmux v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-tmux)
+   Compiling tempfile v3.27.0
+    Checking clap_complete v4.6.7
+   Compiling hashbrown v0.15.5
+    Checking rusty-fork v0.3.1
+    Checking bstr v1.12.3
+    Checking module-harness v0.2.1
+    Checking filetime v0.2.29
+    Checking libloading v0.8.9
+    Checking agent-doc-sim-net v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-sim-net)
+    Checking rand_core v0.9.5
+   Compiling string_cache_codegen v0.6.1
+   Compiling phf_codegen v0.13.1
+    Checking predicates-tree v1.0.13
+   Compiling prost-derive v0.14.4
+    Checking bit-set v0.8.0
+   Compiling phf_macros v0.13.1
+    Checking predicates v3.1.4
+   Compiling agent-doc v0.35.585 (/home/brian/worktrees/guid/agent-doc)
+    Checking existence v0.4.0
+    Checking rand v0.9.4
+    Checking rand_xorshift v0.4.0
+   Compiling web_atoms v0.2.5
+    Checking assert_cmd v2.2.2
+   Compiling petgraph v0.8.3
+    Checking phf v0.13.1
+    Checking agent-doc-element-queue v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-element-queue)
+    Checking agent-doc-element-boundary v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-element-boundary)
+    Checking agent-doc-element-unknown v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-element-unknown)
+    Checking agent-doc-element-signals v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-element-signals)
+    Checking agent-doc-element-icebox v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-element-icebox)
+    Checking agent-doc-element-status v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-element-status)
+    Checking agent-doc-session-accretion v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-session-accretion)
+    Checking agent-doc-principles v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-principles)
+    Checking agent-doc-response-toc v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-response-toc)
+   Compiling prost v0.14.4
+    Checking markup5ever v0.38.0
+    Checking xml5ever v0.38.0
+    Checking html5ever v0.38.0
+   Compiling prost-types v0.14.4
+    Checking agent-doc-markdown-ast v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-markdown-ast)
+    Checking agent-doc-syntax v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-syntax)
+    Checking markup5ever_rcdom v0.38.0+unofficial
+    Checking htmd v0.5.4
+   Compiling prost-build v0.14.4
+    Checking agent-doc-model-tier v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-model-tier)
+    Checking agent-doc-markdown-lossless v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-markdown-lossless)
+    Checking agent-doc-ipc-protocol v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-ipc-protocol)
+    Checking agent-doc-decision-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-decision-io)
+    Checking agent-doc-frontmatter v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-frontmatter)
+   Compiling lazily v0.58.0 (https://github.com/lazily-hub/lazily-rs.git?rev=92656d6840e9171b3e55a9e6b11205f820ec984c#92656d68)
+    Checking ppv-lite86 v0.2.21
+    Checking rand_chacha v0.9.0
+    Checking proptest v1.11.0
+    Checking agent-doc-element-backlog v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-element-backlog)
+    Checking agent-doc-config v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-config)
+    Checking agent-doc-turn-executor v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-turn-executor)
+    Checking agent-doc-write-command-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-write-command-io)
+    Checking agent-doc-turn-executor-tmux v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-turn-executor-tmux)
+    Checking agent-doc-prompt-lines v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-prompt-lines)
+    Checking agent-doc-element-done v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-element-done)
+    Checking agent-doc-element-review v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-element-review)
+    Checking agent-doc-memory v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-memory)
+    Checking agent-doc-work-graph v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-work-graph)
+    Checking agent-doc-diff v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-diff)
+    Checking agent-doc-element-exchange v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-element-exchange)
+    Checking agent-doc-prompt-context v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-prompt-context)
+    Checking agent-doc-element-registry v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-element-registry)
+    Checking agent-doc-document v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-document)
+    Checking agent-doc-queue v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-queue)
+    Checking agent-doc-template v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-template)
+    Checking agent-doc-merge v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-merge)
+    Checking agent-doc-turn v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-turn)
+    Checking agent-doc-work-projection v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-work-projection)
+    Checking agent-doc-answer-ledger v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-answer-ledger)
+    Checking agent-doc-fs v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-fs)
+    Checking agent-doc-state-backbone v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-state-backbone)
+    Checking agent-doc-editor-surface v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-editor-surface)
+    Checking agent-doc-element-exchange-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-element-exchange-io)
+    Checking agent-doc-prompt-contract v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-prompt-contract)
+    Checking agent-doc-diff-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-diff-io)
+    Checking agent-doc-memory-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-memory-io)
+    Checking agent-doc-lease-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-lease-io)
+    Checking agent-doc-harness v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-harness)
+    Checking agent-doc-workflow v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-workflow)
+    Checking agent-doc-supervisor v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-supervisor)
+    Checking agent-doc-sync v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-sync)
+    Checking agent-doc-controller v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-controller)
+    Checking agent-doc-process-owner-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-process-owner-io)
+    Checking agent-doc-document-realtime v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-document-realtime)
+    Checking agent-doc-sqlite v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-sqlite)
+    Checking agent-doc-state-wire v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-state-wire)
+    Checking agent-doc-git v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-git)
+    Checking agent-doc-ffi v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-ffi)
+    Checking agent-doc-git-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-git-io)
+    Checking agent-doc-owner-pane-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-owner-pane-io)
+    Checking agent-doc-turn-scope-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-turn-scope-io)
+    Checking agent-doc-callback-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-callback-io)
+    Checking agent-doc-project-root-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-project-root-io)
+    Checking agent-doc-agent-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-agent-io)
+    Checking agent-doc-project-config-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-project-config-io)
+    Checking agent-doc-ipc-forensics-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-ipc-forensics-io)
+    Checking agent-doc-archive-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-archive-io)
+    Checking agent-doc-admin-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-admin-io)
+    Checking agent-doc-frontmatter-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-frontmatter-io)
+    Checking agent-doc-tmux-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-tmux-io)
+    Checking agent-doc-session-actor-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-session-actor-io)
+    Checking agent-doc-session-registry-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-session-registry-io)
+    Checking agent-doc-supervisor-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-supervisor-io)
+    Checking agent-doc-snapshot-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-snapshot-io)
+    Checking agent-doc-turn-status-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-turn-status-io)
+    Checking agent-doc-focus-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-focus-io)
+    Checking agent-doc-cycle-state-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-cycle-state-io)
+    Checking agent-doc-gc-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-gc-io)
+    Checking agent-doc-ops-log-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-ops-log-io)
+    Checking agent-doc-run-context-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-run-context-io)
+    Checking agent-doc-dynamic-context-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-dynamic-context-io)
+    Checking agent-doc-ipc-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-ipc-io)
+    Checking agent-doc-supervisor-process v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-supervisor-process)
+    Checking agent-doc-op-capture-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-op-capture-io)
+    Checking agent-doc-editor-transport-health-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-editor-transport-health-io)
+    Checking agent-doc-capture-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-capture-io)
+    Checking agent-doc-session-accretion-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-session-accretion-io)
+    Checking agent-doc-codex-hook-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-codex-hook-io)
+    Checking agent-doc-element-backlog-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-element-backlog-io)
+    Checking agent-doc-merge-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-merge-io)
+    Checking agent-doc-supervisor-process-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-supervisor-process-io)
+    Checking agent-doc-watch-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-watch-io)
+    Checking agent-doc-crdt-relay-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-crdt-relay-io)
+    Checking agent-doc-state-observer-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-state-observer-io)
+    Checking agent-doc-controller-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-controller-io)
+    Checking agent-doc-workflow-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-workflow-io)
+    Checking agent-doc-write-converge-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-write-converge-io)
+    Checking agent-doc-editor-surface-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-editor-surface-io)
+    Checking agent-doc-zed-lsp-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-zed-lsp-io)
+    Checking agent-doc-test-support v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-test-support)
+    Checking agent-doc-sync-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-sync-io)
+    Checking agent-doc-queue-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-queue-io)
+    Checking agent-doc-claim-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-claim-io)
+    Checking agent-doc-preflight-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-preflight-io)
+    Checking agent-doc-flow-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-flow-io)
+    Checking agent-doc-document-realtime-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-document-realtime-io)
+    Checking agent-doc-lint-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-lint-io)
+    Checking agent-doc-template-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-template-io)
+    Checking agent-doc-hooks-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-hooks-io)
+    Checking agent-doc-response-toc-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-response-toc-io)
+    Checking agent-doc-element-backlog-runtime-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-element-backlog-runtime-io)
+    Checking agent-doc-status-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-status-io)
+    Checking agent-doc-response-replay-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-response-replay-io)
+    Checking agent-doc-boundary-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-boundary-io)
+    Checking agent-doc-prompt-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-prompt-io)
+    Checking agent-doc-write-ipc-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-write-ipc-io)
+    Checking agent-doc-session-check-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-session-check-io)
+    Checking agent-doc-compact-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-compact-io)
+    Checking agent-doc-prompt-context-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-prompt-context-io)
+    Checking agent-doc-stream-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-stream-io)
+    Checking agent-doc-repair-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-repair-io)
+    Checking agent-doc-commit-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-commit-io)
+    Checking agent-doc-run-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-run-io)
+    Checking agent-doc-start-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-start-io)
+    Checking agent-doc-preflight-runtime-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-preflight-runtime-io)
+    Checking agent-doc-closeout-runtime-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-closeout-runtime-io)
+    Checking agent-doc-repair-runtime-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-repair-runtime-io)
+    Checking agent-doc-write-runtime-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-write-runtime-io)
+    Checking agent-doc-route-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-route-io)
+    Checking agent-doc-run-runtime-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-run-runtime-io)
+    Checking agent-doc-preflight-command-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-preflight-command-io)
+    Checking agent-doc-repair-command-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-repair-command-io)
+    Checking agent-doc-start-runtime-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-start-runtime-io)
+    Checking agent-doc-codex-stop-io v0.35.585 (/home/brian/worktrees/guid/agent-doc/agent-doc-codex-stop-io)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 59.96s

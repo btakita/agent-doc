@@ -1,0 +1,70 @@
+[agent-doc build-slot] slot 1/4 acquired after 0s (/run/user/1000/agent-doc/build-slots): cargo run --quiet --bin agent-doc -- audit-docs
+Auditing docs...
+
+  .agents/skills/tsift/SKILL.md                    ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  .claude/skills/agent-doc/SKILL.md                ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  .claude/skills/agent-doc/runbooks/baseline-drift.md ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  .claude/skills/agent-doc/runbooks/code-enforced-directives.md ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  .claude/skills/agent-doc/runbooks/coder-workspace.md ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  .claude/skills/agent-doc/runbooks/command-synonyms.md ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  .claude/skills/agent-doc/runbooks/commit.md      ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  .claude/skills/agent-doc/runbooks/compact-exchange.md ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  .claude/skills/agent-doc/runbooks/compound-task-steering.md ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  .claude/skills/agent-doc/runbooks/decisions.md   ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  .claude/skills/agent-doc/runbooks/describe-image.md ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  .claude/skills/agent-doc/runbooks/document-format.md ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  .claude/skills/agent-doc/runbooks/dynamic-context.md ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  .claude/skills/agent-doc/runbooks/harness-invocation.md ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  .claude/skills/agent-doc/runbooks/jb-cache-conflict.md ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  .claude/skills/agent-doc/runbooks/manual-job-packets.md ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  .claude/skills/agent-doc/runbooks/model-tier-gate.md ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  .claude/skills/agent-doc/runbooks/multi-tmux-sessions.md ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  .claude/skills/agent-doc/runbooks/pending-ops.md ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  .claude/skills/agent-doc/runbooks/persist-closeout.md ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  .claude/skills/agent-doc/runbooks/planning-dispatch.md ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  .claude/skills/agent-doc/runbooks/preset-runbooks.md ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  .claude/skills/agent-doc/runbooks/recap.md       ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  .claude/skills/agent-doc/runbooks/split-spec-files.md ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  .claude/skills/agent-doc/runbooks/streaming-checkpoints.md ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  .claude/skills/agent-doc/runbooks/transfer-extract.md ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  AGENTS.md                                        ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  CLAUDE.md                                        ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  README.md                                        ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+  SPEC.md                                          ⚠ Mtime advisory: Older than src/queue_completion_feedback.rs — may be stale; generated agent-doc surfaces are checked by rendered content
+
+Combined instruction files: 628 lines (budget: 1000) ✓
+  .agents/skills/tsift/SKILL.md: 37
+  .claude/skills/agent-doc/SKILL.md: 49
+  .claude/skills/agent-doc/runbooks/baseline-drift.md: 58
+  .claude/skills/agent-doc/runbooks/code-enforced-directives.md: 48
+  .claude/skills/agent-doc/runbooks/coder-workspace.md: 136
+  .claude/skills/agent-doc/runbooks/command-synonyms.md: 39
+  .claude/skills/agent-doc/runbooks/commit.md: 132
+  .claude/skills/agent-doc/runbooks/compact-exchange.md: 100
+  .claude/skills/agent-doc/runbooks/compound-task-steering.md: 57
+  .claude/skills/agent-doc/runbooks/decisions.md: 201
+  .claude/skills/agent-doc/runbooks/describe-image.md: 11
+  .claude/skills/agent-doc/runbooks/document-format.md: 110
+  .claude/skills/agent-doc/runbooks/dynamic-context.md: 64
+  .claude/skills/agent-doc/runbooks/harness-invocation.md: 245
+  .claude/skills/agent-doc/runbooks/jb-cache-conflict.md: 148
+  .claude/skills/agent-doc/runbooks/manual-job-packets.md: 96
+  .claude/skills/agent-doc/runbooks/model-tier-gate.md: 42
+  .claude/skills/agent-doc/runbooks/multi-tmux-sessions.md: 66
+  .claude/skills/agent-doc/runbooks/pending-ops.md: 418
+  .claude/skills/agent-doc/runbooks/persist-closeout.md: 191
+  .claude/skills/agent-doc/runbooks/planning-dispatch.md: 62
+  .claude/skills/agent-doc/runbooks/preset-runbooks.md: 60
+  .claude/skills/agent-doc/runbooks/queue-auto-loop.md: 223
+  .claude/skills/agent-doc/runbooks/recap.md: 117
+  .claude/skills/agent-doc/runbooks/respond.md: 1294
+  .claude/skills/agent-doc/runbooks/session-cycle.md: 242
+  .claude/skills/agent-doc/runbooks/split-spec-files.md: 51
+  .claude/skills/agent-doc/runbooks/streaming-checkpoints.md: 89
+  .claude/skills/agent-doc/runbooks/transfer-extract.md: 210
+  AGENTS.md: 541
+  CLAUDE.md: 1
+  README.md: 234
+  SPEC.md: 941
+
+No blocking issues found ✓ (30 mtime advisory(s))

@@ -42,7 +42,9 @@ Read `ui_outcome` before describing a stop:
 
 `queue_auto_clear_yield: true` is an intentional supervisor handoff only after
 the just-completed item's authorized current-item and returned-subagent outward
-effects have executed and their results are verified (`#effectbeforecloseout`).
+effects have executed and their results are verified (`#effectbeforecloseout`),
+and the agent-owned action items its handback reported are done and their rows
+struck (`#finishactionable`).
 A required pull request is one of those effects (`#closepressure`): citing a
 pull request that already existed does not complete a setup or
 open-a-pull-request head.

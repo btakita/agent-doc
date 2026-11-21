@@ -936,3 +936,75 @@ fn operator_verify_followup_rests_as_operator_wait_not_agent_inbox() {
         "{identified_projected}"
     );
 }
+
+/// `#finishactionable`: which live rows are agent-owned action items. The
+/// follow-up shape decides, through any heading, lifecycle marker, attempt
+/// projection, or generated id; `[operator-verify]`, `🙋`, and a strike do not
+/// qualify, and a hand-written row outside the shape is not one.
+#[test]
+fn agent_followup_rows_are_recognized_through_projection() {
+    for row in [
+        "follow up on an action item from `alpha`: agent: install `a12e285c55` and verify `agent-doc --version`.",
+        "📥 follow up on an action item from `alpha`: agent: check CI run 44946906648 finished green.",
+        "### 📥 follow up on an action item from queue item “complete the work”: agent: check CI.",
+        "🟡 [#subagent:ci12#1] follow up on an action item from `alpha`: agent: check CI.",
+        "📥 follow up on an action item from `alpha`: rebase #241 [#q-0123456789ab]",
+    ] {
+        assert!(is_agent_followup_row(row), "{row}");
+    }
+    for row in [
+        "📥 follow up on an action item from `alpha`: operator: rotate the tokens [operator-verify]",
+        "🙋 follow up on an action item from `alpha`: human (tmstorm): approve PR 9 [operator-verify] [#q-0123456789ab]",
+        "~~follow up on an action item from `alpha`: agent: check CI.~~",
+        "📥 do [#alpha]",
+        "📥 install the build and check CI",
+    ] {
+        assert!(!is_agent_followup_row(row), "{row}");
+    }
+}
+
+/// `#finishactionable`: the Stop gate tells the agent to finish a pending
+/// agent-owned action item in this turn, while a human-owned follow-up row
+/// still waits on the operator and an ordinary pending head keeps the
+/// generic owed transition.
+#[test]
+fn stop_gate_names_agent_action_items_as_this_turns_work() {
+    let doc = "---\nagent_doc_format: template\nqueue: go\n---\n\n\
+<!-- agent:queue go -->\n\
+- 📥 follow up on an action item from queue item “complete the work for this tree”: agent: install `a12e285c55` (`make install` in the agent-doc submodule) and verify `agent-doc --version`.\n\
+- 📥 follow up on an action item from queue item “complete the work for this tree”: operator: apply edits 1–3 in the editor. [operator-verify]\n\
+- 📥 do [#otherwork]\n\
+<!-- /agent:queue -->\n";
+    let assessment = assess_transient_closeout(doc, &CloseoutEvidence::default()).unwrap();
+    assert_eq!(assessment.debts.len(), 2, "{:#?}", assessment.debts);
+    let install = assessment
+        .debts
+        .iter()
+        .find(|debt| debt.row.contains("make install"))
+        .expect("the agent-owned install row holds the turn");
+    assert_eq!(
+        install.owed,
+        crate::transient_closeout::OWED_AGENT_ACTION_ITEM
+    );
+    let other = assessment
+        .debts
+        .iter()
+        .find(|debt| debt.row.contains("do [#otherwork]"))
+        .expect("an ordinary pending head still holds the turn");
+    assert_ne!(
+        other.owed,
+        crate::transient_closeout::OWED_AGENT_ACTION_ITEM
+    );
+    assert_eq!(
+        assessment.quiescent_count(QuiescentReason::AwaitingOperator),
+        1
+    );
+    let failure = normal_closeout_failure(doc)
+        .unwrap()
+        .expect("the agent-owned row refuses closeout");
+    assert!(
+        failure.contains("do this agent-owned action item now, in this turn (#finishactionable)"),
+        "{failure}"
+    );
+    assert!(!failure.contains("apply edits 1–3"), "{failure}");
+}

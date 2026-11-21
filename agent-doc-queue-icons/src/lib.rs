@@ -290,7 +290,11 @@ pub fn lifecycle_word_before_owner_annotation(text: &str) -> Option<&str> {
 /// `[#<owner>#<generation>]` or a legacy `⟦<owner>#<generation>⟧` /
 /// `⟦owner=<owner>;generation=<generation>⟧`. The owner is non-empty and on
 /// one line; the generation is a decimal number.
-fn is_owner_annotation_prefix(text: &str) -> bool {
+///
+/// An owner annotation names a claim attempt, never tracked work, so the
+/// row-identity parser skips one quoted inside a row's text
+/// (`#lifecyclewordowner`).
+pub fn is_owner_annotation_prefix(text: &str) -> bool {
     let (payload, legacy) = if let Some(after_open) = text.strip_prefix("[#") {
         match after_open.split_once(']') {
             Some((payload, _)) => (payload, false),

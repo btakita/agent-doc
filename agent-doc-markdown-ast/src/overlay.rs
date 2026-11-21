@@ -1585,11 +1585,31 @@ fn strip_one_pin(text: &str) -> Option<(&str, bool)> {
     None
 }
 
+/// The first `[#id]` token in `text`.
+///
+/// `#lifecyclewordowner`: an exact-attempt owner annotation
+/// (`[#subagent:x#1]`) names a claim attempt, never tracked work, so one
+/// quoted inside a row is skipped and the search continues after it. In
+/// agent-loop `agent-doc-bugs.md` (2026-11-21) follow-up titles and bug
+/// reports quoted the torn label `running [#subagent:lzeffectvoid#1] amend
+/// core-v1`; every such row keyed as `subagent:lzeffectvoid#1`, so prompt
+/// identity reported "queue prompt id [#subagent:lzeffectvoid#1] names 4
+/// executable rows", stamped `Duplicate` diagnostics on unrelated rows, never
+/// admitted them a `[#q-…]` id, and the keyed queue merge declined every cut
+/// over the colliding keys.
 fn extract_bracket_id(text: &str) -> Option<String> {
-    let start = text.find("[#")? + 2;
-    let end = text[start..].find(']')? + start;
-    let id = &text[start..end];
-    (!id.is_empty()).then(|| id.to_string())
+    let mut from = 0;
+    loop {
+        let open = text[from..].find("[#")? + from;
+        let start = open + 2;
+        let end = text[start..].find(']')? + start;
+        if agent_doc_queue_icons::is_owner_annotation_prefix(&text[open..]) {
+            from = end + 1;
+            continue;
+        }
+        let id = &text[start..end];
+        return (!id.is_empty()).then(|| id.to_string());
+    }
 }
 
 /// A list item's node id and whether it came from an explicit `[#id]`
@@ -3716,6 +3736,46 @@ trailing residue
             parse_item("🙋 [#subagent-operator-request-abc]: yes", 0, 0, true).id,
             "subagent-operator-request-abc"
         );
+    }
+
+    /// `#lifecyclewordowner`: an exact-attempt owner annotation quoted inside
+    /// a row is a claim label, never the row's work id. The search continues
+    /// past it, so a later real id still keys the row.
+    #[test]
+    fn a_quoted_owner_annotation_is_never_a_row_id() {
+        let bare_rows = [
+            "follow up on an action item from queue item “running [#subagent:x#1] amend core-v1”: operator: cut a release",
+            "the root quotes `🟡 running [#subagent:x#1] amend core-v1` in a bug report",
+            "🟡 [#subagent:y#1] the root quotes `running [#subagent:x#1] amend` here",
+            "see ⟦subagent:x#2⟧ and [#subagent:x#2] for context",
+        ];
+        for row in bare_rows {
+            let item = parse_item(row, 0, row.len(), true);
+            assert!(!item.explicit_id, "{row:?} keyed {:?}", item.id);
+            assert!(item.id.starts_with("ft-"), "{row:?} keyed {:?}", item.id);
+        }
+        let real = parse_item(
+            "follow up on “running [#subagent:x#1] amend” then [#real-id] work",
+            0,
+            0,
+            true,
+        );
+        assert_eq!(real.id, "real-id");
+        assert!(real.explicit_id);
+        // A bare work id inside prose still keys the row, as before.
+        assert_eq!(
+            parse_item("fix [#inline] handling later", 0, 0, true).id,
+            "inline"
+        );
+        let multiline = parse_multiline_item(
+            "x",
+            0,
+            0,
+            0,
+            "quotes “running [#subagent:x#1] amend core-v1”\nbody".to_string(),
+            false,
+        );
+        assert!(!multiline.explicit_id, "{:?}", multiline.id);
     }
 
     /// `#queuerowworkidentity`: multiline prompts key on their work too.

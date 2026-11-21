@@ -771,6 +771,56 @@ mod tests {
         assert!(projection.content.contains("operator child prompt [#q-"));
     }
 
+    /// `#lifecyclewordowner`: rows that QUOTE a claim label in their text
+    /// are distinct work, not one prompt. agent-loop `agent-doc-bugs.md`
+    /// (2026-11-21) had follow-up titles and bug reports quoting
+    /// `running [#subagent:lzeffectvoid#1] amend core-v1`; each keyed as
+    /// `subagent:lzeffectvoid#1`, drew "names 4 executable rows" and
+    /// `Duplicate` blockquotes, and was never admitted a q-id.
+    #[test]
+    fn a_quoted_claim_label_is_not_a_shared_prompt_id() {
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "- follow up on an action item from queue item “running [#subagent:x#1] amend core-v1”: operator: cut a release\n",
+            "- follow up on an action item from queue item “follow up on an action item from queue item 'running [#subagent:x#1] …”: operator: fix gh\n",
+            "- 🟡 [#subagent:y#1] the root quotes `🟡 running [#subagent:x#1] amend core-v1` in a bug report\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let projection = project(content, "doc-a");
+        assert!(
+            !projection.content.contains("**Duplicate #"),
+            "{}",
+            projection.content
+        );
+        assert!(
+            projection
+                .relations
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "queue_prompt_identity_duplicate"),
+            "{:?}",
+            projection.relations.diagnostics
+        );
+        assert_eq!(
+            projection.assignments.len(),
+            3,
+            "{:?}",
+            projection.assignments
+        );
+        assert!(
+            projection
+                .assignments
+                .iter()
+                .all(|assignment| assignment.id.starts_with("q-")),
+            "{:?}",
+            projection.assignments
+        );
+        assert_eq!(
+            project(&projection.content, "doc-a").content,
+            projection.content
+        );
+    }
+
     #[test]
     fn duplicate_directives_project_inert_blockquotes_without_rewriting_authored_rows() {
         let content = concat!(

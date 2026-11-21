@@ -2475,9 +2475,14 @@ fn strip_response_projection_children(body: &str) -> String {
 ///
 /// The first full `**Response [#r-…]**` row in document order is retained.
 /// Later full rows become inert `**Closed by:** [#r-…]` backlinks and only
-/// binary-owned metadata beneath those rows is removed. Unknown descendants
-/// remain byte-for-byte so an operator reply nested under a generated choice
-/// or action cannot be discarded by the migration.
+/// binary-owned metadata beneath those rows is removed, including the copied
+/// worker hand-back sections (`#handbackrowstructure`: `**What changed:**`,
+/// `**Verification:**`, … and their `<!-- agent-doc:response-detail -->`
+/// rows). A later copy under the same parent row as the retained tree is
+/// removed outright when nothing but generated metadata sits beneath it,
+/// because a backlink beside the tree it names is noise (`#ackrespdup`).
+/// Unknown descendants remain byte-for-byte so an operator reply nested under
+/// a generated choice or action cannot be discarded by the migration.
 pub fn canonicalize_duplicate_queue_response_projections(content: &str) -> Result<String> {
     let components = element::parse(content)?;
     let mut seen = HashSet::<String>::new();
@@ -2569,12 +2574,24 @@ fn canonicalize_duplicate_response_projections_in_queue(
     };
     let response_ids = (0..lines.len()).map(response_id_at).collect::<Vec<_>>();
     let mut duplicate_markers = HashMap::<usize, String>::new();
+    // `#ackrespdup`: duplicate markers whose retained tree (first seen in
+    // this same queue body) hangs from the same parent row.
+    let mut first_in_body = HashMap::<String, usize>::new();
+    let mut same_parent_duplicates = HashSet::<usize>::new();
     for (index, response_id) in response_ids.iter().enumerate() {
         let Some(response_id) = response_id else {
             continue;
         };
-        if !seen.insert(response_id.clone()) {
+        if seen.insert(response_id.clone()) {
+            first_in_body.insert(response_id.clone(), index);
+        } else {
             duplicate_markers.insert(index, response_id.clone());
+            if first_in_body
+                .get(response_id)
+                .is_some_and(|first| parents[*first] == parents[index])
+            {
+                same_parent_duplicates.insert(index);
+            }
         }
     }
     if duplicate_markers.is_empty() {
@@ -2593,11 +2610,21 @@ fn canonicalize_duplicate_response_projections_in_queue(
     generated.extend(agent_doc_markdown_ast::overlay::response_row_child_ranges(
         body,
     ));
+    // `#ackrespdup`: a strike copies the worker hand-back onto the row
+    // (`#handbackrowstructure`). Its section rows and marked detail rows are
+    // generated response structure too; leaving them behind orphaned a full
+    // copy of every section under the backlink.
+    generated.extend(lines.iter().enumerate().filter_map(|(index, line)| {
+        let (_, item) = markdown_list_item(line)?;
+        agent_doc_markdown_ast::overlay::is_generated_response_structure_row(item)
+            .then(|| (offsets[index], offsets[index + 1]))
+    }));
     generated.sort_unstable_by_key(|(start, end)| (*start, std::cmp::Reverse(*end)));
     generated.dedup();
 
     let mut replacements = Vec::<(usize, usize, String)>::new();
     let mut removed = Vec::<(usize, usize)>::new();
+    let mut duplicate_headers = Vec::<(usize, usize, usize)>::new();
     for (start, end) in generated {
         let Ok(line_index) = offsets.binary_search(&start) else {
             continue;
@@ -2605,25 +2632,48 @@ fn canonicalize_duplicate_response_projections_in_queue(
         let Some(owner) = root_response_marker(line_index) else {
             continue;
         };
-        let Some(response_id) = duplicate_markers.get(&owner) else {
+        if !duplicate_markers.contains_key(&owner) {
             continue;
-        };
+        }
         if line_index == owner {
-            let line = &body[start..end];
-            let marker =
-                agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(response_id)
-                    .expect("parsed response lookup ids are canonical");
-            replacements.push((
-                start,
-                end,
-                line.replacen(&marker, &format!("**Closed by:** {response_id}"), 1),
-            ));
+            duplicate_headers.push((owner, start, end));
         } else if !removed
             .iter()
             .any(|(outer_start, outer_end)| *outer_start <= start && end <= *outer_end)
         {
             removed.push((start, end));
         }
+    }
+    let line_indent = |index: usize| {
+        let line = lines[index];
+        line.len() - line.trim_start_matches([' ', '\t']).len()
+    };
+    for (owner, start, end) in duplicate_headers {
+        let response_id = &duplicate_markers[&owner];
+        // The duplicate's subtree: every following line indented deeper than
+        // its header, up to the first blank or shallower line.
+        let subtree_end = (owner + 1..lines.len())
+            .find(|index| {
+                lines[*index].trim().is_empty() || line_indent(*index) <= line_indent(owner)
+            })
+            .unwrap_or(lines.len());
+        let only_generated_beneath = (owner + 1..subtree_end).all(|index| {
+            removed.iter().any(|(removed_start, removed_end)| {
+                *removed_start <= offsets[index] && offsets[index + 1] <= *removed_end
+            })
+        });
+        if same_parent_duplicates.contains(&owner) && only_generated_beneath {
+            removed.push((start, end));
+            continue;
+        }
+        let line = &body[start..end];
+        let marker = agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(response_id)
+            .expect("parsed response lookup ids are canonical");
+        replacements.push((
+            start,
+            end,
+            line.replacen(&marker, &format!("**Closed by:** {response_id}"), 1),
+        ));
     }
     replacements.extend(
         removed
@@ -10173,6 +10223,154 @@ mod tests {
         assert!(repaired.contains("**Timestamp:** first"), "{repaired}");
         assert!(!repaired.contains("**Timestamp:** second"), "{repaired}");
         assert!(!repaired.contains("**Timestamp:** third"), "{repaired}");
+    }
+
+    /// One worker hand-back tree as `queue consume --ack-text` renders it on a
+    /// struck row (`#handbackrowstructure`), indented under a row at `indent`.
+    fn handback_tree(indent: &str, response_id: &str, timestamp: &str) -> String {
+        let detail = agent_doc_markdown_ast::overlay::RESPONSE_DETAIL_MARKER;
+        format!(
+            concat!(
+                "{i}- **Response {r}**\n",
+                "{i}  - **Timestamp:** {t}\n",
+                "{i}  - **Summary:** Amended core-v1 and pushed `35983d8`.\n",
+                "{i}  - **What changed:** {d}\n",
+                "{i}    - Commit `35983d8` widens `EffectRun`. {d}\n",
+                "{i}  - **Verification:** {d}\n",
+                "{i}    - `make check` exit 0. {d}\n",
+                "{i}  - **Action items:** {d}\n",
+                "{i}    - agent: check the CI run for `35983d8`. {d}\n",
+                "{i}  - **Notes:** {d}\n",
+                "{i}    - `AsyncEffectRun` is unchanged. {d}\n",
+                "{i}  - **Next actions:** {d}\n",
+                "{i}    - Coordinator closes the queue item. {d}\n",
+                "{i}  - **State:** Follow-up work remains.\n",
+                "{i}  - **Guidance:** More work remains. Keep this tree and follow the action items in this response.\n",
+            ),
+            i = indent,
+            r = response_id,
+            t = timestamp,
+            d = detail,
+        )
+    }
+
+    /// `#ackrespdup`: `tasks/agent-doc/agent-doc-bugs.md` at superproject
+    /// `18d6a77239` holds the same hand-back tree `[#r-92b7ccc53170]` twice
+    /// under one struck `amend core-v1` row (the 08:15:26Z `--ack-text` copy
+    /// above the 08:05:59Z original). The committed-duplicate heal kept the
+    /// header as a `**Closed by:**` backlink and left every hand-back section
+    /// (`**What changed:**` … `**Next actions:**` and their marked detail
+    /// rows) orphaned beneath it. The copy beside the retained tree must
+    /// disappear completely.
+    #[test]
+    fn duplicate_handback_tree_under_the_same_row_heals_to_one_tree() {
+        const RESPONSE: &str = "[#r-92b7ccc53170]";
+        let retained = handback_tree("    ", RESPONSE, "2026-11-21T08:15:26.000Z");
+        let content = queue_doc(&format!(
+            concat!(
+                "- decide on #lzeffectvoid [operator-verify]\n",
+                "  - ~~amend core-v1~~\n",
+                "{0}",
+                "{1}",
+                "  - ~~follow up: check the CI run~~\n",
+            ),
+            retained,
+            handback_tree("    ", RESPONSE, "2026-11-21T08:05:59.000Z"),
+        ));
+        assert_eq!(
+            duplicate_queue_response_projection_ids(&content).unwrap(),
+            BTreeSet::from([RESPONSE.to_string()])
+        );
+
+        let repaired = canonicalize_duplicate_queue_response_projections(&content).unwrap();
+        assert_eq!(
+            repaired,
+            queue_doc(&format!(
+                concat!(
+                    "- decide on #lzeffectvoid [operator-verify]\n",
+                    "  - ~~amend core-v1~~\n",
+                    "{0}",
+                    "  - ~~follow up: check the CI run~~\n",
+                ),
+                retained,
+            )),
+            "exactly the retained tree remains, with no backlink or orphaned section"
+        );
+        assert!(
+            duplicate_queue_response_projection_ids(&repaired)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            canonicalize_duplicate_queue_response_projections(&repaired).unwrap(),
+            repaired,
+            "the heal must be idempotent"
+        );
+    }
+
+    /// `#ackrespdup`: the original 08:15Z shape, a copy of the hand-back
+    /// tree under an identical struck sibling. It keeps the inert backlink
+    /// (another row), but none of the copied sections.
+    #[test]
+    fn duplicate_handback_tree_under_a_sibling_row_leaves_only_a_backlink() {
+        const RESPONSE: &str = "[#r-92b7ccc53170]";
+        let retained = handback_tree("  ", RESPONSE, "2026-11-21T08:05:59.000Z");
+        let content = queue_doc(&format!(
+            concat!(
+                "- ~~amend core-v1~~\n",
+                "{0}",
+                "- ~~amend core-v1~~\n",
+                "{1}",
+            ),
+            retained,
+            handback_tree("  ", RESPONSE, "2026-11-21T08:15:26.000Z"),
+        ));
+
+        let repaired = canonicalize_duplicate_queue_response_projections(&content).unwrap();
+        assert_eq!(
+            repaired,
+            queue_doc(&format!(
+                concat!(
+                    "- ~~amend core-v1~~\n",
+                    "{0}",
+                    "- ~~amend core-v1~~\n",
+                    "  - **Closed by:** {1}\n",
+                ),
+                retained, RESPONSE,
+            ))
+        );
+        assert_eq!(
+            canonicalize_duplicate_queue_response_projections(&repaired).unwrap(),
+            repaired
+        );
+    }
+
+    /// `#ackrespdup`: an operator-authored child under the same-row copy
+    /// keeps the copy's backlink as its parent and stays byte-identical.
+    #[test]
+    fn duplicate_handback_tree_under_the_same_row_keeps_operator_children() {
+        const RESPONSE: &str = "[#r-92b7ccc53170]";
+        let retained = handback_tree("    ", RESPONSE, "2026-11-21T08:15:26.000Z");
+        let mut duplicate = handback_tree("    ", RESPONSE, "2026-11-21T08:05:59.000Z");
+        duplicate.push_str("      - Operator: keep this reply exactly.\n");
+        let content = queue_doc(&format!(
+            "- parent\n  - ~~amend core-v1~~\n{retained}{duplicate}"
+        ));
+
+        let repaired = canonicalize_duplicate_queue_response_projections(&content).unwrap();
+        assert_eq!(
+            repaired,
+            queue_doc(&format!(
+                concat!(
+                    "- parent\n",
+                    "  - ~~amend core-v1~~\n",
+                    "{0}",
+                    "    - **Closed by:** {1}\n",
+                    "      - Operator: keep this reply exactly.\n",
+                ),
+                retained, RESPONSE,
+            ))
+        );
     }
 
     #[test]

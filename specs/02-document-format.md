@@ -502,6 +502,23 @@ queue lines the strike itself added or removed, closeout logs
 publishes both cuts. An operator row the snapshot never held, and a snapshot
 whose queue body already matches the published live queue, stay quiet.
 
+The `gen:<enclosing key>:<label>` scoping of generated response rows also
+covers every other binary-rendered tree in a list component
+(`#waitingonyoukeys`): Waiting-on-you packet reply rows (`**Next:**`,
+`**Response:**`, `**Question:**`, `**Action:**`, … ending in `▫️`), a
+Waiting-on-you item head (`gen:<root key>:wait:id:<id>`, or its text without
+the `⟦…⟧` counts), Status rows, generated response-structure rows including
+`<!-- agent-doc:response-detail -->` hand-back sections and their detail rows,
+and the `**Complete by:**`/`**Prompt:**`/`**Evidence:**` fields of a review
+prompt blocker. A `status?` query under a row keys as `txt:status?@<enclosing
+key>`. A label repeated inside one scope (two `**Action:**` rows under one
+`**Next actions:**`) keys by its rendered row, then by occurrence. Before this,
+packet rows quoting an item's source text took its `[#id]`, the same id the
+operator's `do [#id]` head carries, and every packet repeated `**Question:**`
+and `**Next actions:**`, so the keyed queue reconcile declined on every cut of
+a document with a Waiting-on-you tree and the queue fell to the line-diff
+merge.
+
 Generated response structures append after the owning row's complete existing
 descendant subtree. Materialization must not insert a response immediately
 after the parent line and thereby move operator-authored children below it.

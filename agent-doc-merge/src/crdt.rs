@@ -1810,13 +1810,34 @@ pub(crate) fn split_list_children(body: &str) -> Option<Vec<KeyedChild>> {
 /// The enclosing row's key plus the row's own label is stable across both
 /// sides and across a re-rendered value. Operator text beneath a generated
 /// choice or action is outside the generated ranges and keeps its own key.
+///
+/// `#waitingonyoukeys`: the same holds for every other binary-rendered tree
+/// in a list component. A Waiting-on-you packet renders `**Response:**` and
+/// `**Action:**` rows that quote the item's source text, so they carried its
+/// `[#id]` (and the operator's `do [#id]` head carries the same one), and
+/// every packet renders the same `**Question:**`/`**Next actions:**` rows. A
+/// worker hand-back copied onto a row (`**What changed:** <!--
+/// agent-doc:response-detail -->` and its sections) repeats under every
+/// response, Status rows repeat their labels, and two review prompt blockers
+/// can carry identical `**Complete by:**`/`**Evidence:**` rows. Each repeat
+/// was a duplicate merge key, so the keyed reconcile declined for every cut
+/// of tasks/agent-doc/agent-doc-bugs.md (2026-11-21 08:06Z and 08:16Z) and
+/// the whole queue fell to the line-diff merge. Those rows now key under the
+/// row they hang under too, and a repeated label inside one scope keys by
+/// its rendered text (then by occurrence), so generated rows never collide
+/// with each other or with operator rows.
 fn rekey_generated_response_children(body: &str, children: &mut [KeyedChild]) {
     let mut generated = agent_doc_markdown_ast::overlay::response_row_child_ranges(body);
     generated.extend(agent_doc_markdown_ast::overlay::response_details_child_ranges(body));
-    if generated.is_empty() {
-        return;
+    let lines: Vec<&str> = body.split_inclusive('\n').collect();
+    let mut line_at = std::collections::HashMap::<usize, usize>::new();
+    let mut line_offset = 0usize;
+    for (index, line) in lines.iter().enumerate() {
+        line_at.insert(line_offset, index);
+        line_offset += line.len();
     }
     let mut enclosing: Vec<(usize, String)> = Vec::new();
+    let mut seen_generated = std::collections::HashSet::<String>::new();
     let mut offset = 0usize;
     for child in children.iter_mut() {
         let start = offset;
@@ -1828,23 +1849,128 @@ fn rekey_generated_response_children(body: &str, children: &mut [KeyedChild]) {
         while enclosing.last().is_some_and(|(open, _)| *open >= indent) {
             enclosing.pop();
         }
-        if generated
+        let scope = enclosing.last().map_or("", |(_, key)| key.as_str());
+        let label = if generated
             .iter()
             .any(|(range_start, range_end)| (*range_start..*range_end).contains(&start))
         {
-            let scope = enclosing.last().map_or("", |(_, key)| key.as_str());
-            child.key = format!("gen:{scope}:{}", generated_row_label(&child.text));
+            Some(generated_row_label(&child.text).to_string())
+        } else {
+            line_at
+                .get(&start)
+                .and_then(|&index| generated_tree_row_label(&lines, index, indent, scope))
+        };
+        if let Some(label) = label {
+            let mut key = format!("gen:{scope}:{label}");
+            if seen_generated.contains(&key) {
+                // A label repeated in one scope (two `**Action:**` rows under
+                // one `**Next actions:**`) keys by its rendered row, then by
+                // occurrence for byte-identical repeats.
+                let row = normalize_item_text(&child.text);
+                let by_text = format!("{key}:{row}");
+                key = by_text.clone();
+                let mut ordinal = 2usize;
+                while seen_generated.contains(&key) {
+                    key = format!("{by_text}~{ordinal}");
+                    ordinal += 1;
+                }
+            }
+            seen_generated.insert(key.clone());
+            child.key = key;
+        } else if !scope.is_empty()
+            && agent_doc_markdown_ast::tree_status_row::status_query_line_kind(
+                child.text.lines().next().unwrap_or(""),
+            )
+            .is_some()
+        {
+            // A `status?` query typed under several rows is one query per row,
+            // and the Status tree answering it hangs under it.
+            child.key = format!("{}@{scope}", child.key);
         }
         enclosing.push((indent, child.key.clone()));
     }
 }
 
+/// `#waitingonyoukeys`: the scoped label of a binary-rendered row outside the
+/// response ranges, or `None` for an ordinary row. `lines` is the component
+/// body split inclusively, `index` the row's first line, and `scope` the key of
+/// the row it hangs under.
+///
+/// - the head of a Waiting-on-you item (`<!-- agent-doc:waiting-item -->`) keys
+///   by its `[#id]` or its text without the binary `⟦…⟧` counts, so a
+///   re-counted head stays one row and never shares the operator's `do [#id]`
+///   identity;
+/// - a packet reply row (`**Next:**`, `**Response:**`, `**Action:**`, … ending
+///   in the reply glyph, under a packet row) keys by its label;
+/// - a Status row, and a generated response-structure row (`**Summary:** …`,
+///   `**What changed:** <!-- agent-doc:response-detail -->`, and the detail
+///   rows beneath it) key by their label or row;
+/// - a `**Complete by:**`/`**Prompt:**`/`**Evidence:**` field directly under a
+///   `[#prompt-blocker-…]` review head keys by its label.
+fn generated_tree_row_label(
+    lines: &[&str],
+    index: usize,
+    indent: usize,
+    scope: &str,
+) -> Option<String> {
+    use agent_doc_markdown_ast::{overlay, reply_row, tree_status_row};
+    let line = lines.get(index)?;
+    if line.contains(reply_row::WAITING_ITEM_MARKER) {
+        let head = line.replace(reply_row::WAITING_ITEM_MARKER, "");
+        return Some(match first_hash_id(&without_binary_counts(&head)) {
+            Some(id) => format!("wait:id:{id}"),
+            None => format!(
+                "wait:txt:{}",
+                normalize_item_text(agent_doc_element_queue::strip_attempt_projection_prefix(
+                    &without_binary_counts(&head)
+                ))
+            ),
+        });
+    }
+    if reply_row::is_agent_doc_reply_row_at(lines, index)
+        || tree_status_row::is_tree_status_row_at(lines, index)
+        || overlay::generated_response_structure_row_end(lines, index, indent).is_some()
+    {
+        return Some(generated_row_label(line).to_string());
+    }
+    let blocker_field = scope.starts_with("id:prompt-blocker-")
+        && ["**Complete by:**", "**Prompt:**", "**Evidence:**"]
+            .iter()
+            .any(|label| {
+                line.trim_start()
+                    .trim_start_matches("- ")
+                    .starts_with(label)
+            });
+    blocker_field.then(|| generated_row_label(line).to_string())
+}
+
+/// `text` without binary `⟦…⟧` status tokens (`⟦you: 1 · agent: 0 · done: 0⟧`).
+fn without_binary_counts(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(open) = rest.find('⟦') {
+        out.push_str(&rest[..open]);
+        match rest[open..].find('⟧') {
+            Some(close) => rest = &rest[open + close + '⟧'.len_utf8()..],
+            None => {
+                rest = &rest[open..];
+                break;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// A generated row's stable label: the bold lead of `**State:** Complete.`, or
 /// the whole row when it has none. The value after the label is excluded so a
-/// re-rendered timestamp, state or guidance updates the row in place.
+/// re-rendered timestamp, state or guidance updates the row in place. A strike
+/// wrapper or lifecycle projection painted onto the row is not part of it.
 fn generated_row_label(row: &str) -> &str {
     let line = row.lines().next().unwrap_or("").trim();
     let item = line.strip_prefix("- ").unwrap_or(line);
+    let item = agent_doc_element_queue::strip_attempt_projection_prefix(item).trim_start();
+    let item = item.strip_prefix("~~").unwrap_or(item);
     item.strip_prefix("**")
         .and_then(|rest| rest.split_once("**"))
         .map_or(item, |(label, _)| label)
@@ -9084,6 +9210,231 @@ Second answer line three.
             children.last().unwrap().key,
             "id:q-aaaaaaaaaaaa",
             "an operator reply is queue work, not a generated row"
+        );
+    }
+
+    /// `#waitingonyoukeys`: the queue of tasks/agent-doc/agent-doc-bugs.md at
+    /// 2026-11-21 08:06Z/08:16Z, reduced. `agent` is the agent cut (strikes
+    /// `do [#ghrecvpolicy]` and `do [#blockerreportterminal]`, re-renders the
+    /// first Waiting-on-you item's counts and timestamp); `operator` is the
+    /// live cut (answers under that item, adds a row).
+    fn waitingonyou_queue(agent: bool, operator: bool) -> String {
+        let source = "Decide whether backlog #ghrecvpolicy stays open in the backlog or moves to the icebox. (source: agent:backlog [#ghrecvpolicy])";
+        let mut doc = String::from("<!-- agent:queue id=\"main\" -->\n");
+        doc.push_str(if agent {
+            "- ### ~~do [#ghrecvpolicy]: #advance whatever is actionable.~~\n"
+        } else {
+            "- ### ⛔ do [#ghrecvpolicy]: #advance whatever is actionable.\n"
+        });
+        doc.push_str(concat!(
+            "- ### ~~Prune the worktrees.~~\n",
+            "  - **Response [#r-580c94a38f53]**\n",
+            "    - **Timestamp:** 2026-11-21T06:35:24.000Z\n",
+            "    - **Summary:** I pruned the worktrees.\n",
+            "    - **What changed:** <!-- agent-doc:response-detail -->\n",
+            "      - No branch, no commits, no source edits. <!-- agent-doc:response-detail -->\n",
+            "    - **Action items:** <!-- agent-doc:response-detail -->\n",
+            "      - operator: decide whether to salvage the dirty worktrees. <!-- agent-doc:response-detail -->\n",
+            "    - **Next actions:** <!-- agent-doc:response-detail -->\n",
+            "      - No follow-up queue heads. <!-- agent-doc:response-detail -->\n",
+            "    - **State:** Follow-up work remains.\n",
+            "- ### 🙋 follow up on an action item from queue item “Prune the worktrees.”: operator: decide whether to salvage the dirty worktrees\n",
+            "  - Should we integrate it?\n",
+            "    - **Response [#r-6103e5c0afe4]**\n",
+            "      - **Timestamp:** 2026-11-21T08:05:59.000Z\n",
+            "      - **Summary:** Recommendation: integrate with changes.\n",
+            "      - **What changed:** <!-- agent-doc:response-detail -->\n",
+            "        - Nothing; read-only. <!-- agent-doc:response-detail -->\n",
+            "      - **Action items:** <!-- agent-doc:response-detail -->\n",
+            "        - operator: approve integrating per the recommendation. <!-- agent-doc:response-detail -->\n",
+            "        - operator: rotate the Cargo, npm and PyPI tokens. <!-- agent-doc:response-detail -->\n",
+            "      - **Next actions:** <!-- agent-doc:response-detail -->\n",
+            "        - No follow-up queue heads. <!-- agent-doc:response-detail -->\n",
+            "      - **State:** Follow-up work remains.\n",
+            "- 🚧 [#subagent:dupprompt#1] agent-doc duplicated my prompt above this prompt.\n",
+            "- ### Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n",
+        ));
+        let (counts, stamp) = if agent {
+            ("⟦📥 you: 0 · agent: 1 · done: 0⟧", "2026-11-21T03:16-05:00")
+        } else {
+            ("⟦you: 1 · agent: 0 · done: 0⟧", "2026-11-21T02:31-05:00")
+        };
+        doc.push_str(&format!(
+            "  - {counts} [#ghrecvpolicypark] {source} <!-- agent-doc:waiting-item -->\n"
+        ));
+        doc.push_str(
+            "    - **Next:** you — reply under this item with the decision or result it asks for ▫️\n",
+        );
+        if operator {
+            doc.push_str("    - keep it in the backlog until GH #40 lands\n");
+        }
+        doc.push_str(&format!("    - **Response:** {source} ▫️\n"));
+        doc.push_str(&format!("      - **Timestamp:** {stamp} ▫️\n"));
+        doc.push_str(concat!(
+            "      - **Question:** What decision or completion result should be recorded? ▫️\n",
+            "      - **Next actions:** ▫️\n",
+        ));
+        doc.push_str(&format!("        - **Action:** {source} ▫️\n"));
+        doc.push_str(concat!(
+            "  - ⟦you: 1 · agent: 0 · done: 0⟧ [#jbsignedfrontend] Confirm the signed frontend release, then verify activation. <!-- agent-doc:waiting-item -->\n",
+            "    - **Next:** you — reply under this item with the decision or result it asks for ▫️\n",
+            "    - **Response:** Confirm the signed frontend release, then verify activation. ▫️\n",
+            "      - **Timestamp:** 2026-11-21T02:31-05:00 ▫️\n",
+            "      - **Question:** What decision or completion result should be recorded? ▫️\n",
+            "      - **Next actions:** ▫️\n",
+            "        - **Action:** Confirm the signed frontend release. ▫️\n",
+            "        - **Action:** Verify activation receipts in a live session. ▫️\n",
+        ));
+        doc.push_str(if agent {
+            "- ~~do [#blockerreportterminal]~~\n"
+        } else {
+            "- 🚧 [#subagent:blockerreportterminal#1] do [#blockerreportterminal]\n"
+        });
+        if operator {
+            doc.push_str("- check the lazily-js CI run for 35983d8\n");
+        }
+        doc.push_str("<!-- /agent:queue -->\n");
+        doc
+    }
+
+    /// `#waitingonyoukeys`: every cut of the real-shaped queue has unique merge
+    /// keys, so the keyed reconcile is taken, never the line-diff fallback, and
+    /// an agent strike + re-render composes with the operator's concurrent
+    /// answer and new row with every row exactly once.
+    #[test]
+    fn waitingonyoukeys_real_queue_takes_the_keyed_merge_under_concurrent_edits() {
+        let base = waitingonyou_queue(false, false);
+        let agent = waitingonyou_queue(true, false);
+        let operator = waitingonyou_queue(false, true);
+        for cut in [&base, &agent, &operator, &waitingonyou_queue(true, true)] {
+            let (_, body, _) = component_framing(cut).unwrap();
+            let children = split_list_children(body).unwrap();
+            let mut seen = std::collections::HashSet::new();
+            let duplicates = children
+                .iter()
+                .filter(|child| !seen.insert(child.key.as_str()))
+                .map(|child| child.key.as_str())
+                .collect::<Vec<_>>();
+            assert!(
+                duplicates.is_empty(),
+                "duplicate merge keys: {duplicates:?}"
+            );
+        }
+
+        let keyed = reconcile_component("queue", Some(&base), &agent, &operator)
+            .expect("the keyed queue reconcile must not decline (no line-diff fallback)");
+        assert_eq!(
+            merge_one_component("queue", Some(&base), &agent, &operator).unwrap(),
+            keyed,
+            "merge_one_component must take the keyed path"
+        );
+        assert_eq!(
+            keyed,
+            waitingonyou_queue(true, true),
+            "every agent and operator edit lands exactly once, in place"
+        );
+    }
+
+    /// `#waitingonyoukeys`: generated rows key under the row they hang under,
+    /// so they never share an operator row's `[#id]`, and their keys survive a
+    /// re-count, a re-rendered value, and a strike.
+    #[test]
+    fn waitingonyoukeys_generated_rows_are_scoped_and_stable() {
+        let key_of = |doc: &str, needle: &str| {
+            let (_, body, _) = component_framing(doc).unwrap();
+            let matches = split_list_children(body)
+                .unwrap()
+                .into_iter()
+                .filter(|child| child.text.contains(needle))
+                .map(|child| child.key)
+                .collect::<Vec<_>>();
+            assert_eq!(matches.len(), 1, "{needle}: {matches:?}");
+            matches.into_iter().next().unwrap()
+        };
+        let base = waitingonyou_queue(false, false);
+        let agent = waitingonyou_queue(true, false);
+        assert_eq!(
+            key_of(&base, "do [#ghrecvpolicy]"),
+            "id:ghrecvpolicy",
+            "only the operator head owns the id"
+        );
+        let head = key_of(&base, "[#ghrecvpolicypark]");
+        assert!(head.starts_with("gen:") && head.ends_with(":wait:id:ghrecvpolicypark"));
+        assert_eq!(head, key_of(&agent, "[#ghrecvpolicypark]"), "re-count");
+        let action = key_of(&base, "**Action:** Decide");
+        assert!(
+            action.starts_with("gen:") && action.contains(&head) && action.ends_with(":Action:"),
+            "{action}"
+        );
+        let stamp = key_of(&agent, "**Timestamp:** 2026-11-21T03:16");
+        assert_eq!(stamp, format!("gen:gen:{head}:Response::Timestamp:"));
+        let (_, base_body, _) = component_framing(&base).unwrap();
+        assert!(
+            split_list_children(base_body)
+                .unwrap()
+                .iter()
+                .any(|child| child.key == stamp && child.text.contains("T02:31")),
+            "a re-rendered value keeps the row's identity"
+        );
+        let next =
+            "**Next:** you — reply under this item with the decision or result it asks for ▫️";
+        let struck = base.replacen(next, &format!("~~{next}~~"), 1);
+        assert_ne!(struck, base);
+        assert_eq!(
+            key_of(&struck, "~~**Next:**"),
+            format!("gen:{head}:Next:"),
+            "a struck generated row keeps its label key"
+        );
+    }
+
+    /// `#waitingonyoukeys`: the other binary-rendered trees. Two Status trees,
+    /// two review prompt blockers with identical fields (one Prompt names the
+    /// other blocker's id), and repeated response-detail rows all key apart.
+    #[test]
+    fn waitingonyoukeys_status_rows_and_prompt_blockers_never_collide() {
+        let queue = concat!(
+            "- ### do [#alpha]\n",
+            "  - status?\n",
+            "    - **Status:** snapshot — 0 you · 1 agent · 0 deletable · 0 need review ▫️\n",
+            "      - **Next: agent:** “do [#alpha]” — pick up this queued item ▫️\n",
+            "      - **Next: agent:** “do [#beta]” — pick up this queued item ▫️\n",
+            "- ### do [#beta]\n",
+            "  - status?\n",
+            "    - **Status:** snapshot — 0 you · 1 agent · 0 deletable · 0 need review ▫️\n",
+            "      - **Next: agent:** “do [#alpha]” — pick up this queued item ▫️\n",
+        );
+        let review = concat!(
+            "<!-- agent-doc:prompt-blocker -->\n",
+            "- [/] [#prompt-blocker-dfc6201b3410] Activation awaits a signed release.\n",
+            "  - **Complete by:** Verify the signed package.\n",
+            "  - **Prompt:** [#prompt-blocker-b0ddfbae2f94]: Use chromium-bridge.\n",
+            "  - **Evidence:** No signed assets.\n",
+            "<!-- /agent-doc:prompt-blocker -->\n",
+            "<!-- agent-doc:prompt-blocker -->\n",
+            "- [/] [#prompt-blocker-b0ddfbae2f94] Activation awaits a signed release.\n",
+            "  - **Complete by:** Verify the signed package.\n",
+            "  - **Prompt:** do [#jbfrontendswap]: approved\n",
+            "  - **Evidence:** No signed assets.\n",
+            "<!-- /agent-doc:prompt-blocker -->\n",
+        );
+        for body in [queue, review] {
+            let children = split_list_children(body).unwrap();
+            assert!(
+                keys_unique(&children),
+                "{:?}",
+                children.iter().map(|c| &c.key).collect::<Vec<_>>()
+            );
+            let joined: String = children.iter().map(|c| c.text.as_str()).collect();
+            assert_eq!(joined, body, "rekeying must stay lossless");
+        }
+        let review_children = split_list_children(review).unwrap();
+        assert_eq!(
+            review_children
+                .iter()
+                .filter(|c| c.key == "id:prompt-blocker-b0ddfbae2f94")
+                .count(),
+            1,
+            "only the blocker head owns its id"
         );
     }
 

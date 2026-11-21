@@ -493,7 +493,12 @@ new operator intent; an unanswered quoted tail remains actionable.
   IDE buffer. Exact equality converges without a write, an unreadable buffer may
   accept the controller projection, and a captured local delta may defer the
   registration effect until its existing delivery edge settles
-  (`#idebufferauthority`).
+  (`#idebufferauthority`). Publishing that buffer re-authors only the lines that
+  differ: a native replica applies a local replacement that re-inserts whole
+  lines it also deletes as the line-minimal splices between the two, so text a
+  concurrent controller write placed inside an unchanged line stays in that
+  line instead of being materialized at the edge of the re-authored span
+  (`#statewordinterleave`).
   Editor-selected tmux focus is likewise latest-wins per project. A stale or
   pruned actor projection cannot hide a still-running document owner when the
   latest open session log, live pane, and exact process-tree document binding

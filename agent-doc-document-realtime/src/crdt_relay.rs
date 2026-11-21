@@ -8170,4 +8170,114 @@ mod tests {
             BINARY_WRITE_ATTRIBUTION_CAPACITY
         );
     }
+
+    /// `#statewordinterleave` (agent-loop `agent-doc-bugs.md`, 2026-11-21
+    /// 08:04Z): the row `🟡 [#subagent:lzeffectvoid#1] amend core-v1` became
+    /// `🟡 running [#subagent:lzeffectvoid#1] amend core-v1`.
+    ///
+    /// `queue start` repainted that row to `🚧` and its `agent:active` status
+    /// to `running`. The JetBrains buffer still showed the pre-start text plus
+    /// unaccepted operator typing, so the plugin refused to overwrite it,
+    /// registered a replacement replica bootstrapped from that canonical, and
+    /// published the IDE buffer through it (`#idebufferauthority`) as ONE
+    /// splice from the first difference (the `agent:active` status word) to the
+    /// last (the row's glyph) — about 8.5K characters, a 60,462-byte delta.
+    /// Between that bootstrap and the publication the controller applied
+    /// another item's start projection (`tsiftgraft`, `**Status:** claimed` →
+    /// `running`) inside that span. The CRDT union materialized the concurrent
+    /// `running` at the far edge of the re-authored span — between the stale
+    /// `🟡` the buffer restored and ` [#…#1]` — and the next claim repaint wrote
+    /// the glyph's space back in front of it.
+    ///
+    /// A coarse local splice now keeps the identity of every whole line it
+    /// re-inserts unchanged, so the concurrent status edit stays in its own
+    /// entry and the restored row keeps exactly the buffer's text.
+    #[test]
+    fn ide_buffer_publication_never_moves_a_concurrent_status_word_into_a_queue_row() {
+        fn row(text: &str, lz: &str, ts: &str) -> String {
+            text.replace("{lz}", lz).replace("{ts}", ts)
+        }
+        let template = concat!(
+            "## Active <!-- agent:active -->\n",
+            "- **Running** (2)\n",
+            "  - `queue-free:199c068128dc` — amend core-v1\n",
+            "    - **Status:** {lz}\n",
+            "  - `queue-free:8aaf82a313d8` — What does tsift graft do?\n",
+            "    - **Status:** {ts}\n",
+            "<!-- /agent:active -->\n",
+            "\n",
+            "## Run <!-- agent:queue id=\"main\" -->\n",
+            "- ### 🙋 decide on #lzeffectvoid: amend core-v1, or defer it?\n",
+            "  - {lzglyph} [#subagent:lzeffectvoid#1] amend core-v1\n",
+            "- ### 🙋 decide whether to land the tsift graft prototypes\n",
+            "  - {tsglyph} [#subagent:tsiftgraft#1] What does tsift graft do?\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let doc = |lz: &str, lz_glyph: &str, ts: &str, ts_glyph: &str| {
+            row(template, lz, ts)
+                .replace("{lzglyph}", lz_glyph)
+                .replace("{tsglyph}", ts_glyph)
+        };
+        // Both items claimed; the editor shows exactly this.
+        let claimed = doc("claimed", "🟡", "claimed", "🟡");
+        let mut hub = RelayHub::from_text(1, &claimed);
+        let lineage = hub.lineage().to_string();
+
+        // `queue start` for lzeffectvoid: one binary-authored CP write.
+        let lz_started = doc("running", "🚧", "claimed", "🟡");
+        hub.apply_binary_authored_replace(&claimed, &lz_started, "queue_claim_runtime_projection")
+            .unwrap();
+
+        // The editor refused that projection over unaccepted typing and
+        // registers a replacement replica bootstrapped at this canonical.
+        hub.register(9).unwrap();
+        let replacement = ReplicaState::from_encoded(9, &hub.canonical_encoded_state()).unwrap();
+        let bootstrap_frontier = replacement.state_vector();
+        let bootstrap_text = replacement.text();
+        assert_eq!(bootstrap_text, lz_started);
+
+        // Concurrently, before the publication arrives, tsiftgraft starts.
+        let ts_started = doc("running", "🚧", "running", "🚧");
+        hub.apply_binary_authored_replace(
+            &lz_started,
+            &ts_started,
+            "queue_claim_runtime_projection",
+        )
+        .unwrap();
+
+        // `#idebufferauthority`: the plugin publishes its buffer with ONE splice
+        // (`singleSpliceBatchUtil`): common prefix and suffix peeled, everything
+        // between re-authored.
+        let buffer = claimed.clone();
+        let old: Vec<char> = bootstrap_text.chars().collect();
+        let new: Vec<char> = buffer.chars().collect();
+        let mut prefix = 0;
+        while prefix < old.len() && prefix < new.len() && old[prefix] == new[prefix] {
+            prefix += 1;
+        }
+        let mut suffix = 0;
+        while suffix < old.len() - prefix
+            && suffix < new.len() - prefix
+            && old[old.len() - 1 - suffix] == new[new.len() - 1 - suffix]
+        {
+            suffix += 1;
+        }
+        let insert: String = new[prefix..new.len() - suffix].iter().collect();
+        assert!(
+            insert.contains("What does tsift graft do?"),
+            "the splice spans the concurrent edit: {insert:?}"
+        );
+        replacement.apply_local_edit(prefix as u32, (old.len() - prefix - suffix) as u32, &insert);
+        assert_eq!(replacement.text(), buffer);
+        let delta = replacement.diff(&bootstrap_frontier).unwrap();
+        assert_eq!(
+            hub.apply_document_op_delta_in_lineage(Some(&lineage), &delta)
+                .unwrap(),
+            DocumentOpDeltaOutcome::Applied { changed: true }
+        );
+
+        // The buffer wins its own edits (lzeffectvoid back to claimed); the
+        // concurrent tsiftgraft start stays where the controller wrote it.
+        assert_eq!(hub.canonical_text(), doc("claimed", "🟡", "running", "🚧"));
+    }
 }

@@ -801,6 +801,11 @@ impl ReplicaState {
     /// which (under `panic = unwind` + the FFI `catch_unwind` guard) degrades the
     /// editor sync for that file, or (under `panic = abort`) kills the host IDE.
     /// Both values saturate to the current char count.
+    ///
+    /// `#statewordinterleave`: a replacement that re-inserts whole lines it also
+    /// deletes is applied as the line-minimal edits between the two, so the
+    /// characters of every unchanged line keep their CRDT identity. See
+    /// [`line_preserving_splices`].
     pub fn apply_local_edit(&self, offset: u32, delete_len: u32, insert: &str) {
         if delete_len == 0 && insert.is_empty() {
             return;
@@ -815,6 +820,42 @@ impl ReplicaState {
         let end_char = start_char
             .saturating_add(delete_len as usize)
             .min(total_chars);
+        if end_char > start_char && insert.contains('\n') {
+            let parts = {
+                let cached = self.cached_text.borrow();
+                let current = cached
+                    .as_ref()
+                    .expect("cached projection must remain materialized");
+                let anchor = self
+                    .cached_edit_anchor
+                    .get()
+                    .unwrap_or((total_chars, current.len()));
+                let start_byte = char_to_byte_index_near(current, start_char, anchor);
+                let end_byte = char_to_byte_index_near(current, end_char, anchor);
+                line_preserving_splices(&current[start_byte..end_byte], insert)
+            };
+            if let Some(parts) = parts {
+                // Highest offset first: each part addresses the pre-edit text.
+                for (relative, part_delete, part_insert) in parts {
+                    self.apply_exact_local_edit(start_char + relative, part_delete, &part_insert);
+                }
+                return;
+            }
+        }
+        self.apply_exact_local_edit(start_char, end_char - start_char, insert);
+    }
+
+    /// Apply exactly one local splice at codepoint `offset` (already clamped to
+    /// the projection), without line-preserving refinement.
+    fn apply_exact_local_edit(&self, offset: usize, delete_len: usize, insert: &str) {
+        self.ensure_cached_text();
+        self.ensure_visible_order();
+        let total_chars = self
+            .cached_text_chars
+            .get()
+            .expect("cached projection must have a codepoint count");
+        let start_char = offset.min(total_chars);
+        let end_char = start_char.saturating_add(delete_len).min(total_chars);
         let actual_delete = end_char - start_char;
         let inserted_chars = insert.chars().count();
         if actual_delete == 0 && insert.is_empty() {
@@ -1130,6 +1171,102 @@ impl ReplicaState {
         let snapshot = self.text.borrow().delta_since(&TextVersionVector::new());
         encode_update_ops(&snapshot).unwrap_or_default()
     }
+}
+
+/// `#statewordinterleave`: the line-minimal splices that turn `deleted` into
+/// `inserted`, as `(offset, delete_len, insert)` codepoint triples relative to
+/// the start of `deleted`, highest offset first. `None` when no whole line of
+/// `deleted` survives into `inserted`, so the caller's single splice is already
+/// minimal.
+///
+/// An editor that publishes its buffer over a replica it does not trust
+/// (JetBrains `ensureEditorText` under `#idebufferauthority`) sends ONE splice
+/// from the first differing character to the last. On a session document those
+/// two differences can be thousands of characters apart (an `agent:active`
+/// status word near the top, a queue glyph far below), so the splice tombstones
+/// and re-inserts every component between them. A concurrent controller edit
+/// anchored inside that span is then materialized by the CRDT union at the
+/// span's far edge: agent-loop `agent-doc-bugs.md` (2026-11-21 08:04Z) got
+/// another item's `**Status:** running` word between a restored `🟡` and its
+/// owner annotation. Re-authoring only the lines that actually changed keeps
+/// the untouched text — and every concurrent edit inside it — in place. The
+/// controller's own CP writes already diff this way
+/// (`minimal_char_span_edits`, `#exchangetypingrevert`).
+pub(crate) fn line_preserving_splices(
+    deleted: &str,
+    inserted: &str,
+) -> Option<Vec<(usize, usize, String)>> {
+    use similar::{Algorithm, DiffTag, capture_diff_slices};
+
+    /// Larger spans keep the caller's single splice: Myers is O(N*D).
+    const MAX_LINES: usize = 20_000;
+    if deleted.is_empty() || inserted.is_empty() || deleted == inserted {
+        return None;
+    }
+    let old_lines = split_lines_inclusive(deleted);
+    let new_lines = split_lines_inclusive(inserted);
+    if old_lines.len() < 2
+        || new_lines.len() < 2
+        || old_lines.len().max(new_lines.len()) > MAX_LINES
+    {
+        return None;
+    }
+    let ops = capture_diff_slices(Algorithm::Myers, &old_lines, &new_lines);
+    if !ops.iter().any(|op| op.tag() == DiffTag::Equal) {
+        return None;
+    }
+    let mut old_line_starts = Vec::with_capacity(old_lines.len() + 1);
+    let mut chars = 0usize;
+    old_line_starts.push(chars);
+    for line in &old_lines {
+        chars += line.chars().count();
+        old_line_starts.push(chars);
+    }
+    let mut hunks: Vec<(std::ops::Range<usize>, std::ops::Range<usize>)> = Vec::new();
+    for op in ops {
+        if op.tag() == DiffTag::Equal {
+            continue;
+        }
+        let (old, new) = (op.old_range(), op.new_range());
+        match hunks.last_mut() {
+            Some((prev_old, prev_new))
+                if prev_old.end == old.start && prev_new.end == new.start =>
+            {
+                prev_old.end = old.end;
+                prev_new.end = new.end;
+            }
+            _ => hunks.push((old, new)),
+        }
+    }
+    let mut splices = Vec::with_capacity(hunks.len());
+    for (old, new) in hunks {
+        let removed: Vec<char> = old_lines[old.clone()].concat().chars().collect();
+        let added: Vec<char> = new_lines[new].concat().chars().collect();
+        let mut lead = 0usize;
+        while lead < removed.len() && lead < added.len() && removed[lead] == added[lead] {
+            lead += 1;
+        }
+        let mut tail = 0usize;
+        while tail < removed.len() - lead
+            && tail < added.len() - lead
+            && removed[removed.len() - 1 - tail] == added[added.len() - 1 - tail]
+        {
+            tail += 1;
+        }
+        let delete_len = removed.len() - lead - tail;
+        let insert: String = added[lead..added.len() - tail].iter().collect();
+        if delete_len == 0 && insert.is_empty() {
+            continue;
+        }
+        splices.push((old_line_starts[old.start] + lead, delete_len, insert));
+    }
+    splices.sort_unstable_by_key(|splice| std::cmp::Reverse(splice.0));
+    Some(splices)
+}
+
+/// Split on `\n`, keeping each terminator with its line.
+fn split_lines_inclusive(text: &str) -> Vec<&str> {
+    text.split_inclusive('\n').collect()
 }
 
 fn char_to_byte_index(text: &str, char_index: usize) -> usize {
@@ -1933,5 +2070,67 @@ mod tests {
             .unwrap();
         assert_eq!(editor.text(), "operator note\n- ~~do [#a]~~\n- do [#b]\n");
         assert_eq!(editor.update_history_divergence(&strike).unwrap(), None);
+    }
+
+    /// `#statewordinterleave`: the splices keep every unchanged whole line and
+    /// re-author only the characters that differ, highest offset first.
+    #[test]
+    fn line_preserving_splices_reauthor_only_the_changed_characters() {
+        let deleted = "running\n  - `b` — two\n    - **Status:** claimed\n  - 🚧";
+        let inserted = "claimed\n  - `b` — two\n    - **Status:** claimed\n  - 🟡";
+        let splices = line_preserving_splices(deleted, inserted).expect("lines survive");
+        let glyph = deleted.chars().count() - 1;
+        assert_eq!(
+            splices,
+            vec![(glyph, 1, "🟡".to_string()), (0, 7, "claimed".to_string()),]
+        );
+        let mut rebuilt: Vec<char> = deleted.chars().collect();
+        for (offset, delete_len, insert) in &splices {
+            rebuilt.splice(*offset..offset + delete_len, insert.chars());
+        }
+        assert_eq!(rebuilt.into_iter().collect::<String>(), inserted);
+
+        // Nothing to keep: the caller's single splice is already minimal.
+        assert_eq!(line_preserving_splices("a\nb\n", "c\nd\n"), None);
+        assert_eq!(line_preserving_splices("one line", "other line"), None);
+        assert_eq!(line_preserving_splices("same\n", "same\n"), None);
+    }
+
+    /// `#statewordinterleave`: a coarse local splice (an editor publishing its
+    /// whole buffer from the first to the last difference) no longer tombstones
+    /// the unchanged lines between them, so a concurrent remote edit inside one
+    /// of those lines stays where its author wrote it instead of being
+    /// materialized at the splice's far edge.
+    #[test]
+    fn a_coarse_local_splice_keeps_a_concurrent_edit_in_an_unchanged_line() {
+        let base = "- a: running\n- b: claimed\n- 🚧 [#x#1] row\n";
+        let controller = ReplicaState::from_text(1, base);
+        let editor = ReplicaState::from_encoded(2, &controller.encode_state()).unwrap();
+        let editor_frontier = editor.state_vector();
+
+        // The controller starts `b` concurrently.
+        let b_start = base.find("claimed").unwrap();
+        controller.apply_local_edit(b_start as u32, "claimed".len() as u32, "running");
+
+        // The editor publishes its buffer (`a` claimed, row back to 🟡) as ONE
+        // splice spanning `b`'s unchanged line.
+        let buffer = "- a: claimed\n- b: claimed\n- 🟡 [#x#1] row\n";
+        let first = "- a: ".chars().count();
+        let last = base.find("🚧").unwrap();
+        let span = base[first..last].chars().count() + 1;
+        let insert: String = buffer.chars().skip(first).take(span).collect();
+        editor.apply_local_edit(first as u32, span as u32, &insert);
+        assert_eq!(editor.text(), buffer);
+
+        controller
+            .apply_update(&editor.diff(&editor_frontier).unwrap())
+            .unwrap();
+        assert_eq!(
+            controller.text(),
+            "- a: claimed\n- b: running\n- 🟡 [#x#1] row\n",
+            "the concurrent word stays in b's line, never between 🟡 and the owner tag"
+        );
+        sync(&controller, &editor).unwrap();
+        assert_eq!(editor.text(), controller.text());
     }
 }

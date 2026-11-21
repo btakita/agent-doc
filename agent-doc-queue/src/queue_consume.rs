@@ -6225,6 +6225,27 @@ fn row_has_response_child(document: &str, item_end: usize, scope_end: usize) -> 
     scope.contains("**Response [#r-") || scope.contains("**Closed by:**")
 }
 
+/// Every `**Response [#r-…]**` child id already rendered in a queue component.
+///
+/// `#ackrespdup`: a row response id is derived from the row's work text and the
+/// response it shows ([`stopped_response_id`], [`handback_response_id`]), so
+/// identical sibling rows derive the same id. The id is the response tree's
+/// identity: a tree that is already on one row must never be rendered again
+/// under an identical sibling that is struck later.
+fn queue_response_child_ids(document: &str) -> HashSet<String> {
+    let Ok(components) = element::parse(document) else {
+        return HashSet::new();
+    };
+    components
+        .iter()
+        .filter(|component| component.name == "queue")
+        .flat_map(|component| component.content(document).lines())
+        .filter_map(|line| {
+            markdown_list_item(line).and_then(|(_, item)| generated_response_id(item))
+        })
+        .collect()
+}
+
 fn stopped_response_id(row_text: &str, summary: &str) -> String {
     let hash = agent_doc_hash::content_hash(&format!(
         "stopped-row\n{}\n{summary}",
@@ -6545,6 +6566,10 @@ pub fn attach_stopped_row_responses(
         crate::queue_tree::queue_tree(after, &crate::queue_tree::QueueTreeOptions::default()).ok();
     let mut inserts = Vec::<(usize, String)>::new();
     let mut rendered_choice_packet_ids = HashSet::new();
+    // `#ackrespdup`: the response trees already on a row, plus the ones this
+    // pass renders. A struck row whose response is in this set is an identical
+    // sibling of the row that holds it and stays bare.
+    let mut rendered_response_ids = queue_response_child_ids(after);
     for node in &nodes {
         if !node.item.struck
             || struck_before.contains(&node.node_key)
@@ -6579,6 +6604,9 @@ pub fn attach_stopped_row_responses(
         }
         if let Some(reason) = stopped_reason_for_row(after, response_body, &node.item.text) {
             let response_id = stopped_response_id(&node.item.text, &reason);
+            if !rendered_response_ids.insert(response_id.clone()) {
+                continue;
+            }
             let Some(child) = response_summary_row_child(
                 &ResponseLookupContext {
                     source_document: before,
@@ -6604,6 +6632,9 @@ pub fn attach_stopped_row_responses(
         let Some(handback) = handback else {
             continue;
         };
+        if !rendered_response_ids.insert(handback_response_id(&node.item.text, &handback)) {
+            continue;
+        }
         let closure = closure_tree.as_ref().and_then(|tree| {
             crate::queue_tree::row_closure_at_offset(tree, after, node.item.start_byte)
         });
@@ -12167,6 +12198,91 @@ mod tests {
             attach_stopped_row_responses(&before, &spliced, "", STOPPED_AT).unwrap(),
             spliced
         );
+    }
+
+    /// `#ackrespdup` (agent-doc-bugs.md `3c3d9775c7`, 08:15:26Z): two live
+    /// rows had the same text as a struck sibling that already held the
+    /// worker's `**Response [#r-92b7ccc53170]**` tree. `queue consume
+    /// --ack-text … --ack-occurrence 1`, run once per live copy, re-rendered
+    /// that tree under the first struck copy, so the response appeared twice.
+    /// The tree stays only under the row that held it, whichever copy is
+    /// struck, one at a time or together.
+    #[test]
+    fn striking_identical_siblings_never_duplicates_the_held_response_tree() {
+        const PARENT: &str = "Decide on the effect type";
+        let work = "amend core-v1";
+        let struck = format!("~~{work}~~");
+        let handback = "**Summary**\n\n\
+             Amended core-v1 so an effect may return void.\n\n\
+             **What changed**\n\n\
+             - Commit `35983d8` on `main`.\n\n\
+             **Verification**\n\n\
+             - `make check` passed.\n\n\
+             **Action items**\n\n\
+             - agent: check the CI run for `35983d8`.\n\n\
+             **Notes**\n\n\
+             none\n\n\
+             **Next actions**\n\n\
+             - Coordinator closes the queue item.\n";
+        let cell = agent_doc_document::subagent_completion::cell_with_response(
+            "subagent:lzeffectvoid",
+            &format!("{PARENT}: {work}"),
+            "lzeffectvoid-key",
+            handback,
+        )
+        .unwrap();
+        let doc = |rows: [&str; 3]| {
+            format!(
+                "---\nqueue_active: true\n---\n\n\
+                 <!-- agent:exchange -->\n{cell}\n<!-- /agent:exchange -->\n\n\
+                 <!-- agent:run id=\"main\" subagents -->\n\
+                 - {PARENT}\n\
+                 \x20 - {}\n\
+                 \x20 - {}\n\
+                 \x20 - {}\n\
+                 - do [#install]\n\
+                 <!-- /agent:run -->\n",
+                rows[0], rows[1], rows[2]
+            )
+        };
+        let responses = |document: &str| document.matches("**Response [#r-").count();
+        let live = doc([work, work, work]);
+        // The worker's row is struck first and takes the response tree.
+        let held = attach_stopped_row_responses(&live, &doc([work, work, &struck]), "", STOPPED_AT)
+            .unwrap();
+        assert_eq!(responses(&held), 1, "{held}");
+        let tree_at = held.find("**Response [#r-").unwrap();
+        let held_row_at = held.rfind(&format!("  - {struck}\n")).unwrap();
+        assert!(
+            held_row_at < tree_at,
+            "the tree is under its own row:\n{held}"
+        );
+        let (_, held_tree) = held.split_at(held_row_at);
+
+        // Strike each identical live sibling by occurrence, one at a time.
+        let strike_first = held.replacen(&format!("  - {work}\n"), &format!("  - {struck}\n"), 1);
+        let first = attach_stopped_row_responses(&held, &strike_first, "", STOPPED_AT).unwrap();
+        assert_eq!(
+            first, strike_first,
+            "the first struck sibling stays bare:\n{first}"
+        );
+        let strike_second = first.replacen(&format!("  - {work}\n"), &format!("  - {struck}\n"), 1);
+        let second = attach_stopped_row_responses(&first, &strike_second, "", STOPPED_AT).unwrap();
+        assert_eq!(
+            second, strike_second,
+            "the second struck sibling stays bare:\n{second}"
+        );
+        assert_eq!(responses(&second), 1, "{second}");
+        assert!(
+            second.ends_with(held_tree),
+            "the held tree is unchanged:\n{second}"
+        );
+
+        // Striking every copy in one mutation renders the tree exactly once.
+        let together =
+            attach_stopped_row_responses(&live, &doc([&struck, &struck, &struck]), "", STOPPED_AT)
+                .unwrap();
+        assert_eq!(responses(&together), 1, "{together}");
     }
 
     #[test]

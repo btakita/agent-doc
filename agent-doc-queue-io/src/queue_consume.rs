@@ -6656,6 +6656,86 @@ mod core_tests {
         );
     }
 
+    /// `#ackrespdup` (agent-doc-bugs.md `3c3d9775c7`, 08:15:26Z): two live
+    /// rows shared their text with a struck sibling that held the worker's
+    /// response tree. Striking each live copy with `--ack-text <vector>
+    /// --ack-occurrence 1` must leave that tree exactly once, under the row
+    /// that held it.
+    #[test]
+    fn exact_text_ack_occurrence_strikes_never_copy_a_sibling_response_tree() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let parent = "Decide on the effect type";
+        let work = "amend core-v1";
+        let target = format!("{parent}: {work}");
+        let cell = agent_doc_document::subagent_completion::cell_with_response(
+            "subagent:lzeffectvoid",
+            &target,
+            "lzeffectvoid-key",
+            "**Summary**\n\nAmended core-v1.\n\n**What changed**\n\n- Commit `35983d8`.\n\n\
+             **Verification**\n\n- `make check` passed.\n\n**Action items**\n\nnone\n\n\
+             **Notes**\n\nnone\n\n**Next actions**\n\nnone\n",
+        )
+        .unwrap();
+        let render = |rows: [&str; 3]| {
+            format!(
+                "---\nagent_doc_format: template\nqueue_active: true\n---\n\n\
+                 <!-- agent:exchange -->\n{cell}\n<!-- /agent:exchange -->\n\n\
+                 <!-- agent:run id=\"main\" subagents -->\n\
+                 - {parent}\n  - {}\n  - {}\n  - {}\n\
+                 - do [#install]\n\
+                 <!-- /agent:run -->\n",
+                rows[0], rows[1], rows[2]
+            )
+        };
+        let struck = format!("~~{work}~~");
+        let content = agent_doc_queue::queue_consume::attach_stopped_row_responses(
+            &render([work, work, work]),
+            &render([work, work, &struck]),
+            "",
+            "2026-11-21T08:05:59.000Z",
+        )
+        .unwrap();
+        let responses = |text: &str| text.matches("**Response [#r-").count();
+        assert_eq!(responses(&content), 1, "{content}");
+        let held_at = content.rfind(&format!("  - {struck}\n")).unwrap();
+        let held_tree = content[held_at..].to_string();
+        fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let selector = super::AckTextSelector::Occurrence(1);
+        for remaining_live in [1usize, 0] {
+            super::acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
+                &doc,
+                &target,
+                Some(&selector),
+                &TEST_EFFECTS,
+            )
+            .unwrap()
+            .expect("one identical live copy should be acknowledged");
+            let updated = fs::read_to_string(&doc).unwrap();
+            assert_eq!(
+                updated.matches(&format!("  - {work}\n")).count(),
+                remaining_live,
+                "{updated}"
+            );
+            assert_eq!(responses(&updated), 1, "{updated}");
+            assert!(updated.ends_with(&held_tree), "{updated}");
+        }
+        let updated = fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            updated.matches(&format!("  - {struck}\n")).count(),
+            3,
+            "{updated}"
+        );
+    }
+
     #[test]
     fn exact_text_ack_owner_selects_one_duplicate_sdk_lineage() {
         let tmp = TempDir::new().unwrap();

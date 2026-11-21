@@ -14,6 +14,7 @@ use agent_doc_markdown_ast::exchange_tree::{
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -467,11 +468,14 @@ fn append_archived_cell(archive: &mut String, response_id: &str, anchor_marker: 
     }
 }
 
-/// Every checksum each response id proves in `archive`. An id may own several
-/// archived bodies (see `#archivedupid`); an index entry is proven when its
-/// checksum is any one of them, matching [`verify_entry_in_archive`].
-fn archive_response_checksums(archive: &str) -> BTreeMap<String, BTreeSet<String>> {
-    let mut checksums = BTreeMap::<String, BTreeSet<String>>::new();
+/// Visit the exact response bodies an archive can prove. A historical locator
+/// may bind an index entry to a cell carrying a different visible response
+/// stamp. Keep both identities when the locator has its own matching anchor
+/// and bounds one response. Callers must still match the expected checksum.
+fn visit_archive_responses<B>(
+    archive: &str,
+    mut visit: impl FnMut(&str, String) -> ControlFlow<B>,
+) -> ControlFlow<B> {
     const LOCATOR: &str = "❯ Archived response locator ";
     let starts = archive
         .match_indices(LOCATOR)
@@ -479,24 +483,15 @@ fn archive_response_checksums(archive: &str) -> BTreeMap<String, BTreeSet<String
             (start == 0 || archive.as_bytes().get(start - 1) == Some(&b'\n')).then_some(start)
         })
         .collect::<Vec<_>>();
-    let mut record = |scope: &str, fallback_response_id: Option<&str>| {
-        for (response_id, body) in response_nodes_with_fallback(scope, fallback_response_id) {
-            checksums
-                .entry(response_id)
-                .or_default()
-                .insert(agent_doc_hash::content_hash(&body));
-        }
-    };
-    if starts.is_empty() {
-        record(archive, None);
-        return checksums;
+    let prefix_end = starts.first().copied().unwrap_or(archive.len());
+    for (response_id, body) in response_nodes(&archive[..prefix_end]) {
+        visit(&response_id, body)?;
     }
     // The archive is append-only and each response cell is framed by a
     // prompt-shaped locator. Parse one frame at a time instead of feeding the
     // exchange parser thousands of nodes in one growing scope; this preserves
     // full-index checksum validation while making the scan streaming/linear
     // (`#archiveframedstreamverify`).
-    record(&archive[..starts[0]], None);
     let locator_id = |start: usize| {
         let value = &archive[start + LOCATOR.len()..];
         value.lines().next().unwrap_or_default()
@@ -515,9 +510,55 @@ fn archive_response_checksums(archive: &str) -> BTreeMap<String, BTreeSet<String
             next += 1;
         }
         let end = starts.get(next).copied().unwrap_or(archive.len());
-        record(&archive[start..end], Some(id));
+        let responses = response_nodes_with_fallback(&archive[start..end], Some(id));
+        if let Ok(anchor) = anchor_for(id) {
+            let anchor_marker = format!("<a id=\"{anchor}\"></a>");
+            for frame_index in index..next {
+                let frame_start = starts[frame_index];
+                let frame_end = starts
+                    .get(frame_index + 1)
+                    .copied()
+                    .unwrap_or(archive.len());
+                let frame = &archive[frame_start..frame_end];
+                let first_content = frame.lines().skip(1).find(|line| !line.trim().is_empty());
+                if first_content != Some(anchor_marker.as_str()) {
+                    continue;
+                }
+                let framed_responses;
+                let frame_cells = if next == index + 1 {
+                    responses.as_slice()
+                } else {
+                    framed_responses = response_nodes_with_fallback(frame, Some(id));
+                    framed_responses.as_slice()
+                };
+                if let [(cell_id, body)] = frame_cells
+                    && cell_id != id
+                {
+                    visit(id, body.clone())?;
+                }
+            }
+        }
+        for (response_id, body) in responses {
+            visit(&response_id, body)?;
+        }
         index = next;
     }
+    ControlFlow::Continue(())
+}
+
+type ArchiveResponseChecksums = BTreeMap<String, BTreeSet<String>>;
+
+/// Every checksum each response id proves in `archive`. An id may own several
+/// archived bodies (see `#archivedupid`).
+fn archive_response_checksums(archive: &str) -> ArchiveResponseChecksums {
+    let mut checksums = ArchiveResponseChecksums::new();
+    let _: ControlFlow<()> = visit_archive_responses(archive, |id, body| {
+        checksums
+            .entry(id.to_owned())
+            .or_default()
+            .insert(agent_doc_hash::content_hash(&body));
+        ControlFlow::Continue(())
+    });
     checksums
 }
 
@@ -689,7 +730,7 @@ fn verified_indexed_response_ids(doc: &Path) -> Result<BTreeSet<String>> {
     let index = parse_response_index_file(&response_index_path(doc))?;
     let root = project_root(doc)?;
     let mut indexed = BTreeSet::new();
-    let mut archive_proofs = BTreeMap::<String, BTreeMap<String, BTreeSet<String>>>::new();
+    let mut archive_proofs = BTreeMap::<String, ArchiveResponseChecksums>::new();
     for entry in index.values() {
         if !archive_proofs.contains_key(&entry.archive_path) {
             let archive =
@@ -704,16 +745,25 @@ fn verified_indexed_response_ids(doc: &Path) -> Result<BTreeSet<String>> {
                 archive_response_checksums(&archive),
             );
         }
-        ensure!(
-            archive_proofs[&entry.archive_path]
-                .get(&entry.response_id)
-                .is_some_and(|checksums| checksums.contains(&entry.content_sha256)),
-            "{}",
-            unproven_archive_entry_message(doc, entry),
-        );
+        verify_archive_entry(doc, entry, &archive_proofs[&entry.archive_path])?;
         indexed.insert(entry.response_id.clone());
     }
     Ok(indexed)
+}
+
+fn verify_archive_entry(
+    doc: &Path,
+    entry: &ResponseIndexEntry,
+    checksums: &ArchiveResponseChecksums,
+) -> Result<()> {
+    ensure!(
+        checksums
+            .get(&entry.response_id)
+            .is_some_and(|checksums| checksums.contains(&entry.content_sha256)),
+        "{}",
+        unproven_archive_entry_message(doc, entry),
+    );
+    Ok(())
 }
 
 /// The refusal for an index entry whose checksum names bytes its archive does
@@ -722,8 +772,8 @@ fn verified_indexed_response_ids(doc: &Path) -> Result<BTreeSet<String>> {
 fn unproven_archive_entry_message(doc: &Path, entry: &ResponseIndexEntry) -> String {
     format!(
         "archive checksum proof failed for {id}: {index} names sha256 {sha} but {archive} holds no {id} response with those bytes. \
-`agent-doc session-check {doc}` restores the exact bytes from a commit of the document whose response cell hashes to that checksum; \
-when no commit carries them the index entry cannot be proven and needs an explicit restore, detach, or replace decision",
+`agent-doc session-check` is read-only. Use `agent-doc repair {doc} --session-check-heal` to restore exact bytes when bounded document history proves the checksum. \
+When history cannot prove it, this index entry needs an explicit restore, detach, or replace decision",
         id = entry.response_id,
         index = response_index_path(doc).display(),
         sha = entry.content_sha256,
@@ -1043,10 +1093,11 @@ pub fn rebuild_response_location_cache(doc: &Path) -> Result<usize> {
     );
     let mut archives = BTreeMap::new();
     for shard in shards {
-        archives.insert(shard, std::fs::read_to_string(root.join(shard))?);
+        let archive = std::fs::read_to_string(root.join(shard))?;
+        archives.insert(shard, archive_response_checksums(&archive));
     }
     for entry in entries.values() {
-        verify_entry_in_archive(entry, archives[entry.archive_path.as_str()].as_str())?;
+        verify_archive_entry(doc, entry, &archives[entry.archive_path.as_str()])?;
     }
     let cache_entries = entries
         .values()
@@ -1141,8 +1192,9 @@ pub fn record_exchange_archive_receipt(doc: &Path) -> Result<Option<ExchangeArch
         "one receipt cannot cover multiple archive shards"
     );
     let archive = head_blob(&root, &commit, &archive_rel)?;
+    let checksums = archive_response_checksums(&archive);
     for entry in entries.values() {
-        verify_entry_in_archive(entry, &archive)?;
+        verify_archive_entry(doc, entry, &checksums)?;
     }
     let receipt = ExchangeArchiveReceipt {
         commit,
@@ -1223,7 +1275,7 @@ fn compatibility_git_history_response(
         let Ok(current) = head_blob(&root, commit, &doc_rel) else {
             continue;
         };
-        if let Some(content) = response_content_by_id(&current, response_id, None) {
+        if let Some(content) = response_content_by_id(&current, response_id) {
             return Ok(Some(CompatibilityGitHistoryResponse {
                 content,
                 commit: commit.to_string(),
@@ -1720,7 +1772,7 @@ fn recover_response_locally(
         commit: None,
     };
     if let Some(retained) = retained_state
-        && let Some(content) = response_content_by_id(retained, response_id, None)
+        && let Some(content) = response_content_by_id(retained, response_id)
     {
         return Ok(Some((
             found(RecoverySource::RetainedState, content),
@@ -1733,7 +1785,7 @@ fn recover_response_locally(
         .cloned()
         && let Ok(archive) = std::fs::read_to_string(root.join(&entry.archive_path))
         && let Some(content) =
-            response_content_by_id(&archive, response_id, Some(&entry.content_sha256))
+            archived_response_by_checksum(&archive, response_id, &entry.content_sha256)
     {
         return Ok(Some((
             found(RecoverySource::ResponseIndex, content),
@@ -1747,7 +1799,7 @@ fn recover_response_locally(
         agent_doc_sqlite::archive_index::lookup_response_location_cache(doc, response_id)
         && let Ok(archive) = std::fs::read_to_string(root.join(&entry.archive_path))
         && let Some(content) =
-            response_content_by_id(&archive, response_id, Some(&entry.content_sha256))
+            archived_response_by_checksum(&archive, response_id, &entry.content_sha256)
     {
         return Ok(Some((
             found(RecoverySource::SqliteCache, content),
@@ -1829,7 +1881,7 @@ pub fn recover_response_with_metrics(
             continue;
         };
         if let Some(content) =
-            response_content_by_id(&archive, response_id, Some(&entry.content_sha256))
+            archived_response_by_checksum(&archive, response_id, &entry.content_sha256)
         {
             return Ok((
                 ResponseRecovery::Found(RecoveredResponse {
@@ -1873,25 +1925,21 @@ fn lookup_metrics(
     }
 }
 
-fn response_content_by_id(
-    content: &str,
-    response_id: &str,
-    checksum: Option<&str>,
-) -> Option<String> {
-    response_nodes(content).into_iter().find_map(|(id, body)| {
-        (id == response_id
-            && checksum.is_none_or(|expected| agent_doc_hash::content_hash(&body) == expected))
-        .then_some(body)
-    })
+fn response_content_by_id(content: &str, response_id: &str) -> Option<String> {
+    response_nodes(content)
+        .into_iter()
+        .find_map(|(id, body)| (id == response_id).then_some(body))
 }
 
-fn verify_entry_in_archive(entry: &ResponseIndexEntry, archive: &str) -> Result<()> {
-    ensure!(
-        response_content_by_id(archive, &entry.response_id, Some(&entry.content_sha256)).is_some(),
-        "archive checksum proof failed for {}",
-        entry.response_id
-    );
-    Ok(())
+fn archived_response_by_checksum(archive: &str, response_id: &str, sha: &str) -> Option<String> {
+    visit_archive_responses(archive, |id, body| {
+        if id == response_id && agent_doc_hash::content_hash(&body) == sha {
+            ControlFlow::Break(body)
+        } else {
+            ControlFlow::Continue(())
+        }
+    })
+    .break_value()
 }
 
 fn project_root(doc: &Path) -> Result<PathBuf> {
@@ -2917,11 +2965,12 @@ mod tests {
 
     #[test]
     fn framed_archive_scan_preserves_repeated_locator_response_boundaries() {
+        let anchored = "### Re: recovered inline queue response\n\nfirst revision\n\n**Response [#r-111111111111]**\n\n";
         let archive = format!(
-            "❯ Archived response locator {DUP_ID}\n\n<a id=\"r-0a0b0c0d0e0f\"></a>\n### Re: recovered inline queue response\n\nfirst revision\n\n**Response [#r-111111111111]**\n\n\
+            "❯ Archived response locator {DUP_ID}\n\n<a id=\"r-0a0b0c0d0e0f\"></a>\n{anchored}\
 ❯ Archived response locator {DUP_ID}\n\n### Re: recovered inline queue response\n\nterminal revision\n\n**Response {DUP_ID}**\n"
         );
-        let expected = response_nodes(&archive).into_iter().fold(
+        let mut expected = response_nodes(&archive).into_iter().fold(
             BTreeMap::<String, BTreeSet<String>>::new(),
             |mut checksums, (response_id, body)| {
                 checksums
@@ -2931,7 +2980,75 @@ mod tests {
                 checksums
             },
         );
+        expected
+            .get_mut(DUP_ID)
+            .unwrap()
+            .insert(agent_doc_hash::content_hash(anchored));
         assert_eq!(archive_response_checksums(&archive), expected);
+        assert!(
+            response_content_by_id(&archive, DUP_ID)
+                .unwrap()
+                .contains("terminal revision")
+        );
+    }
+
+    #[test]
+    fn checksum_bound_historical_locator_proves_index_lookup_and_archive_receipt() {
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+        std::fs::create_dir(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let archive_path = exchange_archive_path(&doc);
+        let anchor = anchor_for(DUP_ID).unwrap();
+        let marker = format!("<a id=\"{anchor}\"></a>");
+        let anchored =
+            "### Re: first revision\n\nFirst response.\n\n**Response [#r-111111111111]**\n\n";
+        let archive = format!(
+            "❯ Archived response locator {DUP_ID}\n\n{marker}\n{anchored}\
+❯ Archived response locator {DUP_ID}\n\n### Re: later revision\n\nLater response.\n\n**Response {DUP_ID}**\n"
+        );
+        let entry = ResponseIndexEntry {
+            response_id: DUP_ID.to_string(),
+            archive_path: relative_slash(dir.path(), &archive_path).unwrap(),
+            anchor,
+            content_sha256: agent_doc_hash::content_hash(anchored),
+            action: "moved".to_string(),
+        };
+        std::fs::write(&doc, "live\n").unwrap();
+        std::fs::write(&archive_path, &archive).unwrap();
+        std::fs::write(
+            response_index_path(&doc),
+            render_response_index(&doc, [&entry]),
+        )
+        .unwrap();
+        git(dir.path(), &["add", "."]);
+        git(dir.path(), &["commit", "-q", "-m", "compacted archive"]);
+
+        assert_eq!(
+            verified_indexed_response_ids(&doc).unwrap(),
+            BTreeSet::from([DUP_ID.to_string()])
+        );
+        assert_eq!(
+            read_response_locally(&doc, DUP_ID, None).as_deref(),
+            Some(anchored)
+        );
+        assert_eq!(rebuild_response_location_cache(&doc).unwrap(), 1);
+        assert!(record_exchange_archive_receipt(&doc).unwrap().is_some());
+        assert!(
+            unproven_response_index_entries_restorable_from_git(&doc)
+                .unwrap()
+                .is_empty()
+        );
+
+        for invalid in [
+            archive.replace(&marker, "<a id=\"r-222222222222\"></a>"),
+            archive.replace("First response.", "Edited response."),
+        ] {
+            std::fs::write(&archive_path, &invalid).unwrap();
+            assert!(verified_indexed_response_ids(&doc).is_err());
+            assert!(read_response_locally(&doc, DUP_ID, None).is_none());
+            assert!(rebuild_response_location_cache(&doc).is_err());
+        }
     }
 
     #[test]
@@ -3062,7 +3179,11 @@ mod tests {
         let error = verified_indexed_response_ids(&doc).unwrap_err().to_string();
         assert!(error.contains("archive checksum proof failed for [#r-0a0b0c0d0e0f]"));
         assert!(
-            error.contains("agent-doc session-check"),
+            error.contains("`agent-doc session-check` is read-only")
+                && error.contains(&format!(
+                    "`agent-doc repair {} --session-check-heal`",
+                    doc.display()
+                )),
             "the refusal must name its recovery path: {error}"
         );
 

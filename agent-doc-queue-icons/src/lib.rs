@@ -240,6 +240,86 @@ pub fn fused_lifecycle_word_token(text: &str) -> Option<(QueueLifecycleMarker, u
     Some((state, word_len + glyph_len))
 }
 
+/// `#lifecyclewordowner`: a leading lifecycle state word followed by
+/// whitespace and an exact-attempt owner annotation, `running
+/// [#subagent:x#1]`, is a torn projection, never work text.
+///
+/// agent-loop `agent-doc-bugs.md` (2026-11-21 08:04Z) carried `🟡 running
+/// [#subagent:lzeffectvoid#1] amend core-v1` for the leaf `amend core-v1`.
+/// A JetBrains IDE-buffer-authority publication (`#idebufferauthority`)
+/// merged into the document while `queue start` was repainting the row from
+/// `🟡` to `🚧`, and the state's name landed between the stale glyph and the
+/// owner annotation. No parser read `running [#…#1]` as projection, so the
+/// word and the claim's own owner tag became work text: `#claimfollowsedit`
+/// re-keyed the claim onto them, the next repaint wrote `🚧 [#…#1] running
+/// [#…#1] amend core-v1`, and closeout copies and derived follow-up titles all
+/// quoted the label. This is the whitespace-separated sibling of
+/// [`fused_lifecycle_word_token`].
+///
+/// Recognition is exact: one of the binary's own state words
+/// ([`QueueLifecycleMarker::state_words`], ASCII case-insensitive), then at
+/// least one space or tab, then a well-formed owner annotation
+/// (`[#<owner>#<generation>]`, or a legacy `⟦<owner>#<generation>⟧` /
+/// `⟦owner=<owner>;generation=<generation>⟧` spelling). A bare `[#id]` names
+/// work, not an attempt, so `running [#fix-parser] tests` never matches;
+/// neither does operator prose such as `running tests`.
+///
+/// Returns the text after the word and its whitespace, starting at the owner
+/// annotation, so callers parse the annotation with their own owner grammar
+/// and drop the word.
+pub fn lifecycle_word_before_owner_annotation(text: &str) -> Option<&str> {
+    let word_len = ALL_LIFECYCLE_STATES
+        .iter()
+        .flat_map(|state| state.state_words().iter())
+        .filter(|word| {
+            text.len() > word.len()
+                && text.is_char_boundary(word.len())
+                && text[..word.len()].eq_ignore_ascii_case(word)
+        })
+        .map(|word| word.len())
+        .max()?;
+    let after_word = &text[word_len..];
+    let rest = after_word.trim_start_matches([' ', '\t']);
+    if rest.len() == after_word.len() {
+        return None;
+    }
+    is_owner_annotation_prefix(rest).then_some(rest)
+}
+
+/// Whether `text` starts with a well-formed exact-attempt owner annotation:
+/// `[#<owner>#<generation>]` or a legacy `⟦<owner>#<generation>⟧` /
+/// `⟦owner=<owner>;generation=<generation>⟧`. The owner is non-empty and on
+/// one line; the generation is a decimal number.
+fn is_owner_annotation_prefix(text: &str) -> bool {
+    let (payload, legacy) = if let Some(after_open) = text.strip_prefix("[#") {
+        match after_open.split_once(']') {
+            Some((payload, _)) => (payload, false),
+            None => return false,
+        }
+    } else if let Some(after_open) = text.strip_prefix('⟦') {
+        match after_open.split_once('⟧') {
+            Some((payload, _)) => (payload, true),
+            None => return false,
+        }
+    } else {
+        return false;
+    };
+    let split = if legacy {
+        payload.strip_prefix("owner=").map_or_else(
+            || payload.rsplit_once('#'),
+            |rest| rest.rsplit_once(";generation="),
+        )
+    } else {
+        payload.rsplit_once('#')
+    };
+    split.is_some_and(|(owner, generation)| {
+        !owner.is_empty()
+            && !owner.contains(['\n', '\r'])
+            && !generation.is_empty()
+            && generation.chars().all(|ch| ch.is_ascii_digit())
+    })
+}
+
 impl Default for QueueIconSet {
     fn default() -> Self {
         Self {
@@ -439,6 +519,61 @@ mod tests {
             "",
         ] {
             assert_eq!(fused_lifecycle_word_token(text), None, "{text:?}");
+        }
+    }
+
+    /// `#lifecyclewordowner`: agent-loop agent-doc-bugs.md 2026-11-21 carried
+    /// `🟡 running [#subagent:lzeffectvoid#1] amend core-v1`. After the glyph,
+    /// the state word and its whitespace are torn projection in front of the
+    /// owner annotation.
+    #[test]
+    fn state_word_before_owner_annotation_is_torn_projection() {
+        let row = "running [#subagent:lzeffectvoid#1] amend core-v1";
+        assert_eq!(
+            lifecycle_word_before_owner_annotation(row),
+            Some("[#subagent:lzeffectvoid#1] amend core-v1")
+        );
+        for (text, rest) in [
+            (
+                "Claimed\t[#subagent:a#2] do [#a]",
+                "[#subagent:a#2] do [#a]",
+            ),
+            ("lost_running  [#subagent:a#3] x", "[#subagent:a#3] x"),
+            ("reported ⟦subagent:a#4⟧ x", "⟦subagent:a#4⟧ x"),
+            (
+                "pending ⟦owner=subagent:a;generation=5⟧ x",
+                "⟦owner=subagent:a;generation=5⟧ x",
+            ),
+        ] {
+            assert_eq!(
+                lifecycle_word_before_owner_annotation(text),
+                Some(rest),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn operator_prose_is_never_a_state_word_before_an_owner_annotation() {
+        for text in [
+            "running tests on the branch",
+            "running [#fix-parser] tests",
+            "running [#subagent:a#] x",
+            "running [#subagent:a#one] x",
+            "running [#subagent:a#1 x",
+            "running[#subagent:a#1] x",
+            "runningX [#subagent:a#1] x",
+            "rerunning [#subagent:a#1] x",
+            "running\n[#subagent:a#1] x",
+            "[#subagent:a#1] running x",
+            "running",
+            "",
+        ] {
+            assert_eq!(
+                lifecycle_word_before_owner_annotation(text),
+                None,
+                "{text:?}"
+            );
         }
     }
 

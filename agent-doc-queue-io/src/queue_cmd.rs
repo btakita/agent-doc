@@ -4740,6 +4740,74 @@ mod tests {
         assert_checkpoint("☑️", "reported", true);
     }
 
+    /// `#lifecyclewordowner`: agent-loop agent-doc-bugs.md (2026-11-21 08:04Z).
+    /// While `queue start` repainted the nested leaf `amend core-v1` from
+    /// `🟡` to `🚧`, an IDE-buffer publication merged in and the row read
+    /// `🟡 running [#subagent:lzeffectvoid#1] amend core-v1`. The word and the
+    /// claim's own owner tag parsed as work text: the claim followed that
+    /// "edit" (`queue_claim_followed_edit previous_bytes=822
+    /// current_bytes=857`), and a projection that still held the authored
+    /// claim restored a second `🚧` row beside a `📥 running [#…#1] amend
+    /// core-v1` copy. The ledger, `agent:active`, struck copies and derived
+    /// follow-up titles all quoted the label. The torn token is projection:
+    /// the claim keeps its authored text and the next projection heals the
+    /// row in place.
+    #[test]
+    fn state_word_before_owner_annotation_is_healed_and_never_followed() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("lifecycle-word-owner.md");
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "## Active <!-- agent:active priority -->\n<!-- /agent:active -->\n\n",
+            "## Run <!-- agent:run id=\"main\" subagents go -->\n",
+            "- decide on #lzeffectvoid: amend core-v1, or defer it?\n",
+            "  - amend core-v1\n",
+            "<!-- /agent:run -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        let effects = FakeEffects::default();
+        let item = "amend core-v1";
+        let owner = "subagent:lzeffectvoid";
+        let (_, claim) = claim_with_runtime_projection(&effects, &doc, item, owner, 600).unwrap();
+        let generation = claim.generation;
+        let claimed_row = format!("  - 🟡 [#{owner}#{generation}] amend core-v1\n");
+        let claimed = std::fs::read_to_string(&doc).unwrap();
+        assert!(claimed.contains(&claimed_row), "{claimed}");
+        let claimed_item = crate::queue_claim::load_ledger(&doc).unwrap().claims[0]
+            .item_text
+            .clone();
+
+        crate::queue_claim::start_attempt(
+            &doc,
+            item,
+            owner,
+            "worker:lzeffectvoid",
+            600,
+            generation,
+        )
+        .unwrap();
+        // The torn merge result lands before the start projection is applied.
+        let leaked_row = format!("  - 🟡 running [#{owner}#{generation}] amend core-v1\n");
+        std::fs::write(&doc, claimed.replace(&claimed_row, &leaked_row)).unwrap();
+        project_claim_runtime_state_with_effects(&effects, &doc, None).unwrap();
+
+        let healed = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            healed.contains(&format!("  - 🚧 [#{owner}#{generation}] amend core-v1\n")),
+            "{healed}"
+        );
+        assert!(!healed.contains("running ["), "{healed}");
+        let ledger = crate::queue_claim::load_ledger(&doc).unwrap();
+        assert_eq!(ledger.claims.len(), 1, "{:?}", ledger.claims);
+        assert_eq!(ledger.claims[0].item_text, claimed_item);
+        assert!(
+            !ledger.claims[0].item_text.contains("running"),
+            "{}",
+            ledger.claims[0].item_text
+        );
+    }
+
     /// `#managedlistnodrift`: through the real state.db loader, `agent:active`
     /// follows the durable claim lifecycle (claimed and running under Running,
     /// reported under Needs integration with an age), whatever marker the row

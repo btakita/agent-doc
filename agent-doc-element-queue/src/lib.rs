@@ -696,6 +696,15 @@ fn strip_blocked_annotation_token(trimmed: &str) -> Option<&str> {
 /// A leading exact-attempt owner annotation (`[#<owner>#<generation>]` or the
 /// legacy `⟦…⟧` spellings). A bare `[#id]` is work identity, not an attempt.
 fn strip_owner_annotation_token(trimmed: &str) -> Option<&str> {
+    strip_exact_owner_annotation_token(trimmed).or_else(|| {
+        // `#lifecyclewordowner`: a state word in front of the annotation
+        // (`running [#subagent:x#1]`) is part of the same torn projection.
+        agent_doc_queue_icons::lifecycle_word_before_owner_annotation(trimmed)
+            .and_then(strip_exact_owner_annotation_token)
+    })
+}
+
+fn strip_exact_owner_annotation_token(trimmed: &str) -> Option<&str> {
     let (payload, after, legacy_delimiters) = if let Some(rest) = trimmed.strip_prefix("[#") {
         let (payload, after) = rest.split_once(']')?;
         (payload, after, false)
@@ -1673,6 +1682,38 @@ mod tests {
         assert_eq!(
             strip_priority_markers("running tests on main"),
             "running tests on main"
+        );
+    }
+
+    /// `#lifecyclewordowner`: agent-loop agent-doc-bugs.md 2026-11-21 carried
+    /// `🟡 running [#subagent:lzeffectvoid#1] amend core-v1` and, after
+    /// closeout, `~~running [#subagent:lzeffectvoid#1] amend core-v1~~`. The
+    /// state word plus owner annotation is projection: identity, priority
+    /// stripping and the strike body all read the authored `amend core-v1`.
+    #[test]
+    fn state_word_before_owner_annotation_is_projection_for_identity_and_strikes() {
+        let leaked = "🟡 running [#subagent:lzeffectvoid#1] amend core-v1";
+        assert_eq!(strip_priority_markers(leaked), "amend core-v1");
+        assert_eq!(strip_attempt_projection_prefix(leaked), "amend core-v1");
+        assert_eq!(struck_work_text(leaked), "amend core-v1");
+        assert_eq!(render_struck_row_body(leaked), "~~amend core-v1~~");
+        assert_eq!(
+            queue_head_identity(leaked),
+            queue_head_identity("amend core-v1")
+        );
+        assert_eq!(
+            queue_head_identity(
+                "🚧 [#subagent:lzeffectvoid#1] running [#subagent:lzeffectvoid#1] amend core-v1"
+            ),
+            queue_head_identity("amend core-v1")
+        );
+        assert_eq!(
+            QueueItemIdentity::from_prompt("running [#subagent:lzeffectvoid#1] amend core-v1"),
+            QueueItemIdentity::from_prompt("amend core-v1")
+        );
+        assert_eq!(
+            strip_priority_markers("running [#fix-parser] tests"),
+            "running [#fix-parser] tests"
         );
     }
 }

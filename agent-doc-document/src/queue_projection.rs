@@ -562,6 +562,16 @@ pub struct QueueOwnerProjection {
 /// `⟦owner=<owner>;generation=<generation>⟧` spellings remain readable so an
 /// installed binary can normalize documents written by an older release.
 pub fn strip_owner_annotation_prefix(text: &str) -> Option<(QueueOwnerProjection, &str)> {
+    strip_exact_owner_annotation_prefix(text).or_else(|| {
+        // `#lifecyclewordowner`: `running [#subagent:x#1]` is one torn owner
+        // token. The annotation names the attempt; the state word is dropped,
+        // so it never survives a repaint or enters work identity.
+        agent_doc_frontmatter::frontmatter::lifecycle_word_before_owner_annotation(text)
+            .and_then(strip_exact_owner_annotation_prefix)
+    })
+}
+
+fn strip_exact_owner_annotation_prefix(text: &str) -> Option<(QueueOwnerProjection, &str)> {
     let (payload, rest, legacy_delimiters) =
         if let Some(after_open) = text.strip_prefix(OWNER_ANNOTATION_OPEN) {
             let (payload, rest) = after_open.split_once(OWNER_ANNOTATION_CLOSE)?;
@@ -2639,6 +2649,58 @@ mod tests {
         // Operator prose that merely starts with the word stays work text.
         assert_eq!(
             strip_in_progress_marker("📥 running tests on main"),
+            "running tests on main"
+        );
+    }
+
+    /// `#lifecyclewordowner`: the live agent-loop row `🟡 running
+    /// [#subagent:lzeffectvoid#1] amend core-v1` (2026-11-21). The state word
+    /// in front of the owner annotation is torn projection: the work text is
+    /// the authored `amend core-v1`, and every repaint writes one glyph and
+    /// one owner annotation, never the word.
+    #[test]
+    fn state_word_before_owner_annotation_is_stripped_and_never_repainted() {
+        let leaked = "🟡 running [#subagent:lzeffectvoid#1] amend core-v1";
+        let owner = QueueOwnerProjection {
+            owner: "subagent:lzeffectvoid".to_string(),
+            generation: 1,
+        };
+        assert_eq!(
+            lifecycle_marker(leaked),
+            Some(QueueLifecycleMarker::Claimed)
+        );
+        assert_eq!(owner_projection(leaked), Some(owner.clone()));
+        assert_eq!(strip_in_progress_marker(leaked), "amend core-v1");
+        assert_eq!(strip_priority_markers(leaked), "amend core-v1");
+        let repainted = apply_owner_projection(
+            &apply_lifecycle_marker(leaked, QueueLifecycleMarker::Running),
+            Some(&owner),
+        );
+        assert_eq!(repainted, "🚧 [#subagent:lzeffectvoid#1] amend core-v1");
+
+        // The repaint the live document then received doubles the owner
+        // annotation around the word; it heals to the same canonical row.
+        let doubled =
+            "🚧 [#subagent:lzeffectvoid#1] running [#subagent:lzeffectvoid#1] amend core-v1";
+        assert_eq!(strip_priority_markers(doubled), "amend core-v1");
+        assert_eq!(
+            apply_owner_projection(doubled, Some(&owner)),
+            "🚧 [#subagent:lzeffectvoid#1] amend core-v1"
+        );
+        // Without a glyph (a pending or struck copy) the word still drops.
+        assert_eq!(
+            strip_priority_markers("running [#subagent:lzeffectvoid#1] amend core-v1"),
+            "amend core-v1"
+        );
+
+        // Operator prose keeps its words: no owner annotation follows, or the
+        // bracket names work (`[#id]`), not an attempt.
+        assert_eq!(
+            strip_in_progress_marker("🟡 running [#fix-parser] tests"),
+            "running [#fix-parser] tests"
+        );
+        assert_eq!(
+            strip_priority_markers("running tests on main"),
             "running tests on main"
         );
     }

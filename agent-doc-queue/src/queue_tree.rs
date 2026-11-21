@@ -506,6 +506,16 @@ fn node_for_entry(
     entry: &QueueEntry,
     open_todo_ids: &HashSet<String>,
 ) -> Option<NodeParts> {
+    // `#responserowqueuehead` / `#followupmovedstate`: a response detail
+    // copied from a worker hand-back (`- agent: … <!-- agent-doc:response-detail -->`
+    // under `**Action items:**`) and the reserved response labels are
+    // binary-owned metadata, not rows. Read as operator replies, the copied
+    // action items of a struck row looked like open work nested under it,
+    // so its closure said to keep the tree after those items had moved to
+    // their own follow-up rows.
+    if entry_is_generated_response_structure(entry) {
+        return None;
+    }
     match entry {
         QueueEntry::Completed(prompt) => {
             Some((QueueNodeState::Done, None, display_text(&prompt.text), None))
@@ -578,6 +588,21 @@ fn node_for_entry(
         }
         _ => None,
     }
+}
+
+/// Whether `entry` is one generated response-structure row
+/// ([`agent_doc_markdown_ast::overlay::is_generated_response_structure_row`]).
+fn entry_is_generated_response_structure(entry: &QueueEntry) -> bool {
+    let line = match entry {
+        QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) if !prompt.multiline => {
+            prompt.text.as_str()
+        }
+        QueueEntry::Freeform(line) => line.lines().next().unwrap_or_default(),
+        _ => return false,
+    };
+    let line = line.trim_start();
+    let line = line.strip_prefix("- ").unwrap_or(line);
+    agent_doc_markdown_ast::overlay::is_generated_response_structure_row(line)
 }
 
 fn normalized_item_key(item: &str) -> String {

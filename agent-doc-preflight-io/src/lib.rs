@@ -7659,6 +7659,27 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         ));
     }
 
+    // `#followupmovedstate`: a struck row whose hand-back action items all
+    // became their own follow-up rows no longer holds that work. Its response
+    // said `Follow-up work remains.` / "Keep this tree and follow the action
+    // items" when it was written before this rule, or when the rows were
+    // placed after the strike; rewrite only those two values, in every run
+    // block, so the closed row's response matches the queue.
+    if let Some((reconciled, rows)) =
+        agent_doc_queue::followup_moved_state::reconcile_moved_followup_states(&current_content)
+    {
+        current_content = reconciled;
+        activation.entries_after = queue_entries_for_id(&current_content, &selected_queue_id);
+        mutated = true;
+        eprintln!(
+            "[preflight] queue: {rows} struck row response(s) now say their action items moved to follow-up rows (#followupmovedstate)"
+        );
+        effect_phase.log_op(format!(
+            "queue_followup_moved_state_reconciled file={} rows={rows} (#followupmovedstate)",
+            file.display()
+        ));
+    }
+
     // Consume start fence if needed
     if activation.consumed_start_fence {
         let new_body = agent_doc_queue::document_queue::render(&activation.entries_after);

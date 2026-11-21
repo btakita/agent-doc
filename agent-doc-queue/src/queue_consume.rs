@@ -4812,7 +4812,9 @@ fn response_summary_row_child(
 /// the queue tree decides how much of it may go: the row alone, the row with
 /// its nested rows, or the whole tree under its top-level row. When an open
 /// row keeps the subtree or the tree alive, the guidance names it.
-fn completed_row_deletion_guidance(closure: Option<&crate::queue_tree::RowClosure>) -> String {
+pub(crate) fn completed_row_deletion_guidance(
+    closure: Option<&crate::queue_tree::RowClosure>,
+) -> String {
     const DONE: &str = "the item is complete and has no remaining tracked or unpublished work.";
     let Some(closure) = closure else {
         return format!(
@@ -6445,6 +6447,7 @@ fn handback_response_row_child(
     handback: &agent_doc_document::worker_handback::WorkerHandback,
     addressed_at: &str,
     closure: Option<&crate::queue_tree::RowClosure>,
+    action_items_moved: bool,
 ) -> Option<String> {
     let response_id = handback_response_id(row_text, handback);
     let marker = agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(&response_id)?;
@@ -6465,7 +6468,10 @@ fn handback_response_row_child(
     {
         render_handback_section(&mut child, "", *kind, text);
     }
-    let follow_up = !handback.action_items().is_empty();
+    // `#followupmovedstate`: once every action item has its own follow-up row,
+    // this closed row no longer holds that work, so it says so instead of
+    // asking the operator to keep the tree.
+    let follow_up = !handback.action_items().is_empty() && !action_items_moved;
     child.push_str("- **State:** ");
     child.push_str(if follow_up {
         RESPONSE_STATE_FOLLOW_UP
@@ -6474,9 +6480,11 @@ fn handback_response_row_child(
     });
     child.push_str("\n- **Guidance:** ");
     if follow_up {
-        child.push_str(
-            "More work remains. Keep this tree and follow the action items in this response.",
-        );
+        child.push_str(crate::followup_moved_state::FOLLOW_UP_ACTION_ITEMS_GUIDANCE);
+    } else if action_items_moved {
+        child.push_str(&crate::followup_moved_state::moved_followup_guidance(
+            closure,
+        ));
     } else {
         child.push_str(&completed_row_deletion_guidance(closure));
     }
@@ -6638,9 +6646,18 @@ pub fn attach_stopped_row_responses(
         let closure = closure_tree.as_ref().and_then(|tree| {
             crate::queue_tree::row_closure_at_offset(tree, after, node.item.start_byte)
         });
-        let Some(child) =
-            handback_response_row_child(&node.item.text, &handback, addressed_at, closure.as_ref())
-        else {
+        let action_items_moved = crate::followup_moved_state::action_items_held_as_rows(
+            after,
+            &node.item.text,
+            &handback.action_items(),
+        );
+        let Some(child) = handback_response_row_child(
+            &node.item.text,
+            &handback,
+            addressed_at,
+            closure.as_ref(),
+            action_items_moved,
+        ) else {
             continue;
         };
         let child_indent = " ".repeat(indent + 2);

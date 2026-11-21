@@ -239,7 +239,7 @@ pub fn plan_handback_followups(
 /// lifecycle marker (`☑️ [#subagent:leaf#1]`). That marker changes between
 /// reports, and it used to consume the 80-character bound, so the check
 /// compares the quote's work text. A struck row still matches.
-fn followup_rows_match(line: &str, row: &str) -> bool {
+pub(crate) fn followup_rows_match(line: &str, row: &str) -> bool {
     let line_key = followup_hold_key(line);
     let row_key = followup_hold_key(row);
     if line_key.contains(&row_key) {

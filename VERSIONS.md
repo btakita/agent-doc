@@ -2,6 +2,11 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.585
+
+- **Codex Stop reuses verified closeout evidence.** When the live document, merge baseline, and Git commit still match the controller's terminal receipt, Stop skips the duplicate session audit. A changed document still triggers the full integrity checks.
+- **Retained closeout survives queue maintenance.** Stop waits for the current closeout owner and preserves its capture. Tracked work that stayed unchanged no longer triggers a second maintenance pass after the commit.
+
 ## 0.35.584
 
 - **The live editor buffer is authoritative.** Saves and recovery preserve the open document's content and ordering. Incremental parsing reuses unchanged document components.

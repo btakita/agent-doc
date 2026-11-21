@@ -976,8 +976,17 @@ fn exchange_candidates(
 ) -> Vec<Candidate> {
     let presets =
         PresetContext::new_with_presets(current, &watermark.session_presets, prompt_presets);
-    let without_agent_responses = strip_new_response_sections(&watermark.baseline, current);
-    let set = exchange_steering_set_between(&watermark.baseline, &without_agent_responses);
+    // `#ackechosteer`: binary-owned exchange content is removed from BOTH
+    // sides before the diff, so it can neither read as an added operator
+    // prompt nor as a deleted one. Response-heading membership still comes
+    // from the unstripped baseline: an operator-edited completion cell loses
+    // its attestation, keeps its old heading, and stays visible as steering.
+    let baseline = strip_binary_owned_exchange_content(&watermark.baseline);
+    let without_agent_responses = strip_new_response_sections(
+        &watermark.baseline,
+        &strip_binary_owned_exchange_content(current),
+    );
+    let set = exchange_steering_set_between(&baseline, &without_agent_responses);
     let mut out = Vec::new();
     for directive in set.directives() {
         let Some(identity) = directive.identity() else {
@@ -1153,6 +1162,106 @@ fn strip_new_response_sections(baseline: &str, current: &str) -> String {
         out.push_str(&held);
     }
     out
+}
+
+/// Remove exchange content only the binary writes (`#ackechosteer`).
+///
+/// Observed 2026-11-21 on agent-doc-bugs.md: after several `queue
+/// report-complete` calls and `queue consume --ack-text`, `agent-doc steering`
+/// reported `dispatch=subagent source=exchange change=added verbatim: > follow
+/// up on an action item from queue item …` — the binary's own echo read back
+/// as a new operator prompt. Neither writer goes through a captured response,
+/// so the `#assistantsteeringlineage` subtraction in session-check cannot see
+/// them, and [`strip_new_response_sections`] skips only sections under a NEW
+/// heading, while `--ack-text` embeds its echo under the latest heading, which
+/// the steering baseline usually already holds.
+///
+/// Ownership is structural, never a match on prompt text:
+/// - A `> **Queue prompt(s):**` echo block anchored directly under a response
+///   heading (only blank lines or other anchored echo blocks between) is the
+///   insertion point `queue_response::embed_consumed_prompt_echoes_in_response`
+///   owns. The blank lines it inserted go with it.
+/// - A completion cell that [`agent_doc_document::subagent_completion`]
+///   attests by heading, response digest, and keyed marker is binary-owned
+///   whole. A cell whose response an operator edited fails its digest and is
+///   kept.
+fn strip_binary_owned_exchange_content(text: &str) -> String {
+    use agent_doc_document::subagent_completion;
+    let is_cell_structure = |trimmed: &str| {
+        trimmed.starts_with(subagent_completion::RESPONSE_DIGEST_PREFIX)
+            || subagent_completion::is_marker_line(trimmed)
+    };
+    let mut without_echoes = String::with_capacity(text.len());
+    let mut after_heading = false;
+    let mut in_echo = false;
+    let mut removed_echo = false;
+    let mut blanks_before_echo = String::new();
+    let mut blanks = String::new();
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim();
+        if in_echo {
+            if trimmed.starts_with('>') {
+                continue;
+            }
+            in_echo = false;
+        }
+        if after_heading {
+            if trimmed.is_empty() {
+                blanks.push_str(line);
+                continue;
+            }
+            if is_anchored_echo_open_line(trimmed) {
+                if !removed_echo {
+                    blanks_before_echo = std::mem::take(&mut blanks);
+                }
+                blanks.clear();
+                removed_echo = true;
+                in_echo = true;
+                continue;
+            }
+            after_heading = false;
+            if !removed_echo {
+                without_echoes.push_str(&blanks);
+            } else if !is_cell_structure(trimmed) {
+                without_echoes.push_str(&blanks_before_echo);
+            }
+            blanks.clear();
+            blanks_before_echo.clear();
+        }
+        without_echoes.push_str(line);
+        if crate::baseline_comparison::is_exchange_response_heading(trimmed) {
+            after_heading = true;
+            removed_echo = false;
+        }
+    }
+    if after_heading {
+        if removed_echo {
+            without_echoes.push_str(&blanks_before_echo);
+        } else {
+            without_echoes.push_str(&blanks);
+        }
+    }
+
+    let cells = subagent_completion::completion_cell_line_ranges(&without_echoes);
+    if cells.is_empty() {
+        return without_echoes;
+    }
+    without_echoes
+        .split_inclusive('\n')
+        .enumerate()
+        .filter(|(index, _)| !cells.iter().any(|cell| cell.contains(index)))
+        .map(|(_, line)| line)
+        .collect()
+}
+
+/// The opening line of a binary queue-prompt echo block.
+fn is_anchored_echo_open_line(trimmed: &str) -> bool {
+    trimmed
+        .strip_prefix('>')
+        .map(str::trim)
+        .is_some_and(|rest| {
+            rest.starts_with("**Queue prompt:**") || rest.starts_with("**Queue prompts:**")
+        })
 }
 
 /// A `> **Queue prompt:** …` response echo line.
@@ -6189,5 +6298,139 @@ mod tests {
         let inline_only =
             "# S\n\n<!-- agent:queue go -->\n- do [#a]\n- do [#b]\n<!-- /agent:queue -->\n";
         assert!(subagent_routed_queue_head_ids(inline_only, &presets).is_empty());
+    }
+
+    /// `#ackechosteer` fixture: an answered exchange whose boundary is where
+    /// the binary inserts completion cells and the operator types next.
+    const ACK_EX: &str =
+        "Earlier prompt.\n\n### Re: Earlier prompt\n\nAnswer.\n\n<!-- agent:boundary:abc -->\n";
+
+    /// The live echo ended in the operator's answer, a question: the shape the
+    /// exchange extractor reads as an unanswered prompt.
+    const ACK_ITEM: &str = "follow up on an action item from queue item \u{201c}Prune the worktrees.\u{201d}: agent: test-first triage of the agent-doc branches that conflict with main: Should we integrate these?";
+
+    fn report_complete(content: &str, owner: &str, item: &str, key: &str) -> String {
+        let cell = agent_doc_document::subagent_completion::cell_with_response(
+            owner,
+            item,
+            key,
+            "**Summary**\n\nDone.",
+        )
+        .unwrap();
+        agent_doc_element_exchange::insert_prompt_line_before_boundary(content, &cell).unwrap()
+    }
+
+    fn ack_text(content: &str, item: &str) -> String {
+        let acked = agent_doc_queue::queue_response::embed_consumed_prompt_in_response(
+            content,
+            &[item.to_string()],
+            None,
+        );
+        assert_ne!(acked, content, "ack-text must embed its echo");
+        acked
+    }
+
+    fn assert_no_steering(wm: &SteeringWatermark, current: &str, owned: &BTreeSet<String>) {
+        for mode in [ObserveMode::InTurn, ObserveMode::Boundary] {
+            let obs = observe_with_mode(wm, current, &quiet_ctx(owned), mode);
+            assert!(obs.ready.is_empty(), "{mode:?}: {:?}\n{current}", obs.ready);
+            assert_eq!(obs.pending, 0, "{mode:?}");
+        }
+    }
+
+    fn assert_operator_prompt_still_steers(
+        wm: &SteeringWatermark,
+        current: &str,
+        owned: &BTreeSet<String>,
+    ) {
+        let with_operator = current.replace(
+            "<!-- /agent:exchange -->",
+            "please also bump the version\n<!-- /agent:exchange -->",
+        );
+        for mode in [ObserveMode::InTurn, ObserveMode::Boundary] {
+            let obs = observe_with_mode(wm, &with_operator, &quiet_ctx(owned), mode);
+            assert_eq!(obs.ready.len(), 1, "{mode:?}: {:?}", obs.ready);
+            let verbatim = &obs.ready[0].verbatim;
+            assert!(
+                verbatim.contains("please also bump the version"),
+                "{verbatim}"
+            );
+            assert!(
+                !verbatim.contains("follow up on an action item"),
+                "{verbatim}"
+            );
+            assert!(!verbatim.contains("Queue prompt"), "{verbatim}");
+        }
+    }
+
+    /// `#ackechosteer` (2026-11-21, agent-doc-bugs.md): `queue consume
+    /// --ack-text` embeds its `> **Queue prompt:**` echo directly under the
+    /// latest response heading. When that heading is already in the steering
+    /// baseline (an earlier response), the echo is not a "new response
+    /// section", and `agent-doc steering` surfaced `> follow up on an action
+    /// item from queue item …` as `dispatch=subagent source=exchange
+    /// change=added`. The echo sits where only the binary writes; it is never
+    /// operator steering.
+    #[test]
+    fn ack_text_echo_under_a_baseline_response_heading_is_never_operator_steering() {
+        let owned = BTreeSet::new();
+        let baseline = doc("", ACK_EX);
+        let wm = seeded(&baseline, None);
+        let current = ack_text(&baseline, ACK_ITEM);
+        assert_no_steering(&wm, &current, &owned);
+        assert_operator_prompt_still_steers(&wm, &current, &owned);
+    }
+
+    /// `#ackechosteer`: replay several `queue report-complete` cells followed
+    /// by `queue consume --ack-text` for each. The completion cells may be in
+    /// the steering baseline (reported before the watermark) or new; either
+    /// way neither the binary-owned cell nor the ack echo embedded under its
+    /// heading is an operator prompt.
+    #[test]
+    fn report_complete_then_ack_text_replay_is_never_operator_steering() {
+        let owned = BTreeSet::new();
+        let items = [
+            ACK_ITEM.to_string(),
+            format!("{ACK_ITEM} Integrate both."),
+            "do [#blockerreportterminal]".to_string(),
+        ];
+        let start = doc("", ACK_EX);
+        let mut reported = start.clone();
+        for (index, item) in items.iter().enumerate() {
+            reported = report_complete(
+                &reported,
+                &format!("subagent:worker{index}"),
+                item,
+                &format!("{index:0>64}"),
+            );
+        }
+        for baseline in [start.clone(), reported.clone()] {
+            let wm = seeded(&baseline, None);
+            let mut current = reported.clone();
+            assert_no_steering(&wm, &current, &owned);
+            for item in &items {
+                current = ack_text(&current, item);
+                assert_no_steering(&wm, &current, &owned);
+            }
+            assert_operator_prompt_still_steers(&wm, &current, &owned);
+        }
+    }
+
+    /// `#ackechosteer`: an operator who edits a binary completion cell's
+    /// response breaks its digest, so the edit is operator text again and
+    /// still steers. Only attested cells are binary-owned.
+    #[test]
+    fn operator_edit_inside_a_completion_cell_still_steers() {
+        let owned = BTreeSet::new();
+        let baseline = report_complete(&doc("", ACK_EX), "subagent:w", ACK_ITEM, &"a".repeat(64));
+        let wm = seeded(&baseline, None);
+        let current = baseline.replace("> Done.", "> Done.\n\nwhy did this skip the tests?");
+        let obs = observe(&wm, &current, &quiet_ctx(&owned));
+        assert_eq!(obs.ready.len(), 1, "{:?}", obs.ready);
+        assert!(
+            obs.ready[0]
+                .verbatim
+                .contains("why did this skip the tests?")
+        );
     }
 }

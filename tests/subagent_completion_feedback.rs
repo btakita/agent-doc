@@ -1093,6 +1093,7 @@ fn several_reports_then_preflight_admits_the_next_turn() {
         "#gh-fix https://github.com/example/project/issues/263",
         "#gh-fix https://github.com/example/project/issues/261",
     ];
+    // Work the coordinator finished inline and acknowledges with `--ack-text`.
     let doc = committed_session(dir.path(), &items);
     for (index, item) in items.iter().enumerate() {
         let owner = format!("subagent:gh26{index}");
@@ -1168,6 +1169,170 @@ fn several_reports_then_preflight_admits_the_next_turn() {
     assert_preflight_admits(dir.path(), &doc, items.len());
     assert_cells_committed(dir.path(), items.len());
     assert_session_check_does_not_accuse_patchback(dir.path(), &doc);
+}
+
+/// `#ackechosteer` (2026-11-21, agent-doc-bugs.md): after several `queue
+/// report-complete` calls and `queue consume --ack-text`, `agent-doc
+/// steering` reported `dispatch=subagent source=exchange change=added
+/// verbatim: > follow up on an action item from queue item …`: the binary's
+/// own completion cells and ack echoes read back as an operator prompt. Replay
+/// that sequence and read steering: only an operator prompt typed afterwards
+/// is exchange steering.
+#[test]
+fn report_complete_then_ack_text_never_reads_back_as_operator_steering() {
+    let dir = tempfile::tempdir().unwrap();
+    let items = [
+        "Prune the worktrees.",
+        "follow up on an action item from queue item \u{201c}Prune the worktrees.\u{201d}: agent: bring the `src/freehold` checkout onto `origin/main`",
+    ];
+    let acked_inline = "follow up on an action item from queue item \u{201c}Prune the worktrees.\u{201d}: agent: test-first triage of the agent-doc branches that conflict with main: Should we integrate these?";
+    let doc = committed_session(dir.path(), &items);
+    let path = doc.to_str().unwrap();
+    assert_preflight_admits(dir.path(), &doc, 0);
+    let mut claimed_items = Vec::<String>::new();
+    for (index, item) in items.iter().enumerate() {
+        let owner = format!("subagent:echo{index}");
+        let worker = format!("worker:echo{index}");
+        assert_ok(
+            &run_agent_doc(
+                dir.path(),
+                &["queue", "claim", path, "--item", item, "--owner", &owner],
+            ),
+            "queue claim",
+        );
+        let claims = run_agent_doc(dir.path(), &["queue", "claims", path]);
+        assert_ok(&claims, "queue claims");
+        let claims: serde_json::Value = serde_json::from_slice(&claims.stdout).unwrap();
+        let item = claims
+            .as_array()
+            .and_then(|claims| {
+                claims.iter().find_map(|claim| {
+                    (claim["owner"].as_str() == Some(owner.as_str()))
+                        .then(|| claim["item_text"].as_str())
+                        .flatten()
+                })
+            })
+            .unwrap_or_else(|| panic!("missing claim for {owner}: {claims}"))
+            .to_string();
+        let item = item.as_str();
+        assert_ok(
+            &run_agent_doc(
+                dir.path(),
+                &[
+                    "queue",
+                    "start",
+                    path,
+                    "--item",
+                    item,
+                    "--owner",
+                    &owner,
+                    "--generation",
+                    "1",
+                    "--worker-id",
+                    &worker,
+                ],
+            ),
+            "queue start",
+        );
+        assert_ok(
+            &run_agent_doc(
+                dir.path(),
+                &[
+                    "queue",
+                    "report-complete",
+                    "--prose-only",
+                    path,
+                    "--item",
+                    item,
+                    "--generation",
+                    "1",
+                    "--response",
+                    "Pruned; focused tests passed.",
+                ],
+            ),
+            "queue report-complete",
+        );
+        claimed_items.push(item.to_string());
+    }
+    // The coordinator's next turn: the operator asks for something, and its
+    // preflight baseline (the steering watermark) now holds the completion
+    // cells.
+    let asked = fs::read_to_string(&doc).unwrap().replace(
+        "<!-- /agent:exchange -->",
+        "Report the worktree status.\n<!-- /agent:exchange -->",
+    );
+    fs::write(&doc, &asked).unwrap();
+    assert_preflight_admits(dir.path(), &doc, claimed_items.len());
+    assert_ok(
+        &run_agent_doc(dir.path(), &["steering", path]),
+        "steering seed",
+    );
+    let reported = fs::read_to_string(&doc).unwrap();
+    for item in &claimed_items {
+        assert!(reported.contains(&format!("> {item}")), "{reported}");
+    }
+    let with_row = reported.replace(
+        "<!-- /agent:queue -->",
+        &format!("- {acked_inline}\n<!-- /agent:queue -->"),
+    );
+    assert_ne!(with_row, reported);
+    fs::write(&doc, &with_row).unwrap();
+    assert_ok(
+        &run_agent_doc(
+            dir.path(),
+            &["queue", "consume", path, "--ack-text", acked_inline],
+        ),
+        "queue consume --ack-text",
+    );
+    let acked = fs::read_to_string(&doc).unwrap();
+    assert!(acked.contains(&format!("> {acked_inline}")), "{acked}");
+
+    // Steering holds a document edited within the debounce window as
+    // `pending`; age the file so every item is settled and reported.
+    let settle = || {
+        let aged = filetime::FileTime::from_system_time(
+            std::time::SystemTime::now() - std::time::Duration::from_secs(120),
+        );
+        filetime::set_file_mtime(&doc, aged).unwrap();
+    };
+    let exchange_items = |output: &std::process::Output| -> Vec<serde_json::Value> {
+        assert_ok(output, "steering --json");
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["pending"].as_u64().unwrap_or(0), 0, "{report:#}");
+        report["items"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|item| item["source"] == "exchange")
+            .collect()
+    };
+    settle();
+    let steering = run_agent_doc(dir.path(), &["steering", path, "--json", "--peek"]);
+    let echoed = exchange_items(&steering);
+    assert!(
+        echoed.is_empty(),
+        "binary-authored completion cells and ack echoes are never operator steering: {echoed:#?}\n{acked}"
+    );
+
+    let typed = acked.replace(
+        "<!-- /agent:exchange -->",
+        "please also bump the version\n<!-- /agent:exchange -->",
+    );
+    fs::write(&doc, &typed).unwrap();
+    settle();
+    let steering = run_agent_doc(dir.path(), &["steering", path, "--json", "--peek"]);
+    let operator = exchange_items(&steering);
+    assert_eq!(operator.len(), 1, "{operator:#?}");
+    let verbatim = operator[0]["verbatim"].as_str().unwrap_or_default();
+    assert!(
+        verbatim.contains("please also bump the version"),
+        "{verbatim}"
+    );
+    assert!(
+        !verbatim.contains("follow up on an action item"),
+        "{verbatim}"
+    );
 }
 
 /// `#subagentcompletioncell`: a completion cell appended under a response

@@ -6113,29 +6113,141 @@ fn row_work_heading(row_text: &str) -> String {
     agent_doc_document::subagent_completion::heading_item_text(work)
 }
 
-fn completion_cell_matches_row(document: &str, cell_item: &str, row_text: &str) -> bool {
-    if crate::queue_claim::completion_evidence_matches_row(cell_item, row_text) {
+/// One concrete queue row: where it starts, its own work heading, and every
+/// heading form of its claim lineage (`#nestlistlineage`).
+struct QueueRowLineage {
+    line_start: usize,
+    work: String,
+    lineages: Vec<String>,
+}
+
+/// The claim lineage of every queue row in one document (`#nestlistlineage`).
+///
+/// A completion cell names the claim key the worker reported. For a nested row
+/// that key is the row's full nest vector (`parent: …: leaf`). Two trees can
+/// each hold a row with the same leaf text ("Complete the work."); the leaf
+/// alone cannot say which one the worker claimed. The lineage is read at each
+/// row's own position, never by looking the leaf text up again, which finds
+/// the first copy.
+struct QueueRowLineages {
+    rows: Vec<QueueRowLineage>,
+}
+
+impl QueueRowLineages {
+    fn new(document: &str) -> Self {
+        use agent_doc_document::subagent_completion::heading_item_text;
+        let mut rows = Vec::new();
+        let Ok(components) = element::parse(document) else {
+            return Self { rows };
+        };
+        for component in components
+            .iter()
+            .filter(|component| component.name == "queue")
+        {
+            let body = component.content(document);
+            let Ok(spanned) = document_queue::parse_spans(body) else {
+                continue;
+            };
+            let entries = spanned
+                .iter()
+                .map(|(entry, _)| entry.clone())
+                .collect::<Vec<_>>();
+            for (index, (entry, span)) in spanned.iter().enumerate() {
+                let (QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt)) = entry else {
+                    continue;
+                };
+                let identity = strip_in_progress_marker(prompt.text.trim());
+                let mut lineages = Vec::new();
+                for lineage in [
+                    document_queue::lineage_claim_text(&entries, index),
+                    document_queue::nest_vector_at(&entries, index, &identity),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    let lineage = heading_item_text(&lineage);
+                    if !lineage.is_empty() && !lineages.contains(&lineage) {
+                        lineages.push(lineage);
+                    }
+                }
+                rows.push(QueueRowLineage {
+                    line_start: line_start_at(document, component.open_end + span.start),
+                    work: row_work_heading(&prompt.text),
+                    lineages,
+                });
+            }
+        }
+        Self { rows }
+    }
+
+    /// Line starts of the rows whose own lineage is `cell`.
+    fn owners(&self, cell: &str) -> Vec<usize> {
+        self.rows
+            .iter()
+            .filter(|row| row.lineages.iter().any(|lineage| lineage == cell))
+            .map(|row| row.line_start)
+            .collect()
+    }
+
+    /// Number of queue rows whose own work heading is `work`.
+    fn rows_with_work(&self, work: &str) -> usize {
+        self.rows.iter().filter(|row| row.work == work).count()
+    }
+}
+
+fn line_start_at(document: &str, offset: usize) -> usize {
+    let offset = offset.min(document.len());
+    document
+        .get(..offset)
+        .and_then(|prefix| prefix.rfind('\n'))
+        .map_or(0, |index| index + 1)
+}
+
+/// The queue row a completion or echo cell addresses, at a concrete position.
+#[derive(Clone, Copy)]
+struct RowRef<'a> {
+    text: &'a str,
+    /// Byte offset of the row in the document the lineages were read from.
+    start: usize,
+    lineages: &'a QueueRowLineages,
+    document: &'a str,
+}
+
+impl RowRef<'_> {
+    /// `#nestlistlineage`: whether `head`, a claim key that is more than this
+    /// row's own text, names this row.
+    ///
+    /// When some queue row's lineage spells `head`, only those rows own it. A
+    /// row with the same leaf under another parent does not. When no row spells
+    /// it (an ancestor was edited after the claim), the leaf still names this
+    /// row, but only while no other queue row has the same work.
+    fn named_by_nested_head(&self, head: &str, work: &str) -> bool {
+        use agent_doc_document::subagent_completion::heading_item_text;
+        let head = heading_item_text(head);
+        let owners = self.lineages.owners(&head);
+        if !owners.is_empty() {
+            return owners.contains(&line_start_at(self.document, self.start));
+        }
+        let leaf_names_work = head
+            .rsplit_once(": ")
+            .is_some_and(|(_, leaf)| heading_item_text(leaf) == work);
+        leaf_names_work && self.lineages.rows_with_work(work) <= 1
+    }
+}
+
+fn completion_cell_matches_row(cell_item: &str, row: RowRef<'_>) -> bool {
+    if crate::queue_claim::completion_evidence_matches_row(cell_item, row.text) {
         return true;
     }
     let cell = agent_doc_document::subagent_completion::heading_item_text(cell_item);
-    let work = row_work_heading(row_text);
+    let work = row_work_heading(row.text);
     if work.is_empty() {
         return false;
     }
     if cell == work {
         return true;
     }
-    if cell.rsplit_once(": ").is_some_and(|(_, leaf)| {
-        agent_doc_document::subagent_completion::heading_item_text(leaf) == work
-    }) {
-        return true;
-    }
-    let vector = crate::queue_response::nest_vector_in_document(document, row_text).or_else(|| {
-        crate::queue_response::nest_vector_in_document(document, &row_work_heading(row_text))
-    });
-    vector.is_some_and(|vector| {
-        cell == agent_doc_document::subagent_completion::heading_item_text(&vector)
-    })
+    row.named_by_nested_head(&cell, &work)
 }
 
 fn quoted_queue_prompts(cell: &str) -> Vec<String> {
@@ -6183,15 +6295,23 @@ fn quoted_queue_prompts(cell: &str) -> Vec<String> {
     prompts
 }
 
-fn prompt_names_work(prompt: &str, work: &str) -> bool {
-    !work.is_empty() && (prompt == work || prompt.ends_with(&format!(": {work}")))
+fn prompt_names_work(prompt: &str, work: &str, row: RowRef<'_>) -> bool {
+    if work.is_empty() {
+        return false;
+    }
+    if prompt == work {
+        return true;
+    }
+    // `#nestlistlineage`: a quoted nest vector names only the row it spells.
+    prompt.ends_with(&format!(": {work}")) && row.named_by_nested_head(prompt, work)
 }
 
-fn echo_cell_names_row(document: &str, cell: &str, row_text: &str) -> bool {
+fn echo_cell_names_row(document: &str, cell: &str, row: RowRef<'_>) -> bool {
+    let row_text = row.text;
     let work = row_work_heading(row_text);
     if quoted_queue_prompts(cell)
         .iter()
-        .any(|prompt| prompt_names_work(prompt, &work))
+        .any(|prompt| prompt_names_work(prompt, &work, row))
     {
         return true;
     }
@@ -6223,10 +6343,10 @@ fn unique_strings(mut values: Vec<String>) -> Option<String> {
     }
 }
 
-fn completion_stop_reasons(document: &str, text: &str, row_text: &str) -> Vec<String> {
+fn completion_stop_reasons(text: &str, row: RowRef<'_>) -> Vec<String> {
     agent_doc_document::subagent_completion::completion_evidence(text)
         .into_iter()
-        .filter(|evidence| completion_cell_matches_row(document, &evidence.item, row_text))
+        .filter(|evidence| completion_cell_matches_row(&evidence.item, row))
         .filter_map(|evidence| {
             let body =
                 agent_doc_document::subagent_completion::completion_response(text, &evidence.key)?;
@@ -6235,21 +6355,20 @@ fn completion_stop_reasons(document: &str, text: &str, row_text: &str) -> Vec<St
         .collect()
 }
 
-fn echo_stop_reasons(document: &str, text: &str, row_text: &str) -> Vec<String> {
+fn echo_stop_reasons(document: &str, text: &str, row: RowRef<'_>) -> Vec<String> {
     queue_addressed_response_cells(text)
         .into_iter()
-        .filter(|cell| echo_cell_names_row(document, &cell.body, row_text))
+        .filter(|cell| echo_cell_names_row(document, &cell.body, row))
         .filter_map(|cell| stopped_row_reason(&cell.body))
         .collect()
 }
 
-fn stopped_reason_for_row(document: &str, response_body: &str, row_text: &str) -> Option<String> {
-    if let Some(reason) = unique_strings(completion_stop_reasons(document, document, row_text)) {
+fn stopped_reason_for_row(document: &str, response_body: &str, row: RowRef<'_>) -> Option<String> {
+    if let Some(reason) = unique_strings(completion_stop_reasons(document, row)) {
         return Some(reason);
     }
     if !response_body.trim().is_empty()
-        && let Some(reason) =
-            unique_strings(completion_stop_reasons(document, response_body, row_text))
+        && let Some(reason) = unique_strings(completion_stop_reasons(response_body, row))
     {
         return Some(reason);
     }
@@ -6262,12 +6381,12 @@ fn stopped_reason_for_row(document: &str, response_body: &str, row_text: &str) -
             echoes.extend(echo_stop_reasons(
                 document,
                 component.content(document),
-                row_text,
+                row,
             ));
         }
     }
     if !response_body.trim().is_empty() {
-        echoes.extend(echo_stop_reasons(document, response_body, row_text));
+        echoes.extend(echo_stop_reasons(document, response_body, row));
     }
     unique_strings(echoes)
 }
@@ -6431,7 +6550,7 @@ fn render_handback_section(
 fn structured_handback_for_row(
     document: &str,
     response_body: &str,
-    row_text: &str,
+    row: RowRef<'_>,
 ) -> Option<agent_doc_document::worker_handback::WorkerHandback> {
     let mut sources = vec![document];
     if !response_body.trim().is_empty() && response_body != document {
@@ -6440,7 +6559,7 @@ fn structured_handback_for_row(
     let mut renders = Vec::<(String, agent_doc_document::worker_handback::WorkerHandback)>::new();
     for source in sources {
         for evidence in agent_doc_document::subagent_completion::completion_evidence(source) {
-            if !completion_cell_matches_row(document, &evidence.item, row_text) {
+            if !completion_cell_matches_row(&evidence.item, row) {
                 continue;
             }
             let Some(body) =
@@ -6628,6 +6747,7 @@ pub fn attach_stopped_row_responses(
     // pass renders. A struck row whose response is in this set is an identical
     // sibling of the row that holds it and stays bare.
     let mut rendered_response_ids = queue_response_child_ids(after);
+    let lineages = QueueRowLineages::new(after);
     for node in &nodes {
         if !node.item.struck
             || struck_before.contains(&node.node_key)
@@ -6640,12 +6760,20 @@ pub fn attach_stopped_row_responses(
             .unwrap_or("");
         let indent = raw.len() - raw.trim_start_matches([' ', '\t']).len();
         let scope_end = descendant_region_end(after, node.item.end_byte, indent);
-        let handback = structured_handback_for_row(after, response_body, &node.item.text);
+        // `#nestlistlineage`: the row is addressed at its own position, so a
+        // same-text row in another tree never takes this row's hand-back.
+        let row = RowRef {
+            text: &node.item.text,
+            start: node.item.start_byte,
+            lineages: &lineages,
+            document: after,
+        };
+        let handback = structured_handback_for_row(after, response_body, row);
         if row_has_response_child(after, node.item.end_byte, scope_end) {
             // A stopped child already carries its explanation. A summary child
             // from an earlier projection still needs the hand-back sections,
             // including the markdown file named under What changed.
-            if stopped_reason_for_row(after, response_body, &node.item.text).is_some() {
+            if stopped_reason_for_row(after, response_body, row).is_some() {
                 continue;
             }
             if let Some(handback) = handback.as_ref()
@@ -6660,7 +6788,7 @@ pub fn attach_stopped_row_responses(
             }
             continue;
         }
-        if let Some(reason) = stopped_reason_for_row(after, response_body, &node.item.text) {
+        if let Some(reason) = stopped_reason_for_row(after, response_body, row) {
             let response_id = stopped_response_id(&node.item.text, &reason);
             if !rendered_response_ids.insert(response_id.clone()) {
                 continue;
@@ -12498,6 +12626,131 @@ mod tests {
             attach_stopped_row_responses(&live, &doc([&struck, &struck, &struck]), "", STOPPED_AT)
                 .unwrap();
         assert_eq!(responses(&together), 1, "{together}");
+    }
+
+    /// `#nestlistlineage`: in `agent-doc-bugs.md`, the gh-keyring worker
+    /// reported `…: Complete the work.` under one tree and `subagent:cw2`
+    /// reported `…: Complete the work.` under another. Striking cw2's row
+    /// copied the gh-keyring hand-back onto it (`#r-8eb6516470b1`, a second
+    /// copy of `#r-0a9ca5faea72`), because a cell whose key ended in the same
+    /// leaf matched any row with that leaf. A hand-back lands only on the row
+    /// whose own lineage the claim key spells.
+    #[test]
+    fn same_leaf_rows_in_different_trees_take_only_their_own_handback() {
+        const LEAF: &str = "Complete the work.";
+        const GH_PARENT: &str = "operator: fix the `gh` hang [#q-90b6adc4ad05]";
+        const ACK_PARENT: &str = "agent: stop `queue consume --ack-text` from re-attaching";
+        let handback = |summary: &str, file: &str| {
+            format!(
+                "**Summary**\n\n{summary}\n\n\
+                 **What changed**\n\n- Updated `{file}`.\n\n\
+                 **Verification**\n\n- `make check` passed.\n\n\
+                 **Action items**\n\nnone\n\n\
+                 **Notes**\n\nnone\n\n\
+                 **Next actions**\n\n- Coordinator closes the queue item.\n"
+            )
+        };
+        let gh_summary = "The gh wrapper reads the token from the Default keyring.";
+        let ack_summary = "Ack-text no longer re-attaches a held response tree.";
+        let gh_cell = agent_doc_document::subagent_completion::cell_with_response(
+            "subagent:ghkeyring",
+            &format!("{GH_PARENT}: {LEAF}"),
+            "ghkeyring-key",
+            // A markdown file under What changed wins the multi-cell tie-break.
+            &handback(gh_summary, "memory/reference_gh_keyring.md"),
+        )
+        .unwrap();
+        let ack_cell = agent_doc_document::subagent_completion::cell_with_response(
+            "subagent:cw2",
+            &format!("{ACK_PARENT}: {LEAF}"),
+            "cw2-key",
+            &handback(ack_summary, "agent-doc-queue/src/queue_consume.rs"),
+        )
+        .unwrap();
+        let doc = |cells: &[&str], gh_row: &str, ack_row: &str| {
+            format!(
+                "---\nqueue_active: true\n---\n\n\
+                 <!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n\n\
+                 <!-- agent:run id=\"main\" subagents -->\n\
+                 - {GH_PARENT}\n\
+                 \x20 - {gh_row}\n\
+                 - {ACK_PARENT}\n\
+                 \x20 - {ack_row}\n\
+                 - do [#install]\n\
+                 <!-- /agent:run -->\n",
+                cells.join("\n\n")
+            )
+        };
+        let struck = format!("~~{LEAF}~~");
+        let struck_published = format!("~~{LEAF} ⟦published⟧~~");
+        // The response tree directly under the row that starts at `row`.
+        let tree_under = |document: &str, row: &str| -> Option<String> {
+            let row_at = document.find(&format!("\n  - {row}\n"))? + 1;
+            let rest = &document[row_at..];
+            let body = &rest[rest.find('\n')? + 1..];
+            let tree = body
+                .lines()
+                .take_while(|line| line.starts_with("    "))
+                .collect::<Vec<_>>()
+                .join("\n");
+            (!tree.is_empty()).then_some(tree)
+        };
+
+        // The gh-keyring row is struck first and takes its own hand-back.
+        let live = doc(&[&gh_cell], LEAF, LEAF);
+        let gh_struck =
+            attach_stopped_row_responses(&live, &doc(&[&gh_cell], &struck, LEAF), "", STOPPED_AT)
+                .unwrap();
+        let gh_tree = tree_under(&gh_struck, &struck).expect("gh-keyring row holds its tree");
+        assert!(gh_tree.contains(gh_summary), "{gh_struck}");
+
+        // cw2's row is struck before its own cell is in the document: it stays
+        // bare instead of taking the gh-keyring hand-back.
+        let ack_struck_early = gh_struck.replacen(
+            &format!("\n  - {LEAF}\n"),
+            &format!("\n  - {struck_published}\n"),
+            1,
+        );
+        let early =
+            attach_stopped_row_responses(&gh_struck, &ack_struck_early, "", STOPPED_AT).unwrap();
+        assert_eq!(
+            early, ack_struck_early,
+            "a same-leaf row in another tree stays bare:\n{early}"
+        );
+
+        // With both cells present, cw2's row takes only cw2's hand-back.
+        let both = gh_struck.replace(&gh_cell, &format!("{gh_cell}\n\n{ack_cell}"));
+        let ack_struck = both.replacen(
+            &format!("\n  - {LEAF}\n"),
+            &format!("\n  - {struck_published}\n"),
+            1,
+        );
+        let attached = attach_stopped_row_responses(&both, &ack_struck, "", STOPPED_AT).unwrap();
+        let ack_tree =
+            tree_under(&attached, &struck_published).expect("cw2 row holds its own tree");
+        assert!(ack_tree.contains(ack_summary), "{attached}");
+        assert!(!ack_tree.contains(gh_summary), "{attached}");
+        assert_eq!(
+            tree_under(&attached, &struck).as_deref(),
+            Some(gh_tree.as_str()),
+            "the gh-keyring tree is unchanged:\n{attached}"
+        );
+
+        // Striking both rows in one mutation gives each row its own hand-back.
+        let live_both = doc(&[&gh_cell, &ack_cell], LEAF, LEAF);
+        let together = attach_stopped_row_responses(
+            &live_both,
+            &doc(&[&gh_cell, &ack_cell], &struck, &struck_published),
+            "",
+            STOPPED_AT,
+        )
+        .unwrap();
+        let gh_together = tree_under(&together, &struck).unwrap();
+        let ack_together = tree_under(&together, &struck_published).unwrap();
+        assert!(gh_together.contains(gh_summary), "{together}");
+        assert!(!gh_together.contains(ack_summary), "{together}");
+        assert!(ack_together.contains(ack_summary), "{together}");
+        assert!(!ack_together.contains(gh_summary), "{together}");
     }
 
     #[test]

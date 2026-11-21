@@ -2791,6 +2791,15 @@ fn strict_typed_prefix(shorter: &str, longer: &str) -> bool {
 /// fragment is dropped, extra copies of the longer work collapse to one row,
 /// preferring the copy that carries an attempt projection. Identical repeats
 /// with no prefix fragment stay.
+///
+/// Typing is not append-only. When the longer work is a `base`
+/// row that a side carrying the shorter work no longer holds, that side
+/// deleted the tail of the settled row: the shorter work is its newest
+/// revision, not an unfinished fragment of the base row. Dropping it as a
+/// fragment while the same side's deletion of the base row also lands lost the
+/// operator's row outright (tasks/agent-doc/agent-doc-bugs.md 2026-11-21:
+/// `… Including lazily-spec + lazily` edited to `… Including lazily-spec`),
+/// and every recovery path then re-added stale spellings as sibling rows.
 pub(crate) fn typing_fragment_keep_masks(
     base_free: &[Option<String>],
     ours_free: &[Option<String>],
@@ -2811,9 +2820,18 @@ pub(crate) fn typing_fragment_keep_masks(
         if base_works.contains(shorter) {
             continue;
         }
+        let holds = |side: &[Option<String>], work: &str| {
+            side.iter().flatten().any(|candidate| candidate == work)
+        };
+        let replaced_base_tail = |longer: &str| {
+            base_works.contains(&longer)
+                && [ours_free, theirs_free]
+                    .iter()
+                    .any(|side| holds(side, shorter) && !holds(side, longer))
+        };
         let continued = union
             .iter()
-            .any(|longer| strict_typed_prefix(shorter, longer));
+            .any(|longer| strict_typed_prefix(shorter, longer) && !replaced_base_tail(longer));
         if continued {
             dropped.insert(*shorter);
         }
@@ -4737,6 +4755,107 @@ fn apply_ops_lazily(t: &mut TextCrdt, ops: &[EditOp]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Deleting a word from a typed row: tasks/agent-doc/agent-doc-bugs.md, 2026-11-21. The
+    /// operator typed a nested queue row, deleted a word, and typed a
+    /// different one while `queue consume --ack-text` struck a sibling leaf.
+    /// Merging the agent's strike (ours, still holding the settled spelling)
+    /// with the operator's deletion (theirs) read the shorter spelling as an
+    /// unfinished typing fragment of the base row and dropped it, while the
+    /// operator's removal of the base row also landed: the row vanished, and
+    /// the recovery paths that restore operator text re-added stale spellings
+    /// as sibling rows. Every step of type → delete a word → type a different
+    /// word keeps exactly the operator's newest spelling, with or without a
+    /// concurrent agent strike.
+    #[test]
+    fn typingfork_deleting_a_word_never_drops_the_edited_queue_row() {
+        let doc = |exchange: &str, typing: &str, struck: bool| {
+            let (parent, leaf) = if struck {
+                (
+                    "  - ~~follow up on an action item: agent: test-first triage of the conflicting branches~~\n",
+                    "      - ~~Should we integrate these?~~\n",
+                )
+            } else {
+                (
+                    "  - follow up on an action item: agent: test-first triage of the conflicting branches\n",
+                    "      - Should we integrate these?\n",
+                )
+            };
+            format!(
+                concat!(
+                    "---\nagent_doc_format: template\n---\n\n",
+                    "<!-- agent:exchange patch=append -->\n❯ Keep going.\n{}<!-- /agent:exchange -->\n\n",
+                    "<!-- agent:queue go -->\n",
+                    "- ### 🙋 follow up on an action item from queue item “Prune the worktrees.”: operator: decide [operator-verify]\n",
+                    "  - 🙋 follow up on an action item: operator: decide whether to integrate the publish patch\n",
+                    "    - Should we integrate it?\n",
+                    "{}{}{}",
+                    "<!-- /agent:queue -->\n",
+                ),
+                exchange, typing, parent, leaf,
+            )
+        };
+        let row = |text: &str| {
+            format!("      - Complete integration. Ensure full lazily family parity. {text}\n")
+        };
+        let echo = "> **Queue prompt:** Should we integrate these?\n\n";
+        // Type, delete ` + lazily`, then type a different word.
+        let spellings = [
+            row("Including lazily-spec + lazily"),
+            row("Including lazily-spec"),
+            row("Including lazily-spec + formal"),
+            row("Including lazily-spec + lazily-formal + the lazily implementations."),
+        ];
+        for step in spellings.windows(2) {
+            let (settled, edited) = (&step[0], &step[1]);
+            for (agent_exchange, agent_struck) in [("", false), ("", true), (echo, true)] {
+                let base = doc("", settled, false);
+                let ours = doc(agent_exchange, settled, agent_struck);
+                let theirs = doc(agent_exchange, edited, agent_struck);
+                let state = CrdtDoc::from_text(&base).encode_state();
+                for merged in [
+                    merge_by_component(Some(&state), &ours, &theirs).unwrap(),
+                    merge_by_component(Some(&state), &theirs, &ours).unwrap(),
+                ] {
+                    let rows: Vec<&str> = merged
+                        .lines()
+                        .filter(|line| line.contains("Complete integration."))
+                        .collect();
+                    assert_eq!(
+                        rows,
+                        vec![edited.trim_end_matches('\n')],
+                        "{settled:?} -> {edited:?} must keep exactly the edited row:\n{merged}"
+                    );
+                    let leaf = if agent_struck {
+                        "      - ~~Should we integrate these?~~\n"
+                    } else {
+                        "      - Should we integrate these?\n"
+                    };
+                    assert_eq!(merged.matches(leaf).count(), 1, "{merged}");
+                }
+            }
+        }
+
+        // An unfinished fragment absent from the base still collapses into
+        // the longer spelling it continues.
+        let base = doc("", "", false);
+        let state = CrdtDoc::from_text(&base).encode_state();
+        let merged = merge_by_component(
+            Some(&state),
+            &doc("", &row("Including lazily-spec"), false),
+            &doc("", &row("Including lazily-spec + lazily"), false),
+        )
+        .unwrap();
+        let rows: Vec<&str> = merged
+            .lines()
+            .filter(|line| line.contains("Complete integration."))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![row("Including lazily-spec + lazily").trim_end_matches('\n')],
+            "{merged}"
+        );
+    }
 
     /// `#inflighttypinghold`: the identity "hash" lets the tests name texts
     /// directly; the rule only ever compares hashes for equality.

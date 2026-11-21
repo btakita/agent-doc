@@ -18001,6 +18001,147 @@ mod tests {
         );
     }
 
+    /// Deleting a word while a strike is retained: tasks/agent-doc/agent-doc-bugs.md,
+    /// 2026-11-21T08:09:13Z-08:09:28Z. `queue consume --ack-text` struck a
+    /// nested leaf while the operator was typing a new row in the same queue:
+    /// `… Including lazily-spec + lazily`, then deleted ` + lazily` (a lineage
+    /// fork, not an append), then typed `… + lazily-formal + the lazily
+    /// implementations.` The strike was retained over the cut holding the first
+    /// spelling; the CAS raced, the controller projected it, and the retry
+    /// derived its target over the cut after the deletion. Composing the two
+    /// intents read the shorter spelling as an unfinished typing fragment of
+    /// the settled row and dropped it, while the deletion of the settled row
+    /// also landed: the composed target lost the operator's row, its
+    /// projection was refused as operator text loss, and the recovery paths
+    /// re-added stale spellings as their own rows, which steering then
+    /// dispatched. Type, delete a word, type a different word: every
+    /// projection keeps exactly the operator's current row and the strike once.
+    #[test]
+    fn typingfork_retained_strike_keeps_one_row_through_delete_and_retype() {
+        let doc = |exchange_tail: &str, queue: &str| {
+            format!(
+                concat!(
+                    "---\nagent_doc_format: template\n---\n\n",
+                    "<!-- agent:exchange patch=append -->\n",
+                    "❯ Keep going.\n",
+                    "{}",
+                    "<!-- /agent:exchange -->\n\n",
+                    "<!-- agent:queue go -->\n",
+                    "{}",
+                    "<!-- /agent:queue -->\n",
+                ),
+                exchange_tail, queue,
+            )
+        };
+        let queue = |typing: &str, struck: bool| {
+            let (parent, leaf) = if struck {
+                (
+                    "  - ~~follow up on an action item: agent: test-first triage of the conflicting branches~~\n",
+                    "      - ~~Should we integrate these?~~\n",
+                )
+            } else {
+                (
+                    "  - follow up on an action item: agent: test-first triage of the conflicting branches\n",
+                    "      - Should we integrate these?\n",
+                )
+            };
+            format!(
+                concat!(
+                    "- ### 🙋 follow up on an action item from queue item “Prune the worktrees.”: operator: decide [operator-verify]\n",
+                    "  - 🙋 follow up on an action item: operator: decide whether to integrate the publish patch\n",
+                    "    - Should we integrate it?\n",
+                    "{}{}{}",
+                ),
+                typing, parent, leaf,
+            )
+        };
+        let echo = "> **Queue prompt:** Should we integrate these?\n\n";
+        let response =
+            "### Re: Should we integrate these?\n\nNo.\n<!-- agent:boundary:closeout -->\n";
+        let row = |text: &str| {
+            format!("      - Complete integration. Ensure full lazily family parity. {text}\n")
+        };
+        let typed = row("Including lazily-spec + lazily");
+        let deleted = row("Including lazily-spec");
+        let retyped = row("Including lazily-spec + formal");
+        let finished = row("Including lazily-spec + lazily-formal + the lazily implementations.");
+
+        // The ack's first attempt: retained over the cut holding `typed`.
+        let relay1 = doc(response, &queue(&typed, false));
+        let target1 = doc(&format!("{echo}{response}"), &queue(&typed, true));
+        // The controller projected it; the operator deleted ` + lazily`; the
+        // retry derived its target (one more agent-only change) over that cut.
+        let relay2 = doc(&format!("{echo}{response}"), &queue(&deleted, true));
+        let target2 = doc(&format!("{echo}{echo}{response}"), &queue(&deleted, true));
+        let (_dir, file, _canonical) = temp_doc(&relay1);
+        for (expected, target) in [(&relay1, &target1), (&relay2, &target2)] {
+            ensure_deferred_document_write_intent(
+                &file,
+                expected,
+                target,
+                "queue_consume_ack_text",
+                DocumentWriteDeferredReason::EditorProjectionPending,
+            )
+            .unwrap();
+        }
+        let pending = pending_document_write(&file).expect("composed ack retained");
+        let base = pending
+            .expected_content
+            .as_deref()
+            .expect("composed intent keeps its base");
+
+        for current in [&deleted, &retyped, &finished] {
+            let delivery = doc(&format!("{echo}{response}"), &queue(current, true));
+            let projected =
+                agent_doc_document_realtime::write_policy::rebase_retained_target_over_editor_cut(
+                    base,
+                    &pending.target_content,
+                    &delivery,
+                )
+                .unwrap_or_else(|err| panic!("projection over {current:?} refused: {err:#}"));
+            let rows: Vec<&str> = projected
+                .lines()
+                .filter(|line| line.contains("Complete integration."))
+                .collect();
+            assert_eq!(
+                rows,
+                vec![current.trim_end_matches('\n')],
+                "the operator's current spelling must be the only row:\n{projected}"
+            );
+            assert_eq!(
+                projected
+                    .matches("      - ~~Should we integrate these?~~\n")
+                    .count(),
+                1,
+                "{projected}"
+            );
+            assert!(
+                !projected.contains("      - Should we integrate these?\n"),
+                "{projected}"
+            );
+            assert_eq!(projected.matches(echo).count(), 1, "{projected}");
+
+            // The convergence loop's own rebase of the retry's target over the
+            // same cut must not re-add a stale spelling either.
+            let rebased = super::write_policy::rebase_agent_candidate_over_editor_cut(
+                &relay1, &target1, &delivery,
+            )
+            .unwrap();
+            let rows: Vec<&str> = rebased
+                .lines()
+                .filter(|line| line.contains("Complete integration."))
+                .collect();
+            assert_eq!(rows, vec![current.trim_end_matches('\n')], "{rebased}");
+            assert_eq!(
+                rebased
+                    .matches("      - ~~Should we integrate these?~~\n")
+                    .count(),
+                1,
+                "{rebased}"
+            );
+        }
+    }
+
     #[test]
     fn retained_target_retries_do_not_multiply_operator_cleaned_queue_item() {
         let base = concat!(

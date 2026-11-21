@@ -2695,10 +2695,14 @@ fn apply_bound_stop(
         );
     }
     stop_phase("session_check_inspect");
-    let report = agent_doc_session_check_io::inspect_read_only_with_warnings(
+    let (report, proven_content) = agent_doc_session_check_io::inspect_read_only_for_stop(
         file,
         &agent_doc_closeout_runtime_io::session_check_effects(),
     )?;
+    if let Some(content) = proven_content {
+        STOP_DOCUMENT_CACHE.with(|cache| cache.borrow_mut().insert(file.to_path_buf(), content));
+        agent_doc_ops_log_io::log_op(file, "codex_stop_live_terminal_proof_reused");
+    }
     if report.queue_apply_in_flight() {
         agent_doc_ops_log_io::log_op(
             file,
@@ -2903,10 +2907,11 @@ fn apply_bound_stop(
                     return Ok(StopResponse::AllowExit);
                 }
                 invalidate_stop_document_cache();
-                let status = agent_doc_session_check_io::inspect_read_only(
+                let (report, _) = agent_doc_session_check_io::inspect_read_only_for_stop(
                     file,
                     &agent_doc_closeout_runtime_io::session_check_effects(),
                 )?;
+                let status = report.status;
                 let terminal_maintenance_still_pending = matches!(
                     &status,
                     agent_doc_session_check_io::SessionCheckStatus::Interrupted(message)
@@ -3278,11 +3283,11 @@ fn try_resume_captured_finalize_in_hook(file: &Path) -> CapturedFinalizeHookResu
                 return CapturedFinalizeHookResume::Pending;
             }
             agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Superseded => {
-                return if agent_doc_session_check_io::inspect_read_only(
+                return if agent_doc_session_check_io::inspect_read_only_for_stop(
                     file,
                     &agent_doc_closeout_runtime_io::session_check_effects(),
                 )
-                .is_ok_and(|status| !status.is_failure())
+                .is_ok_and(|(report, _)| !report.status.is_failure())
                 {
                     CapturedFinalizeHookResume::Closed
                 } else {

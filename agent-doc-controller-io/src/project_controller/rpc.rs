@@ -10537,6 +10537,38 @@ pub fn peek_current_text_via_controller_model_read_for_doc(
         .map(Some)
 }
 
+/// The Stop hook may reuse a proof already published by strict closeout.
+/// A cold or older controller has no fast proof. Never replay the ledger or
+/// launch a controller to answer this optional probe.
+pub fn live_terminal_closeout_proof_for_doc(
+    file: &Path,
+) -> Option<agent_doc_state_backbone::TerminalCloseoutProofProjection> {
+    let canonical = file.canonicalize().ok()?;
+    let root = agent_doc_project_root_io::project_root_containing(&canonical)?;
+    request_existing_controller_effect_free_with_timeout(
+        &root,
+        ControllerRequest {
+            command: "document_terminal_closeout_proof".to_string(),
+            file: Some(canonical),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+            sequence: None,
+        },
+        Duration::from_secs(2),
+    )
+    .ok()
+    .flatten()
+}
+
 /// Publish the diagnostic/pressure side of a controller-model observation
 /// after its caller has independently revalidated mutation authority.
 ///
@@ -25035,6 +25067,12 @@ pub(crate) fn handle_request_locked(
                 runtime.as_ref(),
                 request,
             ))
+        }
+        "document_terminal_closeout_proof" => {
+            controller_envelope(request_file(&request).map(|file| {
+                runtime
+                    .document_terminal_closeout_proof(&agent_doc_hash::document_id_for_path(&file))
+            }))
         }
         "record_owner_pane_wedge" => controller_envelope(handle_record_owner_pane_wedge(
             &bootstrap_snapshot,

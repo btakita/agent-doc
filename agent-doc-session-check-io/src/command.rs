@@ -3796,7 +3796,44 @@ pub fn inspect_read_only_with_warnings(
     // call graph therefore needs the same durable-state and diagnostic purity
     // boundary as `run_read_only_settling`.
     crate::with_status_only_transaction(|| {
-        crate::with_current_document_pass(|| inspect_with_warnings_inner(file, &status_only))
+        crate::with_current_document_pass(|| inspect_with_warnings_inner(file, &status_only, true))
+    })
+}
+
+/// Stop consumes the strict closeout verdict for the current live revision.
+/// On an unproven revision, keep the integrity checks and omit advisory audits.
+pub fn inspect_read_only_for_stop(
+    file: &Path,
+    effects: &impl SessionCheckEffects,
+) -> Result<(SessionCheckReport, Option<String>)> {
+    let status_only = StatusOnlySessionCheckEffects { inner: effects };
+    crate::with_status_only_transaction(|| {
+        crate::with_current_document_pass(|| {
+            if let Some(proof) =
+                agent_doc_controller_io::project_controller::live_terminal_closeout_proof_for_doc(
+                    file,
+                )
+                && let Ok(current) = crate::resolve_current_document(file, "stop_terminal_proof")
+                && quarantined_replica_interruption(&current).is_none()
+                && agent_doc_hash::content_hash(current.content()) == proof.file_hash
+                && agent_doc_git_io::revision::show_head(file)?
+                    .is_some_and(|head| agent_doc_hash::content_hash(&head) == proof.head_hash)
+            {
+                let content = current.into_content();
+                let status = SessionCheckStatus::Ok(format!(
+                    "[session-check] ok — cycle `{}` is `committed` ({})",
+                    proof.cycle_id, proof.last_event,
+                ));
+                // The controller verified that no retained delivery owns this
+                // boundary. Queue ownership can change without changing text.
+                let status = check_live_queue_closeout(file, status, &content)?;
+                return Ok((SessionCheckReport::from_status(status), Some(content)));
+            }
+            Ok((
+                inspect_with_warnings_inner(file, &status_only, false)?,
+                None,
+            ))
+        })
     })
 }
 
@@ -3854,15 +3891,16 @@ pub fn inspect_with_warnings(
     // `#sccurrentpass`: callers outside `run_with_options` (compact/write
     // closeout) get the same one-version-per-sweep memo. Nested inside a pass
     // this reuses the outer one.
-    crate::with_current_document_pass(|| inspect_with_warnings_inner(file, effects))
+    crate::with_current_document_pass(|| inspect_with_warnings_inner(file, effects, true))
 }
 
 fn inspect_with_warnings_inner(
     file: &Path,
     effects: &impl SessionCheckEffects,
+    include_diagnostics: bool,
 ) -> Result<SessionCheckReport> {
     let mut steering = None;
-    let report = inspect_with_warnings_sweep(file, effects, &mut steering)?;
+    let report = inspect_with_warnings_sweep(file, effects, &mut steering, include_diagnostics)?;
     Ok(steering_survives_steering_carried_drift(report, steering))
 }
 
@@ -3990,7 +4028,7 @@ fn refuse_transient_queue_lifecycle_debt(
     file: &Path,
     status: SessionCheckStatus,
 ) -> Result<SessionCheckStatus> {
-    let SessionCheckStatus::Ok(message) = &status else {
+    let SessionCheckStatus::Ok(_) = &status else {
         return Ok(status);
     };
     // Comprehensive queue maintenance is detached from admission. A terminal
@@ -4025,12 +4063,23 @@ fn refuse_transient_queue_lifecycle_debt(
                 .join(", "),
         )));
     }
+    check_live_queue_closeout(file, status, &content)
+}
+
+fn check_live_queue_closeout(
+    file: &Path,
+    status: SessionCheckStatus,
+    content: &str,
+) -> Result<SessionCheckStatus> {
+    let SessionCheckStatus::Ok(message) = &status else {
+        return Ok(status);
+    };
     // `#stopquiescentrows`: the same durable evidence the Stop hook reads, so
     // a heartbeat-fresh worker claim, an operator-owned row, and a loop row a
     // closed schedule window holds back do not refuse here either.
-    let evidence = agent_doc_queue_io::transient_closeout::closeout_evidence(file, &content);
+    let evidence = agent_doc_queue_io::transient_closeout::closeout_evidence(file, content);
     match agent_doc_queue::transient_closeout::closeout_failure_for_success_message_with(
-        message, &content, &evidence,
+        message, content, &evidence,
     )? {
         Some(failure) => Ok(SessionCheckStatus::Interrupted(format!(
             "[session-check] INTERRUPTED: {failure}"
@@ -4043,6 +4092,7 @@ fn inspect_with_warnings_sweep(
     file: &Path,
     effects: &impl SessionCheckEffects,
     steering_message: &mut Option<String>,
+    include_diagnostics: bool,
 ) -> Result<SessionCheckReport> {
     let mut report = refuse_transient_queue_closeout(file, inspect_core(file, effects)?)?;
     report.status = retained_write_gate_status(
@@ -4073,15 +4123,17 @@ fn inspect_with_warnings_sweep(
         // Phase 1 lossless-tree shadow projection (#lzlosstree): audit the tree
         // round-trip against the same authoritative text the guard sweep uses.
         // Logged, never load-bearing — the flat CRDT stays the closeout authority.
-        crate::profile::timed("shadow_audit_lossless_roundtrip", || {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &agent_doc_markdown_lossless::shadow_audit_ops_log_line(
-                    current_document.content(),
-                    "session_check_guard_sweep",
-                ),
-            );
-        });
+        if include_diagnostics {
+            crate::profile::timed("shadow_audit_lossless_roundtrip", || {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &agent_doc_markdown_lossless::shadow_audit_ops_log_line(
+                        current_document.content(),
+                        "session_check_guard_sweep",
+                    ),
+                );
+            });
+        }
         rc.set_current_document(current_document);
         match crate::profile::timed("guard_dropped_exchange_prompt", || {
             crate::check_dropped_exchange_prompt_guard(file, &rc)
@@ -4235,9 +4287,6 @@ fn inspect_with_warnings_sweep(
             crate::profile::timed("guard_partial_closeout_state", || {
                 crate::check_partial_closeout_state_guard(file)
             })?,
-            crate::profile::timed("guard_partial_staging_closeout", || {
-                crate::check_partial_staging_closeout_guard(file)
-            })?,
             crate::profile::timed("guard_blocked_closeout_followup", || {
                 crate::check_blocked_closeout_followup_guard(file, &rc)
             })?,
@@ -4263,7 +4312,17 @@ fn inspect_with_warnings_sweep(
                 }
             }
         }
-        if let Ok(Some(miss)) = agent_doc_supervisor_io::startup_miss::load_startup_miss(file) {
+        if include_diagnostics
+            && let GuardResult::Warn(lines) =
+                crate::profile::timed("guard_partial_staging_closeout", || {
+                    crate::check_partial_staging_closeout_guard(file)
+                })?
+        {
+            report.warnings.extend(lines);
+        }
+        if include_diagnostics
+            && let Ok(Some(miss)) = agent_doc_supervisor_io::startup_miss::load_startup_miss(file)
+        {
             if let Some(supersession) =
                 agent_doc_supervisor_io::startup_miss::superseded_by_newer_registered_start(
                     agent_doc_supervisor_io::startup_miss::session_registry_lookup(),
@@ -4304,8 +4363,9 @@ fn inspect_with_warnings_sweep(
     // GH #235: the report form reads the outstanding recycle request (an already
     // `requested` recycle drops the manual remedy) and stays silent when this
     // process already printed the same supervisor's warning.
-    if let Some(message) =
-        agent_doc_controller_io::project_controller::stale_supervisor_warning_for_report(file)
+    if include_diagnostics
+        && let Some(message) =
+            agent_doc_controller_io::project_controller::stale_supervisor_warning_for_report(file)
     {
         report
             .warnings

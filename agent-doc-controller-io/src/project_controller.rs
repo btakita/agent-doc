@@ -12438,6 +12438,33 @@ impl ControllerRuntime {
             .map(|document| document.closeout.clone()))
     }
 
+    /// Read one terminal proof from the current document projection. Queue
+    /// and capture history stay in the controller.
+    fn document_terminal_closeout_proof(
+        &self,
+        document_hash: &str,
+    ) -> Option<agent_doc_state_backbone::TerminalCloseoutProofProjection> {
+        let memory = self.memory.lock();
+        let document = memory.state_projection.document(document_hash)?;
+        let closeout = &document.closeout;
+        if closeout.phase != Some(agent_doc_turn::CyclePhase::Committed)
+            || document.document.pending_write.is_some()
+            || document.document.pending_compact_projection.is_some()
+        {
+            return None;
+        }
+        let proof = document
+            .proof
+            .terminal_closeouts
+            .get(closeout.cycle_id.as_deref()?)?;
+        let baseline = document.document.merge_baseline.as_ref()?;
+        (proof.response_materialized_in_head
+            && proof.capture_id == closeout.capture_id
+            && proof.response_sha256 == closeout.response_sha256
+            && proof.snapshot_hash == baseline.content_hash)
+            .then(|| proof.clone())
+    }
+
     fn editor_op_capture_projection(
         &self,
         document_hash: &str,

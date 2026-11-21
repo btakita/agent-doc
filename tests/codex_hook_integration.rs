@@ -1285,6 +1285,72 @@ fn bound_session_with_committed_cycle(session: &str) -> (TempDir, PathBuf) {
     (tmp, doc)
 }
 
+#[test]
+fn codex_stop_reuses_live_terminal_proof_but_checks_changed_authority() {
+    let (tmp, doc) = setup_template_doc();
+    let root = tmp.path();
+    init_git_repo(root, &doc);
+    let _actor =
+        agent_doc_controller_io::project_controller::start_state_actor_for_tests(root).unwrap();
+    let session = "codex-live-terminal-proof";
+    assert!(
+        codex_submit(
+            root,
+            session,
+            "turn-1",
+            &format!("agent-doc {}", doc.display())
+        )
+        .contains("cycle contract (preflight already ran")
+    );
+    let response = "### Re: Please reply — gpt-5\n\nThe exact response is committed.";
+    respond(
+        root,
+        &doc,
+        &format!(
+            "<!-- patch:exchange -->\n{response}\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nReplied.\n<!-- /patch:recap -->\n"
+        ),
+    );
+    let inspect = || {
+        agent_doc_session_check_io::inspect_read_only_for_stop(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+    };
+    let (report, proven) = inspect();
+    assert!(!report.status.is_failure(), "{:?}", report.status);
+    let committed = proven.expect("consume the live controller's exact terminal proof");
+    assert!(committed.contains("The exact response is committed."));
+
+    agent_doc()
+        .current_dir(root)
+        .args(["hook", "codex-stop"])
+        .write_stdin(
+            json!({
+                "session_id": session,
+                "turn_id": "turn-1",
+                "cwd": root,
+                "last_assistant_message": response,
+                "stop_hook_active": true,
+            })
+            .to_string(),
+        )
+        .assert()
+        .success()
+        .stdout(predicate::eq("{\"continue\":true}\n"));
+    let ops = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        ops.contains("codex_stop_live_terminal_proof_reused"),
+        "{ops}"
+    );
+
+    fs::write(&doc, format!("{committed}\nAnother editor revision.\n")).unwrap();
+    assert!(
+        inspect().1.is_none(),
+        "changed authority needs a fresh verdict"
+    );
+}
+
 /// GH #125 gaps 1 and 4: a chat prompt reaches the next trigger's contract as
 /// a real turn, and a closeout that never records it warns with the repair.
 /// The repair (gap 5) is a pure chat turn: `respond` with the canonical record

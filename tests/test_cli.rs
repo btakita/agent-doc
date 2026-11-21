@@ -15710,6 +15710,7 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
     for required in [
         "fn read_only_inspection(&self) -> bool",
         "pub fn inspect_read_only_with_warnings(",
+        "pub fn inspect_read_only_for_stop(",
         "if effects.read_only_inspection()",
         "crate::with_status_only_transaction",
     ] {
@@ -15743,13 +15744,16 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         ),
         (
             "agent-doc-codex-stop-io/src/lib.rs",
-            "agent_doc_session_check_io::inspect_read_only_with_warnings(",
+            "agent_doc_session_check_io::inspect_read_only_for_stop(",
         ),
     ] {
         let source = fs::read_to_string(manifest_dir.join(production_source)).unwrap();
         assert!(
             source.contains(required)
-                && source.contains("agent_doc_closeout_runtime_io::session_check_effects()"),
+                && source.contains("agent_doc_closeout_runtime_io::session_check_effects()")
+                && (!production_source.contains("codex-stop")
+                    || !source
+                        .contains("agent_doc_session_check_io::inspect_read_only_with_warnings(")),
             "{production_source} status inspection must use the intrinsic read-only adapter through the explicit read-only API"
         );
     }

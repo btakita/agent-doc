@@ -598,6 +598,8 @@ chain needed to diagnose the rejected envelope.
 
 ## session-check
 
+Codex Stop reads the active cycle's terminal receipt from the controller's live document projection. It reuses the verdict when the receipt still matches the current editor authority, merge baseline, and Git HEAD, and the controller reports no retained write or compact continuation. Each view must match its own recorded hash. Stop still checks live queue lifecycle evidence. An unavailable or stale proof falls through to read-only integrity checks. Repository-wide staging diagnostics and lossless round-trip audits stay on the explicit `session-check` and strict closeout paths.
+
 The owner PostToolUse hook shares a revision-aware current-document projection
 across mid-turn steering, status sync, place, subagent-pool, and reported-closeout
 checkpoints. Unchanged document revisions reuse one full authority read. When a

@@ -1377,8 +1377,37 @@ struct StructuredInlineResponse {
     indent: usize,
     timestamp_seen: bool,
     summary: Option<String>,
+    /// The `Summary` child carries only the response-detail marker and its
+    /// text is the nested block beneath it (a multi-paragraph worker summary
+    /// rendered by `render_handback_section`). Nested lines append to
+    /// `summary` until the next direct child.
+    summary_block: bool,
     nested_metadata_allowed: bool,
     invalid: bool,
+}
+
+impl StructuredInlineResponse {
+    /// Append one nested line of a block `Summary` (`#respindexorphan`):
+    /// relative indentation and blank lines are kept, the generated
+    /// response-detail markers are not part of the text.
+    fn push_summary_block_line(&mut self, raw_line: &str) {
+        use agent_doc_markdown_ast::overlay::RESPONSE_DETAIL_MARKER;
+
+        let Some(summary) = self.summary.as_mut() else {
+            return;
+        };
+        let body_indent = self.indent + 4;
+        let leading = raw_line.len() - raw_line.trim_start_matches(' ').len();
+        let line = &raw_line[leading.min(body_indent)..];
+        let line = line.trim_end();
+        let line = line
+            .strip_suffix(RESPONSE_DETAIL_MARKER)
+            .map_or(line, str::trim_end);
+        if !summary.is_empty() {
+            summary.push('\n');
+        }
+        summary.push_str(line);
+    }
 }
 
 fn finish_structured_inline_response(
@@ -1388,6 +1417,8 @@ fn finish_structured_inline_response(
     if candidate.timestamp_seen
         && !candidate.invalid
         && let Some(summary) = candidate.summary
+        && let summary = summary.trim().to_string()
+        && !summary.is_empty()
     {
         projections
             .entry(candidate.response_id)
@@ -1411,6 +1442,11 @@ fn finish_structured_inline_response(
 /// summary and not a reason to reject the projection. The binary's later
 /// structured metadata may follow that summary without changing its identity.
 /// This includes generated worker hand-back fields and their nested content.
+/// A `Summary` whose value is only the response-detail marker is a block
+/// summary: its nested text is the evidence (`#respindexorphan`). The first
+/// direct child after the summary that is not response metadata ends the
+/// projection, so a queue row an operator nested beneath the tree, and any
+/// response tree under that row, are scanned on their own (`#respindexorphan`).
 /// Identical copies in several prompt trees collapse to one
 /// value;
 /// conflicting summaries remain multiple values and are rejected by the
@@ -1443,12 +1479,16 @@ fn structured_inline_response_projections(content: &str) -> BTreeMap<String, BTr
     for raw_line in content.lines() {
         let space_trimmed = raw_line.trim_start_matches(' ');
         let indent = raw_line.len() - space_trimmed.len();
-        if candidate
-            .as_ref()
-            .is_some_and(|active| active.nested_metadata_allowed && indent > active.indent + 2)
+        if let Some(active) = candidate.as_mut()
+            && active.nested_metadata_allowed
+            && (indent > active.indent + 2 || raw_line.trim().is_empty())
         {
             // A recognized metadata container owns this subtree. Ordered list
-            // items and prose in a worker detail do not supply summary evidence.
+            // items and prose in a worker detail do not supply summary evidence;
+            // only a block `Summary` is its own nested text.
+            if active.summary_block {
+                active.push_summary_block_line(raw_line);
+            }
             continue;
         }
         let trimmed = raw_line.trim_start();
@@ -1483,6 +1523,7 @@ fn structured_inline_response_projections(content: &str) -> BTreeMap<String, BTr
         // continuations never prove a structured response child.
         let item = space_trimmed.strip_prefix("- ");
 
+        let mut projection_ended = false;
         if let Some(active) = candidate.as_mut() {
             if !raw_line.trim().is_empty() && indent <= active.indent {
                 finish_structured_inline_response(
@@ -1492,6 +1533,7 @@ fn structured_inline_response_projections(content: &str) -> BTreeMap<String, BTr
             } else if let Some(item) = item {
                 if indent == active.indent + 2 {
                     active.nested_metadata_allowed = false;
+                    active.summary_block = false;
                     if let Some(blocker) = item.strip_prefix("**Blocker:**") {
                         if blocker.trim().is_empty() {
                             active.invalid = true;
@@ -1501,6 +1543,13 @@ fn structured_inline_response_projections(content: &str) -> BTreeMap<String, BTr
                         if !active.timestamp_seen || summary.is_empty() || active.summary.is_some()
                         {
                             active.invalid = true;
+                        } else if summary == RESPONSE_DETAIL_MARKER {
+                            // `#respindexorphan`: a multi-paragraph worker
+                            // summary is rendered as the marker with its text
+                            // nested beneath; that text is the evidence.
+                            active.summary = Some(String::new());
+                            active.summary_block = true;
+                            active.nested_metadata_allowed = true;
                         } else {
                             active.summary = Some(summary.to_string());
                         }
@@ -1544,18 +1593,41 @@ fn structured_inline_response_projections(content: &str) -> BTreeMap<String, BTr
                         let container = matches!(metadata, "**Choices:**" | "**Next actions:**");
                         active.nested_metadata_allowed = container
                             || (handback_section && metadata.ends_with(RESPONSE_DETAIL_MARKER));
-                        active.invalid |= !handback_section && !has_value && !container;
+                        let known = handback_section || has_value || container;
+                        // An unknown `**Label:**` field still fails closed.
+                        let metadata_shaped = metadata
+                            .strip_prefix("**")
+                            .and_then(|bold| bold.split_once("**"))
+                            .is_some_and(|(label, _)| label.ends_with(':'));
+                        active.invalid |= !known && metadata_shaped;
+                        // `#respindexorphan`: any other direct child after the
+                        // summary is not response metadata. It is a queue row
+                        // nested beneath the tree (operator children indented
+                        // past the binary's response item) or another
+                        // response tree; the projection's evidence is already
+                        // complete, so it ends here and that line is scanned
+                        // as ordinary document content, where a nested
+                        // `**Response [#r-…]**` starts its own projection.
+                        projection_ended = !known && !metadata_shaped;
                     } else {
                         active.invalid = true;
                     }
                 } else if !raw_line.trim().is_empty() {
                     active.invalid = true;
                 }
-                continue;
+                if !projection_ended {
+                    continue;
+                }
             } else if !raw_line.trim().is_empty() {
                 active.invalid = true;
                 continue;
             }
+        }
+        if projection_ended {
+            finish_structured_inline_response(
+                candidate.take().expect("candidate is present"),
+                &mut projections,
+            );
         }
 
         if let Some(response_id) = item.and_then(structured_inline_response_item_id) {
@@ -1564,6 +1636,7 @@ fn structured_inline_response_projections(content: &str) -> BTreeMap<String, BTr
                 indent,
                 timestamp_seen: false,
                 summary: None,
+                summary_block: false,
                 nested_metadata_allowed: false,
                 invalid: false,
             });
@@ -2983,6 +3056,135 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    /// `#respindexorphan` follow-up (2026-11-21,
+    /// tasks/agent-doc/agent-doc-bugs.md): after `667bff2350` the orphan guard
+    /// still named six present hand-back trees (`[#r-0a9ca5faea72]`,
+    /// `[#r-0cccf5fc92b3]`, `[#r-6568315e32b4]`, `[#r-7500d4a99269]`,
+    /// `[#r-8eb6516470b1]`, `[#r-aa40bd385a0b]`), one more per report-complete,
+    /// and blocked every closeout. Two binary-written shapes were rejected:
+    /// the operator nests follow-up rows four spaces under a heading row whose
+    /// own response tree sits at two, so those rows (and the trees
+    /// report-complete strikes onto them) are list children of that response
+    /// and the scan swallowed them; and a multi-paragraph worker summary is
+    /// rendered as `**Summary:** <marker>` with its text nested beneath.
+    #[test]
+    fn respindexorphan_trees_under_operator_rows_nested_in_a_response_are_evidence() {
+        const OUTER: &str = "[#r-ed4566860530]";
+        const STRUCK: &str = "[#r-6568315e32b4]";
+        const BLOCK: &str = "[#r-8eb6516470b1]";
+        const SIBLING: &str = "[#r-aa57754937ca]";
+        let detail = agent_doc_markdown_ast::overlay::RESPONSE_DETAIL_MARKER;
+        let content = format!(
+            concat!(
+                "<!-- agent:queue -->\n",
+                "- ### agent-doc duplicated my prompt above this prompt.\n",
+                "  - **Response {outer}**\n",
+                "    - **Timestamp:** 2026-11-21T08:31:41.000Z\n",
+                "    - **Summary:** Fixed and pushed to agent-doc `main`.\n",
+                "    - **What changed:** {d}\n",
+                "      - Commit `56a3d3d687`. {d}\n",
+                "    - **State:** Follow-up work remains.\n",
+                "    - **Guidance:** More work remains. Keep this tree and follow the action items in this response.\n",
+                "    - ~~complete the work for this tree ⟦published⟧~~\n",
+                "      - **Response {struck}**\n",
+                "        - **Timestamp:** 2026-11-21T20:20:16.000Z\n",
+                "        - **Summary:** Both earlier fixes are on agent-doc `origin/main`.\n",
+                "        - **Verification:** {d}\n",
+                "          - `cargo test` passed. {d}\n",
+                "        \n",
+                "          **Document edit list** for the session document:\n",
+                "          1. Replace the struck title. {d}\n",
+                "        - **State:** Follow-up work remains.\n",
+                "        - **Guidance:** More work remains. Keep this tree and follow the action items in this response.\n",
+                "    - 🙋 follow up on an action item: operator: decide. [operator-verify]\n",
+                "    - ~~Complete the work. ⟦published⟧~~\n",
+                "      - **Response {block}**\n",
+                "        - **Timestamp:** 2026-11-21T20:20:16.000Z\n",
+                "        - **Summary:** {d}\n",
+                "          Both gh commands now return in under a second.\n",
+                "        \n",
+                "          Why no prompt ever appeared:\n",
+                "          - The daemon never contacts the prompter. {d}\n",
+                "        - **What changed:** {d}\n",
+                "          - New file `~/.local/bin/gh`. {d}\n",
+                "        - **State:** Follow-up work remains.\n",
+                "        - **Guidance:** More work remains. Keep this tree and follow the action items in this response.\n",
+                "        - **Response {sibling}**\n",
+                "          - **Timestamp:** 2026-11-21T08:31:41.000Z\n",
+                "          - **Summary:** The change is on `main` in all six repositories.\n",
+                "          - **State:** Complete.\n",
+                "- open prompt\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            outer = OUTER,
+            struck = STRUCK,
+            block = BLOCK,
+            sibling = SIBLING,
+            d = detail,
+        );
+        let all = BTreeSet::from([
+            OUTER.to_string(),
+            STRUCK.to_string(),
+            BLOCK.to_string(),
+            SIBLING.to_string(),
+        ]);
+        assert_eq!(extract_response_reference_ids(&content), all);
+        assert_eq!(present_inline_response_ids(&content), all);
+        assert_eq!(
+            structured_inline_response_summaries(&content, BLOCK),
+            BTreeSet::from([concat!(
+                "Both gh commands now return in under a second.\n",
+                "\n",
+                "Why no prompt ever appeared:\n",
+                "- The daemon never contacts the prompter.",
+            )
+            .to_string()]),
+            "a block summary's nested text is its evidence, without generated markers"
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, &content).unwrap();
+        assert!(
+            dangling_response_references(&doc, &content)
+                .unwrap()
+                .is_empty(),
+            "present nested trees never orphan"
+        );
+        assert_eq!(
+            index_inline_response_projections(&doc, &content, None).unwrap(),
+            all.iter().cloned().collect::<Vec<_>>(),
+            "the commit boundary indexes every nested tree"
+        );
+
+        // An empty block summary proves nothing.
+        let empty_block = format!(
+            concat!(
+                "- ~~row~~\n",
+                "  - **Response {block}**\n",
+                "    - **Timestamp:** 2026-11-21T20:20:16.000Z\n",
+                "    - **Summary:** {d}\n",
+                "    - **State:** Complete.\n",
+            ),
+            block = BLOCK,
+            d = detail,
+        );
+        assert!(present_inline_response_ids(&empty_block).is_empty());
+        // A stray child before the summary still rejects the projection.
+        let stray_before_summary = format!(
+            concat!(
+                "  - **Response {block}**\n",
+                "    - **Timestamp:** 2026-11-21T20:20:16.000Z\n",
+                "    - an operator reply\n",
+                "    - **Summary:** Late summary.\n",
+            ),
+            block = BLOCK,
+        );
+        assert!(present_inline_response_ids(&stray_before_summary).is_empty());
     }
 
     #[test]

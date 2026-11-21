@@ -1153,7 +1153,9 @@ Duplicate replay should stay live.
             &agent_doc_archive_io::response_index_path(&doc),
         )
         .unwrap();
-        assert_eq!(index[RESPONSE_ID].action, "restored");
+        // `#respindexorphan`: HEAD's own projection is the evidence, indexed
+        // without the history bridge.
+        assert_eq!(index[RESPONSE_ID].action, "indexed");
         assert!(
             agent_doc_archive_io::dangling_response_references(&doc, &authority)
                 .unwrap()
@@ -1198,11 +1200,167 @@ Duplicate replay should stay live.
             !restore_and_commit_historical_response_evidence(&doc)
                 .expect("changed response evidence must fail closed")
         );
-        assert!(!agent_doc_archive_io::response_index_path(&doc).exists());
+        assert!(
+            !agent_doc_archive_io::response_index_path(&doc).exists(),
+            "stale committed bytes are never indexed over a changed live summary"
+        );
+        // `#respindexorphan`: the changed live projection is its own evidence;
+        // the next commit indexes it as the new truth.
+        assert!(
+            agent_doc_archive_io::dangling_response_references(&doc, &authority)
+                .unwrap()
+                .is_empty(),
+            "a present projection is never an orphan"
+        );
+    }
+
+    /// `#respindexorphan` (2026-11-21, agent-doc-bugs.md: 11 ids; sdk-dev.md:
+    /// 6 ids): queue strikes nested worker hand-backs under their rows as
+    /// `**Response [#r-…]**` projections whose minted ids no exchange cell and
+    /// no index entry owns. With two or more pending at once the heal refused
+    /// as "multi-orphan corruption" and session-check stayed INTERRUPTED.
+    fn respindexorphan_projection(row: &str, response_id: &str, summary: &str) -> String {
+        format!(
+            concat!(
+                "- ~~{row}~~\n",
+                "  - **Response {id}**\n",
+                "    - **Timestamp:** 2026-11-21T08:23:45.000Z\n",
+                "    - **Summary:** {summary}\n",
+                "    - **State:** Complete.\n",
+                "    - **Guidance:** Delete this tree when you no longer need it.\n",
+            ),
+            row = row,
+            id = response_id,
+            summary = summary,
+        )
+    }
+
+    #[test]
+    fn respindexorphan_session_check_heal_indexes_every_committed_projection() {
+        const IDS: [&str; 3] = [
+            "[#r-0ede87d947fd]",
+            "[#r-58237f198f38]",
+            "[#r-13c431e927a5]",
+        ];
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        th::init_repo(root);
+        fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let document = format!(
+            "<!-- agent:queue -->\n{}{}{}- open prompt\n<!-- /agent:queue -->\n",
+            respindexorphan_projection("README hand-back", IDS[0], "Seven README PRs are open."),
+            respindexorphan_projection("PR #368 hand-back", IDS[1], "PR #368 is merged."),
+            respindexorphan_projection("deploy docs", IDS[2], "Docs deployed."),
+        );
+        th::commit_file(root, "session.md", &document, "struck hand-backs");
+        let doc = root.join("session.md");
+        // The operator keeps editing: one finished tree is deleted after the
+        // commit, which must not stop HEAD's evidence from being indexed.
+        let authority = document.replace(
+            &respindexorphan_projection("deploy docs", IDS[2], "Docs deployed."),
+            &format!("- ~~deploy docs~~ — auto-struck: response: {}\n", IDS[2]),
+        );
+        fs::write(&doc, &authority).unwrap();
+
+        let pending = pending_committed_response_evidence_repair(&doc)
+            .unwrap()
+            .expect("unindexed committed projections are a pending heal");
+        for response_id in IDS {
+            assert!(pending.contains(response_id), "{pending}");
+        }
+        assert!(
+            restore_and_commit_historical_response_evidence(&doc)
+                .expect("committed projections index together")
+        );
         assert_eq!(
-            agent_doc_archive_io::dangling_response_references(&doc, &authority).unwrap(),
-            [RESPONSE_ID.to_string()],
-            "history compatibility must not hide conflicting live evidence"
+            fs::read_to_string(&doc).unwrap(),
+            authority,
+            "the heal never writes the session document"
+        );
+        let show = |rel: &str| {
+            let output = Command::new("git")
+                .current_dir(root)
+                .args(["show", &format!("HEAD:{rel}")])
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&output.stdout).into_owned()
+        };
+        assert_eq!(show("session.md"), document);
+        let index =
+            agent_doc_archive_io::parse_response_index(&show("session.response-index.md")).unwrap();
+        for response_id in IDS {
+            assert_eq!(index[response_id].action, "indexed", "{response_id}");
+        }
+        assert!(show("session.exchange-archive.md").contains("PR #368 is merged."));
+        // Every tree removed, only backlinks left: still resolved.
+        let trees_deleted = format!(
+            concat!(
+                "<!-- agent:queue -->\n",
+                "- ~~README hand-back~~ — auto-struck: response: {}\n",
+                "- ~~PR #368 hand-back~~ — auto-struck: response: {}\n",
+                "- ~~deploy docs~~ — auto-struck: response: {}\n",
+                "- open prompt\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            IDS[0], IDS[1], IDS[2],
+        );
+        assert!(
+            agent_doc_archive_io::dangling_response_references(&doc, &trees_deleted)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            !restore_and_commit_historical_response_evidence(&doc).expect("the heal is idempotent")
+        );
+        assert_eq!(
+            pending_committed_response_evidence_repair(&doc).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn respindexorphan_commit_indexes_the_projections_it_records() {
+        const FIRST: &str = "[#r-1a76051712fb]";
+        const SECOND: &str = "[#r-2964a3bfb7af]";
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        th::init_repo(root);
+        fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let before = "---\nagent_doc_session: test\n---\n\n<!-- agent:queue -->\n- check the CI run\n- land the README\n<!-- /agent:queue -->\n";
+        th::commit_file(root, "session.md", before, "add doc");
+        let doc = root.join("session.md");
+        // Two strikes landed hand-back projections since the last commit.
+        let struck = format!(
+            "---\nagent_doc_session: test\n---\n\n<!-- agent:queue -->\n{}{}<!-- /agent:queue -->\n",
+            respindexorphan_projection("check the CI run", FIRST, "CI passed."),
+            respindexorphan_projection("land the README", SECOND, "The README PR is open."),
+        );
+        fs::write(&doc, &struck).unwrap();
+        let snap_abs = root.join(agent_doc_fs::snapshot_path_for(&doc).unwrap());
+        fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
+        fs::write(&snap_abs, &struck).unwrap();
+
+        commit(&doc).expect("commit should succeed");
+
+        let show = |rel: &str| {
+            let output = Command::new("git")
+                .current_dir(root)
+                .args(["show", &format!("HEAD:{rel}")])
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "HEAD:{rel} missing");
+            String::from_utf8_lossy(&output.stdout).into_owned()
+        };
+        assert!(show("session.md").contains(&format!("**Response {FIRST}**")));
+        let index =
+            agent_doc_archive_io::parse_response_index(&show("session.response-index.md")).unwrap();
+        assert_eq!(index[FIRST].action, "indexed");
+        assert_eq!(index[SECOND].action, "indexed");
+        assert!(show("session.exchange-archive.md").contains("The README PR is open."));
+        assert_eq!(
+            pending_committed_response_evidence_repair(&doc).unwrap(),
+            None,
+            "the reference and its locator landed in one commit"
         );
     }
 

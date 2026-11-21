@@ -114,6 +114,16 @@ remain reserved for explicit status commands and actual recovery transitions.
   receipt verifies all three exact blobs in the resulting commit. Commit or
   receipt failure retains them. Response or decision-evidence references may
   not be orphaned by compact or `session-check`.
+- `#respindexorphan`: a queue strike that nests a worker hand-back or stopped
+  row as a structured `**Response [#r-…]**` projection (exact `Timestamp` and
+  `Summary` children) mints an id no exchange cell owns. While present, that
+  projection is its own response evidence, so any number of them never fail
+  the orphan guard. The commit that records a projection also indexes it
+  (archive cell plus `action="indexed"` locator) in the same Git transaction,
+  so backlinks keep resolving after the operator deletes the tree.
+  `agent-doc repair <FILE> --session-check-heal` indexes every such projection
+  already committed in `HEAD` (no single-id limit, no history walk) unless
+  current authority rewrote its summary.
 - Recovery order is retained state, tracked response index/archive, rebuildable
   SQLite response-location cache, then checksum-verified Git trailer
   candidates. Ambiguous deletion returns structured restore, detach-reference,

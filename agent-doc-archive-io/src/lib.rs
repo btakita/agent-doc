@@ -34,8 +34,8 @@ pub struct ResponseIndexEntry {
     pub anchor: String,
     /// Hash of the exact response node bytes, excluding the archive anchor.
     pub content_sha256: String,
-    /// The action which last changed this locator (`moved`, `restored`, or
-    /// `reindexed`). This action map is authoritative; commit trailers only
+    /// The action which last changed this locator (`moved`, `restored`,
+    /// `reindexed`, or `indexed` for a present queue response projection). This action map is authoritative; commit trailers only
     /// accelerate candidate lookup.
     pub action: String,
 }
@@ -677,10 +677,14 @@ pub fn dangling_response_references_with_pins(
     content: &str,
     pinned: impl IntoIterator<Item = String>,
 ) -> Result<Vec<String>> {
-    let live = response_nodes(content)
+    // A present structured queue projection is its own response evidence
+    // (`#respindexorphan`); only a reference whose projection is gone needs
+    // the tracked index.
+    let mut live = response_nodes(content)
         .into_iter()
         .map(|(id, _)| id)
         .collect::<BTreeSet<_>>();
+    live.extend(present_inline_response_ids(content));
     let mut refs = extract_response_reference_ids(content);
     refs.extend(pinned);
     let indexed_candidates = indexed_response_ids(doc)?;
@@ -1369,6 +1373,7 @@ fn inline_response_summaries(content: &str, response_id: &str) -> Vec<String> {
 
 #[derive(Debug)]
 struct StructuredInlineResponse {
+    response_id: String,
     indent: usize,
     timestamp_seen: bool,
     summary: Option<String>,
@@ -1378,13 +1383,16 @@ struct StructuredInlineResponse {
 
 fn finish_structured_inline_response(
     candidate: StructuredInlineResponse,
-    summaries: &mut BTreeSet<String>,
+    projections: &mut BTreeMap<String, BTreeSet<String>>,
 ) {
     if candidate.timestamp_seen
         && !candidate.invalid
         && let Some(summary) = candidate.summary
     {
-        summaries.insert(summary);
+        projections
+            .entry(candidate.response_id)
+            .or_default()
+            .insert(summary);
     }
 }
 
@@ -1408,11 +1416,27 @@ fn finish_structured_inline_response(
 /// conflicting summaries remain multiple values and are rejected by the
 /// caller's exact-one compatibility gate.
 fn structured_inline_response_summaries(content: &str, response_id: &str) -> BTreeSet<String> {
+    structured_inline_response_projections(content)
+        .remove(response_id)
+        .unwrap_or_default()
+}
+
+/// The response id named by a structured projection's own list item
+/// (`- **Response [#r-…]**`), or `None` for any other item.
+fn structured_inline_response_item_id(item: &str) -> Option<&str> {
+    let response_id = item.strip_prefix("**Response ")?.strip_suffix("**")?;
+    is_compact_response_id(response_id).then_some(response_id)
+}
+
+/// Every structured response projection in `content`, keyed by response id,
+/// with the distinct summaries its well-formed copies carry. One pass over the
+/// document serves every id; see [`structured_inline_response_summaries`] for
+/// the exact shape a projection must have to count.
+fn structured_inline_response_projections(content: &str) -> BTreeMap<String, BTreeSet<String>> {
     use agent_doc_document::worker_handback::SectionKind;
     use agent_doc_markdown_ast::overlay::RESPONSE_DETAIL_MARKER;
 
-    let response_item = format!("**Response {response_id}**");
-    let mut summaries = BTreeSet::new();
+    let mut projections = BTreeMap::<String, BTreeSet<String>>::new();
     let mut candidate: Option<StructuredInlineResponse> = None;
     let mut fence: Option<String> = None;
 
@@ -1441,7 +1465,7 @@ fn structured_inline_response_summaries(content: &str, response_id: &str) -> BTr
                 }
                 finish_structured_inline_response(
                     candidate.take().expect("candidate is present"),
-                    &mut summaries,
+                    &mut projections,
                 );
             }
             if fence.as_deref() == Some(marker) {
@@ -1463,7 +1487,7 @@ fn structured_inline_response_summaries(content: &str, response_id: &str) -> BTr
             if !raw_line.trim().is_empty() && indent <= active.indent {
                 finish_structured_inline_response(
                     candidate.take().expect("candidate is present"),
-                    &mut summaries,
+                    &mut projections,
                 );
             } else if let Some(item) = item {
                 if indent == active.indent + 2 {
@@ -1534,8 +1558,9 @@ fn structured_inline_response_summaries(content: &str, response_id: &str) -> BTr
             }
         }
 
-        if item == Some(response_item.as_str()) {
+        if let Some(response_id) = item.and_then(structured_inline_response_item_id) {
             candidate = Some(StructuredInlineResponse {
+                response_id: response_id.to_string(),
                 indent,
                 timestamp_seen: false,
                 summary: None,
@@ -1546,9 +1571,9 @@ fn structured_inline_response_summaries(content: &str, response_id: &str) -> BTr
     }
 
     if let Some(candidate) = candidate {
-        finish_structured_inline_response(candidate, &mut summaries);
+        finish_structured_inline_response(candidate, &mut projections);
     }
-    summaries
+    projections
 }
 
 fn added_inline_response_summaries(parent: &str, current: &str, response_id: &str) -> Vec<String> {
@@ -1572,6 +1597,121 @@ fn added_inline_response_summaries(parent: &str, current: &str, response_id: &st
 
 fn inline_summary_response_cell(response_id: &str, summary: &str) -> String {
     format!("### Re: recovered inline queue response\n\n{summary}\n\n**Response {response_id}**\n")
+}
+
+fn indexed_inline_projection_response_cell(response_id: &str, summary: &str) -> String {
+    format!("### Re: indexed inline queue response\n\n{summary}\n\n**Response {response_id}**\n")
+}
+
+/// Response ids whose structured queue projection (`- **Response [#r-…]**`
+/// with exact `Timestamp` and `Summary` children) is present in `content`
+/// with exactly one summary.
+///
+/// A queue strike mints such a projection for a worker hand-back or a stopped
+/// row (`handback_response_id` / `stopped_response_id`): the projection is the
+/// response, not a backlink to an exchange cell, so its id is never a live
+/// exchange node. While the projection is present its own summary is the
+/// response evidence (`#respindexorphan`). Conflicting copies (several
+/// summaries for one id) prove nothing and stay subject to the index.
+pub fn present_inline_response_ids(content: &str) -> BTreeSet<String> {
+    present_inline_response_summaries(content)
+        .into_keys()
+        .collect()
+}
+
+fn present_inline_response_summaries(content: &str) -> BTreeMap<String, String> {
+    structured_inline_response_projections(content)
+        .into_iter()
+        .filter_map(|(response_id, summaries)| {
+            let mut summaries = summaries.into_iter();
+            let summary = summaries.next()?;
+            summaries.next().is_none().then_some((response_id, summary))
+        })
+        .collect()
+}
+
+/// Read-only plan for [`index_inline_response_projections`]: the present
+/// structured queue projections in `content` that neither a live exchange cell
+/// nor the tracked response index resolves, as `(response_id, archive_cell)`.
+fn plan_inline_response_projection_index(
+    doc: &Path,
+    content: &str,
+    eligible: Option<&BTreeSet<String>>,
+) -> Result<Vec<(String, String)>> {
+    let present = present_inline_response_summaries(content);
+    if present.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut resolved = indexed_response_ids(doc)?;
+    resolved.extend(response_nodes(content).into_iter().map(|(id, _)| id));
+    Ok(present
+        .into_iter()
+        .filter(|(response_id, _)| {
+            !resolved.contains(response_id)
+                && eligible.is_none_or(|eligible| eligible.contains(response_id))
+        })
+        .map(|(response_id, summary)| {
+            let cell = indexed_inline_projection_response_cell(&response_id, &summary);
+            (response_id, cell)
+        })
+        .collect())
+}
+
+/// Response ids [`index_inline_response_projections`] would add to the tracked
+/// archive/index for `content`, without writing either.
+pub fn unindexed_inline_response_projection_ids(
+    doc: &Path,
+    content: &str,
+) -> Result<BTreeSet<String>> {
+    Ok(plan_inline_response_projection_index(doc, content, None)?
+        .into_iter()
+        .map(|(response_id, _)| response_id)
+        .collect())
+}
+
+/// Index every present structured queue response projection in `content` that
+/// the tracked archive/index does not resolve yet (`#respindexorphan`).
+///
+/// The queue strike that writes a hand-back or stopped-row projection mints its
+/// response id but has no exchange cell to archive, so nothing else gives that
+/// id a durable locator. Without one, removing the projection (the operator
+/// deleting a finished tree, or compaction) orphans every backlink that cites
+/// it, and two such ids pending at once fail the orphan guard closed. The
+/// commit that first records a projection calls this with the committed
+/// document so the reference and its locator land in one commit; the
+/// `--session-check-heal` repair calls it with `HEAD` for documents written
+/// before this boundary existed. `eligible`, when given, limits the ids.
+/// Idempotent: an indexed id is never rewritten.
+pub fn index_inline_response_projections(
+    doc: &Path,
+    content: &str,
+    eligible: Option<&BTreeSet<String>>,
+) -> Result<Vec<String>> {
+    let planned = plan_inline_response_projection_index(doc, content, eligible)?;
+    if planned.is_empty() {
+        return Ok(Vec::new());
+    }
+    write_inline_response_archive_entries(doc, planned, "indexed")
+}
+
+/// Present structured queue projections in committed `HEAD` that current
+/// authority still carries unchanged, or no longer carries at all (an operator
+/// deleted the tree after the commit). An authority copy whose summary changed
+/// is a newer edit and is never indexed from stale committed bytes.
+pub fn committed_inline_response_projection_ids(
+    authority: &str,
+    committed: &str,
+) -> BTreeSet<String> {
+    let authority_projections = structured_inline_response_projections(authority);
+    present_inline_response_summaries(committed)
+        .into_iter()
+        .filter(|(response_id, summary)| {
+            authority_projections
+                .get(response_id)
+                .is_none_or(|summaries| summaries.len() == 1 && summaries.contains(summary))
+        })
+        .map(|(response_id, _)| response_id)
+        .collect()
 }
 
 /// Restore canonical inline response summaries that were committed before the
@@ -1648,7 +1788,7 @@ fn restore_inline_response_references_from_git_for_ids(
     if recovered.is_empty() {
         return Ok(Vec::new());
     }
-    write_inline_response_reference_restoration(doc, recovered)
+    write_inline_response_archive_entries(doc, recovered, "restored")
 }
 
 /// The `(response_id, recovered_cell)` pairs an inline-reference restoration
@@ -1689,9 +1829,10 @@ fn plan_inline_response_reference_restoration(
     Ok(recovered)
 }
 
-fn write_inline_response_reference_restoration(
+fn write_inline_response_archive_entries(
     doc: &Path,
     recovered: Vec<(String, String)>,
+    action: &str,
 ) -> Result<Vec<String>> {
     let recovered_cells = recovered
         .iter()
@@ -1708,7 +1849,7 @@ fn write_inline_response_reference_restoration(
         let entry = entries.get_mut(response_id).with_context(|| {
             format!("restored response archive omitted indexed id {response_id}")
         })?;
-        entry.action = "restored".to_string();
+        entry.action = action.to_string();
     }
     atomic_write(
         &write.index_path,
@@ -2733,6 +2874,114 @@ mod tests {
                 ABSENT_B.to_string(),
                 ABSENT_C.to_string(),
             ]
+        );
+    }
+
+    /// `#respindexorphan` (2026-11-21, agent-doc-bugs.md and sdk-dev.md): a
+    /// queue strike nests a worker hand-back under its row as
+    /// `**Response [#r-…]**` with a freshly minted id that no exchange cell
+    /// and no index entry owns. Several such projections at once failed the
+    /// orphan guard closed ("response index would orphan referenced response
+    /// id(s)") although every one was still in the document and HEAD.
+    fn handback_projection(row: &str, response_id: &str, summary: &str) -> String {
+        let detail = agent_doc_markdown_ast::overlay::RESPONSE_DETAIL_MARKER;
+        format!(
+            concat!(
+                "- ~~{row}~~\n",
+                "  - **Response {id}**\n",
+                "    - **Timestamp:** 2026-11-21T08:15:26.000Z\n",
+                "    - **Summary:** {summary}\n",
+                "    - **What changed:** {detail}\n",
+                "      - Commit `35983d8` on `main`. {detail}\n",
+                "    - **Verification:** {detail}\n",
+                "      - `cargo test` passed. {detail}\n",
+                "    - **State:** Complete.\n",
+                "    - **Guidance:** Delete this tree when you no longer need it.\n",
+            ),
+            row = row,
+            id = response_id,
+            summary = summary,
+            detail = detail,
+        )
+    }
+
+    #[test]
+    fn respindexorphan_present_queue_projections_are_evidence_and_index_together() {
+        const FIRST: &str = "[#r-1a76051712fb]";
+        const SECOND: &str = "[#r-2964a3bfb7af]";
+        const THIRD: &str = "[#r-6103e5c0afe4]";
+        const CONFLICTING: &str = "[#r-92b7ccc53170]";
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let conflicting = format!(
+            "{}{}",
+            handback_projection("amend core-v1", CONFLICTING, "First summary."),
+            handback_projection("amend core-v1 again", CONFLICTING, "A different summary."),
+        );
+        let content = format!(
+            "<!-- agent:queue -->\n{}{}{}{}- open prompt\n<!-- /agent:queue -->\n",
+            handback_projection("check the CI run", FIRST, "CI passed for `35983d8`."),
+            handback_projection("land the README", SECOND, "The README PR is open."),
+            handback_projection("integrate it", THIRD, "Recommendation: integrate."),
+            conflicting,
+        );
+        std::fs::write(&doc, &content).unwrap();
+
+        assert_eq!(
+            present_inline_response_ids(&content),
+            BTreeSet::from([FIRST.to_string(), SECOND.to_string(), THIRD.to_string()]),
+            "conflicting copies of one id prove nothing"
+        );
+        assert_eq!(
+            dangling_response_references(&doc, &content).unwrap(),
+            [CONFLICTING.to_string()],
+            "present projections are their own evidence; only the conflicting id stays dangling"
+        );
+
+        assert_eq!(
+            unindexed_inline_response_projection_ids(&doc, &content).unwrap(),
+            BTreeSet::from([FIRST.to_string(), SECOND.to_string(), THIRD.to_string()])
+        );
+        assert_eq!(
+            index_inline_response_projections(&doc, &content, None).unwrap(),
+            [FIRST.to_string(), SECOND.to_string(), THIRD.to_string()],
+            "several projections index together, without the single-id history bridge"
+        );
+        let index = parse_response_index_file(&response_index_path(&doc)).unwrap();
+        for response_id in [FIRST, SECOND, THIRD] {
+            assert_eq!(index[response_id].action, "indexed");
+        }
+        assert!(!index.contains_key(CONFLICTING));
+        let archive = std::fs::read_to_string(exchange_archive_path(&doc)).unwrap();
+        assert!(archive.contains("CI passed for `35983d8`."), "{archive}");
+        assert!(
+            index_inline_response_projections(&doc, &content, None)
+                .unwrap()
+                .is_empty(),
+            "indexing is idempotent"
+        );
+
+        // The operator deletes the finished trees; the backlinks that cite
+        // them keep resolving through the index.
+        let trees_deleted = format!(
+            concat!(
+                "<!-- agent:queue -->\n",
+                "- ~~check the CI run~~ — auto-struck: response: {first}\n",
+                "- ~~land the README~~ — auto-struck: response: {second}\n",
+                "- ~~integrate it~~ — auto-struck: response: {third}\n",
+                "- open prompt\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            first = FIRST,
+            second = SECOND,
+            third = THIRD,
+        );
+        assert!(
+            dangling_response_references(&doc, &trees_deleted)
+                .unwrap()
+                .is_empty()
         );
     }
 

@@ -3620,3 +3620,178 @@ fn a_running_followup_keeps_its_open_backlog_item_out_of_the_go_mirror() {
         "row={nested:?}\nledger={ledger:?}"
     );
 }
+
+/// `#respindexorphan` (2026-11-21, agent-doc-bugs.md: 11 ids; sdk-dev.md: 6
+/// ids incl. the README and PR #368 hand-backs): after several `queue
+/// report-complete` calls whose rows the coordinator struck with `queue
+/// consume --ack-text`, every strike nested the worker hand-back under its row
+/// as `**Response [#r-…]**` with a minted id and retired the completion cell
+/// that was its only exchange evidence. Nothing indexed those ids, so with two
+/// or more pending the session-check orphan guard failed closed ("response
+/// index would orphan referenced response id(s)") although every projection
+/// was still in the document and HEAD. Replay report-complete → strike →
+/// session-check → commit → tree removal.
+#[test]
+fn respindexorphan_struck_handback_projections_never_orphan_and_commit_indexes_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let items = [
+        "Deploy the README changes.",
+        "Review PR #368 and hand it back.",
+    ];
+    let doc = committed_session(dir.path(), &items);
+    let path = doc.to_str().unwrap();
+    assert_preflight_admits(dir.path(), &doc, 0);
+    let mut claimed_items = Vec::<String>::new();
+    for (index, item) in items.iter().enumerate() {
+        let owner = format!("subagent:respindex{index}");
+        let worker = format!("worker:respindex{index}");
+        assert_ok(
+            &run_agent_doc(
+                dir.path(),
+                &["queue", "claim", path, "--item", item, "--owner", &owner],
+            ),
+            "queue claim",
+        );
+        let claims = run_agent_doc(dir.path(), &["queue", "claims", path]);
+        assert_ok(&claims, "queue claims");
+        let claims: serde_json::Value = serde_json::from_slice(&claims.stdout).unwrap();
+        let item = claims
+            .as_array()
+            .and_then(|claims| {
+                claims.iter().find_map(|claim| {
+                    (claim["owner"].as_str() == Some(owner.as_str()))
+                        .then(|| claim["item_text"].as_str())
+                        .flatten()
+                })
+            })
+            .unwrap_or_else(|| panic!("missing claim for {owner}: {claims}"))
+            .to_string();
+        let item = item.as_str();
+        claimed_items.push(item.to_string());
+        assert_ok(
+            &run_agent_doc(
+                dir.path(),
+                &[
+                    "queue",
+                    "start",
+                    path,
+                    "--item",
+                    item,
+                    "--owner",
+                    &owner,
+                    "--generation",
+                    "1",
+                    "--worker-id",
+                    &worker,
+                ],
+            ),
+            "queue start",
+        );
+        let response = format!(
+            concat!(
+                "**Summary**\n\nFinished hand-back {index}: the work is done.\n\n",
+                "**What changed**\n\n- Nothing outside the document.\n\n",
+                "**Verification**\n\n- Read-only check {index} passed.\n\n",
+                "**Action items**\n\nnone\n\n",
+                "**Notes**\n\nnone\n\n",
+                "**Next actions**\n\nnone\n",
+            ),
+            index = index,
+        );
+        assert_ok(
+            &run_agent_doc(
+                dir.path(),
+                &[
+                    "queue",
+                    "report-complete",
+                    "--prose-only",
+                    path,
+                    "--item",
+                    item,
+                    "--generation",
+                    "1",
+                    "--response",
+                    &response,
+                ],
+            ),
+            "queue report-complete",
+        );
+    }
+    // A prose-only report is a mechanical closeout: the binary strikes each
+    // row and nests its hand-back as a response projection.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while agent_doc_archive_io::present_inline_response_ids(&fs::read_to_string(&doc).unwrap())
+        .len()
+        < claimed_items.len()
+    {
+        assert!(
+            Instant::now() < deadline,
+            "reported rows were never struck: {}",
+            fs::read_to_string(&doc).unwrap()
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let struck = fs::read_to_string(&doc).unwrap();
+    let projected = agent_doc_archive_io::present_inline_response_ids(&struck);
+    assert_eq!(
+        projected.len(),
+        items.len(),
+        "each strike nests its hand-back as a response projection: {struck}"
+    );
+    assert!(
+        agent_doc_archive_io::dangling_response_references(&doc, &struck)
+            .unwrap()
+            .is_empty(),
+        "present projections are never orphans: {struck}"
+    );
+    let check = run_agent_doc(dir.path(), &["session-check", path]);
+    let check_out = format!(
+        "{}{}",
+        String::from_utf8_lossy(&check.stdout),
+        String::from_utf8_lossy(&check.stderr)
+    );
+    assert!(
+        !check_out.contains("would orphan referenced response id"),
+        "{check_out}"
+    );
+
+    assert_ok(&run_agent_doc(dir.path(), &["commit", path]), "commit");
+    let index = agent_doc_archive_io::parse_response_index(
+        &String::from_utf8(git(dir.path(), &["show", "HEAD:session.response-index.md"]).stdout)
+            .unwrap(),
+    )
+    .unwrap();
+    for response_id in &projected {
+        assert!(index.contains_key(response_id), "{response_id}: {index:?}");
+    }
+
+    // The operator deletes the finished trees by hand: whatever still cites
+    // their ids resolves through the committed index.
+    let mut trees_deleted = struck.clone();
+    for response_id in &projected {
+        let marker = format!("**Response {response_id}**");
+        let start = trees_deleted.find(&marker).unwrap();
+        let line_start = trees_deleted[..start].rfind('\n').map_or(0, |at| at + 1);
+        let indent = start - line_start - 2;
+        let mut end = trees_deleted[start..]
+            .find('\n')
+            .map_or(trees_deleted.len(), |at| start + at + 1);
+        while end < trees_deleted.len() {
+            let line = &trees_deleted[end..];
+            let line_indent = line.len() - line.trim_start_matches(' ').len();
+            if line.trim().is_empty() || line_indent <= indent {
+                break;
+            }
+            end += line.find('\n').map_or(line.len(), |at| at + 1);
+        }
+        trees_deleted.replace_range(line_start..end, "");
+    }
+    for response_id in &projected {
+        assert!(!trees_deleted.contains(&format!("**Response {response_id}**")));
+    }
+    assert!(
+        agent_doc_archive_io::dangling_response_references(&doc, &trees_deleted)
+            .unwrap()
+            .is_empty()
+    );
+}

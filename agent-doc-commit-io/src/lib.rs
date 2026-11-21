@@ -2100,6 +2100,12 @@ fn historical_response_evidence_restore_plan(
     if !retained_ids.is_empty() {
         return Ok(Some(retained_ids));
     }
+    // `#respindexorphan`: structured queue projections committed in HEAD carry
+    // their own evidence, so any number of them index without a history walk.
+    let projections = committed_inline_response_projection_index_ids(file, &authority, &head)?;
+    if !projections.is_empty() {
+        return Ok(Some(projections));
+    }
     let referenced = agent_doc_archive_io::extract_response_reference_ids(&authority);
     let multi_orphan = if referenced.is_empty() {
         false
@@ -2136,6 +2142,26 @@ fn historical_response_evidence_restore_plan(
     affected.retain(|response_id| referenced.contains(response_id));
     affected.extend(restored);
     Ok((!affected.is_empty()).then_some(affected))
+}
+
+/// Structured queue response projections committed in `head` that the tracked
+/// archive/index does not resolve yet and that current authority has not
+/// rewritten (`#respindexorphan`). Their committed summary is the evidence.
+fn committed_inline_response_projection_index_ids(
+    file: &Path,
+    authority: &str,
+    head: &str,
+) -> Result<BTreeSet<String>> {
+    let committed = agent_doc_archive_io::committed_inline_response_projection_ids(authority, head);
+    if committed.is_empty() {
+        return Ok(BTreeSet::new());
+    }
+    Ok(
+        agent_doc_archive_io::unindexed_inline_response_projection_ids(file, head)?
+            .intersection(&committed)
+            .cloned()
+            .collect(),
+    )
 }
 
 /// Return checkpoint response bodies that cryptographically own unresolved
@@ -2313,11 +2339,28 @@ pub fn restore_and_commit_historical_response_evidence(file: &Path) -> Result<bo
             return Ok(false);
         };
         let retained = retained_checkpoint_response_evidence(file, &authority)?;
+        // `#respindexorphan`: index HEAD's structured queue projections from
+        // the committed document itself; this needs no history walk and has
+        // no single-id limit.
+        let projection_ids = if retained.is_empty() {
+            committed_inline_response_projection_index_ids(file, &authority, &head)?
+        } else {
+            BTreeSet::new()
+        };
+        let projected = if projection_ids.is_empty() {
+            Vec::new()
+        } else {
+            agent_doc_archive_io::index_inline_response_projections(
+                file,
+                &head,
+                Some(&projection_ids),
+            )?
+        };
         // A verified retained response is already exact local evidence and is
         // the bounded repair selected by the plan. Do not precede it with an
         // unrelated archive-history scan; any independent unproven index
         // entry remains eligible for the next repair pass.
-        let reproven = if retained.is_empty() {
+        let reproven = if retained.is_empty() && projected.is_empty() {
             // `#archivedupid`: restore archive bytes an index entry already
             // committed to but its archive lost; only the archive changes and
             // the commit below stages HEAD's document.
@@ -2327,6 +2370,7 @@ pub fn restore_and_commit_historical_response_evidence(file: &Path) -> Result<bo
         };
         if reproven.is_empty()
             && retained.is_empty()
+            && projected.is_empty()
             && agent_doc_archive_io::extract_response_reference_ids(&authority).is_empty()
         {
             return Ok(false);
@@ -2348,6 +2392,7 @@ pub fn restore_and_commit_historical_response_evidence(file: &Path) -> Result<bo
         affected.extend(restored);
         affected.extend(reproven.iter().cloned());
         affected.extend(retained_restored);
+        affected.extend(projected);
         if affected.is_empty() {
             return Ok(false);
         }
@@ -4517,6 +4562,34 @@ where
         snapshot_content.as_deref().or(Some(file_content.as_str())),
         "staged",
     )?;
+    // `#respindexorphan`: a queue strike mints the response id of a hand-back
+    // or stopped-row projection without an exchange cell to archive. Index the
+    // projections this commit records so the reference and its durable
+    // locator land in the same commit; the staged side effects below pick up
+    // the archive/index. A failure leaves the commit itself intact and the
+    // `--session-check-heal` repair can index from HEAD later.
+    match agent_doc_archive_io::index_inline_response_projections(
+        file,
+        snapshot_content.as_deref().unwrap_or(&file_content),
+        None,
+    ) {
+        Ok(indexed) if !indexed.is_empty() => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "commit_indexed_inline_response_projections file={} ids={}",
+                file.display(),
+                indexed.join(",")
+            ),
+        ),
+        Ok(_) => {}
+        Err(error) => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "commit_inline_response_projection_index_failed file={} error={error:#}",
+                file.display()
+            ),
+        ),
+    }
     binary_owned_side_effects = binary_owned_commit_side_effects(file, &file_content)?;
     if !binary_owned_side_effects.is_empty() {
         agent_doc_ops_log_io::log_op(

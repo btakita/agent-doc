@@ -431,9 +431,11 @@ pub fn slim_handback_response_details(document: &str) -> Option<(String, usize)>
             if markdown.is_empty() {
                 continue;
             }
-            let mut expected = String::new();
-            crate::queue_consume::render_handback_section(&mut expected, &indent, kind, &markdown);
-            let Some(range) = exact_section(&response, kind, &expected) else {
+            let Some(range) =
+                crate::queue_consume::handback_section_renders(&indent, kind, &markdown)
+                    .iter()
+                    .find_map(|expected| exact_section(&response, kind, expected))
+            else {
                 continue;
             };
             if kind != SectionKind::ActionItems {

@@ -33,6 +33,7 @@ pub mod preset_order;
 pub mod prompt_component_attrs;
 pub mod prompt_identity;
 pub mod prompt_pressure;
+pub mod prose_split;
 pub mod prune_duplicates;
 pub mod queue;
 pub mod queue_auto_clear;

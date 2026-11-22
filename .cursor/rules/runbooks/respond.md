@@ -29,6 +29,25 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   scoped commit first, keep a blocking operator request when commit authority is
   missing, then retain integration work until a haiven-dev PR or an agent-doc
   named integration-branch receipt exists.
+- **Write short, structured response trees (`#responsetreeshape`).** Avoid
+  walls of text:
+  - Shape: prefer `Label: value` lines (`Status: pushed`, `CI: green`) and
+    short one-fact statements over paragraphs.
+  - Prose: break a longer explanation into a subtree of short bullets under one
+    headline, instead of one long line. The binary does the same for a worker
+    hand-back: a long Summary or prose section keeps its first sentence as the
+    headline and puts each later sentence in a child bullet, without changing
+    any words.
+  - Completion: make every subtree say whether it is complete, e.g. a final
+    `State: complete` / `State: waiting on <owner>` line, or `none` for an
+    empty list.
+  - Depth: prefer several top-level trees over one deeply nested tree. Two
+    levels below a row is usually enough.
+  - Operator replies: when the operator answers inside a subtree, open a new
+    top-level follow-up tree for it instead of nesting the answer deeper.
+    Chain it to its origin by id, in the follow-up title form
+    `[#<origin>] follow-up: <short title>`, so the chain of top-level trees
+    reads in order.
 - **Native choice prompts are document-visible (`#choicecheckpoint`).** Before
   invoking a harness-native choice UI (Claude Code `AskUserQuestion`, Codex
   `request_user_input`, or the active harness's equivalent), materialize the

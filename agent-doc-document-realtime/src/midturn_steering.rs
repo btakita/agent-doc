@@ -5191,6 +5191,72 @@ mod tests {
         assert!(!dispatch_live[0].contains("live-buffer"));
     }
 
+    /// `#waitingdispatchgate`: the live `#ghrecvpolicypark` packet shape
+    /// (stale `⟦you: 1⟧` token, generated `**Next:**` row, a generic Question,
+    /// and a garbage Timestamp value) is never offered for subagent dispatch
+    /// while the operator owes the answer. An operator line anywhere in the
+    /// packet answers it; then dispatch and the queue tree agree that the item
+    /// is answered agent work (`📥`), whatever the stale token still says.
+    #[test]
+    fn unanswered_waiting_item_is_never_dispatched_and_an_answer_releases_it() {
+        let packet = concat!(
+            "<!-- agent:run id=main subagents go -->\n",
+            "- ### Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n",
+            "  - ⟦you: 1 · agent: 0 · done: 0⟧ [#ghrecvpolicypark] Decide whether backlog #ghrecvpolicy stays open. <!-- agent-doc:waiting-item -->\n",
+            "    - **Next:** you — reply under this item with the decision or result it asks for (evidence: no answer or attempt in its packet yet) ▫️\n",
+            "    - **Response:** Decide whether backlog #ghrecvpolicy stays open. ▫️\n",
+            "      - **Timestamp:** concise response trees ▫️\n",
+            "      - **Question:** What decision or completion result should be recorded? ▫️\n",
+            "      - **Next actions:** ▫️\n",
+            "        - **Action:** Decide whether backlog #ghrecvpolicy stays open. ▫️\n",
+        );
+        let tail = concat!(
+            "- other work\n",
+            "<!-- /agent:run -->\n",
+            "<!-- agent:todo -->\n",
+            "- [ ] [#ghrecvpolicypark] Decide whether backlog #ghrecvpolicy stays open.\n",
+            "<!-- /agent:todo -->\n",
+        );
+        let state_of = |doc: &str| {
+            agent_doc_queue::queue_tree::queue_tree(doc, &Default::default())
+                .unwrap()
+                .nodes
+                .into_iter()
+                .find(|node| node.waiting_item)
+                .map(|node| node.state)
+        };
+
+        let unanswered = format!("{packet}{tail}");
+        let heads = subagent_dispatch_heads(&unanswered, None);
+        assert_eq!(heads, vec!["other work".to_string()], "{heads:#?}");
+        let (_, eligible, live) = queue_attr_subagent_heads(&unanswered).unwrap();
+        assert!(
+            eligible
+                .iter()
+                .chain(&live)
+                .all(|head| !head.contains("ghrecvpolicypark")),
+            "{eligible:#?} {live:#?}"
+        );
+        assert_eq!(
+            state_of(&unanswered),
+            Some(agent_doc_queue::queue_tree::QueueNodeState::WaitingOnYou)
+        );
+
+        let answered =
+            format!("{packet}        - Complete multi-user access control for agent-doc.\n{tail}");
+        let heads = subagent_dispatch_heads(&answered, None);
+        assert!(
+            heads
+                .first()
+                .is_some_and(|head| head.contains("[#ghrecvpolicypark]")),
+            "{heads:#?}"
+        );
+        assert_eq!(
+            state_of(&answered),
+            Some(agent_doc_queue::queue_tree::QueueNodeState::Answered)
+        );
+    }
+
     #[test]
     fn waiting_answer_edit_steers_one_parent_selection_not_response_leaves() {
         let owned = BTreeSet::new();

@@ -6654,6 +6654,53 @@ pub(crate) fn render_handback_section(
     kind: agent_doc_document::worker_handback::SectionKind,
     markdown: &str,
 ) {
+    render_handback_section_shaped(out, indent, kind, markdown, true);
+}
+
+/// Every rendering a strike may have written for one hand-back section:
+/// the current one, then the single-line prose form written before
+/// `#responsetreeshape` split long prose. The slim pass matches either, so a
+/// tree written before the split is still recognized as binary-rendered.
+pub(crate) fn handback_section_renders(
+    indent: &str,
+    kind: agent_doc_document::worker_handback::SectionKind,
+    markdown: &str,
+) -> Vec<String> {
+    let mut current = String::new();
+    render_handback_section_shaped(&mut current, indent, kind, markdown, true);
+    let mut legacy = String::new();
+    render_handback_section_shaped(&mut legacy, indent, kind, markdown, false);
+    if legacy == current {
+        vec![current]
+    } else {
+        vec![current, legacy]
+    }
+}
+
+/// `{indent}- {label} {value}`, with a long prose value split into its first
+/// sentence as the headline and one marked child bullet per later sentence
+/// (`#responsetreeshape`). The wording is unchanged; the children carry the
+/// response-detail marker, so they are never read as operator replies.
+pub(crate) fn push_prose_row(out: &mut String, indent: &str, label: &str, value: &str) {
+    use agent_doc_markdown_ast::overlay::RESPONSE_DETAIL_MARKER;
+    match crate::prose_split::split_long_prose(value) {
+        Some(pieces) => {
+            out.push_str(&format!("{indent}- {label} {}\n", pieces[0]));
+            for piece in &pieces[1..] {
+                out.push_str(&format!("{indent}  - {piece} {RESPONSE_DETAIL_MARKER}\n"));
+            }
+        }
+        None => out.push_str(&format!("{indent}- {label} {value}\n")),
+    }
+}
+
+fn render_handback_section_shaped(
+    out: &mut String,
+    indent: &str,
+    kind: agent_doc_document::worker_handback::SectionKind,
+    markdown: &str,
+    split_prose: bool,
+) {
     use agent_doc_markdown_ast::overlay::RESPONSE_DETAIL_MARKER;
     use agent_doc_markdown_ast::{Block, BlockKind, parse};
     use std::fmt::Write as _;
@@ -6671,11 +6718,17 @@ pub(crate) fn render_handback_section(
     if let Some(document) = parse(markdown) {
         collect_items(&document, &mut items);
     }
-    write!(out, "{indent}- **{}:**", kind.heading()).expect("writing to a String cannot fail");
     if items.is_empty() {
-        writeln!(out, " {}", collapse_ws(markdown)).expect("writing to a String cannot fail");
+        let label = format!("**{}:**", kind.heading());
+        let value = collapse_ws(markdown);
+        if split_prose {
+            push_prose_row(out, indent, &label, &value);
+        } else {
+            writeln!(out, "{indent}- {label} {value}").expect("writing to a String cannot fail");
+        }
         return;
     }
+    write!(out, "{indent}- **{}:**", kind.heading()).expect("writing to a String cannot fail");
 
     writeln!(out, " {RESPONSE_DETAIL_MARKER}").expect("writing to a String cannot fail");
     let mut items = items.into_iter().peekable();
@@ -6855,11 +6908,7 @@ fn handback_response_row_child(
     if found.in_document {
         let lead = crate::response_tree_sync::summary_lead(summary);
         match &lead {
-            Some((lead, _)) => {
-                child.push_str("- **Summary:** ");
-                child.push_str(lead);
-                child.push('\n');
-            }
+            Some((lead, _)) => push_prose_row(&mut child, "", "**Summary:**", lead),
             None => render_handback_section(&mut child, "", SectionKind::Summary, summary),
         }
         let summary_trimmed = lead.as_ref().is_some_and(|(_, trimmed)| *trimmed);
@@ -8548,7 +8597,26 @@ fn response_heading_timestamp(line: &str) -> Option<&str> {
     let rest = without_hashes.strip_prefix("Re:")?.trim();
     let (_, timestamp) = rest.rsplit_once(" · ")?;
     let timestamp = timestamp.trim();
-    (!timestamp.is_empty()).then_some(timestamp)
+    // `#waitingtimestampshape`: a ` · ` inside the topic itself
+    // (`### Re: parents · concise response trees`) is not the attribution's
+    // timestamp separator. Reading its tail rendered
+    // `**Timestamp:** concise response trees` on a waiting item.
+    is_response_timestamp(timestamp).then_some(timestamp)
+}
+
+/// Whether `value` is a response timestamp: it starts with an ISO date
+/// (`YYYY-MM-DD`), optionally followed by a time (`T…` or ` …`)
+/// (`#waitingtimestampshape`).
+pub(crate) fn is_response_timestamp(value: &str) -> bool {
+    let bytes = value.trim().as_bytes();
+    let digits = |range: std::ops::Range<usize>| bytes[range].iter().all(u8::is_ascii_digit);
+    bytes.len() >= 10
+        && digits(0..4)
+        && bytes[4] == b'-'
+        && digits(5..7)
+        && bytes[7] == b'-'
+        && digits(8..10)
+        && bytes.get(10).is_none_or(|next| matches!(next, b'T' | b' '))
 }
 
 pub(crate) fn latest_response_timestamp(source: &str) -> Option<&str> {
@@ -8559,6 +8627,8 @@ pub(crate) fn latest_response_timestamp(source: &str) -> Option<&str> {
 }
 
 fn ensure_waiting_response_timestamp(child: &str, response_timestamp: &str) -> String {
+    let repaired = repair_waiting_response_timestamps(child, response_timestamp);
+    let child = repaired.as_str();
     let lines = child.split_inclusive('\n').collect::<Vec<_>>();
     let is_reply =
         |index: usize| agent_doc_markdown_ast::reply_row::is_agent_doc_reply_row_at(&lines, index);
@@ -8584,6 +8654,43 @@ fn ensure_waiting_response_timestamp(child: &str, response_timestamp: &str) -> S
             out.push_str(&agent_doc_reply_suffix());
             out.push('\n');
             inserted = true;
+        }
+    }
+    out
+}
+
+/// Rewrite a generated waiting `**Timestamp:**` reply row whose value is not
+/// a timestamp (`#waitingtimestampshape`). Before the heading reader checked
+/// the shape, a `### Re: a · b` topic rendered `**Timestamp:** b`, and the
+/// waiting tree keeps its existing children, so the bad value stayed. Only
+/// binary-owned reply rows change; operator text is returned as is.
+fn repair_waiting_response_timestamps(child: &str, response_timestamp: &str) -> String {
+    let lines = child.split_inclusive('\n').collect::<Vec<_>>();
+    let glyph = AGENT_DOC_REPLY_GLYPH;
+    let mut out = String::with_capacity(child.len());
+    for (index, line) in lines.iter().enumerate() {
+        let body = line.trim_end_matches(['\r', '\n']);
+        let newline = &line[body.len()..];
+        let indent = &body[..body.len() - body.trim_start().len()];
+        let value = body
+            .trim_start()
+            .strip_prefix("- **Timestamp:** ")
+            .and_then(|rest| rest.trim_end().strip_suffix(glyph))
+            .map(str::trim);
+        match value {
+            Some(value)
+                if !is_response_timestamp(value)
+                    && is_response_timestamp(response_timestamp)
+                    && agent_doc_markdown_ast::reply_row::is_agent_doc_reply_row_at(
+                        &lines, index,
+                    ) =>
+            {
+                out.push_str(&format!(
+                    "{indent}- **Timestamp:** {} {glyph}{newline}",
+                    response_timestamp.trim()
+                ));
+            }
+            _ => out.push_str(line),
         }
     }
     out
@@ -8702,6 +8809,82 @@ mod tests {
              <!-- agent:todo -->\n{todo_body}<!-- /agent:todo -->\n\
              <!-- agent:exchange -->\n{response}\n<!-- /agent:exchange -->\n"
         )
+    }
+
+    /// `#waitingtimestampshape`: a `### Re:` topic that itself contains ` · `
+    /// (no model attribution) is not a timestamp. The live waiting tree
+    /// rendered `**Timestamp:** concise response trees` from
+    /// `### Re: subtree in context of its parents · concise response trees`.
+    #[test]
+    fn waiting_timestamp_ignores_a_topic_middle_dot_and_repairs_a_bad_value() {
+        assert_eq!(
+            response_heading_timestamp(
+                "### Re: subtree in context of its parents · concise response trees"
+            ),
+            None
+        );
+        assert_eq!(
+            response_heading_timestamp("### Re: topic — opus-5 · 2026-11-21T03:22-05:00"),
+            Some("2026-11-21T03:22-05:00")
+        );
+        assert_eq!(
+            response_heading_timestamp("### Re: topic · 2026-11-22T22:01:51.000Z"),
+            Some("2026-11-22T22:01:51.000Z")
+        );
+        assert!(is_response_timestamp("2026-11-22"));
+        assert!(!is_response_timestamp("2026-11-2x"));
+        assert!(!is_response_timestamp("concise response trees"));
+
+        let id = "ghrecvpolicypark";
+        let action = "Decide whether backlog #ghrecvpolicy stays open.";
+        let reply = agent_doc_reply_suffix();
+        let response = concat!(
+            "### Re: earlier — opus-5 · 2026-11-22T17:00-05:00\n\nDone.\n\n",
+            "### Re: subtree in context of its parents · concise response trees\n\nAlso done.",
+        );
+        // A fresh projection takes the last REAL timestamp, never the topic tail.
+        let fresh = waiting_tree_document("", &format!("- [ ] [#{id}] {action}\n"), response);
+        let projected = project_waiting_on_you_tree(&fresh, response)
+            .unwrap()
+            .expect("open todo creates the tree");
+        assert!(
+            projected.contains(&format!("**Timestamp:** 2026-11-22T17:00-05:00 {reply}")),
+            "{projected}"
+        );
+        assert!(
+            !projected.contains("concise response trees ▫"),
+            "{projected}"
+        );
+
+        // An existing child already holding the bad value is repaired in place;
+        // the operator's reply line beside it is untouched.
+        let operator = "Complete multi-user access control for agent-doc.";
+        let existing = waiting_tree_document(
+            &format!(
+                "- ### {WAITING_ON_YOU_ROOT_TEXT} {WAITING_ON_YOU_ROOT_MARKER}\n  - [#{id}] {action} {WAITING_ON_YOU_ITEM_MARKER}\n    - **Response:** {action} {reply}\n      - **Timestamp:** concise response trees {reply}\n      - **Question:** What decision or completion result should be recorded? {reply}\n      - **Next actions:** {reply}\n        - **Action:** {action} {reply}\n        - {operator}\n"
+            ),
+            &format!("- [ ] [#{id}] {action}\n"),
+            response,
+        );
+        let repaired = project_waiting_on_you_tree(&existing, response)
+            .unwrap()
+            .unwrap_or_else(|| existing.clone());
+        assert!(
+            repaired.contains(&format!(
+                "      - **Timestamp:** 2026-11-22T17:00-05:00 {reply}\n"
+            )),
+            "{repaired}"
+        );
+        assert!(!repaired.contains("concise response trees ▫"), "{repaired}");
+        assert!(
+            repaired.contains(&format!("        - {operator}\n")),
+            "{repaired}"
+        );
+        // A second pass changes nothing.
+        let again = project_waiting_on_you_tree(&repaired, response)
+            .unwrap()
+            .unwrap_or_else(|| repaired.clone());
+        assert_eq!(again, repaired);
     }
 
     #[test]
@@ -12761,6 +12944,104 @@ mod tests {
              - {sibling}\n\
              <!-- /agent:run -->\n"
         )
+    }
+
+    /// `#responsetreeshape`: a long hand-back Summary renders as its first
+    /// sentence on the `**Summary:**` row and one marked child bullet per later
+    /// sentence. The wording is unchanged and code spans stay whole. The
+    /// children are response details, never queue rows, and a second strike
+    /// pass changes nothing.
+    #[test]
+    fn long_handback_summary_renders_as_a_headline_and_sentence_children() {
+        let work = "Shorten the response tree. [#q-0123456789ab]";
+        let struck = format!("~~{work}~~");
+        let sibling = "do [#install]";
+        let summary = "Waiting items now read a real timestamp. A `### Re: a · b. C` topic no longer leaks into the waiting tree. The pool still offers an answered item, and never an unanswered one.";
+        let handback = format!(
+            "**Summary**\n\n{summary}\n\n**What changed**\n\n- `src/a.rs`\n\n**Verification**\n\n- `make check`: passed\n\n**Action items**\n\nnone\n\n**Notes**\n\nnone\n\n**Next actions**\n\nnone\n"
+        );
+        let item = format!("Question with: a colon in it: Then another: clause: {work}");
+        let cell = agent_doc_document::subagent_completion::cell_with_response(
+            "subagent:respfmt",
+            &item,
+            "respfmt-key",
+            &handback,
+        )
+        .unwrap();
+        let before = plan_file_run(work, sibling, &cell);
+        let after = plan_file_run(&struck, sibling, &cell);
+        let projected = attach_stopped_row_responses(&before, &after, "", STOPPED_AT).unwrap();
+        let start = projected.find(&struck).expect("struck row");
+        let end = projected[start..]
+            .find(&format!("- {sibling}"))
+            .map_or(projected.len(), |at| start + at);
+        let tree = &projected[start..end];
+        let marker = agent_doc_markdown_ast::overlay::RESPONSE_DETAIL_MARKER;
+        let summary_line = tree
+            .lines()
+            .position(|line| line.contains("**Summary:**"))
+            .expect("summary row");
+        let lines = tree.lines().collect::<Vec<_>>();
+        assert!(
+            lines[summary_line]
+                .ends_with("- **Summary:** Waiting items now read a real timestamp."),
+            "{tree}"
+        );
+        let indent = lines[summary_line].len() - lines[summary_line].trim_start().len();
+        let child = " ".repeat(indent + 2);
+        assert_eq!(
+            lines[summary_line + 1],
+            format!(
+                "{child}- A `### Re: a · b. C` topic no longer leaks into the waiting tree. {marker}"
+            ),
+            "{tree}"
+        );
+        assert_eq!(
+            lines[summary_line + 2],
+            format!(
+                "{child}- The pool still offers an answered item, and never an unanswered one. {marker}"
+            ),
+            "{tree}"
+        );
+        // The children are inert response details, not queue work.
+        let heads =
+            crate::queue_continuation::live_queue_head_texts(&projected).unwrap_or_default();
+        assert!(
+            heads.iter().all(|head| !head.contains("leaks into")),
+            "{heads:#?}"
+        );
+        assert_eq!(
+            attach_stopped_row_responses(&projected, &projected, "", STOPPED_AT).unwrap(),
+            projected,
+            "a second pass changes nothing"
+        );
+    }
+
+    /// `#responsetreeshape`: a long prose section splits on sentences, and the
+    /// slim pass still recognizes the single-line form a strike wrote before
+    /// the split.
+    #[test]
+    fn long_prose_section_renders_split_and_keeps_its_legacy_form() {
+        use agent_doc_document::worker_handback::SectionKind;
+        let notes = "The first note is about the waiting tree and its timestamp. The second note covers the subagent work pool and its dispatch gate. The third note says `a. B` stays whole.";
+        let renders = handback_section_renders("  ", SectionKind::Notes, notes);
+        assert_eq!(renders.len(), 2, "{renders:#?}");
+        let marker = agent_doc_markdown_ast::overlay::RESPONSE_DETAIL_MARKER;
+        assert_eq!(
+            renders[0],
+            format!(
+                "  - **Notes:** The first note is about the waiting tree and its timestamp.\n    - The second note covers the subagent work pool and its dispatch gate. {marker}\n    - The third note says `a. B` stays whole. {marker}\n"
+            )
+        );
+        assert_eq!(renders[1], format!("  - **Notes:** {notes}\n"));
+        let mut rendered = String::new();
+        render_handback_section(&mut rendered, "  ", SectionKind::Notes, notes);
+        assert_eq!(rendered, renders[0]);
+        // Short prose has one form.
+        assert_eq!(
+            handback_section_renders("", SectionKind::Notes, "Short. Fine."),
+            vec!["- **Notes:** Short. Fine.\n".to_string()]
+        );
     }
 
     /// `#handbackrowstructure`: striking the plan-file row copies the worker

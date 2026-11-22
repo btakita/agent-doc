@@ -436,6 +436,53 @@ mod tests {
         );
     }
 
+    /// `#waitingdispatchgate`: the work pool never offers an operator-owned
+    /// waiting item (the live `#ghrecvpolicypark` packet: stale `⟦you: 1⟧`
+    /// token, a generic Question, a garbage Timestamp). An operator line in
+    /// the packet answers it, and only then does the pool offer it.
+    #[test]
+    fn the_pool_offers_a_waiting_item_only_after_the_operator_answers() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let packet = concat!(
+            "- ### Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n",
+            "  - ⟦you: 1 · agent: 0 · done: 0⟧ [#ghrecvpolicypark] Decide whether backlog #ghrecvpolicy stays open. <!-- agent-doc:waiting-item -->\n",
+            "    - **Next:** you — reply under this item with the decision or result it asks for (evidence: no answer or attempt in its packet yet) ▫️\n",
+            "    - **Response:** Decide whether backlog #ghrecvpolicy stays open. ▫️\n",
+            "      - **Timestamp:** concise response trees ▫️\n",
+            "      - **Question:** What decision or completion result should be recorded? ▫️\n",
+            "      - **Next actions:** ▫️\n",
+            "        - **Action:** Decide whether backlog #ghrecvpolicy stays open. ▫️\n",
+        );
+        let doc = |answer: &str| {
+            format!(
+                "---\nsession: sid\nagent_doc_format: template\n---\n\n## Queue\n\n<!-- agent:queue subagents=4 go -->\n{packet}{answer}- do [#other]\n<!-- /agent:queue -->\n\n## Todo\n\n<!-- agent:todo -->\n- [ ] [#ghrecvpolicypark] Decide whether backlog #ghrecvpolicy stays open.\n<!-- /agent:todo -->\n"
+            )
+        };
+        let clock = crate::queue_claim::claim_clock_now_secs();
+        let _pin = crate::queue_claim::pin_claim_clock_for_current_thread(clock);
+
+        let unanswered = doc("");
+        std::fs::write(&file, &unanswered).unwrap();
+        let refill = pool_running_turn_refill_for_content(&file, &unanswered, Some("grok"))
+            .unwrap()
+            .expect("the other head fills a slot");
+        assert!(refill.text.contains("do [#other]"), "{}", refill.text);
+        assert!(
+            !refill.text.contains("ghrecvpolicypark"),
+            "an unanswered waiting item is the operator's: {}",
+            refill.text
+        );
+
+        let answered = doc("        - Complete multi-user access control for agent-doc.\n");
+        std::fs::write(&file, &answered).unwrap();
+        let refill = pool_running_turn_refill_for_content(&file, &answered, Some("grok"))
+            .unwrap()
+            .expect("the answered item and the other head fill slots");
+        assert!(refill.text.contains("ghrecvpolicypark"), "{}", refill.text);
+    }
+
     /// A frozen worker frees its slot: failed-continue recovery offers that
     /// same head first, and its fresh replacement attempt consumes the slot
     /// (`#subagentworkpool`).

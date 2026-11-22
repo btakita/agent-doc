@@ -704,6 +704,21 @@ fn claude_stop_response_with_quota(
             );
             (serde_json::json!({}), quota)
         }
+        // A controller that misses its RPC deadline is
+        // busy (an install recycle, a slow closeout, a saturated host), not
+        // proof that this turn owes a continuation. Blocking here forbade the
+        // final answer on a turn whose response had committed (sdk-dev.md,
+        // 2026-11-22, `timed out after 5.0s waiting for project controller
+        // response` while the controller served a 160 s commit). Allow the
+        // answer and tell the operator the check was skipped; the route
+        // supervisor's idle-queue watch still owns queue continuation.
+        Err(err) if claude_stop_error_is_controller_busy(&err) => {
+            eprintln!(
+                "[agent-doc] Claude Stop hook could not finish the queue-continuation check because \
+                 the project controller was busy: {err:#}. Allowing the final answer."
+            );
+            (claude_stop_controller_busy_output(&err), quota)
+        }
         Err(err) => (
             serde_json::to_value(ClaudeStopBlock {
                 decision: "block",
@@ -720,6 +735,30 @@ fn claude_stop_response_with_quota(
         return Ok((subagent_quota::announced_hook_output(applied), quota));
     }
     Ok((response, quota))
+}
+
+/// The error is only a project-controller RPC deadline
+/// (anywhere in its chain), so it says the controller is slow, not that the
+/// document owes anything.
+fn claude_stop_error_is_controller_busy(err: &anyhow::Error) -> bool {
+    agent_doc_cycle_state_io::post_commit_error::is_controller_deadline(err)
+}
+
+/// The degraded Stop answer for a busy controller:
+/// no `decision`, so the turn ends, plus a `systemMessage` so the skipped
+/// check is visible to the operator instead of silent.
+fn claude_stop_controller_busy_message(err: &anyhow::Error) -> String {
+    format!(
+        "agent-doc skipped the Stop-hook queue-continuation check: the project controller was too busy to answer ({}). The final answer was allowed instead of blocked; the route supervisor's idle-queue watch still continues the queue. If this turn owed a queue transition, run `agent-doc session-check <FILE>` once the controller answers.",
+        format!("{err:#}").replace('\n', " ")
+    )
+}
+
+fn claude_stop_controller_busy_output(err: &anyhow::Error) -> serde_json::Value {
+    ClaudeStopAnswer::Allow {
+        system_message: Some(claude_stop_controller_busy_message(err)),
+    }
+    .to_hook_output()
 }
 
 fn claude_stop_answer(input: &ClaudeStopInput) -> Result<ClaudeStopAnswer> {
@@ -1828,6 +1867,21 @@ fn transient_turn_end_continuation(
                 ),
             );
             return Ok(ClaudeStopAnswer::allow());
+        }
+        // A controller that missed its deadline did not
+        // show the rows are live; it showed nothing. Allow with a visible
+        // notice instead of holding a turn the operator cannot unblock.
+        Err(err) if claude_stop_error_is_controller_busy(&err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "claude_stop_transient_closeout_unreadable error={} action=allow_final_answer state=controller_busy",
+                    format!("{err:#}").replace('\n', " ")
+                ),
+            );
+            return Ok(ClaudeStopAnswer::Allow {
+                system_message: Some(claude_stop_controller_busy_message(&err)),
+            });
         }
         Err(err) => {
             agent_doc_ops_log_io::log_op(
@@ -6100,6 +6154,51 @@ fn now_secs() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The exact sdk-dev.md 2026-11-22 failure. A
+    /// controller RPC deadline is classified as a busy controller whether it
+    /// arrives bare (the queue-drain-stall status RPC) or under the
+    /// document-read context, and the hook answer it produces ends the turn
+    /// (no `decision`) while naming the skipped check to the operator.
+    #[test]
+    fn controller_deadline_degrades_to_visible_allow_instead_of_block() {
+        let bare = anyhow::Error::new(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "timed out after 5.0s waiting for project controller response",
+        ));
+        assert!(claude_stop_error_is_controller_busy(&bare));
+        let wrapped = anyhow::anyhow!("timed out after 5.0s waiting for project controller response")
+            .context("claude_stop_transient_closeout: failed to resolve current document tasks/sdk/sdk-dev.md");
+        assert!(claude_stop_error_is_controller_busy(&wrapped));
+
+        let output = claude_stop_controller_busy_output(&bare);
+        assert!(
+            output.get("decision").is_none(),
+            "a busy controller must not block the final answer: {output}"
+        );
+        let message = output
+            .get("systemMessage")
+            .and_then(serde_json::Value::as_str)
+            .expect("the skipped check is visible to the operator");
+        assert!(message.contains("route supervisor"), "{message}");
+        assert!(
+            message.contains("waiting for project controller response"),
+            "{message}"
+        );
+        assert!(
+            !message.contains("Do not send the final answer"),
+            "{message}"
+        );
+    }
+
+    /// Only a controller deadline degrades. Any other hook error still fails
+    /// closed on the first Stop so a genuinely broken check is reported.
+    #[test]
+    fn non_deadline_stop_error_is_not_a_busy_controller() {
+        let err = anyhow::anyhow!("state.db: malformed ledger row")
+            .context("load the bound session for this Stop");
+        assert!(!claude_stop_error_is_controller_busy(&err));
+    }
 
     fn actor(
         state: agent_doc_controller::actor::ActorState,

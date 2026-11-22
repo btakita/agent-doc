@@ -460,6 +460,12 @@ pub trait SessionCheckEffects {
     fn pending_retained_pending_only_commit(&self, _file: &Path) -> Result<bool> {
         Ok(false)
     }
+    /// The pending continuation would only
+    /// clear a superseded intent's recorded target (no editor, disk, or git
+    /// effect). Read-only session-check then warns instead of interrupting.
+    fn pending_only_commit_heal_is_bookkeeping(&self, _file: &Path) -> Result<bool> {
+        Ok(false)
+    }
     /// Whether this caller owns document/lifecycle recovery. The operator-facing
     /// `session-check` command sets this false for general recovery, while
     /// finalize/write/preflight own mutations.
@@ -2294,6 +2300,10 @@ impl<E: SessionCheckEffects> SessionCheckEffects for StatusOnlySessionCheckEffec
         self.inner.pending_retained_pending_only_commit(file)
     }
 
+    fn pending_only_commit_heal_is_bookkeeping(&self, file: &Path) -> Result<bool> {
+        self.inner.pending_only_commit_heal_is_bookkeeping(file)
+    }
+
     fn allows_recovery(&self) -> bool {
         false
     }
@@ -3002,11 +3012,25 @@ fn run_with_options_inner(
             crate::invalidate_current_document_pass(file);
         }
     } else if effects.pending_retained_pending_only_commit(file)? {
-        return Err(pending_self_heal_interruption(
-            file,
-            SelfHeal::RetainedPendingOnlyCommit,
-            "an exact tracked-work-only `write --commit` converged in the editor and disk, and its durable git effect would be committed (or its superseded intent retired)",
-        ));
+        // Retiring a superseded intent whose
+        // retained write already settled changes no document, disk, or git
+        // state. Report it, but do not hold the closeout on bookkeeping.
+        if effects.pending_only_commit_heal_is_bookkeeping(file)? {
+            eprintln!(
+                "{}",
+                pending_self_heal_warning(
+                    file,
+                    SelfHeal::RetainedPendingOnlyCommit,
+                    "a tracked-work-only `write --commit` intent was superseded by a later committed document; its recorded target would be retired (no document, disk, or git change)",
+                )
+            );
+        } else {
+            return Err(pending_self_heal_interruption(
+                file,
+                SelfHeal::RetainedPendingOnlyCommit,
+                "an exact tracked-work-only `write --commit` converged in the editor and disk, and its durable git effect would be committed (or its superseded intent retired)",
+            ));
+        }
     }
     // The lossless replay canonicalization is itself a binary-owned document
     // mutation. A terminal session-check may not report `OK` until the same

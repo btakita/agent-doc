@@ -1476,6 +1476,16 @@ fn read_document_baseline(file: &Path) -> Result<Option<String>> {
     agent_doc_snapshot_io::load_document_baseline(file)
 }
 
+/// What the committed-cycle gate decided.
+#[derive(Debug, PartialEq, Eq)]
+enum CommittedCycleGate {
+    /// Continue the write; `Some` is the fresh HEAD baseline of a reopened cycle.
+    Proceed(Option<String>),
+    /// An empty-body `write --commit` committed the visible response the closed
+    /// cycle never committed. Nothing else is left to write.
+    VisibleResponseAbsorbed,
+}
+
 /// Pre-write gate for a baseline-backed closeout against an already-`committed`
 /// cycle (`#finalize-stale-baseline-reopen-friction`).
 ///
@@ -1486,25 +1496,28 @@ fn read_document_baseline(file: &Path) -> Result<Option<String>> {
 /// for a legitimately new response.
 ///
 /// Returns:
-/// - `Ok(None)` — no gate applies (open cycle or non-finalize mode).
-/// - `Ok(Some(fresh_baseline))` — a genuinely new response was supplied after the
-///   commit, so the cycle is auto-reopened from `HEAD` and the caller must diff the
-///   new response against this `HEAD` baseline (the stale explicit baseline is
+/// - `Proceed(None)` — no gate applies (open cycle or non-finalize mode).
+/// - `Proceed(Some(fresh_baseline))` — a genuinely new response was supplied after
+///   the commit, so the cycle is auto-reopened from `HEAD` and the caller must diff
+///   the new response against this `HEAD` baseline (the stale explicit baseline is
 ///   discarded). This is exactly what a manual `preflight` reopen would do.
+/// - `VisibleResponseAbsorbed` — an empty body committed the visible response
+///   the closed cycle left uncommitted.
 /// - `Err(..)` — fail closed. A true replay (the incoming response is already
 ///   materialized in `HEAD`) must not be re-applied (duplicate-block risk); an
-///   empty/repair response or a non-git document cannot be safely auto-reopened.
+///   empty body that cannot absorb a visible response names the step that can,
+///   and a non-git document cannot be safely auto-reopened.
 fn guard_no_baseline_replay_after_committed_cycle(
     file: &Path,
     commit_mode: CommitMode,
     has_tracked_work_mutations: bool,
-) -> Result<Option<String>> {
+) -> Result<CommittedCycleGate> {
     if commit_mode != CommitMode::Required {
-        return Ok(None);
+        return Ok(CommittedCycleGate::Proceed(None));
     }
 
     let Some(cycle_id) = agent_doc_flow_io::closeout::cycle_already_committed(file) else {
-        return Ok(None);
+        return Ok(CommittedCycleGate::Proceed(None));
     };
 
     // `#committedwedge`: a pending-only closeout (`--backlog-add`, `--done`,
@@ -1540,7 +1553,7 @@ fn guard_no_baseline_replay_after_committed_cycle(
             "[finalize] cycle `{cycle_id}` was already committed; reopened a fresh cycle for a \
              pending-only tracked-work update (#committedwedge)"
         );
-        return Ok(Some(head));
+        return Ok(CommittedCycleGate::Proceed(Some(head)));
     }
 
     guard_no_baseline_replay_after_committed_cycle_inner(file, commit_mode)
@@ -1549,13 +1562,13 @@ fn guard_no_baseline_replay_after_committed_cycle(
 fn guard_no_baseline_replay_after_committed_cycle_inner(
     file: &Path,
     commit_mode: CommitMode,
-) -> Result<Option<String>> {
+) -> Result<CommittedCycleGate> {
     if commit_mode != CommitMode::Required {
-        return Ok(None);
+        return Ok(CommittedCycleGate::Proceed(None));
     }
 
     let Some(cycle_id) = agent_doc_flow_io::closeout::cycle_already_committed(file) else {
-        return Ok(None);
+        return Ok(CommittedCycleGate::Proceed(None));
     };
 
     // Read the incoming response now and re-stash it so the downstream write path
@@ -1587,6 +1600,46 @@ fn guard_no_baseline_replay_after_committed_cycle_inner(
         )
     };
 
+    // An empty body is not "a response already in
+    // HEAD" (an empty probe is vacuously materialized). `session-check` names
+    // a bare `agent-doc write --commit <FILE>` for a visible response the closed
+    // cycle never committed (`direct_response_patchback`), and the refusal
+    // below told the agent that same command had nothing to replay, so the two
+    // pointed at each other (agent-doc-bugs.md 2026-11-22, cycle-1795379255768).
+    // Absorb the visible response here, or name the one step that can.
+    if response.trim().is_empty() {
+        if agent_doc_commit_io::commit_visible_uncommitted_response(file)? {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "baseline_replay_visible_response_absorbed file={} cycle_id={}",
+                    file.display(),
+                    cycle_id
+                ),
+            );
+            eprintln!(
+                "[finalize] cycle `{cycle_id}` was already committed; committed the visible uncommitted response it left behind"
+            );
+            return Ok(CommittedCycleGate::VisibleResponseAbsorbed);
+        }
+        log_rejection("empty_response");
+        let file_display = file.display().to_string();
+        let next = match agent_doc_commit_io::visible_uncommitted_response_absorb_blocker_for_file(
+            file,
+        )? {
+            Some(blocker) => agent_doc_commit_io::visible_response_absorb_blocked_recovery(
+                &file_display,
+                blocker,
+            ),
+            None => {
+                format!("run `agent-doc session-check {file_display}` for the remaining recovery")
+            }
+        };
+        anyhow::bail!(
+            "[finalize] pre-write gate: the latest agent-doc cycle `{cycle_id}` for {file_display} is already `committed` and stdin carried no response body; {next}."
+        );
+    }
+
     // True replay: the incoming response is already committed in HEAD. Re-applying
     // it risks a duplicate block, and the work is already durable — fail closed.
     //
@@ -1603,12 +1656,6 @@ fn guard_no_baseline_replay_after_committed_cycle_inner(
             "{}",
             committed_response_replay_refusal(&cycle_id, &file.display().to_string())
         ));
-    }
-
-    // Empty/repair response (pending-only closeout) — keep failing closed; the
-    // auto-reopen path is for genuinely new assistant responses only.
-    if response.trim().is_empty() {
-        return Err(reject("empty_response"));
     }
 
     // No HEAD (non-git or empty repo) — cannot mint a safe HEAD baseline.
@@ -1633,7 +1680,7 @@ fn guard_no_baseline_replay_after_committed_cycle_inner(
         "[finalize] cycle `{}` was already committed; auto-reopened a fresh cycle for the new response (baseline refreshed to HEAD) instead of requiring a manual preflight.",
         cycle_id
     );
-    Ok(Some(head))
+    Ok(CommittedCycleGate::Proceed(Some(head)))
 }
 
 /// The refusal `write --commit` prints when the response it was handed is
@@ -4236,9 +4283,10 @@ fn run_command_inner_within_pass(
         commit_mode,
         has_tracked_work_mutations,
     )? {
+        CommittedCycleGate::VisibleResponseAbsorbed => return Ok(()),
         // Auto-reopened a committed cycle for a genuinely new response: diff against
         // the fresh HEAD baseline, not a stale lifecycle projection.
-        Some(fresh_head_baseline) => {
+        CommittedCycleGate::Proceed(Some(fresh_head_baseline)) => {
             // `#reopencloseoutowner`: the first lease attempt runs before this
             // compatibility gate and therefore sees the previous terminal cycle.
             // The controller correctly returns `CycleSuperseded`, but continuing
@@ -4262,7 +4310,7 @@ fn run_command_inner_within_pass(
             }
             Some(fresh_head_baseline)
         }
-        None => read_document_baseline(file)?,
+        CommittedCycleGate::Proceed(None) => read_document_baseline(file)?,
     };
 
     if has_pending_ops {

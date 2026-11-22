@@ -1747,11 +1747,101 @@ pub fn visible_uncommitted_response_is_absorbable(
     snapshot: &str,
     current: &str,
 ) -> bool {
-    document_only_exchange_is_unchanged(snapshot, current)
-        && normalize_transient_agent_doc_markers(current)
-            != normalize_transient_agent_doc_markers(head)
-        && agent_doc_turn::document_drift::detect_bypassed_response_write_between(head, snapshot)
+    visible_uncommitted_response_absorb_blocker(head, Some(snapshot), current).is_none()
+}
+
+/// Why [`commit_visible_uncommitted_response`] cannot absorb the visible
+/// response. `write --commit` with an empty body and
+/// the `direct_response_patchback` recovery `session-check` names both render
+/// their next step from this one value, so the two commands cannot point at
+/// each other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VisibleResponseAbsorbBlocker {
+    /// The current document carries no `### Re:` response that HEAD lacks.
+    NoUncommittedResponse,
+    /// The current document carries a response HEAD lacks, but the closed
+    /// cycle's snapshot does not hold it, so it is not that cycle's response.
+    ResponseNewerThanSnapshot,
+    /// The snapshot holds the response, but the exchange changed after it
+    /// (a later prompt or response). Committing it alone could hide the
+    /// change from the next turn's diff.
+    ExchangeChangedAfterSnapshot,
+}
+
+/// Pure blocker classification; `None` exactly when
+/// [`visible_uncommitted_response_is_absorbable`] holds.
+pub fn visible_uncommitted_response_absorb_blocker(
+    head: &str,
+    snapshot: Option<&str>,
+    current: &str,
+) -> Option<VisibleResponseAbsorbBlocker> {
+    let snapshot_holds_response = snapshot.is_some_and(|snapshot| {
+        agent_doc_turn::document_drift::detect_bypassed_response_write_between(head, snapshot)
             .is_some()
+    });
+    let Some(snapshot) = snapshot.filter(|_| snapshot_holds_response) else {
+        return Some(
+            if agent_doc_turn::document_drift::detect_bypassed_response_write_between(head, current)
+                .is_some()
+            {
+                VisibleResponseAbsorbBlocker::ResponseNewerThanSnapshot
+            } else {
+                VisibleResponseAbsorbBlocker::NoUncommittedResponse
+            },
+        );
+    };
+    if !document_only_exchange_is_unchanged(snapshot, current) {
+        return Some(VisibleResponseAbsorbBlocker::ExchangeChangedAfterSnapshot);
+    }
+    if normalize_transient_agent_doc_markers(current) == normalize_transient_agent_doc_markers(head)
+    {
+        return Some(VisibleResponseAbsorbBlocker::NoUncommittedResponse);
+    }
+    None
+}
+
+/// [`visible_uncommitted_response_absorb_blocker`] for `file`'s HEAD, durable
+/// snapshot, and current authority. `None` also when a cycle is open: the open
+/// cycle's own closeout owns its response.
+pub fn visible_uncommitted_response_absorb_blocker_for_file(
+    file: &Path,
+) -> Result<Option<VisibleResponseAbsorbBlocker>> {
+    let cycle = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
+    if cycle.as_ref().is_some_and(|state| state.phase.is_open()) {
+        return Ok(None);
+    }
+    let current = commit_current_document_content(file, "visible_response_absorb_blocker")?;
+    let head = agent_doc_git_io::revision::show_head(file)?.unwrap_or_default();
+    let snapshot = agent_doc_snapshot_io::load_document_baseline(file)?;
+    Ok(visible_uncommitted_response_absorb_blocker(
+        &head,
+        snapshot.as_deref(),
+        &current,
+    ))
+}
+
+/// The one next step for a visible response the closed cycle never committed
+/// and an empty-body `write --commit` cannot absorb.
+pub fn visible_response_absorb_blocked_recovery(
+    file: &str,
+    blocker: VisibleResponseAbsorbBlocker,
+) -> String {
+    let reason = match blocker {
+        VisibleResponseAbsorbBlocker::NoUncommittedResponse => {
+            return format!(
+                "the document carries no visible uncommitted `### Re:` response for an empty-body `agent-doc write --commit {file}` to absorb; run `agent-doc session-check {file}` for the remaining recovery"
+            );
+        }
+        VisibleResponseAbsorbBlocker::ResponseNewerThanSnapshot => {
+            "it is newer than the closed cycle's snapshot"
+        }
+        VisibleResponseAbsorbBlocker::ExchangeChangedAfterSnapshot => {
+            "the exchange changed after the closed cycle's snapshot (a later prompt or response), and committing the response alone could hide that change from the next turn"
+        }
+    };
+    format!(
+        "the visible uncommitted `### Re:` response cannot be committed on its own because {reason}. Send this turn's next response through `agent-doc write --commit {file}`: it reopens a cycle from HEAD and commits the visible response with it. Do not re-send the visible response itself, and do not `--force-disk`"
+    )
 }
 
 /// Whether a stale snapshot may be replaced by current document authority for

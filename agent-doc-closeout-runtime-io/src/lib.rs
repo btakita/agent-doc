@@ -638,8 +638,29 @@ fn retained_pending_only_commit_is_pending(
     effects: &impl agent_doc_session_check_io::SessionCheckEffects,
     file: &Path,
 ) -> Result<bool> {
+    Ok(retained_pending_only_commit_pending_kind(effects, file)?
+        != PendingOnlyCommitPendingKind::NotPending)
+}
+
+/// What the pending-only continuation would do now, read-only
+///.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PendingOnlyCommitPendingKind {
+    NotPending,
+    /// It would commit, roll back, or retire a retained editor projection.
+    DocumentEffect,
+    /// It would only clear a superseded intent's recorded target: no editor,
+    /// disk, or git effect, so it must not block a closeout.
+    RetireSupersededIntent,
+}
+
+fn retained_pending_only_commit_pending_kind(
+    effects: &impl agent_doc_session_check_io::SessionCheckEffects,
+    file: &Path,
+) -> Result<PendingOnlyCommitPendingKind> {
+    use PendingOnlyCommitPendingKind as Kind;
     let Some(mut state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
-        return Ok(false);
+        return Ok(Kind::NotPending);
     };
     if state.pending_only_commit_target_hash.is_none()
         && state.phase == agent_doc_turn::CyclePhase::Committed
@@ -677,16 +698,47 @@ fn retained_pending_only_commit_is_pending(
     )?;
     Ok(
         match pending_only_commit_target(file, &state, &authority_content, &disk_content)? {
-            PendingOnlyCommitDecision::NotReady => false,
+            PendingOnlyCommitDecision::NotReady => Kind::NotPending,
             // A retained projection that still blocks is reported by the
             // retained-write gate; the resume would wait on it too.
             PendingOnlyCommitDecision::Eligible { .. } => {
-                !effects.retained_document_write_blocks(file)
+                if effects.retained_document_write_blocks(file) {
+                    Kind::NotPending
+                } else {
+                    Kind::DocumentEffect
+                }
             }
-            PendingOnlyCommitDecision::Superseded { .. }
-            | PendingOnlyCommitDecision::InvalidAtomicCompletion { .. } => true,
+            PendingOnlyCommitDecision::Superseded { target_hash } => {
+                superseded_pending_only_commit_kind(
+                    agent_doc_document_realtime_io::pending_document_write(file)
+                        .map(|pending| pending.target_hash)
+                        .as_deref(),
+                    &target_hash,
+                )
+            }
+            PendingOnlyCommitDecision::InvalidAtomicCompletion { .. } => Kind::DocumentEffect,
         },
     )
+}
+
+/// The resume retires a superseded intent's
+/// retained projection only when that projection still targets it; otherwise
+/// the retirement is a pure ledger clear. sdk-dev.md 2026-11-22: a
+/// tracked-work-only `write --commit` recorded target `99c86478…`, its retained
+/// write persisted, the turn's response then committed a newer document
+/// (`52e96296`), and read-only `session-check` reported the stale target as an
+/// INTERRUPTED closeout until someone ran the heal.
+fn superseded_pending_only_commit_kind(
+    retained_target_hash: Option<&str>,
+    superseded_target_hash: &str,
+) -> PendingOnlyCommitPendingKind {
+    if retained_target_hash
+        .is_some_and(|retained| retained.eq_ignore_ascii_case(superseded_target_hash))
+    {
+        PendingOnlyCommitPendingKind::DocumentEffect
+    } else {
+        PendingOnlyCommitPendingKind::RetireSupersededIntent
+    }
 }
 
 fn read_only_session_check_mutation<T>(operation: &str) -> Result<T> {
@@ -717,6 +769,11 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeReadOnlySessionC
 
     fn pending_retained_pending_only_commit(&self, file: &Path) -> Result<bool> {
         retained_pending_only_commit_is_pending(self, file)
+    }
+
+    fn pending_only_commit_heal_is_bookkeeping(&self, file: &Path) -> Result<bool> {
+        Ok(retained_pending_only_commit_pending_kind(self, file)?
+            == PendingOnlyCommitPendingKind::RetireSupersededIntent)
     }
 
     fn allows_recovery(&self) -> bool {
@@ -849,6 +906,11 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeApplyingSessionC
 
     fn pending_retained_pending_only_commit(&self, file: &Path) -> Result<bool> {
         retained_pending_only_commit_is_pending(self, file)
+    }
+
+    fn pending_only_commit_heal_is_bookkeeping(&self, file: &Path) -> Result<bool> {
+        Ok(retained_pending_only_commit_pending_kind(self, file)?
+            == PendingOnlyCommitPendingKind::RetireSupersededIntent)
     }
 
     fn settle_response_replay_canonicalization(&self, file: &Path) -> Result<()> {
@@ -2076,6 +2138,25 @@ mod tests {
     use agent_doc_session_check_io::{CapturedFinalizeResumeOutcome, SessionCheckEffects};
     use agent_doc_turn::CyclePhase;
 
+    /// A superseded intent blocks a closeout
+    /// only while its own retained projection is still pending; once that write
+    /// settled, retiring it is a pure ledger clear.
+    #[test]
+    fn superseded_pending_only_intent_is_bookkeeping_unless_its_projection_is_retained() {
+        assert_eq!(
+            superseded_pending_only_commit_kind(None, "99c8"),
+            PendingOnlyCommitPendingKind::RetireSupersededIntent
+        );
+        assert_eq!(
+            superseded_pending_only_commit_kind(Some("6921"), "99c8"),
+            PendingOnlyCommitPendingKind::RetireSupersededIntent
+        );
+        assert_eq!(
+            superseded_pending_only_commit_kind(Some("99C8"), "99c8"),
+            PendingOnlyCommitPendingKind::DocumentEffect
+        );
+    }
+
     #[test]
     fn post_commit_maintenance_skips_an_unchanged_tracked_list() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -3025,6 +3106,24 @@ fn closeout_recovery_hint_for_state(
     file: &Path,
     state: agent_doc_turn::closeout_recovery::CloseoutRecoveryState,
 ) -> String {
+    // : `direct_response_patchback` names a bare
+    // `write --commit`, whose empty body absorbs the visible response only when
+    // `commit_visible_uncommitted_response` can. When it cannot, name the same
+    // step the write's refusal names, so the two commands agree.
+    if state == agent_doc_turn::closeout_recovery::CloseoutRecoveryState::DirectResponsePatchback
+        && let Ok(Some(blocker)) =
+            agent_doc_commit_io::visible_uncommitted_response_absorb_blocker_for_file(file)
+        && blocker != agent_doc_commit_io::VisibleResponseAbsorbBlocker::NoUncommittedResponse
+    {
+        return format!(
+            "Recovery [{}]: {}.",
+            state.as_str(),
+            agent_doc_commit_io::visible_response_absorb_blocked_recovery(
+                &file.display().to_string(),
+                blocker,
+            )
+        );
+    }
     match agent_doc_flow_io::closeout::closeout_recovery_command_for_file(file, state) {
         Some(command) => format!("Recovery [{}]: {}.", state.as_str(), command),
         // `#deadlockhint`: the caller saw drift but the recovery classifier found

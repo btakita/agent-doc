@@ -13,7 +13,13 @@ pub const DEFAULT_LOCAL_MODEL_LEASE_REGISTRY_RELATIVE: &str = ".tsift/gpu-lease.
 /// Future timestamps are treated as fresh to tolerate small wall-clock skew
 /// between cooperating processes.
 pub fn timestamp_is_fresh(observed_secs: u64, now_secs: u64, ttl: Duration) -> bool {
-    now_secs.saturating_sub(observed_secs) <= ttl.as_secs()
+    timestamp_age_secs(observed_secs, now_secs) <= ttl.as_secs()
+}
+
+/// Seconds elapsed since `observed_secs`, as diagnostics report a heartbeat's
+/// age. A future timestamp (wall-clock skew) reads as zero seconds old.
+pub fn timestamp_age_secs(observed_secs: u64, now_secs: u64) -> u64 {
+    now_secs.saturating_sub(observed_secs)
 }
 
 /// Oldest heartbeat timestamp eligible for an atomic expired-lease claim.
@@ -139,6 +145,12 @@ mod tests {
     fn expiration_cutoff_saturates_at_the_epoch() {
         assert_eq!(expiration_cutoff(100, Duration::from_secs(30)), 70);
         assert_eq!(expiration_cutoff(10, Duration::from_secs(30)), 0);
+    }
+
+    #[test]
+    fn timestamp_age_reads_future_timestamps_as_zero() {
+        assert_eq!(timestamp_age_secs(70, 100), 30);
+        assert_eq!(timestamp_age_secs(120, 100), 0);
     }
 
     #[test]

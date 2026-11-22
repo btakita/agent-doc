@@ -3866,6 +3866,68 @@ Duplicate replay should stay live.
         );
     }
 
+    /// Agent-doc-bugs.md 2026-11-22. `session-check`
+    /// named `write --commit` for a visible response its committed cycle never
+    /// committed, and the empty-body write refused it as "already committed in
+    /// HEAD". The blocker classification is what both commands now render their
+    /// next step from; it is `None` exactly when the absorb would run.
+    #[test]
+    fn visible_response_absorb_blocker_names_why_an_empty_write_cannot_absorb() {
+        use agent_doc_commit_io::{
+            VisibleResponseAbsorbBlocker as Blocker, visible_uncommitted_response_absorb_blocker,
+        };
+        let head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ parameterize a GPU instance\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let answered = head.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: parameterize a GPU instance — gpt-5 · 2026-09-29T18:12-04:00\n\nTwo PRs.\n<!-- /agent:exchange -->",
+        );
+        let later = answered.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: Subagent completed: `subagent:recap` — agent-doc\n\nDone.\n<!-- /agent:exchange -->",
+        );
+
+        assert_eq!(
+            visible_uncommitted_response_absorb_blocker(head, Some(&answered), &answered),
+            None
+        );
+        assert!(
+            agent_doc_commit_io::visible_uncommitted_response_is_absorbable(
+                head, &answered, &answered
+            )
+        );
+        assert_eq!(
+            visible_uncommitted_response_absorb_blocker(head, Some(&answered), &later),
+            Some(Blocker::ExchangeChangedAfterSnapshot)
+        );
+        assert_eq!(
+            visible_uncommitted_response_absorb_blocker(head, Some(head), &answered),
+            Some(Blocker::ResponseNewerThanSnapshot)
+        );
+        assert_eq!(
+            visible_uncommitted_response_absorb_blocker(head, None, head),
+            Some(Blocker::NoUncommittedResponse)
+        );
+
+        let recovery = agent_doc_commit_io::visible_response_absorb_blocked_recovery(
+            "session.md",
+            Blocker::ExchangeChangedAfterSnapshot,
+        );
+        assert!(
+            recovery.contains("agent-doc write --commit session.md"),
+            "{recovery}"
+        );
+        assert!(recovery.contains("next response"), "{recovery}");
+        assert!(
+            !recovery.contains("already committed in HEAD"),
+            "{recovery}"
+        );
+    }
+
     /// Sets up the `#strandedremedydeadlock` shape: `snapshot == HEAD`, and the
     /// only difference is typed-component (queue/backlog) drift in the
     /// editor-authoritative document.

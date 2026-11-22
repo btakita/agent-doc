@@ -25,6 +25,14 @@ const FOREGROUND_BACKGROUND_POLL: Duration = Duration::from_millis(10);
 /// lease holder: an owner's clear-then-unlock (whose own clear retries for up
 /// to 500 ms) or lock-then-publish step, not an apply body.
 const QUEUE_APPLY_HANDOFF_GRACE: Duration = Duration::from_secs(2);
+/// How long an operator-invoked repair waits for the
+/// live apply owner before reporting the deferral. A closeout on a saturated
+/// host held the flock for 160 s (sdk-dev.md 2026-11-22: `commit_latency
+/// total_ms=160021`), and every `repair --session-check-heal` in that window
+/// failed at once with `queue mutation deferred`, so the pending self-heal it
+/// was asked to apply never ran.
+pub const OPERATOR_REPAIR_OWNER_WAIT: Duration = Duration::from_secs(180);
+const OPERATOR_REPAIR_OWNER_POLL: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueueEditOwnerLease {
@@ -423,6 +431,37 @@ pub fn foreign_queue_edit_in_flight(file: &str) -> Option<u32> {
     )
 }
 
+/// Who holds the queue apply lease, in operator words.
+/// The deferral used to say only "another owner is applying maintenance", which
+/// read as background maintenance even when the holder was a slow foreground
+/// closeout, so nobody could tell what to wait for.
+pub fn describe_queue_edit_owner(lease: Option<&QueueEditOwnerLease>, now: u64) -> String {
+    let Some(lease) = lease else {
+        return "holder: an owner between lease and unlock".to_string();
+    };
+    let kind = if lease.holder.starts_with(BACKGROUND_QUEUE_EDIT_OWNER_PREFIX) {
+        "background queue maintenance"
+    } else if lease.holder.starts_with(DIRECT_QUEUE_EDIT_OWNER_PREFIX) {
+        "a foreground queue apply (closeout, write, queue, or repair)"
+    } else {
+        "a queue apply owner"
+    };
+    format!(
+        "holder: {kind}, pid {}, last heartbeat {}s ago",
+        lease.holder_pid,
+        agent_doc_lease::timestamp_age_secs(lease.heartbeat_secs, now)
+    )
+}
+
+fn queue_mutation_deferred_error(file: &Path) -> anyhow::Error {
+    let lease = read_queue_edit_owner_lease(&file.to_string_lossy());
+    anyhow::anyhow!(
+        "queue mutation deferred: another owner is applying maintenance for {} ({}); retry after it completes",
+        file.display(),
+        describe_queue_edit_owner(lease.as_ref(), now_secs()),
+    )
+}
+
 #[cfg(unix)]
 fn pid_is_live(pid: u32) -> bool {
     let ret = unsafe { libc::kill(pid as libc::pid_t, 0) };
@@ -499,13 +538,41 @@ impl QueueEditGuard {
                 return Ok(guard);
             }
             if std::time::Instant::now() >= deadline {
-                anyhow::bail!(
-                    "queue mutation deferred: another owner is applying maintenance for {}; retry after it completes",
-                    file.display()
-                );
+                return Err(queue_mutation_deferred_error(file));
             }
             std::thread::sleep(poll);
         }
+    }
+
+    /// Acquire the apply capability for an operator-invoked repair.
+    ///
+    /// `repair --session-check-heal` is the command `session-check` names for a
+    /// pending self-heal. It used to take [`Self::acquire`], which fails a live
+    /// foreground holder after the short handoff grace, so while one slow
+    /// closeout held the flock every heal attempt failed and the heal stayed
+    /// pending. Wait for whichever live owner holds it, bounded by `wait`
+    /// (the command passes [`OPERATOR_REPAIR_OWNER_WAIT`]), and say once what
+    /// is being waited on.
+    pub fn acquire_for_operator_repair(file: &Path, wait: Duration) -> Result<Self> {
+        Self::acquire_for_operator_repair_bounded(file, wait, OPERATOR_REPAIR_OWNER_POLL)
+    }
+
+    pub(crate) fn acquire_for_operator_repair_bounded(
+        file: &Path,
+        wait: Duration,
+        poll: Duration,
+    ) -> Result<Self> {
+        if let Some(guard) = Self::try_acquire(file)? {
+            return Ok(guard);
+        }
+        let lease = read_queue_edit_owner_lease(&file.to_string_lossy());
+        eprintln!(
+            "[repair] waiting up to {}s for the live queue apply owner of {} to finish ({})",
+            wait.as_secs(),
+            file.display(),
+            describe_queue_edit_owner(lease.as_ref(), now_secs()),
+        );
+        Self::acquire_waiting_for_any_holder(file, wait, poll)
     }
 
     fn acquire_with_background_wait(file: &Path, wait: Duration) -> Result<Self> {
@@ -558,10 +625,7 @@ impl QueueEditGuard {
                 std::thread::sleep(FOREGROUND_BACKGROUND_POLL);
                 continue;
             }
-            anyhow::bail!(
-                "queue mutation deferred: another owner is applying maintenance for {}; retry after it completes",
-                file.display()
-            );
+            return Err(queue_mutation_deferred_error(file));
         }
     }
 
@@ -958,6 +1022,68 @@ mod tests {
 
         drop(apply);
         QueueEditGuard::acquire(&file).expect("direct edit enters after apply guard drops");
+    }
+
+    /// The deferral names the live holder, and an
+    /// operator repair waits out a slow foreground closeout instead of failing
+    /// while it holds the flock (sdk-dev.md 2026-11-22: a 160 s commit made
+    /// every `repair --session-check-heal` fail at once).
+    #[test]
+    fn operator_repair_waits_for_a_live_foreground_holder_and_deferral_names_it() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+
+        let closeout = QueueEditGuard::acquire(&file).unwrap();
+        let refused = QueueEditGuard::acquire(&file).unwrap_err().to_string();
+        assert!(refused.contains("queue mutation deferred"), "{refused}");
+        assert!(
+            refused.contains("a foreground queue apply")
+                && refused.contains(&format!("pid {}", std::process::id())),
+            "the deferral names who holds the flock: {refused}"
+        );
+        let bounded = QueueEditGuard::acquire_for_operator_repair_bounded(
+            &file,
+            Duration::from_millis(50),
+            Duration::from_millis(5),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(bounded.contains("queue mutation deferred"), "{bounded}");
+
+        let holder = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            drop(closeout);
+        });
+        let repair = QueueEditGuard::acquire_for_operator_repair_bounded(
+            &file,
+            Duration::from_secs(20),
+            Duration::from_millis(5),
+        )
+        .expect("the repair runs once the closeout releases the flock");
+        holder.join().unwrap();
+        drop(repair);
+    }
+
+    #[test]
+    fn describe_queue_edit_owner_distinguishes_background_from_foreground() {
+        let background = QueueEditOwnerLease {
+            holder: format!("{BACKGROUND_QUEUE_EDIT_OWNER_PREFIX}abc"),
+            holder_pid: 7,
+            heartbeat_secs: 100,
+        };
+        let foreground = QueueEditOwnerLease {
+            holder: format!("{DIRECT_QUEUE_EDIT_OWNER_PREFIX}abc"),
+            holder_pid: 8,
+            heartbeat_secs: 100,
+        };
+        assert_eq!(
+            describe_queue_edit_owner(Some(&background), 130),
+            "holder: background queue maintenance, pid 7, last heartbeat 30s ago"
+        );
+        assert!(describe_queue_edit_owner(Some(&foreground), 100).contains("foreground"));
+        assert!(describe_queue_edit_owner(None, 100).contains("between lease and unlock"));
     }
 
     /// `#resumemaintrace`: the owner that committed a cycle `respond` failed to

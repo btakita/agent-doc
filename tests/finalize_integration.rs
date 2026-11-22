@@ -2267,6 +2267,48 @@ fn finalize_late_claimed_response_ignores_unrelated_visible_queue_heads() {
     );
 }
 
+/// An empty-body closeout after a committed cycle is
+/// not "a response already in HEAD" (an empty probe is vacuously
+/// materialized). With nothing visible to absorb it must say stdin carried no
+/// body and name the next step, never the replay refusal that contradicted
+/// `session-check`'s `write --commit` recovery (agent-doc-bugs.md 2026-11-22).
+#[test]
+fn finalize_stream_empty_body_after_committed_cycle_is_not_called_a_replay() {
+    let (tmp, doc) = setup_session_stream_doc();
+    init_git_repo(tmp.path(), &doc);
+
+    let original = fs::read_to_string(&doc).unwrap();
+    checkpoint_baseline(tmp.path(), &original);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--stream",
+            "--origin",
+            "skill",
+        ])
+        .write_stdin("<!-- patch:exchange -->\n### Re: first — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n<!-- patch:recap -->\nCommitted.\n<!-- /patch:recap -->\n")
+        .assert()
+        .success();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--stream",
+            "--origin",
+            "skill",
+        ])
+        .write_stdin("")
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("stdin carried no response body"))
+        .stderr(predicates::str::contains("already committed in HEAD").not());
+}
+
 #[test]
 fn finalize_stream_rejects_true_duplicate_replay_after_committed_cycle() {
     // The auto-reopen does NOT weaken duplicate protection: a true replay (the

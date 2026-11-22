@@ -211,8 +211,19 @@ mod tests {
         let _incumbent =
             agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
 
-        let error = agent_doc_repair_command_io::run_session_check_heal(&doc).unwrap_err();
-        assert!(error.to_string().contains("queue mutation deferred"));
+        // The heal waits (bounded) for the live owner, then defers without any
+        // heal effect; a short bound keeps the incumbent-held case fast.
+        let error = agent_doc_repair_command_io::run_session_check_heal_waiting_for_owner(
+            &doc,
+            std::time::Duration::from_millis(200),
+        )
+        .unwrap_err();
+        let error = error.to_string();
+        assert!(error.contains("queue mutation deferred"), "{error}");
+        assert!(
+            error.contains("a foreground queue apply"),
+            "the deferral names the holder kind: {error}"
+        );
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
         assert_eq!(
             agent_doc_snapshot_io::load_document_baseline(&doc).unwrap(),

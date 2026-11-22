@@ -1249,6 +1249,19 @@ pub fn run_session_check(file: &Path, codex_final_gate: bool) -> Result<()> {
 /// exactly the self-heals the read-only `session-check` reports, through the
 /// same check, then report its terminal status. Rerun `session-check` after.
 pub fn run_session_check_heal(file: &Path) -> Result<()> {
+    run_session_check_heal_waiting_for_owner(
+        file,
+        agent_doc_queue_io::queue_edit_owner::OPERATOR_REPAIR_OWNER_WAIT,
+    )
+}
+
+/// [`run_session_check_heal`] with an explicit bound on how long it waits for
+/// a live queue apply owner before deferring. Every heal effect runs after
+/// that wait, under the acquired guard.
+pub fn run_session_check_heal_waiting_for_owner(
+    file: &Path,
+    owner_wait: std::time::Duration,
+) -> Result<()> {
     // Removed-claim settlement has its own completion-feedback transaction.
     // It must finish before this repair owns QueueEditGuard so the global lock
     // order remains completion -> queue apply and cannot ABBA with reporters.
@@ -1258,7 +1271,12 @@ pub fn run_session_check_heal(file: &Path) -> Result<()> {
     // guard, since the worker body takes the apply flock itself.
     recover_orphaned_queue_maintenance_before_closeout(file, "session_check_heal");
     {
-        let apply_guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(file)?;
+        // Wait out a live closeout instead of failing
+        // the heal `session-check` named while that closeout holds the flock.
+        let apply_guard =
+            agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire_for_operator_repair(
+                file, owner_wait,
+            )?;
         let session_effects =
             agent_doc_closeout_runtime_io::session_check_effects_under_apply_guard(
                 file,

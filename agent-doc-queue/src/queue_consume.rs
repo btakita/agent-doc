@@ -8775,7 +8775,7 @@ mod tests {
             "{annotated}"
         );
         assert!(
-            annotated.contains("**Guidance:** Safe to delete the whole tree under [#q-4775b8697412]; every row in it is struck"),
+            annotated.contains("**Guidance:** Safe to delete the whole tree under `Waiting on you`; every row in it is struck"),
             "{annotated}"
         );
 
@@ -8787,7 +8787,7 @@ mod tests {
                 .unwrap();
         assert!(
             annotated.contains(
-                "its root item [#q-4775b8697412] is still open: [#tdclireleasedownloads] is open."
+                "its root item `Waiting on you` is still open: [#tdclireleasedownloads] is open."
             ),
             "{annotated}"
         );

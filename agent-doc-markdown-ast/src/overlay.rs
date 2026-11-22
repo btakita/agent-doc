@@ -786,8 +786,10 @@ const GENERATED_RESPONSE_STRUCTURE_VALUE_LABELS: [&str; 13] = [
     // it leaves in `agent:exchange` instead of copying them.
     "**Details:** ",
 ];
-const GENERATED_RESPONSE_STRUCTURE_CONTAINER_LABELS: [&str; 2] =
-    ["**Choices:**", "**Next actions:**"];
+/// `#guidancescope`: `**Remaining:**` heads the short list of what is
+/// left in a response tree; its entries are marked response details.
+const GENERATED_RESPONSE_STRUCTURE_CONTAINER_LABELS: [&str; 3] =
+    ["**Choices:**", "**Next actions:**", "**Remaining:**"];
 
 /// A list item copied from a worker response, as opposed to an operator's
 /// unmarked list item underneath the same response section.
@@ -2733,6 +2735,7 @@ mod tests {
         ));
         assert!(is_generated_response_structure_row("**Choices:**"));
         assert!(is_generated_response_structure_row("**Next actions:**"));
+        assert!(is_generated_response_structure_row("**Remaining:**"));
         assert!(is_generated_response_structure_row(
             "**What changed:** `tasks/agent-doc/claim-inline-file-plan.md`"
         ));

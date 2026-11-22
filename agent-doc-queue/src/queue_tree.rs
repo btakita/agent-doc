@@ -168,6 +168,10 @@ pub struct QueueTreeNode {
     pub glyph: String,
     /// One line of work text, with binary projection stripped.
     pub text: String,
+    /// The same first line, not truncated: what guidance quotes as the row's
+    /// short readable text ([`RowRef::label`]).
+    #[serde(skip)]
+    pub full_text: String,
     /// The row's own `[#id]`, when it has one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
@@ -286,6 +290,11 @@ fn glyph(state: QueueNodeState, marker: Option<QueueLifecycleMarker>) -> String 
 /// One line of display text: the work text without projection prefixes, the
 /// waiting status token, hidden markers, or trailing effect annotations.
 fn display_text(raw: &str) -> String {
+    truncate(&full_display_text(raw), TEXT_LIMIT)
+}
+
+/// [`display_text`] without the length bound.
+fn full_display_text(raw: &str) -> String {
     let first = raw.lines().next().unwrap_or_default();
     let work = agent_doc_element_queue::struck_work_text(first);
     let work = waiting_status::without_status_token(work);
@@ -297,7 +306,7 @@ fn display_text(raw: &str) -> String {
         .and_then(|inner| inner.strip_suffix("~~"))
         .unwrap_or(text)
         .trim();
-    truncate(text, TEXT_LIMIT)
+    text.to_string()
 }
 
 fn strip_html_comments(text: &str) -> String {
@@ -474,6 +483,10 @@ pub fn queue_tree(document: &str, options: &QueueTreeOptions) -> anyhow::Result<
                 queue: queue.clone(),
                 state,
                 glyph: glyph(state, marker),
+                full_text: match full_display_text(raw) {
+                    full if text.ends_with('…') && !full.is_empty() => full,
+                    _ => text.clone(),
+                },
                 text,
                 id: own_id(raw),
                 closed: state.is_closed(),
@@ -712,29 +725,45 @@ pub struct RowRef {
     pub line: usize,
     /// The row's own `[#id]`, when it has one.
     pub id: Option<String>,
-    /// One line of display text.
+    /// One line of display text, not truncated.
     pub text: String,
 }
+
+/// The longest short text a row label quotes.
+const LABEL_TEXT_LIMIT: usize = 60;
 
 impl RowRef {
     pub fn of(node: &QueueTreeNode) -> Self {
         Self {
             line: node.line,
             id: node.id.clone(),
-            text: node.text.clone(),
+            text: node.full_text.clone(),
         }
     }
 
-    /// `[#id]` when the row has one, otherwise its quoted display text.
+    /// The row as operator-facing text names it (`#guidancescope`): its
+    /// own `[#slug]` when the row has a readable one, otherwise its short
+    /// readable text, a follow-up row as its action item
+    /// (`` `operator: decide whether to keep …` ``) and any other row as its
+    /// first clause. A generated id (`[#q-…]`, or a `[#r-…]` response id the
+    /// row only quotes) never stands for a row on its own.
     pub fn label(&self) -> String {
-        match &self.id {
-            Some(id) => format!("[#{id}]"),
-            None => {
-                let text = truncate(&self.text.replace('`', "'"), 60);
-                format!("`{text}`")
-            }
+        if let Some(id) = self.id.as_deref().filter(|id| !is_generated_id(id)) {
+            return format!("[#{id}]");
         }
+        let text = crate::response_remaining::short_row_text(&self.text, LABEL_TEXT_LIMIT)
+            .replace('`', "'");
+        format!("`{text}`")
     }
+}
+
+/// `q-…` / `r-…` followed by hex: a binary-generated queue or response id,
+/// opaque to a reader.
+fn is_generated_id(id: &str) -> bool {
+    ["q-", "r-"].iter().any(|prefix| {
+        id.strip_prefix(prefix)
+            .is_some_and(|hex| hex.len() >= 8 && hex.chars().all(|c| c.is_ascii_hexdigit()))
+    })
 }
 
 impl RowClosure {

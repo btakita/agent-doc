@@ -56,7 +56,7 @@ fn a_done_second_level_row_says_its_root_item_is_still_open() {
     assert_eq!(rows, 1);
     assert_eq!(
         guidance(&synced),
-        "This row is done, but its root item `https://github.com/sample-org/sample-sdk/pull/368` is still open: 5 rows in its tree are open, first `follow up on an action item from 'completetasksplans': huma…`. Safe to delete this completed row (nothing tracked or unpublished remains in it); keep the rest of the tree."
+        "This row is done, but its root item `https://github.com/sample-org/sample-sdk/pull/368` is still open: 5 rows in its tree are open, first `human (sample-sdk reviewer with write access): mark…`. Safe to delete this completed row (nothing tracked or unpublished remains in it); keep the rest of the tree."
     );
     assert!(
         reconcile_tree_scoped_guidance(&synced).is_none(),
@@ -77,7 +77,7 @@ fn deleting_second_level_rows_resyncs_the_guidance() {
     let (synced, _) = reconcile_tree_scoped_guidance(&one_left).expect("guidance synced");
     assert!(
         guidance(&synced).starts_with(
-            "This row is done, but its root item `https://github.com/sample-org/sample-sdk/pull/368` is still open: `follow up on an action item from 'completetasksplans': huma…` is open."
+            "This row is done, but its root item `https://github.com/sample-org/sample-sdk/pull/368` is still open: `human (sample-sdk reviewer with write access): mark…` is open."
         ),
         "{}",
         guidance(&synced)

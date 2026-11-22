@@ -526,13 +526,18 @@ fn exact_section(
     Some(response.block[at].start..end)
 }
 
-/// Both passes, slim then guidance, as one successor
-/// (`#guidancescope`, `#handbackrowstructure`). Returns the document, how many
-/// trees were slimmed, and how many guidance values changed.
+/// Every pass, slim, then what remains, then guidance, as one successor
+/// (`#guidancescope`, `#handbackrowstructure`). Returns
+/// the document, how many trees were slimmed, and how many responses' State,
+/// Guidance or Remaining list changed.
 pub fn sync_response_trees(document: &str) -> Option<(String, usize, usize)> {
     let (slimmed, slim_rows) =
         slim_handback_response_details(document).unwrap_or_else(|| (document.to_string(), 0));
-    let (synced, guidance_rows) = reconcile_tree_scoped_guidance(&slimmed).unwrap_or((slimmed, 0));
+    let (remaining, remaining_rows) =
+        crate::response_remaining::reconcile_response_remaining(&slimmed).unwrap_or((slimmed, 0));
+    let (synced, guidance_rows) =
+        reconcile_tree_scoped_guidance(&remaining).unwrap_or((remaining, 0));
+    let guidance_rows = guidance_rows + remaining_rows;
     (slim_rows + guidance_rows > 0).then_some((synced, slim_rows, guidance_rows))
 }
 

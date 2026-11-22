@@ -544,6 +544,11 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      changed or Verification back under the row (`#handbackrowstructure`). A
      finished nested row's Guidance says whether its root item is still open,
      and agent-doc re-renders it whenever the tree changes (`#guidancescope`).
+     A response tree with work left lists it under `**Remaining:**`, one
+     `owner: short imperative` line each, recomputed on every sync; when
+     nothing is left its State is `Complete.` and its Guidance says the tree
+     can be deleted (`#guidancescope`). Read that list instead of the whole
+     tree, and resolve an operator action item by striking its answer row.
      A handback without those labels is recorded verbatim.
      Before treating the handback as complete, compare it with the queue item,
      resolved presets, nested authorization, and any effect named by the worker.

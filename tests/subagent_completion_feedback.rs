@@ -1822,8 +1822,11 @@ fn preflight_json(dir: &std::path::Path, doc: &std::path::Path) -> serde_json::V
 
 fn rows_naming(rows: &[String], id: &str) -> Vec<String> {
     let tag = format!("[#{id}]");
+    // `#followupshorttitle`: a follow-up row's `[#id] follow-up:` cites its
+    // origin; it is not a row for that id.
+    let followup = format!("{tag} follow-up:");
     rows.iter()
-        .filter(|row| row.contains(&tag))
+        .filter(|row| row.contains(&tag) && !row.contains(&followup))
         .cloned()
         .collect()
 }
@@ -2934,8 +2937,8 @@ fn report_complete_structures_the_handback_and_queues_its_action_items() {
         "the hand-back renders into the response structure: {written}"
     );
     // Rows may carry a lifecycle marker (`📥`) once a later pass projects them.
-    let first = "follow up on an action item from `alpha`: >512-commit documents can miss answers";
-    let second = "follow up on an action item from `alpha`: the gutter does not show the stamp yet";
+    let first = "[#alpha] follow-up: >512-commit documents can miss answers";
+    let second = "[#alpha] follow-up: the gutter does not show the stamp yet";
     let rows = run_rows(&doc);
     // `#followupidatcreate`: each row carries its `[#q-…]` id from the
     // report-complete write itself, before any preflight runs.
@@ -3160,8 +3163,14 @@ fn report_complete_prints_a_runnable_command_when_placement_is_refused() {
     assert!(command.contains("--id default"), "{command}");
     assert!(command.contains("--after "), "{command}");
     assert!(command.contains("do [#alpha]"), "{command}");
-    assert!(command.contains("--item 'follow up on an action item from `alpha`: >512-commit documents can miss answers'"), "{command}");
-    assert!(command.contains("--item 'follow up on an action item from `alpha`: the gutter does not show the stamp yet'"), "{command}");
+    assert!(
+        command.contains("--item '[#alpha] follow-up: >512-commit documents can miss answers'"),
+        "{command}"
+    );
+    assert!(
+        command.contains("--item '[#alpha] follow-up: the gutter does not show the stamp yet'"),
+        "{command}"
+    );
     assert!(command.contains(path), "{command}");
 
     let written = fs::read_to_string(&doc).unwrap();
@@ -3170,8 +3179,8 @@ fn report_complete_prints_a_runnable_command_when_placement_is_refused() {
     let rerun = run_printed_command(dir.path(), &command);
     assert_ok(&rerun, "printed queue follow-up");
     let rows = run_rows(&doc);
-    let first = "follow up on an action item from `alpha`: >512-commit documents can miss answers";
-    let second = "follow up on an action item from `alpha`: the gutter does not show the stamp yet";
+    let first = "[#alpha] follow-up: >512-commit documents can miss answers";
+    let second = "[#alpha] follow-up: the gutter does not show the stamp yet";
     let position = |needle: &str| {
         rows.iter()
             .position(|row| row.contains(needle))
@@ -3179,11 +3188,11 @@ fn report_complete_prints_a_runnable_command_when_placement_is_refused() {
     };
     let alpha = rows
         .iter()
-        .position(|row| row.contains("do [#alpha]") && !row.contains("follow up"))
+        .position(|row| row.contains("do [#alpha]") && !row.contains("follow-up:"))
         .unwrap_or_else(|| panic!("origin row missing: {rows:#?}"));
     assert_eq!(
         rows.iter()
-            .filter(|row| row.contains("do [#alpha]") && !row.contains("follow up"))
+            .filter(|row| row.contains("do [#alpha]") && !row.contains("follow-up:"))
             .count(),
         1,
         "{rows:#?}"
@@ -3282,12 +3291,11 @@ fn report_complete_and_follow_up_place_after_a_decorated_heading_row() {
     let rows = run_rows(&doc);
     let alpha = rows
         .iter()
-        .position(|row| row.contains("do [#alpha]") && !row.contains("follow up"))
+        .position(|row| row.contains("do [#alpha]") && !row.contains("follow-up:"))
         .unwrap_or_else(|| panic!("origin row missing: {rows:#?}"));
     assert!(
-        sans_q_id(&rows[alpha + 1]).ends_with(
-            "follow up on an action item from `alpha`: >512-commit documents can miss answers"
-        ),
+        sans_q_id(&rows[alpha + 1])
+            .ends_with("[#alpha] follow-up: >512-commit documents can miss answers"),
         "{rows:#?}"
     );
 
@@ -3464,8 +3472,15 @@ fn followups_of_a_nested_origin_leave_the_parent_children_alone_and_stay_acknowl
 
     // The quote is the leaf's work text. A lifecycle marker on the origin
     // (`☑️ [#subagent:leaf#1]`) is not part of it (`#followuporiginlabelmarker`).
-    let followup = "follow up on an action item from queue item “leaf work”: wire the gutter stamp";
+    // `#followupshorttitle`: the id-less leaf is given its `[#q-…]`, and the
+    // row names it by that id rather than quoting it.
     let rows = run_rows(&doc);
+    let followup = rows
+        .iter()
+        .map(|row| sans_q_id(row.trim_start().trim_start_matches("- ")).to_string())
+        .find(|row| row.starts_with("[#q-") && row.ends_with("] follow-up: wire the gutter stamp"))
+        .unwrap_or_else(|| panic!("short-form follow-up missing: {rows:#?}"));
+    let followup = followup.as_str();
     let position = |needle: &str| {
         rows.iter()
             .position(|row| sans_q_id(row.trim_end_matches("~~")).ends_with(needle))
@@ -3569,8 +3584,7 @@ fn a_running_followup_keeps_its_open_backlog_item_out_of_the_go_mirror() {
         assert_ok(&output, "report-complete");
     };
     report("do [#alpha]", "agent: Continue the remaining alpha rows");
-    let followup =
-        "follow up on an action item from `alpha`: agent: Continue the remaining alpha rows";
+    let followup = "[#alpha] follow-up: agent: Continue the remaining alpha rows";
     assert!(
         run_rows(&doc)
             .iter()
@@ -3638,10 +3652,7 @@ fn a_running_followup_keeps_its_open_backlog_item_out_of_the_go_mirror() {
     let ledger = agent_doc_queue_io::followup_provenance_ledger::load(&doc);
     let nested = run_rows(&doc)
         .into_iter()
-        .find(|row| {
-            row.contains("follow up on an action item")
-                && row.contains("Continue the last alpha family")
-        })
+        .find(|row| row.contains("follow-up: agent: Continue the last alpha family"))
         .unwrap_or_else(|| panic!("nested row missing: {:#?}", run_rows(&doc)));
     let nested = nested.trim_start().strip_prefix("- ").unwrap_or(&nested);
     assert_eq!(

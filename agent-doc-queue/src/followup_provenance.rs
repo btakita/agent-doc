@@ -1,11 +1,12 @@
 //! `#followuprootprovenance`: the tracked item a follow-up row descends from.
 //!
 //! `queue report-complete` and `queue follow-up` turn a worker's action items
-//! into free-text rows (`follow up on an action item from …: <item>`). The
-//! row quotes its origin as a code span without `#` on purpose, so it never
-//! aliases the originating item's identity, and a nested follow-up truncates
-//! that quote (`` `i…` ``). The row text therefore cannot say which backlog
-//! item the work belongs to.
+//! into free-text rows (`[#<origin>] follow-up: <item>`, `#followupshorttitle`;
+//! older rows read `follow up on an action item from …: <item>`). The row
+//! names only its immediate origin, and that reference is never counted as
+//! the origin's identity or as a reference to tracked work, so a nested
+//! follow-up names a `[#q-…]` row id. The row text therefore cannot say which
+//! backlog item the work belongs to.
 //!
 //! The go-mode backlog mirror used to see only that text. Once the item's
 //! `do [#id]` head was acknowledged, struck and reaped, the item was still
@@ -404,7 +405,7 @@ mod tests {
         );
         let content = running(&content, &inserted[0]);
         assert!(
-            !run_body(&content).contains("implementlazilyowned]"),
+            !run_body(&content).contains("do [#implementlazilyowned]"),
             "{content}"
         );
 

@@ -153,6 +153,24 @@
   text, never a row's own id (`#codespanrowid`), so such a row is still
   admitted an id.
 
+- A follow-up row's title is short and names its origin by id
+  (`#followupshorttitle`): `[#<origin-id>] follow-up: <item>`, rendered as
+  `- ### 🙋 [#checkadragainst] follow-up: operator: …` at the top level
+  (the `### ` heading is the same projection every top-level row gets; nested
+  rows get none). The origin id is the origin's authored `[#slug]`, else its
+  `[#q-…]`; an id-less origin is given its `[#q-…]` in the same write. A
+  follow-up of a follow-up names only its immediate origin's id, so titles
+  never nest. The item keeps its owner label (`operator:`, `agent:`,
+  `human (<who>):`). `[#origin] follow-up:` is a reference, never the row's
+  identity: every leading-id parser (optional-`do` grammar, the legacy
+  `🙋 [#id] <work>` request prefix, the Markdown-AST node key, done ids,
+  `#id` references) skips it, so the row keys by its own `[#q-…]`. Rows in
+  the old `follow up on an action item from <origin>: <item>` form still
+  parse and still hold their item against a repeated report; `queue
+  follow-up` rewrites an item given in that form. Existing rows are not
+  rewritten on sync: owner classification and root provenance are recorded
+  by row text, and an old quoted origin cannot be resolved to an id safely.
+
 - A template patch whose target no patch path applies is refused with a
   message, never dropped (`#staleretainedwrite`): `patch:queue`, `patch:run`,
   and `patch:loop` target runnable queue components, which all parse as the

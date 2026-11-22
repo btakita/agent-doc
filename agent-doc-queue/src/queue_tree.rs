@@ -356,6 +356,11 @@ fn own_id(text: &str) -> Option<String> {
         text.lines().next().unwrap_or_default(),
     ));
     let work = work.trim().trim_start_matches("~~");
+    // `#followupshorttitle`: a follow-up row leads with its origin's id. The
+    // row's own id is its binary-admitted `[#q-…]`, not the origin's.
+    if agent_doc_element_queue::followup_origin_reference(work).is_some() {
+        return agent_doc_element_queue::queue_prompt_stable_id(work);
+    }
     document_queue::queue_prompt_reference_ids(work)
         .into_iter()
         .next()

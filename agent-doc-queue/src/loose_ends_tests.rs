@@ -168,3 +168,40 @@ fn operator_lines_typed_under_the_digest_are_kept() {
     );
     assert!(body.ends_with("my own note\n"), "{body}");
 }
+
+/// `#followupshorttitle`: a short-form follow-up row lists by its own
+/// `[#q-…]` with its action as the imperative. The `[#origin]` it follows up
+/// never names it, and neither does the origin's text.
+#[test]
+fn a_short_form_followup_lists_by_its_own_id_and_action() {
+    let document = concat!(
+        "## Loose ends <!-- agent:loose-ends -->\n",
+        "<!-- /agent:loose-ends -->\n\n",
+        "## Active <!-- agent:active -->\n<!-- /agent:active -->\n\n",
+        "## Run <!-- agent:run id=\"main\" -->\n",
+        "- ### ~~do [#checkadragainst]~~\n",
+        "- ### 🙋 [#checkadragainst] follow-up: operator: decide whether to keep the ADR check [operator-verify] [#q-0123456789ab]\n",
+        "- ### 🙋 [#checkadragainst] follow-up: operator: approve PR 9 [operator-verify]\n",
+        "<!-- /agent:run -->\n",
+    );
+    let synced = reconcile_loose_ends(document).unwrap().unwrap();
+    let body = digest_body(&synced);
+    assert!(
+        body.contains("  - `[#q-0123456789ab]` decide whether to keep the ADR check\n"),
+        "{body}"
+    );
+    assert!(!body.contains("`[#checkadragainst]`"), "{body}");
+    assert!(!body.contains("follow-up:"), "{body}");
+
+    let tree = crate::queue_tree::queue_tree(&synced, &Default::default()).unwrap();
+    for node in tree
+        .nodes
+        .iter()
+        .filter(|node| node.full_text.contains("follow-up:"))
+    {
+        assert_ne!(node.id.as_deref(), Some("checkadragainst"), "{node:?}");
+        let label = crate::queue_tree::RowRef::of(node).label();
+        assert!(!label.contains("checkadragainst"), "{label}");
+        assert!(label.starts_with("`operator: "), "{label}");
+    }
+}

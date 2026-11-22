@@ -560,8 +560,12 @@ fn leads_with_bare_id_directive(lower: &str) -> bool {
     }
     let after = &rest[id_len..];
     if bracketed {
+        // `#followupshorttitle`: `[#origin] follow-up: …` references the
+        // row it follows up; it is not a directive for `#origin`.
         match after.strip_prefix(']') {
-            Some(tail) => !tail.starts_with(':'),
+            Some(tail) => {
+                !tail.starts_with(':') && !agent_doc_element_queue::is_followup_reference_tail(tail)
+            }
             None => false,
         }
     } else {

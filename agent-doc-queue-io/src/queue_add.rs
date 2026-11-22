@@ -202,9 +202,24 @@ pub fn add_followups_with_effects(
 ) -> Result<usize> {
     let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let current = effects.current_document_content(file, "queue_followup")?;
-    let mut plan =
-        queue_inbound::plan_queue_followups_targeted(&current, queue_id, origin, followups)
-            .with_context(|| format!("queue follow-up: {}", file.display()))?;
+    // `#followupshorttitle`: an item in the legacy `follow up on an action
+    // item from …` title form becomes `[#<origin-id>] follow-up: <item>`, the
+    // origin given its `[#q-…]` first when it has none.
+    let (normalized, placement_origin, followups) =
+        agent_doc_queue::handback_followups::normalize_followup_items(
+            &current,
+            &agent_doc_hash::document_id_for_path(file),
+            origin,
+            followups,
+        );
+    let followups = followups.as_slice();
+    let mut plan = queue_inbound::plan_queue_followups_targeted(
+        &normalized,
+        queue_id,
+        &placement_origin,
+        followups,
+    )
+    .with_context(|| format!("queue follow-up: {}", file.display()))?;
     // `#followupidatcreate`: the new rows carry their `[#q-…]` id from this
     // write, and id-less operator follow-ups are backfilled.
     plan.content = agent_doc_queue::prompt_identity::admit_followup_row_ids(
@@ -497,6 +512,47 @@ mod tests {
         assert!(!stored.contains(&token), "{stored}");
         assert!(stored.contains("[REDACTED_GITHUB]"), "{stored}");
         assert!(stored.contains("line 3"), "{stored}");
+    }
+
+    /// `#followupshorttitle`: a `queue follow-up` item in the legacy title
+    /// form is written as `[#<origin-id>] follow-up: <item>`. An id-less
+    /// origin gets its `[#q-…]` in the same write; any other item is verbatim.
+    #[test]
+    fn legacy_followup_titles_are_written_in_the_short_form() {
+        let content = DOC.replace("<!-- agent:queue go -->", "<!-- agent:queue id=main go -->");
+        let (_dir, doc) = project(&content);
+        let count = add_followups_with_effects(
+            &DiskEffects,
+            &doc,
+            "main",
+            "current task",
+            &[
+                "follow up on an action item from queue item “follow up on an action item from queue item 'current task'”: operator: approve PR 9 [operator-verify]"
+                    .to_string(),
+                "a plain follow-up".to_string(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(count, 2);
+        let written = std::fs::read_to_string(&doc).unwrap();
+        let origin = written
+            .lines()
+            .find(|line| line.starts_with("- current task"))
+            .unwrap();
+        let (_, id) = origin.rsplit_once(" [#").expect("origin admitted an id");
+        let id = id.trim_end_matches(']');
+        assert!(id.starts_with("q-"), "{written}");
+        assert!(
+            written.contains(&format!(
+                "- [#{id}] follow-up: operator: approve PR 9 [operator-verify]"
+            )),
+            "{written}"
+        );
+        assert!(written.contains("- a plain follow-up"), "{written}");
+        assert!(
+            !written.contains("follow up on an action item"),
+            "{written}"
+        );
     }
 
     /// `#capturegatedispatched`: inserted follow-up heads are recorded on the

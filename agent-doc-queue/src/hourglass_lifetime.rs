@@ -513,7 +513,10 @@ fn strip_correlation_ids(text: &str) -> String {
             return out;
         };
         let id = &after[..end];
-        let drop = id.starts_with("q-") || is_reserved_operator_action_id(id);
+        // `#followupshorttitle`: a follow-up row's `[#q-…] follow-up:` names
+        // its origin; it is part of the row's work, not a correlation id.
+        let drop = (id.starts_with("q-") || is_reserved_operator_action_id(id))
+            && !agent_doc_element_queue::is_followup_reference_tail(&after[end + 1..]);
         if drop {
             out.push_str(&rest[..start]);
             rest = &after[end + 1..];
@@ -782,6 +785,41 @@ mod tests {
                 .filter(|(live, _)| *live)
                 .count(),
             0
+        );
+    }
+
+    /// `#followupshorttitle`: the origin reference is part of a short-form
+    /// row's lifetime key, so a struck row strikes its own live leftover copy
+    /// but never the same action item followed up from another origin.
+    #[test]
+    fn short_form_followup_siblings_key_by_their_origin() {
+        let from_a = "[#q-00000000000a] follow-up: operator: approve the release";
+        let from_b = "[#q-00000000000b] follow-up: operator: approve the release";
+        let other_origin = document(
+            &format!(
+                "- ### ~~{from_a} [operator-verify] [#q-done]~~\n- ### ⏳ {from_b} [operator-verify] [#q-live]\n"
+            ),
+            "",
+        );
+        assert!(
+            strike_completed_hourglass_rows(&other_origin)
+                .unwrap()
+                .is_none(),
+            "a different origin's follow-up is not a leftover copy"
+        );
+        let leftover = document(
+            &format!(
+                "- ### ~~{from_a} [operator-verify] [#q-done]~~\n- ### ⏳ {from_a} [operator-verify] [#q-live]\n"
+            ),
+            "",
+        );
+        let struck = strike_completed_hourglass_rows(&leftover)
+            .unwrap()
+            .expect("a live copy of a struck follow-up is leftover");
+        assert!(
+            states(&struck.content).iter().all(|(live, _)| !*live),
+            "{:?}",
+            states(&struck.content)
         );
     }
 

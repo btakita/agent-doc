@@ -935,8 +935,11 @@ fn upsert_completion_feedback(
     // `#workerresponsestructure`: each action item the hand-back reports
     // becomes a follow-up row after the originating head, in the same
     // successor as the cell, so the work is queued rather than buried prose.
-    let (updated, followups) = agent_doc_queue::handback_followups::plan_handback_followups(
+    // `#followupshorttitle`: an id-less origin gets its `[#q-…]` in this same
+    // write, so every row names its origin by id.
+    let (updated, followups) = agent_doc_queue::handback_followups::plan_handback_followups_in(
         &with_cell,
+        &agent_doc_hash::document_id_for_path(file),
         &claim.item_text,
         response,
     );

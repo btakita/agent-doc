@@ -37,8 +37,8 @@
 
 use agent_doc_markdown_ast::overlay::{ItemSurface, RESPONSE_DETAIL_MARKER};
 
-use crate::followup_owner::FOLLOWUP_ROW_PREFIX;
-use crate::handback_followups::{action_item_followup_text, followup_rows_match};
+use crate::followup_owner::mentions_followup_row;
+use crate::handback_followups::followup_row_held;
 use crate::queue_consume::{
     RESPONSE_STATE_COMPLETE, RESPONSE_STATE_FOLLOW_UP, completed_row_deletion_guidance,
 };
@@ -63,7 +63,8 @@ pub fn moved_followup_guidance(closure: Option<&crate::queue_tree::RowClosure>) 
 }
 
 /// True when every one of `action_items` already has its follow-up row
-/// (`follow up on an action item from <origin>: <item>`) in `document`: live
+/// (`[#<origin>] follow-up: <item>`, or the legacy `follow up on an action
+/// item from <origin>: <item>`) in `document`: live
 /// or struck in a queue, or quoted as a queue prompt in `agent:exchange`.
 /// `origin_row` is the originating row's text.
 ///
@@ -86,8 +87,8 @@ pub fn action_items_held_as_rows(
     action_items.iter().all(|item| {
         !(item.contains("<!--") || item.contains("-->") || item.contains("&lt;!--"))
             && origins.iter().any(|origin| {
-                let row = action_item_followup_text(origin, item);
-                rows.iter().any(|line| followup_rows_match(line, &row))
+                rows.iter()
+                    .any(|line| followup_row_held(line, origin, item))
             })
     })
 }
@@ -144,15 +145,22 @@ fn followup_queue_rows(document: &str) -> Vec<String> {
                     .unwrap_or(quoted)
                     .trim_start()
             };
-            if !queue && !row.starts_with(FOLLOWUP_ROW_PREFIX) {
+            if !queue && !is_quoted_followup_row(row) {
                 continue;
             }
-            if row.contains(FOLLOWUP_ROW_PREFIX) {
+            if mentions_followup_row(row) {
                 rows.push(collapse(row));
             }
         }
     }
     rows
+}
+
+/// Whether an `agent:exchange` queue-prompt quote is a follow-up row in
+/// either form (`#followupshorttitle`).
+fn is_quoted_followup_row(quoted: &str) -> bool {
+    let work = agent_doc_element_queue::strip_attempt_projection_prefix(quoted);
+    crate::followup_owner::followup_row_action_item(work).is_some()
 }
 
 /// The follow-up form of a struck row's own response child.

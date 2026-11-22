@@ -69,6 +69,11 @@ pub fn queue_prompt_done_id(text: &str) -> Option<String> {
     // Historical tagged queue rows and `[#todo]: action` still have an
     // explicit leading label. Free prose that merely mentions a tag does not.
     let visible = strip_priority_markers(text);
+    // `#followupshorttitle`: a follow-up row's leading `[#origin]` names the
+    // row it follows up, not this row's done id.
+    if agent_doc_element_queue::followup_origin_reference(&visible).is_some() {
+        return None;
+    }
     let tail = visible
         .strip_prefix("[#")
         .or_else(|| visible.strip_prefix('#'))?;

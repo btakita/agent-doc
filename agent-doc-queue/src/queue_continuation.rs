@@ -2006,6 +2006,9 @@ pub fn head_leads_with_preset(text: &str, preset_only_ids: &HashSet<String>) -> 
         .get(..3)
         .filter(|prefix| prefix.eq_ignore_ascii_case("do "))
         .map_or(trimmed, |_| trimmed[3..].trim_start());
+    if agent_doc_element_queue::followup_origin_reference(topic).is_some() {
+        return false;
+    }
     let Some(rest) = topic.strip_prefix("[#").or_else(|| topic.strip_prefix('#')) else {
         return false;
     };

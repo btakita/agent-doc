@@ -216,6 +216,11 @@ pub fn head_leads_with_completed_directive(head: &str, completed_ids: &[String])
         .strip_prefix("do ")
         .map(str::trim_start)
         .unwrap_or(&lower);
+    // `#followupshorttitle`: a follow-up row leads with its origin's id, but
+    // completing the origin does not complete the follow-up.
+    if agent_doc_element_queue::followup_origin_reference(rest).is_some() {
+        return false;
+    }
     let Some(rest) = rest.strip_prefix("[#").or_else(|| rest.strip_prefix('#')) else {
         return false;
     };

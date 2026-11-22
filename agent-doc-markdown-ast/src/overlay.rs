@@ -1624,8 +1624,11 @@ fn extract_bracket_id(text: &str) -> Option<String> {
         let open = text[from..].find("[#")? + from;
         let start = open + 2;
         let end = text[start..].find(']')? + start;
+        // `#followupshorttitle`: a follow-up row's `[#origin] follow-up:`
+        // names the row it follows up, never this row.
         if agent_doc_queue_icons::is_owner_annotation_prefix(&text[open..])
             || code_spans.iter().any(|span| span.contains(&open))
+            || agent_doc_element_queue::is_followup_reference_tail(&text[end + 1..])
         {
             from = end + 1;
             continue;
@@ -1942,7 +1945,9 @@ fn queue_multiline_items(
                 bare_prompt_allowed = !item.struck
                     && item.kind == ItemKind::FreeText
                     && !item.text.is_empty()
-                    && !item.text.starts_with("[#");
+                    && (!item.text.starts_with("[#")
+                        || agent_doc_element_queue::followup_origin_reference(&item.text)
+                            .is_some());
             }
             index += 1;
             continue;
@@ -3842,6 +3847,30 @@ trailing residue
             false,
         );
         assert!(!multiline.explicit_id, "{:?}", multiline.id);
+    }
+
+    /// `#followupshorttitle`: a follow-up row's `[#origin] follow-up:` names
+    /// the row it follows up, never this node. Before admission it keys as
+    /// free text; after admission its own `[#q-…]` keys it.
+    #[test]
+    fn a_followup_origin_reference_never_keys_the_row() {
+        for row in [
+            "[#checkadragainst] follow-up: operator: decide [operator-verify]",
+            "🙋 [#checkadragainst] follow-up: operator: decide [operator-verify]",
+            "🚧 [#subagent:x#1] [#q-0123456789ab] follow-up: agent: rerun CI",
+        ] {
+            let item = parse_item(row, 0, row.len(), true);
+            assert!(!item.explicit_id, "{row:?} keyed {:?}", item.id);
+            assert!(item.id.starts_with("ft-"), "{row:?} keyed {:?}", item.id);
+        }
+        let admitted =
+            "🙋 [#checkadragainst] follow-up: operator: decide [operator-verify] [#q-00000000abcd]";
+        let item = parse_item(admitted, 0, admitted.len(), true);
+        assert_eq!(item.id, "q-00000000abcd");
+        assert!(item.explicit_id);
+        // A real id later in the item still keys it, as on any free-text row.
+        let cited = parse_item("[#origin] follow-up: agent: land [#real-id]", 0, 0, true);
+        assert_eq!(cited.id, "real-id");
     }
 
     /// `#codespanrowid`: an id quoted in inline code never keys the row; a

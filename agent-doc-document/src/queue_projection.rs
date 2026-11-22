@@ -343,6 +343,13 @@ fn strip_operator_action_prefix(text: &str) -> Option<(&str, &str)> {
     if is_reserved_operator_action_id(id) && rest.trim_start().starts_with(':') {
         return None;
     }
+    // `#followupshorttitle`: `🙋 [#origin] follow-up: <item>` is an operator
+    // follow-up row whose `[#origin]` names the row it follows up. It is the
+    // row's work text, not a legacy request-id prefix, so the renderer must
+    // not move it to the tail and no gate reads it as an open request.
+    if agent_doc_element_queue::is_followup_reference_tail(rest) {
+        return None;
+    }
     Some((id, rest))
 }
 
@@ -1801,6 +1808,43 @@ pub fn project_active_queue_prompts(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#followupshorttitle`: `🙋 [#origin] follow-up: <item>` is an operator
+    /// follow-up row, not the legacy `🙋 [#id] <work>` request prefix. No
+    /// gate reads its origin as an open request, repainting its lifecycle
+    /// keeps the reference in place, and removing the glyph leaves it intact.
+    #[test]
+    fn a_followup_origin_reference_is_not_a_legacy_request_prefix() {
+        let row =
+            "🙋 [#checkadragainst] follow-up: operator: decide [operator-verify] [#q-0123456789ab]";
+        let legacy = "🙋 follow up on an action item from `checkadragainst`: operator: decide [operator-verify] [#q-0123456789ab]";
+        assert!(!operator_action_ids(row).contains(&"checkadragainst".to_string()));
+        assert_eq!(
+            operator_action_ids(row),
+            operator_action_ids(legacy),
+            "{row}"
+        );
+        assert_eq!(
+            operator_request_annotation_ids(row),
+            operator_request_annotation_ids(legacy)
+        );
+        assert!(operator_action_marked(row));
+        assert_eq!(
+            strip_priority_markers(row),
+            "[#checkadragainst] follow-up: operator: decide [operator-verify] [#q-0123456789ab]"
+        );
+        let pending = apply_lifecycle_marker(row, QueueLifecycleMarker::Pending);
+        assert!(
+            pending.contains("[#checkadragainst] follow-up: operator: decide"),
+            "{pending}"
+        );
+        assert!(!pending.ends_with("[#checkadragainst]"), "{pending}");
+        // The legacy prefix is still read where it is one.
+        assert_eq!(
+            operator_action_ids("🙋 [#subagent-operator-request-x] decide"),
+            vec!["subagent-operator-request-x".to_string()]
+        );
+    }
 
     /// `#dupetags`: a row carrying several request annotations, or repeated
     /// copies of them, reads every id, keeps its work identity, and collapses

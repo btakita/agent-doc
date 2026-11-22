@@ -51,7 +51,8 @@
 //!
 //! 1. the item itself is struck, or a struck row is nested under it (the
 //!    operator's answer, such as `~~keep after unlocking.~~`);
-//! 2. its follow-up row (`follow up on an action item from …: <item>`, any
+//! 2. its follow-up row (`[#<origin>] follow-up: <item>`, or the legacy
+//!    `follow up on an action item from …: <item>`, any
 //!    origin) is struck in a queue, or is gone from every queue but quoted as
 //!    a dispatched `> ` queue prompt in `agent:exchange` (finished, then
 //!    deleted). A live follow-up row keeps it open; an item that never had a
@@ -79,8 +80,8 @@ use agent_doc_markdown_ast::overlay::RESPONSE_DETAIL_MARKER;
 
 use crate::followup_moved_state::FOLLOW_UP_ACTION_ITEMS_GUIDANCE;
 use crate::followup_owner::{
-    ActionItemOwner, FOLLOWUP_ROW_PREFIX, OPERATOR_OWNED_TAG, classify_action_item,
-    explicit_owner_label, followup_row_action_item,
+    ActionItemOwner, OPERATOR_OWNED_TAG, classify_action_item, explicit_owner_label,
+    followup_row_action_item,
 };
 use crate::queue_consume::{
     RESPONSE_STATE_COMPLETE, RESPONSE_STATE_FOLLOW_UP, RESPONSE_STATE_WAITING_ON_OPERATOR,
@@ -600,9 +601,6 @@ fn followup_rows(document: &str, tree: &QueueTree) -> Vec<(String, FollowupRow)>
                     .strip_prefix("**Queue prompt:**")
                     .unwrap_or(quoted)
                     .trim_start();
-                if !quoted.starts_with(FOLLOWUP_ROW_PREFIX) {
-                    continue;
-                }
                 let plain = plain_text(quoted);
                 if let Some(item) = followup_row_action_item(&plain) {
                     rows.push((item_key(item), FollowupRow::Quoted));

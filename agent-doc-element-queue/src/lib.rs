@@ -341,6 +341,49 @@ impl QueueItemMachine {
     }
 }
 
+/// The keyword after a follow-up row's leading origin reference
+/// (`[#<origin>] follow-up: <item>`, `#followupshorttitle`).
+pub const FOLLOWUP_REFERENCE_KEYWORD: &str = "follow-up:";
+
+/// Whether `after_close`, the text right after a leading `[#id]` token's `]`,
+/// marks that token as a follow-up row's origin reference: whitespace, then
+/// [`FOLLOWUP_REFERENCE_KEYWORD`] (any case).
+///
+/// Every parser that reads a leading `[#id]` as the row's own id (the
+/// optional-`do` grammar, the legacy `🙋 [#id] <work>` request prefix, the
+/// Markdown-AST node key) checks this first, so a follow-up row never aliases
+/// the identity of the row it follows up.
+pub fn is_followup_reference_tail(after_close: &str) -> bool {
+    if !after_close.starts_with(char::is_whitespace) {
+        return false;
+    }
+    let rest = after_close.trim_start();
+    rest.get(..FOLLOWUP_REFERENCE_KEYWORD.len())
+        .is_some_and(|keyword| keyword.eq_ignore_ascii_case(FOLLOWUP_REFERENCE_KEYWORD))
+}
+
+/// `(origin id, item)` of a follow-up row's work text
+/// `[#<origin>] follow-up: <item>` (`#followupshorttitle`). `text` is the
+/// row's work text after its lifecycle projection
+/// ([`strip_attempt_projection_prefix`]); leading whitespace is ignored. The
+/// origin id is returned as written; the item is the rest of the row, owner
+/// label (`operator:`, `agent:`, `human (<who>):`) and annotations included.
+/// `None` for any other row, including an empty item.
+pub fn followup_origin_reference(text: &str) -> Option<(&str, &str)> {
+    let rest = text.trim_start().strip_prefix("[#")?;
+    let (id, after) = rest.split_once(']')?;
+    if id.is_empty()
+        || !id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+        || !is_followup_reference_tail(after)
+    {
+        return None;
+    }
+    let item = after.trim_start()[FOLLOWUP_REFERENCE_KEYWORD.len()..].trim_start();
+    (!item.trim().is_empty()).then_some((id, item))
+}
+
 pub fn normalize_multiline_dedup_text(text: &str) -> String {
     text.split_whitespace()
         .collect::<Vec<_>>()
@@ -351,6 +394,11 @@ pub fn normalize_multiline_dedup_text(text: &str) -> String {
 fn extract_head_id(prompt: &str) -> Option<String> {
     let stripped = strip_priority_markers(prompt);
     let trimmed = stripped.trim();
+    // `#followupshorttitle`: `[#origin] follow-up: <item>` references the
+    // row it follows up; it is never that row's identity.
+    if followup_origin_reference(trimmed).is_some() {
+        return None;
+    }
     let lower = trimmed.to_ascii_lowercase();
     let explicit_do = lower.starts_with("do ");
     let topic = lower.strip_prefix("do ").unwrap_or(&lower).trim();
@@ -946,8 +994,11 @@ pub fn strip_priority_markers(text: &str) -> String {
             let after_marker = after_marker.trim_start();
             if let Some(after_open) = after_marker.strip_prefix("[#")
                 && let Some((_, after)) = after_open.split_once(']')
+                && !is_followup_reference_tail(after)
             {
-                // Legacy form: the request id was part of the prefix.
+                // Legacy form: the request id was part of the prefix. A
+                // follow-up row's leading `[#origin] follow-up:` is its work
+                // text, not a request id (`#followupshorttitle`).
                 t = after.trim_start();
             } else {
                 // Canonical form: the request id is local to the tail.
@@ -1159,6 +1210,62 @@ pub fn strip_intent_tags(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// `#followupshorttitle`: `[#origin] follow-up: <item>` names the row it
+    /// follows up. It is never the row's own identity, under any projection,
+    /// and the `🙋` glyph does not read it as a legacy request-id prefix.
+    #[test]
+    fn a_followup_origin_reference_is_not_the_rows_identity() {
+        let row =
+            "[#checkadragainst] follow-up: operator: decide whether to keep it [operator-verify]";
+        assert_eq!(
+            super::followup_origin_reference(row),
+            Some((
+                "checkadragainst",
+                "operator: decide whether to keep it [operator-verify]"
+            ))
+        );
+        for decorated in [
+            row.to_string(),
+            format!("🙋 {row}"),
+            format!("📥 {row}"),
+            format!("🚧 [#subagent:x#1] {row}"),
+            row.replace("follow-up:", "Follow-Up:"),
+        ] {
+            assert!(
+                !super::queue_head_identity(&decorated).is_id_backed(),
+                "{decorated}"
+            );
+            // The reference stays in the free-text key, so 🙋 and 📥
+            // repaints of one row key the same.
+            assert!(
+                super::strip_priority_markers(&decorated)
+                    .to_ascii_lowercase()
+                    .starts_with("[#checkadragainst] follow-up:"),
+                "{decorated}"
+            );
+        }
+        // Its own identity is the binary-admitted `[#q-…]`.
+        let admitted = format!("🙋 {row} [#q-0123456789ab]");
+        assert_eq!(
+            super::queue_prompt_stable_id(&admitted).as_deref(),
+            Some("q-0123456789ab")
+        );
+        // A follow-up of a follow-up names its immediate origin's q-id.
+        let nested = "[#q-0123456789ab] follow-up: agent: rerun CI";
+        assert!(!super::queue_head_identity(nested).is_id_backed());
+        assert_eq!(super::queue_prompt_stable_id(nested), None);
+
+        // Other leading ids keep their meaning.
+        assert!(super::queue_head_identity("[#checkadragainst] check it").is_id_backed());
+        assert_eq!(super::followup_origin_reference("[#a]: follow-up: x"), None);
+        assert_eq!(super::followup_origin_reference("[#a] follow-up:"), None);
+        assert_eq!(super::followup_origin_reference("[#a] follow-upx: y"), None);
+        assert_eq!(
+            super::strip_priority_markers("🙋 [#subagent-operator-request-x] decide"),
+            "decide"
+        );
+    }
+
     #[test]
     fn publication_glyphs_read_in_state_transition_order() {
         assert_eq!(super::QueueReportState::Local.glyph(), "✎");

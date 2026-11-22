@@ -7428,6 +7428,9 @@ fn adopt_legacy_waiting_items(document: &str) -> Result<Option<String>> {
                     continue;
                 }
                 let work = agent_doc_element_queue::strip_attempt_projection_prefix(&prompt.text);
+                if agent_doc_element_queue::followup_origin_reference(work).is_some() {
+                    continue;
+                }
                 let Some(id) = work
                     .strip_prefix("[#")
                     .and_then(|rest| rest.split_once(']'))

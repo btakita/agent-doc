@@ -133,6 +133,43 @@ pub fn admit_followup_row_ids(
     }
 }
 
+/// `#followupshorttitle`: admit a `[#q-…]` id for the id-less executable
+/// queue row whose work text is `row`, with the same deterministic mint
+/// preflight uses, so a follow-up row can name its origin by id. Projection
+/// (lifecycle marker, attempt owner, `### ` heading) is ignored on both
+/// sides. Every row with that work text is admitted; the caller uses the id
+/// only when exactly one was. Preflight admits this same id-less row on its
+/// next cycle, and claims already follow that admission (`#claimrowmigrate`).
+/// A row that already has an id is left unchanged.
+pub fn admit_queue_row_id(
+    content: &str,
+    document_id: &str,
+    row: &str,
+) -> QueuePromptIdentityProjection {
+    let wanted = followup_match_key(strip_queue_heading(row));
+    let (mut projected, assignments, diagnostics) =
+        admit_ids_where(content, document_id, |_, work| {
+            followup_match_key(strip_queue_heading(work)) == wanted
+        });
+    if !assignments.is_empty() {
+        projected = agent_doc_element_queue::repair_generated_id_before_list_marker(&projected)
+            .into_owned();
+    }
+    QueuePromptIdentityProjection {
+        content: projected,
+        assignments,
+        relations: QueueRelationGraph {
+            diagnostics,
+            ..QueueRelationGraph::default()
+        },
+    }
+}
+
+fn strip_queue_heading(text: &str) -> &str {
+    let text = text.trim_start();
+    text.strip_prefix("### ").unwrap_or(text)
+}
+
 fn followup_match_key(text: &str) -> String {
     agent_doc_element_queue::normalize_multiline_dedup_text(
         &agent_doc_element_queue::strip_priority_markers(text.trim()),

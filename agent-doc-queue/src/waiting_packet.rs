@@ -331,13 +331,14 @@ pub fn is_offered_choice(text: &str) -> bool {
     !label.trim().is_empty() && !label.contains("**") && !effect.trim().is_empty()
 }
 
-/// An action-item follow-up (`follow up on an action item from …`) is work
-/// nested in the origin's tree. Inside a Waiting-on-you packet it is not the
-/// operator's answer.
+/// An action-item follow-up (`[#<origin>] follow-up: …`, or the legacy
+/// `follow up on an action item from …`) is work nested in the origin's tree.
+/// Inside a Waiting-on-you packet it is not the operator's answer.
 fn is_action_item_followup(text: &str) -> bool {
     let work = agent_doc_element_queue::strip_attempt_projection_prefix(text).trim();
     let work = crate::document_queue::strip_top_level_queue_heading(work).trim();
-    work.starts_with("follow up on an action item from ")
+    let work = agent_doc_element_queue::strip_attempt_projection_prefix(work);
+    crate::followup_owner::followup_row_action_item(work).is_some()
 }
 
 /// Whether `text` is exactly a legacy binary follow-up sentence plus only

@@ -1639,7 +1639,15 @@ pub fn queue_prompt_reference_ids(text: &str) -> Vec<String> {
             .chars()
             .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
             .collect();
-        if !id.is_empty() {
+        // `#followupshorttitle`: a follow-up row's `[#origin] follow-up:`
+        // names the row it follows up. It is not tracked work this row
+        // references (the origin's root is `#followuprootprovenance`'s
+        // ledger), so it never stands in for the origin's own head.
+        let followup_origin = rest[..marker].ends_with('[')
+            && after[id.len()..]
+                .strip_prefix(']')
+                .is_some_and(agent_doc_element_queue::is_followup_reference_tail);
+        if !id.is_empty() && !followup_origin {
             ids.push(id.to_ascii_lowercase());
         }
         rest = after;
@@ -5692,7 +5700,8 @@ fn row_is_tracked_directive(text: &str) -> bool {
     if let Some(rest) = lower.strip_prefix("[#")
         && let Some((_, tail)) = rest.split_once(']')
     {
-        return !tail.starts_with(':');
+        return !tail.starts_with(':')
+            && !agent_doc_element_queue::is_followup_reference_tail(tail);
     }
     false
 }

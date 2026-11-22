@@ -16839,8 +16839,8 @@ fn report_complete_open_items_use_the_attached_editors_retained_projection() {
 
 fn assert_retained_handback(content: &str) {
     let followups = [
-        "follow up on an action item from `alpha`: wire the gutter stamp",
-        "follow up on an action item from `alpha`: cover the retained path",
+        "[#alpha] follow-up: wire the gutter stamp",
+        "[#alpha] follow-up: cover the retained path",
     ];
     for row in followups {
         assert_eq!(

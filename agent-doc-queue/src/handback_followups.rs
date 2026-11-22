@@ -97,16 +97,68 @@ pub fn refused_placement_command(
     crate::reported_closeout::shell_command(&argv)
 }
 
-/// Longest origin label a follow-up row quotes for an id-less queue item.
+/// Longest origin label a legacy follow-up row quotes for an id-less queue
+/// item.
 const FOLLOWUP_ORIGIN_LABEL_CHARS: usize = 80;
 
-/// The follow-up row text for one action item. The origin id is written as a
-/// code span without `#`, so the row is free-text work that never aliases the
-/// originating item's identity. An id-less origin is quoted by its work text
-/// ([`origin_work_text`]), bounded to [`FOLLOWUP_ORIGIN_LABEL_CHARS`], so a
-/// later report still produces the same row after the origin's lifecycle
-/// marker changes (`#followuporiginlabelmarker`).
+/// The follow-up row text for one action item (`#followupshorttitle`):
+/// `[#<origin-id>] follow-up: <item>`.
+///
+/// The origin is named by its stable id ([`followup_origin_id`]): an authored
+/// `[#slug]`, else the binary-admitted `[#q-…]`. The item, owner label
+/// included (`operator:`, `agent:`, `human (<who>):`), follows verbatim, so
+/// the action leads the row instead of a quote of the origin. A follow-up of
+/// a follow-up names only its immediate origin's own id, so titles never
+/// nest. `[#origin] follow-up:` is a reference, never this row's identity:
+/// every leading-id parser checks
+/// [`agent_doc_element_queue::is_followup_reference_tail`] first.
+///
+/// An origin with no stable id gets one from [`plan_handback_followups_in`]
+/// before any row is built. Only when that is impossible (no document, or the
+/// admission is ambiguous) does the row fall back to the legacy quoted form
+/// ([`legacy_action_item_followup_text`]).
 pub fn action_item_followup_text(origin_item: &str, action_item: &str) -> String {
+    match followup_origin_id(origin_item) {
+        Some(id) => format!(
+            "[#{id}] {} {action_item}",
+            agent_doc_element_queue::FOLLOWUP_REFERENCE_KEYWORD
+        )
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" "),
+        None => legacy_action_item_followup_text(origin_item, action_item),
+    }
+}
+
+/// The stable id a follow-up row names its origin by: the origin's authored
+/// id (`do [#slug]`, `[#slug] …`), else its trailing binary-admitted
+/// `[#q-…]`. The origin's lifecycle projection, `### ` heading, and strike
+/// are ignored. `None` for an id-less origin.
+pub fn followup_origin_id(origin_item: &str) -> Option<String> {
+    let text = origin_item.trim();
+    let text = text.strip_prefix("### ").unwrap_or(text).trim();
+    // A struck origin (`~~work [#q-…] ⟦published⟧~~`); its work text may
+    // quote a strike of its own, so the closing `~~` is the last one.
+    let text = text
+        .strip_prefix("~~")
+        .and_then(|inner| inner.rfind("~~").map(|close| &inner[..close]))
+        .unwrap_or(text);
+    let work = agent_doc_element_queue::strip_attempt_projection_prefix(text);
+    agent_doc_element_queue::queue_prompt_stable_id(work)
+}
+
+/// The row text an earlier binary wrote for one action item:
+/// `follow up on an action item from <origin>: <item>`, the origin an
+/// id-backed `` `id` `` or an id-less `queue item “<label>”` quote. New rows
+/// use [`action_item_followup_text`]; this form stays parseable
+/// ([`crate::followup_owner::followup_row_action_item`]) and is still
+/// matched by the dedupe check, so a repeated report never re-adds an item
+/// an old row already holds. The origin id is written as a code span without
+/// `#`. An id-less origin is quoted by its work text ([`origin_work_text`]),
+/// bounded to [`FOLLOWUP_ORIGIN_LABEL_CHARS`], so a later report still
+/// produces the same row after the origin's lifecycle marker changes
+/// (`#followuporiginlabelmarker`).
+pub fn legacy_action_item_followup_text(origin_item: &str, action_item: &str) -> String {
     let origin = match agent_doc_element_queue::queue_head_identity(origin_item) {
         agent_doc_element_queue::QueueItemIdentity::Id(id) => format!("`{id}`"),
         agent_doc_element_queue::QueueItemIdentity::FreeText(_) => {
@@ -120,10 +172,34 @@ pub fn action_item_followup_text(origin_item: &str, action_item: &str) -> String
             format!("queue item “{label}”")
         }
     };
-    format!("follow up on an action item from {origin}: {action_item}")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+    format!(
+        "{}{origin}: {action_item}",
+        crate::followup_owner::FOLLOWUP_ROW_PREFIX
+    )
+    .split_whitespace()
+    .collect::<Vec<_>>()
+    .join(" ")
+}
+
+/// Every row text that holds `action_item` for `origin_item`: the current
+/// form, then the legacy form an earlier binary wrote. A row in either form,
+/// live or struck, means the item is already queued.
+pub fn followup_row_forms(origin_item: &str, action_item: &str) -> Vec<String> {
+    let current = action_item_followup_text(origin_item, action_item);
+    let legacy = legacy_action_item_followup_text(origin_item, action_item);
+    if current == legacy {
+        vec![current]
+    } else {
+        vec![current, legacy]
+    }
+}
+
+/// True when `line` holds the follow-up row of `action_item` for
+/// `origin_item` in any form ([`followup_row_forms`]).
+pub fn followup_row_held(line: &str, origin_item: &str, action_item: &str) -> bool {
+    followup_row_forms(origin_item, action_item)
+        .iter()
+        .any(|row| followup_rows_match(line, row))
 }
 
 /// Work text of an origin row. A lifecycle marker, pin, or exact-attempt
@@ -147,6 +223,24 @@ pub fn plan_handback_followups(
     origin_item: &str,
     response: &str,
 ) -> (String, HandbackFollowups) {
+    plan_handback_followups_in(content, FALLBACK_DOCUMENT_ID, origin_item, response)
+}
+
+/// Document id seed for [`plan_handback_followups`] callers that have no
+/// document path. It only seeds the generated origin id; any value is valid.
+const FALLBACK_DOCUMENT_ID: &str = "agent-doc:followup-origin";
+
+/// [`plan_handback_followups`] for the document `document_id`
+/// (`agent_doc_hash::document_id_for_path`). An id-less origin row is first
+/// given its `[#q-…]` id with the same deterministic mint preflight uses
+/// ([`crate::prompt_identity::admit_queue_row_id`]), in the same write, so
+/// the follow-up rows can name it (`#followupshorttitle`).
+pub fn plan_handback_followups_in(
+    content: &str,
+    document_id: &str,
+    origin_item: &str,
+    response: &str,
+) -> (String, HandbackFollowups) {
     let mut outcome = HandbackFollowups {
         held_for_triage: agent_doc_document::worker_handback::open_items(response).len(),
         ..HandbackFollowups::default()
@@ -160,9 +254,8 @@ pub fn plan_handback_followups(
     }
     // A nest-vector claim key (`parent: leaf`) names the row by lineage; the
     // placement matches the row's own text.
-    let origin_row = crate::queue_response::queue_row_text_for_head(content, origin_item)
-        .unwrap_or_else(|| origin_item.to_string());
-    let mut queueable: Vec<String> = Vec::new();
+    let original_origin_row = origin_row_text(content, origin_item);
+    let mut queueable_items: Vec<String> = Vec::new();
     let mut withheld = 0;
     for item in items {
         // The cell quotes a worker's component markers inert
@@ -175,18 +268,28 @@ pub fn plan_handback_followups(
             outcome.self_repair_items.push(item);
             continue;
         }
-        // `#humanfollowupowner`: a human-owned item's row waits on the
-        // operator instead of reading as dispatchable agent work.
-        queueable.push(crate::followup_owner::owned_followup_row(
-            action_item_followup_text(&origin_row, &item),
-            &item,
-        ));
+        queueable_items.push(item);
     }
+    // `#humanfollowupowner`: a human-owned item's row waits on the operator
+    // instead of reading as dispatchable agent work.
+    let rows_for = |origin_row: &str, items: &[String]| -> Vec<String> {
+        items
+            .iter()
+            .map(|item| {
+                crate::followup_owner::owned_followup_row(
+                    action_item_followup_text(origin_row, item),
+                    item,
+                )
+            })
+            .collect()
+    };
     let withheld_reason = (withheld > 0).then(|| {
         format!(
             "{withheld} action item(s) carry an HTML comment or component marker, which a live queue row must not hold"
         )
     });
+    // A refused placement leaves the document unchanged, so the rows it
+    // reports name the origin as it still reads there.
     let Some(queue_id) = crate::subagent_brief::origin_queue_id_for_item(content, origin_item)
     else {
         outcome.refused = Some(match &withheld_reason {
@@ -195,23 +298,41 @@ pub fn plan_handback_followups(
             }
             None => "the document has no queue holding the originating head".to_string(),
         });
-        if !queueable.is_empty() {
-            outcome.refused_origin = Some(origin_row);
-            outcome.refused_items = queueable;
+        if !queueable_items.is_empty() {
+            outcome.refused_items = rows_for(&original_origin_row, &queueable_items);
+            outcome.refused_origin = Some(original_origin_row);
         }
         return (content.to_string(), outcome);
     };
     outcome.queue_id = Some(queue_id.clone());
-    let existing = queue_row_lines(content, &queue_id);
+    // `#followupshorttitle`: an id-less origin gets its `[#q-…]` first, so
+    // the rows name it by id.
+    let (admitted, origin_row) = with_origin_id(content, document_id, original_origin_row.clone());
+    let existing = queue_row_lines(&admitted, &queue_id);
     let mut fresh: Vec<String> = Vec::new();
-    for row in queueable {
+    let mut fresh_items: Vec<String> = Vec::new();
+    for item in &queueable_items {
+        let row = crate::followup_owner::owned_followup_row(
+            action_item_followup_text(&origin_row, item),
+            item,
+        );
+        // A row an earlier binary wrote in the legacy form holds the same
+        // item. It quoted the origin as it read before any id was admitted.
+        let legacy = [
+            legacy_action_item_followup_text(&original_origin_row, item),
+            legacy_action_item_followup_text(&origin_row, item),
+        ];
         if fresh.iter().any(|held| followup_rows_match(held, &row))
-            || existing.iter().any(|line| followup_rows_match(line, &row))
+            || existing.iter().any(|line| {
+                followup_rows_match(line, &row)
+                    || legacy.iter().any(|old| followup_rows_match(line, old))
+            })
         {
             outcome.already_present += 1;
             continue;
         }
         fresh.push(row);
+        fresh_items.push(item.clone());
     }
     if let Some(withheld) = withheld_reason {
         outcome.refused = Some(withheld);
@@ -220,7 +341,7 @@ pub fn plan_handback_followups(
         return (content.to_string(), outcome);
     }
     match crate::queue_inbound::plan_queue_followups_targeted(
-        content,
+        &admitted,
         &queue_id,
         &origin_row,
         &fresh,
@@ -240,11 +361,137 @@ pub fn plan_handback_followups(
                 Some(prior) => format!("{placement}; {prior}"),
                 None => placement,
             });
-            outcome.refused_origin = Some(origin_row);
-            outcome.refused_items = fresh;
+            outcome.refused_items = rows_for(&original_origin_row, &fresh_items);
+            outcome.refused_origin = Some(original_origin_row);
             (content.to_string(), outcome)
         }
     }
+}
+
+/// `#followupshorttitle`: `queue follow-up` items written in the legacy title
+/// form (`follow up on an action item from <origin>: <item>`), rewritten to
+/// `[#<origin-id>] follow-up: <item>` for the `--after` origin. Returns the
+/// document (with the origin's `[#q-…]` admitted when it had none and an
+/// item needed it), the origin row text placement must match, and the items.
+/// Items in any other form are kept verbatim, and when the origin cannot be
+/// given an id every item is.
+pub fn normalize_followup_items(
+    content: &str,
+    document_id: &str,
+    origin: &str,
+    items: &[String],
+) -> (String, String, Vec<String>) {
+    let legacy_item = |item: &str| -> Option<String> {
+        let work = agent_doc_element_queue::strip_attempt_projection_prefix(item);
+        if !work
+            .trim_start()
+            .starts_with(crate::followup_owner::FOLLOWUP_ROW_PREFIX)
+        {
+            return None;
+        }
+        crate::followup_owner::followup_row_action_item(work).map(str::to_string)
+    };
+    if !items.iter().any(|item| legacy_item(item).is_some()) {
+        return (content.to_string(), origin.to_string(), items.to_vec());
+    }
+    let origin_row = origin_row_text(content, origin);
+    let (admitted, origin_row) = with_origin_id(content, document_id, origin_row);
+    if followup_origin_id(&origin_row).is_none() {
+        return (content.to_string(), origin.to_string(), items.to_vec());
+    }
+    let items = items
+        .iter()
+        .map(|item| match legacy_item(item) {
+            Some(action) => action_item_followup_text(&origin_row, &action),
+            None => item.clone(),
+        })
+        .collect();
+    (admitted, origin_row, items)
+}
+
+/// The queue row text of the originating head `origin_item`: the row the
+/// queue resolver names, else the one live row whose work text equals it once
+/// the binary's trailing `[#q-…]` is set aside. A claim keeps the text it was
+/// dispatched with, so a repeated report still finds its origin after
+/// `#followupshorttitle` (or preflight) admitted the origin's id. Falls back
+/// to `origin_item` itself.
+fn origin_row_text(content: &str, origin_item: &str) -> String {
+    if let Some(row) = crate::queue_response::queue_row_text_for_head(content, origin_item) {
+        return row;
+    }
+    let key = |text: &str| {
+        followup_match_key(
+            &agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(
+                agent_doc_element_queue::strip_attempt_projection_prefix(
+                    text.trim().strip_prefix("### ").unwrap_or(text.trim()),
+                ),
+            ),
+        )
+    };
+    let wanted = key(origin_item);
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return origin_item.to_string();
+    };
+    let mut found: Option<String> = None;
+    for component in components.iter().filter(|c| c.name == "queue") {
+        let Ok(entries) = crate::document_queue::parse(component.content(content)) else {
+            continue;
+        };
+        for prompt in crate::document_queue::prompts(&entries) {
+            if key(&prompt.text) != wanted {
+                continue;
+            }
+            if found.is_some() {
+                return origin_item.to_string();
+            }
+            found = Some(prompt.text.clone());
+        }
+    }
+    found.unwrap_or_else(|| origin_item.to_string())
+}
+
+fn followup_match_key(text: &str) -> String {
+    agent_doc_element_queue::normalize_multiline_dedup_text(
+        &agent_doc_element_queue::strip_priority_markers(text.trim()),
+    )
+}
+
+/// `content` with the origin row given its stable id when it has none, and
+/// the origin row's text as it now reads (`#followupshorttitle`). The id is
+/// admitted only when exactly one queue row carries the origin's work text;
+/// otherwise both are returned unchanged and the rows fall back to the legacy
+/// quoted form.
+fn with_origin_id(content: &str, document_id: &str, origin_row: String) -> (String, String) {
+    if followup_origin_id(&origin_row).is_some() {
+        return (content.to_string(), origin_row);
+    }
+    let admitted = crate::prompt_identity::admit_queue_row_id(content, document_id, &origin_row);
+    let [assignment] = admitted.assignments.as_slice() else {
+        return (content.to_string(), origin_row);
+    };
+    match queue_row_with_stable_id(&admitted.content, &assignment.id) {
+        Some(row) => (admitted.content, row),
+        None => (content.to_string(), origin_row),
+    }
+}
+
+/// The text (after its list bullet) of the one queue row whose stable id is
+/// `id`.
+fn queue_row_with_stable_id(content: &str, id: &str) -> Option<String> {
+    let components = agent_doc_element::element::parse(content).ok()?;
+    let mut found = None;
+    for component in components.iter().filter(|c| c.name == "queue") {
+        let entries = crate::document_queue::parse(component.content(content)).ok()?;
+        for prompt in crate::document_queue::prompts(&entries) {
+            if followup_origin_id(&prompt.text).as_deref() == Some(id) {
+                if found.is_some() {
+                    return None;
+                }
+                found = Some(prompt.text.clone());
+            }
+        }
+    }
+    found
 }
 
 /// True when `line` already holds the follow-up `row`, live or struck.
@@ -349,6 +596,8 @@ fn queue_row_lines(content: &str, queue_id: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
+    const FOLLOWUP_LEGACY_PREFIX: &str = crate::followup_owner::FOLLOWUP_ROW_PREFIX;
+
     const HANDBACK: &str = concat!(
         "**Summary:** stamped decision ids.\n",
         "**Verification:** make check exit=0\n",
@@ -402,16 +651,14 @@ mod tests {
         assert_eq!(
             outcome.inserted,
             vec![
-                "follow up on an action item from `decisionidstamp`: >512-commit documents can miss answers"
-                    .to_string(),
-                "follow up on an action item from `decisionidstamp`: the gutter does not show the stamp"
-                    .to_string(),
+                "[#decisionidstamp] follow-up: >512-commit documents can miss answers".to_string(),
+                "[#decisionidstamp] follow-up: the gutter does not show the stamp".to_string(),
             ]
         );
         assert!(updated.contains(concat!(
             "- ☑️ do [#decisionidstamp]\n  - push\n",
-            "- follow up on an action item from `decisionidstamp`: >512-commit documents can miss answers\n",
-            "- follow up on an action item from `decisionidstamp`: the gutter does not show the stamp\n",
+            "- [#decisionidstamp] follow-up: >512-commit documents can miss answers\n",
+            "- [#decisionidstamp] follow-up: the gutter does not show the stamp\n",
             "- later work\n",
         )));
         // Free-text rows: neither aliases the origin's identity.
@@ -443,8 +690,8 @@ mod tests {
                 assert!(
                     updated.contains(&format!(
                         "- {row}\n  - push\n\
-                         - follow up on an action item from `decisionidstamp`: >512-commit documents can miss answers\n\
-                         - follow up on an action item from `decisionidstamp`: the gutter does not show the stamp\n\
+                         - [#decisionidstamp] follow-up: >512-commit documents can miss answers\n\
+                         - [#decisionidstamp] follow-up: the gutter does not show the stamp\n\
                          - ### later\n"
                     )),
                     "row {row:?} origin {origin:?}:\n{updated}"
@@ -467,8 +714,8 @@ mod tests {
         assert_eq!(second.already_present, 2);
 
         let struck = once.replacen(
-            "- follow up on an action item from `decisionidstamp`: the gutter does not show the stamp",
-            "- ~~follow up on an action item from `decisionidstamp`: the gutter does not show the stamp~~",
+            "- [#decisionidstamp] follow-up: the gutter does not show the stamp",
+            "- ~~[#decisionidstamp] follow-up: the gutter does not show the stamp~~",
             1,
         );
         let (after, third) = plan_handback_followups(&struck, "do [#decisionidstamp]", HANDBACK);
@@ -517,9 +764,7 @@ mod tests {
             plan_handback_followups(&content, "do [#decisionidstamp]", handback);
         assert_eq!(
             outcome.inserted,
-            vec![
-                "follow up on an action item from `decisionidstamp`: an ordinary limit".to_string()
-            ]
+            vec!["[#decisionidstamp] follow-up: an ordinary limit".to_string()]
         );
         assert!(
             outcome
@@ -542,7 +787,9 @@ mod tests {
         // its sibling. They are not hoisted out to the parent.
         let body = &updated[updated.find("- parent work").unwrap()..];
         let leaf = body.find("  - leaf work").unwrap();
-        let row = body.find("  - follow up on an action item").unwrap();
+        // The id-less leaf is given its `[#q-…]`, and the rows name it.
+        let row = body.find("\n  - [#q-").unwrap();
+        assert!(body[row..].contains("] follow-up: "), "{updated}");
         let sibling = body.find("  - sibling work").unwrap();
         assert!(leaf < row && row < sibling, "{updated}");
         assert!(sibling < body.find("- later work").unwrap(), "{updated}");
@@ -578,13 +825,10 @@ mod tests {
         let (updated, outcome) = plan_handback_followups(&content, "do [#decisionidstamp]", &mixed);
         assert_eq!(
             outcome.inserted,
-            vec![
-                "follow up on an action item from `decisionidstamp`: wire the gutter stamp"
-                    .to_string()
-            ]
+            vec!["[#decisionidstamp] follow-up: wire the gutter stamp".to_string()]
         );
         assert_eq!(outcome.held_for_triage, 2);
-        assert_eq!(updated.matches("follow up on").count(), 1, "{updated}");
+        assert_eq!(updated.matches("follow-up:").count(), 1, "{updated}");
     }
 
     #[test]
@@ -634,12 +878,13 @@ mod tests {
         );
         let content = doc("- ☑️ [#subagent:leaf#1] leaf work\n- later work\n");
         let (once, first) = plan_handback_followups(&content, "leaf work", handback);
+        // `#followupshorttitle`: the id-less origin is given its `[#q-…]`
+        // first, and the row names it by that id.
+        let origin_id = followup_origin_id(&origin_row_text(&once, "leaf work")).unwrap();
+        assert!(origin_id.starts_with("q-"), "{once}");
         assert_eq!(
             first.inserted,
-            vec![
-                "follow up on an action item from queue item “leaf work”: wire the gutter stamp"
-                    .to_string()
-            ]
+            vec![format!("[#{origin_id}] follow-up: wire the gutter stamp")]
         );
         assert_eq!(once.matches("[#subagent:leaf#1]").count(), 1, "{once}");
 
@@ -677,14 +922,14 @@ mod tests {
 
         let other = "**Summary:** done\n**Action items:**\n- a different limit\n";
         let (added, extra) = plan_handback_followups(&legacy, "leaf work", other);
-        assert_eq!(
-            extra.inserted,
-            vec![
-                "follow up on an action item from queue item “leaf work”: a different limit"
-                    .to_string()
-            ]
+        assert_eq!(extra.inserted.len(), 1, "{extra:?}");
+        assert!(
+            extra.inserted[0].starts_with("[#q-")
+                && extra.inserted[0].ends_with("] follow-up: a different limit"),
+            "{extra:?}"
         );
-        assert_eq!(added.matches("follow up on").count(), 2, "{added}");
+        assert_eq!(added.matches("follow up on").count(), 1, "{added}");
+        assert_eq!(added.matches("follow-up:").count(), 1, "{added}");
     }
 
     /// The old quote spent the 80-character bound on the marker, so its work
@@ -738,9 +983,7 @@ mod tests {
         );
         assert_eq!(
             outcome.refused_items,
-            vec![
-                "follow up on an action item from `decisionidstamp`: an ordinary limit".to_string()
-            ]
+            vec!["[#decisionidstamp] follow-up: an ordinary limit".to_string()]
         );
         assert!(
             outcome
@@ -757,7 +1000,7 @@ mod tests {
         );
         assert_eq!(
             command,
-            "agent-doc queue follow-up tasks/session.md --id main --after 'do [#decisionidstamp]' --item 'follow up on an action item from `decisionidstamp`: an ordinary limit'"
+            "agent-doc queue follow-up tasks/session.md --id main --after 'do [#decisionidstamp]' --item '[#decisionidstamp] follow-up: an ordinary limit'"
         );
         assert!(!command.contains("<origin>") && !command.contains("<text>"));
 
@@ -780,11 +1023,11 @@ mod tests {
             "tasks/my session.md",
             "main",
             "do [#alpha]",
-            &["follow up on an action item from `alpha`: it's `done`".to_string()],
+            &["[#alpha] follow-up: it's `done`".to_string()],
         );
         assert_eq!(
             quoted,
-            "agent-doc queue follow-up 'tasks/my session.md' --id main --after 'do [#alpha]' --item 'follow up on an action item from `alpha`: it'\\''s `done`'"
+            "agent-doc queue follow-up 'tasks/my session.md' --id main --after 'do [#alpha]' --item '[#alpha] follow-up: it'\\''s `done`'"
         );
     }
 
@@ -805,7 +1048,7 @@ mod tests {
         let content = doc("- do [#decisionidstamp]\n- later work\n");
         let (updated, outcome) =
             plan_handback_followups(&content, "do [#decisionidstamp]", handback);
-        let from = "follow up on an action item from `decisionidstamp`:";
+        let from = "[#decisionidstamp] follow-up:";
         assert_eq!(
             outcome.inserted,
             vec![
@@ -829,6 +1072,111 @@ mod tests {
         let (again, repeat) = plan_handback_followups(&updated, "do [#decisionidstamp]", handback);
         assert_eq!(again, updated);
         assert_eq!(repeat.already_present, 5);
+    }
+
+    /// `#followupshorttitle`: a follow-up of a follow-up names only its
+    /// immediate origin's own id. Titles never nest, whether the origin is a
+    /// current-form row or a legacy quoted one.
+    #[test]
+    fn a_followup_of_a_followup_names_only_its_immediate_origin() {
+        let handback = "**Summary:** done\n**Action items:**\n- agent: rerun CI\n";
+        for origin in [
+            "[#checkadragainst] follow-up: agent: fix the check [#q-0123456789ab]",
+            "follow up on an action item from queue item “follow up on an action item from `checkadragainst`: agent: fix…”: agent: fix the check [#q-0123456789ab]",
+        ] {
+            let content = doc(&format!(
+                "- ~~do [#checkadragainst]~~\n- 🚧 [#subagent:x#1] {origin}\n- later\n"
+            ));
+            let (updated, outcome) = plan_handback_followups(&content, origin, handback);
+            assert_eq!(
+                outcome.inserted,
+                vec!["[#q-0123456789ab] follow-up: agent: rerun CI".to_string()],
+                "{origin}"
+            );
+            assert!(
+                updated.contains(&format!(
+                    "- 🚧 [#subagent:x#1] {origin}\n- [#q-0123456789ab] follow-up: agent: rerun CI\n- later\n"
+                )),
+                "{updated}"
+            );
+            // The new row is free text: it aliases neither its origin nor the
+            // origin's own origin.
+            let row = &outcome.inserted[0];
+            assert!(!agent_doc_element_queue::queue_head_identity(row).is_id_backed());
+            assert_eq!(row.matches("follow").count(), 1, "{row}");
+            let (again, repeat) = plan_handback_followups(&updated, origin, handback);
+            assert_eq!(again, updated);
+            assert_eq!(repeat.already_present, 1);
+        }
+    }
+
+    /// `#followupshorttitle`: an id-less origin gets its `[#q-…]` in the same
+    /// write, so the row names it by id rather than quoting its text.
+    #[test]
+    fn an_idless_origin_is_given_an_id_before_its_rows_name_it() {
+        let content = doc("- ☑️ [#subagent:x#1] fix the flaky sync test\n- later\n");
+        let (updated, outcome) =
+            plan_handback_followups(&content, "fix the flaky sync test", HANDBACK);
+        let origin = origin_row_text(&updated, "fix the flaky sync test");
+        let id = followup_origin_id(&origin).expect("origin admitted an id");
+        assert!(id.starts_with("q-"), "{updated}");
+        assert!(
+            origin.ends_with(&format!("fix the flaky sync test [#{id}]")),
+            "{origin}"
+        );
+        assert_eq!(
+            outcome.inserted,
+            vec![
+                format!("[#{id}] follow-up: >512-commit documents can miss answers"),
+                format!("[#{id}] follow-up: the gutter does not show the stamp"),
+            ]
+        );
+        assert!(!updated.contains("queue item “"), "{updated}");
+        // A repeat report by the claim's original text finds the same origin
+        // and adds nothing.
+        let (again, repeat) =
+            plan_handback_followups(&updated, "fix the flaky sync test", HANDBACK);
+        assert_eq!(again, updated);
+        assert_eq!(repeat.already_present, 2);
+
+        // A refused placement leaves the document, and the origin, unchanged:
+        // the printed rows quote the origin as it still reads.
+        let ambiguous = doc("- fix it\n- fix it\n");
+        let (same, refused) = plan_handback_followups(&ambiguous, "fix it", HANDBACK);
+        assert_eq!(same, ambiguous);
+        assert!(refused.refused.is_some(), "{refused:?}");
+        assert!(
+            refused
+                .refused_items
+                .iter()
+                .all(|row| row.starts_with(FOLLOWUP_LEGACY_PREFIX)),
+            "{refused:?}"
+        );
+    }
+
+    /// Rows in the legacy title form still parse, and still hold their item:
+    /// a repeated report after the upgrade never re-adds it in the new form.
+    #[test]
+    fn legacy_titles_still_hold_their_items() {
+        let handback = "**Summary:** done\n**Action items:**\n- operator: decide the ZIP layout\n";
+        for legacy in [
+            "- ### 🙋 follow up on an action item from `decisionidstamp`: operator: decide the ZIP layout [operator-verify] [#q-0123456789ab]\n",
+            "- ### ~~follow up on an action item from `decisionidstamp`: operator: decide the ZIP layout~~\n",
+            "- ### 🙋 [from:recovery key=q-0123456789ab-restore] follow up on an action item from `decisionidstamp`: operator: decide the ZIP layout [operator-verify] [#q-0123456789ab]\n",
+        ] {
+            let content = doc(&format!("- do [#decisionidstamp]\n{legacy}"));
+            let (same, outcome) =
+                plan_handback_followups(&content, "do [#decisionidstamp]", handback);
+            assert_eq!(same, content, "{legacy}");
+            assert_eq!(outcome.already_present, 1, "{legacy}");
+            let row = legacy.trim_start_matches("- ### ").trim_end();
+            let work = agent_doc_element_queue::strip_attempt_projection_prefix(row);
+            assert!(
+                crate::followup_owner::followup_row_action_item(work.trim_start_matches("~~"))
+                    .is_some_and(|item| item.starts_with("operator: decide the ZIP layout")),
+                "{legacy}"
+            );
+        }
     }
 
     /// A row written before the owner tag existed, live or struck, still holds

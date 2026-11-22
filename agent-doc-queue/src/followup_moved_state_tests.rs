@@ -132,6 +132,9 @@ const STRUCK_AT: &str = "2026-11-21T08:31:41.000Z";
 
 const ORIGIN: &str = "follow up on an action item from queue item “agent-doc duplicated my prompt ` - ~~Should we integrate these?~~` above this pr…”: agent: find how a row's own claim label got written into its text.";
 
+/// The `[#q-…]` preflight admitted on [`ORIGIN`].
+const ORIGIN_ID: &str = "[#q-4f8a86798745]";
+
 fn handback() -> String {
     "**Summary**\n\n\
      Traced the leak and fixed it.\n\n\
@@ -167,19 +170,21 @@ fn strike_after_report_complete_renders_the_moved_state() {
         &response,
     )
     .unwrap();
+    // The origin carries the `[#q-…]` preflight admitted, so the follow-up
+    // rows name it by id (`#followupshorttitle`).
     let reported = session(
-        &format!("- ### ☑️ [#subagent:markerleak#1] {ORIGIN}\n"),
+        &format!("- ### ☑️ [#subagent:markerleak#1] {ORIGIN} {ORIGIN_ID}\n"),
         &cell,
     );
     let (placed, outcome) = crate::handback_followups::plan_handback_followups(
         &reported,
-        &format!("☑️ [#subagent:markerleak#1] {ORIGIN}"),
+        &format!("☑️ [#subagent:markerleak#1] {ORIGIN} {ORIGIN_ID}"),
         &response,
     );
     assert_eq!(outcome.inserted.len(), 3, "{outcome:#?}\n{placed}");
-    let struck_row = format!("- ### ~~{ORIGIN} ⟦published⟧~~\n");
+    let struck_row = format!("- ### ~~{ORIGIN} {ORIGIN_ID} ⟦published⟧~~\n");
     let struck = placed.replacen(
-        &format!("- ### ☑️ [#subagent:markerleak#1] {ORIGIN}\n"),
+        &format!("- ### ☑️ [#subagent:markerleak#1] {ORIGIN} {ORIGIN_ID}\n"),
         &struck_row,
         1,
     );
@@ -209,7 +214,7 @@ fn strike_after_report_complete_renders_the_moved_state() {
     // Without the placed rows (a refused placement whose printed command has
     // not run), the struck head is the only place the action items live.
     let unplaced = reported.replacen(
-        &format!("- ### ☑️ [#subagent:markerleak#1] {ORIGIN}\n"),
+        &format!("- ### ☑️ [#subagent:markerleak#1] {ORIGIN} {ORIGIN_ID}\n"),
         &struck_row,
         1,
     );
@@ -231,7 +236,7 @@ fn strike_after_report_complete_renders_the_moved_state() {
     // next maintenance pass updates the tree.
     let rows: String = placed
         .lines()
-        .filter(|line| line.starts_with("- follow up on an action item from"))
+        .filter(|line| line.starts_with(&format!("- {ORIGIN_ID} follow-up: ")))
         .map(|line| format!("{line}\n"))
         .collect();
     assert_eq!(rows.lines().count(), 3, "{placed}");

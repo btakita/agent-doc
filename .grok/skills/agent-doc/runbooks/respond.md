@@ -535,7 +535,12 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      **Notes**, and **Next actions** into the response structure and queues each
      Action items bullet as a follow-up row right after the originating head, or
      after the top-level row that holds a nested head, so do not add those rows
-     again with `queue follow-up` (`#workerresponsestructure`). A bullet
+     again with `queue follow-up` (`#workerresponsestructure`). Each row reads
+     `[#<origin-id>] follow-up: <item>` (`#followupshorttitle`): the origin's
+     id, never a quote of its text, and a follow-up of a follow-up names only
+     its immediate origin. When you add a follow-up row yourself, write that
+     form; `queue follow-up` rewrites an item given in the old `follow up on
+     an action item from …` form. A bullet
      labelled `human (<who>):` or `operator:`, or an unlabelled one that names
      an approval, an admin or org-owner setting, or an operator decision,
      becomes an `[operator-verify]` row that waits on the operator (`⏳`): no

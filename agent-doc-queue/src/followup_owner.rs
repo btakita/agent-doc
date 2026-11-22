@@ -1,7 +1,8 @@
 //! `#humanfollowupowner`: who owns a worker hand-back's action item.
 //!
 //! `queue report-complete` turns each **Action items** bullet into a follow-up
-//! row (`follow up on an action item from …: <item>`,
+//! row (`[#<origin>] follow-up: <item>`; older rows read
+//! `follow up on an action item from …: <item>`,
 //! [`crate::handback_followups`]). A row with no owner reads as agent work: it
 //! paints `📥`, a `go` queue dispatches it with no review, and the Stop hook's
 //! `#transientcloseout` gate refuses every turn end while it is pending. Many
@@ -65,9 +66,23 @@ use anyhow::Result;
 use agent_doc_document::queue_projection::{self, QueueLifecycleMarker};
 use agent_doc_element_backlog::backlog;
 
-/// The work-text prefix of every row `report-complete` writes for an action
-/// item ([`crate::handback_followups::action_item_followup_text`]).
+/// The work-text prefix of a legacy follow-up row
+/// (`follow up on an action item from <origin>: <item>`,
+/// [`crate::handback_followups::legacy_action_item_followup_text`]). Rows
+/// written since `#followupshorttitle` read `[#<origin>] follow-up: <item>`
+/// ([`crate::handback_followups::action_item_followup_text`]); both forms
+/// parse through [`followup_row_action_item`].
 pub const FOLLOWUP_ROW_PREFIX: &str = "follow up on an action item from ";
+
+/// Whether `text` (a queue row, any projection) may be a follow-up row in
+/// either form: a cheap prefilter before [`followup_row_action_item`].
+pub fn mentions_followup_row(text: &str) -> bool {
+    if text.contains(FOLLOWUP_ROW_PREFIX) {
+        return true;
+    }
+    text.match_indices(']')
+        .any(|(close, _)| agent_doc_element_queue::is_followup_reference_tail(&text[close + 1..]))
+}
 
 /// The execution tag a human-owned follow-up row carries.
 pub const OPERATOR_OWNED_TAG: &str = backlog::OPERATOR_VERIFY_TAG;
@@ -616,9 +631,19 @@ pub fn owned_followup_row(row: String, item: &str) -> String {
     }
 }
 
-/// The action item a `follow up on an action item from <origin>: <item>` work
-/// text quotes. `<origin>` is `` `id` `` or `queue item “label”`.
+/// The action item of a follow-up row's work text: `[#<origin>] follow-up:
+/// <item>` (`#followupshorttitle`), or the legacy `follow up on an action
+/// item from <origin>: <item>` whose `<origin>` is `` `id` `` or
+/// `queue item “label”`.
+///
+/// A leading `[from:<source> key=<key>]` attribution (a row a coordinator
+/// restored with `queue add --source recovery --key <id>-restore`) is
+/// provenance, not part of either form.
 pub fn followup_row_action_item(work: &str) -> Option<&str> {
+    let work = without_inbound_tag(work);
+    if let Some((_, item)) = agent_doc_element_queue::followup_origin_reference(work) {
+        return Some(item);
+    }
     let rest = work.trim_start().strip_prefix(FOLLOWUP_ROW_PREFIX)?;
     let after_origin = if let Some(quoted) = rest.strip_prefix('`') {
         let close = quoted.find('`')?;
@@ -629,6 +654,15 @@ pub fn followup_row_action_item(work: &str) -> Option<&str> {
         &quoted[close + '”'.len_utf8()..]
     };
     after_origin.strip_prefix(": ")
+}
+
+/// `work` without a leading `[from:<source>( key=<key>)?]` attribution.
+fn without_inbound_tag(work: &str) -> &str {
+    let trimmed = work.trim_start();
+    trimmed
+        .strip_prefix(crate::queue_inbound::INBOUND_TAG_PREFIX)
+        .and_then(|rest| rest.find(']').map(|close| rest[close + 1..].trim_start()))
+        .unwrap_or(trimmed)
 }
 
 /// `#finishactionable`: whether a live queue row's text is an agent-owned
@@ -798,7 +832,8 @@ pub fn followup_row_keys(content: &str) -> Result<FollowupRowKeys> {
 }
 
 /// `(byte offset, text)` of every single-line list row in a queue block that
-/// mentions [`FOLLOWUP_ROW_PREFIX`]; `text` is the row after its `- ` bullet.
+/// may be a follow-up row ([`mentions_followup_row`]); `text` is the row
+/// after its `- ` bullet.
 fn followup_row_texts(content: &str) -> Result<Vec<(usize, &str)>> {
     let components = agent_doc_element::element::parse(content)?;
     let mut rows = Vec::new();
@@ -817,7 +852,7 @@ fn followup_row_texts(content: &str) -> Result<Vec<(usize, &str)>> {
             let Some(text) = content_line[indent..].strip_prefix("- ") else {
                 continue;
             };
-            if !text.contains(FOLLOWUP_ROW_PREFIX) {
+            if !mentions_followup_row(text) {
                 continue;
             }
             rows.push((line_start + indent + 2, text));

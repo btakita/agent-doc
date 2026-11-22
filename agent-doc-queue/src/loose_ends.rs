@@ -353,7 +353,8 @@ fn row_handle(full_text: &str, raw: &str) -> String {
     if let Some(id) = agent_doc_element_queue::queue_prompt_stable_id(work) {
         return id;
     }
-    if let Some(rest) = work.strip_prefix("[#")
+    if agent_doc_element_queue::followup_origin_reference(work).is_none()
+        && let Some(rest) = work.strip_prefix("[#")
         && let Some(close) = rest.find(']')
         && !rest[..close].is_empty()
         && rest[..close]

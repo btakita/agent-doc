@@ -2,6 +2,15 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.586
+
+- **Worker hand-backs land only on their own queue row.** A strike matches the row by its claim lineage, so rows sharing the same leaf text in different trees no longer receive another row's response. An `--ack-text` strike never copies a sibling's response tree, striking a row twice no longer doubles it, and the duplicate-response heal collapses an already-committed duplicate tree completely.
+- **Hand-back state matches where the work went.** A blocker-only hand-back closes its claim and rests the row as blocked. When a hand-back's action items already have their own follow-up rows, the struck row says the work moved instead of asking to keep the tree, and agent-owned action items are reported as work for the current turn.
+- **Queue rows keep their identity through concurrent edits.** A coarse editor splice now publishes line-minimal edits, so a concurrent status word stays in its own line instead of moving into a queue row. A state word or a quoted claim label in a row is no longer read as work text or as the row's prompt id, deleting a word from a row no longer drops the row, and generated rows such as Waiting on you get collision-free merge keys.
+- **Response evidence stays indexed.** Struck hand-back projections, response trees nested under operator rows, and multi-paragraph block summaries count as evidence, so the response orphan guard no longer reports trees that are still in the document. Indexed legacy locator bytes are proven consistently.
+- **Steering, routing, and controller fixes.** Binary-owned exchange echoes and Grok `task_complete` notifications are never treated as operator prompts. An explicit-send enqueue is matched to in-flight editor operations and adopted when authority moved. The closeout guard honors current operator-action holds, and the controller bounds its timeout backlog and state retention.
+- **PyPI publishing resolves its token at the point of use.**
+
 ## 0.35.585
 
 - **Codex Stop reuses verified closeout evidence.** When the live document, merge baseline, and Git commit still match the controller's terminal receipt, Stop skips the duplicate session audit. A changed document still triggers the full integrity checks.

@@ -788,7 +788,11 @@ const GENERATED_RESPONSE_STRUCTURE_VALUE_LABELS: [&str; 13] = [
 ];
 /// `#guidancescope`: `**Remaining:**` heads the short list of what is
 /// left in a response tree; its entries are marked response details.
-const GENERATED_RESPONSE_STRUCTURE_CONTAINER_LABELS: [&str; 3] =
+///
+/// Public so every response-tree parser (the archive orphan guard's
+/// structured projection scan) recognizes the same containers
+/// instead of keeping its own list that falls behind a new label.
+pub const GENERATED_RESPONSE_STRUCTURE_CONTAINER_LABELS: [&str; 3] =
     ["**Choices:**", "**Next actions:**", "**Remaining:**"];
 
 /// A list item copied from a worker response, as opposed to an operator's

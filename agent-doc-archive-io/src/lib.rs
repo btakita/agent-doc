@@ -1469,185 +1469,212 @@ fn structured_inline_response_item_id(item: &str) -> Option<&str> {
 /// document serves every id; see [`structured_inline_response_summaries`] for
 /// the exact shape a projection must have to count.
 fn structured_inline_response_projections(content: &str) -> BTreeMap<String, BTreeSet<String>> {
-    use agent_doc_document::worker_handback::SectionKind;
-    use agent_doc_markdown_ast::overlay::RESPONSE_DETAIL_MARKER;
-
-    let mut projections = BTreeMap::<String, BTreeSet<String>>::new();
-    let mut candidate: Option<StructuredInlineResponse> = None;
-    let mut fence: Option<String> = None;
-
-    for raw_line in content.lines() {
-        let space_trimmed = raw_line.trim_start_matches(' ');
-        let indent = raw_line.len() - space_trimmed.len();
-        if let Some(active) = candidate.as_mut()
-            && active.nested_metadata_allowed
-            && (indent > active.indent + 2 || raw_line.trim().is_empty())
-        {
-            // A recognized metadata container owns this subtree. Ordered list
-            // items and prose in a worker detail do not supply summary evidence;
-            // only a block `Summary` is its own nested text.
-            if active.summary_block {
-                active.push_summary_block_line(raw_line);
-            }
-            continue;
-        }
+    let lines = content.lines().collect::<Vec<_>>();
+    // 2026-11-22: one fence-aware pass finds every
+    // `- **Response [#r-…]**` item, at any depth, and each is scanned on its
+    // own. A single running candidate used to own every deeper line of the
+    // tree it was scanning, so a response nested under a struck row inside an
+    // `Action items` detail, or under a `Guidance` line, was swallowed (or
+    // invalidated its ancestor) and never started a projection of its own,
+    // while [`extract_response_reference_ids`] still counted its id. Here the
+    // set of projection starts is exactly the set of response items the
+    // reference extractor sees.
+    let mut in_fence = vec![false; lines.len()];
+    let mut starts = Vec::new();
+    let mut fence: Option<&str> = None;
+    for (index, raw_line) in lines.iter().enumerate() {
         let trimmed = raw_line.trim_start();
         let fence_marker = trimmed
             .strip_prefix("```")
             .map(|_| "```")
             .or_else(|| trimmed.strip_prefix("~~~").map(|_| "~~~"));
         if let Some(marker) = fence_marker {
-            if fence.is_none()
-                && let Some(active) = candidate.as_mut()
-            {
-                if indent > active.indent {
-                    active.invalid = true;
-                }
-                finish_structured_inline_response(
-                    candidate.take().expect("candidate is present"),
-                    &mut projections,
-                );
-            }
-            if fence.as_deref() == Some(marker) {
+            in_fence[index] = true;
+            if fence == Some(marker) {
                 fence = None;
             } else if fence.is_none() {
-                fence = Some(marker.to_string());
+                fence = Some(marker);
             }
             continue;
         }
         if fence.is_some() {
+            in_fence[index] = true;
             continue;
         }
-
         // Binary projections use space indentation. Tabs and non-list
         // continuations never prove a structured response child.
-        let item = space_trimmed.strip_prefix("- ");
-
-        let mut projection_ended = false;
-        if let Some(active) = candidate.as_mut() {
-            if !raw_line.trim().is_empty() && indent <= active.indent {
-                finish_structured_inline_response(
-                    candidate.take().expect("candidate is present"),
-                    &mut projections,
-                );
-            } else if let Some(item) = item {
-                if indent == active.indent + 2 {
-                    active.nested_metadata_allowed = false;
-                    active.summary_block = false;
-                    if let Some(blocker) = item.strip_prefix("**Blocker:**") {
-                        if blocker.trim().is_empty() {
-                            active.invalid = true;
-                        }
-                    } else if let Some(summary) = item.strip_prefix("**Summary:**") {
-                        let summary = summary.trim();
-                        if !active.timestamp_seen || summary.is_empty() || active.summary.is_some()
-                        {
-                            active.invalid = true;
-                        } else if summary == RESPONSE_DETAIL_MARKER {
-                            // `#respindexorphan`: a multi-paragraph worker
-                            // summary is rendered as the marker with its text
-                            // nested beneath; that text is the evidence.
-                            active.summary = Some(String::new());
-                            active.summary_block = true;
-                            active.nested_metadata_allowed = true;
-                        } else {
-                            active.summary = Some(summary.to_string());
-                        }
-                    } else if let Some(timestamp) = item.strip_prefix("**Timestamp:**") {
-                        if active.timestamp_seen
-                            || active.summary.is_some()
-                            || timestamp.trim().is_empty()
-                        {
-                            active.invalid = true;
-                        } else {
-                            active.timestamp_seen = true;
-                        }
-                    } else if active.timestamp_seen && active.summary.is_some() {
-                        let metadata = item.trim();
-                        let handback_section = metadata
-                            .strip_prefix("**")
-                            .and_then(|bold| bold.split_once(":** "))
-                            .is_some_and(|(heading, value)| {
-                                !value.trim().is_empty()
-                                    && SectionKind::ALL
-                                        .iter()
-                                        .any(|kind| kind.heading() == heading)
-                            });
-                        let has_value = [
-                            "**State:**",
-                            "**Guidance:**",
-                            "**Worktree:**",
-                            "**Branch:**",
-                            "**Integration:**",
-                            "**Details:**",
-                            "**Context:**",
-                            "**Question:**",
-                            "**Selected:**",
-                            "**Recommendation:**",
-                        ]
-                        .into_iter()
-                        .any(|prefix| {
-                            metadata
-                                .strip_prefix(prefix)
-                                .is_some_and(|value| !value.trim().is_empty())
-                        });
-                        let container = matches!(metadata, "**Choices:**" | "**Next actions:**");
-                        active.nested_metadata_allowed = container
-                            || (handback_section && metadata.ends_with(RESPONSE_DETAIL_MARKER));
-                        let known = handback_section || has_value || container;
-                        // An unknown `**Label:**` field still fails closed.
-                        let metadata_shaped = metadata
-                            .strip_prefix("**")
-                            .and_then(|bold| bold.split_once("**"))
-                            .is_some_and(|(label, _)| label.ends_with(':'));
-                        active.invalid |= !known && metadata_shaped;
-                        // `#respindexorphan`: any other direct child after the
-                        // summary is not response metadata. It is a queue row
-                        // nested beneath the tree (operator children indented
-                        // past the binary's response item) or another
-                        // response tree; the projection's evidence is already
-                        // complete, so it ends here and that line is scanned
-                        // as ordinary document content, where a nested
-                        // `**Response [#r-…]**` starts its own projection.
-                        projection_ended = !known && !metadata_shaped;
-                    } else {
-                        active.invalid = true;
-                    }
-                } else if !raw_line.trim().is_empty() {
-                    active.invalid = true;
-                }
-                if !projection_ended {
-                    continue;
-                }
-            } else if !raw_line.trim().is_empty() {
-                active.invalid = true;
-                continue;
-            }
-        }
-        if projection_ended {
-            finish_structured_inline_response(
-                candidate.take().expect("candidate is present"),
-                &mut projections,
-            );
-        }
-
-        if let Some(response_id) = item.and_then(structured_inline_response_item_id) {
-            candidate = Some(StructuredInlineResponse {
-                response_id: response_id.to_string(),
-                indent,
-                timestamp_seen: false,
-                summary: None,
-                summary_block: false,
-                nested_metadata_allowed: false,
-                invalid: false,
-            });
+        let space_trimmed = raw_line.trim_start_matches(' ');
+        if let Some(response_id) = space_trimmed
+            .strip_prefix("- ")
+            .and_then(structured_inline_response_item_id)
+        {
+            starts.push((index, raw_line.len() - space_trimmed.len(), response_id));
         }
     }
 
-    if let Some(candidate) = candidate {
+    let mut projections = BTreeMap::<String, BTreeSet<String>>::new();
+    for (start, indent, response_id) in starts {
+        let candidate =
+            scan_structured_inline_response(&lines, &in_fence, start, indent, response_id);
         finish_structured_inline_response(candidate, &mut projections);
     }
     projections
+}
+
+/// Scan the projection whose `- **Response [#r-…]**` item is `lines[start]`
+/// at `indent`, up to the first line that leaves its subtree or ends it.
+fn scan_structured_inline_response(
+    lines: &[&str],
+    in_fence: &[bool],
+    start: usize,
+    indent: usize,
+    response_id: &str,
+) -> StructuredInlineResponse {
+    use agent_doc_document::worker_handback::SectionKind;
+    use agent_doc_markdown_ast::overlay::{
+        GENERATED_RESPONSE_STRUCTURE_CONTAINER_LABELS, RESPONSE_DETAIL_MARKER,
+    };
+
+    let mut active = StructuredInlineResponse {
+        response_id: response_id.to_string(),
+        indent,
+        timestamp_seen: false,
+        summary: None,
+        summary_block: false,
+        nested_metadata_allowed: false,
+        invalid: false,
+    };
+    // The indent of a nested response item met below a direct
+    // child (under a `Guidance` line, say). That response is its own
+    // projection; its subtree is opaque here and neither adds to nor
+    // invalidates this one.
+    let mut nested_response_indent: Option<usize> = None;
+
+    for (offset, raw_line) in lines[start + 1..].iter().enumerate() {
+        let index = start + 1 + offset;
+        let space_trimmed = raw_line.trim_start_matches(' ');
+        let line_indent = raw_line.len() - space_trimmed.len();
+        let blank = raw_line.trim().is_empty();
+        if let Some(nested) = nested_response_indent {
+            if blank || line_indent > nested {
+                continue;
+            }
+            nested_response_indent = None;
+        }
+        if active.nested_metadata_allowed && (line_indent > active.indent + 2 || blank) {
+            // A recognized metadata container owns this subtree. Ordered list
+            // items and prose in a worker detail do not supply summary evidence;
+            // only a block `Summary` is its own nested text. A response nested
+            // in it is scanned from its own item.
+            if active.summary_block {
+                active.push_summary_block_line(raw_line);
+            }
+            continue;
+        }
+        if in_fence[index] {
+            if line_indent > active.indent {
+                active.invalid = true;
+            }
+            break;
+        }
+        if !blank && line_indent <= active.indent {
+            break;
+        }
+        let Some(item) = space_trimmed.strip_prefix("- ") else {
+            if !blank {
+                active.invalid = true;
+            }
+            continue;
+        };
+        if line_indent != active.indent + 2 {
+            if structured_inline_response_item_id(item).is_some() {
+                nested_response_indent = Some(line_indent);
+            } else {
+                active.invalid = true;
+            }
+            continue;
+        }
+        active.nested_metadata_allowed = false;
+        active.summary_block = false;
+        if let Some(blocker) = item.strip_prefix("**Blocker:**") {
+            if blocker.trim().is_empty() {
+                active.invalid = true;
+            }
+        } else if let Some(summary) = item.strip_prefix("**Summary:**") {
+            let summary = summary.trim();
+            if !active.timestamp_seen || summary.is_empty() || active.summary.is_some() {
+                active.invalid = true;
+            } else if summary == RESPONSE_DETAIL_MARKER {
+                // `#respindexorphan`: a multi-paragraph worker summary is
+                // rendered as the marker with its text nested beneath; that
+                // text is the evidence.
+                active.summary = Some(String::new());
+                active.summary_block = true;
+                active.nested_metadata_allowed = true;
+            } else {
+                active.summary = Some(summary.to_string());
+            }
+        } else if let Some(timestamp) = item.strip_prefix("**Timestamp:**") {
+            if active.timestamp_seen || active.summary.is_some() || timestamp.trim().is_empty() {
+                active.invalid = true;
+            } else {
+                active.timestamp_seen = true;
+            }
+        } else if active.timestamp_seen && active.summary.is_some() {
+            let metadata = item.trim();
+            let handback_section = metadata
+                .strip_prefix("**")
+                .and_then(|bold| bold.split_once(":** "))
+                .is_some_and(|(heading, value)| {
+                    !value.trim().is_empty()
+                        && SectionKind::ALL
+                            .iter()
+                            .any(|kind| kind.heading() == heading)
+                });
+            let has_value = [
+                "**State:**",
+                "**Guidance:**",
+                "**Worktree:**",
+                "**Branch:**",
+                "**Integration:**",
+                "**Details:**",
+                "**Context:**",
+                "**Question:**",
+                "**Selected:**",
+                "**Recommendation:**",
+            ]
+            .into_iter()
+            .any(|prefix| {
+                metadata
+                    .strip_prefix(prefix)
+                    .is_some_and(|value| !value.trim().is_empty())
+            });
+            // The container labels (`Choices`, `Next actions`,
+            // `Remaining`) are the overlay's reserved response structure.
+            let container = GENERATED_RESPONSE_STRUCTURE_CONTAINER_LABELS.contains(&metadata);
+            active.nested_metadata_allowed =
+                container || (handback_section && metadata.ends_with(RESPONSE_DETAIL_MARKER));
+            let known = handback_section || has_value || container;
+            // An unknown `**Label:**` field still fails closed.
+            let metadata_shaped = metadata
+                .strip_prefix("**")
+                .and_then(|bold| bold.split_once("**"))
+                .is_some_and(|(label, _)| label.ends_with(':'));
+            active.invalid |= !known && metadata_shaped;
+            // `#respindexorphan`: any other direct child after the summary is
+            // not response metadata. It is a queue row nested beneath the tree
+            // (operator children indented past the binary's response item) or
+            // another response tree; the projection's evidence is already
+            // complete, so it ends here. A response under that row is scanned
+            // from its own item.
+            if !known && !metadata_shaped {
+                break;
+            }
+        } else {
+            active.invalid = true;
+        }
+    }
+    active
 }
 
 fn added_inline_response_summaries(parent: &str, current: &str, response_id: &str) -> Vec<String> {
@@ -3223,6 +3250,155 @@ mod tests {
             block = BLOCK,
         );
         assert!(present_inline_response_ids(&stray_before_summary).is_empty());
+    }
+
+    /// 2026-11-22, tasks/agent-doc/agent-doc-bugs.md: every
+    /// session-check and `repair --session-check-heal` refused with "response
+    /// index would orphan referenced response id(s): [#r-37bf1620fdbd],
+    /// [#r-4648c2dbc549], [#r-4fd1a32bc2c5]" while all three trees were in
+    /// the document. They sat under a response that is itself nested under
+    /// the `Guidance` line of another response: one under a struck answer row
+    /// inside an `Action items` detail, two under struck rows that are direct
+    /// children of that response. The single running projection candidate
+    /// owned every deeper line, so the outer tree swallowed them (the
+    /// `Guidance` child invalidated it, an `Action items` detail skipped its
+    /// subtree) and none started a projection of its own, while the reference
+    /// extractor still counted every `**Response [#r-…]**` item. Responses
+    /// also gained a `**Remaining:**` container that the scan rejected as an
+    /// unknown label. Cut down from the live tree, anonymized.
+    #[test]
+    fn every_nested_response_item_is_its_own_projection() {
+        const OUTER: &str = "[#r-1c0a7e5d2b90]";
+        const GUIDANCE_CHILD: &str = "[#r-2d1b8f6e3ca1]";
+        const ANSWER: &str = "[#r-3e2c9a7f4db2]";
+        const SHORT_LIST: &str = "[#r-4f3dab805ec3]";
+        const INSTALL: &str = "[#r-5a4ebc916fd4]";
+        let d = agent_doc_markdown_ast::overlay::RESPONSE_DETAIL_MARKER;
+        let content = format!(
+            concat!(
+                "<!-- agent:queue -->\n",
+                "- ~~stop the ack-text strike from copying a sibling tree~~\n",
+                "  - **Response {outer}**\n",
+                "    - **Timestamp:** 2026-11-21T19:00:00.000Z\n",
+                "    - **Summary:** Fixed and pushed to `main`.\n",
+                "    - **What changed:** {d}\n",
+                "      - Commit `d9190e1d6a` on `main`. {d}\n",
+                "    - **Action items:** {d}\n",
+                "      - agent: check the CI run for `d9190e1d6a`. {d}\n",
+                "    - **Next actions:** {d}\n",
+                "      - Coordinator installs and closes the item. {d}\n",
+                "        - ~~Do the next actions.~~\n",
+                "          - ~~What is the status of the parent row?~~\n",
+                "    - **Remaining:**\n",
+                "      - operator: unlock the keyring once {d}\n",
+                "    - **State:** Follow-up work remains.\n",
+                "    - **Guidance:** More work remains. Keep this tree and follow the action items in this response.\n",
+                "      - **Response {guidance_child}**\n",
+                "        - **Timestamp:** 2026-11-21T20:20:16.000Z\n",
+                "        - **Summary:** {d}\n",
+                "          Both commands now return in under a second.\n",
+                "          Why no prompt ever appeared:\n",
+                "          - The daemon never contacts the prompter. {d}\n",
+                "        - **What changed:** {d}\n",
+                "          - **New wrapper:** {d}\n",
+                "            - It reads the token from the unlocked keyring. {d}\n",
+                "        - **Action items:** {d}\n",
+                "          - operator: unlock the keyring once, which needs your password. [operator-verify] {d}\n",
+                "            - ~~Present the password prompt and complete.~~\n",
+                "              - **Response {answer}**\n",
+                "                - **Timestamp:** 2026-11-22T19:09:18.000Z\n",
+                "                - **Summary:** The keyring was already unlocked, so no prompt was shown.\n",
+                "                - **Details:** What changed and Verification are in the hand-back in agent:exchange.\n",
+                "                - **State:** Complete.\n",
+                "                - **Guidance:** This row is done. Safe to delete this completed row.\n",
+                "        - **Notes:** {d}\n",
+                "          - The keyring daemon's stuck queue remains. {d}\n",
+                "        - **Next actions:** {d}\n",
+                "          - None for agents. {d}\n",
+                "        - **State:** Follow-up work remains.\n",
+                "        - **Guidance:** More work remains. Keep this tree and follow the action items in this response.\n",
+                "        - ~~Complete the rest of the work as a short list. [#q-789433648fa7] ⟦published⟧~~\n",
+                "          - **Response {short_list}**\n",
+                "            - **Timestamp:** 2026-11-22T19:29:26.000Z\n",
+                "            - **Summary:** Every response tree with work left now shows a short Remaining list.\n",
+                "            - **Details:** The full hand-back is in agent:exchange.\n",
+                "            - **State:** Complete.\n",
+                "            - **Guidance:** Its action items moved to their own follow-up rows.\n",
+                "        - ~~follow up on an action item: agent: run the single install.~~\n",
+                "          - **Response {install}**\n",
+                "            - **Timestamp:** 2026-11-22T19:29:26.000Z\n",
+                "            - **Summary:** {d}\n",
+                "              - The fix is now installed. {d}\n",
+                "            - **State:** Complete.\n",
+                "- open prompt\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            outer = OUTER,
+            guidance_child = GUIDANCE_CHILD,
+            answer = ANSWER,
+            short_list = SHORT_LIST,
+            install = INSTALL,
+            d = d,
+        );
+        let all = BTreeSet::from([
+            OUTER.to_string(),
+            GUIDANCE_CHILD.to_string(),
+            ANSWER.to_string(),
+            SHORT_LIST.to_string(),
+            INSTALL.to_string(),
+        ]);
+        assert_eq!(extract_response_reference_ids(&content), all);
+        assert_eq!(
+            present_inline_response_ids(&content),
+            all,
+            "every response item the reference extractor counts is its own projection"
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, &content).unwrap();
+        assert!(
+            dangling_response_references(&doc, &content)
+                .unwrap()
+                .is_empty(),
+            "present nested trees never orphan"
+        );
+
+        // The guard keeps its protection: a backlink to a response that is
+        // in neither the document nor the index is still refused, however
+        // deep the present trees around it are.
+        const MISSING: &str = "[#r-6b5fcd027ae5]";
+        let with_missing = content.replace(
+            "- open prompt\n",
+            &format!("- ~~gone row~~ — auto-struck: response: {MISSING}\n- open prompt\n"),
+        );
+        std::fs::write(&doc, &with_missing).unwrap();
+        assert_eq!(
+            dangling_response_references(&doc, &with_missing).unwrap(),
+            [MISSING.to_string()]
+        );
+        // A response item with no summary evidence is still not a projection,
+        // even when it is nested.
+        let no_summary = content.replace(
+            "                - **Summary:** The keyring was already unlocked, so no prompt was shown.\n",
+            "",
+        );
+        assert!(!present_inline_response_ids(&no_summary).contains(ANSWER));
+        // An unknown label still fails closed for its own projection only.
+        let unknown_label = content.replace(
+            "            - **Details:** The full hand-back is in agent:exchange.\n",
+            "            - **Invented:** not response metadata.\n",
+        );
+        let present = present_inline_response_ids(&unknown_label);
+        assert!(!present.contains(SHORT_LIST));
+        assert!(present.contains(INSTALL) && present.contains(GUIDANCE_CHILD));
+        // A response item inside a fence is documentation, never a projection.
+        let fenced = format!(
+            "```\n- **Response {MISSING}**\n  - **Timestamp:** 2026-11-22T19:29:26.000Z\n  - **Summary:** Example.\n```\n{content}"
+        );
+        assert_eq!(present_inline_response_ids(&fenced), all);
     }
 
     #[test]

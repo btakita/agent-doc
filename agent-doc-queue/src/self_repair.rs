@@ -521,6 +521,109 @@ pub fn is_self_repair_cleanup_item(item: &str) -> bool {
     acts && artifact && in_document
 }
 
+/// `#treefinish`: whether none of the artifacts a self-repair cleanup item
+/// ([`is_self_repair_cleanup_item`]) asks about is left in the queue, so
+/// the item is already done. Conservative: every artifact kind the repairs
+/// handle is checked, not only the one the item names.
+///
+/// - no response tree hangs under a response-structure row (misplaced);
+/// - no `[#r-…]` id owns two response trees in the queue, and every
+///   `[#r-…]` id the item names owns at most one;
+/// - no two sibling rows carry byte-identical struck text, whatever their
+///   subtrees (self-repair keeps copies whose subtrees differ, and those
+///   still need a person);
+/// - when the item is about a claim label, no row carries one the label
+///   repair would remove once its claim retires.
+pub fn self_repair_artifacts_absent(document: &str, item: &str) -> bool {
+    let Ok((_, misplaced)) =
+        crate::queue_consume::retire_misplaced_queue_response_projections(document, &|_| true)
+    else {
+        return false;
+    };
+    if !misplaced.is_empty() {
+        return false;
+    }
+    let Ok(duplicates) = crate::queue_consume::duplicate_queue_response_projection_ids(document)
+    else {
+        return false;
+    };
+    if !duplicates.is_empty() {
+        return false;
+    }
+    let Ok(components) = element::parse(document) else {
+        return false;
+    };
+    let queues = components
+        .iter()
+        .filter(|component| component.name == "queue")
+        .map(|component| component.content(document))
+        .collect::<Vec<_>>();
+    for id in response_ids_named(item) {
+        let header = format!("**Response [#{id}]**");
+        let held = queues
+            .iter()
+            .map(|body| {
+                body.lines()
+                    .filter(|line| {
+                        line.trim_start()
+                            .trim_start_matches("- ")
+                            .starts_with(&header)
+                    })
+                    .count()
+            })
+            .sum::<usize>();
+        if held > 1 {
+            return false;
+        }
+    }
+    let lower = item.to_ascii_lowercase();
+    let about_label = ["[#subagent:", "[#worker:", "claim label", "the label"]
+        .iter()
+        .any(|word| lower.contains(word));
+    if about_label
+        && !strip_stale_claim_labels(document, &|_, _| false)
+            .1
+            .is_empty()
+    {
+        return false;
+    }
+    queues.iter().all(|body| !struck_duplicate_siblings(body))
+}
+
+/// `r-…` ids an item names (`[#r-abc123]`, `#r-abc123`), lowercase.
+fn response_ids_named(item: &str) -> Vec<String> {
+    let mut ids = Vec::new();
+    let mut rest = item;
+    while let Some(at) = rest.find("#r-") {
+        let tail = &rest[at + 1..];
+        let hex = tail[2..]
+            .chars()
+            .take_while(char::is_ascii_hexdigit)
+            .collect::<String>();
+        if hex.len() >= 8 {
+            let id = format!("r-{}", hex.to_ascii_lowercase());
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+        rest = &tail[2..];
+    }
+    ids
+}
+
+/// Any two sibling rows (same parent, same indent) with byte-identical
+/// struck text.
+fn struck_duplicate_siblings(body: &str) -> bool {
+    let lines = lines_of(body);
+    let parents = parents(&lines);
+    let mut seen = std::collections::HashSet::new();
+    lines.iter().enumerate().any(|(index, line)| {
+        line.item.is_some_and(|item| {
+            is_struck_row(item) && !seen.insert((parents[index], line.indent, item))
+        })
+    })
+}
+
 #[cfg(test)]
 #[path = "self_repair_tests.rs"]
 mod tests;

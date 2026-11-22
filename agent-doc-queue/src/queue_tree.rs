@@ -189,6 +189,15 @@ pub struct QueueTreeNode {
     /// Prose list rows owned by a tracked command's folded span.
     #[serde(skip)]
     context_rows: usize,
+    /// `#treefinish`: why this live row no longer keeps its tree alive, when
+    /// its work is carried elsewhere or already done by agent-doc itself.
+    #[serde(skip)]
+    pub resolution: Option<RowResolution>,
+    /// `#treefinish`: the row's own `**Response [#r-…]**` child says work
+    /// remains (its `**State:**` is not `Complete.`). A struck row whose
+    /// response still lists open action items is not finished.
+    #[serde(skip)]
+    pub response_open: bool,
     /// The gutter icon's tooltip: the state label, then the roll-up of a live
     /// waiting head (`waiting on you · you 1 · agent 0 · done 2`). Editors show
     /// it verbatim so every plugin words a node the same way.
@@ -200,6 +209,18 @@ pub struct QueueTreeNode {
 pub struct QueueTreeCount {
     pub state: QueueNodeState,
     pub count: usize,
+}
+
+/// Why a live queue row no longer keeps its tree alive (`#treefinish`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowResolution {
+    /// A nested follow-up row whose action item a top-level row elsewhere in
+    /// the same queue carries: the work was delegated to that row.
+    Delegated,
+    /// An operator follow-up row asking to clean up one of agent-doc's own
+    /// document artifacts that self-repair already removed
+    /// (`#selfrepaircleanup`).
+    SelfRepaired,
 }
 
 /// Counts over the listed nodes (group nodes excluded).
@@ -432,6 +453,8 @@ fn is_waiting_root_line(line: &str) -> bool {
 pub fn queue_tree(document: &str, options: &QueueTreeOptions) -> anyhow::Result<QueueTree> {
     let open_todo_ids = crate::queue_consume::open_waiting_todo_ids(document);
     let mut nodes = Vec::new();
+    // The first raw line of each node, for `#treefinish` resolution.
+    let mut raws: Vec<String> = Vec::new();
     for component in element::parse(document)?
         .into_iter()
         .filter(|component| component.name == "queue")
@@ -499,16 +522,141 @@ pub fn queue_tree(document: &str, options: &QueueTreeOptions) -> anyhow::Result<
                 todo_open: waiting_packet::is_waiting_item_head(entry)
                     && own_id(raw).is_some_and(|id| open_todo_ids.contains(&id)),
                 context_rows,
+                resolution: None,
+                response_open: false,
                 rollup,
                 tooltip: node_tooltip(state, rollup),
             });
+            raws.push(raw.lines().next().unwrap_or_default().to_string());
         }
     }
+    mark_open_responses(document, &mut nodes);
+    resolve_rows(document, &mut nodes, &raws);
     let nodes = select(nodes, options);
     Ok(QueueTree {
         summary: QueueTreeSummary::of(&nodes),
         nodes,
     })
+}
+
+/// `#treefinish`: mark every node whose own `**Response [#r-…]**` child (at
+/// the node's first child level) has a `**State:**` other than `Complete.`.
+fn mark_open_responses(document: &str, nodes: &mut [QueueTreeNode]) {
+    if !document.contains("**Response [#r-") {
+        return;
+    }
+    let lines: Vec<&str> = document.lines().collect();
+    let indent = |line: &str| line.len() - line.trim_start_matches([' ', '\t']).len();
+    for node in nodes.iter_mut() {
+        // Lines below the row, 0-based: `node.line ..= node.end_line - 1`.
+        let end = node.end_line.min(lines.len());
+        if node.line >= end {
+            continue;
+        }
+        let below = &lines[node.line..end];
+        let Some(child_indent) = below
+            .iter()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| indent(line))
+            .min()
+        else {
+            continue;
+        };
+        let Some(response_at) = below.iter().position(|line| {
+            indent(line) == child_indent && line.trim_start().starts_with("- **Response [#r-")
+        }) else {
+            continue;
+        };
+        let block = below[response_at + 1..]
+            .iter()
+            .take_while(|line| line.trim().is_empty() || indent(line) > child_indent)
+            .copied()
+            .collect::<Vec<_>>();
+        let Some(detail_indent) = block
+            .iter()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| indent(line))
+            .min()
+        else {
+            continue;
+        };
+        let state = block.iter().find_map(|line| {
+            (indent(line) == detail_indent)
+                .then(|| line.trim().strip_prefix("- **State:** "))
+                .flatten()
+        });
+        node.response_open = state
+            .is_some_and(|state| state.trim() != crate::queue_consume::RESPONSE_STATE_COMPLETE);
+    }
+}
+
+/// `#treefinish`: mark live follow-up rows whose work is carried elsewhere
+/// ([`RowResolution::Delegated`]) or already done by agent-doc's self-repair
+/// ([`RowResolution::SelfRepaired`]). Only binary-placed follow-up rows
+/// (`follow up on an action item from …: <item>`) are ever resolved: an
+/// operator's own row is never read as done.
+fn resolve_rows(document: &str, nodes: &mut [QueueTreeNode], raws: &[String]) {
+    use crate::followup_owner::{ActionItemOwner, explicit_owner_label, followup_row_action_item};
+    use crate::response_remaining::{item_key, plain_text};
+    let candidate = |node: &QueueTreeNode| {
+        !node.closed
+            && !node.waiting_item
+            && matches!(
+                node.state,
+                QueueNodeState::Open | QueueNodeState::WaitingOnYou
+            )
+    };
+    if !nodes.iter().any(candidate) {
+        return;
+    }
+    let action_of = |raw: &str| -> Option<String> {
+        let plain = plain_text(raw);
+        followup_row_action_item(&plain).map(str::to_string)
+    };
+    // The top-level row of each node, and each top-level row's work key.
+    let mut top_of = vec![0usize; nodes.len()];
+    let mut top_keys: Vec<(usize, String)> = Vec::new();
+    for (index, node) in nodes.iter().enumerate() {
+        if node.depth == 0 {
+            top_of[index] = index;
+            if node.state != QueueNodeState::Group && !node.waiting_item {
+                let plain = plain_text(&raws[index]);
+                let work = followup_row_action_item(&plain).unwrap_or(&plain);
+                top_keys.push((index, item_key(work)));
+            }
+        } else if index > 0 {
+            top_of[index] = top_of[index - 1];
+        }
+    }
+    let mut artifacts_absent: std::collections::HashMap<String, bool> =
+        std::collections::HashMap::new();
+    for index in 0..nodes.len() {
+        if !candidate(&nodes[index]) {
+            continue;
+        }
+        let Some(action) = action_of(&raws[index]) else {
+            continue;
+        };
+        let key = item_key(&action);
+        let top = top_of[index];
+        if nodes[index].depth > 0
+            && !key.is_empty()
+            && top_keys.iter().any(|(other, other_key)| {
+                *other != top && nodes[*other].queue == nodes[index].queue && *other_key == key
+            })
+        {
+            nodes[index].resolution = Some(RowResolution::Delegated);
+            continue;
+        }
+        if explicit_owner_label(&action) == Some(ActionItemOwner::Human)
+            && crate::self_repair::is_self_repair_cleanup_item(&action)
+            && *artifacts_absent.entry(action.clone()).or_insert_with(|| {
+                crate::self_repair::self_repair_artifacts_absent(document, &action)
+            })
+        {
+            nodes[index].resolution = Some(RowResolution::SelfRepaired);
+        }
+    }
 }
 
 type NodeParts = (
@@ -721,6 +869,12 @@ pub struct RowClosure {
     /// the root item the operator still sees open, even when it is only a
     /// label for its nested rows.
     pub top_level_struck: bool,
+    /// Whether the top-level row is the binary-owned Waiting-on-you root, a
+    /// label whose items each read as their own tree (`#treefinish`).
+    pub top_level_group: bool,
+    /// The row itself, when it keeps its tree alive as a row (a struck
+    /// waiting head whose Todo is still open).
+    pub own_open: Option<RowRef>,
 }
 
 /// A queue row named in operator-facing text.
@@ -753,7 +907,13 @@ impl RowRef {
     /// first clause. A generated id (`[#q-…]`, or a `[#r-…]` response id the
     /// row only quotes) never stands for a row on its own.
     pub fn label(&self) -> String {
-        if let Some(id) = self.id.as_deref().filter(|id| !is_generated_id(id)) {
+        // A follow-up row's first `[#id]` is its origin's, quoted; the row
+        // reads as its action item.
+        let followup = crate::followup_owner::followup_row_action_item(
+            &crate::response_remaining::plain_text(&self.text),
+        )
+        .is_some();
+        if !followup && let Some(id) = self.id.as_deref().filter(|id| !is_generated_id(id)) {
             return format!("[#{id}]");
         }
         let text = crate::response_remaining::short_row_text(&self.text, LABEL_TEXT_LIMIT)
@@ -795,7 +955,9 @@ fn nested_indexes(nodes: &[QueueTreeNode], index: usize) -> std::ops::Range<usiz
     index + 1..end
 }
 
-/// Whether the node at `index` keeps its subtree and tree alive.
+/// Whether the node at `index` keeps its subtree and tree alive, as a row:
+/// a live leaf or a row with projected state. A row whose work is
+/// [`RowResolution`]-resolved does not (`#treefinish`).
 fn keeps_tree_alive(nodes: &[QueueTreeNode], index: usize) -> bool {
     let node = &nodes[index];
     if node.closed {
@@ -803,7 +965,7 @@ fn keeps_tree_alive(nodes: &[QueueTreeNode], index: usize) -> bool {
         // still projects open work.
         return node.waiting_item && node.todo_open;
     }
-    if node.state == QueueNodeState::Group {
+    if node.state == QueueNodeState::Group || node.resolution.is_some() {
         return false;
     }
     // A plain live group parent is a label; its nested rows decide. A parent
@@ -814,18 +976,38 @@ fn keeps_tree_alive(nodes: &[QueueTreeNode], index: usize) -> bool {
         || nested_indexes(nodes, index).is_empty()
 }
 
+/// Whether the node at `index` holds its tree open (`#treefinish`): it keeps
+/// it alive as a row ([`keeps_tree_alive`]), or its own response says work
+/// remains.
+fn holds_tree_open(nodes: &[QueueTreeNode], index: usize) -> bool {
+    keeps_tree_alive(nodes, index) || nodes[index].response_open
+}
+
 fn first_open(nodes: &[QueueTreeNode], range: std::ops::Range<usize>) -> Option<RowRef> {
     range
         .into_iter()
-        .find(|&index| keeps_tree_alive(nodes, index))
+        .find(|&index| holds_tree_open(nodes, index))
         .map(|index| RowRef::of(&nodes[index]))
 }
 
 fn open_count(nodes: &[QueueTreeNode], range: std::ops::Range<usize>) -> usize {
     range
         .into_iter()
-        .filter(|&index| keeps_tree_alive(nodes, index))
+        .filter(|&index| holds_tree_open(nodes, index))
         .count()
+}
+
+/// Indexes of the top-level node at `index` and every node beneath it: the
+/// whole tree a top-level row roots (`#treefinish`).
+pub fn tree_indexes(tree: &QueueTree, index: usize) -> std::ops::Range<usize> {
+    index..nested_indexes(&tree.nodes, index).end
+}
+
+/// Whether the node at `index` of an unfiltered [`queue_tree`] holds its
+/// tree open: a live row of work (not a label, not resolved), or a row whose
+/// own response says work remains (`#treefinish`).
+pub fn row_holds_tree_open(tree: &QueueTree, index: usize) -> bool {
+    index < tree.nodes.len() && holds_tree_open(&tree.nodes, index)
 }
 
 /// The closability of the tree around the node at `index` of an unfiltered
@@ -842,6 +1024,7 @@ pub fn row_closure(tree: &QueueTree, index: usize) -> Option<RowClosure> {
             .sum::<usize>();
     let first_open_nested = first_open(nodes, nested.clone());
     let open_nested = open_count(nodes, nested.clone());
+    let own_open = keeps_tree_alive(nodes, index).then(|| RowRef::of(node));
     let top_index = (0..=index).rev().find(|&candidate| {
         let candidate = &nodes[candidate];
         candidate.depth == 0
@@ -858,6 +1041,8 @@ pub fn row_closure(tree: &QueueTree, index: usize) -> Option<RowClosure> {
             open_nested,
             open_in_tree: open_nested,
             top_level_struck: node.closed,
+            top_level_group: false,
+            own_open,
         });
     }
     let tree_range = top_index..nested_indexes(nodes, top_index).end;
@@ -869,11 +1054,14 @@ pub fn row_closure(tree: &QueueTree, index: usize) -> Option<RowClosure> {
         open_nested,
         open_in_tree: open_count(nodes, tree_range),
         top_level_struck: nodes[top_index].closed,
+        top_level_group: nodes[top_index].state == QueueNodeState::Group,
+        own_open,
     })
 }
 
 /// Whether the node at `index` of an unfiltered [`queue_tree`] keeps its
-/// subtree and top-level tree alive (the per-row rule [`row_closure`] reads).
+/// subtree and top-level tree alive as a row (the per-row rule
+/// [`row_closure`] reads, without the row's own response state).
 pub fn row_keeps_tree_alive(tree: &QueueTree, index: usize) -> bool {
     index < tree.nodes.len() && keeps_tree_alive(&tree.nodes, index)
 }

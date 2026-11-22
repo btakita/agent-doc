@@ -44,9 +44,9 @@ fn without_followup_rows(document: &str, keep: usize) -> String {
         .collect()
 }
 
-/// A finished second-level row says it is done and that its root item is
-/// still open, with how many rows keep it open, instead of leading with
-/// "Safe to delete" as if the item were done.
+/// A finished second-level row in an unfinished tree says only that it is
+/// done (`#treefinish`): no "Safe to delete" as if the item were done, and no
+/// "keep the rest of the tree" sentence on every child.
 #[test]
 fn a_done_second_level_row_says_its_root_item_is_still_open() {
     assert!(SESSION.contains(ROOT));
@@ -54,10 +54,7 @@ fn a_done_second_level_row_says_its_root_item_is_still_open() {
 
     let (synced, rows) = reconcile_tree_scoped_guidance(SESSION).expect("guidance synced");
     assert_eq!(rows, 1);
-    assert_eq!(
-        guidance(&synced),
-        "This row is done, but its root item `https://github.com/sample-org/sample-sdk/pull/368` is still open: 5 rows in its tree are open, first `human (sample-sdk reviewer with write access): mark…`. Safe to delete this completed row (nothing tracked or unpublished remains in it); keep the rest of the tree."
-    );
+    assert_eq!(guidance(&synced), "✅ Done.");
     assert!(
         reconcile_tree_scoped_guidance(&synced).is_none(),
         "a second pass changes nothing"
@@ -75,23 +72,11 @@ fn a_done_second_level_row_says_its_root_item_is_still_open() {
 fn deleting_second_level_rows_resyncs_the_guidance() {
     let one_left = without_followup_rows(SESSION, 1);
     let (synced, _) = reconcile_tree_scoped_guidance(&one_left).expect("guidance synced");
-    assert!(
-        guidance(&synced).starts_with(
-            "This row is done, but its root item `https://github.com/sample-org/sample-sdk/pull/368` is still open: `human (sample-sdk reviewer with write access): mark…` is open."
-        ),
-        "{}",
-        guidance(&synced)
-    );
+    assert_eq!(guidance(&synced), "✅ Done.");
 
     let none_left = without_followup_rows(&synced, 0);
     let (closed, _) = reconcile_tree_scoped_guidance(&none_left).expect("guidance synced");
-    assert!(
-        guidance(&closed).starts_with(
-            "Safe to delete the whole tree under `https://github.com/sample-org/sample-sdk/pull/368`;"
-        ),
-        "{}",
-        guidance(&closed)
-    );
+    assert_eq!(guidance(&closed), "✅ Done. 🗑️ Safe to delete this tree.");
     assert!(reconcile_tree_scoped_guidance(&closed).is_none());
 
     // A row added back reopens the tree.
@@ -100,11 +85,7 @@ fn deleting_second_level_rows_resyncs_the_guidance() {
         "  - do [#merge368]\n- ### Deploy the README",
     );
     let (reopened, _) = reconcile_tree_scoped_guidance(&reopened).expect("guidance synced");
-    assert!(
-        guidance(&reopened).contains("is still open: [#merge368] is open."),
-        "{}",
-        guidance(&reopened)
-    );
+    assert_eq!(guidance(&reopened), "✅ Done.");
 }
 
 /// The copied hand-back sections leave the row; one Details row points at
@@ -154,7 +135,7 @@ fn copied_handback_sections_move_behind_a_details_row() {
     );
     assert!(tree.contains("      - **State:** Complete.\n"), "{tree}");
     assert!(
-        guidance(&slimmed).starts_with(&format!("{FOLLOW_UP_MOVED_GUIDANCE_LEAD} Safe to delete")),
+        guidance(&slimmed).ends_with(&format!(" {FOLLOW_UP_MOVED_GUIDANCE_NOTE}")),
         "the removed action items moved to their follow-up rows: {}",
         guidance(&slimmed)
     );
@@ -234,9 +215,9 @@ fn retiring_a_pointed_cell_keeps_the_handback_record() {
 fn sync_response_trees_is_one_idempotent_successor() {
     let (synced, slimmed, guided) = sync_response_trees(SESSION).expect("synced");
     assert_eq!((slimmed, guided), (1, 1));
-    assert!(
-        guidance(&synced).starts_with("Its action items moved")
-            || guidance(&synced).starts_with("This row is done")
+    assert_eq!(
+        guidance(&synced),
+        format!("✅ Done. {FOLLOW_UP_MOVED_GUIDANCE_NOTE}")
     );
     assert!(sync_response_trees(&synced).is_none());
 }

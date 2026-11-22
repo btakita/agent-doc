@@ -260,12 +260,27 @@ fn an_agent_item_needs_a_completion_or_a_struck_followup_row() {
     assert_eq!(remaining.len(), 2, "{remaining:?}");
     assert!(!remaining.iter().any(|entry| entry.contains("CI run")));
 
-    // A live follow-up row keeps it open, listed once.
-    let live = resynced.replace(
+    // `#treefinish`: a live follow-up row in another top-level tree carries
+    // the item (delegated), so this tree no longer lists it.
+    let delegated = resynced.replace(
         &struck_row,
         &format!("- follow up on an action item from queue item “stop the copy”: agent: {item}"),
     );
-    let (relive, _) = reconcile_response_remaining(&live).expect("live again");
+    assert!(reconcile_response_remaining(&delegated).is_none());
+    let (_, _, remaining) = response(&delegated, ROOT);
+    assert_eq!(remaining.len(), 2, "{remaining:?}");
+
+    // A live follow-up row inside this tree keeps it open, listed once.
+    let nested_row = format!(
+        "    - follow up on an action item from queue item “stop the copy”: agent: {item}\n"
+    );
+    let live = synced.replacen(
+        "    - 🙋 follow up on an action item",
+        &format!("{nested_row}    - 🙋 follow up on an action item"),
+        1,
+    );
+    assert_ne!(live, synced);
+    let relive = reconcile_response_remaining(&live).map_or(live, |(document, _)| document);
     let (_, _, remaining) = response(&relive, ROOT);
     assert_eq!(remaining.len(), 3, "{remaining:?}");
     assert_eq!(
@@ -286,16 +301,13 @@ fn guidance_names_rows_by_readable_text() {
     let (synced, _, _) =
         crate::response_tree_sync::sync_response_trees(SESSION).expect("trees synced");
     assert_guidance_readable(&synced);
+    // `#treefinish`: the finished child says only that it is done; the
+    // root's response carries the tree's keep/delete indicator.
     assert!(
-        synced.contains(
-            "This row is done, but its root item `agent: stop 'queue consume --ack-text' from re-attaching a…` is still open"
-        ),
-        "{}",
-        synced
-            .lines()
-            .find(|line| line.contains("This row is done"))
-            .unwrap_or_default()
+        synced.contains("                - **Guidance:** ✅ Done.\n"),
+        "{synced}"
     );
+    assert!(!synced.contains("This row is done"), "{synced}");
     assert!(crate::response_tree_sync::sync_response_trees(&synced).is_none());
 
     let (resolved, _, _) =

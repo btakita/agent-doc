@@ -203,7 +203,7 @@ fn link_blocked(
 /// [`queue_head_identity`](agent_doc_element_queue::queue_head_identity) covers
 /// `do [#id]`, `[#id]`, and `do [#id]: note`. A leading `[#id]:` head is the
 /// same link. A later citation, and a generated `[#q-…]` correlation id, are not.
-fn linked_queue_todo_id(work_text: &str) -> Option<String> {
+pub(crate) fn linked_queue_todo_id(work_text: &str) -> Option<String> {
     let head = agent_doc_element_queue::subprompts::head_without_subprompts(work_text);
     match agent_doc_element_queue::queue_head_identity(head) {
         QueueItemIdentity::Id(id) => {

@@ -27,9 +27,11 @@
 //! left the State is `Waiting on operator input.` and the Guidance names the
 //! one thing to do (or how many); with agent work left the State is
 //! `Follow-up work remains.`; once nothing is left, `**State:** Complete.`
-//! and the Guidance says `Complete. Safe to delete this tree.` (or this
-//! response). The wordings this pass wrote before the tally are still its
-//! own and are rewritten.
+//! and the Guidance says `🗑️ Safe to delete this tree.` under a top-level
+//! row (`#treefinish`: the root carries the tree's indicator), only the
+//! tally under a nested row, and `🗑️ Safe to delete this response.` under a
+//! response. The wordings this pass wrote earlier are still its own and are
+//! rewritten.
 //!
 //! # What remains
 //!
@@ -41,7 +43,8 @@
 //!   and nested ones), except a response that itself says `Complete.`;
 //! - every **open queue row** in that scope (the queue tree's per-row rule,
 //!   [`crate::queue_tree::row_keeps_tree_alive`]: a live leaf, a row with
-//!   projected state; a plain group parent is only a label), unless it sits
+//!   projected state; a plain group parent is only a label, and a delegated
+//!   or self-repaired row is resolved and counts as done), unless it sits
 //!   under an unresolved action item or is that item's own follow-up row,
 //!   which the item's entry already stands for;
 //! - the parent row itself when it is live work of its own.
@@ -60,7 +63,10 @@
 //! 3. for an `agent:` item only, a later completion covers it: a struck row
 //!    in the same response, after the item and not under any action item
 //!    (the operator's `~~Do the next actions.~~`). Agent items are finished in
-//!    the turn that closes such a row (`#finishactionable`).
+//!    the turn that closes such a row (`#finishactionable`);
+//! 4. `#treefinish`: its follow-up row is live in another top-level tree.
+//!    The work was delegated to that row, so this tree no longer holds it
+//!    (a live follow-up row inside the same tree still keeps it open).
 //!
 //! Nothing else resolves an item: prose that says "done" does not, and an
 //! operator-owned item is never covered by agent work.
@@ -91,18 +97,26 @@ use crate::queue_tree::{QueueNodeState, QueueTree};
 /// The response-structure label of the short list of what is left.
 pub const REMAINING_LABEL: &str = "**Remaining:**";
 
-/// Guidance once nothing remains under a response that hangs under a row
-/// (after the tally, `✅ N/N done.`).
-pub const NOTHING_REMAINS_ROW_GUIDANCE: &str = "Complete. Safe to delete this tree.";
+/// Guidance once nothing remains under a response that hangs under a
+/// top-level row (after the tally, `✅ N/N done.`): the tree's keep/delete
+/// indicator (`#treefinish`). A response under a nested row says only the
+/// tally; the root carries the indicator.
+pub const NOTHING_REMAINS_ROW_GUIDANCE: &str = crate::queue_consume::TREE_DELETE_GUIDANCE;
 
 /// Guidance once nothing remains in a response nested under another response
 /// (after the tally).
-pub const NOTHING_REMAINS_RESPONSE_GUIDANCE: &str = "Complete. Safe to delete this response.";
+pub const NOTHING_REMAINS_RESPONSE_GUIDANCE: &str = "🗑️ Safe to delete this response.";
 
 /// The earlier nothing-remains wordings, still recognized as this pass's own.
 const LEGACY_NOTHING_REMAINS_GUIDANCE: [&str; 2] = [
     "Nothing remains: every action item and row under this row is resolved. Safe to delete this row and everything under it.",
     "Nothing remains in this response: every action item and row in it is resolved. Safe to delete this response.",
+];
+
+/// The nothing-remains tails after the tally before `#treefinish`.
+const LEGACY_NOTHING_REMAINS_TAILS: [&str; 2] = [
+    "Complete. Safe to delete this tree.",
+    "Complete. Safe to delete this response.",
 ];
 
 /// Opens the guidance when only operator work is left.
@@ -146,7 +160,8 @@ pub fn tally(done: usize, total: usize, agent_open: usize, yours: usize) -> Stri
     }
 }
 
-/// The tally a guidance opens with, and the rest of it.
+/// The tally a guidance opens with, and the rest of it (empty when the
+/// guidance is only the tally).
 fn split_tally(guidance: &str) -> Option<&str> {
     let rest = [DONE_GLYPH, AGENT_OPEN_GLYPH, OPERATOR_OPEN_GLYPH]
         .iter()
@@ -164,6 +179,9 @@ fn split_tally(guidance: &str) -> Option<&str> {
         }
         None => rest.strip_prefix('.')?,
     };
+    if rest.is_empty() {
+        return Some(rest);
+    }
     rest.strip_prefix(' ')
 }
 
@@ -182,8 +200,10 @@ fn managed_form(state: &str, guidance: &str) -> bool {
             || (state == RESPONSE_STATE_WAITING_ON_OPERATOR
                 && tail.starts_with(ONLY_YOU_GUIDANCE_LEAD))
             || (state == RESPONSE_STATE_COMPLETE
-                && (tail == NOTHING_REMAINS_ROW_GUIDANCE
-                    || tail == NOTHING_REMAINS_RESPONSE_GUIDANCE));
+                && (tail.is_empty()
+                    || tail == NOTHING_REMAINS_ROW_GUIDANCE
+                    || tail == NOTHING_REMAINS_RESPONSE_GUIDANCE
+                    || LEGACY_NOTHING_REMAINS_TAILS.contains(&tail)));
     }
     (state == RESPONSE_STATE_FOLLOW_UP
         && (guidance == FOLLOW_UP_ACTION_ITEMS_GUIDANCE || is_remaining_guidance(guidance)))
@@ -198,7 +218,7 @@ fn managed_form(state: &str, guidance: &str) -> bool {
 /// heading, lifecycle and `🙋` prefix, a strike wrapper, `[operator-verify]`,
 /// the generated `[#q-…]` id, report-state and effect annotations, and the
 /// response-detail marker. Whitespace collapsed.
-fn plain_text(text: &str) -> String {
+pub(crate) fn plain_text(text: &str) -> String {
     let mut text = text.trim();
     text = text
         .strip_suffix(RESPONSE_DETAIL_MARKER)
@@ -436,7 +456,7 @@ fn value_of(
     Some((offset..offset + value.len(), value.to_string()))
 }
 
-fn item_key(text: &str) -> String {
+pub(crate) fn item_key(text: &str) -> String {
     plain_text(text)
 }
 
@@ -577,7 +597,9 @@ enum FollowupRow {
     Quoted,
 }
 
-fn followup_rows(document: &str, tree: &QueueTree) -> Vec<(String, FollowupRow)> {
+/// Each row's action-item key, its state, and its 1-based queue line (none
+/// for a quote in `agent:exchange`).
+fn followup_rows(document: &str, tree: &QueueTree) -> Vec<(String, FollowupRow, Option<usize>)> {
     let mut rows = Vec::new();
     for node in &tree.nodes {
         let plain = plain_text(&node.full_text);
@@ -587,7 +609,7 @@ fn followup_rows(document: &str, tree: &QueueTree) -> Vec<(String, FollowupRow)>
             } else {
                 FollowupRow::Live
             };
-            rows.push((item_key(item), state));
+            rows.push((item_key(item), state, Some(node.line)));
         }
     }
     if let Ok(components) = agent_doc_element::element::parse(document) {
@@ -603,7 +625,7 @@ fn followup_rows(document: &str, tree: &QueueTree) -> Vec<(String, FollowupRow)>
                     .trim_start();
                 let plain = plain_text(quoted);
                 if let Some(item) = followup_row_action_item(&plain) {
-                    rows.push((item_key(item), FollowupRow::Quoted));
+                    rows.push((item_key(item), FollowupRow::Quoted, None));
                 }
             }
         }
@@ -747,10 +769,19 @@ pub fn reconcile_response_remaining(document: &str) -> Option<(String, usize)> {
                 .any(|item| item.line == line || item.span.contains(&line))
         })
     };
-    // Rule 1–3 for each item of each response.
+    // The 1-based line range of the top-level tree that holds a 0-based
+    // document line (`#treefinish`).
+    let tree_lines_of = |line: usize| {
+        tree.nodes
+            .iter()
+            .find(|node| node.depth == 0 && node.line <= line + 1 && line < node.end_line)
+            .map(|node| node.line..=node.end_line)
+    };
+    // Rule 1–4 for each item of each response.
     let resolved: Vec<Vec<bool>> = responses
         .iter()
         .map(|response| {
+            let own_tree = tree_lines_of(response.line);
             response
                 .items
                 .iter()
@@ -765,13 +796,25 @@ pub fn reconcile_response_remaining(document: &str) -> Option<(String, usize)> {
                     }
                     let matches = followups
                         .iter()
-                        .filter(|(key, _)| *key == item.key)
-                        .map(|(_, state)| *state)
+                        .filter(|(key, _, _)| *key == item.key)
+                        .map(|(_, state, _)| *state)
                         .collect::<Vec<_>>();
                     if !matches.contains(&FollowupRow::Live)
                         && (matches.contains(&FollowupRow::Struck)
                             || matches.contains(&FollowupRow::Quoted))
                     {
+                        return true;
+                    }
+                    // `#treefinish`: rule 4, delegation. A live follow-up row
+                    // in another top-level tree carries the item; this tree
+                    // no longer holds it.
+                    if followups.iter().any(|(key, state, line)| {
+                        *key == item.key
+                            && *state == FollowupRow::Live
+                            && line.is_some_and(|line| {
+                                own_tree.as_ref().is_none_or(|own| !own.contains(&line))
+                            })
+                    }) {
                         return true;
                     }
                     // `#selfrepaircleanup`: an operator ask to clean up
@@ -892,7 +935,7 @@ pub fn reconcile_response_remaining(document: &str) -> Option<(String, usize)> {
             {
                 continue;
             }
-            if row.closed {
+            if row.closed || row.resolution.is_some() {
                 total += 1;
                 done += 1;
             } else if crate::queue_tree::row_keeps_tree_alive(&tree, node) {
@@ -912,15 +955,20 @@ pub fn reconcile_response_remaining(document: &str) -> Option<(String, usize)> {
         let (state_range, state) = response.state.clone().expect("managed has a state");
         let (guidance_range, guidance) = response.guidance.clone().expect("managed has guidance");
         let (want_state, want_guidance, want_remaining) = if entries.is_empty() {
-            let guidance = if response
-                .parent
-                .is_some_and(|parent| node_at(parent).is_some())
-            {
-                NOTHING_REMAINS_ROW_GUIDANCE
-            } else {
-                NOTHING_REMAINS_RESPONSE_GUIDANCE
+            // `#treefinish`: the root's response carries the tree's
+            // indicator; a nested row's response is only its tally.
+            let guidance = match response.parent.and_then(node_at) {
+                Some(node)
+                    if tree.nodes[node].depth == 0
+                        && crate::queue_tree::row_closure(&tree, node)
+                            .is_some_and(|closure| closure.subtree_closed()) =>
+                {
+                    format!("{tally} {NOTHING_REMAINS_ROW_GUIDANCE}")
+                }
+                Some(_) => tally.clone(),
+                None => format!("{tally} {NOTHING_REMAINS_RESPONSE_GUIDANCE}"),
             };
-            (RESPONSE_STATE_COMPLETE, format!("{tally} {guidance}"), None)
+            (RESPONSE_STATE_COMPLETE, guidance, None)
         } else if agent_open == 0 {
             // Only the operator can finish it: say exactly what to do.
             let what = if yours == 1 {

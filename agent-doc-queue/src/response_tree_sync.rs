@@ -29,12 +29,23 @@
 //!
 //! Both passes are idempotent and touch only binary-owned response rows of
 //! struck queue rows.
+//!
+//! `#treefinish` replaced the long deletion sentence with one indicator
+//! (`🗑️ Safe to delete this tree.` / `📌 Keep: N open — <row>.` on a root,
+//! `✅ Done.` on a nested row), and [`sync_response_trees_striking`] also
+//! strikes every finished tree from the root down
+//! ([`crate::finished_tree`]).
 
 use agent_doc_document::worker_handback::SectionKind;
 use agent_doc_markdown_ast::overlay::ItemSurface;
 
-use crate::followup_moved_state::{FOLLOW_UP_MOVED_GUIDANCE_LEAD, moved_followup_guidance};
-use crate::queue_consume::{RESPONSE_STATE_COMPLETE, completed_row_deletion_guidance};
+use crate::followup_moved_state::{
+    FOLLOW_UP_MOVED_GUIDANCE_LEAD, FOLLOW_UP_MOVED_GUIDANCE_NOTE, moved_followup_guidance,
+};
+use crate::queue_consume::{
+    RESPONSE_STATE_COMPLETE, ROW_DONE_GUIDANCE, TREE_DELETE_GUIDANCE, TREE_KEEP_LEAD,
+    completed_row_deletion_guidance,
+};
 
 /// The response-structure label of the row that points at the hand-back
 /// sections left in `agent:exchange`.
@@ -45,8 +56,12 @@ pub const DETAILS_LABEL: &str = "**Details:**";
 const SUMMARY_LEAD_LIMIT: usize = 400;
 
 /// The generated deletion-guidance openings
-/// ([`completed_row_deletion_guidance`]), current and earlier wordings.
-const GENERATED_GUIDANCE_OPENINGS: [&str; 6] = [
+/// ([`completed_row_deletion_guidance`]), current (`#treefinish`) and
+/// earlier wordings.
+const GENERATED_GUIDANCE_OPENINGS: [&str; 9] = [
+    TREE_DELETE_GUIDANCE,
+    TREE_KEEP_LEAD,
+    ROW_DONE_GUIDANCE,
     "Safe to delete this completed row; ",
     "Safe to delete this row and its ",
     "Safe to delete the whole tree under ",
@@ -184,12 +199,15 @@ fn last_sentence_end_within(text: &str, limit: usize) -> Option<usize> {
 }
 
 /// Whether a Guidance value is one the binary rendered as completed-row
-/// deletion guidance; `Some(true)` when it leads with the moved-action-items
-/// sentence ([`moved_followup_guidance`]).
+/// deletion guidance; `Some(true)` when it carries the moved-action-items
+/// note ([`moved_followup_guidance`]), or the earlier lead sentence.
 fn generated_completed_guidance(value: &str) -> Option<bool> {
     let (moved, rest) = match value.strip_prefix(FOLLOW_UP_MOVED_GUIDANCE_LEAD) {
         Some(rest) => (true, rest.trim_start()),
-        None => (false, value),
+        None => match value.strip_suffix(FOLLOW_UP_MOVED_GUIDANCE_NOTE) {
+            Some(rest) => (true, rest.trim_end()),
+            None => (false, value),
+        },
     };
     GENERATED_GUIDANCE_OPENINGS
         .iter()
@@ -465,8 +483,8 @@ pub fn slim_handback_response_details(document: &str) -> Option<(String, usize)>
             && generated_completed_guidance(value) == Some(false)
         {
             edits.push((
-                guidance.start..guidance.start,
-                format!("{FOLLOW_UP_MOVED_GUIDANCE_LEAD} "),
+                guidance.end..guidance.end,
+                format!(" {FOLLOW_UP_MOVED_GUIDANCE_NOTE}"),
             ));
         }
         let first_detail = removed
@@ -531,16 +549,59 @@ fn exact_section(
 /// Every pass, slim, then what remains, then guidance, as one successor
 /// (`#guidancescope`, `#handbackrowstructure`). Returns
 /// the document, how many trees were slimmed, and how many responses' State,
-/// Guidance or Remaining list changed.
+/// Guidance or Remaining list changed. Strikes no tree; see
+/// [`sync_response_trees_striking`].
 pub fn sync_response_trees(document: &str) -> Option<(String, usize, usize)> {
+    sync_response_trees_striking(document, &|_| true)
+        .map(|synced| (synced.document, synced.slimmed, synced.guided))
+}
+
+/// What [`sync_response_trees_striking`] changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResponseTreeSync {
+    pub document: String,
+    /// Trees whose copied hand-back sections were slimmed.
+    pub slimmed: usize,
+    /// Responses whose State, Guidance or Remaining list changed.
+    pub guided: usize,
+    /// Finished trees struck from the root down (`#treefinish`).
+    pub struck_trees: usize,
+}
+
+/// [`sync_response_trees`] that also strikes every finished tree
+/// (`#treefinish`, [`crate::finished_tree::strike_finished_trees`]): slim,
+/// what remains, strike, what remains again (a struck root joins its tally),
+/// then guidance. `is_claimed(row_text)` says whether a live worker claims a
+/// row; a tree with a claimed row is never struck. A second pass changes
+/// nothing.
+pub fn sync_response_trees_striking(
+    document: &str,
+    is_claimed: &dyn Fn(&str) -> bool,
+) -> Option<ResponseTreeSync> {
     let (slimmed, slim_rows) =
         slim_handback_response_details(document).unwrap_or_else(|| (document.to_string(), 0));
-    let (remaining, remaining_rows) =
+    let (remaining, mut remaining_rows) =
         crate::response_remaining::reconcile_response_remaining(&slimmed).unwrap_or((slimmed, 0));
+    let (remaining, struck_trees) =
+        match crate::finished_tree::strike_finished_trees(&remaining, is_claimed) {
+            Some((struck, trees)) => {
+                let (again, rows) =
+                    crate::response_remaining::reconcile_response_remaining(&struck)
+                        .unwrap_or((struck, 0));
+                remaining_rows += rows;
+                (again, trees)
+            }
+            None => (remaining, 0),
+        };
     let (synced, guidance_rows) =
         reconcile_tree_scoped_guidance(&remaining).unwrap_or((remaining, 0));
-    let guidance_rows = guidance_rows + remaining_rows;
-    (slim_rows + guidance_rows > 0).then_some((synced, slim_rows, guidance_rows))
+    let guided = guidance_rows + remaining_rows;
+    (slim_rows + guided + struck_trees > 0).then_some(ResponseTreeSync {
+        document: synced,
+        slimmed: slim_rows,
+        guided,
+        struck_trees,
+    })
 }
 
 #[cfg(test)]

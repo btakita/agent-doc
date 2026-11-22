@@ -6765,9 +6765,7 @@ mod core_tests {
             "{updated}"
         );
         assert!(
-            updated.contains(
-                "**Guidance:** Safe to delete the whole tree under `Decide on the effect type`;"
-            ),
+            updated.contains("**Guidance:** ✅ Done. 🗑️ Safe to delete this tree.\n"),
             "every sibling is struck, so the held tree's guidance says so:\n{updated}"
         );
     }

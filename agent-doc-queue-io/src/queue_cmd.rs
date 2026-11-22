@@ -2486,9 +2486,26 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
             }
             None => normalized_responses,
         };
-    let normalized_responses =
-        agent_doc_queue::response_tree_sync::sync_response_trees(&normalized_responses)
-            .map_or(normalized_responses, |(synced, _, _)| synced);
+    // `#treefinish`: finished trees are struck from the root down.
+    let normalized_responses = match crate::self_repair::sync_response_trees_for(
+        file,
+        &normalized_responses,
+    ) {
+        Some(synced) => {
+            if synced.struck_trees > 0 {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_finished_trees_struck file={} source=queue_sync trees={} (#treefinish)",
+                        file.display(),
+                        synced.struck_trees
+                    ),
+                );
+            }
+            synced.document
+        }
+        None => normalized_responses,
+    };
     let response_metadata_repaired = normalized_responses != content;
     if response_metadata_repaired {
         effects.converge_document_or_disk(

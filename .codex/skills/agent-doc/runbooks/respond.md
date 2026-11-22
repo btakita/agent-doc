@@ -566,8 +566,14 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      action items still held only there, State, Guidance) and a `**Details:**`
      row pointing at the full hand-back in `agent:exchange`; do not paste What
      changed or Verification back under the row (`#handbackrowstructure`). A
-     finished nested row's Guidance says whether its root item is still open,
-     and agent-doc re-renders it whenever the tree changes (`#guidancescope`).
+     struck row's Guidance is one short indicator, re-rendered whenever the
+     tree changes (`#guidancescope`, `#treefinish`): the root says
+     `🗑️ Safe to delete this tree.` or `📌 Keep: N open — <row>.`, and a
+     finished nested row says `✅ Done.`. When no row in a tree holds work
+     (rows struck, delegated to a top-level follow-up row, or cleanup asks
+     self-repair already did), agent-doc strikes the whole tree from the root
+     down on the next sync; it never strikes an open operator row or a row a
+     live worker claims, so do not strike such a tree by hand.
      A response tree with work left lists it under `**Remaining:**`, one
      `owner: short imperative` line each, recomputed on every sync; when
      nothing is left its State is `Complete.` and its Guidance says the tree

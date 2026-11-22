@@ -40,6 +40,7 @@ pub mod queue_auto_clear;
 pub mod queue_blocked;
 pub mod queue_claim;
 pub use agent_doc_element_queue::QueueReportState;
+pub mod finished_tree;
 pub mod followup_moved_state;
 pub mod followup_owner;
 pub mod followup_provenance;

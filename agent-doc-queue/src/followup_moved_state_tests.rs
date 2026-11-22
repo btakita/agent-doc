@@ -50,7 +50,7 @@ fn struck_root_whose_action_items_became_rows_reads_complete() {
     assert!(tree.contains("    - **State:** Complete.\n"), "{tree}");
     assert!(
         tree.contains(&format!(
-            "    - **Guidance:** {FOLLOW_UP_MOVED_GUIDANCE_LEAD} "
+            "    - **Guidance:** 🗑️ Safe to delete this tree. {FOLLOW_UP_MOVED_GUIDANCE_NOTE}"
         )),
         "{tree}"
     );
@@ -60,8 +60,8 @@ fn struck_root_whose_action_items_became_rows_reads_complete() {
         "{tree}"
     );
     assert!(
-        tree.contains("Safe to delete this completed row"),
-        "the usual deletion guidance follows:\n{tree}"
+        tree.contains("**Guidance:** 🗑️ Safe to delete this tree."),
+        "the tree's keep/delete indicator leads:\n{tree}"
     );
     // The action items themselves stay in the response as its record.
     assert_eq!(
@@ -205,7 +205,9 @@ fn strike_after_report_complete_renders_the_moved_state() {
     assert!(tree.contains("- **Details:** "), "{tree}");
     assert!(tree.contains("- **State:** Complete.\n"), "{tree}");
     assert!(
-        tree.contains(&format!("- **Guidance:** {FOLLOW_UP_MOVED_GUIDANCE_LEAD} ")),
+        tree.contains(&format!(
+            "- **Guidance:** 🗑️ Safe to delete this tree. {FOLLOW_UP_MOVED_GUIDANCE_NOTE}"
+        )),
         "{tree}"
     );
     assert!(!tree.contains(FOLLOW_UP_ACTION_ITEMS_GUIDANCE), "{tree}");
@@ -249,7 +251,7 @@ fn strike_after_report_complete_renders_the_moved_state() {
         .unwrap_or_else(|| panic!("late placement repaired:\n{late}"));
     assert_eq!(rows, 1);
     assert!(
-        repaired.contains(&format!("- **Guidance:** {FOLLOW_UP_MOVED_GUIDANCE_LEAD} ")),
+        repaired.contains(&format!(" {FOLLOW_UP_MOVED_GUIDANCE_NOTE}\n")),
         "{repaired}"
     );
 }

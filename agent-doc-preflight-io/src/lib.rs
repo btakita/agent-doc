@@ -7710,17 +7710,21 @@ fn run_queue_maintenance_with_options_under_apply_guard(
     // tree in every run block; a copied hand-back whose completion cell is
     // still in agent:exchange moves behind one `**Details:**` row. Only
     // binary-owned values and byte-exact copied sections change.
-    if let Some((synced, slimmed, guided)) =
-        agent_doc_queue::response_tree_sync::sync_response_trees(&current_content)
+    // `#treefinish`: a finished tree (no row in it holds work; delegated and
+    // self-repaired rows count as done) is struck from the root down, never
+    // a tree with a row a live worker claims.
+    if let Some(synced) =
+        agent_doc_queue_io::self_repair::sync_response_trees_for(file, &current_content)
     {
-        current_content = synced;
+        let (slimmed, guided, struck) = (synced.slimmed, synced.guided, synced.struck_trees);
+        current_content = synced.document;
         activation.entries_after = queue_entries_for_id(&current_content, &selected_queue_id);
         mutated = true;
         eprintln!(
-            "[preflight] queue: response trees synced to the queue tree (slimmed={slimmed}, guidance={guided}; #guidancescope)"
+            "[preflight] queue: response trees synced to the queue tree (slimmed={slimmed}, guidance={guided}, struck_trees={struck}; #guidancescope, #treefinish)"
         );
         effect_phase.log_op(format!(
-            "queue_response_trees_synced file={} slimmed={slimmed} guidance={guided} (#guidancescope)",
+            "queue_response_trees_synced file={} slimmed={slimmed} guidance={guided} struck_trees={struck} (#guidancescope, #treefinish)",
             file.display()
         ));
     }

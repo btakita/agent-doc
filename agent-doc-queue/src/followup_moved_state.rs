@@ -48,16 +48,21 @@ use crate::queue_consume::{
 pub const FOLLOW_UP_ACTION_ITEMS_GUIDANCE: &str =
     "More work remains. Keep this tree and follow the action items in this response.";
 
-/// The first sentence of the Guidance once every action item has its own
-/// follow-up row.
+/// The first sentence of the Guidance once every action item had its own
+/// follow-up row, before `#treefinish` put the keep/delete indicator first.
+/// Still recognized as generated guidance.
 pub const FOLLOW_UP_MOVED_GUIDANCE_LEAD: &str =
     "Its action items moved to their own follow-up queue rows after this tree.";
 
-/// Guidance for a struck row whose action items all have follow-up rows:
-/// [`FOLLOW_UP_MOVED_GUIDANCE_LEAD`], then the row's deletion guidance.
+/// The note after the keep/delete indicator once every action item has its
+/// own follow-up row (`#treefinish`).
+pub const FOLLOW_UP_MOVED_GUIDANCE_NOTE: &str = "Its action items moved to follow-up rows.";
+
+/// Guidance for a struck row whose action items all have follow-up rows: the
+/// row's keep/delete indicator, then [`FOLLOW_UP_MOVED_GUIDANCE_NOTE`].
 pub fn moved_followup_guidance(closure: Option<&crate::queue_tree::RowClosure>) -> String {
     format!(
-        "{FOLLOW_UP_MOVED_GUIDANCE_LEAD} {}",
+        "{} {FOLLOW_UP_MOVED_GUIDANCE_NOTE}",
         completed_row_deletion_guidance(closure)
     )
 }

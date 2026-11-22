@@ -316,11 +316,12 @@ fn a_misplaced_generated_only_copy_is_removed_outright() {
     );
 }
 
-/// `#donetrack` end to end on the audited `--ack-text` tree (anonymized):
-/// every agent item is done and one operator row is left. Self-repair
-/// retires the misplaced hand-back copy (its original is in the exchange
-/// archive), and the root response then says it waits on the operator, with
-/// a done tally and the one thing to do, instead of "Follow-up work remains".
+/// `#donetrack` / `#treefinish` end to end on the audited `--ack-text` tree
+/// (anonymized): every agent item is done and the one operator row left asks
+/// to delete the misplaced hand-back copy. Self-repair retires that copy (its
+/// original is in the exchange archive), so the operator row is resolved too
+/// and the root response says the tree is finished, with the done tally,
+/// instead of "Follow-up work remains".
 #[test]
 fn audited_tree_reads_as_one_operator_action_left() {
     let session = include_str!("../tests/fixtures/response_remaining_session.md");
@@ -330,6 +331,21 @@ fn audited_tree_reads_as_one_operator_action_left() {
     let end = at + session[at..].find('\n').unwrap();
     let body = &session[at + "        - ".len()..end];
     let document = format!("{}        - ~~{body}~~{}", &session[..at], &session[end..]);
+
+    // Before the repair the misplaced copy is still there: the operator row
+    // asking to delete it is open work.
+    let (before, _, _) = crate::response_tree_sync::sync_response_trees(&document).unwrap();
+    let root = before.find("- **Response [#r-2da6da4a7fd8]**").unwrap();
+    let guidance = before[root..]
+        .lines()
+        .find_map(|line| line.trim_start().strip_prefix("- **Guidance:** "))
+        .unwrap();
+    assert!(
+        guidance.contains(
+            " done, 1 yours. Only you can finish this: in the editor, delete the misplaced copy"
+        ),
+        "{guidance}"
+    );
 
     let proven = |id: &str| id == "[#r-8eb6516470b1]";
     let (repaired, repairs) = self_repair_document(&document, &retired, &proven).unwrap();
@@ -354,18 +370,38 @@ fn audited_tree_reads_as_one_operator_action_left() {
         .lines()
         .find_map(|line| line.trim_start().strip_prefix("- **Guidance:** "))
         .unwrap();
-    assert_eq!(
-        state,
-        crate::queue_consume::RESPONSE_STATE_WAITING_ON_OPERATOR
-    );
-    assert!(guidance.starts_with("🙋 "), "{guidance}");
+    assert_eq!(state, crate::queue_consume::RESPONSE_STATE_COMPLETE);
+    assert!(guidance.starts_with("✅ "), "{guidance}");
     assert!(
-        guidance.contains(
-            " done, 1 yours. Only you can finish this: in the editor, delete the misplaced copy"
-        ),
+        guidance.ends_with(" done. 🗑️ Safe to delete this tree."),
         "{guidance}"
     );
     assert!(crate::response_tree_sync::sync_response_trees(&synced).is_none());
     assert!(self_repair_document(&synced, &retired, &proven).is_none());
-    eprintln!("{guidance}");
+}
+
+/// `#treefinish`: an operator cleanup ask is resolved only once the artifact
+/// it names is gone.
+#[test]
+fn a_cleanup_ask_is_done_only_when_its_artifact_is_gone() {
+    let ask = "operator: in the editor, delete the misplaced copy: the block from `- **Response [#r-8eb6516470b1]**` through its Guidance line.";
+    let misplaced = doc(concat!(
+        "- ~~fix the thing~~\n",
+        "  - **Response [#r-2da6da4a7fd8]**\n",
+        "    - **State:** Complete.\n",
+        "    - **Guidance:** Safe to delete.\n",
+        "      - **Response [#r-8eb6516470b1]**\n",
+        "        - **Summary:** copied hand-back.\n",
+    ));
+    assert!(!self_repair_artifacts_absent(&misplaced, ask));
+    let (repaired, _) =
+        self_repair_document(&misplaced, &retired, &|id| id == "[#r-8eb6516470b1]").unwrap();
+    assert!(self_repair_artifacts_absent(&repaired, ask));
+
+    let doubled = doc("- ~~amend core-v1~~\n  - kept note\n- ~~amend core-v1~~\n  - other note\n");
+    let extra = "operator: delete the extra struck copies of `amend core-v1`.";
+    assert!(
+        !self_repair_artifacts_absent(&doubled, extra),
+        "copies self-repair keeps still need a person"
+    );
 }

@@ -4985,87 +4985,61 @@ fn response_summary_row_child(
     Some(child)
 }
 
+/// `#treefinish`: a finished tree's keep/delete indicator.
+pub const TREE_DELETE_GUIDANCE: &str = "🗑️ Safe to delete this tree.";
+
+/// `#treefinish`: opens the indicator of a tree that still holds open work.
+pub const TREE_KEEP_LEAD: &str = "📌 Keep: ";
+
+/// `#treefinish`: a finished row inside a tree; the root carries the
+/// keep/delete indicator.
+pub const ROW_DONE_GUIDANCE: &str = "✅ Done.";
+
+/// `📌 Keep: N open — <first>.`: the tree (or the row's subtree) still holds
+/// `open` rows, named by the first of them.
+pub fn tree_keep_guidance(open: usize, first: &crate::queue_tree::RowRef) -> String {
+    format!("{TREE_KEEP_LEAD}{} open — {}.", open.max(1), first.label())
+}
+
 /// Deletion guidance for a completed row with no tracked or unpublished work
-/// (`#guidancescope`). The row's own response decides that the row is done;
-/// the queue tree decides how much of it may go: the row alone, the row with
-/// its nested rows, or the whole tree under its top-level row. When an open
-/// row keeps the subtree or the tree alive, the guidance names it.
+/// (`#guidancescope`, `#treefinish`): one short indicator.
 ///
-/// A nested row reads in the context of its root: when the row is done but
-/// its top-level (root) item is still open, the guidance says so first, with
-/// how many rows of that tree are still open, so a finished second-level row
-/// never reads as if the whole item were done. Preflight queue maintenance
-/// re-renders this guidance whenever the tree changes
+/// - A top-level (root) row, or an item under the Waiting-on-you root:
+///   `🗑️ Safe to delete this tree.` when nothing in its tree holds work,
+///   else `📌 Keep: N open — <first open row>.`.
+/// - A nested row: `✅ Done.`. The root carries the tree's indicator, so a
+///   finished child never says to keep the rest of the tree. It adds
+///   `📌 Keep: N open — <row>.` only when an open row sits beneath this row
+///   itself (deleting it would drop that work), and
+///   `🗑️ Safe to delete this tree.` once the whole tree is finished.
+///
+/// A row "holds" work while it is live work of its own (not a label and not
+/// delegated to a top-level follow-up row or already repaired by
+/// agent-doc), or while its own response says work remains
+/// ([`crate::queue_tree::RowClosure`]). Preflight queue maintenance and
+/// `queue sync` re-render this guidance whenever the tree changes
 /// ([`crate::response_tree_sync`]).
 pub(crate) fn completed_row_deletion_guidance(
     closure: Option<&crate::queue_tree::RowClosure>,
 ) -> String {
-    const DONE: &str = "the item is complete and has no remaining tracked or unpublished work.";
     let Some(closure) = closure else {
         return format!(
-            "This row is complete; {DONE} Its nested rows and tree were not checked, so confirm they are struck before deleting it."
+            "{ROW_DONE_GUIDANCE} Its tree was not checked; confirm it is struck before deleting it."
         );
     };
-    let nested = match closure.nested_rows {
-        1 => "1 nested row".to_string(),
-        count => format!("{count} nested rows"),
-    };
-    if let Some(open) = &closure.first_open_nested {
-        let open_rows = if closure.open_nested > 1 {
-            format!(
-                "{} of them are still open, first {}",
-                closure.open_nested,
-                open.label()
-            )
-        } else {
-            format!("{} is still open", open.label())
-        };
-        return format!(
-            "More work remains beneath this row. This item is complete, but keep this row and its {nested}: {open_rows}."
-        );
-    }
-    let row_scope = if closure.nested_rows == 0 {
-        "Safe to delete this completed row".to_string()
-    } else {
-        format!("Safe to delete this row and its {nested}")
-    };
-    match &closure.top_level {
-        None => format!("{row_scope}; {DONE}"),
-        Some(top) => match &closure.first_open_in_tree {
-            None => format!(
-                "Safe to delete the whole tree under {}; every row in it is struck and {DONE}",
-                top.label()
-            ),
-            Some(open) => format!(
-                "This row is done, but {}. {row_scope} (nothing tracked or unpublished remains in it); keep the rest of the tree.",
-                root_still_open(closure, top, open),
-            ),
-        },
-    }
-}
-
-/// `its root item <top> is still open …`: why a finished nested row's tree
-/// stays (`#guidancescope`).
-fn root_still_open(
-    closure: &crate::queue_tree::RowClosure,
-    top: &crate::queue_tree::RowRef,
-    open: &crate::queue_tree::RowRef,
-) -> String {
-    let root = top.label();
-    if open.line == top.line {
-        return format!("its root item {root} is still open");
-    }
-    let first = open.label();
-    let (state, rows) = if closure.top_level_struck {
-        ("is struck, but", "still open")
-    } else {
-        ("is still open:", "open")
-    };
-    match closure.open_in_tree {
-        0 | 1 => format!("its root item {root} {state} {first} is {rows}"),
-        count => format!(
-            "its root item {root} {state} {count} rows in its tree are {rows}, first {first}"
-        ),
+    let open = closure.open_nested + usize::from(closure.own_open.is_some());
+    let keep = closure
+        .own_open
+        .as_ref()
+        .or(closure.first_open_nested.as_ref())
+        .map(|first| tree_keep_guidance(open, first));
+    let root = closure.top_level.is_none() || closure.top_level_group;
+    match keep {
+        Some(keep) if root => keep,
+        Some(keep) => format!("{ROW_DONE_GUIDANCE} {keep}"),
+        None if root => TREE_DELETE_GUIDANCE.to_string(),
+        None if closure.tree_closed() => format!("{ROW_DONE_GUIDANCE} {TREE_DELETE_GUIDANCE}"),
+        None => ROW_DONE_GUIDANCE.to_string(),
     }
 }
 
@@ -9070,7 +9044,7 @@ mod tests {
             "{annotated}"
         );
         assert!(
-            annotated.contains("**Guidance:** Safe to delete the whole tree under `Waiting on you`; every row in it is struck"),
+            annotated.contains("**Guidance:** 🗑️ Safe to delete this tree.\n"),
             "{annotated}"
         );
 
@@ -9081,9 +9055,7 @@ mod tests {
             annotate_newly_struck_queue_items_with_response_id(&before, &after_open, &response)
                 .unwrap();
         assert!(
-            annotated.contains(
-                "its root item `Waiting on you` is still open: [#tdclireleasedownloads] is open."
-            ),
+            annotated.contains("**Guidance:** 📌 Keep: 1 open — [#tdclireleasedownloads].\n"),
             "{annotated}"
         );
     }
@@ -10594,7 +10566,7 @@ mod tests {
         );
         assert_eq!(
             annotated
-                .matches("**Guidance:** Safe to delete the whole tree under `docs`")
+                .matches("**Guidance:** ✅ Done. 🗑️ Safe to delete this tree.")
                 .count(),
             1,
             "canonical guidance must not be duplicated:\n{annotated}"
@@ -10631,10 +10603,7 @@ mod tests {
             "- ~~do [#solo]~~\n- do [#other]\n",
             "solo",
         );
-        assert_eq!(
-            guidance,
-            "Safe to delete this completed row; the item is complete and has no remaining tracked or unpublished work."
-        );
+        assert_eq!(guidance, "🗑️ Safe to delete this tree.");
     }
 
     #[test]
@@ -10644,10 +10613,7 @@ mod tests {
             "- ~~do [#parent]~~\n  - ~~step one~~\n  - ~~step two~~\n",
             "parent",
         );
-        assert!(
-            guidance.starts_with("Safe to delete this row and its 2 nested rows;"),
-            "{guidance}"
-        );
+        assert_eq!(guidance, "🗑️ Safe to delete this tree.");
     }
 
     #[test]
@@ -10657,15 +10623,7 @@ mod tests {
             "- ~~do [#parent]~~\n  - ~~do [#first]~~\n  - do [#second]\n",
             "parent",
         );
-        assert!(
-            guidance.starts_with("More work remains beneath this row."),
-            "{guidance}"
-        );
-        assert!(
-            guidance.contains("keep this row and its 2 nested rows: [#second] is still open."),
-            "{guidance}"
-        );
-        assert!(!guidance.contains("Safe to delete"), "{guidance}");
+        assert_eq!(guidance, "📌 Keep: 1 open — [#second].");
     }
 
     #[test]
@@ -10675,10 +10633,9 @@ mod tests {
             "- ### epic\n  - ~~do [#done-child]~~\n  - do [#open-child]\n",
             "done-child",
         );
-        assert_eq!(
-            guidance,
-            "This row is done, but its root item `epic` is still open: [#open-child] is open. Safe to delete this completed row (nothing tracked or unpublished remains in it); keep the rest of the tree."
-        );
+        // `#treefinish`: a finished child never says to keep the rest of
+        // the tree; the root carries that.
+        assert_eq!(guidance, "✅ Done.");
     }
 
     #[test]
@@ -10688,10 +10645,7 @@ mod tests {
             "- ### epic\n  - ~~do [#earlier]~~\n  - ~~do [#last]~~\n    - ~~step~~\n",
             "last",
         );
-        assert_eq!(
-            guidance,
-            "Safe to delete the whole tree under `epic`; every row in it is struck and the item is complete and has no remaining tracked or unpublished work."
-        );
+        assert_eq!(guidance, "✅ Done. 🗑️ Safe to delete this tree.");
     }
 
     #[test]
@@ -10707,7 +10661,7 @@ mod tests {
         );
         let first =
             annotate_newly_struck_queue_items_with_response_id(&before, &after, response).unwrap();
-        assert!(first.contains("[#open-child] is open"), "{first}");
+        assert!(first.contains("**Guidance:** ✅ Done.\n"), "{first}");
         // The sibling closes before a detached replay of the same response.
         let changed = first.replace("  - do [#open-child]", "  - ~~do [#open-child]~~");
         let replayed =
@@ -10727,10 +10681,7 @@ mod tests {
             "- ### epic\n  - ~~do [#only]~~\n- ### other\n  - do [#elsewhere]\n",
             "only",
         );
-        assert!(
-            guidance.starts_with("Safe to delete the whole tree under `epic`;"),
-            "{guidance}"
-        );
+        assert_eq!(guidance, "✅ Done. 🗑️ Safe to delete this tree.");
     }
 
     #[test]

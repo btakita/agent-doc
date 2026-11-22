@@ -56,11 +56,12 @@ pub fn expected_editor_plugin_version(editor_kind: &str) -> Option<&'static str>
 
 /// Package generation expected for the proven JetBrains platform line.
 ///
-/// JetBrains 262 and 263 use separately versioned packages. Callers that can
-/// prove the live IDE build must compare against that package generation, not
-/// the classic 242-261 generation. Unknown and unsupported builds retain the
-/// classic fallback so the existing unsupported-build diagnostic can explain
-/// that no matching package is published.
+/// JetBrains 262 and 263 share one separately versioned modular package
+/// (`#jbdocdrift`). Callers that can prove the live IDE build must
+/// compare against that package generation, not the classic 242-261
+/// generation. Unknown and unsupported builds retain the classic fallback so
+/// the existing unsupported-build diagnostic can explain that no matching
+/// package is published.
 pub fn expected_editor_plugin_version_for_platform_build(
     editor_kind: &str,
     platform_build: Option<u32>,
@@ -70,9 +71,7 @@ pub fn expected_editor_plugin_version_for_platform_build(
         "jetbrains" | "intellij" | "idea" | "jb"
     ) {
         return match platform_build {
-            Some(262) => option_env!("AGENT_DOC_EXPECTED_JETBRAINS_262_PLUGIN_VERSION")
-                .or_else(|| expected_editor_plugin_version(editor_kind)),
-            Some(263) => option_env!("AGENT_DOC_EXPECTED_JETBRAINS_263_PLUGIN_VERSION")
+            Some(262 | 263) => option_env!("AGENT_DOC_EXPECTED_JETBRAINS_262_PLUGIN_VERSION")
                 .or_else(|| expected_editor_plugin_version(editor_kind)),
             _ => expected_editor_plugin_version(editor_kind),
         };
@@ -90,7 +89,8 @@ pub fn editor_plugin_generation_matches(editor_kind: &str, running: &str) -> boo
 
 /// Every package version this binary's release pairs with an editor kind, one
 /// per IDE line (GH #236). JetBrains ships a classic-source package for 242-261
-/// plus modular 262 and 263 packages (GH #249) under three distinct versions.
+/// plus one modular package for 262 through 263.* (GH #249,
+/// `#jbdocdrift`) under two distinct versions.
 pub fn release_paired_editor_plugin_versions(editor_kind: &str) -> Vec<&'static str> {
     let mut versions = Vec::new();
     if let Some(primary) = expected_editor_plugin_version(editor_kind) {
@@ -103,14 +103,6 @@ pub fn release_paired_editor_plugin_versions(editor_kind: &str) -> Vec<&'static 
         && !versions.contains(&modular)
     {
         versions.push(modular);
-    }
-    if matches!(
-        editor_kind.trim().to_ascii_lowercase().as_str(),
-        "jetbrains" | "intellij" | "idea" | "jb"
-    ) && let Some(modern) = option_env!("AGENT_DOC_EXPECTED_JETBRAINS_263_PLUGIN_VERSION")
-        && !versions.contains(&modern)
-    {
-        versions.push(modern);
     }
     versions
 }
@@ -214,7 +206,7 @@ fn dotted_version_at_least(running: &[u64], floor: &[u64]) -> bool {
 /// Whether a registration may receive a disk-writing native save (GH #236).
 ///
 /// Admission is protocol compatibility, not equality with the classic package
-/// version: the 262 and 263 ranged packages speak the same `persist_current`
+/// version: the 262-263 modular package speaks the same `persist_current`
 /// protocol as the primary classic package, despite distinct update versions.
 pub fn editor_native_save_compatibility(
     editor_kind: &str,
@@ -1035,10 +1027,9 @@ mod tests {
         let classic = expected_editor_plugin_version("jetbrains")
             .expect("classic JetBrains package version baked by build.rs");
         let paired = release_paired_editor_plugin_versions("jetbrains");
-        assert_eq!(paired.len(), 3, "all JetBrains package lines are baked in");
-        assert_eq!(paired.iter().copied().collect::<BTreeSet<_>>().len(), 3);
+        assert_eq!(paired.len(), 2, "both JetBrains package lines are baked in");
+        assert_eq!(paired.iter().copied().collect::<BTreeSet<_>>().len(), 2);
         let modular = paired[1];
-        let modern = paired[2];
 
         assert_eq!(
             expected_editor_plugin_version_for_platform_build("jetbrains", Some(261)),
@@ -1048,9 +1039,10 @@ mod tests {
             expected_editor_plugin_version_for_platform_build("jetbrains", Some(262)),
             Some(modular)
         );
+        // `#jbdocdrift`: one modular ZIP serves 262 through 263.*.
         assert_eq!(
             expected_editor_plugin_version_for_platform_build("jetbrains", Some(263)),
-            Some(modern)
+            Some(modular)
         );
 
         // Matching classic package.
@@ -1068,10 +1060,6 @@ mod tests {
             modular
         ));
         assert!(!editor_plugin_generation_matches("jetbrains", modular));
-        assert_eq!(
-            editor_native_save_compatibility("jetbrains", modern),
-            NativeSaveCompatibility::ReleasePaired
-        );
         // Older 263 installations remain protocol-compatible during rollout.
         let gh236 = editor_native_save_compatibility("jetbrains", "0.2.508");
         assert_eq!(

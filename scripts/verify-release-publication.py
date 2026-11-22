@@ -111,9 +111,9 @@ def missing_release_assets(asset_names: set[str]) -> list[str]:
         and "-262-" not in name
         and "-263-" not in name
         and name.endswith(".zip"),
-        "JetBrains 262 package": lambda name: name.startswith("agent-doc-jetbrains-262-")
-        and name.endswith(".zip"),
-        "JetBrains 263 package": lambda name: name.startswith("agent-doc-jetbrains-263-")
+        # One modular ZIP serves 262 through 263.* (#jbdocdrift);
+        # agent-doc-jetbrains-263.xml remains as an alias feed of it.
+        "JetBrains 262-263 modular package": lambda name: name.startswith("agent-doc-jetbrains-262-")
         and name.endswith(".zip"),
     }
     missing.extend(label for label, predicate in families.items() if not any(map(predicate, asset_names)))
@@ -211,10 +211,17 @@ def self_test() -> None:
             "agent-doc-1.2.3.vsix",
             "agent-doc-jetbrains-1.2.3.zip",
             "agent-doc-jetbrains-262-1.2.3.zip",
-            "agent-doc-jetbrains-263-1.2.3.zip",
         }
     )
     assert missing_release_assets(complete_assets) == []
+    complete_assets.remove("agent-doc-jetbrains-262-1.2.3.zip")
+    assert missing_release_assets(complete_assets) == ["JetBrains 262-263 modular package"]
+    complete_assets.add("agent-doc-jetbrains-263-1.2.3.zip")
+    assert missing_release_assets(complete_assets) == ["JetBrains 262-263 modular package"], (
+        "a retired exact-263 ZIP cannot stand in for the modular package"
+    )
+    complete_assets.remove("agent-doc-jetbrains-263-1.2.3.zip")
+    complete_assets.add("agent-doc-jetbrains-262-1.2.3.zip")
     complete_assets.remove("SHA256SUMS")
     assert missing_release_assets(complete_assets) == ["SHA256SUMS"]
     complete_assets.add("SHA256SUMS")

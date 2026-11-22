@@ -1,12 +1,15 @@
 # Agent Doc JetBrains modular distributions
 
-This source project builds the Plugin Model v2 distributions for IntelliJ
-Platform 2026.2 (`262`) and 2026.3 (`263`). Both keep the existing plugin ID
-`com.github.btakita.agent-doc`; Gradle properties select the artifact name,
-platform, and exact compatibility range. The classic source in `../jetbrains`
-produces only the distribution for 242 through 261. The 263 build takes its
-range, platform, name, and independent version from `../jetbrains-263`.
-`make release-version VERSION=...` assigns fresh, distinct versions to all three
+This source project builds the one Plugin Model v2 distribution for IntelliJ
+Platform 2026.2 (`262`) through 2026.3 (`263.*`), `agent-doc-jetbrains-262-<pluginVersion>.zip`
+(`#jbdocdrift`). It keeps the existing plugin ID
+`com.github.btakita.agent-doc`; `gradle.properties` sets the artifact name, the
+compile platform (`platformVersion`, 262), the upper verification platform
+(`upperPlatformVersion`, 263), and the compatibility range. The classic source in
+`../jetbrains` produces only the distribution for 242 through 261. Separate
+exact-262 and exact-263 ZIPs (the latter configured by the removed
+`../jetbrains-263`) shipped before the combined ZIP.
+`make release-version VERSION=...` assigns fresh, distinct versions to both
 updates under the shared Marketplace plugin ID and records their source digests.
 Repeating the projection is idempotent; changed source bytes allocate fresh
 versions above every prior update, so the ranged artifacts cannot overwrite one another.
@@ -44,13 +47,18 @@ IntelliJ 2026.2 and 2026.3 require a Java 25 toolchain for compilation in this b
 
 ```shell
 gradle test buildPlugin verifySplitArtifact
-gradle verifyPlugin
+gradle verifyPlugin        # IU platformVersion (262) and upperPlatformVersion (263)
+gradle -PplatformVersion=263.6800.24 test   # what `make jetbrains-263-check` runs
 gradle runIdeSplitMode
 ```
 
+`verifyPlugin` also accepts local IDE homes, for example an installed Rider
+2026.2 and IntelliJ IDEA 2026.3:
+`gradle verifyPlugin "-PverifyLocalIdePaths=/opt/rider-2026.2,/opt/idea-IU-263"`.
+
 The build sets `splitMode = true` and `pluginInstallationTarget = BOTH`.
-`runIdeSplitMode` therefore installs the same selected build-line plugin into the local
-backend and frontend sandboxes. `verifySplitArtifact` checks the selected exact range,
+`runIdeSplitMode` therefore installs the same plugin into the local backend and
+frontend sandboxes. `verifySplitArtifact` checks the patched 262..263.* range,
 the exact frontend/backend/both role-selection matrix, exact module
 JAR/descriptor pairing and dependencies, module presence, and that the isolated
 backend module embeds its private Lazily runtime instead of relying on a root
@@ -60,13 +68,15 @@ both development sandboxes.
 
 ## Distribution and installation
 
-The classic, 262, and 263 ZIPs are compatible updates of the same plugin ID with
+The classic and modular ZIPs are compatible updates of the same plugin ID with
 non-overlapping IDE ranges. Every tag publishes one JetBrains custom-repository
-listing per range (`agent-doc-jetbrains-classic.xml`,
-`agent-doc-jetbrains-262.xml`, `agent-doc-jetbrains-263.xml`), generated and validated by
+listing per range (`agent-doc-jetbrains-classic.xml` and
+`agent-doc-jetbrains-262.xml`, plus `agent-doc-jetbrains-263.xml`, a
+byte-identical alias of the modular listing kept for existing 263
+subscribers), generated and validated by
 `scripts/jetbrains-custom-repository.py`; each IDE process selects the update
 whose `since-build`/`until-build` contains its build. The same release job first
-validates and publishes all three updates to Marketplace, which synchronizes the
+validates and publishes both updates to Marketplace, which synchronizes the
 selected modular ZIP across Remote Dev peers; custom repositories remain the
 manual fallback. See
 [`docs/reference/jetbrains-distribution.md`](../../docs/reference/jetbrains-distribution.md).
@@ -104,16 +114,18 @@ Marketplace API. Structural routing remains blocked and retains the existing tmu
 Detached-window identity and frontend presentation remain unavailable until the
 matching frontend module connects and publishes an accepted snapshot.
 
-Every Agent Doc tag packages both modular ZIPs as
-`agent-doc-jetbrains-{262,263}-<pluginVersion>.zip` alongside the compatibility-ranged
+Every Agent Doc tag packages the modular ZIP as
+`agent-doc-jetbrains-262-<pluginVersion>.zip` alongside the compatibility-ranged
 classic ZIP and the VS Code package. The package-generation fence tracks both
 the modular build and the classic implementation sources reused by its backend.
-`make check` builds and verifies all compatibility-ranged ZIPs plus the modular
-backend/frontend sandboxes, while the tag workflow rejects equal update versions
-and copies the artifacts by exact versioned name.
+`make check` builds and verifies both compatibility-ranged ZIPs plus the modular
+backend/frontend sandboxes, plugin-verifies the modular ZIP against IntelliJ
+IDEA 262 and 263, and runs the modular tests on the 263 platform, while the tag
+workflow rejects equal update versions and copies the artifacts by exact
+versioned name.
 `agent-doc plugin install jetbrains` derives the target build from the
-versioned IDE data directory and selects the classic, exact-262, or exact-263
-ZIP for that build. The installer fails closed if it cannot prove a supported
+versioned IDE data directory and selects the classic ZIP for 242-261 or the
+modular ZIP for 262 and 263. The installer fails closed if it cannot prove a supported
 build. Marketplace synchronizes the compatible ZIP across Remote Dev peers.
 For a local or custom-repository install, install the same ranged ZIP in each
 peer, using `--plugins-dir <PATH>` when needed.
@@ -125,8 +137,8 @@ then sent as one `editor_view_snapshot_observe` controller request. They are
 never fanned out through legacy `editor_surface_observe`, because that path can
 apply focus/layout effects before main-versus-detached policy sees the complete
 snapshot. The payload sets `terminal_capable=true` only after the exact-262
-runtime probe verifies every internal editor/terminal shape used by the isolated
-adapter. Otherwise it remains false and controller policy freezes. A controller
+runtime probe (a 262 baseline build, so never on 263) verifies every internal
+editor/terminal shape used by the isolated adapter. Otherwise it remains false and controller policy freezes. A controller
 without the new atomic ingress rejects the command, so no detached surface
 reaches the legacy effect path.
 

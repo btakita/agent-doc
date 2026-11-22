@@ -93,15 +93,6 @@ TARGETS = (
         ("/src/test/",),
     ),
     Target(
-        "JetBrains 263",
-        ("editors/jetbrains-262/", "editors/jetbrains/src/"),
-        (".kt", ".java", ".xml", ".kts"),
-        "editors/jetbrains-263/gradle.properties",
-        ("editors/jetbrains-263/gradle.properties",),
-        DIGEST_KEY,
-        ("/src/test/",),
-    ),
-    Target(
         "VS Code",
         ("editors/vscode/src/",),
         (".ts",),
@@ -635,9 +626,19 @@ def jetbrains_targets() -> tuple[Target, ...]:
     return tuple(target for target in TARGETS if target.name.startswith("JetBrains"))
 
 
+# `#jbdocdrift`: the exact-263 line (`editors/jetbrains-263`) was retired
+# when one modular ZIP took over 262 through 263.*. Its last allocated update,
+# 0.2.1038, is installed in 263 IDEs and may already be a Marketplace update, so
+# every later allocation stays above it even though no target reads it anymore.
+RETIRED_JETBRAINS_VERSION_FLOOR = (0, 2, 1038)
+
+
 def next_jetbrains_version() -> tuple[int, int, int]:
-    """Allocate above both Marketplace updates so the shared plugin ID cannot collide."""
-    highest = max(read_gradle_version(target.primary_version) for target in jetbrains_targets())
+    """Allocate above every Marketplace update so the shared plugin ID cannot collide."""
+    highest = max(
+        [read_gradle_version(target.primary_version) for target in jetbrains_targets()]
+        + [RETIRED_JETBRAINS_VERSION_FLOOR]
+    )
     return highest[0], highest[1], highest[2] + 1
 
 
@@ -741,13 +742,13 @@ def self_test() -> int:
 
     jb = TARGETS[0]
     jb262 = TARGETS[1]
-    jb263 = TARGETS[2]
     assert "editors/jetbrains-262/" in jb262.source_prefixes
     assert "editors/jetbrains/src/" in jb262.source_prefixes, (
         "the modular backend compiles classic implementation sources, so they must fence both generations"
     )
-    assert "editors/jetbrains-262/" in jb263.source_prefixes
-    assert "editors/jetbrains/src/" in jb263.source_prefixes
+    assert [target.name for target in jetbrains_targets()] == ["JetBrains", "JetBrains 262"], (
+        "#jbdocdrift: one modular ZIP serves 262 through 263.*; no separate 263 line"
+    )
 
     # bump_gradle_patch increments only the patch and leaves the file otherwise intact.
     with tempfile.TemporaryDirectory() as tmp:
@@ -788,8 +789,6 @@ def self_test() -> int:
             build = f"{tmp}/editors/jetbrains/build.gradle.kts"
             modular_dir = f"{tmp}/editors/jetbrains-262"
             os.makedirs(modular_dir)
-            modern_dir = f"{tmp}/editors/jetbrains-263"
-            os.makedirs(modern_dir)
             modular_build = f"{modular_dir}/build.gradle.kts"
             modular_test = f"{modular_dir}/backend/src/test/kotlin/BackendContractTest.kt"
             os.makedirs(os.path.dirname(classic_test), exist_ok=True)
@@ -807,10 +806,7 @@ def self_test() -> int:
             with open(modular_test, "w", encoding="utf-8") as handle:
                 handle.write("class BackendContractTest")
             with open(f"{modular_dir}/gradle.properties", "w", encoding="utf-8") as handle:
-                handle.write("pluginVersion = 0.2.388\n")
-            modern_props = f"{modern_dir}/gradle.properties"
-            with open(modern_props, "w", encoding="utf-8") as handle:
-                handle.write("pluginVersion = 0.2.388\ncompatibilitySinceBuild = 263\n")
+                handle.write("pluginVersion = 0.2.1037\n")
             rels = [
                 os.path.relpath(path, tmp)
                 for path in (
@@ -820,7 +816,6 @@ def self_test() -> int:
                     build,
                     modular_build,
                     modular_test,
-                    modern_props,
                 )
             ]
             git = lambda *a: rels if "ls-files" in a and "--others" not in a else []  # noqa: E731
@@ -832,7 +827,6 @@ def self_test() -> int:
                     "an unchanged tree must digest identically, or every build bumps"
                 )
                 modular_first = source_digest(jb262)
-                modern_first = source_digest(jb263)
                 with open(classic_test, "w", encoding="utf-8") as handle:
                     handle.write("class AContractTest { val changed = true }")
                 with open(modular_test, "w", encoding="utf-8") as handle:
@@ -843,11 +837,8 @@ def self_test() -> int:
                 assert source_digest(jb262) == modular_first, (
                     "test-only modular changes must not manufacture a 262 package generation"
                 )
-                assert source_digest(jb263) == modern_first, (
-                    "test-only modular changes must not manufacture a 263 package generation"
-                )
                 with open(jb.primary_version, "w", encoding="utf-8") as handle:
-                    handle.write("pluginVersion = 0.2.388\n")
+                    handle.write("pluginVersion = 0.2.1036\n")
                 missing = source_digest_failure(jb)
                 assert missing and "does not record" in missing, missing
                 write_property(jb.primary_version, DIGEST_KEY, first)
@@ -874,37 +865,33 @@ def self_test() -> int:
                 # Repeating the projection is byte-stable, and a new app release
                 # with the same source digests keeps those live-compatible plugin
                 # generations instead of manufacturing a restart-only update.
+                # `#jbdocdrift`: allocation stays above the retired
+                # exact-263 line's last update (0.2.1038) even though the classic
+                # (0.2.1036) and modular (0.2.1037) properties are both below it.
                 project_jetbrains_release("2.4.6")
-                assert read_gradle_version(jb.primary_version) == (0, 2, 389)
-                assert read_gradle_version(jb262.primary_version) == (0, 2, 390)
-                assert read_gradle_version(jb263.primary_version) == (0, 2, 391)
+                assert read_gradle_version(jb.primary_version) == (0, 2, 1039)
+                assert read_gradle_version(jb262.primary_version) == (0, 2, 1040)
                 assert read_property(jb.primary_version, RELEASE_KEY) == "2.4.6"
                 assert source_digest_failure(jb) is None
                 assert source_digest_failure(jb262) is None
-                assert source_digest_failure(jb263) is None
                 project_jetbrains_release("2.4.6")
-                assert read_gradle_version(jb.primary_version) == (0, 2, 389)
-                assert read_gradle_version(jb262.primary_version) == (0, 2, 390)
-                assert read_gradle_version(jb263.primary_version) == (0, 2, 391)
+                assert read_gradle_version(jb.primary_version) == (0, 2, 1039)
+                assert read_gradle_version(jb262.primary_version) == (0, 2, 1040)
                 project_jetbrains_release("2.4.7")
-                assert read_gradle_version(jb.primary_version) == (0, 2, 389)
-                assert read_gradle_version(jb262.primary_version) == (0, 2, 390)
-                assert read_gradle_version(jb263.primary_version) == (0, 2, 391)
+                assert read_gradle_version(jb.primary_version) == (0, 2, 1039)
+                assert read_gradle_version(jb262.primary_version) == (0, 2, 1040)
                 assert read_property(jb.primary_version, RELEASE_KEY) == "2.4.7"
                 assert read_property(jb262.primary_version, RELEASE_KEY) == "2.4.7"
-                assert read_property(jb263.primary_version, RELEASE_KEY) == "2.4.7"
                 with open(kt, "w", encoding="utf-8") as handle:
                     handle.write("class A { val release = 2 }")
                 project_jetbrains_release("2.4.7")
-                assert read_gradle_version(jb.primary_version) == (0, 2, 392)
-                assert read_gradle_version(jb262.primary_version) == (0, 2, 393)
-                assert read_gradle_version(jb263.primary_version) == (0, 2, 394)
+                assert read_gradle_version(jb.primary_version) == (0, 2, 1041)
+                assert read_gradle_version(jb262.primary_version) == (0, 2, 1042)
                 with open(kt, "w", encoding="utf-8") as handle:
                     handle.write("class A { val release = 3 }")
                 bump("JetBrains")
-                assert read_gradle_version(jb.primary_version) == (0, 2, 395)
-                assert read_gradle_version(jb262.primary_version) == (0, 2, 393)
-                assert read_gradle_version(jb263.primary_version) == (0, 2, 394)
+                assert read_gradle_version(jb.primary_version) == (0, 2, 1043)
+                assert read_gradle_version(jb262.primary_version) == (0, 2, 1042)
             finally:
                 os.chdir(cwd)
     finally:
@@ -938,13 +925,25 @@ def self_test() -> int:
     assert "jetbrains-classic-check" in check_header, check_header
     assert "jetbrains-262-check" in check_header, check_header
     assert "jetbrains-263-check" in check_header, check_header
+    modular_recipe = recipe("jetbrains-262-check")
+    assert "verifySplitArtifact" in modular_recipe, modular_recipe
+    assert "verifyPlugin" in modular_recipe, (
+        "the 262-compiled modular ZIP must pass the plugin verifier on both ends of 262..263.*"
+    )
     modern_recipe = recipe("jetbrains-263-check")
     assert "cd editors/jetbrains-262" in modern_recipe, (
-        "JetBrains 263 must build the modular frame-aware source line"
+        "the 263 platform check must test the one modular source line"
     )
-    assert "verifySplitArtifact" in modern_recipe, modern_recipe
+    assert "upperPlatformVersion" in modern_recipe, modern_recipe
+    assert "buildPlugin" not in modern_recipe, (
+        "the 263 platform check must not overwrite the shipped 262-compiled modular ZIP"
+    )
     assert "verifyClassicArtifact" not in modern_recipe, modern_recipe
     assert "--bump JetBrains" in recipe("editor-generation-bump")
+    assert '--bump "JetBrains 262"' in recipe("editor-generation-bump"), (
+        "#installgenskew: the modular generation must also be bumped before the binary builds"
+    )
+    assert "JetBrains 263" not in makefile, "#jbdocdrift: no separate 263 generation remains"
 
     release_workflow_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "..", ".github", "workflows", "release.yml"
@@ -956,8 +955,8 @@ def self_test() -> int:
     assert "agent-doc-jetbrains-262-$modular_version.zip" in release_workflow, (
         "tag-triggered releases must package the modular JetBrains distribution by exact name"
     )
-    assert "agent-doc-jetbrains-263-$modern_version.zip" in release_workflow, (
-        "tag-triggered releases must package the JetBrains 263 distribution by exact name"
+    assert "agent-doc-jetbrains-263-" not in release_workflow, (
+        "#jbdocdrift: the one modular ZIP serves 263; no separate 263 package ships"
     )
     assert "verifySplitModeSandboxes" in release_workflow, (
         "the modular release artifact must prove the same ZIP is installed into both sandboxes"
@@ -965,7 +964,7 @@ def self_test() -> int:
     assert "verifyClassicArtifact" in release_workflow, (
         "the classic release artifact must prove its compatibility range from the packaged ZIP"
     )
-    assert 'sort -u | wc -l)" -eq 3' in release_workflow, (
+    assert 'sort -u | wc -l)" -eq 2' in release_workflow, (
         "the release job must reject colliding Marketplace update versions"
     )
 
@@ -1337,17 +1336,19 @@ def check() -> int:
         failures.append("JetBrains: classic artifact must be compatibility-ranged to 242..261.*")
     if (
         "compatibilitySinceBuild = 262" not in modular_properties
-        or "compatibilityUntilBuild = 262.*" not in modular_properties
+        or "compatibilityUntilBuild = 263.*" not in modular_properties
         or 'sinceBuild.set(compatibilitySinceBuild)' not in modular_build
         or 'untilBuild.set(compatibilityUntilBuild)' not in modular_build
     ):
-        failures.append("JetBrains 262: modular artifact must be compatibility-ranged to 262..262.*")
-    modern_properties = open("editors/jetbrains-263/gradle.properties", encoding="utf-8").read()
+        failures.append("JetBrains 262: modular artifact must be compatibility-ranged to 262..263.*")
     if (
-        "compatibilitySinceBuild = 263" not in modern_properties
-        or "compatibilityUntilBuild = 263.*" not in modern_properties
+        re.search(r"(?m)^upperPlatformVersion\s*=\s*263\.", modular_properties) is None
+        or "create(IntelliJPlatformType.IntellijIdeaUltimate, upperPlatformVersion)" not in modular_build
     ):
-        failures.append("JetBrains 263: artifact must be compatibility-ranged to 263..263.*")
+        failures.append(
+            "JetBrains 262: the modular plugin verifier must cover the 263 end of its range "
+            "(upperPlatformVersion = 263.*)"
+        )
     for target in TARGETS:
         staged_source = any(is_source(target, path) for path in staged)
         digest_failure = source_digest_failure(target)

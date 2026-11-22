@@ -289,19 +289,19 @@ jobs:
         run: |
           set -euo pipefail
           ( cd editors/jetbrains && ./gradlew --no-daemon --console=plain buildPlugin verifyClassicArtifact )
-          ( cd editors/jetbrains-262 && gradle --no-daemon --console=plain test buildPlugin verifySplitArtifact verifySplitModeSandboxes )
+          # One modular ZIP serves 262 through 263.* (#jbdocdrift). It is
+          # compiled against 262, tested on the 263 platform, and plugin-verified
+          # against both ends of its range before it is packaged.
           make jetbrains-263-check
+          ( cd editors/jetbrains-262 && gradle --no-daemon --console=plain -PverifierFailureLevel=compatibility test buildPlugin verifySplitArtifact verifySplitModeSandboxes verifyPlugin )
           mkdir -p editor-packages
           classic_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains/gradle.properties | tr -d '[:space:]')
           modular_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains-262/gradle.properties | tr -d '[:space:]')
-          modern_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains-263/gradle.properties | tr -d '[:space:]')
           test -n "$classic_version"
           test -n "$modular_version"
-          test -n "$modern_version"
-          test "$(printf '%s\n' "$classic_version" "$modular_version" "$modern_version" | sort -u | wc -l)" -eq 3
+          test "$(printf '%s\n' "$classic_version" "$modular_version" | sort -u | wc -l)" -eq 2
           cp "editors/jetbrains/build/distributions/agent-doc-jetbrains-$classic_version.zip" editor-packages/
           cp "editors/jetbrains-262/build/distributions/agent-doc-jetbrains-262-$modular_version.zip" editor-packages/
-          cp "editors/jetbrains-262/build/distributions/agent-doc-jetbrains-263-$modern_version.zip" editor-packages/
           ls -la editor-packages
 
       - name: Sign restart-free JetBrains frontend release packages
@@ -318,7 +318,7 @@ jobs:
           key_file=$(mktemp)
           trap 'rm -f "$key_file"' EXIT
           printf '%s\n' "$FRONTEND_RELEASE_PRIVATE_KEY" > "$key_file"
-          for package in editor-packages/agent-doc-jetbrains-262-*.zip editor-packages/agent-doc-jetbrains-263-*.zip; do
+          for package in editor-packages/agent-doc-jetbrains-262-*.zip; do
             scripts/sign-jetbrains-frontend-release.sh "$key_file" "$package" "$package.sig"
           done
           openssl pkey -in "$key_file" -pubout -outform DER 2>/dev/null |
@@ -329,20 +329,21 @@ jobs:
       # per listing. Publish one stable feed URL per compatibility range (served
       # from `releases/latest/download/`); each listing pins its ZIP to THIS tag
       # so a feed and the archive it names can never come from different
-      # releases. The generator refuses the pair (and writes neither listing)
-      # unless the ID matches, versions differ, and the ranges are exactly
-      # 242..261.*, 262..262.*, and 263..263.*. Remote Dev users configure the
-      # matching build-line URL on both the backend and Client/Gateway.
+      # releases. The generator refuses the pair (and writes no listing) unless
+      # the ID matches, versions differ, and the ranges are exactly 242..261.*
+      # and 262..263.*. The modular listing is published as both
+      # agent-doc-jetbrains-262.xml and the byte-identical alias
+      # agent-doc-jetbrains-263.xml, so IDEs already subscribed to either feed
+      # keep updating. Remote Dev users configure the matching build-line URL on
+      # both the backend and Client/Gateway.
       - name: Build and verify JetBrains custom-repository feeds
         run: |
           set -euo pipefail
           classic_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains/gradle.properties | tr -d '[:space:]')
           modular_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains-262/gradle.properties | tr -d '[:space:]')
-          modern_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains-263/gradle.properties | tr -d '[:space:]')
           python3 scripts/jetbrains-custom-repository.py \
             --classic "editor-packages/agent-doc-jetbrains-$classic_version.zip" \
             --modular "editor-packages/agent-doc-jetbrains-262-$modular_version.zip" \
-            --modern "editor-packages/agent-doc-jetbrains-263-$modern_version.zip" \
             --output-dir editor-packages \
             --download-base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
           test -f editor-packages/agent-doc-jetbrains-classic.xml
@@ -369,22 +370,20 @@ jobs:
           set -euo pipefail
           classic_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains/gradle.properties | tr -d '[:space:]')
           modular_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains-262/gradle.properties | tr -d '[:space:]')
-          modern_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains-263/gradle.properties | tr -d '[:space:]')
-          test "$(printf '%s\n' "$classic_version" "$modular_version" "$modern_version" | sort -u | wc -l)" -eq 3
+          test "$(printf '%s\n' "$classic_version" "$modular_version" | sort -u | wc -l)" -eq 2
           test -f "editor-packages/agent-doc-jetbrains-$classic_version.zip"
           test -f "editor-packages/agent-doc-jetbrains-262-$modular_version.zip"
-          test -f "editor-packages/agent-doc-jetbrains-263-$modern_version.zip"
           test -f editor-packages/agent-doc-jetbrains-classic.xml
           test -f editor-packages/agent-doc-jetbrains-262.xml
           test -f editor-packages/agent-doc-jetbrains-263.xml
           python3 scripts/jetbrains-custom-repository.py \
             --output-dir editor-packages \
-            --verify-listings "$classic_version" "$modular_version" "$modern_version"
+            --verify-listings "$classic_version" "$modular_version"
           jetbrains=$(find editor-packages -name 'agent-doc-jetbrains-*.zip' | wc -l)
           repositories=$(find editor-packages -name 'agent-doc-jetbrains-*.xml' | wc -l)
           vsix=$(find editor-packages -name '*.vsix' | wc -l)
-          if [ "$jetbrains" -ne 3 ] || [ "$repositories" -ne 3 ] || [ "$vsix" -ne 1 ]; then
-            echo "::error::expected 3 ranged JetBrains zips, 3 ranged feeds, and 1 vsix; got $jetbrains zips, $repositories feeds, and $vsix vsix"
+          if [ "$jetbrains" -ne 2 ] || [ "$repositories" -ne 3 ] || [ "$vsix" -ne 1 ]; then
+            echo "::error::expected 2 ranged JetBrains zips, 3 feeds (classic, 262, and its 263 alias), and 1 vsix; got $jetbrains zips, $repositories feeds, and $vsix vsix"
             ls -la editor-packages
             exit 1
           fi
@@ -393,8 +392,8 @@ jobs:
       # applies the same compatibility selection independently to the backend
       # and JetBrains Client, then synchronizes the selected modular ZIP to both
       # peers. Marketplace onboarding is external and must not block the core
-      # GitHub/PyPI release; when configured, validate the complete three-update
-      # set before the first upload.
+      # GitHub/PyPI release; when configured, validate the complete two-update
+      # set (classic 242..261.*, modular 262..263.*) before the first upload.
       # Per-artifact release markers make a failed-job retry resume after the
       # last accepted update instead of attempting to upload that version twice.
       - name: Publish all compatibility-ranged JetBrains updates to Marketplace
@@ -412,16 +411,13 @@ jobs:
 
           classic_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains/gradle.properties | tr -d '[:space:]')
           modular_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains-262/gradle.properties | tr -d '[:space:]')
-          modern_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains-263/gradle.properties | tr -d '[:space:]')
           artifacts=(
             "editor-packages/agent-doc-jetbrains-$classic_version.zip"
             "editor-packages/agent-doc-jetbrains-262-$modular_version.zip"
-            "editor-packages/agent-doc-jetbrains-263-$modern_version.zip"
           )
           python3 scripts/jetbrains-custom-repository.py \
             --classic "${artifacts[0]}" \
             --modular "${artifacts[1]}" \
-            --modern "${artifacts[2]}" \
             --verify-artifacts
 
           mkdir -p marketplace-state

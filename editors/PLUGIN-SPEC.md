@@ -30,10 +30,14 @@ Rust binary.
 - Missing capabilities, an incompatible ABI, an unknown intent, or ambiguous
   structure fails closed without mutating the buffer or disk.
 - The target editor build determines package selection. JetBrains publishes
-  three disjoint packages under one plugin ID. Builds `242` through `261.*`
-  receive `agent-doc-jetbrains-<version>.zip`, `262` through `262.*` receive
-  `agent-doc-jetbrains-262-<version>.zip`, and `263` through `263.*` receive
-  `agent-doc-jetbrains-263-<version>.zip`. The installer
+  two disjoint packages under one plugin ID. Builds `242` through `261.*`
+  receive the classic `agent-doc-jetbrains-<version>.zip`, and builds `262`
+  through `263.*` receive the one modular
+  `agent-doc-jetbrains-262-<version>.zip` (`#jbdocdrift`). That ZIP is
+  compiled against 262 and plugin-verified against both 262 and 263; it
+  replaced the separate exact-262 and exact-263 modular ZIPs, so a 263 IDE
+  still holding the retired `agent-doc-jetbrains-263` package is moved onto it
+  as the same line. The installer
   proves the build from the versioned IDE data directory; an unprovable or
   unsupported target fails closed with guidance instead of defaulting to the
   classic package. During installed-plugin reconciliation (`agent-doc
@@ -66,10 +70,11 @@ Rust binary.
   grouping to pass through `client_measured_layout` before the schema-3 Kotlin
   compatibility floor.
 - Restart-free dynamic upgrade is a per-line capability. The JetBrains classic
-  line ships an attach launcher. The exact-262 modular line does not, so a live
-  262 IDE gets a file replacement plus an explicit restart-required verdict that
+  line ships an attach launcher. The modular line does not, so a live 262 IDE
+  gets a file replacement plus an explicit restart-required verdict that
   names the missing entry point, never a misleading "legacy package" or
-  upgrader-failure warning. Exact-263 is also restart-only: a filtered launcher
+  upgrader-failure warning. The verdict's stated cause follows the target IDE
+  build, not the package. A 263 IDE (exact-263) is also restart-only: a filtered launcher
   probe on split-mode IU 263.7031.23 on 2026-10-19 reached `DynamicPlugins`, which
   computed Agent Doc's removal but rejected the new state because the plugin
   remained included in the module graph; `unloadPlugin` returned false (GH
@@ -362,7 +367,6 @@ An adapter that ships more than one artifact under one plugin identity must:
    generation; a one-sided or mismatched install fails closed with no fallback
    to a different artifact's code path.
 
-The JetBrains classic (`242` through `261.*`), exact-262 modular
-(`262` through `262.*`), and exact-263 modular (`263` through `263.*`) updates
-and their per-range custom-repository listings are specified in
+The JetBrains classic (`242` through `261.*`) and modular (`262` through
+`263.*`) updates and their per-range custom-repository listings are specified in
 [`docs/reference/jetbrains-distribution.md`](../docs/reference/jetbrains-distribution.md).

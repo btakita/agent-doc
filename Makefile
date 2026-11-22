@@ -383,29 +383,30 @@ jetbrains-keystroke-bench:
 		AGENT_DOC_BENCH_OUT="$(JETBRAINS_BENCH_OUT)" AGENT_DOC_BENCH_BASELINE="$(JETBRAINS_BENCH_BASELINE)" \
 		./gradlew $(AGENT_DOC_GRADLE_FLAGS) --no-daemon --console=plain -q -I benchmark/keystroke-latency.init.gradle.kts runKeystrokeLatencyBenchmark
 
-# The classic and both modular ZIPs share one Marketplace plugin ID, so every
-# disjoint compatibility range and the modular role/sandbox contract are release
-# gates.
+# The classic ZIP (242-261.*) and the one modular ZIP (262-263.*) share one
+# Marketplace plugin ID, so both disjoint compatibility ranges and the modular
+# role/sandbox contract are release gates.
 jetbrains-classic-check:
 	@cd editors/jetbrains && ./gradlew $(AGENT_DOC_GRADLE_FLAGS) --no-daemon --console=plain verifyClassicArtifact
 
+# The modular ZIP is compiled against 262 and serves 262 through 263.*.
+# `verifyPlugin` runs the plugin verifier against both ends of that range (IU
+# `platformVersion` and `upperPlatformVersion`), so the 263 IDE's binary
+# compatibility with the 262-compiled bytes is a gate. The gate is
+# compatibility-level: the Marketplace-level run (plain `gradle verifyPlugin`)
+# also fails on API-status findings such as internal API usage.
 jetbrains-262-check:
-	@cd editors/jetbrains-262 && gradle $(AGENT_DOC_GRADLE_FLAGS) --no-daemon --console=plain test buildPlugin verifySplitArtifact verifySplitModeSandboxes
+	@cd editors/jetbrains-262 && gradle $(AGENT_DOC_GRADLE_FLAGS) --no-daemon --console=plain -PverifierFailureLevel=compatibility test buildPlugin verifySplitArtifact verifySplitModeSandboxes verifyPlugin
 
+# The same modular sources and tests on the 263 platform. This builds no
+# package: the release ships only the 262-compiled modular ZIP, so this target
+# runs `test` alone and leaves build/distributions untouched.
 jetbrains-263-check:
 	@set -e; \
-	props=editors/jetbrains-263/gradle.properties; \
-	name=$$(sed -n 's/^pluginName *= *//p' "$$props" | tr -d '[:space:]'); \
-	distribution=$$(sed -n 's/^distributionName *= *//p' "$$props" | tr -d '[:space:]'); \
-	version=$$(sed -n 's/^pluginVersion *= *//p' "$$props" | tr -d '[:space:]'); \
-	platform=$$(sed -n 's/^platformVersion *= *//p' "$$props" | tr -d '[:space:]'); \
-	since=$$(sed -n 's/^compatibilitySinceBuild *= *//p' "$$props" | tr -d '[:space:]'); \
-	until=$$(sed -n 's/^compatibilityUntilBuild *= *//p' "$$props" | tr -d '[:space:]'); \
+	upper=$$(sed -n 's/^upperPlatformVersion *= *//p' editors/jetbrains-262/gradle.properties | tr -d '[:space:]'); \
+	test -n "$$upper" || { echo "editors/jetbrains-262/gradle.properties has no upperPlatformVersion" >&2; exit 1; }; \
 	cd editors/jetbrains-262 && gradle $(AGENT_DOC_GRADLE_FLAGS) --no-daemon --console=plain \
-		-PpluginName="$$name" -PdistributionName="$$distribution" \
-		-PpluginVersion="$$version" -PplatformVersion="$$platform" \
-		-PcompatibilitySinceBuild="$$since" -PcompatibilityUntilBuild="$$until" \
-		test buildPlugin verifySplitArtifact verifySplitModeSandboxes
+		-PplatformVersion="$$upper" test
 
 # Bump JB plugin patch versions (when their sources changed) and build all zips.
 # `#installgenskew`: the bump goes through check_plugin_versions.py so it also
@@ -414,12 +415,10 @@ jetbrains-263-check:
 # 0.2.443 beside a binary that expected 0.2.442 (plugin_generation_mismatch).
 bump-plugin:
 	@python3 scripts/check_plugin_versions.py --bump JetBrains
-	@python3 scripts/check_plugin_versions.py --bump "JetBrains 263"
 	@cd editors/jetbrains && \
 	new=$$(grep '^pluginVersion' gradle.properties | sed 's/.*= *//'); \
 	./gradlew $(AGENT_DOC_GRADLE_FLAGS) buildPlugin signPlugin && \
 	ls -1 build/distributions/agent-doc-jetbrains-$$new*.zip
-	@$(MAKE) jetbrains-263-check
 
 bump-plugin-262:
 	@python3 scripts/check_plugin_versions.py --bump "JetBrains 262"
@@ -435,7 +434,7 @@ bump-plugin-262:
 editor-generation-bump:
 	@if agent-doc plugin list 2>/dev/null | grep -q '^jetbrains'; then \
 		python3 scripts/check_plugin_versions.py --bump JetBrains || exit 1; \
-		python3 scripts/check_plugin_versions.py --bump "JetBrains 263" || exit 1; \
+		python3 scripts/check_plugin_versions.py --bump "JetBrains 262" || exit 1; \
 	fi
 
 # Check staged changes and committed history since each target's last package
@@ -709,13 +708,13 @@ install-full: editor-generation-bump
 # version, so this adds no churn to a no-op `make install`.
 # The native cdylib and editor package are separate install surfaces: updating
 # only the former leaves running turns reporting the older package generation.
-# The classic (242-261) and modular (262 and 263) packages are
-# disjoint artifacts with one plugin ID. Build all three before convergence so
-# each target selects its exact range; never substitute another range.
+# The classic (242-261.*) and modular (262-263.*) packages are disjoint
+# artifacts with one plugin ID. Build both before convergence so each target
+# selects its range: a 262 IDE (Rider 2026.2) and a 263 IDE (IntelliJ IDEA
+# 2026.3) both receive the one modular ZIP; never substitute another range.
 install-editor-plugins:
 	@if agent-doc plugin list 2>/dev/null | grep -q '^jetbrains'; then \
 		python3 scripts/check_plugin_versions.py --bump JetBrains || exit 1; \
-		python3 scripts/check_plugin_versions.py --bump "JetBrains 263" || exit 1; \
 		( cd editors/jetbrains && ./gradlew $(AGENT_DOC_GRADLE_FLAGS) buildPlugin ) || { \
 			echo "JetBrains classic plugin build failed. Its Gradle daemon is pinned to Temurin 21 (gradle/gradle-daemon-jvm.properties); check that Gradle can detect or download it. Refusing to install a stale package." >&2; \
 			exit 1; \
@@ -723,16 +722,12 @@ install-editor-plugins:
 		if [ -f editors/jetbrains-262/gradle.properties ]; then \
 			python3 scripts/check_plugin_versions.py --bump "JetBrains 262" || exit 1; \
 			( cd editors/jetbrains-262 && gradle $(AGENT_DOC_GRADLE_FLAGS) --no-daemon --console=plain buildPlugin verifySplitArtifact ) || { \
-				echo "JetBrains 262 modular plugin build failed. Refusing to install the classic package into a 262 IDE." >&2; \
+				echo "JetBrains 262-263 modular plugin build failed. Refusing to install the classic package into a 262 or 263 IDE." >&2; \
 				exit 1; \
 			}; \
 		else \
-			echo "WARNING: this checkout has no editors/jetbrains-262 project; any build-262 IDE target is refused rather than given the classic package." >&2; \
+			echo "WARNING: this checkout has no editors/jetbrains-262 project; any build-262 or build-263 IDE target is refused rather than given the classic package." >&2; \
 		fi; \
-		$(MAKE) jetbrains-263-check || { \
-			echo "JetBrains 263 plugin build failed. Refusing to install another compatibility line into a 263 IDE." >&2; \
-			exit 1; \
-		}; \
 		agent-doc plugin install jetbrains --local --all-installed; \
 	else \
 		echo "No existing JetBrains agent-doc package; editor package sync skipped."; \

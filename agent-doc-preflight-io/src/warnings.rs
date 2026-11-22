@@ -616,7 +616,7 @@ pub fn stale_plugin_message(
 /// [`stale_plugin_message`] with the live IDE's proven platform build when it
 /// lies outside every published package range (GH #233). Such an IDE cannot
 /// receive {expected} — the classic package is capped at 261 and the modular
-/// one at 262 — so "install {expected} first" is unreachable advice there; the
+/// one at 263.* — so "install {expected} first" is unreachable advice there; the
 /// message names the build, the supported ranges and what stays installed.
 pub fn stale_plugin_message_for_platform(
     kind: &str,
@@ -2002,8 +2002,9 @@ mod tests {
         }
     }
 
-    /// GH #251: a live 263 mapping selects the 263 release generation and
-    /// recognizes that exact generation as staged in the live IDE's own tree.
+    /// GH #251: a live 263 mapping selects the 263 release generation (the
+    /// 262-263 modular package since `#jbdocdrift`) and recognizes that
+    /// exact generation as staged in the live IDE's own tree.
     #[test]
     fn stale_plugin_install_state_uses_the_modern_263_package_generation() {
         let tmp = TempDir::new().unwrap();
@@ -2184,8 +2185,7 @@ mod tests {
         for needle in [
             "platform build 264",
             "242-261 (agent-doc-jetbrains-<version>.zip)",
-            "262 (agent-doc-jetbrains-262-<version>.zip)",
-            "263 (agent-doc-jetbrains-263-<version>.zip)",
+            "262-263 (agent-doc-jetbrains-262-<version>.zip)",
             "plugin 0.2.508 stays installed",
             "ADVISORY",
         ] {

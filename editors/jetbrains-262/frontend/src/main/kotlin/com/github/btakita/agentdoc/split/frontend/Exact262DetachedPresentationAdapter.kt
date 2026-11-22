@@ -223,7 +223,8 @@ internal data class FrontendEditorWindowTarget(val editorWindow: EditorWindow, v
 
 /**
  * The exact-build internal adapter is the only place allowed to import 262 editor-window APIs.
- * The artifact is clamped to 262.* and the shape is probed before terminal capability is admitted.
+ * The modular artifact spans 262..263.*, so [runtimeShapeAvailable] admits the adapter only on a
+ * 262 baseline and probes the shape before terminal capability is admitted.
  */
 internal class Exact262DetachedPresentationAdapter private constructor(
     private val project: Project,

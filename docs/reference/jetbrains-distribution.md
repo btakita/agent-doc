@@ -1,15 +1,22 @@
 # JetBrains plugin distribution
 
-Agent Doc ships three compatibility-ranged updates under the single plugin ID
+Agent Doc ships two compatibility-ranged updates under the single plugin ID
 `com.github.btakita.agent-doc`:
 
 | Update | IDE range | Release artifact |
 |---|---|---|
 | Classic | `242` through `261.*` | `agent-doc-jetbrains-<pluginVersion>.zip` |
-| Plugin Model v2 (262) | exactly `262` through `262.*` | `agent-doc-jetbrains-262-<pluginVersion>.zip` |
-| Plugin Model v2 (263) | exactly `263` through `263.*` | `agent-doc-jetbrains-263-<pluginVersion>.zip` |
+| Plugin Model v2 (modular) | `262` through `263.*` | `agent-doc-jetbrains-262-<pluginVersion>.zip` |
 
-The 262 and 263 updates install the same Plugin Model v2 tree into
+One modular ZIP serves both 262 and 263 (`#jbdocdrift`). It is compiled
+against 262 and passes the plugin verifier against IntelliJ IDEA 262 and 263
+before release; `make jetbrains-263-check` also runs its tests on the 263
+platform. Releases before this change shipped separate exact-262
+(`262`..`262.*`) and exact-263 (`263`..`263.*`, `agent-doc-jetbrains-263-<v>.zip`)
+modular ZIPs. Every later modular update number is above the last exact-263
+update (0.2.1038), so a 263 IDE on the old package upgrades to the combined one.
+
+The modular update installs one Plugin Model v2 tree into
 `<IDE data dir>/agent-doc-jetbrains/`. A descriptor-only `lib/agent.doc-<pluginVersion>.jar`
 sits beside unversioned `lib/modules/agent.doc.{backend,frontend,shared}.jar`
 content-module jars. A running exact-263 IDE memory-maps only the module jars.
@@ -26,8 +33,7 @@ the workflow before publication.
 
 ## Production repository URLs
 
-In addition to Marketplace, every stable GitHub release publishes three
-JetBrains
+In addition to Marketplace, every stable GitHub release publishes JetBrains
 [simple custom-repository listings](https://plugins.jetbrains.com/docs/intellij/custom-plugin-repository.html)
 as a fallback channel:
 
@@ -35,12 +41,16 @@ as a fallback channel:
 - IDEs on branch 262: `https://github.com/btakita/agent-doc/releases/latest/download/agent-doc-jetbrains-262.xml`
 - IDEs on branch 263: `https://github.com/btakita/agent-doc/releases/latest/download/agent-doc-jetbrains-263.xml`
 
-JetBrains permits a plugin ID only once in a simple static listing, so the three
-updates cannot safely share one XML file. Each listing contains exactly one
+The 262 and 263 listings are byte-identical: both advertise the one modular
+update. The 263 URL stays published so IDEs already subscribed to it, and the
+**Enable Agent Doc GitHub Updates** action on a 263 IDE, keep receiving updates.
+
+JetBrains permits a plugin ID only once in a simple static listing, so the
+classic and modular updates cannot safely share one XML file. Each listing contains exactly one
 update and repeats the ID, version, and compatibility range read from the built
 ZIP's patched `plugin.xml`. The listing itself is reached through
 `releases/latest/download/`, but its download URL is pinned to the tag that
-produced it (`releases/download/<tag>/agent-doc-jetbrains[-262|-263]-<version>.zip`),
+produced it (`releases/download/<tag>/agent-doc-jetbrains[-262]-<version>.zip`),
 so a listing and the archive it names always come from the same release.
 
 Configure only the listing for the IDE's build in Settings → Plugins → gear →
@@ -48,7 +58,8 @@ Manage Plugin Repositories. The classic listing cannot select the modular ZIP,
 and the 262 listing cannot offer the classic ZIP. Because the ranges are
 disjoint, configuring the wrong listing (or both) is still safe: an IDE only
 offers an update whose `since-build`/`until-build` contains its own build, so a
-242–261 IDE never sees the 262 update and a 262 IDE never sees the classic one.
+242–261 IDE never sees the modular update and a 262 or 263 IDE never sees the
+classic one.
 Builds below 242 or above `263.*` are offered nothing.
 
 The plugin also exposes **Tools → Enable Agent Doc GitHub Updates** (and the
@@ -66,13 +77,13 @@ installation path before both processes restart.
 ### Marketplace
 
 When `JETBRAINS_MARKETPLACE_TOKEN` is configured, every tagged release uploads
-all three ZIPs as updates of the same plugin ID,
+both ZIPs as updates of the same plugin ID,
 `com.github.btakita.agent-doc`. Immediately before the first upload, the release
 job re-reads each packaged `plugin.xml` and refuses the whole set unless the
 artifact names, shared ID, distinct versions, and exact ranges are `242` through
-`261.*`, `262` through `262.*`, and `263` through `263.*`. A missing token emits
-a notice and defers only Marketplace publication: the core GitHub/PyPI release,
-three verified ZIPs, and custom-repository listings continue normally.
+`261.*` and `262` through `263.*`. A missing token emits a notice and defers
+only Marketplace publication: the core GitHub/PyPI release, both verified ZIPs,
+and custom-repository listings continue normally.
 
 Marketplace applies compatibility selection independently to the Remote Dev
 backend and JetBrains Client/Gateway and synchronizes the selected modular ZIP
@@ -170,8 +181,8 @@ split plugin into both processes. JetBrains' plugin synchronization currently
 resolves the other peer only through Marketplace metadata. Running
 `agent-doc plugin install jetbrains` in a Coder workspace therefore updates the
 backend filesystem only; it cannot write the JetBrains Client installation on
-the operator's machine. The command prints this scope when it selects a modular
-262 or 263 package rather than implying that Remote Dev is ready.
+the operator's machine. The command prints this scope when it selects the
+modular package (262 or 263 IDE) rather than implying that Remote Dev is ready.
 
 Before Marketplace onboarding is complete, the reliable fallback is explicit
 two-sided installation:
@@ -198,10 +209,10 @@ flow.
 
 ## Release proof
 
-`scripts/jetbrains-custom-repository.py` reads all three distribution ZIPs, validates
+`scripts/jetbrains-custom-repository.py` reads both distribution ZIPs, validates
 the shared identity, distinct update versions, exact non-overlapping ranges
-(`242`..`261.*`, `262`..`262.*`, and `263`..`263.*`), and canonical artifact names,
-then emits the three listings. Validation runs before any listing is written, so
+(`242`..`261.*` and `262`..`263.*`), and canonical artifact names, then emits the
+classic listing, the modular listing, and its byte-identical 263 alias. Validation runs before any listing is written, so
 a refused set publishes none. The tag workflow repeats that validation with
 `--verify-artifacts` immediately before Marketplace upload and writes one
 GitHub-release marker after each accepted update so retries can resume safely.
@@ -210,11 +221,11 @@ GitHub-release marker after each accepted update so retries can resume safely.
 
 - IntelliJ range semantics (prefix `since-build`, wildcard `until-build`);
 - range selection over the generated listings: 242–261 builds receive only the
-  classic update, 262 builds receive only the modular update, 263 builds receive
-  only the 263 modular update, builds outside all three receive nothing,
-  and every branch 242–263 is covered;
-- refusal, with no listing written, for equal versions, an overlapping or
-  widened range, an open-ended classic range, a foreign plugin ID, a missing
+  classic update, 262 and 263 builds receive only the modular update, builds
+  outside both receive nothing, and every branch 242–263 is covered;
+- that the 263 listing is byte-identical to the 262 listing;
+- refusal, with no listing written, for equal versions, an overlapping,
+  narrowed (exact-262), or widened range, an open-ended classic range, a foreign plugin ID, a missing
   ranged artifact, swapped or misnamed artifacts, and a non-HTTPS base URL;
 - that a build matching two updates is a distribution error, never a choice.
 
@@ -222,11 +233,12 @@ The tag workflow additionally runs each Gradle artifact verifier, verifies both
 modular development sandboxes, copies artifacts by declared version instead of
 glob, generates the listings, and then, as a separate assertion over the files
 it is about to upload, re-reads all listings with `--verify-listings
-<classic> <modular> <modern>`: each must carry exactly one update with the declared
-version and exact range, and a build sweep from 241 through 264 must select the
-classic update for 242–261, the modular update for 262, the modular update
-for 263, and nothing otherwise. Finally it asserts the exact three-ZIP/three-listing
-shape. The plugin job uploads the packages, listings, VSIX, and their separate
+<classic> <modular>`: each must carry exactly one update with the declared
+version and exact range, the 263 alias must match the 262 listing byte for byte,
+and a build sweep from 241 through 264 must select the classic update for
+242–261, the modular update for 262 and 263, and nothing otherwise. Finally it
+asserts the exact two-ZIP/three-listing shape. Before packaging, the modular
+ZIP passes `verifyPlugin` against IntelliJ IDEA 262 and 263. The plugin job uploads the packages, listings, VSIX, and their separate
 checksum manifest as soon as they verify. The release finalizer depends on that
 job, so editor failure blocks the all-platform completion marker without
 withholding already successful platform archives.
@@ -249,12 +261,13 @@ behavior, so before calling a release generally installable:
    a different modular version) and confirm detached-view and frontend effects
    stay unavailable with no classic fallback, and recover once both sides match.
 5. On a 263 Remote Dev pair, add the 263 listing to both sides, confirm only the
-   263 package is offered, and confirm a document detached with Open in New
+   modular update is offered, and confirm a document detached with Open in New
    Window does not become a main-window tmux pane.
    Then move a session document to the opposite main-window split and confirm
    tmux pane order follows (GH #320 option B): the client logs
    `[split-surface] snapshot schema negotiated version=2 ... geometry=measured`,
    the backend logs `[rd-layout] forwarded measured columns ... column_order=editor`,
    and ops.log has `pane_layout_desired_published ... column_order=editor`.
-6. After the tag workflow runs, confirm the release carries all three ZIPs and
-   listings, and that each listing names its tag-pinned artifact and exact range.
+6. After the tag workflow runs, confirm the release carries both ZIPs and all
+   three listings, and that each listing names its tag-pinned artifact and exact
+   range.

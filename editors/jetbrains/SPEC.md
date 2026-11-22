@@ -126,14 +126,20 @@ compatible build.
 
 Package selection is per target IDE. The classic package
 (`agent-doc-jetbrains-<version>.zip`, `editors/jetbrains`) covers builds
-242-261; the modular source (`editors/jetbrains-262`) produces both
-`agent-doc-jetbrains-262-<version>.zip` for exactly 262 and
-`agent-doc-jetbrains-263-<version>.zip` for exactly 263, with the latter's
-metadata in `editors/jetbrains-263`. The presentation adapter remains guarded
-to exact 262, while frontend frame snapshots are compiled and verified against
-both platform branches.
-All three update versions, artifact names, repository listings, and ranges are
-distinct. A new agent-doc release retains a package's update version when its
+242-261; the modular source (`editors/jetbrains-262`) produces one
+`agent-doc-jetbrains-262-<version>.zip` for builds 262 through 263.*
+(`#jbdocdrift`). It compiles against 262 (`platformVersion`);
+`make jetbrains-263-check` runs the same tests on the 263 platform
+(`upperPlatformVersion`), and `verifyPlugin` checks the packaged ZIP against
+both ends of the range. The retired exact-263 package
+(`agent-doc-jetbrains-263-<version>.zip`, metadata in `editors/jetbrains-263`)
+is no longer built; its last update, 0.2.1038, stays below every later modular
+update. The presentation adapter remains guarded at runtime to a 262 baseline,
+so on 263 it stays off exactly as it did in the exact-263 package. Frontend
+frame snapshots are compiled and tested against both platform branches.
+Both update versions and artifact names, and the two ranges, are distinct. The
+modular custom-repository listing is published as `agent-doc-jetbrains-262.xml`
+and a byte-identical `agent-doc-jetbrains-263.xml` alias. A new agent-doc release retains a package's update version when its
 recorded `pluginSourceDigest` still matches its source tree, while updating the
 package's `pluginReleaseVersion` ownership metadata; this keeps the binary paired
 with the already-running generation and makes installed-plugin reconciliation a
@@ -168,8 +174,8 @@ before the all-installed convergence.
 Restart-free dynamic upgrade is a classic-line capability
 (`#jb262dynupgrade`). Only the classic 242-261 plugin jar carries the
 `JetBrainsPluginUpgradeBootstrap` `Main-Class`/`Agent-Class` launcher, and that
-launcher replaces one classic `agent-doc-jetbrains/` tree. The exact-262 and
-exact-263 packages are Plugin Model v2 split-mode distributions (descriptor-only
+launcher replaces one classic `agent-doc-jetbrains/` tree. The modular package
+(exact-262 and exact-263 IDEs) is a Plugin Model v2 split-mode distribution (descriptor-only
 `agent.doc-<version>.jar` plus unversioned `lib/modules/agent.doc.*.jar`, with a
 frontend half that may run in a separate JetBrains Client) and expose no
 launcher. The upgrader classes do ship in `agent.doc.backend.jar`; their absence

@@ -760,9 +760,9 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   exact unversioned filename that no release has ever carried (GH #55).
   Selection must not depend on the order the API returns assets in. JetBrains
   install/update derives the platform branch from the versioned IDE data root:
-  builds 242–261 select `agent-doc-jetbrains-<version>.zip`, build 262 selects
-  `agent-doc-jetbrains-262-<version>.zip`, build 263 selects
-  `agent-doc-jetbrains-263-<version>.zip`, and an unprovable or unsupported
+  builds 242–261 select `agent-doc-jetbrains-<version>.zip`, builds 262 and 263
+  select the one modular `agent-doc-jetbrains-262-<version>.zip`
+  (`#jbdocdrift`), and an unprovable or unsupported
   target fails before any installed tree is replaced. `--local --all-installed`
   applies the same policy independently to every existing installation.
   A release install, `plugin update`, or `agent-doc upgrade` reconcile keeps
@@ -900,7 +900,8 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   receives a platform-specific package, the installer re-roots its temporary
   copy to the canonical `agent-doc-jetbrains/` tree (GH #248). Thus the stager's
   verified archive and final unzip both replace that tree even when the
-  published package is rooted at `agent-doc-jetbrains-263/`.
+  published package is rooted at `agent-doc-jetbrains-262/` (or, for the
+  retired exact-263 package, `agent-doc-jetbrains-263/`).
   Rationale: a durable backup copy of the package would only cover the
   "package vanished" cause and only if something restored it before the
   restart; ordering the probe first closes the vanish AND full-disk causes at

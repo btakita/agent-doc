@@ -17672,9 +17672,9 @@ fn test_release_install_paths_fail_closed_for_issue_47() {
         install_target.contains("Refusing to install a stale package."),
         "a failed JetBrains build must explicitly refuse stale package installation"
     );
-    // `#jetbrains262installselect`: the modular 262 package is built (and fails
-    // closed) before the all-installed convergence, so a 262 IDE is never handed
-    // the classic package as a substitute.
+    // `#jetbrains262installselect`: the modular 262-263 package is built (and
+    // fails closed) before the all-installed convergence, so a 262 or 263 IDE is
+    // never handed the classic package as a substitute (`#jbdocdrift`).
     let modular_build = install_target
         .find("( cd editors/jetbrains-262 && gradle $(AGENT_DOC_GRADLE_FLAGS) --no-daemon --console=plain buildPlugin verifySplitArtifact ) || {")
         .expect("JetBrains 262 build must fail closed");
@@ -17683,7 +17683,7 @@ fn test_release_install_paths_fail_closed_for_issue_47() {
         "the 262 modular package must build before local installation"
     );
     assert!(
-        install_target.contains("Refusing to install the classic package into a 262 IDE."),
+        install_target.contains("Refusing to install the classic package into a 262 or 263 IDE."),
         "a failed 262 build must refuse classic substitution"
     );
 
@@ -17773,14 +17773,15 @@ fn test_every_release_publishes_the_editor_packages() {
         .expect("editor-package build job")..];
     for required in [
         "./gradlew --no-daemon --console=plain buildPlugin verifyClassicArtifact",
-        "gradle --no-daemon --console=plain test buildPlugin verifySplitArtifact verifySplitModeSandboxes",
+        "gradle --no-daemon --console=plain -PverifierFailureLevel=compatibility test buildPlugin verifySplitArtifact verifySplitModeSandboxes verifyPlugin",
+        "make jetbrains-263-check",
         "scripts/jetbrains-custom-repository.py",
         "agent-doc-jetbrains-classic.xml",
         "agent-doc-jetbrains-262.xml",
         "agent-doc-jetbrains-263.xml",
-        "--verify-listings \"$classic_version\" \"$modular_version\" \"$modern_version\"",
+        "--verify-listings \"$classic_version\" \"$modular_version\"",
         "npm run package --prefix editors/vscode",
-        "expected 3 ranged JetBrains zips, 3 ranged feeds, and 1 vsix",
+        "expected 2 ranged JetBrains zips, 3 feeds (classic, 262, and its 263 alias), and 1 vsix",
     ] {
         assert!(
             plugins.contains(required),
@@ -17793,12 +17794,12 @@ fn test_every_release_publishes_the_editor_packages() {
     assert!(
         plugins.contains("agent-doc-jetbrains-$classic_version.zip")
             && plugins.contains("agent-doc-jetbrains-262-$modular_version.zip")
-            && plugins.contains("agent-doc-jetbrains-263-$modern_version.zip")
+            && !plugins.contains("agent-doc-jetbrains-263-$modern_version.zip")
             && plugins.contains("agent-doc-$version.vsix"),
         "editor packages must be copied by declared version, never globbed"
     );
     assert!(
-        plugins.contains("sort -u | wc -l)\" -eq 3")
+        plugins.contains("sort -u | wc -l)\" -eq 2")
             && plugins.contains(
                 "--download-base-url \"https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}\""
             ),
@@ -17814,7 +17815,8 @@ fn test_every_release_publishes_the_editor_packages() {
     );
 }
 
-/// When configured, Marketplace must receive the same three ZIPs that passed
+/// When configured, Marketplace must receive the same two ZIPs (classic
+/// 242-261.* and the one modular 262-263.* ZIP, `#jbdocdrift`) that passed
 /// the custom-feed range proof, and a failed job must resume without
 /// re-uploading versions that the service already accepted. External onboarding
 /// must not hold the core release.
@@ -17835,7 +17837,6 @@ fn test_release_publishes_all_ranged_jetbrains_updates_when_marketplace_is_confi
         "rerun this tag's Release workflow to publish them to Marketplace",
         "--classic \"${artifacts[0]}\"",
         "--modular \"${artifacts[1]}\"",
-        "--modern \"${artifacts[2]}\"",
         "--verify-artifacts",
         "marketplace-uploaded-${artifact##*/}.txt",
         "gh release view \"$GITHUB_REF_NAME\" --json assets",
@@ -17845,10 +17846,14 @@ fn test_release_publishes_all_ranged_jetbrains_updates_when_marketplace_is_confi
     ] {
         assert!(
             publish.contains(required),
-            "Marketplace publication must retain the exact three-artifact gate and retry marker: {required}",
+            "Marketplace publication must retain the exact two-artifact gate and retry marker: {required}",
         );
     }
 
+    assert!(
+        !publish.contains("--modern") && !publish.contains("${artifacts[2]}"),
+        "no separate 263 artifact is uploaded to Marketplace"
+    );
     assert!(
         publish.contains("if [ -z \"$PUBLISH_TOKEN\" ]; then")
             && publish.contains("exit 0")
@@ -17864,7 +17869,7 @@ fn test_release_publishes_all_ranged_jetbrains_updates_when_marketplace_is_confi
         .expect("Marketplace upload endpoint");
     assert!(
         verify < upload,
-        "all three artifact identities and ranges must verify before the first Marketplace upload",
+        "both artifact identities and ranges must verify before the first Marketplace upload",
     );
     assert!(
         !publish.contains("--retry-all-errors"),

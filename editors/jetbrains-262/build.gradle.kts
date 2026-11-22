@@ -46,7 +46,14 @@ val distributionName = providers.gradleProperty("distributionName")
 val compatibilitySinceBuild = providers.gradleProperty("compatibilitySinceBuild")
     .orElse("262")
 val compatibilityUntilBuild = providers.gradleProperty("compatibilityUntilBuild")
-    .orElse("262.*")
+    .orElse("263.*")
+// One modular ZIP serves 262 through 263.*. It compiles against the lowest
+// platform in that range (`platformVersion`) and is verified against both ends,
+// so the upper platform's binary compatibility is a gate, not an assumption.
+val upperPlatformVersion = providers.gradleProperty("upperPlatformVersion")
+// Optional extra verification targets: comma-separated local IDE homes, such as
+// an installed Rider 2026.2 and IntelliJ IDEA 2026.3.
+val verifyLocalIdePaths = providers.gradleProperty("verifyLocalIdePaths")
 
 evaluationDependsOn(":frontend-impl")
 val frontendImplementationJar = project(":frontend-impl").tasks.named<Jar>("jar")
@@ -99,19 +106,39 @@ intellijPlatform {
 
     pluginVerification {
         // Marketplace review rejects private platform linkage. Keep those findings as hard gates
-        // for every exact split build so a rejected API cannot return unnoticed.
+        // for every split build so a rejected API cannot return unnoticed.
+        // `-PverifierFailureLevel=compatibility` narrows the gate to binary compatibility
+        // (`make jetbrains-262-check`, the release job): it proves the 262-compiled ZIP links
+        // on every IDE in its 262..263.* range independently of the Marketplace API findings.
+        val compatibilityOnly = providers.gradleProperty("verifierFailureLevel").orNull == "compatibility"
         failureLevel.set(
-            EnumSet.of(
-                VerifyPluginTask.FailureLevel.COMPATIBILITY_PROBLEMS,
-                VerifyPluginTask.FailureLevel.MISSING_DEPENDENCIES,
-                VerifyPluginTask.FailureLevel.INVALID_PLUGIN,
-                VerifyPluginTask.FailureLevel.PLUGIN_STRUCTURE_WARNINGS,
-                VerifyPluginTask.FailureLevel.INTERNAL_API_USAGES,
-                VerifyPluginTask.FailureLevel.OVERRIDE_ONLY_API_USAGES,
-            ),
+            if (compatibilityOnly) {
+                EnumSet.of(
+                    VerifyPluginTask.FailureLevel.COMPATIBILITY_PROBLEMS,
+                    VerifyPluginTask.FailureLevel.MISSING_DEPENDENCIES,
+                    VerifyPluginTask.FailureLevel.INVALID_PLUGIN,
+                )
+            } else {
+                EnumSet.of(
+                    VerifyPluginTask.FailureLevel.COMPATIBILITY_PROBLEMS,
+                    VerifyPluginTask.FailureLevel.MISSING_DEPENDENCIES,
+                    VerifyPluginTask.FailureLevel.INVALID_PLUGIN,
+                    VerifyPluginTask.FailureLevel.PLUGIN_STRUCTURE_WARNINGS,
+                    VerifyPluginTask.FailureLevel.INTERNAL_API_USAGES,
+                    VerifyPluginTask.FailureLevel.OVERRIDE_ONLY_API_USAGES,
+                )
+            },
         )
         ides {
             create(IntelliJPlatformType.IntellijIdeaUltimate, platformVersion)
+            if (upperPlatformVersion.isPresent) {
+                create(IntelliJPlatformType.IntellijIdeaUltimate, upperPlatformVersion)
+            }
+            verifyLocalIdePaths.orNull
+                ?.split(',')
+                ?.map(String::trim)
+                ?.filter(String::isNotEmpty)
+                ?.forEach { local(file(it)) }
         }
     }
 }

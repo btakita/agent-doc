@@ -419,7 +419,7 @@ Tests:
 ## 14. Package Generations
 
 - **One generation, every file.** A package generation is one version string written into every file that carries it, in one change (`#editorbumpgeneration`):
-  - **JetBrains** (classic, 262, 263): `pluginVersion` plus `pluginSourceDigest` in that target's `gradle.properties`.
+  - **JetBrains** (classic, and the one modular 262-263 package, `#jbdocdrift`): `pluginVersion` plus `pluginSourceDigest` in that target's `gradle.properties`. A new modular generation stays above 0.2.1038, the retired exact-263 package's last update.
   - **VS Code:** `package.json` `version`, `package-lock.json` `version` and `packages[""].version`, and `src/native.ts` `EDITOR_PLUGIN_VERSION`, the version the extension registers with the controller.
   - **Zed:** `extension.toml` `version`, the only file Zed installs the extension under.
 - **Bump:** `python3 scripts/check_plugin_versions.py --bump <target>` allocates the next generation for any target and writes all of its files. It changes only the version bytes, and it refuses without writing anything when a file lacks its version entry. For VS Code and Zed, it bumps when a packaged source changed after the last commit that touched the primary version file, or when one differs on disk. It holds when the working tree already carries a new generation, so a repeated bump is a no-op. A held bump still completes an incomplete generation, using the highest version any of the files carries.

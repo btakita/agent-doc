@@ -82,6 +82,8 @@ pub fn newest_installed_artifact(plugins_dirs: &[PathBuf]) -> Option<InstalledPl
         .max_by_key(|artifact| artifact.modified)
 }
 
+/// Every agent-doc plugin directory layout, including the retired exact-263
+/// package's `agent-doc-jetbrains-263/` tree that older releases installed.
 pub fn installed_artifacts_in(plugins_dir: &Path) -> Vec<InstalledPluginArtifact> {
     [
         "agent-doc-jetbrains",
@@ -179,7 +181,8 @@ pub fn is_jetbrains_ide_data_dir(name: &str) -> bool {
 /// The operator-facing ranges every published JetBrains package covers. Kept
 /// beside [`jetbrains_platform_build`] so the installer refusal, the upgrade
 /// summary and the `stale_plugin` warning name the same ranges (GH #233).
-pub const JETBRAINS_SUPPORTED_RANGES: &str = "242-261 (agent-doc-jetbrains-<version>.zip), 262 (agent-doc-jetbrains-262-<version>.zip), and 263 (agent-doc-jetbrains-263-<version>.zip)";
+/// One modular ZIP serves 262 through 263.* (`#jbdocdrift`).
+pub const JETBRAINS_SUPPORTED_RANGES: &str = "242-261 (agent-doc-jetbrains-<version>.zip) and 262-263 (agent-doc-jetbrains-262-<version>.zip)";
 
 /// Whether any published agent-doc JetBrains package declares `build`.
 pub fn jetbrains_platform_build_supported(build: u32) -> bool {

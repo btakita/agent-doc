@@ -47,11 +47,11 @@ def validate_editor_manifest(path: Path) -> None:
         names.add(fields[1].lstrip("*"))
     required = (
         re.compile(r"^agent-doc-jetbrains-[0-9]+(?:\.[0-9]+)*\.zip$"),
+        # One modular ZIP serves 262 through 263.* (#jbdocdrift).
         re.compile(r"^agent-doc-jetbrains-262-[0-9]+(?:\.[0-9]+)*\.zip$"),
-        re.compile(r"^agent-doc-jetbrains-263-[0-9]+(?:\.[0-9]+)*\.zip$"),
     )
     if any(sum(pattern.fullmatch(name) is not None for name in names) != 1 for pattern in required):
-        raise ValueError(f"{path} must bind exactly one classic, 262, and 263 JetBrains package")
+        raise ValueError(f"{path} must bind exactly one classic and one 262-263 modular JetBrains package")
 
 
 def load_current(path: Optional[Path], target: str) -> Optional[dict[str, object]]:
@@ -130,7 +130,6 @@ def self_test() -> None:
                 [
                     f"{'1' * 64}  agent-doc-jetbrains-800.zip",
                     f"{'2' * 64}  agent-doc-jetbrains-262-801.zip",
-                    f"{'3' * 64}  agent-doc-jetbrains-263-802.zip",
                 ]
             )
             + "\n",

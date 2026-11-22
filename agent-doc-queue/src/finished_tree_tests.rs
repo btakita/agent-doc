@@ -256,3 +256,27 @@ fn a_row_tracking_an_open_item_is_never_struck() {
     let struck = sync(&done);
     assert!(struck.contains("- ### ~~do [#origin]~~\n"), "{struck}");
 }
+
+/// Short follow-up titles (`[#<origin>] follow-up: <item>`) delegate the
+/// same way as the legacy form.
+#[test]
+fn a_short_title_followup_delegates_its_origin_tree() {
+    let document = doc("\
+- ### do [#shortorigin]
+  - ~~step~~
+  - 🙋 [#shortorigin] follow-up: operator: approve the deploy. [operator-verify]
+- 🙋 [#shortorigin] follow-up: operator: approve the deploy. [operator-verify] [#q-0123456789ab]
+");
+    let synced = sync(&document);
+    assert!(synced.contains("- ### ~~do [#shortorigin]~~\n"), "{synced}");
+    assert!(
+        synced.contains(
+            "  - ~~[#shortorigin] follow-up: operator: approve the deploy. [operator-verify]~~\n"
+        ),
+        "{synced}"
+    );
+    assert!(
+        synced.contains("- 🙋 [#shortorigin] follow-up: operator: approve the deploy. [operator-verify] [#q-0123456789ab]\n"),
+        "{synced}"
+    );
+}

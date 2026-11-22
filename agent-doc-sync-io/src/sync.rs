@@ -8512,6 +8512,9 @@ mod tests {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::fs::create_dir_all(root.join("tasks")).unwrap();
         std::fs::create_dir_all(child_root.join(".agent-doc")).unwrap();
+        // A nested root is a *marked* project (`is_marked_project_root`); a state-only
+        // `.agent-doc/` no longer outranks the enclosing configured root.
+        std::fs::write(child_root.join(".agent-doc/config.toml"), "").unwrap();
         std::fs::create_dir_all(child_root.join("tasks")).unwrap();
         std::fs::write(
             root.join(".agent-doc/config.toml"),
@@ -8617,6 +8620,9 @@ mod tests {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::fs::create_dir_all(root.join("tasks")).unwrap();
         std::fs::create_dir_all(child_root.join(".agent-doc")).unwrap();
+        // A nested root is a *marked* project (`is_marked_project_root`); a state-only
+        // `.agent-doc/` no longer outranks the enclosing configured root.
+        std::fs::write(child_root.join(".agent-doc/config.toml"), "").unwrap();
         std::fs::create_dir_all(child_root.join("tasks")).unwrap();
         std::fs::write(
             root.join(".agent-doc/config.toml"),

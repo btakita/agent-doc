@@ -409,6 +409,9 @@ mod tests {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::fs::create_dir_all(root.join("tasks")).unwrap();
         std::fs::create_dir_all(subroot.join(".agent-doc")).unwrap();
+        // A nested root is a *marked* project (`is_marked_project_root`); a state-only
+        // `.agent-doc/` no longer outranks the enclosing configured root.
+        std::fs::write(subroot.join(".agent-doc/config.toml"), "").unwrap();
         std::fs::create_dir_all(subroot.join("tasks")).unwrap();
         std::fs::write(
             root.join(".agent-doc/config.toml"),
@@ -509,6 +512,9 @@ mod tests {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::fs::create_dir_all(root.join("tasks")).unwrap();
         std::fs::create_dir_all(subroot.join(".agent-doc")).unwrap();
+        // A nested root is a *marked* project (`is_marked_project_root`); a state-only
+        // `.agent-doc/` no longer outranks the enclosing configured root.
+        std::fs::write(subroot.join(".agent-doc/config.toml"), "").unwrap();
         std::fs::create_dir_all(subroot.join("tasks")).unwrap();
         let _cwd = ScopedCurrentDir::set(&subroot);
         std::fs::write(
@@ -615,6 +621,9 @@ mod tests {
         let subroot = root.join("src/session-share");
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::fs::create_dir_all(subroot.join(".agent-doc")).unwrap();
+        // A nested root is a *marked* project (`is_marked_project_root`); a state-only
+        // `.agent-doc/` no longer outranks the enclosing configured root.
+        std::fs::write(subroot.join(".agent-doc/config.toml"), "").unwrap();
         std::fs::create_dir_all(subroot.join("tasks")).unwrap();
 
         let doc = subroot.join("tasks/claudescore-3.md");

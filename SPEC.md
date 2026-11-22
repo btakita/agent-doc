@@ -134,10 +134,22 @@
   recommends a choice nests the `#recommendationinrow` row
   `- **Recommendation:** **<label>** — <reason>`; that line is not projected
   into `**Choices:**` (`#recaprecommendationrow`). An agent-authored template
-  closeout is refused before capture when the recap is missing or blank.
-  Format findings stay advisory. Binary-owned replay still lands without a
-  recap. All harnesses write one format, from `runbooks/recap.md`. See
-  [Document Format](specs/02-document-format.md).
+  closeout is refused before capture when the recap is missing or blank, and
+  when a recap bullet counts queue rows (`4 decisions for you`, `3 blocked`)
+  but names fewer distinct `[#…]` ids than it counts (`#recapids`); the
+  refusal names the bullet. Other format findings stay advisory. Binary-owned
+  replay still lands without a recap. All harnesses write one format, from
+  `runbooks/recap.md`. See [Document Format](specs/02-document-format.md).
+
+- Follow-up rows get their stable `[#q-…]` id in the write that creates them
+  (`#followupidatcreate`): `queue report-complete` and `queue follow-up` mint
+  it with the same deterministic seed preflight uses, and the same write
+  backfills every id-less, unclaimed `[operator-verify]` follow-up row, so a
+  row added during a chat-driven turn (which opens no preflight) is nameable
+  at once. `queue consume --ack-text` also matches a row whose only difference
+  is that binary-owned trailing id. A `[#id]` inside inline code is quoted
+  text, never a row's own id (`#codespanrowid`), so such a row is still
+  admitted an id.
 
 - A template patch whose target no patch path applies is refused with a
   message, never dropped (`#staleretainedwrite`): `patch:queue`, `patch:run`,

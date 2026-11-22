@@ -72,6 +72,84 @@ pub fn project(content: &str, document_id: &str) -> QueuePromptIdentityProjectio
     // continuation text or influence identity, then regenerate it below.
     let without_duplicate_diagnostics = strip_duplicate_directive_diagnostics(content);
     let content = without_duplicate_diagnostics.as_str();
+    let (mut projected, assignments, identity_diagnostics) =
+        admit_ids_where(content, document_id, |_, _| true);
+    projected =
+        agent_doc_element_queue::repair_generated_id_before_list_marker(&projected).into_owned();
+    projected = project_duplicate_directive_diagnostics(&projected);
+    let mut relations = relation_graph(&projected);
+    relations.diagnostics.extend(identity_diagnostics);
+    QueuePromptIdentityProjection {
+        content: projected,
+        assignments,
+        relations,
+    }
+}
+
+/// `#followupidatcreate`: give follow-up rows their `[#q-…]` id in the same
+/// write that creates them, and backfill id-less operator follow-up rows.
+///
+/// Preflight queue maintenance admits ids for every executable row, but a
+/// chat-driven turn opens no preflight (`#backlogroutingskipped`), so a row
+/// `queue report-complete` or `queue follow-up` adds could live for hours with
+/// no id, and a recap could not name it (`#recapids`). This admits, with the
+/// same deterministic mint preflight uses:
+///
+/// - every id-less executable row whose work text is one of `inserted` (the
+///   rows this write just added; none of them can hold a claim yet); and
+/// - every id-less, unclaimed `follow up on an action item` row that carries
+///   `[operator-verify]`. No drain dispatches such a row, so no claim is keyed
+///   by its text, and backfilling it on each follow-up write needs no claim
+///   transfer. Id-less agent rows are left to preflight, which transfers their
+///   claims.
+///
+/// Nothing else in the document changes, and a second call is a no-op.
+pub fn admit_followup_row_ids(
+    content: &str,
+    document_id: &str,
+    inserted: &[String],
+) -> QueuePromptIdentityProjection {
+    let inserted: HashSet<String> = inserted.iter().map(|row| followup_match_key(row)).collect();
+    let (mut projected, assignments, diagnostics) =
+        admit_ids_where(content, document_id, |node, work| {
+            if inserted.contains(&followup_match_key(work)) {
+                return true;
+            }
+            crate::followup_owner::carries_operator_owned_tag(work)
+                && crate::followup_owner::followup_row_action_item(work).is_some()
+                && agent_doc_document::queue_projection::owner_projection(&node.item.text).is_none()
+        });
+    if !assignments.is_empty() {
+        projected = agent_doc_element_queue::repair_generated_id_before_list_marker(&projected)
+            .into_owned();
+    }
+    QueuePromptIdentityProjection {
+        content: projected,
+        assignments,
+        relations: QueueRelationGraph {
+            diagnostics,
+            ..QueueRelationGraph::default()
+        },
+    }
+}
+
+fn followup_match_key(text: &str) -> String {
+    agent_doc_element_queue::normalize_multiline_dedup_text(
+        &agent_doc_element_queue::strip_priority_markers(text.trim()),
+    )
+}
+
+/// The shared admission loop: mint an id for every id-less executable queue
+/// node `admit` accepts (it receives the node and its trimmed work text).
+fn admit_ids_where(
+    content: &str,
+    document_id: &str,
+    admit: impl Fn(&MutationItemNode, &str) -> bool,
+) -> (
+    String,
+    Vec<QueuePromptIdAssignment>,
+    Vec<QueueRelationDiagnostic>,
+) {
     let nodes = executable_queue_nodes(content);
     let ancestor_paths = queue_ancestor_paths(content);
     let mut owned_ids: HashMap<String, String> = identified_queue_nodes(content)
@@ -86,6 +164,9 @@ pub fn project(content: &str, document_id: &str) -> QueuePromptIdentityProjectio
             continue;
         }
         let work = node.item.work_text().trim();
+        if !admit(&node, work) {
+            continue;
+        }
         let ancestors = ancestor_paths
             .get(&node.node_key)
             .map(String::as_str)
@@ -125,16 +206,7 @@ pub fn project(content: &str, document_id: &str) -> QueuePromptIdentityProjectio
     for (offset, annotation) in insertions.into_iter().rev() {
         projected.insert_str(offset, &annotation);
     }
-    projected =
-        agent_doc_element_queue::repair_generated_id_before_list_marker(&projected).into_owned();
-    projected = project_duplicate_directive_diagnostics(&projected);
-    let mut relations = relation_graph(&projected);
-    relations.diagnostics.extend(identity_diagnostics);
-    QueuePromptIdentityProjection {
-        content: projected,
-        assignments,
-        relations,
-    }
+    (projected, assignments, identity_diagnostics)
 }
 
 /// Whether `line` is the exact display-only duplicate-directive projection.
@@ -697,6 +769,71 @@ mod tests {
             !projected.contains("pull/841 [#q-"),
             "the parent url is context, not a second id: {projected}"
         );
+    }
+
+    /// `#followupidatcreate`: the 2026-11-22 agent-doc-bugs.md shapes. A
+    /// report-complete follow-up gets its id in the creating write; id-less
+    /// operator follow-ups, top-level and nested under a response tree, are
+    /// backfilled; id-less agent rows and other rows wait for preflight.
+    #[test]
+    fn followupidatcreate_admits_new_rows_and_backfills_operator_followups() {
+        let new_row = "follow up on an action item from `alpha`: agent: wire the gutter stamp";
+        let content = concat!(
+            "<!-- agent:run id=\"main\" -->\n",
+            "- ### plain operator prompt\n",
+            "- ### 🙋 follow up on an action item from queue item “pypi”: operator: decide whether to revoke the token. [operator-verify]\n",
+            "- ### agent row\n",
+            "  - **Response [#r-0123456789ab]**\n",
+            "    - **State:** Follow-up work remains.\n",
+            "    - 🙋 follow up on an action item from queue item “tree”: operator: delete the block from ` - **Response [#r-8eb6516470b1]**` through its guidance. [operator-verify]\n",
+            "    - follow up on an action item from queue item “tree”: agent: an older agent row\n",
+            "- 🟡 [#subagent:x#1] follow up on an action item from `beta`: operator: claimed before tagging [operator-verify]\n",
+            "- do [#alpha]\n",
+            "- follow up on an action item from `alpha`: agent: wire the gutter stamp\n",
+            "<!-- /agent:run -->\n",
+        );
+        let admitted = admit_followup_row_ids(content, "doc", &[new_row.to_string()]);
+        let id_of = |needle: &str| {
+            admitted
+                .content
+                .lines()
+                .find(|line| line.contains(needle))
+                .and_then(|line| line.rsplit_once(" [#q-"))
+                .map(|(_, id)| id.trim_end_matches(']').to_string())
+        };
+        assert!(
+            id_of("wire the gutter stamp").is_some(),
+            "{}",
+            admitted.content
+        );
+        assert!(id_of("revoke the token").is_some(), "{}", admitted.content);
+        assert!(id_of("delete the block").is_some(), "{}", admitted.content);
+        assert_eq!(admitted.assignments.len(), 3, "{}", admitted.content);
+        for untouched in [
+            "- ### plain operator prompt\n",
+            "    - follow up on an action item from queue item “tree”: agent: an older agent row\n",
+            "claimed before tagging [operator-verify]\n",
+            "- do [#alpha]\n",
+        ] {
+            assert!(
+                admitted.content.contains(untouched),
+                "{untouched:?}: {}",
+                admitted.content
+            );
+        }
+        // Preflight mints the same ids for the same cut, so the two writers
+        // never disagree about a row's identity.
+        let preflight = project(content, "doc");
+        for assignment in &admitted.assignments {
+            assert!(
+                preflight.assignments.contains(assignment),
+                "{assignment:?} not minted the same by preflight"
+            );
+        }
+        // A second pass is a no-op.
+        let again = admit_followup_row_ids(&admitted.content, "doc", &[new_row.to_string()]);
+        assert!(again.assignments.is_empty());
+        assert_eq!(again.content, admitted.content);
     }
 
     #[test]

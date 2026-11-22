@@ -25,6 +25,13 @@
 //!   the previous recap in place. A blank recap counts as no recap.
 //! - [`recap_format_findings`] checks only what is cheap and deterministic, and
 //!   its findings are advisory. The format itself lives in `runbooks/recap.md`.
+//! - A recap bullet that counts queue rows (`4 decisions for you`, `3 blocked`)
+//!   names each of those rows by its `[#…]` id (`#recapids`). That one rule is
+//!   not advisory: [`recap_row_id_findings`] is the pre-capture refusal for an
+//!   agent-authored closeout, because a count the operator cannot jump to is
+//!   not a summary. It is conservative: it only reads a list item whose own
+//!   line states a number directly before a row noun, and plain prose without
+//!   a row count is never a finding.
 //! - A recommended decision nests the `#recommendationinrow` row
 //!   `- **Recommendation:** **<label>** — <reason>` under that numbered item.
 //!   The row is display only: findings never turn the recap into choices
@@ -46,6 +53,7 @@
 //! - replace_creates_the_section_below_status_and_nothing_else
 //! - format_findings_accept_the_full_shape_and_any_omitted_section
 //! - decision_recommendation_uses_the_rendered_marker
+//! - recapids_counted_rows_must_be_named_by_id
 
 use std::fmt;
 
@@ -519,6 +527,212 @@ pub fn recap_format_findings(body: &str) -> Vec<RecapFormatFinding> {
     }
     findings.extend(decision_recommendation_findings(&lines));
     findings
+}
+
+/// A recap list item that counts queue rows without naming each of them by
+/// id (`#recapids`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecapRowIdFinding {
+    /// The bullet's own line, trimmed.
+    pub bullet: String,
+    /// How many rows the bullet says it covers.
+    pub counted: usize,
+    /// How many distinct `[#…]` ids the bullet and its nested lines name.
+    pub named: usize,
+}
+
+impl fmt::Display for RecapRowIdFinding {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "recap bullet `{}` counts {} row(s) but names {} row id(s); list each row's id inline, for example `- 3 blocked: [#jbfrontendswap], [#ghrecvpolicy], [#prompt-blocker-b0ddfbae2f94]`, using its `[#q-…]`, `[#slug]`, `[#prompt-blocker-…]` or `[#r-…]` id (#recapids, see runbooks/recap.md)",
+            self.bullet, self.counted, self.named
+        )
+    }
+}
+
+/// Recap bullets that count queue rows but name fewer row ids than they
+/// count (`#recapids`).
+///
+/// Deliberately narrow, so prose never trips it: only a list item is read,
+/// only its own line is searched for a count, and a count is a number (digits
+/// or `one` … `twelve`) directly followed by a row noun (`rows`, `items`,
+/// `decisions`, `heads`, `follow-ups`, `questions`, `blockers`), optionally
+/// with one word between (`4 cleanup rows`), or directly followed by a row
+/// state (`3 blocked`, `1 running`, `2 waiting`). Inline code is not read.
+/// The ids are counted over the bullet and its nested lines, so a count may
+/// list its rows as children. A fenced example is never checked.
+pub fn recap_row_id_findings(body: &str) -> Vec<RecapRowIdFinding> {
+    let lines = prose_lines(body);
+    let mut findings = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim_start();
+        if !is_list_item(trimmed) {
+            continue;
+        }
+        let Some(counted) = counted_rows(strip_list_marker(trimmed)) else {
+            continue;
+        };
+        let indent = line.len() - trimmed.len();
+        let mut block = vec![*line];
+        block.extend(
+            lines[index + 1..]
+                .iter()
+                .take_while(|next| next.len() - next.trim_start().len() > indent)
+                .copied(),
+        );
+        let named = distinct_row_ids(&block);
+        if named < counted {
+            findings.push(RecapRowIdFinding {
+                bullet: trimmed.trim_end().to_string(),
+                counted,
+                named,
+            });
+        }
+    }
+    findings
+}
+
+fn strip_list_marker(line: &str) -> &str {
+    for marker in ["- ", "* ", "+ "] {
+        if let Some(rest) = line.strip_prefix(marker) {
+            return rest;
+        }
+    }
+    let digits = line.bytes().take_while(u8::is_ascii_digit).count();
+    line.get(digits + 2..).unwrap_or(line)
+}
+
+/// Row nouns a count may name, with one optional word between.
+const ROW_NOUNS: &[&str] = &[
+    "row",
+    "rows",
+    "item",
+    "items",
+    "decision",
+    "decisions",
+    "head",
+    "heads",
+    "follow-up",
+    "follow-ups",
+    "followup",
+    "followups",
+    "question",
+    "questions",
+    "blocker",
+    "blockers",
+];
+
+/// Row states a count may name only when they directly follow the number.
+const ROW_STATES: &[&str] = &["blocked", "running", "waiting"];
+
+const NUMBER_WORDS: &[&str] = &[
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven",
+    "twelve",
+];
+
+fn count_value(token: &str) -> Option<usize> {
+    let token = token.trim_start_matches('(');
+    if !token.is_empty() && token.bytes().all(|byte| byte.is_ascii_digit()) {
+        return token.parse().ok();
+    }
+    let lower = token.to_ascii_lowercase();
+    NUMBER_WORDS
+        .iter()
+        .position(|word| *word == lower)
+        .map(|index| index + 1)
+}
+
+/// The largest row count `text` states, if any (`#recapids`).
+fn counted_rows(text: &str) -> Option<usize> {
+    let text = without_inline_code(text);
+    let tokens: Vec<&str> = text.split_whitespace().collect();
+    let mut counted = None;
+    for (index, token) in tokens.iter().enumerate() {
+        // A number that ends a clause (`took 3.`) counts nothing.
+        if token.ends_with(['.', ',', ';', ':', ')']) {
+            continue;
+        }
+        let Some(value) = count_value(token) else {
+            continue;
+        };
+        let mut word_count = 0;
+        let mut found = false;
+        for (offset, next) in tokens[index + 1..].iter().enumerate() {
+            let ends_clause = next.ends_with(['.', ',', ';', ':', ')', '!', '?']);
+            let word = next
+                .trim_end_matches(['.', ',', ';', ':', ')', '!', '?'])
+                .to_ascii_lowercase();
+            if ROW_NOUNS.contains(&word.as_str())
+                || (offset == 0 && ROW_STATES.contains(&word.as_str()))
+            {
+                found = true;
+                break;
+            }
+            // `3 open queue rows`: `queue` qualifies the noun, not the count.
+            if word != "queue" {
+                word_count += 1;
+            }
+            if ends_clause || word_count > 1 || count_value(next).is_some() {
+                break;
+            }
+        }
+        if found && value > 0 {
+            counted = Some(counted.map_or(value, |prior: usize| prior.max(value)));
+        }
+    }
+    counted
+}
+
+/// `text` with every backtick code span blanked, so a quoted count is inert.
+fn without_inline_code(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(open) = rest.find('`') {
+        out.push_str(&rest[..open]);
+        let run = rest[open..]
+            .bytes()
+            .take_while(|byte| *byte == b'`')
+            .count();
+        let fence = &rest[open..open + run];
+        let after = &rest[open + run..];
+        match after.find(fence) {
+            Some(close) => {
+                out.push(' ');
+                rest = &after[close + run..];
+            }
+            None => {
+                out.push_str(fence);
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Distinct `[#…]` ids across `lines`.
+fn distinct_row_ids(lines: &[&str]) -> usize {
+    let mut ids = std::collections::HashSet::new();
+    for line in lines {
+        let mut rest = *line;
+        while let Some(open) = rest.find("[#") {
+            let after = &rest[open + 2..];
+            let Some(close) = after.find(']') else {
+                break;
+            };
+            let id = &after[..close];
+            if !id.is_empty()
+                && id.chars().all(|ch| {
+                    ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | ':' | '#' | '.')
+                })
+            {
+                ids.insert(id.to_ascii_lowercase());
+            }
+            rest = &after[close + 1..];
+        }
+    }
+    ids.len()
 }
 
 /// Recommendations under `Your decisions`, and only there (`#recaprecommendationrow`).
@@ -1182,5 +1396,71 @@ mod tests {
                 }
             ]
         );
+    }
+
+    /// `#recapids`: the 2026-11-22 agent-doc-bugs.md recap counted rows the
+    /// operator could not jump to.
+    #[test]
+    fn recapids_counted_rows_must_be_named_by_id() {
+        let live = concat!(
+            "Loose ends, sorted:\n",
+            "- 4 decisions for you: lazily bindings, PyPI token, JetBrains ZIPs; the VS Code row is obsolete.\n",
+            "- 4 cleanup rows that agent-doc should fix itself.\n",
+            "- 3 blocked on outside releases or features.\n",
+            "- 1 running.\n",
+        );
+        let findings = recap_row_id_findings(live);
+        assert_eq!(
+            findings
+                .iter()
+                .map(|finding| (finding.counted, finding.named))
+                .collect::<Vec<_>>(),
+            [(4, 0), (4, 0), (3, 0), (1, 0)]
+        );
+        assert!(
+            findings[0]
+                .to_string()
+                .contains("`- 4 decisions for you: lazily bindings"),
+            "the refusal names the bullet: {}",
+            findings[0]
+        );
+
+        // Ids inline, or nested under the counting bullet, satisfy it.
+        let named = concat!(
+            "Loose ends, sorted:\n",
+            "- 4 decisions for you: [#q-0e29d5fdf1c4], [#q-cb3ac1276fd3], [#q-dade5157fe53], [#q-d4abba40f2db].\n",
+            "- 3 blocked: [#jbfrontendswap], [#ghrecvpolicy], [#prompt-blocker-b0ddfbae2f94]\n",
+            "- 2 cleanup rows:\n",
+            "  - [#q-8eeadf7937c8] delete the struck copy.\n",
+            "  - [#q-e107b04c1cd5] move the tree.\n",
+            "- one running: [#q-18e990fdbfee].\n",
+        );
+        assert_eq!(recap_row_id_findings(named), []);
+
+        // Fewer ids than the count is still a finding.
+        assert_eq!(
+            recap_row_id_findings("- 4 decisions for you: [#a], [#b], [#a].\n"),
+            [RecapRowIdFinding {
+                bullet: "- 4 decisions for you: [#a], [#b], [#a].".to_string(),
+                counted: 4,
+                named: 2,
+            }]
+        );
+
+        // Prose without a row count, counts of other things, quoted text, an
+        // opening paragraph, and fenced examples are never findings.
+        let prose = concat!(
+            "The cycle committed 4 rows of docs at abc123.\n\n",
+            "Queue rows this cycle:\n",
+            "- Closed: the docs row.\n",
+            "- Waiting on you (🙋): the release row.\n",
+            "- 3 commits pushed; 2 files changed.\n",
+            "- Tests: 1203 passed, 0 failed.\n",
+            "- The `4 decisions` label is quoted, not counted.\n",
+            "- 0 blocked.\n",
+            "```\n- 4 decisions for you.\n```\n",
+        );
+        assert_eq!(recap_row_id_findings(prose), []);
+        assert_eq!(recap_row_id_findings(FULL_RECAP), []);
     }
 }

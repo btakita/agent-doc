@@ -957,7 +957,7 @@ fn run_with_options_to_writer_in_pass(
     let response_contract = response_contract_for_content(&content);
     if response_contract.is_some() {
         eprintln!(
-            "[preflight] response contract: strict template; persist with `agent-doc finalize --template <FILE>` (or `write --template --commit`) and wrap stdin in matching `<!-- patch:exchange -->` / `<!-- /patch:exchange -->` markers, followed by a required non-blank `<!-- patch:recap -->` / `<!-- /patch:recap -->` block (format: runbooks/recap.md). A missing or blank recap is refused before capture. Binary-owned replay of an already captured response stays exempt. Format nits stay advisory."
+            "[preflight] response contract: strict template; persist with `agent-doc finalize --template <FILE>` (or `write --template --commit`) and wrap stdin in matching `<!-- patch:exchange -->` / `<!-- /patch:exchange -->` markers, followed by a required non-blank `<!-- patch:recap -->` / `<!-- /patch:recap -->` block (format: runbooks/recap.md). A missing or blank recap is refused before capture, and so is a recap bullet that counts queue rows (`4 decisions`, `3 blocked`) without naming each row's `[#…]` id. Binary-owned replay of an already captured response stays exempt. Format nits stay advisory."
         );
     }
 

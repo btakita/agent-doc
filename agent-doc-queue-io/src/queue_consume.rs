@@ -848,10 +848,30 @@ fn exact_acknowledgement_rows<'a>(
         return select_exact_acknowledgement_rows(&lineage_matches, expected, selector).map(Some);
     }
 
-    let display_matches: Vec<&AddressableExecutableRow> = rows
+    let mut display_matches: Vec<&AddressableExecutableRow> = rows
         .iter()
         .filter(|row| strip_priority_markers(&row.display).trim() == expected)
         .collect();
+    if display_matches.is_empty() {
+        // `#followupidatcreate`: the trailing `[#q-…]` is binary-owned and can
+        // be admitted (at creation or by preflight) after the caller copied
+        // the row, so the exact text also matches without it.
+        let sans_generated_id = |text: &str| {
+            agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(
+                strip_priority_markers(text).trim(),
+            )
+            .trim()
+            .to_string()
+        };
+        let expected_sans = sans_generated_id(expected);
+        display_matches = rows
+            .iter()
+            .filter(|row| {
+                sans_generated_id(&row.lineage) == expected_sans
+                    || sans_generated_id(&row.display) == expected_sans
+            })
+            .collect();
+    }
     if display_matches.is_empty() {
         return Ok(None);
     }

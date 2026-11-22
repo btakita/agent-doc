@@ -1607,19 +1607,71 @@ fn strip_one_pin(text: &str) -> Option<(&str, bool)> {
 /// executable rows", stamped `Duplicate` diagnostics on unrelated rows, never
 /// admitted them a `[#q-…]` id, and the keyed queue merge declined every cut
 /// over the colliding keys.
+///
+/// `#codespanrowid`: a `[#id]` inside an inline code span is quoted text, not
+/// the row's id. In the same document a nested 🙋 follow-up row told the
+/// operator to delete `` ` - **Response [#r-8eb6516470b1]**` `` and keyed as
+/// `r-8eb6516470b1`, so prompt identity treated it as already identified and
+/// never admitted it a `[#q-…]` id, and no recap could name it.
 fn extract_bracket_id(text: &str) -> Option<String> {
+    let code_spans = if text.contains('`') {
+        backtick_code_spans(text)
+    } else {
+        Vec::new()
+    };
     let mut from = 0;
     loop {
         let open = text[from..].find("[#")? + from;
         let start = open + 2;
         let end = text[start..].find(']')? + start;
-        if agent_doc_queue_icons::is_owner_annotation_prefix(&text[open..]) {
+        if agent_doc_queue_icons::is_owner_annotation_prefix(&text[open..])
+            || code_spans.iter().any(|span| span.contains(&open))
+        {
             from = end + 1;
             continue;
         }
         let id = &text[start..end];
         return (!id.is_empty()).then(|| id.to_string());
     }
+}
+
+/// Byte ranges of backtick code spans on one line: a run of N backticks opens
+/// a span that the next run of exactly N backticks closes. An unmatched run
+/// is literal text.
+fn backtick_code_spans(text: &str) -> Vec<std::ops::Range<usize>> {
+    let bytes = text.as_bytes();
+    let run_at = |at: usize| bytes[at..].iter().take_while(|byte| **byte == b'`').count();
+    let mut spans = Vec::new();
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] != b'`' {
+            at += 1;
+            continue;
+        }
+        let run = run_at(at);
+        let mut probe = at + run;
+        let mut close = None;
+        while probe < bytes.len() {
+            if bytes[probe] == b'`' {
+                let candidate = run_at(probe);
+                if candidate == run {
+                    close = Some(probe);
+                    break;
+                }
+                probe += candidate;
+            } else {
+                probe += 1;
+            }
+        }
+        match close {
+            Some(close) => {
+                spans.push(at..close + run);
+                at = close + run;
+            }
+            None => at += run,
+        }
+    }
+    spans
 }
 
 /// A list item's node id and whether it came from an explicit `[#id]`
@@ -3790,6 +3842,27 @@ trailing residue
             false,
         );
         assert!(!multiline.explicit_id, "{:?}", multiline.id);
+    }
+
+    /// `#codespanrowid`: an id quoted in inline code never keys the row; a
+    /// bare id elsewhere on the row still does.
+    #[test]
+    fn a_code_span_id_is_never_a_row_id() {
+        let quoted = "🙋 follow up on an action item from queue item “x”: operator: delete the block from ` - **Response [#r-8eb6516470b1]**` through its guidance. [operator-verify]";
+        let item = parse_item(quoted, 0, quoted.len(), true);
+        assert!(!item.explicit_id, "keyed {:?}", item.id);
+        assert!(item.id.starts_with("ft-"), "keyed {:?}", item.id);
+        for row in [
+            "see `[#a]` then [#real] work",
+            "see ``code with ` and [#a]`` then [#real]",
+        ] {
+            let item = parse_item(row, 0, row.len(), true);
+            assert_eq!(item.id, "real", "{row:?}");
+            assert!(item.explicit_id, "{row:?}");
+        }
+        // An unmatched backtick is literal, so the id after it still keys.
+        assert_eq!(parse_item("a ` stray then [#real]", 0, 0, true).id, "real");
+        assert_eq!(parse_item("do [#foo] with `code`", 0, 0, true).id, "foo");
     }
 
     /// `#queuerowworkidentity`: multiline prompts key on their work too.

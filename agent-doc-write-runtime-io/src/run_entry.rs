@@ -544,6 +544,10 @@ fn enforce_strict_template_closeout_contract(
         agent_doc_template::response_materialization::refuse_missing_strict_template_recap(
             patches,
         )?;
+        // `#recapids`: a recap that counts rows names each one.
+        agent_doc_template::response_materialization::refuse_strict_template_recap_without_row_ids(
+            patches,
+        )?;
     }
     if template_mode {
         for advisory in

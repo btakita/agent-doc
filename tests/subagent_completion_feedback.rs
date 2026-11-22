@@ -1786,6 +1786,14 @@ fn run_rows(doc: &std::path::Path) -> Vec<String> {
         .collect()
 }
 
+/// `row` without the binary's trailing `[#q-…]` id (`#followupidatcreate`).
+fn sans_q_id(row: &str) -> &str {
+    row.strip_suffix(']')
+        .and_then(|rest| rest.rsplit_once(" [#q-"))
+        .filter(|(_, id)| id.len() == 12 && id.chars().all(|ch| ch.is_ascii_hexdigit()))
+        .map_or(row, |(work, _)| work)
+}
+
 fn assert_ok(output: &std::process::Output, what: &str) {
     assert!(
         output.status.success(),
@@ -2929,10 +2937,21 @@ fn report_complete_structures_the_handback_and_queues_its_action_items() {
     let first = "follow up on an action item from `alpha`: >512-commit documents can miss answers";
     let second = "follow up on an action item from `alpha`: the gutter does not show the stamp yet";
     let rows = run_rows(&doc);
+    // `#followupidatcreate`: each row carries its `[#q-…]` id from the
+    // report-complete write itself, before any preflight runs.
+    let ends_with_row = |row: &str, needle: &str| {
+        row.strip_suffix(']')
+            .and_then(|row| row.rsplit_once(" [#q-"))
+            .is_some_and(|(work, id)| {
+                work.ends_with(needle)
+                    && id.len() == 12
+                    && id.chars().all(|ch| ch.is_ascii_hexdigit())
+            })
+    };
     let position = |needle: &str| {
         rows.iter()
-            .position(|row| row.ends_with(needle))
-            .unwrap_or_else(|| panic!("{needle:?} missing: {rows:#?}"))
+            .position(|row| ends_with_row(row, needle))
+            .unwrap_or_else(|| panic!("{needle:?} missing or without its [#q-…] id: {rows:#?}"))
     };
     let alpha = rows
         .iter()
@@ -2940,7 +2959,11 @@ fn report_complete_structures_the_handback_and_queues_its_action_items() {
         .unwrap_or_else(|| panic!("origin row missing: {rows:#?}"));
     assert_eq!(position(first), alpha + 1, "{rows:#?}");
     assert_eq!(position(second), alpha + 2, "{rows:#?}");
-    assert!(position("later work") > alpha + 2, "{rows:#?}");
+    let later = rows
+        .iter()
+        .position(|row| row.ends_with("later work"))
+        .unwrap_or_else(|| panic!("later row missing: {rows:#?}"));
+    assert!(later > alpha + 2, "{rows:#?}");
 
     let stderr = report("repeated report-complete");
     assert!(
@@ -2949,12 +2972,12 @@ fn report_complete_structures_the_handback_and_queues_its_action_items() {
     );
     let rows = run_rows(&doc);
     assert_eq!(
-        rows.iter().filter(|row| row.ends_with(first)).count(),
+        rows.iter().filter(|row| ends_with_row(row, first)).count(),
         1,
         "{rows:#?}"
     );
     assert_eq!(
-        rows.iter().filter(|row| row.ends_with(second)).count(),
+        rows.iter().filter(|row| ends_with_row(row, second)).count(),
         1,
         "{rows:#?}"
     );
@@ -3262,7 +3285,7 @@ fn report_complete_and_follow_up_place_after_a_decorated_heading_row() {
         .position(|row| row.contains("do [#alpha]") && !row.contains("follow up"))
         .unwrap_or_else(|| panic!("origin row missing: {rows:#?}"));
     assert!(
-        rows[alpha + 1].ends_with(
+        sans_q_id(&rows[alpha + 1]).ends_with(
             "follow up on an action item from `alpha`: >512-commit documents can miss answers"
         ),
         "{rows:#?}"
@@ -3295,15 +3318,20 @@ fn report_complete_and_follow_up_place_after_a_decorated_heading_row() {
         );
         assert_ok(&output, &format!("queue follow-up --after {after:?}"));
         let rows = run_rows(&doc);
+        // `#followupidatcreate`: `queue follow-up` rows carry their id too.
         assert!(
-            rows.iter().any(|row| row.ends_with(&item)),
+            rows.iter()
+                .any(|row| row != sans_q_id(row) && sans_q_id(row).ends_with(&item)),
             "{after:?}: {rows:#?}"
         );
         let later = rows
             .iter()
             .position(|row| row.ends_with("later work"))
             .unwrap();
-        let placed = rows.iter().position(|row| row.ends_with(&item)).unwrap();
+        let placed = rows
+            .iter()
+            .position(|row| sans_q_id(row).ends_with(&item))
+            .unwrap();
         assert!(placed > alpha && placed < later, "{after:?}: {rows:#?}");
     }
 }
@@ -3440,7 +3468,7 @@ fn followups_of_a_nested_origin_leave_the_parent_children_alone_and_stay_acknowl
     let rows = run_rows(&doc);
     let position = |needle: &str| {
         rows.iter()
-            .position(|row| row.trim_end_matches("~~").ends_with(needle))
+            .position(|row| sans_q_id(row.trim_end_matches("~~")).ends_with(needle))
             .unwrap_or_else(|| panic!("{needle:?} missing: {rows:#?}"))
     };
     assert!(
@@ -3544,7 +3572,9 @@ fn a_running_followup_keeps_its_open_backlog_item_out_of_the_go_mirror() {
     let followup =
         "follow up on an action item from `alpha`: agent: Continue the remaining alpha rows";
     assert!(
-        run_rows(&doc).iter().any(|row| row.ends_with(followup)),
+        run_rows(&doc)
+            .iter()
+            .any(|row| sans_q_id(row).ends_with(followup)),
         "{:#?}",
         run_rows(&doc)
     );

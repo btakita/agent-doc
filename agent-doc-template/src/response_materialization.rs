@@ -168,6 +168,30 @@ pub fn refuse_missing_strict_template_recap(patches: &[PatchBlock]) -> Result<()
     Ok(())
 }
 
+/// Refusal for an agent-authored strict template closeout whose recap counts
+/// queue rows without naming each by id (`#recapids`): `- 4 decisions for
+/// you: …` with fewer than four `[#…]` ids. Like
+/// [`refuse_missing_strict_template_recap`], binary-owned replay does not
+/// call this, so an already captured response still lands. A closeout with no
+/// recap is left to that refusal.
+pub fn refuse_strict_template_recap_without_row_ids(patches: &[PatchBlock]) -> Result<()> {
+    let Some(recap) = crate::recap_patch_body(patches) else {
+        return Ok(());
+    };
+    let findings = agent_doc_element::recap::recap_row_id_findings(recap);
+    if findings.is_empty() {
+        return Ok(());
+    }
+    let details = findings
+        .iter()
+        .map(|finding| format!("- {finding}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    bail!(
+        "strict template closeout recap counts queue rows without naming them; it is refused before capture:\n{details}"
+    );
+}
+
 /// Advisories for a strict closeout's recap (`#agentrecap`).
 ///
 /// A missing or blank recap is an advisory only on paths that do not require
@@ -1431,6 +1455,33 @@ mod tests {
     fn trailing_newline_comparison_is_stable() {
         assert!(same_ignoring_trailing_newlines("a\n", "a"));
         assert!(!same_ignoring_trailing_newlines("a\nb", "a"));
+    }
+
+    /// `#recapids`: a recap bullet that counts rows must name each by id.
+    #[test]
+    fn recapids_recap_counting_rows_without_ids_is_refused_before_capture() {
+        let exchange = PatchBlock::new("exchange", "\n### Re: x\n\nBody.\n");
+        let counted = PatchBlock::new(
+            "recap",
+            "Loose ends.\n\n- 3 blocked on outside releases or features.\n",
+        );
+        let err =
+            refuse_strict_template_recap_without_row_ids(&[exchange.clone(), counted]).unwrap_err();
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("`- 3 blocked on outside releases or features.`")
+                && message.contains("counts 3 row(s) but names 0"),
+            "{message}"
+        );
+        let named = PatchBlock::new(
+            "recap",
+            "Loose ends.\n\n- 3 blocked: [#jbfrontendswap], [#ghrecvpolicy], [#prompt-blocker-b0ddfbae2f94]\n",
+        );
+        refuse_strict_template_recap_without_row_ids(&[exchange.clone(), named]).unwrap();
+        let prose = PatchBlock::new("recap", "The cycle committed; nothing is blocked.\n");
+        refuse_strict_template_recap_without_row_ids(&[exchange.clone(), prose]).unwrap();
+        // No recap at all is the missing-recap refusal's job, not this one.
+        refuse_strict_template_recap_without_row_ids(&[exchange]).unwrap();
     }
 
     /// `#agentrecap`: a missing recap refuses an agent-authored template

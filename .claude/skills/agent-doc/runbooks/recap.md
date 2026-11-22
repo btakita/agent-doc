@@ -53,7 +53,7 @@ below. Omit any section that has nothing to say, except the first.
    waiting on. Say what you checked and what you did not check.
 3. **`Queue rows this cycle:`** A list of the rows that changed, grouped by state
    with the existing queue markers, such as `Closed`, `Waiting on you (🙋)`, and
-   `Blocked (⛔)`.
+   `Blocked (⛔)`. Name each row by its `[#…]` id.
 4. **`Still can't close:`** A list of what stays open, each with the reason.
 5. **`Your decisions, most urgent first:`** A numbered list of what only the
    operator can decide. When you recommend one choice that item names, nest the
@@ -72,6 +72,24 @@ below. Omit any section that has nothing to say, except the first.
 Use the three labels exactly as written, each on its own line and directly above
 its list. Use no Markdown headings.
 
+## Name every row you count
+
+The operator jumps to a row by its id, so a recap that counts or groups queue
+rows names each of them (`#recapids`). Any bullet that says how many rows it
+covers, such as `4 decisions for you`, `2 cleanup rows`, or `3 blocked`, lists
+each row's id inline or in nested lines under it. Use the row's own id: its
+`[#q-…]`, its `[#slug]`, its `[#prompt-blocker-…]`, or the `[#r-…]` id of a
+response tree:
+
+```markdown
+- 3 blocked: [#jbfrontendswap], [#ghrecvpolicy], [#prompt-blocker-b0ddfbae2f94]
+```
+
+Name the row, not only its topic. `- 4 decisions for you: lazily bindings, PyPI
+token, JetBrains ZIPs` counts four rows and names none. A row that has no id yet
+gets one from the binary when it is created or on the next queue sync; if one
+still has none, describe it without a count.
+
 ## Example
 
 ```markdown
@@ -82,8 +100,8 @@ The release is waiting on one approval. I checked the review state on the main
 repository, but not on the mirror.
 
 Queue rows this cycle:
-- Closed: the docs row.
-- Waiting on you (🙋): the release row.
+- Closed: the docs row [#q-0a1b2c3d4e5f].
+- Waiting on you (🙋): the release row [#q-5f4e3d2c1b0a].
 - Blocked (⛔): [#example-b], behind [#example-a].
 
 Still can't close:
@@ -109,6 +127,15 @@ format finding is an advisory on stderr. A format nit never fails a closeout:
   tautology. `I recommend` and `My recommendation` there are findings. The check
   does not guess which choice the prose meant, and it does not read the line as
   a `**Choices:**` row.
+
+One check is not advisory (`#recapids`). A list item whose own line states a
+row count, meaning a number directly before a row noun (`rows`, `items`,
+`decisions`, `heads`, `follow-ups`, `questions`, `blockers`, with at most one
+word between) or directly before `blocked`, `running`, or `waiting`, must name
+at least that many distinct `[#…]` ids on its line or in its nested lines. An
+agent-authored closeout that breaks this is refused before capture, and the
+error names the bullet. Prose with no row count, a count inside inline code, and
+fenced examples are not checked.
 
 Everything else in this runbook is your responsibility. An agent-authored
 template closeout with no recap, or with a blank one, is refused before capture

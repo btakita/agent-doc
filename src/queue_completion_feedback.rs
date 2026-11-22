@@ -934,6 +934,27 @@ fn upsert_completion_feedback(
         &claim.item_text,
         response,
     );
+    // `#followupidatcreate`: each new row carries its `[#q-…]` id from the
+    // write that creates it, and id-less operator follow-ups are backfilled,
+    // so a recap can name them before any preflight runs (`#recapids`).
+    let admitted = agent_doc_queue::prompt_identity::admit_followup_row_ids(
+        &updated,
+        &agent_doc_hash::document_id_for_path(file),
+        &followups.inserted,
+    );
+    let updated = admitted.content;
+    let mut followups = followups;
+    // The report names each row as it now reads, id included, so the
+    // coordinator's `--ack-text` and recap quote the row the operator sees.
+    for row in &mut followups.inserted {
+        if let Some(assignment) = admitted
+            .assignments
+            .iter()
+            .find(|assignment| assignment.source_text == row.trim())
+        {
+            *row = assignment.target_text.clone();
+        }
+    }
     let replaced = !appended && with_cell != projected;
     if updated == current {
         let intent_id = agent_doc_document_realtime_io::pending_document_write(file)

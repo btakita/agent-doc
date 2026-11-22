@@ -1303,6 +1303,10 @@ fn validate_template_response_shape_before_tracked_work(
         agent_doc_template::response_materialization::refuse_missing_strict_template_recap(
             &normalized.patches,
         )?;
+        // `#recapids`: a recap that counts rows names each one.
+        agent_doc_template::response_materialization::refuse_strict_template_recap_without_row_ids(
+            &normalized.patches,
+        )?;
     }
     Ok(())
 }

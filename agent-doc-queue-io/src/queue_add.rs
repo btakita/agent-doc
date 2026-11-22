@@ -202,8 +202,17 @@ pub fn add_followups_with_effects(
 ) -> Result<usize> {
     let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
     let current = effects.current_document_content(file, "queue_followup")?;
-    let plan = queue_inbound::plan_queue_followups_targeted(&current, queue_id, origin, followups)
-        .with_context(|| format!("queue follow-up: {}", file.display()))?;
+    let mut plan =
+        queue_inbound::plan_queue_followups_targeted(&current, queue_id, origin, followups)
+            .with_context(|| format!("queue follow-up: {}", file.display()))?;
+    // `#followupidatcreate`: the new rows carry their `[#q-…]` id from this
+    // write, and id-less operator follow-ups are backfilled.
+    plan.content = agent_doc_queue::prompt_identity::admit_followup_row_ids(
+        &plan.content,
+        &agent_doc_hash::document_id_for_path(file),
+        followups,
+    )
+    .content;
     effects.converge_document_or_disk(file, &plan.content, &current, "queue_followup")?;
     // `#followuprootprovenance`: record which tracked item the new rows serve,
     // so the backlog mirror counts that item as queued while they are live.

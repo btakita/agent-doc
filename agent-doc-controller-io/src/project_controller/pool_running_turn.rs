@@ -6,6 +6,16 @@
 //! A Grok status line that says Enter would interrupt a blocked wait is left
 //! untouched too (`#blockedwaitentercancels`): that Enter cancels the turn the
 //! worker is bound to. The refill stays owed until the wait ends.
+//!
+//! `#poolturnrevisiongate`: an idle project must not rebuild every attached
+//! document's text on this tick. A hook-injecting owner (Claude, Codex) never
+//! owes this paste, so its document is not read at all. A hookless owner's
+//! text is memoized by the relay's compact [`CurrentRevision`]: an unchanged
+//! revision reuses the text, and the refill itself is still recomputed every
+//! tick from the current claims and clock, so nothing time- or claim-driven
+//! is cached.
+//!
+//! [`CurrentRevision`]: agent_doc_crdt_relay_io::CurrentRevision
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -131,6 +141,99 @@ pub(super) fn pool_running_turn_obligation(
         }
         PoolRunningTurnFollowUpDecision::Skip(skip) => PoolRunningTurnObligation::Skip(skip),
     })
+}
+
+/// `#poolturnrevisiongate`: one document's text and the revision it was read at.
+///
+/// Before this memo, the 15 s tick materialized every attached document's
+/// canonical text per actor, SHA-256'd it under the relay-hub lock, and wrote a
+/// `crdt_current_text` `ops.log` line, whether or not any turn was live or any
+/// head had been added. haiven-dev, 2026-11-22: 11 documents (one 233 KB),
+/// 3-4% idle CPU with 13-18% bursts and ~1.3 KB/s of `ops.log`.
+///
+/// Same contract as `#idlewatchrevisiongate`: the revision is read *before* the
+/// text on a miss, so a document that changes between the two reads stores the
+/// older revision and misses again next tick. Only a `Current` revision is a
+/// key. `Detached`, a missing replica, or a failed probe falls through to the
+/// existing read and drops the entry.
+///
+/// A hit while the relay's commit barrier is not ready serves the canonical
+/// text at that same revision instead of skipping the tick. That is the text
+/// the previous tick already acted on, and the delivery receipt keeps the same
+/// fingerprint from being pasted twice.
+struct MemoizedRunningTurnText {
+    revision: agent_doc_crdt_relay_io::CurrentRevision,
+    text: std::sync::Arc<str>,
+}
+
+/// The document text this tick decides from, read only when its revision moved.
+fn running_turn_document_text(
+    texts: &mut HashMap<PathBuf, MemoizedRunningTurnText>,
+    file: &Path,
+    read_revision: impl FnOnce(&Path) -> Result<agent_doc_crdt_relay_io::CurrentRevision>,
+    read_text: impl FnOnce(&Path) -> Result<Option<String>>,
+) -> Result<Option<std::sync::Arc<str>>> {
+    let revision = match read_revision(file) {
+        Ok(revision @ agent_doc_crdt_relay_io::CurrentRevision::Current { .. }) => {
+            if let Some(cached) = texts.get(file).filter(|cached| cached.revision == revision) {
+                return Ok(Some(cached.text.clone()));
+            }
+            Some(revision)
+        }
+        _ => None,
+    };
+    let text = match read_text(file) {
+        Ok(Some(text)) => std::sync::Arc::<str>::from(text),
+        other => {
+            texts.remove(file);
+            return other.map(|_| None);
+        }
+    };
+    match revision {
+        Some(revision) => {
+            texts.insert(
+                file.to_path_buf(),
+                MemoizedRunningTurnText {
+                    revision,
+                    text: text.clone(),
+                },
+            );
+        }
+        None => {
+            texts.remove(file);
+        }
+    }
+    Ok(Some(text))
+}
+
+/// One document's obligation this tick, from the cheapest sufficient read.
+///
+/// A hook-injecting owner returns `HookInjects` before any read: the decision
+/// skips it for every observation, so the text cannot change the answer.
+#[allow(clippy::too_many_arguments)]
+fn running_turn_document_obligation(
+    texts: &mut HashMap<PathBuf, MemoizedRunningTurnText>,
+    conn: &state_store::Connection,
+    project_root: &Path,
+    file: &Path,
+    harness: &str,
+    read_revision: impl FnOnce(&Path) -> Result<agent_doc_crdt_relay_io::CurrentRevision>,
+    read_text: impl FnOnce(&Path) -> Result<Option<String>>,
+    refill_for: impl FnOnce(&str) -> Result<Option<PoolRunningTurnRefill>>,
+) -> Result<PoolRunningTurnObligation> {
+    if hook_injects(harness) {
+        texts.remove(file);
+        return Ok(PoolRunningTurnObligation::Skip(
+            PoolRunningTurnFollowUpSkip::HookInjects,
+        ));
+    }
+    let Some(content) = running_turn_document_text(texts, file, read_revision, read_text)? else {
+        return Ok(PoolRunningTurnObligation::Skip(
+            PoolRunningTurnFollowUpSkip::NothingToDispatch,
+        ));
+    };
+    let refill = refill_for(&content)?;
+    pool_running_turn_obligation(conn, project_root, file, harness, refill.as_ref())
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -259,6 +362,8 @@ enum RefillHold {
 pub(super) struct PoolRunningTurnTick {
     last_run: Option<Instant>,
     held: HashMap<PathBuf, RefillHold>,
+    /// `#poolturnrevisiongate`: hookless documents' text by revision.
+    texts: HashMap<PathBuf, MemoizedRunningTurnText>,
 }
 
 impl PoolRunningTurnTick {
@@ -296,6 +401,7 @@ impl PoolRunningTurnTick {
         let store = load_actor_store_from_db(&conn)?;
         let registry = agent_doc_session_registry_io::load_in(&project_root)?;
         let effects = runtime_effects()?;
+        let mut visited = std::collections::HashSet::new();
         for record in store.values() {
             if record.pane_id.is_empty()
                 || record.state == agent_doc_controller::actor::ActorState::Closed
@@ -321,22 +427,19 @@ impl PoolRunningTurnTick {
                     ),
                 );
             }
-            let step = (|| -> Result<PoolRunningTurnObligation> {
-                let Some(content) = pool_heartbeat_document_text(&file)? else {
-                    return Ok(PoolRunningTurnObligation::Skip(
-                        PoolRunningTurnFollowUpSkip::NothingToDispatch,
-                    ));
-                };
-                let refill =
-                    effects.subagent_pool_running_turn_refill(&file, &content, &record.harness)?;
-                pool_running_turn_obligation(
-                    &conn,
-                    &project_root,
-                    &file,
-                    &record.harness,
-                    refill.as_ref(),
-                )
-            })();
+            visited.insert(file.clone());
+            let step = running_turn_document_obligation(
+                &mut self.texts,
+                &conn,
+                &project_root,
+                &file,
+                &record.harness,
+                agent_doc_crdt_relay_io::current_revision_for_file,
+                pool_heartbeat_document_text,
+                |content| {
+                    effects.subagent_pool_running_turn_refill(&file, content, &record.harness)
+                },
+            );
             let obligation = match step {
                 Ok(obligation) => obligation,
                 Err(err) => {
@@ -464,6 +567,7 @@ impl PoolRunningTurnTick {
                 }
             }
         }
+        self.texts.retain(|file, _| visited.contains(file));
         Ok(())
     }
 }
@@ -586,5 +690,217 @@ mod tests {
             obligation,
             PoolRunningTurnObligation::Skip(PoolRunningTurnFollowUpSkip::HookInjects)
         );
+    }
+
+    fn revision(state_vector: &[u8]) -> agent_doc_crdt_relay_io::CurrentRevision {
+        agent_doc_crdt_relay_io::CurrentRevision::Current {
+            lineage: "lineage-a".to_string(),
+            state_vector: state_vector.to_vec(),
+            live_editors: 1,
+            delivery_converged: true,
+        }
+    }
+
+    /// Heads in a toy queue: one per `- ` line. Stands in for the binary's
+    /// refill effect, which this crate reaches only through the effects port.
+    fn refill_from_text(content: &str) -> Option<PoolRunningTurnRefill> {
+        let heads = content
+            .lines()
+            .filter(|line| line.starts_with("- "))
+            .count();
+        (heads > 0).then(|| refill(heads))
+    }
+
+    /// `#poolturnrevisiongate`: an idle hookless document whose revision does
+    /// not move is materialized once, not once per tick.
+    #[test]
+    fn repeated_ticks_over_an_unchanged_revision_materialize_the_text_once() {
+        let fixture = fixture();
+        let mut texts = HashMap::new();
+        let reads = std::cell::Cell::new(0usize);
+        let refills = std::cell::Cell::new(0usize);
+        for _ in 0..20 {
+            let obligation = running_turn_document_obligation(
+                &mut texts,
+                &fixture.conn,
+                &fixture.root,
+                &fixture.file,
+                "grok",
+                |_| Ok(revision(b"sv-1")),
+                |_| {
+                    reads.set(reads.get() + 1);
+                    Ok(Some("# Plan\n\nno queue heads\n".to_string()))
+                },
+                |content| {
+                    refills.set(refills.get() + 1);
+                    Ok(refill_from_text(content))
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                obligation,
+                PoolRunningTurnObligation::Skip(PoolRunningTurnFollowUpSkip::NothingToDispatch)
+            );
+        }
+        assert_eq!(reads.get(), 1, "only the first tick materializes the text");
+        assert_eq!(
+            refills.get(),
+            20,
+            "the refill is still recomputed every tick, so claims and the clock stay live"
+        );
+    }
+
+    /// A head added while a hookless turn runs moves the revision: the next
+    /// tick re-reads the text and still owes the paste.
+    #[test]
+    fn a_changed_revision_re_reads_the_text_and_still_owes_the_refill() {
+        let fixture = fixture();
+        let mut texts = HashMap::new();
+        let reads = std::cell::Cell::new(0usize);
+        let mut tick = |state_vector: &'static [u8], text: &'static str| {
+            running_turn_document_obligation(
+                &mut texts,
+                &fixture.conn,
+                &fixture.root,
+                &fixture.file,
+                "grok",
+                |_| Ok(revision(state_vector)),
+                |_| {
+                    reads.set(reads.get() + 1);
+                    Ok(Some(text.to_string()))
+                },
+                |content| Ok(refill_from_text(content)),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            tick(b"sv-1", "# Plan\n"),
+            PoolRunningTurnObligation::Skip(PoolRunningTurnFollowUpSkip::NothingToDispatch)
+        );
+        assert_eq!(
+            tick(b"sv-2", "# Plan\n- do [#alpha]\n- do [#beta]\n"),
+            PoolRunningTurnObligation::Capture(refill(2))
+        );
+        assert_eq!(
+            tick(b"sv-2", "stale text the memo must serve instead"),
+            PoolRunningTurnObligation::Capture(refill(2)),
+            "the unchanged revision serves the text it was read at"
+        );
+        assert_eq!(reads.get(), 2);
+    }
+
+    /// Claims live in the ledger, not the document, so a claim change never
+    /// moves the revision. The memo holds text only; the refill sees the claim.
+    #[test]
+    fn a_claim_change_at_the_same_revision_still_produces_the_refill() {
+        let fixture = fixture();
+        let mut texts = HashMap::new();
+        let reads = std::cell::Cell::new(0usize);
+        let mut tick = |unstarted: usize| {
+            running_turn_document_obligation(
+                &mut texts,
+                &fixture.conn,
+                &fixture.root,
+                &fixture.file,
+                "grok",
+                |_| Ok(revision(b"sv-1")),
+                |_| {
+                    reads.set(reads.get() + 1);
+                    Ok(Some("# Plan\n".to_string()))
+                },
+                |_| {
+                    Ok((unstarted > 0).then(|| PoolRunningTurnRefill {
+                        unstarted,
+                        ..refill(0)
+                    }))
+                },
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            tick(0),
+            PoolRunningTurnObligation::Skip(PoolRunningTurnFollowUpSkip::NothingToDispatch)
+        );
+        assert!(matches!(tick(1), PoolRunningTurnObligation::Capture(_)));
+        assert_eq!(reads.get(), 1);
+    }
+
+    /// Only a `Current` revision is a memo key. Detached (disk authority), a
+    /// missing replica, or a failed probe reads every tick and drops the entry.
+    #[test]
+    fn a_non_current_revision_is_never_a_memo_key() {
+        let fixture = fixture();
+        let mut texts = HashMap::new();
+        let reads = std::cell::Cell::new(0usize);
+        let read = |_: &Path| {
+            reads.set(reads.get() + 1);
+            Ok(Some("# Plan\n".to_string()))
+        };
+        running_turn_document_text(&mut texts, &fixture.file, |_| Ok(revision(b"sv-1")), read)
+            .unwrap();
+        assert!(texts.contains_key(&fixture.file));
+        for probe in [
+            Ok(agent_doc_crdt_relay_io::CurrentRevision::Detached),
+            Ok(agent_doc_crdt_relay_io::CurrentRevision::EditorAttachedMissingReplica),
+            Err(anyhow::anyhow!("relay unavailable")),
+        ] {
+            running_turn_document_text(&mut texts, &fixture.file, |_| probe, read).unwrap();
+            assert!(!texts.contains_key(&fixture.file));
+        }
+        assert_eq!(reads.get(), 4);
+        let unreadable = running_turn_document_text(
+            &mut texts,
+            &fixture.file,
+            |_| Ok(revision(b"sv-1")),
+            |_| Ok(None),
+        )
+        .unwrap();
+        assert_eq!(
+            unreadable, None,
+            "an unreadable replica still skips the tick"
+        );
+        assert!(!texts.contains_key(&fixture.file));
+    }
+
+    /// A hook-injecting owner is skipped before any read, and the skip is exact:
+    /// the decision returns no paste for any observation once the hook injects.
+    #[test]
+    fn a_hook_injecting_owner_is_skipped_without_reading_the_document() {
+        let fixture = fixture();
+        let mut texts = HashMap::new();
+        for harness in ["claude", "codex", ""] {
+            let obligation = running_turn_document_obligation(
+                &mut texts,
+                &fixture.conn,
+                &fixture.root,
+                &fixture.file,
+                harness,
+                |_| panic!("{harness:?}: no revision probe"),
+                |_| panic!("{harness:?}: no text read"),
+                |_| panic!("{harness:?}: no refill"),
+            )
+            .unwrap();
+            assert_eq!(
+                obligation,
+                PoolRunningTurnObligation::Skip(PoolRunningTurnFollowUpSkip::HookInjects)
+            );
+        }
+        for harness in ["grok", "opencode", "cursor"] {
+            assert!(!hook_injects(harness), "{harness} must still be read");
+        }
+        for bits in 0u8..64 {
+            let bit = |n: u8| bits & (1 << n) != 0;
+            let decision =
+                pool_running_turn_follow_up_decision(PoolRunningTurnFollowUpObservation {
+                    next_heads: usize::from(bit(0)),
+                    unstarted: usize::from(bit(1)),
+                    delivered: bit(2),
+                    queue_paused: bit(3),
+                    hook_injects: true,
+                    turn_live: bit(4),
+                    enter_would_cancel: bit(5),
+                });
+            assert_ne!(decision, PoolRunningTurnFollowUpDecision::FollowUp);
+        }
     }
 }

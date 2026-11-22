@@ -238,3 +238,126 @@ fn summary_lead_keeps_whole_sentences() {
     assert!(trimmed);
     assert!(lead.ends_with("here."), "{lead}");
 }
+
+/// The live tree behind the struck-row Guidance and the backlink re-nesting
+/// (anonymized): the operator answered a Next actions entry with `Do the next
+/// actions.`, asked under it what had become of that row, and both rows were
+/// struck with nothing beneath them.
+const STRUCK_COVER_SESSION: &str = include_str!("../tests/fixtures/closed_by_nest_session.md");
+
+const DO_NEXT: &str = "        - ~~Do the next actions.~~\n";
+const STATUS_QUESTION: &str = "          - ~~What is the status of the parent `        - ~~Do the next actions.~~`? It is struck but there's no response structure.~~\n";
+
+/// The fixture with its last operator row turned into real open operator
+/// work (not an ask to clean up an agent-doc artifact, which self-repair
+/// resolves), so the tree stays open.
+fn open_struck_cover_session() -> String {
+    let session = crate::self_repair::renest_closed_by_rows(STRUCK_COVER_SESSION).0;
+    let start = session.find("    - 🙋 follow up on an action item from queue item “follow up on an action item from queue item 'follow up on an action item from qu…”: operator: in the editor").unwrap();
+    let end = start + session[start..].find('\n').unwrap() + 1;
+    let mut open = session.clone();
+    open.replace_range(
+        start..end,
+        "    - 🙋 operator: confirm the release notes read well. [operator-verify] [#q-6608c8ce85b2]\n",
+    );
+    open
+}
+
+/// Every operator line of `before` (not generated response structure) is
+/// still in `after`, in order, byte for byte.
+fn keeps_every_operator_line(before: &str, after: &str) -> bool {
+    let operator = |line: &&str| {
+        !line
+            .trim_start()
+            .strip_prefix("- ")
+            .is_some_and(agent_doc_markdown_ast::overlay::is_generated_response_structure_row)
+    };
+    let mut rest = after.lines().filter(operator);
+    before
+        .lines()
+        .filter(operator)
+        .all(|line| rest.any(|kept| kept == line))
+}
+
+/// `#treefinish`: the struck `Do the next actions.` answer under a Next
+/// actions entry gets one generated `✅ Done.` Guidance as its first child;
+/// the struck question under it is covered by that line and gets none. The
+/// response's tally counts both rows as done. Operator text is unchanged and
+/// a second sync is a no-op.
+#[test]
+fn struck_answer_under_a_detail_row_gets_a_done_guidance() {
+    let session = open_struck_cover_session();
+    let (synced, _, _) = sync_response_trees(&session).unwrap();
+    let guided = format!("{DO_NEXT}          - **Guidance:** ✅ Done.\n{STATUS_QUESTION}");
+    assert!(synced.contains(&guided), "{synced}");
+    assert_eq!(
+        synced.matches("**Guidance:** ✅ Done.\n").count(),
+        2,
+        "{synced}"
+    );
+    assert!(keeps_every_operator_line(&session, &synced), "{synced}");
+    // The root response still waits on the one open operator row, and counts
+    // the struck rows as done.
+    assert!(
+        synced.contains("    - **State:** Waiting on operator input.\n"),
+        "{synced}"
+    );
+    assert!(sync_response_trees(&synced).is_none(), "{synced}");
+
+    // The operator finishes the last row: the tree is finished, and the
+    // struck answer's Guidance says so.
+    let finished = synced.replace(
+        "    - 🙋 operator: confirm the release notes read well. [operator-verify] [#q-6608c8ce85b2]\n",
+        "    - ~~operator: confirm the release notes read well. [operator-verify] [#q-6608c8ce85b2]~~\n",
+    );
+    let (done, _, _) = sync_response_trees(&finished).unwrap();
+    assert!(
+        done.contains(&format!(
+            "{DO_NEXT}          - **Guidance:** ✅ Done. 🗑️ Safe to delete this tree.\n{STATUS_QUESTION}"
+        )),
+        "{done}"
+    );
+    assert!(sync_response_trees(&done).is_none(), "{done}");
+}
+
+/// `#treefinish`: in a finished tree the root's indicator covers every
+/// struck row, so no per-row line is added; the root says the tree can go.
+#[test]
+fn struck_rows_in_a_finished_tree_are_covered_by_the_root() {
+    let session = crate::self_repair::renest_closed_by_rows(STRUCK_COVER_SESSION).0;
+    let (synced, _, _) = sync_response_trees(&session).unwrap();
+    assert!(
+        synced.contains(&format!("{DO_NEXT}{STATUS_QUESTION}")),
+        "{synced}"
+    );
+    assert!(
+        synced.contains("    - **Guidance:** ✅ 6/6 done. 🗑️ Safe to delete this tree.\n"),
+        "{synced}"
+    );
+    assert!(sync_response_trees(&synced).is_none(), "{synced}");
+}
+
+/// `#treefinish`: an operator's own Guidance under a struck row, and a row
+/// with its own response, are left alone; a struck row outside any response
+/// is not this pass's.
+#[test]
+fn bare_struck_guidance_leaves_covered_and_unrelated_rows() {
+    let document = concat!(
+        "<!-- agent:run id=\"main\" subagents -->\n",
+        "- ### root\n",
+        "  - **Response [#r-2da6da4a7fd8]**\n",
+        "    - **Next actions:** <!-- agent-doc:response-detail -->\n",
+        "      - Ship it. <!-- agent-doc:response-detail -->\n",
+        "        - ~~shipped~~\n",
+        "          - **Guidance:** my own note\n",
+        "        - ~~answered~~\n",
+        "          - **Response [#r-37bf1620fdbd]**\n",
+        "            - **State:** Complete.\n",
+        "    - **State:** Complete.\n",
+        "    - **Guidance:** operator wording\n",
+        "  - open work\n",
+        "  - ~~outside~~\n",
+        "<!-- /agent:run -->\n",
+    );
+    assert!(guide_bare_struck_rows(document).is_none());
+}

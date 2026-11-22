@@ -1501,8 +1501,11 @@ Duplicate replay should stay live.
             "{repaired}"
         );
         assert_eq!(repaired.matches("Shared result.").count(), 1, "{repaired}");
+        // The kept operator row moves up to sit directly under the backlink.
         assert!(
-            repaired.contains("        - Operator-authored descendant survives.\n"),
+            repaired.contains(&format!(
+                "  - **Closed by:** {RESPONSE_ID}\n    - Operator-authored descendant survives.\n"
+            )),
             "{repaired}"
         );
         let head = Command::new("git")

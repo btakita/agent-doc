@@ -93,6 +93,9 @@ pub enum SelfRepairKind {
     /// lifecycle word left behind, or the label quoted in a follow-up title)
     /// to the clean text its `agent:exchange` provenance proves.
     ClaimLabelResidue,
+    /// Moved the operator rows kept under a `**Closed by:**` backlink up to
+    /// be its direct children (`#selfrepaircleanup`).
+    MisnestedClosedByRows,
 }
 
 impl SelfRepairKind {
@@ -103,6 +106,7 @@ impl SelfRepairKind {
             Self::MisplacedResponseTree => "misplaced_response_tree",
             Self::StaleClaimLabel => "stale_claim_label",
             Self::ClaimLabelResidue => "claim_label_residue",
+            Self::MisnestedClosedByRows => "misnested_closed_by_rows",
         }
     }
 }
@@ -797,11 +801,114 @@ pub fn restore_claim_label_residue(
     })
 }
 
+/// `#selfrepaircleanup`: the `**Closed by:** [#r-…]` content of a list item.
+fn closed_by_id(item: &str) -> Option<&str> {
+    let id = item.strip_prefix("**Closed by:** ")?.trim();
+    (id.starts_with("[#r-") && id.ends_with(']') && !id.contains(char::is_whitespace)).then_some(id)
+}
+
+/// `#selfrepaircleanup`: the operator rows a retired response tree kept under its
+/// `**Closed by:** [#r-…]` backlink, moved up to sit directly under it.
+///
+/// Retiring a copied tree removes its generated rows (Summary, Action items,
+/// response-detail rows) but kept the operator rows beneath them at their old
+/// depth, so an answer that sat under an action item hung several levels below
+/// the backlink (`- **Closed by:** …` at 6 spaces, its kept row at 12): markdown
+/// reads that as the backlink's text, not its child. Each list row under a
+/// backlink sits at most one step deeper than its parent row, where a step is
+/// the backlink's own depth below its parent (2 spaces when unknown); a deeper
+/// row moves up by the excess, with its whole subtree, so the kept rows keep
+/// their structure relative to each other. Only leading spaces change; the
+/// text after them is byte-for-byte the same. A subtree indented with tabs is
+/// left alone. A second run changes nothing.
+///
+/// `only` limits the pass to backlinks naming those ids. Returns the body and
+/// the ids of the backlinks whose rows moved.
+pub(crate) fn renest_closed_by_children(
+    body: &str,
+    only: Option<&std::collections::HashSet<String>>,
+) -> (String, Vec<String>) {
+    let lines = lines_of(body);
+    let parents = parents(&lines);
+    let mut cuts: Vec<(usize, usize)> = Vec::new();
+    let mut moved = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        let Some(id) = line.item.and_then(closed_by_id) else {
+            continue;
+        };
+        if only.is_some_and(|only| !only.contains(id)) {
+            continue;
+        }
+        let end = subtree_end(&lines, index);
+        if (index..end)
+            .any(|at| body[lines[at].start..lines[at].start + lines[at].indent].contains('\t'))
+        {
+            continue;
+        }
+        let step = parents[index]
+            .map(|parent| line.indent.saturating_sub(lines[parent].indent))
+            .filter(|step| (2..=4).contains(step))
+            .unwrap_or(2);
+        // (original indent, new indent) of the open list rows above.
+        let mut stack: Vec<(usize, usize)> = vec![(line.indent, line.indent)];
+        let mut any = false;
+        for row in &lines[index + 1..end] {
+            let new_indent = if row.item.is_some() {
+                while stack.last().is_some_and(|(orig, _)| *orig >= row.indent) {
+                    stack.pop();
+                }
+                let (parent_orig, parent_new) = *stack.last().expect("the backlink is shallower");
+                let new_indent = parent_new + (row.indent - parent_orig).min(step);
+                stack.push((row.indent, new_indent));
+                new_indent
+            } else {
+                let (owner_orig, owner_new) = *stack
+                    .iter()
+                    .rev()
+                    .find(|(orig, _)| *orig < row.indent)
+                    .expect("the backlink is shallower");
+                row.indent - (owner_orig - owner_new)
+            };
+            if new_indent < row.indent {
+                cuts.push((row.start, row.start + row.indent - new_indent));
+                any = true;
+            }
+        }
+        if any {
+            moved.push(id.to_string());
+        }
+    }
+    if cuts.is_empty() {
+        return (body.to_string(), moved);
+    }
+    let mut out = body.to_string();
+    for (start, end) in cuts.into_iter().rev() {
+        out.replace_range(start..end, "");
+    }
+    (out, moved)
+}
+
+/// `#selfrepaircleanup` migration: re-nest the rows under every `**Closed by:**`
+/// backlink a retirement already wrote with its kept rows too deep
+/// ([`renest_closed_by_children`]).
+pub fn renest_closed_by_rows(document: &str) -> (String, Vec<SelfRepair>) {
+    edit_queue_bodies(document, |body, repairs| {
+        let (out, moved) = renest_closed_by_children(body, None);
+        repairs.extend(moved.into_iter().map(|id| SelfRepair {
+            kind: SelfRepairKind::MisnestedClosedByRows,
+            detail: id,
+            rewritten: None,
+        }));
+        out
+    })
+}
+
 /// Run every self-repair over `document`: misplaced response trees
 /// (`response_proven(id)` says the `[#r-…]` id's original lives in
-/// `agent:exchange` or the response index), duplicate response trees, stale
-/// claim labels, claim-label residue, then duplicate struck rows (a label
-/// removal or residue restore can make two struck copies identical). `None` when nothing changed; a second run is a
+/// `agent:exchange` or the response index), duplicate response trees,
+/// backlink rows nested too deep, stale claim labels, claim-label residue,
+/// then duplicate struck rows (a label removal or residue restore can make
+/// two struck copies identical). `None` when nothing changed; a second run is a
 /// no-op.
 pub fn self_repair_document(
     document: &str,
@@ -834,6 +941,9 @@ pub fn self_repair_document(
         }));
         current = collapsed;
     }
+    let (renested, renest_repairs) = renest_closed_by_rows(&current);
+    current = renested;
+    repairs.extend(renest_repairs);
     let (labelled, label_repairs) = strip_stale_claim_labels(&current, is_live);
     current = labelled;
     repairs.extend(label_repairs);

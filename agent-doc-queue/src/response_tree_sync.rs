@@ -388,6 +388,146 @@ pub fn reconcile_tree_scoped_guidance(document: &str) -> Option<(String, usize)>
     (rows > 0).then(|| (apply_edits(document, edits), rows))
 }
 
+/// `#treefinish`: every struck operator row inside a response tree says
+/// what became of it.
+///
+/// An operator row nested in a response (an answer under an action item,
+/// `~~Do the next actions.~~` under a Next actions entry, a question under
+/// either) is struck when the work it asked for is done, but nothing beneath
+/// it said so: no Response, no State, no Guidance. The response's tally
+/// already counts it as done; the row itself read as an unexplained strike,
+/// and the operator could not tell whether it, or its tree, could go.
+///
+/// Each such row gets one generated child, first among its children:
+/// `- **Guidance:** ✅ Done.`, the nested-row indicator
+/// ([`completed_row_deletion_guidance`]: `📌 Keep: …` when an open row sits
+/// beneath it, `🗑️ Safe to delete this tree.` once its whole tree is
+/// finished). A row is covered already, and left alone, when it has its own
+/// `**Response [#r-…]**`, `**Closed by:**` or `**State:**` child, or when a
+/// struck operator row above it (below the response) is covered: that row's
+/// Guidance speaks for its subtree. A row in a finished tree gets no new
+/// line; the root's `🗑️ Safe to delete this tree.` covers it. Only a Guidance
+/// value this pass (or the deletion guidance) rendered is re-rendered, so an
+/// operator's own Guidance stays. Returns the document and how many rows
+/// changed, or `None`; a second pass changes nothing.
+pub fn guide_bare_struck_rows(document: &str) -> Option<(String, usize)> {
+    if !document.contains("**Response [#r-") {
+        return None;
+    }
+    let is_generated = agent_doc_markdown_ast::overlay::is_generated_response_structure_row;
+    let is_struck = |item: &str| {
+        let item = item.strip_prefix("### ").unwrap_or(item);
+        let item = agent_doc_element_queue::strip_attempt_projection_prefix(item).trim_start();
+        item.starts_with("~~") && item.len() > 4 && item[2..].contains("~~")
+    };
+    let lines = lines_from(document, 0);
+    let line_at = |offset: usize| lines.partition_point(|line| line.end <= offset);
+    let mut tree = None;
+    let mut edits = Vec::new();
+    for node in struck_rows(document) {
+        let at = line_at(node.item.start_byte);
+        let Some(row) = lines.get(at) else {
+            continue;
+        };
+        let Some(content) = row.text.strip_prefix("- ") else {
+            continue;
+        };
+        if is_generated(content) {
+            continue;
+        }
+        // Its ancestors, nearest first, up to the response that holds it.
+        let mut indent = row.indent;
+        let mut in_response = false;
+        for prior in lines[..at].iter().rev() {
+            if prior.text.is_empty() || prior.indent >= indent {
+                continue;
+            }
+            let Some(item) = prior.text.strip_prefix("- ") else {
+                break;
+            };
+            indent = prior.indent;
+            if item.starts_with("**Response [#r-") {
+                in_response = true;
+                break;
+            }
+            if !is_generated(item) && is_struck(item) {
+                // A struck operator row above speaks for this one.
+                break;
+            }
+            if indent == 0 {
+                break;
+            }
+        }
+        if !in_response {
+            continue;
+        }
+        let mut scope_end = at + 1;
+        while scope_end < lines.len()
+            && (lines[scope_end].text.is_empty() || lines[scope_end].indent > row.indent)
+        {
+            scope_end += 1;
+        }
+        let children = lines[at + 1..scope_end]
+            .iter()
+            .filter(|line| line.text.starts_with("- "))
+            .collect::<Vec<_>>();
+        let child_indent = children.iter().map(|line| line.indent).min();
+        let direct = children
+            .iter()
+            .filter(|line| Some(line.indent) == child_indent)
+            .collect::<Vec<_>>();
+        if direct.iter().any(|line| {
+            ["- **Response [#r-", "- **Closed by:** ", "- **State:** "]
+                .iter()
+                .any(|lead| line.text.starts_with(lead))
+        }) {
+            continue;
+        }
+        let tree = tree.get_or_insert_with(|| {
+            crate::queue_tree::queue_tree(document, &crate::queue_tree::QueueTreeOptions::default())
+                .ok()
+        });
+        let Some(closure) = tree.as_ref().and_then(|tree| {
+            crate::queue_tree::row_closure_at_offset(tree, document, node.item.start_byte)
+        }) else {
+            continue;
+        };
+        let want = completed_row_deletion_guidance(Some(&closure));
+        const LEAD: &str = "- **Guidance:** ";
+        if let Some(line) = direct.iter().find(|line| line.text.starts_with(LEAD)) {
+            let value = &line.text[LEAD.len()..];
+            if generated_completed_guidance(value) == Some(false) && value != want {
+                let start = line.start + line.indent + LEAD.len();
+                edits.push((start..start + value.len(), want));
+            }
+            continue;
+        }
+        if closure.tree_closed() {
+            continue;
+        }
+        let insert_at = match children.first() {
+            Some(first) => first.start,
+            None => lines[at + 1..scope_end]
+                .iter()
+                .rev()
+                .find(|line| !line.text.is_empty())
+                .map_or(row.end, |line| line.end),
+        };
+        let indent = " ".repeat(child_indent.unwrap_or(row.indent + 2));
+        let newline = if document[..insert_at].ends_with('\n') {
+            ""
+        } else {
+            "\n"
+        };
+        edits.push((
+            insert_at..insert_at,
+            format!("{newline}{indent}{LEAD}{want}\n"),
+        ));
+    }
+    let rows = edits.len();
+    (rows > 0).then(|| (apply_edits(document, edits), rows))
+}
+
 /// Slim the copied hand-back sections out of struck rows' response trees
 /// written before the slim shape (`#handbackrowstructure`).
 ///
@@ -595,7 +735,8 @@ pub fn sync_response_trees_striking(
         };
     let (synced, guidance_rows) =
         reconcile_tree_scoped_guidance(&remaining).unwrap_or((remaining, 0));
-    let guided = guidance_rows + remaining_rows;
+    let (synced, bare_rows) = guide_bare_struck_rows(&synced).unwrap_or((synced, 0));
+    let guided = guidance_rows + remaining_rows + bare_rows;
     (slim_rows + guided + struck_trees > 0).then_some(ResponseTreeSync {
         document: synced,
         slimmed: slim_rows,

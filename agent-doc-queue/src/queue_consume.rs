@@ -2813,7 +2813,10 @@ fn collapse_response_projections_in_queue(body: &str, select: &mut CollapseSelec
     for (start, end, replacement) in replacements.into_iter().rev() {
         repaired.replace_range(start..end, &replacement);
     }
-    repaired
+    // `#selfrepaircleanup`: the operator rows a new backlink kept sat under the
+    // generated rows just removed; move them up to be its direct children.
+    let backlinks = duplicate_markers.values().cloned().collect::<HashSet<_>>();
+    crate::self_repair::renest_closed_by_children(&repaired, Some(&backlinks)).0
 }
 
 /// Detach binary-owned response projections for response ids whose durable
@@ -10734,8 +10737,12 @@ mod tests {
             1,
             "{repaired}"
         );
+        // Operator text stays byte-identical; the row moves up to sit
+        // directly under the backlink, beside the nested row.
         assert!(
-            repaired.contains("        - Operator chose staging; preserve this reply exactly.\n"),
+            repaired.contains(&format!(
+                "  - **Closed by:** {RESPONSE}\n    - Operator chose staging; preserve this reply exactly.\n"
+            )),
             "operator-authored descendants stay byte-identical:\n{repaired}"
         );
         assert!(

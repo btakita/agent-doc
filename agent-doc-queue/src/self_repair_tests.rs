@@ -273,20 +273,24 @@ fn a_response_tree_under_a_guidance_line_is_retired_keeping_operator_rows() {
             rewritten: None,
         }]
     );
-    assert!(!repaired.contains("Both gh commands"), "{repaired}");
-    assert!(!repaired.contains("New file `gh` wrapper"), "{repaired}");
-    assert!(
-        repaired.contains("**Closed by:** [#r-8eb6516470b1]"),
-        "{repaired}"
+    // `#selfrepaircleanup`: the kept operator rows are the backlink's direct
+    // children, their own structure unchanged.
+    assert_eq!(
+        repaired,
+        doc(concat!(
+            "- ### follow up on an action item: agent: stop the ack-text copy.\n",
+            "  - **Response [#r-2da6da4a7fd8]**\n",
+            "    - **Summary:** Fix pushed.\n",
+            "    - **State:** Follow-up work remains.\n",
+            "    - **Guidance:** More work remains. Keep this tree and follow the action items in this response.\n",
+            "      - **Closed by:** [#r-8eb6516470b1]\n",
+            "        - ~~Present the password prompt and complete.~~\n",
+            "          - **Response [#r-37bf1620fdbd]**\n",
+            "            - **Summary:** The keyring was already unlocked.\n",
+            "            - **State:** Complete.\n",
+            "        - 🙋 operator: confirm the copy is gone. [operator-verify] [#q-8834c5a41276]\n",
+        ))
     );
-    for kept in [
-        "            - ~~Present the password prompt and complete.~~\n",
-        "              - **Response [#r-37bf1620fdbd]**\n",
-        "        - 🙋 operator: confirm the copy is gone. [operator-verify] [#q-8834c5a41276]\n",
-        "  - **Response [#r-2da6da4a7fd8]**\n",
-    ] {
-        assert!(repaired.contains(kept), "{kept}\n{repaired}");
-    }
     assert!(self_repair_document(&repaired, &retired, &proven).is_none());
     // Without proof that the original lives elsewhere, nothing is touched.
     assert!(self_repair_document(&doc(queue), &retired, &unproven).is_none());
@@ -339,7 +343,7 @@ fn audited_tree_reads_as_one_operator_action_left() {
     let root = before.find("- **Response [#r-2da6da4a7fd8]**").unwrap();
     let guidance = before[root..]
         .lines()
-        .find_map(|line| line.trim_start().strip_prefix("- **Guidance:** "))
+        .find_map(|line| line.strip_prefix("    - **Guidance:** "))
         .unwrap();
     assert!(
         guidance.contains(
@@ -365,11 +369,11 @@ fn audited_tree_reads_as_one_operator_action_left() {
     let root = synced.find("- **Response [#r-2da6da4a7fd8]**").unwrap();
     let state = synced[root..]
         .lines()
-        .find_map(|line| line.trim_start().strip_prefix("- **State:** "))
+        .find_map(|line| line.strip_prefix("    - **State:** "))
         .unwrap();
     let guidance = synced[root..]
         .lines()
-        .find_map(|line| line.trim_start().strip_prefix("- **Guidance:** "))
+        .find_map(|line| line.strip_prefix("    - **Guidance:** "))
         .unwrap();
     assert_eq!(state, crate::queue_consume::RESPONSE_STATE_COMPLETE);
     assert!(guidance.starts_with("✅ "), "{guidance}");
@@ -572,4 +576,102 @@ fn short_title_followup_residue_is_restored() {
         "{repairs:?}"
     );
     assert!(self_repair_document(&repaired, &retired, &unproven).is_none());
+}
+
+/// `#selfrepaircleanup` migration, on the live tree (anonymized): an earlier
+/// retirement kept `~~Present the password prompt and complete.~~` under its
+/// `**Closed by:**` backlink at its old depth (12 spaces under a 6-space
+/// backlink). Sync moves it, with its response, up to be the backlink's
+/// direct child; every line's text after its indentation is unchanged, and a
+/// second sync is a no-op.
+#[test]
+fn rows_kept_too_deep_under_a_closed_by_backlink_are_renested() {
+    let session = include_str!("../tests/fixtures/closed_by_nest_session.md");
+    let (repaired, repairs) = self_repair_document(session, &retired, &unproven).unwrap();
+    assert_eq!(
+        repairs,
+        vec![SelfRepair {
+            kind: SelfRepairKind::MisnestedClosedByRows,
+            detail: "[#r-8eb6516470b1]".to_string(),
+            rewritten: None,
+        }]
+    );
+    let backlink = "      - **Closed by:** [#r-8eb6516470b1]\n";
+    let at = repaired.find(backlink).unwrap() + backlink.len();
+    let after: Vec<&str> = repaired[at..].lines().take(8).collect();
+    assert_eq!(
+        after[0],
+        "        - ~~Present the password prompt and complete.~~"
+    );
+    assert_eq!(after[1], "          - **Response [#r-37bf1620fdbd]**");
+    assert!(
+        after[2].starts_with("            - **Timestamp:** "),
+        "{}",
+        after[2]
+    );
+    assert!(
+        after[6].starts_with("            - **Guidance:** "),
+        "{}",
+        after[6]
+    );
+    assert!(
+        after[7].starts_with("        - 🙋 follow up on an action item"),
+        "{}",
+        after[7]
+    );
+    // Only indentation moved: the same lines, the same text after it.
+    let stripped = |text: &str| {
+        text.lines()
+            .map(|line| line.trim_start_matches(' ').to_string())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(stripped(&repaired), stripped(session));
+    // Nothing outside the backlink's subtree moved.
+    let before_backlink = session.find(backlink).unwrap();
+    assert_eq!(repaired[..before_backlink], session[..before_backlink]);
+    assert!(self_repair_document(&repaired, &retired, &unproven).is_none());
+}
+
+/// `#selfrepaircleanup`: rows already directly under a backlink, and deeper rows
+/// that sit one step under their own parent, are left alone; a row two
+/// generated levels down keeps its children's relative depth when it moves.
+#[test]
+fn closed_by_renest_keeps_relative_structure() {
+    let queue = concat!(
+        "- ### root\n",
+        "  - **Response [#r-2da6da4a7fd8]**\n",
+        "    - **Guidance:** ✅ Done.\n",
+        "      - **Closed by:** [#r-8eb6516470b1]\n",
+        "            - ~~answer~~\n",
+        "              - nested reply\n",
+        "                continuation text\n",
+        "                  - deeper reply\n",
+        "        - sibling at the right depth\n",
+        "          - its child\n",
+        "  - **Closed by:** [#r-aaaaaaaaaaaa]\n",
+        "    - already direct\n",
+        "      - one step down\n",
+    );
+    let (repaired, repairs) = renest_closed_by_rows(&doc(queue));
+    assert_eq!(repairs.len(), 1, "{repairs:?}");
+    assert_eq!(
+        repaired,
+        doc(concat!(
+            "- ### root\n",
+            "  - **Response [#r-2da6da4a7fd8]**\n",
+            "    - **Guidance:** ✅ Done.\n",
+            "      - **Closed by:** [#r-8eb6516470b1]\n",
+            "        - ~~answer~~\n",
+            "          - nested reply\n",
+            "            continuation text\n",
+            "            - deeper reply\n",
+            "        - sibling at the right depth\n",
+            "          - its child\n",
+            "  - **Closed by:** [#r-aaaaaaaaaaaa]\n",
+            "    - already direct\n",
+            "      - one step down\n",
+        ))
+    );
+    assert!(renest_closed_by_rows(&repaired).1.is_empty());
+    assert_eq!(renest_closed_by_rows(&repaired).0, repaired);
 }

@@ -24546,21 +24546,39 @@ fn controller_request_peer_pid() -> Option<u32> {
     CONTROLLER_REQUEST_PEER_PID.get()
 }
 
-fn controller_stream_peer_pid(stream: &interprocess::local_socket::Stream) -> Result<Option<u32>> {
+/// Admit or refuse the peer on `stream` (`#ghrecvpolicy`): its kernel
+/// peer credentials name a principal, and the project's `[workspace]`
+/// membership decides. The single-user default admits only the controller's
+/// own user. Returns the peer's pid for request attribution.
+fn controller_stream_peer_pid(
+    stream: &interprocess::local_socket::Stream,
+    access: &super::workspace_access::ControllerWorkspaceAccess,
+) -> Result<Option<u32>> {
     use interprocess::local_socket::traits::StreamCommon as _;
     #[cfg(unix)]
     let credentials = {
         let credentials = stream
             .peer_creds()
             .context("read project controller client peer credentials")?;
-        anyhow::ensure!(
-            credentials.euid() == Some(controller_user()),
-            "project controller client does not belong to the current user"
+        let Some(peer) = credentials.euid() else {
+            anyhow::bail!(
+                "project controller client does not belong to the current user (no effective user in its peer credentials)"
+            );
+        };
+        let decision = access.decide(
+            agent_doc_frontmatter::workspace_access::Principal::os_user(controller_user()),
+            agent_doc_frontmatter::workspace_access::Principal::os_user(peer),
         );
+        if let Some(refusal) = decision.refusal_message() {
+            anyhow::bail!(refusal);
+        }
         Some(credentials)
     };
     #[cfg(not(unix))]
-    let credentials = stream.peer_creds().ok();
+    let credentials = {
+        let _ = access;
+        stream.peer_creds().ok()
+    };
     Ok(credentials
         .and_then(|credentials| credentials.pid())
         .and_then(|pid| u32::try_from(pid).ok())
@@ -24573,7 +24591,7 @@ pub(crate) fn serve_client(
     should_stop: &AtomicBool,
     sock: &Path,
 ) -> Result<()> {
-    let peer_pid = controller_stream_peer_pid(&stream)?;
+    let peer_pid = controller_stream_peer_pid(&stream, &runtime.workspace_access)?;
     install_controller_request_thread_context(runtime);
     let _peer = enter_controller_request_peer(peer_pid);
     stream
@@ -51602,8 +51620,11 @@ mod tests {
             .unwrap();
         let client = connect_path(&sock).unwrap();
         let accepted = interprocess::local_socket::traits::Listener::accept(&listener).unwrap();
+        // The connecting process runs as the controller's user, the owner
+        // the single-user default admits.
+        let access = super::super::workspace_access::ControllerWorkspaceAccess::new(dir.path());
         assert_eq!(
-            controller_stream_peer_pid(&accepted).unwrap(),
+            controller_stream_peer_pid(&accepted, &access).unwrap(),
             Some(std::process::id())
         );
         drop(client);

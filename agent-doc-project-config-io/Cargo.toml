@@ -19,5 +19,8 @@ agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "
 anyhow = "1"
 toml = "1.1"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tempfile = "3"

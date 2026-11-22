@@ -2,7 +2,7 @@
 
 # Security
 
-agent-doc is designed for a single operator. Controller connections are local to a machine. The optional browser editor uses bearer tokens on non-loopback binds. These boundaries do not provide a multi-user access-control model.
+agent-doc is designed for a single operator by default. Controller connections are local to a machine. The optional browser editor uses bearer tokens on non-loopback binds. A multi-user access-control model is being built in phases (see [Multi-user workspaces](#multi-user-workspaces-ghrecvpolicy)). Phase 1 has landed: the principal and membership model, controller admission by membership, and the recipient-side `[receive]` policy. Session isolation and shared controller access have not landed yet.
 
 ## Threat Model
 
@@ -23,7 +23,7 @@ agent-doc is designed for a single operator. Controller connections are local to
 - Use a **private git repository** for the project containing session documents.
 - Avoid putting secrets (API keys, credentials) in documents or agent context.
 - If you are experimenting with shared/collaborative docs, mark the document with `agent_doc_collaboration: shared` and require an auditable `agent_doc_security_review: <review-id>` before cross-document `extract` / `transfer` or plan-backed `do #id` work that reads another `.md` file.
-- For broader shared/collaborative use cases, wait for the planned multi-user security model (access control, session isolation, content scanning).
+- For broader shared/collaborative use cases, wait for the remaining multi-user phases (per-request authorization, session isolation, content scanning). Until then, give other members of a shared project only the OS file permissions they need, and set `[receive] auto_create_components` to limit what they can add to your documents.
 - Review agent responses before sharing or publishing document content.
 
 ## Browser editor writes (`agent-doc serve`, `#servesavebypass`)
@@ -32,7 +32,36 @@ agent-doc is designed for a single operator. Controller connections are local to
 
 ## Local controller access
 
-On Unix, the project controller requires an owner-owned, non-symlink socket directory. It creates or restricts the project `.agent-doc` directory to mode `0700` and binds public and replacement sockets with mode `0600`. A custom socket directory outside that project directory must already have mode `0700`. Before reading a request, the controller requires kernel peer credentials with an effective UID matching its own. Linux uses `SO_PEERCRED`. Windows uses a local named pipe.
+On Unix, the project controller requires an owner-owned, non-symlink socket directory. It creates or restricts the project `.agent-doc` directory to mode `0700` and binds public and replacement sockets with mode `0600`. A custom socket directory outside that project directory must already have mode `0700`. Before reading a request, the controller reads the peer's kernel credentials (Linux `SO_PEERCRED`) and admits the peer only when the workspace model gives its effective UID the `owner` role. That is the controller's own UID, or, in a `multi-user` workspace, a member listed with `role = "owner"`. In the default single-user workspace this is exactly the previous rule: the effective UID must match the controller's own. Non-owner members (`editor`, `viewer`) are refused with a reason until per-request authorization lands. A peer with no effective UID in its credentials is refused. Windows uses a local named pipe.
+
+## Multi-user workspaces (`#ghrecvpolicy`)
+
+Design and phase plan: [proposals/multi-user-access-control.md](proposals/multi-user-access-control.md).
+
+- **Principal.** Every channel resolves to one OS user: the effective UID of the CLI process, or the kernel peer credentials of a controller-socket connection. Agent sessions, supervisors, and editors act as the user that runs them. `queue add --source` is a provenance label, not an identity.
+- **Workspace owner.** The OS user that owns the project's `.agent-doc` directory. The controller runs as this user.
+- **Membership.** `.agent-doc/config.toml`:
+  - `[workspace] mode` is `single-user` (default) or `multi-user`.
+  - `[[workspace.members]]` entries carry `uid`, an optional `name`, and `role` (`owner`, `editor`, or `viewer`).
+  - In single-user mode, member entries are ignored.
+- **Controller admission** follows the rules in [Local controller access](#local-controller-access). The decision reads `[workspace]` only for a non-owner peer, through a cache keyed on the config file's modification time and length, so membership edits apply without a restart. A config that cannot be read or parsed falls back to single-user.
+- **Recipient policy (GH #40).** `[receive] auto_create_components` controls which managed components a sender other than the recipient workspace's owners may create on its documents:
+  - `true` or unset: any component (the previous behaviour).
+  - `false` or `[]`: none.
+  - A list of names: only those. `pending` means `backlog`, and `run`/`loop` mean `queue`.
+
+  A refused sender gets an error naming the component, the policy, and the owner to ask. A sender-side `--no-create-backlog` applies first. A component that already exists needs no permission. Enforcement points:
+  - `notify --backlog-add`/`--backlog-add-gated`, before auto-creating `agent:backlog`.
+  - Focused `extract` into an existing target, for every component the plan adds.
+- **Not yet enforced.** These are later phases in the design:
+  - per-command authorization inside the controller;
+  - session ownership (one member driving another's pane);
+  - a group-shared controller socket;
+  - editor replica attribution;
+  - per-document ACLs;
+  - principal-mapped `serve` tokens.
+
+  OS file permissions remain the only boundary for direct file writes.
 
 The internal `command_plane_submit` operation requires a non-empty string `binary_version`. The controller rejects a different version before dispatch, except that an already-issued closeout-owner capability can still release its exact owner across an upgrade. A missing version is refused even for that release.
 

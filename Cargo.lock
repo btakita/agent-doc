@@ -1770,6 +1770,7 @@ dependencies = [
  "agent-doc-fs",
  "agent-doc-project-root-io",
  "anyhow",
+ "libc",
  "tempfile",
  "toml 1.1.2+spec-1.1.0",
 ]

@@ -522,6 +522,20 @@ pub struct ProjectConfig {
     /// Opt-in gating for which `.md` files become agent-doc session documents.
     #[serde(default)]
     pub documents: DocumentsConfig,
+    /// `[workspace]` membership and mode (`#ghrecvpolicy`). Absent is
+    /// single-user: only the workspace owner has a role.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::workspace_access::WorkspaceConfig::is_default"
+    )]
+    pub workspace: crate::workspace_access::WorkspaceConfig,
+    /// `[receive]` recipient-side policy for what other principals may create
+    /// on this workspace's documents (GH #40). Absent is permissive.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::workspace_access::ReceiveConfig::is_default"
+    )]
+    pub receive: crate::workspace_access::ReceiveConfig,
     /// Vision (describe-image) provider configuration.
     #[serde(default)]
     pub vision: VisionConfig,

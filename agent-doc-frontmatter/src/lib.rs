@@ -9,5 +9,6 @@ pub mod frontmatter;
 pub mod lint;
 pub mod project_config;
 pub mod security_review;
+pub mod workspace_access;
 
 pub use frontmatter::*;

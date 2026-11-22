@@ -555,6 +555,46 @@ fn ensure_component(
     Ok(updated)
 }
 
+/// Components the plan creates on an existing target document, in document
+/// order. A new target document is not a component auto-create.
+fn components_created_on_existing_target(
+    target_before: Option<&str>,
+    target_after: &str,
+) -> Result<Vec<String>> {
+    let Some(before) = target_before else {
+        return Ok(Vec::new());
+    };
+    let existing: BTreeSet<String> = element::parse(before)
+        .context("failed to parse target components")?
+        .into_iter()
+        .map(|component| component.name)
+        .collect();
+    let mut created = Vec::new();
+    for component in element::parse(target_after).context("failed to parse planned target")? {
+        if !existing.contains(&component.name) && !created.contains(&component.name) {
+            created.push(component.name);
+        }
+    }
+    Ok(created)
+}
+
+/// Refuse a plan that creates a component on an existing `target` the
+/// recipient workspace's `[receive] auto_create_components` withholds from
+/// `sender` (GH #40).
+fn enforce_target_component_auto_create(
+    sender: agent_doc_frontmatter::workspace_access::Principal,
+    target: &Path,
+    target_before: Option<&str>,
+    target_after: &str,
+) -> Result<()> {
+    for component in components_created_on_existing_target(target_before, target_after)? {
+        agent_doc_project_config_io::workspace_access::enforce_component_auto_create(
+            sender, target, &component,
+        )?;
+    }
+    Ok(())
+}
+
 fn append_to_component(doc: &str, name: &str, moved: &str) -> Result<String> {
     let component = find_component(doc, name)?
         .with_context(|| format!("target component '{name}' was not initialized"))?;
@@ -2041,6 +2081,15 @@ pub fn run(
             return Err(error);
         }
     };
+    // GH #40 (`#ghrecvpolicy`): every component this plan adds to an
+    // existing target is a sender-side auto-create the recipient's
+    // `[receive]` policy must allow.
+    enforce_target_component_auto_create(
+        agent_doc_project_config_io::workspace_access::current_principal(),
+        target,
+        prepared.target_before.as_deref(),
+        &prepared.target_after,
+    )?;
     println!("{}", serde_json::to_string_pretty(&prepared.preview)?);
     if !apply || prepared.preview.already_applied {
         if !apply {
@@ -3644,5 +3693,74 @@ mod tests {
             .expect("typed lost-node refusal");
         assert_eq!(lost.operation_id, dev.preview.operation_id);
         assert_eq!(lost.missing, vec!["todo:#dev1".to_string()]);
+    }
+
+    // --- Recipient-side `[receive]` policy (GH #40) ---
+
+    fn recipient_project(receive: &str) -> tempfile::TempDir {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(dir.path().join(".agent-doc/config.toml"), receive).unwrap();
+        dir
+    }
+
+    fn other_sender() -> agent_doc_frontmatter::workspace_access::Principal {
+        let owner = agent_doc_project_config_io::workspace_access::current_principal();
+        agent_doc_frontmatter::workspace_access::Principal::os_user(owner.uid.wrapping_add(7919))
+    }
+
+    const TARGET_BEFORE: &str =
+        "# T\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
+
+    #[test]
+    fn components_created_on_existing_target_lists_only_new_components() {
+        let none: BTreeMap<String, String> = BTreeMap::new();
+        let after = ensure_component(TARGET_BEFORE.to_string(), "backlog", &none).unwrap();
+        let after = ensure_component(after, "exchange", &none).unwrap();
+        assert_eq!(
+            components_created_on_existing_target(Some(TARGET_BEFORE), &after).unwrap(),
+            vec!["backlog".to_string()]
+        );
+        assert!(
+            components_created_on_existing_target(None, &after)
+                .unwrap()
+                .is_empty(),
+            "a new target document is not a component auto-create"
+        );
+    }
+
+    #[test]
+    fn recipient_policy_refuses_a_distinct_sender_creating_target_components() {
+        let dir = recipient_project("[receive]\nauto_create_components = [\"backlog\"]\n");
+        let target = dir.path().join("target.md");
+        std::fs::write(&target, TARGET_BEFORE).unwrap();
+        let none: BTreeMap<String, String> = BTreeMap::new();
+        let with_review = ensure_component(TARGET_BEFORE.to_string(), "review", &none).unwrap();
+        let with_backlog = ensure_component(TARGET_BEFORE.to_string(), "backlog", &none).unwrap();
+
+        let err = enforce_target_component_auto_create(
+            other_sender(),
+            &target,
+            Some(TARGET_BEFORE),
+            &with_review,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("no agent:review component"), "{err}");
+        enforce_target_component_auto_create(
+            other_sender(),
+            &target,
+            Some(TARGET_BEFORE),
+            &with_backlog,
+        )
+        .unwrap();
+        // The recipient itself is never limited by its own policy.
+        enforce_target_component_auto_create(
+            agent_doc_project_config_io::workspace_access::current_principal(),
+            &target,
+            Some(TARGET_BEFORE),
+            &with_review,
+        )
+        .unwrap();
     }
 }

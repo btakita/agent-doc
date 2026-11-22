@@ -12,6 +12,11 @@
 //!   exchange close tag). Legacy aliases: `--pending-add` /
 //!   `--pending-add-gated`.
 //! - `--no-create-backlog` opts out of auto-creation.
+//! - Recipient-side policy (GH #40, `#ghrecvpolicy`): before auto-creating
+//!   the backlog, the target workspace's `[receive] auto_create_components`
+//!   is consulted for the sending principal. A sender who is not the target
+//!   workspace's owner gets an error when the policy excludes `backlog`;
+//!   unset policy stays permissive. `--no-create-backlog` still applies first.
 //! - When only backlog ops are requested (no message), the exchange blockquote
 //!   is skipped (backlog-only mode).
 //! - Backlog errors become no-ops when `--no-create-backlog` is set and the
@@ -41,6 +46,8 @@
 //! - backlog_only_updates_baseline: backlog-only → typed baseline checkpointed
 //! - auto_create_inserts_before_final_exchange: missing backlog uses the canonical slot
 //! - message_required_without_backlog: no message, no backlog → `Err`
+//! - recipient_policy_*: distinct sender/recipient principals against a
+//!   recipient `[receive]` policy (strict, backlog-only, unset, owner sender)
 
 use anyhow::{Context, Result, bail};
 use std::path::Path;
@@ -48,6 +55,7 @@ use std::process::Command;
 
 use agent_doc_element::element::{self, is_backlog_component};
 use agent_doc_element_backlog::backlog;
+use agent_doc_frontmatter::workspace_access::Principal;
 
 /// Format an ISO-8601 timestamp using the system `date` command.
 fn iso_timestamp() -> String {
@@ -91,8 +99,9 @@ fn format_notification(message: &str, source: Option<&str>, affects: Option<&str
 
 /// Ensure the document has an `agent:backlog` component; create one if absent.
 /// Returns `Ok(true)` if a component was created, `Ok(false)` if it already existed.
-/// Under `no_create`, returns `Err` if absent.
-fn ensure_pending_component(file: &Path, no_create: bool) -> Result<bool> {
+/// Under `no_create`, returns `Err` if absent. A missing component is created
+/// only when the recipient workspace's `[receive]` policy lets `sender` do it.
+fn ensure_pending_component(file: &Path, no_create: bool, sender: Principal) -> Result<bool> {
     let doc = agent_doc_document_realtime_io::try_resolve_current_document_content(
         file,
         "notify_command_document",
@@ -108,6 +117,9 @@ fn ensure_pending_component(file: &Path, no_create: bool) -> Result<bool> {
     if no_create {
         bail!("document has no backlog component and --no-create-backlog was set");
     }
+    agent_doc_project_config_io::workspace_access::enforce_component_auto_create(
+        sender, file, "backlog",
+    )?;
 
     // This command already has to repair missing structure. Insert the backlog
     // at its canonical slot without moving any established component.
@@ -146,6 +158,32 @@ pub fn run(
     pending_add_gated: &[String],
     no_create_pending: bool,
 ) -> Result<()> {
+    run_as(
+        agent_doc_project_config_io::workspace_access::current_principal(),
+        file,
+        message,
+        source,
+        affects,
+        commit,
+        pending_add,
+        pending_add_gated,
+        no_create_pending,
+    )
+}
+
+/// [`run`] on behalf of an explicit sending principal.
+#[allow(clippy::too_many_arguments)]
+pub fn run_as(
+    sender: Principal,
+    file: &Path,
+    message: Option<&str>,
+    source: Option<&str>,
+    affects: Option<&str>,
+    commit: bool,
+    pending_add: &[String],
+    pending_add_gated: &[String],
+    no_create_pending: bool,
+) -> Result<()> {
     if !file.exists() {
         bail!("file not found: {}", file.display());
     }
@@ -155,7 +193,7 @@ pub fn run(
     // --- Backlog operations ---
     if has_pending_ops {
         // Ensure backlog component exists (auto-create unless opted out)
-        match ensure_pending_component(file, no_create_pending) {
+        match ensure_pending_component(file, no_create_pending, sender) {
             Ok(_) => {}
             Err(e) => {
                 // Under auto-create mode, errors become no-ops
@@ -749,5 +787,196 @@ mod tests {
                 .to_string()
                 .contains("message is required")
         );
+    }
+
+    // --- Recipient-side `[receive]` policy (GH #40) ---
+    //
+    // Distinct principals: the recipient workspace is owned by this test's OS
+    // user (it created the store); the sender is a different uid passed to
+    // `run_as`. Real files, real config, real document writes.
+
+    fn recipient_project(receive: &str) -> TempDir {
+        let dir = setup_project();
+        std::fs::write(dir.path().join(".agent-doc/config.toml"), receive).unwrap();
+        dir
+    }
+
+    fn recipient_owner() -> Principal {
+        agent_doc_project_config_io::workspace_access::current_principal()
+    }
+
+    fn other_sender() -> Principal {
+        Principal::os_user(recipient_owner().uid.wrapping_add(7919))
+    }
+
+    const NO_BACKLOG: &str =
+        "<!-- agent:exchange patch=append -->\nContent\n<!-- /agent:exchange -->\n";
+
+    #[test]
+    fn recipient_policy_strict_refuses_a_distinct_sender_and_leaves_the_document() {
+        let dir = recipient_project("[receive]\nauto_create_components = false\n");
+        let doc = write_doc(dir.path(), "recipient.md", NO_BACKLOG);
+        let items = vec!["from another user".to_string()];
+
+        let err = run_as(
+            other_sender(),
+            &doc,
+            None,
+            None,
+            None,
+            false,
+            &items,
+            &[],
+            false,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("auto_create_components = false"), "{err}");
+        assert!(err.contains(&other_sender().to_string()), "{err}");
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), NO_BACKLOG);
+    }
+
+    #[test]
+    fn recipient_policy_strict_still_lets_the_recipient_create_its_own_backlog() {
+        let dir = recipient_project("[receive]\nauto_create_components = []\n");
+        let doc = write_doc(dir.path(), "recipient.md", NO_BACKLOG);
+        let items = vec!["own item".to_string()];
+
+        run_as(
+            recipient_owner(),
+            &doc,
+            None,
+            None,
+            None,
+            false,
+            &items,
+            &[],
+            false,
+        )
+        .unwrap();
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(result.contains("<!-- agent:backlog"));
+        assert!(result.contains("own item"));
+    }
+
+    #[test]
+    fn recipient_policy_backlog_allow_list_admits_a_distinct_sender() {
+        let dir = recipient_project("[receive]\nauto_create_components = [\"pending\"]\n");
+        let doc = write_doc(dir.path(), "recipient.md", NO_BACKLOG);
+        let items = vec!["allowed backlog item".to_string()];
+
+        run_as(
+            other_sender(),
+            &doc,
+            None,
+            None,
+            None,
+            false,
+            &items,
+            &[],
+            false,
+        )
+        .unwrap();
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(result.contains("<!-- agent:backlog"));
+        assert!(result.contains("allowed backlog item"));
+    }
+
+    #[test]
+    fn recipient_policy_allow_list_without_backlog_refuses_a_distinct_sender() {
+        let dir = recipient_project("[receive]\nauto_create_components = [\"review\"]\n");
+        let doc = write_doc(dir.path(), "recipient.md", NO_BACKLOG);
+        let items = vec!["not allowed".to_string()];
+
+        let err = run_as(
+            other_sender(),
+            &doc,
+            None,
+            None,
+            None,
+            false,
+            &items,
+            &[],
+            false,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("[\"review\"]"), "{err}");
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), NO_BACKLOG);
+    }
+
+    #[test]
+    fn recipient_policy_unset_keeps_single_author_auto_create_for_any_sender() {
+        let dir = setup_project();
+        let doc = write_doc(dir.path(), "recipient.md", NO_BACKLOG);
+        let items = vec!["permissive".to_string()];
+
+        run_as(
+            other_sender(),
+            &doc,
+            None,
+            None,
+            None,
+            false,
+            &items,
+            &[],
+            false,
+        )
+        .unwrap();
+        assert!(
+            std::fs::read_to_string(&doc)
+                .unwrap()
+                .contains("<!-- agent:backlog")
+        );
+    }
+
+    #[test]
+    fn recipient_policy_existing_backlog_needs_no_auto_create_permission() {
+        let dir = recipient_project("[receive]\nauto_create_components = false\n");
+        let doc = write_doc(
+            dir.path(),
+            "recipient.md",
+            "<!-- agent:backlog priority queue -->\n<!-- /agent:backlog -->\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n",
+        );
+        let items = vec!["into the existing backlog".to_string()];
+
+        run_as(
+            other_sender(),
+            &doc,
+            None,
+            None,
+            None,
+            false,
+            &items,
+            &[],
+            false,
+        )
+        .unwrap();
+        assert!(
+            std::fs::read_to_string(&doc)
+                .unwrap()
+                .contains("into the existing backlog")
+        );
+    }
+
+    #[test]
+    fn recipient_policy_sender_opt_out_still_wins_over_a_permissive_recipient() {
+        let dir = setup_project();
+        let doc = write_doc(dir.path(), "recipient.md", NO_BACKLOG);
+        let items = vec!["opted out".to_string()];
+
+        run_as(
+            other_sender(),
+            &doc,
+            None,
+            None,
+            None,
+            false,
+            &items,
+            &[],
+            true,
+        )
+        .unwrap();
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), NO_BACKLOG);
     }
 }

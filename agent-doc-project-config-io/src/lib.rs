@@ -10,6 +10,8 @@
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
+pub mod workspace_access;
+
 use agent_doc_frontmatter::project_config::{
     ProjectConfig, parse_legacy_components_toml, parse_project_toml,
 };

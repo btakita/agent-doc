@@ -4540,6 +4540,9 @@ fn run_state_projection_derived_test_hook(_document_hash: &str) {}
 
 pub(crate) struct ControllerRuntime {
     bootstrap: Mutex<ControllerBootstrap>,
+    /// `#ghrecvpolicy`: admission rule for socket peers, from the
+    /// project's `[workspace]` section (single-user = owner only).
+    workspace_access: workspace_access::ControllerWorkspaceAccess,
     memory: Mutex<ControllerMemoryState>,
     /// Serialize the controller-owned durable-append -> live-apply boundary.
     ///
@@ -10535,8 +10538,11 @@ impl ControllerRuntime {
         );
         let document_path_transition_graph =
             rpc::ControllerDocumentPathTransitionGraph::new_in(&scope);
+        let workspace_access =
+            workspace_access::ControllerWorkspaceAccess::new(&bootstrap.project_root);
         let runtime = Self {
             bootstrap: Mutex::new(bootstrap),
+            workspace_access,
             memory: Mutex::new(memory),
             state_event_ingress: Mutex::new(()),
             document_authority_handoff_wake: Mutex::new(None),
@@ -15806,6 +15812,9 @@ fn record_projection_diagnostic_with_metadata(
 
 mod rpc;
 pub use rpc::*;
+
+/// `#ghrecvpolicy` — controller-socket peer admission via workspace membership.
+mod workspace_access;
 
 /// `#installstrandsreplica` — native cdylib reload admission + deferred intent.
 mod native_reload;
@@ -23495,8 +23504,11 @@ agent:queue\n\
         );
         let document_path_transition_graph =
             rpc::ControllerDocumentPathTransitionGraph::new_in(&scope);
+        let workspace_access =
+            workspace_access::ControllerWorkspaceAccess::new(&bootstrap.project_root);
         ControllerRuntime {
             bootstrap: Mutex::new(bootstrap),
+            workspace_access,
             memory: Mutex::new(ControllerMemoryState {
                 state_document_versions: BTreeMap::new(),
                 state_projection,

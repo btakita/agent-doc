@@ -13251,8 +13251,13 @@ pub(super) fn is_agent_doc_internal_path(file: &Path) -> bool {
         .any(|component| component.as_os_str() == ".agent-doc")
 }
 
+#[cfg(test)]
+pub(super) fn is_agent_doc_document_for_admission(file: &Path) -> bool {
+    is_agent_doc_document(file)
+}
+
 fn is_agent_doc_document(file: &Path) -> bool {
-    if is_agent_doc_internal_path(file) {
+    if is_agent_doc_internal_path(file) || agent_doc_fs::is_within_harness_skill_install_dir(file) {
         return false;
     }
     static CACHE: OnceLock<Mutex<AgentDocDocumentCache>> = OnceLock::new();
@@ -13464,6 +13469,11 @@ fn handle_crdt_replica_rpc(
     // stale attached hub cannot grandfather the path back in.
     if is_agent_doc_internal_path(&canonical) {
         return Ok(crdt_replica_refused_data("internal_agent_doc_path"));
+    }
+    // `#strayskillroot`: an installed skill/runbook copy documents the
+    // `<!-- agent:` markers it carries; it is never a session document.
+    if agent_doc_fs::is_within_harness_skill_install_dir(&canonical) {
+        return Ok(crdt_replica_refused_data("harness_skill_install_path"));
     }
     // GH #349: a plain copy of a session document carries the original's
     // `agent_doc_session` value. Content-only admission would give the copy its

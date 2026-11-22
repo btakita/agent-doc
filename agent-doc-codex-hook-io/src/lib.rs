@@ -1534,6 +1534,9 @@ mod tests {
         std::fs::create_dir_all(git_root.join(".agent-doc")).unwrap();
         let nested = git_root.join("nested");
         std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+        // `#strayskillroot`: a nested project is a configured one; a state-only
+        // `.agent-doc/` under the git root would yield to it.
+        std::fs::write(nested.join(".agent-doc/config.toml"), "").unwrap();
         let doc = nested.join("task.md");
         std::fs::write(&doc, "---\n---\n").unwrap();
 

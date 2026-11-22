@@ -35,4 +35,28 @@ class ProjectRootsTest {
         check(File(home, ".git").mkdir())
         assertEquals(home, policy.find(home))
     }
+
+    @Test
+    fun `stray state only dir in a skill folder resolves to the enclosing project`() {
+        val project = fixture.newFolder("project")
+        check(File(project, ".agent-doc").mkdirs())
+        File(project, ".agent-doc/config.toml").writeText("")
+        val runbooks = File(project, ".claude/skills/agent-doc/runbooks")
+        check(File(runbooks, ".agent-doc/logs").mkdirs())
+        val memory = File(project, "memory")
+        check(File(memory, ".agent-doc/logs").mkdirs())
+        val nested = File(project, "src/nested")
+        check(File(nested, ".agent-doc").mkdirs())
+        File(nested, ".agent-doc/config.toml").writeText("")
+        val policy = ProjectRoots.Policy(null, emptyList(), listOf(fixture.root), false)
+
+        assertEquals(project, policy.find(runbooks))
+        assertFalse(policy.allows(runbooks))
+        assertEquals(project, policy.find(memory))
+        assertEquals(nested, policy.find(nested))
+
+        val bare = fixture.newFolder("bare")
+        check(File(bare, ".agent-doc").mkdirs())
+        assertEquals(bare, policy.find(bare))
+    }
 }

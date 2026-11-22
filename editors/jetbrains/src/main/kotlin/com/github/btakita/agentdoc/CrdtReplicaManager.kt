@@ -6646,10 +6646,16 @@ internal fun nonOperatorEditorEventMayAdoptUtil(
     shownOnEditorSurface: Boolean,
 ): Boolean = hasAttachedForwarder || shownOnEditorSurface
 
-/** Project-internal `.agent-doc/` paths are state/artifacts, never user documents. */
+/**
+ * Project-internal `.agent-doc/` paths are state/artifacts, never user documents.
+ * Neither are installed harness skill copies (`#strayskillroot`): their runbooks
+ * carry `<!-- agent:` markers as documentation, and registering one lazily
+ * launched a controller for the skill folder.
+ */
 internal fun isAgentDocUserDocumentPathUtil(filePath: String): Boolean =
     try {
-        File(filePath).toPath().normalize().none { component -> component.toString() == ".agent-doc" }
+        File(filePath).toPath().normalize().none { component -> component.toString() == ".agent-doc" } &&
+            !ProjectRoots.isWithinHarnessSkillInstallDir(File(filePath))
     } catch (_: Exception) {
         false
     }

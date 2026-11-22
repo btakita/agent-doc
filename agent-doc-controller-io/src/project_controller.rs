@@ -18904,6 +18904,39 @@ mod tests {
         }
     }
 
+    /// `#strayskillroot`: an editor op on an installed skill runbook (rewritten
+    /// by `skill install`, carrying `<!-- agent:` markers as documentation) must
+    /// not lazily launch a controller for the skill folder, even when a stray
+    /// state-only `.agent-doc/` already sits there.
+    #[test]
+    fn skill_install_folder_never_launches_a_controller() {
+        let fixture = tempfile::tempdir().unwrap();
+        let project = fixture.path().join("project");
+        std::fs::create_dir_all(project.join(".agent-doc")).unwrap();
+        std::fs::write(project.join(".agent-doc/config.toml"), "").unwrap();
+        let runbooks = project.join(".claude/skills/agent-doc/runbooks");
+        std::fs::create_dir_all(runbooks.join(".agent-doc/logs")).unwrap();
+        let doc = runbooks.join("respond.md");
+        std::fs::write(&doc, "<!-- agent:exchange -->\nRunbook prose.\n").unwrap();
+
+        assert_eq!(
+            agent_doc_project_root_io::project_root_containing(&doc),
+            Some(project.clone()),
+            "the stray state dir must not capture the runbook"
+        );
+        let error = super::ensure_controller_running(&runbooks, LaunchMode::Lazy)
+            .expect_err("a skill install folder is never a controller root");
+        assert!(
+            format!("{error:#}").contains("cannot use"),
+            "refused by the project-root policy, got {error:#}"
+        );
+        assert!(
+            !runbooks.join(".agent-doc/controller.sock").exists(),
+            "no controller socket may appear in the skill folder"
+        );
+        assert!(!super::rpc::is_agent_doc_document_for_admission(&doc));
+    }
+
     #[test]
     fn project_internal_state_path_is_never_a_replica_document() {
         use super::rpc::is_agent_doc_internal_path;

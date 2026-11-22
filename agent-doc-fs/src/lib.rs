@@ -73,16 +73,81 @@ impl ProjectRootPolicy {
     }
 
     fn allows(&self, path: &Path) -> bool {
+        // `#strayskillroot`: an installed harness skill tree is never a project,
+        // whichever spelling (a `~/.claude/skills` symlink alias or its target)
+        // reaches it.
+        if is_within_harness_skill_install_dir(path) {
+            return false;
+        }
         let path = canonical_or_normalized(path);
+        if is_within_harness_skill_install_dir(&path) {
+            return false;
+        }
         (!path.has_root() || path.parent().is_some())
             && !self.temp.contains(&path)
             && (self.home.as_ref() != Some(&path) || self.allow_home || path.join(".git").exists())
     }
 }
 
+/// Harness skill/rule install trees, as `(parent, child)` directory-name pairs.
+///
+/// `#strayskillroot`: `agent-doc skill install` copies the SKILL and its runbooks
+/// into these directories. They are installed artifacts, not session documents,
+/// and the runbooks carry `<!-- agent:` markers as *documentation*. Before this
+/// rule an editor edit of `.claude/skills/agent-doc/runbooks/respond.md` (rewritten
+/// by `skill install`) found a stray state-only `runbooks/.agent-doc/` and lazily
+/// launched a whole project controller for the skill folder (2026-11-22).
+pub const HARNESS_SKILL_INSTALL_DIRS: &[(&str, &str)] = &[
+    (".claude", "skills"),
+    (".agents", "skills"),
+    (".codex", "skills"),
+    (".grok", "skills"),
+    (".opencode", "skills"),
+    (".cursor", "rules"),
+];
+
+/// Whether `path` is, or lies inside, a harness skill/rule install directory
+/// ([`HARNESS_SKILL_INSTALL_DIRS`]). Purely lexical: callers that may hold a
+/// symlink alias check the canonical spelling too.
+pub fn is_within_harness_skill_install_dir(path: &Path) -> bool {
+    let names: Vec<&std::ffi::OsStr> = path
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(name) => Some(name),
+            _ => None,
+        })
+        .collect();
+    names.windows(2).any(|pair| {
+        HARNESS_SKILL_INSTALL_DIRS
+            .iter()
+            .any(|(parent, child)| pair[0] == *parent && pair[1] == *child)
+    })
+}
+
+/// Files inside `.agent-doc/` that mark a configured project rather than
+/// runtime state some process happened to write there.
+pub const PROJECT_MARKER_FILES: &[&str] = &["config.toml", "project.md", "sessions.json"];
+
+/// Whether `dir` is a *marked* agent-doc project: its `.agent-doc/` holds
+/// project configuration or a session registry ([`PROJECT_MARKER_FILES`]), or
+/// `dir` is itself a git checkout (a repository owns its own project).
+///
+/// A `.agent-doc/` with none of these is state-only (`state.db`, `logs/`,
+/// sockets): evidence that a process once resolved `dir` as a root, not that
+/// anyone configured a project there.
+pub fn is_marked_project_root(dir: &Path) -> bool {
+    let state = dir.join(".agent-doc");
+    PROJECT_MARKER_FILES
+        .iter()
+        .any(|marker| state.join(marker).is_file())
+        || dir.join(".git").exists()
+}
+
 /// Whether a directory can own an agent-doc project. Filesystem and temp roots
 /// are never projects. Home needs an explicit opt-in or its own Git worktree.
-/// These checks apply to the directory itself, including symlink aliases.
+/// Harness skill install trees ([`HARNESS_SKILL_INSTALL_DIRS`]) are never
+/// projects. These checks apply to the directory itself, including symlink
+/// aliases.
 pub fn project_root_allowed(path: &Path) -> bool {
     static POLICY: OnceLock<ProjectRootPolicy> = OnceLock::new();
     POLICY
@@ -117,6 +182,15 @@ pub fn user_log_directory() -> Option<PathBuf> {
 /// `.agent-doc` (the project root). Relative inputs are first anchored to the
 /// process working directory so the returned root is never an empty relative
 /// path. Returns `None` if no such ancestor exists.
+///
+/// `#strayskillroot`: the nearest *marked* project ([`is_marked_project_root`])
+/// wins over a nearer state-only `.agent-doc/`, so a stray state dir left in a
+/// subdirectory cannot capture that subdirectory's documents away from the
+/// enclosing configured project. A state-only directory is still the root when
+/// no marked project encloses it. When the walk finds nothing on the path as
+/// spelled, it retries on the canonical path, so a symlink alias of a project
+/// file (`~/.claude/skills/agent-doc` -> `<project>/.claude/skills/agent-doc`)
+/// resolves to that project instead of falling back to the alias's parent.
 pub fn find_project_root(path: &Path) -> Option<PathBuf> {
     let anchored = if path.is_absolute() {
         path.to_path_buf()
@@ -131,9 +205,26 @@ pub fn find_project_root(path: &Path) -> Option<PathBuf> {
     // `#testisolationtests`: never climb above an `AGENT_DOC_ROOT_CEILING_DIRECTORIES`
     // entry (or a test binary's temp root), so a test tempdir cannot adopt
     // `$HOME/.agent-doc` as its project root.
-    ancestors_within_root_ceiling(start)
-        .into_iter()
-        .find(|dir| dir.join(".agent-doc").is_dir() && project_root_allowed(dir))
+    find_project_root_from_dir(start).or_else(|| {
+        let canonical = start.canonicalize().ok()?;
+        (canonical != start)
+            .then(|| find_project_root_from_dir(&canonical))
+            .flatten()
+    })
+}
+
+fn find_project_root_from_dir(start: &Path) -> Option<PathBuf> {
+    let mut nearest_state_only = None;
+    for dir in ancestors_within_root_ceiling(start) {
+        if !dir.join(".agent-doc").is_dir() || !project_root_allowed(&dir) {
+            continue;
+        }
+        if is_marked_project_root(&dir) {
+            return Some(dir);
+        }
+        nearest_state_only.get_or_insert(dir);
+    }
+    nearest_state_only
 }
 
 /// Canonicalize `path` first, then delegate to [`find_project_root`].
@@ -841,6 +932,122 @@ mod tests {
         assert!(!policy.allows(&alias));
         assert!(policy.allows(&alias.join("project")));
     }
+    /// `#strayskillroot`: a state-only `.agent-doc/` (no config, no session
+    /// registry, no checkout) inside an installed skill folder never becomes the
+    /// root; its documents resolve to the enclosing configured project.
+    #[test]
+    fn stray_state_only_dir_in_skill_folder_resolves_to_enclosing_project() {
+        let fixture = tempfile::tempdir().unwrap();
+        let project = fixture.path().join("project");
+        std::fs::create_dir_all(project.join(".agent-doc")).unwrap();
+        std::fs::write(project.join(".agent-doc/config.toml"), "").unwrap();
+        let runbooks = project.join(".claude/skills/agent-doc/runbooks");
+        std::fs::create_dir_all(runbooks.join(".agent-doc/logs")).unwrap();
+        std::fs::write(runbooks.join(".agent-doc/state.db"), "").unwrap();
+        let doc = runbooks.join("respond.md");
+        std::fs::write(&doc, "<!-- agent:exchange -->\n").unwrap();
+
+        assert_eq!(super::find_project_root(&doc), Some(project.clone()));
+        assert!(!super::project_root_allowed(&runbooks));
+        // Even a configured `.agent-doc/` cannot make an install tree a project.
+        std::fs::write(runbooks.join(".agent-doc/config.toml"), "").unwrap();
+        assert_eq!(super::find_project_root(&doc), Some(project));
+        for (parent, child) in super::HARNESS_SKILL_INSTALL_DIRS {
+            let installed = fixture.path().join(format!("x/{parent}/{child}/agent-doc"));
+            assert!(super::is_within_harness_skill_install_dir(&installed));
+        }
+        assert!(!super::is_within_harness_skill_install_dir(
+            &fixture.path().join("x/.claude/settings")
+        ));
+        assert!(!super::is_within_harness_skill_install_dir(
+            &fixture.path().join("x/skills/.claude")
+        ));
+    }
+
+    /// With no skill tree involved, the nearest *marked* project still wins over
+    /// a nearer state-only directory, and a nested configured project (or a
+    /// nested checkout) keeps resolving to itself.
+    #[test]
+    fn marked_project_wins_over_nearer_state_only_dir() {
+        let fixture = tempfile::tempdir().unwrap();
+        let project = fixture.path().join("project");
+        std::fs::create_dir_all(project.join(".agent-doc")).unwrap();
+        std::fs::write(project.join(".agent-doc/config.toml"), "").unwrap();
+
+        let stray = project.join("memory");
+        std::fs::create_dir_all(stray.join(".agent-doc/logs")).unwrap();
+        assert_eq!(
+            super::find_project_root(&stray.join("note.md")),
+            Some(project.clone())
+        );
+
+        for (name, marker) in [
+            ("configured", ".agent-doc/config.toml"),
+            ("described", ".agent-doc/project.md"),
+            ("registered", ".agent-doc/sessions.json"),
+        ] {
+            let nested = project.join("src").join(name);
+            std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+            std::fs::write(nested.join(marker), "").unwrap();
+            assert_eq!(
+                super::find_project_root(&nested.join("plan.md")),
+                Some(nested.clone()),
+                "{marker} marks a real nested project"
+            );
+        }
+        let checkout = project.join("src/checkout");
+        std::fs::create_dir_all(checkout.join(".agent-doc")).unwrap();
+        std::fs::write(checkout.join(".git"), "gitdir: elsewhere\n").unwrap();
+        assert_eq!(
+            super::find_project_root(&checkout.join("plan.md")),
+            Some(checkout)
+        );
+    }
+
+    /// A state-only directory with no marked project above it is still a root:
+    /// bare fixtures and unconfigured standalone projects keep resolving.
+    #[test]
+    fn state_only_dir_without_marked_ancestor_still_resolves() {
+        let fixture = tempfile::tempdir().unwrap();
+        let outer = fixture.path().join("outer");
+        let inner = outer.join("inner");
+        std::fs::create_dir_all(outer.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(inner.join(".agent-doc")).unwrap();
+        assert_eq!(
+            super::find_project_root(&inner.join("plan.md")),
+            Some(inner)
+        );
+        assert_eq!(
+            super::find_project_root(&outer.join("plan.md")),
+            Some(outer)
+        );
+    }
+
+    /// A symlink alias of a project's skill folder (`~/.claude/skills/agent-doc`
+    /// -> `<project>/.claude/skills/agent-doc`) resolves to the project through
+    /// the canonical path instead of finding nothing, which used to send callers
+    /// to the alias's parent and create a stray state dir there.
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_skill_alias_resolves_to_the_target_project() {
+        let fixture = tempfile::tempdir().unwrap();
+        let project = fixture.path().join("project");
+        let skill = project.join(".claude/skills/agent-doc");
+        std::fs::create_dir_all(skill.join("runbooks")).unwrap();
+        std::fs::create_dir_all(project.join(".agent-doc")).unwrap();
+        std::fs::write(project.join(".agent-doc/config.toml"), "").unwrap();
+        std::fs::write(skill.join("runbooks/respond.md"), "").unwrap();
+        let user_skills = fixture.path().join("home/.claude/skills");
+        std::fs::create_dir_all(&user_skills).unwrap();
+        std::os::unix::fs::symlink(&skill, user_skills.join("agent-doc")).unwrap();
+
+        let alias_doc = user_skills.join("agent-doc/runbooks/respond.md");
+        assert_eq!(
+            super::find_project_root(&alias_doc).map(|root| root.canonicalize().unwrap()),
+            Some(project.canonicalize().unwrap())
+        );
+    }
+
     use super::{
         document_state_hash, document_state_hash_from_str, find_project_root, inode_of_path,
         preserve_dropped_operator_buffer, preserve_unproven_reseed, quarantine_corrupt_file,

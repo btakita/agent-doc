@@ -65,6 +65,16 @@ class AgentDocDocumentTextTest {
     }
 
     @Test
+    fun `installed harness skill copy is never a user document`() {
+        assertFalse(isAgentDocUserDocumentPathUtil("/project/.claude/skills/agent-doc/runbooks/respond.md"))
+        assertFalse(isAgentDocUserDocumentPathUtil("/home/me/.claude/skills/agent-doc/SKILL.md"))
+        assertFalse(isAgentDocUserDocumentPathUtil("/project/.codex/skills/agent-doc/runbooks/respond.md"))
+        assertFalse(isAgentDocUserDocumentPathUtil("/project/.cursor/rules/runbooks/respond.md"))
+        assertTrue(isAgentDocUserDocumentPathUtil("/project/skills/agent-doc/session.md"))
+        assertTrue(isAgentDocUserDocumentPathUtil("/project/.claude/notes.md"))
+    }
+
+    @Test
     fun `plain markdown close is a no-op only when no replica is attached`() {
         val plain = "# Notes\n\nOrdinary markdown.\n"
         val session = "$plain\n<!-- agent:exchange -->\n"

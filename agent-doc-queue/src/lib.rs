@@ -73,6 +73,7 @@ pub mod queue_set;
 pub mod queue_sync_payload;
 pub mod queue_tree;
 pub mod reported_closeout;
+pub mod response_tree_sync;
 pub mod restart_recovery;
 pub mod route_dispatch;
 pub mod session_trigger;

@@ -194,7 +194,10 @@ fn strike_after_report_complete_renders_the_moved_state() {
         .map_or(projected.len(), |at| start + struck_row.len() + at);
     let tree = &projected[start..tree_end];
     assert!(tree.contains("**Response [#r-"), "{projected}");
-    assert!(tree.contains("**Action items:**"), "{tree}");
+    // `#handbackrowstructure`: the moved items live in their follow-up rows,
+    // so the slim tree does not copy them again.
+    assert!(!tree.contains("**Action items:**"), "{tree}");
+    assert!(tree.contains("- **Details:** "), "{tree}");
     assert!(tree.contains("- **State:** Complete.\n"), "{tree}");
     assert!(
         tree.contains(&format!("- **Guidance:** {FOLLOW_UP_MOVED_GUIDANCE_LEAD} ")),

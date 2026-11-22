@@ -694,6 +694,15 @@ pub struct RowClosure {
     /// The first row anywhere in the top-level tree, the top-level row
     /// included, that keeps it alive.
     pub first_open_in_tree: Option<RowRef>,
+    /// How many rows nested beneath the row keep it alive.
+    pub open_nested: usize,
+    /// How many rows of the whole top-level tree, the top-level row included,
+    /// keep it alive.
+    pub open_in_tree: usize,
+    /// Whether the top-level row itself is struck. A live top-level row is
+    /// the root item the operator still sees open, even when it is only a
+    /// label for its nested rows.
+    pub top_level_struck: bool,
 }
 
 /// A queue row named in operator-facing text.
@@ -778,6 +787,13 @@ fn first_open(nodes: &[QueueTreeNode], range: std::ops::Range<usize>) -> Option<
         .map(|index| RowRef::of(&nodes[index]))
 }
 
+fn open_count(nodes: &[QueueTreeNode], range: std::ops::Range<usize>) -> usize {
+    range
+        .into_iter()
+        .filter(|&index| keeps_tree_alive(nodes, index))
+        .count()
+}
+
 /// The closability of the tree around the node at `index` of an unfiltered
 /// [`queue_tree`] (built with [`QueueTreeOptions::default`]).
 pub fn row_closure(tree: &QueueTree, index: usize) -> Option<RowClosure> {
@@ -791,6 +807,7 @@ pub fn row_closure(tree: &QueueTree, index: usize) -> Option<RowClosure> {
             .map(|descendant| descendant.context_rows)
             .sum::<usize>();
     let first_open_nested = first_open(nodes, nested.clone());
+    let open_nested = open_count(nodes, nested.clone());
     let top_index = (0..=index).rev().find(|&candidate| {
         let candidate = &nodes[candidate];
         candidate.depth == 0
@@ -804,6 +821,9 @@ pub fn row_closure(tree: &QueueTree, index: usize) -> Option<RowClosure> {
             first_open_in_tree: first_open_nested.clone(),
             first_open_nested,
             top_level: None,
+            open_nested,
+            open_in_tree: open_nested,
+            top_level_struck: node.closed,
         });
     }
     let tree_range = top_index..nested_indexes(nodes, top_index).end;
@@ -811,7 +831,10 @@ pub fn row_closure(tree: &QueueTree, index: usize) -> Option<RowClosure> {
         nested_rows,
         first_open_nested,
         top_level: Some(RowRef::of(&nodes[top_index])),
-        first_open_in_tree: first_open(nodes, tree_range),
+        first_open_in_tree: first_open(nodes, tree_range.clone()),
+        open_nested,
+        open_in_tree: open_count(nodes, tree_range),
+        top_level_struck: nodes[top_index].closed,
     })
 }
 

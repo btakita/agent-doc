@@ -93,11 +93,30 @@ pub struct QueueConsumptionPlan {
 /// closeout proves integrated. The attempt keys are returned so I/O adapters
 /// can fence retained editor delivery on both the queue strike and cell
 /// retirement reaching the authoritative document.
+///
+/// `#handbackrowstructure`: a cell whose struck row points at its full
+/// hand-back in `agent:exchange` (a slim tree's `**Details:**` row) is kept
+/// in place as a plain hand-back record instead of deleted, so retiring the
+/// evidence never deletes the only full copy of the hand-back. It stops being
+/// completion evidence either way, and its key is retired.
 pub fn retire_consumed_completion_feedback(
     content: &str,
     consumed_heads: &[String],
 ) -> (String, HashSet<String>) {
     let mut retired_keys = HashSet::new();
+    let (content, kept) =
+        agent_doc_document::subagent_completion::retain_completion_cells_as_handback_records(
+            content,
+            |evidence| {
+                content.contains(&crate::response_tree_sync::handback_details_token(
+                    &evidence.owner,
+                )) && consumed_heads.iter().any(|head| {
+                    crate::queue_claim::completion_evidence_matches_row(&evidence.item, head)
+                })
+            },
+        );
+    retired_keys.extend(kept.into_iter().map(|evidence| evidence.key));
+    let content = content.as_str();
     let retired = agent_doc_document::subagent_completion::strip_completion_cells_matching(
         content,
         |evidence| {
@@ -4862,6 +4881,13 @@ fn response_summary_row_child(
 /// the queue tree decides how much of it may go: the row alone, the row with
 /// its nested rows, or the whole tree under its top-level row. When an open
 /// row keeps the subtree or the tree alive, the guidance names it.
+///
+/// A nested row reads in the context of its root: when the row is done but
+/// its top-level (root) item is still open, the guidance says so first, with
+/// how many rows of that tree are still open, so a finished second-level row
+/// never reads as if the whole item were done. Preflight queue maintenance
+/// re-renders this guidance whenever the tree changes
+/// ([`crate::response_tree_sync`]).
 pub(crate) fn completed_row_deletion_guidance(
     closure: Option<&crate::queue_tree::RowClosure>,
 ) -> String {
@@ -4876,9 +4902,17 @@ pub(crate) fn completed_row_deletion_guidance(
         count => format!("{count} nested rows"),
     };
     if let Some(open) = &closure.first_open_nested {
+        let open_rows = if closure.open_nested > 1 {
+            format!(
+                "{} of them are still open, first {}",
+                closure.open_nested,
+                open.label()
+            )
+        } else {
+            format!("{} is still open", open.label())
+        };
         return format!(
-            "More work remains beneath this row. This item is complete, but keep this row and its {nested}: {} is still open.",
-            open.label()
+            "More work remains beneath this row. This item is complete, but keep this row and its {nested}: {open_rows}."
         );
     }
     let row_scope = if closure.nested_rows == 0 {
@@ -4894,11 +4928,35 @@ pub(crate) fn completed_row_deletion_guidance(
                 top.label()
             ),
             Some(open) => format!(
-                "{row_scope}; {DONE} Keep the tree under {}: {} is still open.",
-                top.label(),
-                open.label()
+                "This row is done, but {}. {row_scope} (nothing tracked or unpublished remains in it); keep the rest of the tree.",
+                root_still_open(closure, top, open),
             ),
         },
+    }
+}
+
+/// `its root item <top> is still open …`: why a finished nested row's tree
+/// stays (`#guidancescope`).
+fn root_still_open(
+    closure: &crate::queue_tree::RowClosure,
+    top: &crate::queue_tree::RowRef,
+    open: &crate::queue_tree::RowRef,
+) -> String {
+    let root = top.label();
+    if open.line == top.line {
+        return format!("its root item {root} is still open");
+    }
+    let first = open.label();
+    let (state, rows) = if closure.top_level_struck {
+        ("is struck, but", "still open")
+    } else {
+        ("is still open:", "open")
+    };
+    match closure.open_in_tree {
+        0 | 1 => format!("its root item {root} {state} {first} is {rows}"),
+        count => format!(
+            "its root item {root} {state} {count} rows in its tree are {rows}, first {first}"
+        ),
     }
 }
 
@@ -6438,7 +6496,7 @@ fn handback_response_id(
 }
 
 /// The authored Markdown of one canonical hand-back section.
-fn handback_section_markdown(
+pub(crate) fn handback_section_markdown(
     handback: &agent_doc_document::worker_handback::WorkerHandback,
     kind: agent_doc_document::worker_handback::SectionKind,
 ) -> String {
@@ -6481,7 +6539,7 @@ fn handback_section_bodies(
 
 /// Keep explicit lists under their field, with a marker on each generated
 /// item. Unmarked operator replies beneath the field remain queue work.
-fn render_handback_section(
+pub(crate) fn render_handback_section(
     out: &mut String,
     indent: &str,
     kind: agent_doc_document::worker_handback::SectionKind,
@@ -6541,6 +6599,17 @@ fn render_handback_section(
     }
 }
 
+/// A labelled worker hand-back matched to one queue row.
+pub(crate) struct RowHandback {
+    pub(crate) handback: agent_doc_document::worker_handback::WorkerHandback,
+    /// The owner its completion cell names (`subagent:x`).
+    pub(crate) owner: String,
+    /// Whether the completion cell is in the document's `agent:exchange`, so
+    /// the row's tree can point at the full hand-back there instead of
+    /// copying it (`#handbackrowstructure`).
+    pub(crate) in_document: bool,
+}
+
 /// The labelled worker hand-back whose completion cell names `row_text`.
 ///
 /// A unique render wins. When several cells differ, the one whose What changed
@@ -6551,13 +6620,13 @@ fn structured_handback_for_row(
     document: &str,
     response_body: &str,
     row: RowRef<'_>,
-) -> Option<agent_doc_document::worker_handback::WorkerHandback> {
+) -> Option<RowHandback> {
     let mut sources = vec![document];
     if !response_body.trim().is_empty() && response_body != document {
         sources.push(response_body);
     }
-    let mut renders = Vec::<(String, agent_doc_document::worker_handback::WorkerHandback)>::new();
-    for source in sources {
+    let mut renders = Vec::<(String, RowHandback)>::new();
+    for (source_index, source) in sources.into_iter().enumerate() {
         for evidence in agent_doc_document::subagent_completion::completion_evidence(source) {
             if !completion_cell_matches_row(&evidence.item, row) {
                 continue;
@@ -6583,41 +6652,85 @@ fn structured_handback_for_row(
             if renders.iter().any(|(have, _)| have == &render) {
                 continue;
             }
-            renders.push((render, handback));
+            renders.push((
+                render,
+                RowHandback {
+                    handback,
+                    owner: evidence.owner.clone(),
+                    in_document: source_index == 0,
+                },
+            ));
         }
     }
     if renders.len() == 1 {
-        return renders.pop().map(|(_, handback)| handback);
+        return renders.pop().map(|(_, found)| found);
     }
     let mut with_markdown = renders
         .into_iter()
-        .filter(|(_, handback)| {
+        .filter(|(_, found)| {
             handback_section_markdown(
-                handback,
+                &found.handback,
                 agent_doc_document::worker_handback::SectionKind::WhatChanged,
             )
             .contains(".md")
         })
         .collect::<Vec<_>>();
     if with_markdown.len() == 1 {
-        with_markdown.pop().map(|(_, handback)| handback)
+        with_markdown.pop().map(|(_, found)| found)
     } else {
         None
     }
 }
 
-/// The existing Response child, with the worker hand-back sections on it
+/// Looks up struck rows' hand-backs in one document's own completion cells
+/// ([`crate::response_tree_sync`]). The rows' claim lineages are read once.
+pub(crate) struct DocumentHandbacks<'a> {
+    document: &'a str,
+    lineages: QueueRowLineages,
+}
+
+impl<'a> DocumentHandbacks<'a> {
+    pub(crate) fn new(document: &'a str) -> Self {
+        Self {
+            document,
+            lineages: QueueRowLineages::new(document),
+        }
+    }
+
+    /// The hand-back of the queue row at byte `row_start`, when its cell is in
+    /// the document.
+    pub(crate) fn for_row(&self, row_text: &str, row_start: usize) -> Option<RowHandback> {
+        let row = RowRef {
+            text: row_text,
+            start: row_start,
+            lineages: &self.lineages,
+            document: self.document,
+        };
+        structured_handback_for_row(self.document, "", row).filter(|found| found.in_document)
+    }
+}
+
+/// The Response child a struck row takes from its worker hand-back
 /// (`#handbackrowstructure`, `#workerresponsestructure`).
 ///
-/// Summary is the hand-back's own Summary, not a truncated lead. What changed
-/// is kept whole so a created markdown file name stays on the row.
+/// When the hand-back's completion cell is in the document, the tree carries
+/// only the salient part: the Summary's lead paragraph, the Action items that
+/// still live only here, any Open items, then State and Guidance. A
+/// `**Details:**` row names the sections it leaves in `agent:exchange` (What
+/// changed, Verification, Notes, Next actions) and any markdown file What
+/// changed names, so the full hand-back stays one lookup away without being
+/// copied under the row. Retiring that completion cell keeps it as a plain
+/// hand-back record ([`retire_consumed_completion_feedback`]). A hand-back
+/// read only from the response body has no copy in the document, so the row
+/// keeps every section, as before.
 fn handback_response_row_child(
     row_text: &str,
-    handback: &agent_doc_document::worker_handback::WorkerHandback,
+    found: &RowHandback,
     addressed_at: &str,
     closure: Option<&crate::queue_tree::RowClosure>,
     action_items_moved: bool,
 ) -> Option<String> {
+    let handback = &found.handback;
     let response_id = handback_response_id(row_text, handback);
     let marker = agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(&response_id)?;
     let bodies = handback_section_bodies(handback);
@@ -6630,12 +6743,60 @@ fn handback_response_row_child(
         .find(|(kind, _)| *kind == SectionKind::Summary)
         .map_or("Completed.", |(_, text)| text);
     let mut child = format!("{marker}\n- **Timestamp:** {}\n", addressed_at.trim());
-    render_handback_section(&mut child, "", SectionKind::Summary, summary);
-    for (kind, text) in bodies
-        .iter()
-        .filter(|(kind, _)| *kind != SectionKind::Summary)
-    {
-        render_handback_section(&mut child, "", *kind, text);
+    if found.in_document {
+        let lead = crate::response_tree_sync::summary_lead(summary);
+        match &lead {
+            Some((lead, _)) => {
+                child.push_str("- **Summary:** ");
+                child.push_str(lead);
+                child.push('\n');
+            }
+            None => render_handback_section(&mut child, "", SectionKind::Summary, summary),
+        }
+        let summary_trimmed = lead.as_ref().is_some_and(|(_, trimmed)| *trimmed);
+        let mut omitted = Vec::new();
+        let mut what_changed = String::new();
+        for (kind, text) in bodies
+            .iter()
+            .filter(|(kind, _)| *kind != SectionKind::Summary)
+        {
+            match kind {
+                // Moved items live in their follow-up rows; a `none` list
+                // holds nothing.
+                SectionKind::ActionItems
+                    if action_items_moved || handback.action_items().is_empty() => {}
+                SectionKind::OpenItems if handback.open_items().is_empty() => {}
+                SectionKind::ActionItems | SectionKind::OpenItems => {
+                    render_handback_section(&mut child, "", *kind, text);
+                }
+                _ => {
+                    if *kind == SectionKind::WhatChanged {
+                        what_changed = text.clone();
+                    }
+                    omitted.push(kind.heading());
+                }
+            }
+        }
+        if let Some(details) = crate::response_tree_sync::details_value(
+            &found.owner,
+            summary_trimmed,
+            &omitted,
+            &what_changed,
+        ) {
+            child.push_str("- ");
+            child.push_str(crate::response_tree_sync::DETAILS_LABEL);
+            child.push(' ');
+            child.push_str(&details);
+            child.push('\n');
+        }
+    } else {
+        render_handback_section(&mut child, "", SectionKind::Summary, summary);
+        for (kind, text) in bodies
+            .iter()
+            .filter(|(kind, _)| *kind != SectionKind::Summary)
+        {
+            render_handback_section(&mut child, "", *kind, text);
+        }
     }
     // `#followupmovedstate`: once every action item has its own follow-up row,
     // this closed row no longer holds that work, so it says so instead of
@@ -6661,12 +6822,19 @@ fn handback_response_row_child(
 }
 
 /// Section rows the existing Response child does not already show.
+///
+/// With the completion cell in the document, only the salient rows are added
+/// (Action items still held only here, Open items) plus one `**Details:**`
+/// row naming the sections left in `agent:exchange`; see
+/// [`handback_response_row_child`].
 fn handback_sections_missing_from_response(
     document: &str,
     item_end: usize,
     scope_end: usize,
-    handback: &agent_doc_document::worker_handback::WorkerHandback,
+    found: &RowHandback,
+    action_items_moved: bool,
 ) -> Option<(usize, String)> {
+    use agent_doc_document::worker_handback::SectionKind;
     let scope = document.get(item_end..scope_end)?;
     let response_rel = scope.find("**Response [#r-")?;
     let line_rel = scope[..response_rel]
@@ -6684,15 +6852,44 @@ fn handback_sections_missing_from_response(
     let response_scope = document.get(response_abs..block_end).unwrap_or("");
     let section_indent = " ".repeat(response_indent + 2);
     let mut rendered = String::new();
-    for (kind, text) in handback_section_bodies(handback) {
-        if kind == agent_doc_document::worker_handback::SectionKind::Summary {
+    let mut omitted = Vec::new();
+    let mut what_changed = String::new();
+    for (kind, text) in handback_section_bodies(&found.handback) {
+        if kind == SectionKind::Summary {
             continue;
         }
         let label = format!("**{}:**", kind.heading());
         if response_scope.contains(&label) {
             continue;
         }
-        render_handback_section(&mut rendered, &section_indent, kind, &text);
+        let salient = matches!(kind, SectionKind::ActionItems | SectionKind::OpenItems);
+        let empty = match kind {
+            SectionKind::ActionItems => {
+                action_items_moved || found.handback.action_items().is_empty()
+            }
+            SectionKind::OpenItems => found.handback.open_items().is_empty(),
+            _ => false,
+        };
+        if !found.in_document || (salient && !empty) {
+            render_handback_section(&mut rendered, &section_indent, kind, &text);
+        } else if !salient {
+            if kind == SectionKind::WhatChanged {
+                what_changed = text.clone();
+            }
+            omitted.push(kind.heading());
+        }
+    }
+    if found.in_document
+        && !response_scope.contains(crate::response_tree_sync::DETAILS_LABEL)
+        && let Some(details) =
+            crate::response_tree_sync::details_value(&found.owner, false, &omitted, &what_changed)
+    {
+        rendered.push_str(&section_indent);
+        rendered.push_str("- ");
+        rendered.push_str(crate::response_tree_sync::DETAILS_LABEL);
+        rendered.push(' ');
+        rendered.push_str(&details);
+        rendered.push('\n');
     }
     if rendered.is_empty() {
         return None;
@@ -6704,13 +6901,16 @@ fn handback_sections_missing_from_response(
 /// Attach a response child to each newly struck row whose stop explanation is
 /// already in `after` or in a row-specific completion cell (`#stoppedstruckqueue`).
 ///
-/// A labelled worker hand-back is copied onto that same row inside the
-/// Response child (`#handbackrowstructure`, `#workerresponsestructure`):
-/// Summary, What changed, Verification, Action items, Open items, Notes, and
-/// Next actions. What changed is not truncated, so a markdown file the work
-/// created stays visible on the struck row. The copy happens in this mutation.
+/// A labelled worker hand-back is projected onto that same row inside the
+/// Response child (`#handbackrowstructure`, `#workerresponsestructure`): the
+/// salient part (Summary lead, action items held only there, Open items,
+/// State, Guidance) and a `**Details:**` row naming the sections left in
+/// `agent:exchange` and any markdown file What changed names; see
+/// [`handback_response_row_child`]. The projection happens in this mutation.
 /// A row already struck in `before` stays bare. A row that already has a
-/// Response child gains only the hand-back sections it does not yet show. A
+/// Response child gains only the hand-back rows it does not yet show. Every
+/// struck row's generated deletion guidance is then re-read from the new
+/// tree (`#guidancescope`). A
 /// `BLOCKED` / `REVIEW-CLEAN` / Blocker explanation keeps the stopped child
 /// and does not also take the hand-back sections. `response_body` is scanned
 /// only when it is non-empty; callers that hold an unmaterialized capture
@@ -6776,15 +6976,21 @@ pub fn attach_stopped_row_responses(
             if stopped_reason_for_row(after, response_body, row).is_some() {
                 continue;
             }
-            if let Some(handback) = handback.as_ref()
-                && let Some(splice) = handback_sections_missing_from_response(
+            if let Some(found) = handback.as_ref() {
+                let action_items_moved = crate::followup_moved_state::action_items_held_as_rows(
+                    after,
+                    &node.item.text,
+                    &found.handback.action_items(),
+                );
+                if let Some(splice) = handback_sections_missing_from_response(
                     after,
                     node.item.end_byte,
                     scope_end,
-                    handback,
-                )
-            {
-                inserts.push(splice);
+                    found,
+                    action_items_moved,
+                ) {
+                    inserts.push(splice);
+                }
             }
             continue;
         }
@@ -6815,10 +7021,10 @@ pub fn attach_stopped_row_responses(
             inserts.push((insert_at, rendered));
             continue;
         }
-        let Some(handback) = handback else {
+        let Some(found) = handback else {
             continue;
         };
-        if !rendered_response_ids.insert(handback_response_id(&node.item.text, &handback)) {
+        if !rendered_response_ids.insert(handback_response_id(&node.item.text, &found.handback)) {
             continue;
         }
         let closure = closure_tree.as_ref().and_then(|tree| {
@@ -6827,11 +7033,11 @@ pub fn attach_stopped_row_responses(
         let action_items_moved = crate::followup_moved_state::action_items_held_as_rows(
             after,
             &node.item.text,
-            &handback.action_items(),
+            &found.handback.action_items(),
         );
         let Some(child) = handback_response_row_child(
             &node.item.text,
-            &handback,
+            &found,
             addressed_at,
             closure.as_ref(),
             action_items_moved,
@@ -6842,9 +7048,6 @@ pub fn attach_stopped_row_responses(
         let rendered = render_response_lookup_child(&child, &child_indent);
         let insert_at = response_child_insert_at(after, node.item.end_byte, scope_end);
         inserts.push((insert_at, rendered));
-    }
-    if inserts.is_empty() {
-        return Ok(after.to_string());
     }
     inserts.sort_by_key(|insert| std::cmp::Reverse(insert.0));
     let mut out = after.to_string();
@@ -6858,6 +7061,12 @@ pub fn attach_stopped_row_responses(
         }
         block.push_str(&rendered);
         out.insert_str(insert_at, &block);
+    }
+    // `#guidancescope`: the strike changed the tree, so every other struck
+    // row's generated deletion guidance in it is re-read from the new tree
+    // (a sibling that just closed no longer keeps the root open).
+    if let Some((synced, _)) = crate::response_tree_sync::reconcile_tree_scoped_guidance(&out) {
+        out = synced;
     }
     Ok(out)
 }
@@ -8578,7 +8787,7 @@ mod tests {
                 .unwrap();
         assert!(
             annotated.contains(
-                "Keep the tree under [#q-4775b8697412]: [#tdclireleasedownloads] is still open."
+                "its root item [#q-4775b8697412] is still open: [#tdclireleasedownloads] is open."
             ),
             "{annotated}"
         );
@@ -10173,7 +10382,7 @@ mod tests {
         );
         assert_eq!(
             guidance,
-            "Safe to delete this completed row; the item is complete and has no remaining tracked or unpublished work. Keep the tree under `epic`: [#open-child] is still open."
+            "This row is done, but its root item `epic` is still open: [#open-child] is open. Safe to delete this completed row (nothing tracked or unpublished remains in it); keep the rest of the tree."
         );
     }
 
@@ -10203,7 +10412,7 @@ mod tests {
         );
         let first =
             annotate_newly_struck_queue_items_with_response_id(&before, &after, response).unwrap();
-        assert!(first.contains("[#open-child] is still open"), "{first}");
+        assert!(first.contains("[#open-child] is open"), "{first}");
         // The sibling closes before a detached replay of the same response.
         let changed = first.replace("  - do [#open-child]", "  - ~~do [#open-child]~~");
         let replayed =
@@ -12488,13 +12697,28 @@ mod tests {
         assert!(start < sibling_at, "{projected}");
         let tree = &projected[start..sibling_at];
         assert!(tree.contains("**Response [#r-"), "{tree}");
-        assert!(tree.contains("**Summary:**"), "{tree}");
-        assert!(tree.contains("**What changed:**"), "{tree}");
-        assert!(tree.contains(filename), "{tree}");
-        assert!(tree.contains("**Verification:**"), "{tree}");
-        assert!(tree.contains("**Action items:**"), "{tree}");
-        assert!(tree.contains("**Notes:**"), "{tree}");
-        assert!(tree.contains("**Next actions:**"), "{tree}");
+        assert!(
+            tree.contains("**Summary:** Filed the review plan."),
+            "{tree}"
+        );
+        // The completion cell is in the document, so the row carries only the
+        // salient part and points at the rest in agent:exchange; the created
+        // markdown file stays named on the row.
+        assert!(
+            tree.contains(&format!(
+                "**Details:** What changed, Verification, Notes and Next actions are in the `subagent:planreview` hand-back in agent:exchange. What changed names `{filename}`."
+            )),
+            "{tree}"
+        );
+        for copied in [
+            "**What changed:**",
+            "**Verification:**",
+            "**Action items:**",
+            "**Notes:**",
+            "**Next actions:**",
+        ] {
+            assert!(!tree.contains(copied), "{copied}: {tree}");
+        }
         assert!(tree.contains("**State:** Complete."), "{tree}");
         assert!(
             !projected[sibling_at..].contains("**Response [#r-"),
@@ -12534,7 +12758,11 @@ mod tests {
             "the existing response child stays the only one:\n{spliced_tree}"
         );
         assert!(
-            spliced_tree.contains(&format!("**What changed:** `{filename}`")),
+            spliced_tree.contains(&format!("What changed names `{filename}`.")),
+            "{spliced_tree}"
+        );
+        assert!(
+            !spliced_tree.contains("**What changed:**"),
             "{spliced_tree}"
         );
         assert_eq!(
@@ -12776,8 +13004,10 @@ mod tests {
             handback,
         )
         .unwrap();
-        let before = plan_file_run(work, "do [#install]", &cell);
-        let for_leaf = |leaf: &str| plan_file_run(leaf, "do [#install]", &cell);
+        // The hand-back arrives only in the response body, so no copy is in
+        // the document and the row keeps every section (`#handbackrowstructure`).
+        let before = plan_file_run(work, "do [#install]", "");
+        let for_leaf = |leaf: &str| plan_file_run(leaf, "do [#install]", "");
         let after = for_leaf(&struck);
         let summary_child = format!(
             "{struck}\n\
@@ -12786,7 +13016,8 @@ mod tests {
         );
 
         for base in [after, for_leaf(&summary_child)] {
-            let projected = attach_stopped_row_responses(&before, &base, "", STOPPED_AT).unwrap();
+            let projected =
+                attach_stopped_row_responses(&before, &base, &cell, STOPPED_AT).unwrap();
             let marker = agent_doc_markdown_ast::overlay::RESPONSE_DETAIL_MARKER;
             assert!(
                 projected.contains(&format!(
@@ -12804,7 +13035,7 @@ mod tests {
             );
             assert!(projected.contains(&nested), "{projected}");
             assert_eq!(
-                attach_stopped_row_responses(&before, &projected, "", STOPPED_AT).unwrap(),
+                attach_stopped_row_responses(&before, &projected, &cell, STOPPED_AT).unwrap(),
                 projected
             );
             let with_reply = projected.replace(

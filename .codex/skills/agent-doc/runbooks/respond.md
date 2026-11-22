@@ -537,7 +537,13 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      become rows. Bullets under the older **Open items** label are not queued
      either, because that label does not say which are work: when the report
      line says they were held for triage, read them and queue only the work with
-     `queue follow-up` (`#handbackopenitemstriage`).
+     `queue follow-up` (`#handbackopenitemstriage`). When the row is struck,
+     its queue tree keeps only the salient part of the hand-back (Summary lead,
+     action items still held only there, State, Guidance) and a `**Details:**`
+     row pointing at the full hand-back in `agent:exchange`; do not paste What
+     changed or Verification back under the row (`#handbackrowstructure`). A
+     finished nested row's Guidance says whether its root item is still open,
+     and agent-doc re-renders it whenever the tree changes (`#guidancescope`).
      A handback without those labels is recorded verbatim.
      Before treating the handback as complete, compare it with the queue item,
      resolved presets, nested authorization, and any effect named by the worker.

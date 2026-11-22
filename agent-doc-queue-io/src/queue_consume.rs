@@ -6700,7 +6700,14 @@ mod core_tests {
         let responses = |text: &str| text.matches("**Response [#r-").count();
         assert_eq!(responses(&content), 1, "{content}");
         let held_at = content.rfind(&format!("  - {struck}\n")).unwrap();
-        let held_tree = content[held_at..].to_string();
+        // `#guidancescope`: the held tree's Guidance follows the open siblings
+        // as they are struck, so it is compared apart from the tree.
+        let without_guidance = |text: &str| {
+            text.split_inclusive('\n')
+                .filter(|line| !line.trim_start().starts_with("- **Guidance:** "))
+                .collect::<String>()
+        };
+        let held_tree = without_guidance(&content[held_at..]);
         fs::write(&doc, &content).unwrap();
         agent_doc_snapshot_io::checkpoint_document_baseline(
             &doc,
@@ -6726,13 +6733,22 @@ mod core_tests {
                 "{updated}"
             );
             assert_eq!(responses(&updated), 1, "{updated}");
-            assert!(updated.ends_with(&held_tree), "{updated}");
+            assert!(
+                without_guidance(&updated).ends_with(&held_tree),
+                "{updated}"
+            );
         }
         let updated = fs::read_to_string(&doc).unwrap();
         assert_eq!(
             updated.matches(&format!("  - {struck}\n")).count(),
             3,
             "{updated}"
+        );
+        assert!(
+            updated.contains(
+                "**Guidance:** Safe to delete the whole tree under `Decide on the effect type`;"
+            ),
+            "every sibling is struck, so the held tree's guidance says so:\n{updated}"
         );
     }
 

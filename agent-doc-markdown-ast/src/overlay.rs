@@ -580,6 +580,7 @@ fn response_state_metadata_child_end(
         "**Worktree:** ",
         "**Branch:** ",
         "**Integration:** ",
+        "**Details:** ",
     ]
     .into_iter()
     .find_map(|prefix| response_metadata_child_end(lines, opener_index, item_indent, prefix))
@@ -761,7 +762,7 @@ fn response_next_action_decision_child_end(
 /// Labels the binary renders only as response-structure rows beneath a
 /// `**Response [#r-…]**` parent (`#responserowqueuehead`). Labels that take a
 /// value end with a space; the container labels stand alone.
-const GENERATED_RESPONSE_STRUCTURE_VALUE_LABELS: [&str; 12] = [
+const GENERATED_RESPONSE_STRUCTURE_VALUE_LABELS: [&str; 13] = [
     // `#blockerfront`: the blocker reason leads the response structure and is
     // never itself a queue prompt, with or without its Response parent.
     "**Blocker:** ",
@@ -781,6 +782,9 @@ const GENERATED_RESPONSE_STRUCTURE_VALUE_LABELS: [&str; 12] = [
     "**Open items:** ",
     "**Notes:** ",
     "**Next actions:** ",
+    // `#handbackrowstructure`: the slim hand-back tree points at the sections
+    // it leaves in `agent:exchange` instead of copying them.
+    "**Details:** ",
 ];
 const GENERATED_RESPONSE_STRUCTURE_CONTAINER_LABELS: [&str; 2] =
     ["**Choices:**", "**Next actions:**"];
@@ -792,7 +796,7 @@ pub const RESPONSE_DETAIL_MARKER: &str = "<!-- agent-doc:response-detail -->";
 /// Whether a list item's content is a marked response detail or a generated response-structure row
 /// (`**Blocker:** …`, `**Summary:** …`, `**What changed:** …`,
 /// `**Verification:** …`, `**Action items:** …`, `**Open items:** …`,
-/// `**Notes:** …`, `**Next actions:** …`, `**State:** …`, `**Guidance:** …`,
+/// `**Notes:** …`, `**Next actions:** …`, `**Details:** …`, `**State:** …`, `**Guidance:** …`,
 /// `**Timestamp:** …`, `**Choices:**`, `**Next actions:**`, `**Disregard:** …`),
 /// whatever its
 /// parent is.
@@ -2746,6 +2750,9 @@ mod tests {
         ));
         assert!(is_generated_response_structure_row(
             "**Next actions:** Operator reviews the plan."
+        ));
+        assert!(is_generated_response_structure_row(
+            "**Details:** What changed and Notes are in the `subagent:x` hand-back in agent:exchange."
         ));
         // Empty values and ordinary operator prose are not the reserved shape.
         assert!(!is_generated_response_structure_row("**Summary:**"));

@@ -555,6 +555,84 @@ pub fn strip_completion_cells_matching(
     out
 }
 
+/// The heading of a retired completion cell kept as the worker's hand-back
+/// record ([`retain_completion_cells_as_handback_records`]).
+pub const HANDBACK_RECORD_HEADING_PREFIX: &str = "### Re: Subagent hand-back: ";
+
+/// The heading a kept hand-back record carries for `owner` and `item`.
+pub fn handback_record_heading(owner: &str, item: &str) -> String {
+    let owner = owner.replace('`', "'").replace('—', "-");
+    let item = heading_item_text(item);
+    format!("{HANDBACK_RECORD_HEADING_PREFIX}`{owner}` for queue item “{item}”")
+}
+
+/// Turn the attested completion cells selected by `keep` into plain
+/// `agent:exchange` records of the worker's hand-back, in place
+/// (`#handbackrowstructure`).
+///
+/// A struck queue row whose response tree carries only the salient part of a
+/// worker hand-back points at the rest (What changed, Verification, Notes,
+/// Next actions) in `agent:exchange`. Retiring that row's completion cell must
+/// not delete the only full copy, yet the cell must stop being completion
+/// evidence. A kept cell therefore loses its heading grammar, its response
+/// digest, and its keyed marker: it becomes the heading from
+/// [`handback_record_heading`] followed by the same quoted response lines,
+/// byte for byte. Cells `keep` does not select, and every byte outside the
+/// kept cells, are unchanged. Returns the text and the kept cells' evidence.
+pub fn retain_completion_cells_as_handback_records(
+    text: &str,
+    mut keep: impl FnMut(&CompletionEvidence) -> bool,
+) -> (String, Vec<CompletionEvidence>) {
+    let evidence_lines: Vec<&str> = text.lines().collect();
+    let mut kept = Vec::new();
+    let mut ranges = Vec::new();
+    for range in completion_cell_line_ranges(text) {
+        let Some(evidence) = completion_evidence_for_range(&evidence_lines, &range) else {
+            continue;
+        };
+        let Some(digest_index) = completion_response_digest_index(&evidence_lines, range.start)
+        else {
+            continue;
+        };
+        if digest_index + 1 >= range.end.saturating_sub(1) || !keep(&evidence) {
+            continue;
+        }
+        ranges.push((range, digest_index));
+        kept.push(evidence);
+    }
+    if ranges.is_empty() {
+        return (text.to_string(), kept);
+    }
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+    for ((range, digest_index), evidence) in ranges.iter().zip(&kept) {
+        for line in &lines[cursor..range.start] {
+            out.push_str(line);
+        }
+        let newline = if lines[range.start].ends_with("\r\n") {
+            "\r\n"
+        } else {
+            "\n"
+        };
+        out.push_str(&handback_record_heading(&evidence.owner, &evidence.item));
+        out.push_str(newline);
+        // The quoted response lines, without the digest and the keyed marker.
+        for line in &lines[digest_index + 1..range.end - 1] {
+            out.push_str(line);
+        }
+        let marker = lines[range.end - 1];
+        if !marker.ends_with('\n') && out.ends_with('\n') {
+            out.truncate(out.len() - if out.ends_with("\r\n") { 2 } else { 1 });
+        }
+        cursor = range.end;
+    }
+    for line in &lines[cursor..] {
+        out.push_str(line);
+    }
+    (out, kept)
+}
+
 /// A line that must stay a separate markdown block from an adjacent content
 /// line: anything except a blank line or an agent-doc component/boundary
 /// marker, which delimit blocks on their own.
@@ -913,6 +991,47 @@ mod tests {
         assert!(completion_cell_line_ranges(&mismatched).is_empty());
         let edited = with_echo.replace("> Implemented and verified.", "> Edited by operator.");
         assert!(completion_cell_line_ranges(&edited).is_empty());
+    }
+
+    /// `#handbackrowstructure`: a kept cell stays in place as a plain record
+    /// of the hand-back; it is no longer completion evidence, and the other
+    /// cell and every surrounding byte are unchanged.
+    #[test]
+    fn a_kept_completion_cell_becomes_a_plain_handback_record() {
+        let kept = cell_with_response(
+            "subagent:sample",
+            "do [#sample]",
+            "k1",
+            "**Summary**\n\nDone.\n\n**What changed**\n\n- `a.rs`",
+        )
+        .unwrap();
+        let other = cell_with_response("subagent:other", "do [#other]", "k2", "Other.").unwrap();
+        let text = format!("Above.\n\n{kept}\n\n{other}\n\nBelow.\n");
+        let (out, evidence) =
+            retain_completion_cells_as_handback_records(&text, |cell| cell.key == "k1");
+        assert_eq!(evidence.len(), 1);
+        assert_eq!(evidence[0].key, "k1");
+        assert!(
+            out.contains("### Re: Subagent hand-back: `subagent:sample` for queue item “do [#sample]”\n> **Subagent response:**\n>\n> **Summary**\n"),
+            "{out}"
+        );
+        assert!(
+            out.contains("> - `a.rs`\n\n### Re: Subagent completed"),
+            "{out}"
+        );
+        assert!(!out.contains(&marker("k1")), "{out}");
+        assert!(out.contains(&marker("k2")), "{out}");
+        let remaining = completion_evidence(&out);
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].key, "k2");
+        assert!(
+            out.starts_with("Above.\n\n") && out.ends_with("\n\nBelow.\n"),
+            "{out}"
+        );
+        let (again, none) =
+            retain_completion_cells_as_handback_records(&out, |cell| cell.key == "k1");
+        assert_eq!(again, out);
+        assert!(none.is_empty());
     }
 
     #[test]

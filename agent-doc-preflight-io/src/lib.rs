@@ -7680,6 +7680,28 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         ));
     }
 
+    // `#guidancescope` / `#handbackrowstructure`: a struck row's response tree
+    // follows its queue tree. The operator deleting or striking a sibling, or
+    // a placed follow-up row, changes what keeps the root item open, so every
+    // struck row's generated deletion guidance is re-read from the current
+    // tree in every run block; a copied hand-back whose completion cell is
+    // still in agent:exchange moves behind one `**Details:**` row. Only
+    // binary-owned values and byte-exact copied sections change.
+    if let Some((synced, slimmed, guided)) =
+        agent_doc_queue::response_tree_sync::sync_response_trees(&current_content)
+    {
+        current_content = synced;
+        activation.entries_after = queue_entries_for_id(&current_content, &selected_queue_id);
+        mutated = true;
+        eprintln!(
+            "[preflight] queue: response trees synced to the queue tree (slimmed={slimmed}, guidance={guided}; #guidancescope)"
+        );
+        effect_phase.log_op(format!(
+            "queue_response_trees_synced file={} slimmed={slimmed} guidance={guided} (#guidancescope)",
+            file.display()
+        ));
+    }
+
     // Consume start fence if needed
     if activation.consumed_start_fence {
         let new_body = agent_doc_queue::document_queue::render(&activation.entries_after);

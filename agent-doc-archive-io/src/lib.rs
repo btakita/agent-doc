@@ -1579,6 +1579,7 @@ fn structured_inline_response_projections(content: &str) -> BTreeMap<String, BTr
                             "**Worktree:**",
                             "**Branch:**",
                             "**Integration:**",
+                            "**Details:**",
                             "**Context:**",
                             "**Question:**",
                             "**Selected:**",
@@ -3055,6 +3056,43 @@ mod tests {
             dangling_response_references(&doc, &trees_deleted)
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    /// `#handbackrowstructure`: the slim hand-back tree (Summary, Details,
+    /// State, Guidance) is the same evidence as the full copy, and its summary
+    /// is unchanged when the copied sections leave the row.
+    #[test]
+    fn slim_handback_tree_with_a_details_row_is_evidence() {
+        const ID: &str = "[#r-829e6ed2ad19]";
+        let slim = format!(
+            concat!(
+                "<!-- agent:queue -->\n",
+                "- ### https://example.test/pull/368\n",
+                "  - ~~do [#plan]~~\n",
+                "    - **Response {id}**\n",
+                "      - **Timestamp:** 2026-11-21T23:57:03.000Z\n",
+                "      - **Summary:** No agent work is left before the pull request is accepted.\n",
+                "      - **State:** Complete.\n",
+                "      - **Guidance:** This row is done, but its root item `https://example.test/pull/368` is still open: [#merge] is open.\n",
+                "      - **Details:** What changed, Verification and Notes are in the `subagent:plan` hand-back in agent:exchange.\n",
+                "  - do [#merge]\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            id = ID,
+        );
+        assert_eq!(
+            present_inline_response_ids(&slim),
+            BTreeSet::from([ID.to_string()])
+        );
+        let full = slim.replace(
+            "      - **Details:** What changed, Verification and Notes are in the `subagent:plan` hand-back in agent:exchange.\n",
+            "      - **What changed:** Updated the plan.\n      - **Verification:** Read it back.\n",
+        );
+        assert_eq!(
+            committed_inline_response_projection_ids(&slim, &full),
+            BTreeSet::from([ID.to_string()]),
+            "slimming keeps the committed projection's identity"
         );
     }
 

@@ -2464,6 +2464,12 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
             &normalized_responses,
         )
         .unwrap_or(normalized_responses);
+    // `#guidancescope` / `#handbackrowstructure`: struck rows' response trees
+    // follow the current queue tree (re-rendered deletion guidance, copied
+    // hand-back sections behind a `**Details:**` row).
+    let normalized_responses =
+        agent_doc_queue::response_tree_sync::sync_response_trees(&normalized_responses)
+            .map_or(normalized_responses, |(synced, _, _)| synced);
     let response_metadata_repaired = normalized_responses != content;
     if response_metadata_repaired {
         effects.converge_document_or_disk(

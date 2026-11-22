@@ -38,7 +38,30 @@
 //!   belongs to the lifecycle repaint; an id-less live row's text is its work
 //!   identity, and a row a worker holds keeps its text, so neither is
 //!   touched; a label inside inline code is evidence prose and is never
-//!   touched; an attempt the ledger still holds keeps its label.
+//!   touched; an attempt the ledger still holds keeps its label. A
+//!   follow-up row's quoted origin and its action item are scanned for
+//!   code spans separately: the origin is a truncated label that can end
+//!   inside a span (`“… prompt ` - …”`), and its stray backtick used to
+//!   flip every later span of the action item, so a label quoted in code
+//!   was stripped while its lifecycle word stayed (`` `running amend
+//!   core-v1` ``).
+//! - **Claim-label residue.** Rows that still carry a
+//!   retired label's leftovers are restored only when `agent:exchange`
+//!   proves the text they came from:
+//!   - a follow-up row (stable id, no worker holding it, or struck) whose
+//!     whole action item is a hand-back bullet the exchange records with a
+//!     retired `<word> [#owner#N]` in it, either still labelled (quoted in
+//!     code) or with only the lifecycle word left behind, takes that bullet
+//!     with each label and its word removed;
+//!   - a struck row whose whole text is a labelled leaf the exchange quotes
+//!     (`` `🟡 running [#subagent:x#1] amend core-v1` ``) with only the word
+//!     left behind (`~~running amend core-v1~~`), beside a struck sibling
+//!     holding the clean leaf (`~~amend core-v1~~`), takes the leaf's text,
+//!     and the duplicate pass collapses the two.
+//!
+//!   Without such a record nothing is rewritten: a row that merely reads
+//!   like residue (`stop the running amend job`), an id-less live row, a
+//!   row a worker holds, and generated response structure keep their text.
 //!
 //! Generated response structure (`**Label:**` rows and response-detail rows)
 //! is never rewritten by the label pass. Every repair is returned so the
@@ -66,6 +89,10 @@ pub enum SelfRepairKind {
     MisplacedResponseTree,
     /// Removed a retired attempt's owner label from a row's text.
     StaleClaimLabel,
+    /// Restored a row whose text holds a retired claim label's residue (the
+    /// lifecycle word left behind, or the label quoted in a follow-up title)
+    /// to the clean text its `agent:exchange` provenance proves.
+    ClaimLabelResidue,
 }
 
 impl SelfRepairKind {
@@ -75,6 +102,7 @@ impl SelfRepairKind {
             Self::DuplicateResponseTree => "duplicate_response_tree",
             Self::MisplacedResponseTree => "misplaced_response_tree",
             Self::StaleClaimLabel => "stale_claim_label",
+            Self::ClaimLabelResidue => "claim_label_residue",
         }
     }
 }
@@ -85,6 +113,10 @@ pub struct SelfRepair {
     pub kind: SelfRepairKind,
     /// The row text (or label) the repair removed or rewrote.
     pub detail: String,
+    /// A row whose text the repair rewrote: `(before, after)`, each the row
+    /// after its `- ` bullet. Ledgers keyed on row text carry their record
+    /// from `before` to `after`.
+    pub rewritten: Option<(String, String)>,
 }
 
 impl SelfRepair {
@@ -265,6 +297,7 @@ fn dedupe_struck_rows_in_body(body: &str, repairs: &mut Vec<SelfRepair>) -> Stri
             repairs.push(SelfRepair {
                 kind: SelfRepairKind::DuplicateStruckRow,
                 detail: key.2.to_string(),
+                rewritten: None,
             });
         }
     }
@@ -301,16 +334,54 @@ fn outside_code(text: &str) -> Vec<bool> {
     out
 }
 
+/// `inner` as a byte range of `outer`, when it is a subslice of it.
+fn offset_in(outer: &str, inner: &str) -> Option<usize> {
+    let base = outer.as_ptr() as usize;
+    let at = inner.as_ptr() as usize;
+    (at >= base && at + inner.len() <= base + outer.len()).then(|| at - base)
+}
+
+/// Byte offset in a row's item (live or struck, any projection) where the
+/// action item of a follow-up row starts (`follow up on an action item
+/// from <origin>: <item>`); `None` for any other row.
+fn followup_action_offset(item: &str) -> Option<usize> {
+    let text = item.strip_prefix("### ").unwrap_or(item);
+    let text = text.strip_prefix("~~").unwrap_or(text);
+    let work = agent_doc_element_queue::strip_attempt_projection_prefix(text);
+    let action = crate::followup_owner::followup_row_action_item(work)?;
+    offset_in(item, action)
+}
+
+/// [`outside_code`] for a queue row. A follow-up row's quoted origin is a
+/// truncated label that can end inside a code span (`“… prompt ` - …”`), so
+/// its stray backtick must not flip every later span of the action item:
+/// the origin and the action item are scanned separately.
+fn row_outside_code(item: &str) -> Vec<bool> {
+    match followup_action_offset(item) {
+        Some(split) if split > 0 => {
+            let mut out = outside_code(&item[..split]);
+            out.pop();
+            out.extend(outside_code(&item[split..]));
+            out
+        }
+        _ => outside_code(item),
+    }
+}
+
 /// `(start, end, owner, generation)` of every owner annotation in `text`
-/// outside inline code, from byte `from` on.
-fn owner_labels(text: &str, from: usize) -> Vec<(usize, usize, String, u64)> {
-    let outside = outside_code(text);
+/// from byte `from` on whose start `outside` marks (all of them when
+/// `outside` is `None`).
+fn owner_labels(
+    text: &str,
+    from: usize,
+    outside: Option<&[bool]>,
+) -> Vec<(usize, usize, String, u64)> {
     let mut out = Vec::new();
     let mut cursor = from;
     while let Some(found) = text[cursor..].find("[#") {
         let at = cursor + found;
         cursor = at + 2;
-        if !outside[at] {
+        if outside.is_some_and(|outside| !outside[at]) {
             continue;
         }
         let Some(close) = text[at..].find(']') else {
@@ -335,6 +406,30 @@ fn owner_labels(text: &str, from: usize) -> Vec<(usize, usize, String, u64)> {
     out
 }
 
+/// Start of the lifecycle state word written directly before the owner
+/// annotation at `label_start` (`running [#subagent:x#1]`), if there is one.
+/// The word starts after whitespace, an opening quote, a strike, a
+/// parenthesis, or a backtick.
+fn lifecycle_word_start(text: &str, label_start: usize, label_end: usize) -> Option<usize> {
+    let before = text[..label_start].trim_end_matches(' ');
+    if before.len() == label_start {
+        return None;
+    }
+    let word_start = before
+        .rfind(|c: char| c.is_whitespace() || matches!(c, '“' | '\'' | '"' | '~' | '(' | '`'))
+        .map_or(0, |at| {
+            at + before[at..].chars().next().map_or(1, char::len_utf8)
+        });
+    let word = &before[word_start..];
+    (!word.is_empty()
+        && agent_doc_frontmatter::frontmatter::lifecycle_word_before_owner_annotation(&format!(
+            "{word} {}",
+            &text[label_start..label_end]
+        ))
+        .is_some())
+    .then_some(word_start)
+}
+
 /// Byte offset in a live row's item where its leading lifecycle/owner
 /// projection ends (the repaint owns everything before it).
 fn projection_end(item: &str) -> usize {
@@ -342,6 +437,38 @@ fn projection_end(item: &str) -> usize {
     let heading = item.len() - text.len();
     let work = agent_doc_element_queue::strip_attempt_projection_prefix(text);
     heading + (text.len() - work.len())
+}
+
+/// Whether the label pass may rewrite this live row's text: it carries a
+/// stable id and no worker holds it. A live row's text is its work identity
+/// unless it carries a stable id; an id-less row, or one a worker holds,
+/// keeps its text so no claim or lineage record loses its row.
+fn live_row_text_is_rewritable(item: &str) -> bool {
+    let heading = item.strip_prefix("### ").unwrap_or(item);
+    let work = agent_doc_element_queue::strip_attempt_projection_prefix(heading);
+    agent_doc_element_queue::queue_prompt_stable_id(work).is_some()
+        && agent_doc_document::queue_projection::owner_projection(heading).is_none()
+}
+
+/// Remove byte ranges `cuts` (sorted, disjoint) from `text`.
+fn without_ranges(text: &str, cuts: &[(usize, usize)]) -> String {
+    let mut out = text.to_string();
+    for (start, end) in cuts.iter().rev() {
+        out.replace_range(*start..*end, "");
+    }
+    out
+}
+
+/// The cut for a label at `start..end` (with `cut_start` at the label or
+/// its lifecycle word): the following space too, or else a preceding one.
+fn label_cut(text: &str, mut cut_start: usize, end: usize) -> (usize, usize) {
+    let mut cut_end = end;
+    if text[cut_end..].starts_with(' ') {
+        cut_end += 1;
+    } else if cut_start > 0 && text[..cut_start].ends_with(' ') {
+        cut_start -= 1;
+    }
+    (cut_start, cut_end)
 }
 
 fn strip_stale_labels_in_body(
@@ -364,54 +491,41 @@ fn strip_stale_labels_in_body(
         let from = if is_struck_row(item) {
             0
         } else {
-            // A live row's text is its work identity unless it carries a
-            // stable id; an id-less row, or one a worker holds, keeps its
-            // text so no claim or lineage record loses its row.
-            let heading = item.strip_prefix("### ").unwrap_or(item);
-            let work = agent_doc_element_queue::strip_attempt_projection_prefix(heading);
-            if agent_doc_element_queue::queue_prompt_stable_id(work).is_none()
-                || agent_doc_document::queue_projection::owner_projection(heading).is_some()
-            {
+            if !live_row_text_is_rewritable(item) {
                 continue;
             }
             projection_end(item)
         };
-        for (start, end, owner, generation) in owner_labels(item, from) {
+        let outside = row_outside_code(item);
+        let mut cuts = Vec::new();
+        let mut labels = Vec::new();
+        for (start, end, owner, generation) in owner_labels(item, from, Some(&outside)) {
             if is_live(&owner, generation) {
                 continue;
             }
             // A lifecycle state word written before the label (`running
             // [#subagent:x#1]`) is part of the same torn token.
-            let before = item[..start].trim_end_matches(' ');
-            let word_start = before
-                .rfind(|c: char| c.is_whitespace() || matches!(c, '“' | '\'' | '"' | '~' | '('))
-                .map_or(0, |at| {
-                    at + before[at..].chars().next().map_or(1, char::len_utf8)
-                });
-            let word = &before[word_start..];
-            let mut cut_start = start;
-            if !word.is_empty()
-                && word_start >= from
-                && agent_doc_frontmatter::frontmatter::lifecycle_word_before_owner_annotation(
-                    &format!("{word} {}", &item[start..end]),
-                )
-                .is_some()
-            {
-                cut_start = word_start;
-            }
-            // Take the following space too, or else a preceding one.
-            let mut cut_end = end;
-            if item[cut_end..].starts_with(' ') {
-                cut_end += 1;
-            } else if cut_start > 0 && item[..cut_start].ends_with(' ') {
-                cut_start -= 1;
-            }
-            edits.push((item_start + cut_start, item_start + cut_end));
+            let cut_start = lifecycle_word_start(item, start, end)
+                .filter(|word_start| *word_start >= from)
+                .unwrap_or(start);
+            cuts.push(label_cut(item, cut_start, end));
+            labels.push(format!("[#{owner}#{generation}]"));
+        }
+        if cuts.is_empty() {
+            continue;
+        }
+        let after = without_ranges(item, &cuts);
+        for (at, label) in labels.into_iter().enumerate() {
             repairs.push(SelfRepair {
                 kind: SelfRepairKind::StaleClaimLabel,
-                detail: format!("[#{owner}#{generation}] in {item}"),
+                detail: format!("{label} in {item}"),
+                rewritten: (at == 0).then(|| (item.to_string(), after.clone())),
             });
         }
+        edits.extend(
+            cuts.into_iter()
+                .map(|(start, end)| (item_start + start, item_start + end)),
+        );
     }
     if edits.is_empty() {
         return body.to_string();
@@ -435,11 +549,259 @@ pub fn strip_stale_claim_labels(
     })
 }
 
+/// One text `agent:exchange` records with a retired attempt's label in it,
+/// in the three forms a queue row can hold it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LabelEvidence {
+    /// As recorded: `… running [#subagent:x#1] amend core-v1 …`.
+    labelled: String,
+    /// With only the labels removed, the lifecycle words left behind (the
+    /// text an earlier label strip wrote): `… running amend core-v1 …`.
+    residue: String,
+    /// With each label and its lifecycle word removed: `… amend core-v1 …`.
+    clean: String,
+}
+
+/// [`LabelEvidence`] for `text` when it holds a retired attempt's label
+/// with a lifecycle word written before it; `None` otherwise.
+fn label_evidence(text: &str, is_live: &dyn Fn(&str, u64) -> bool) -> Option<LabelEvidence> {
+    let mut label_cuts = Vec::new();
+    let mut word_cuts = Vec::new();
+    for (start, end, owner, generation) in owner_labels(text, 0, None) {
+        if is_live(&owner, generation) {
+            continue;
+        }
+        let Some(word_start) = lifecycle_word_start(text, start, end) else {
+            continue;
+        };
+        label_cuts.push(label_cut(text, start, end));
+        word_cuts.push(label_cut(text, word_start, end));
+    }
+    if label_cuts.is_empty() {
+        return None;
+    }
+    Some(LabelEvidence {
+        labelled: text.to_string(),
+        residue: without_ranges(text, &label_cuts),
+        clean: without_ranges(text, &word_cuts),
+    })
+}
+
+/// Inline code span contents of `line` (single-backtick spans).
+fn code_spans(line: &str) -> Vec<&str> {
+    let mut spans = Vec::new();
+    let mut rest = line;
+    while let Some(open) = rest.find('`') {
+        let after = &rest[open + 1..];
+        let Some(close) = after.find('`') else {
+            break;
+        };
+        spans.push(&after[..close]);
+        rest = &after[close + 1..];
+    }
+    spans
+}
+
+/// Everything `agent:exchange` proves about retired claim labels: each
+/// hand-back bullet (`> - operator: …`) holding one becomes bullet
+/// evidence, and each inline code span quoting a labelled row
+/// (`` `🟡 running [#subagent:x#1] amend core-v1` ``) becomes span
+/// evidence, cut to start at its lifecycle word.
+fn exchange_label_evidence(
+    document: &str,
+    is_live: &dyn Fn(&str, u64) -> bool,
+) -> (Vec<LabelEvidence>, Vec<LabelEvidence>) {
+    let mut bullets = Vec::new();
+    let mut spans = Vec::new();
+    let Ok(components) = element::parse(document) else {
+        return (bullets, spans);
+    };
+    for exchange in components
+        .iter()
+        .filter(|component| component.name == "exchange")
+    {
+        for line in exchange.content(document).lines() {
+            if !line.contains("[#") {
+                continue;
+            }
+            let mut text = line.trim();
+            while let Some(rest) = text.strip_prefix('>') {
+                text = rest.trim_start();
+            }
+            if let Some(bullet) = text
+                .strip_prefix("- ")
+                .or_else(|| text.strip_prefix("* "))
+                .map(str::trim_end)
+                && let Some(evidence) = label_evidence(bullet, is_live)
+                && !bullets.contains(&evidence)
+            {
+                bullets.push(evidence);
+            }
+            for span in code_spans(line) {
+                // The span cut to start at its first labelled lifecycle
+                // word: the leaf text a labelled row held after its
+                // projection (`🟡 running [#subagent:x#1] amend core-v1`).
+                let Some(word_start) = owner_labels(span, 0, None).into_iter().find_map(
+                    |(start, end, owner, generation)| {
+                        (!is_live(&owner, generation))
+                            .then(|| lifecycle_word_start(span, start, end))
+                            .flatten()
+                    },
+                ) else {
+                    continue;
+                };
+                if let Some(evidence) = label_evidence(&span[word_start..], is_live)
+                    && !evidence.clean.trim().is_empty()
+                    && !spans.contains(&evidence)
+                {
+                    spans.push(evidence);
+                }
+            }
+        }
+    }
+    (bullets, spans)
+}
+
+/// Whether `rest`, the text after an action item in its row, holds only
+/// trailing tags and annotations (`[operator-verify]`, `[#q-…]`, `⟦…⟧`) or
+/// a strike's close.
+fn only_trailing_tags(rest: &str) -> bool {
+    let mut rest = rest.trim_start();
+    loop {
+        if rest.is_empty() {
+            return true;
+        }
+        if let Some(after) = rest.strip_prefix("~~") {
+            rest = after.trim_start();
+            continue;
+        }
+        let close = match rest.chars().next() {
+            Some('[') => ']',
+            Some('⟦') => '⟧',
+            _ => return false,
+        };
+        let Some(end) = rest.find(close) else {
+            return false;
+        };
+        rest = rest[end + close.len_utf8()..].trim_start();
+    }
+}
+
+/// `(offset, text)` of a struck row's `~~…~~` content.
+fn struck_inner(item: &str) -> Option<(usize, &str)> {
+    let text = item.strip_prefix("### ").unwrap_or(item);
+    let rest = text.strip_prefix("~~")?;
+    let inner = &rest[..rest.find("~~")?];
+    Some((offset_in(item, inner)?, inner))
+}
+
+fn restore_label_residue_in_body(
+    body: &str,
+    repairs: &mut Vec<SelfRepair>,
+    bullets: &[LabelEvidence],
+    spans: &[LabelEvidence],
+) -> String {
+    let lines = lines_of(body);
+    let parents = parents(&lines);
+    let mut struck_siblings: HashMap<(Option<usize>, usize), Vec<&str>> = HashMap::new();
+    for (index, line) in lines.iter().enumerate() {
+        if let Some((_, inner)) = line.item.and_then(struck_inner) {
+            struck_siblings
+                .entry((parents[index], line.indent))
+                .or_default()
+                .push(inner);
+        }
+    }
+    let mut edits: Vec<(usize, usize, String)> = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        let Some(item) = line.item else {
+            continue;
+        };
+        if item.starts_with("**") || item.contains(RESPONSE_DETAIL_MARKER) {
+            continue;
+        }
+        let struck = is_struck_row(item);
+        if !struck && !live_row_text_is_rewritable(item) {
+            continue;
+        }
+        // A follow-up row whose whole action item is a hand-back bullet the
+        // exchange records with the label, either still labelled (quoted in
+        // code) or with only the lifecycle word left behind.
+        let mut rewrite = followup_action_offset(item).and_then(|at| {
+            let action = &item[at..];
+            bullets.iter().find_map(|evidence| {
+                [&evidence.residue, &evidence.labelled]
+                    .into_iter()
+                    .find(|form| {
+                        action.starts_with(form.as_str())
+                            && only_trailing_tags(&action[form.len()..])
+                    })
+                    .map(|form| (at, at + form.len(), evidence.clean.as_str()))
+            })
+        });
+        // A struck copy whose whole text is a labelled leaf's residue, beside
+        // a struck sibling holding the clean leaf: the two differ only by
+        // the residue, so the copy takes the leaf's text (and the dedupe
+        // pass collapses it).
+        if rewrite.is_none()
+            && let Some((at, inner)) = struck_inner(item)
+        {
+            let siblings = struck_siblings
+                .get(&(parents[index], line.indent))
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            rewrite = spans
+                .iter()
+                .find(|evidence| {
+                    inner == evidence.residue && siblings.contains(&evidence.clean.as_str())
+                })
+                .map(|evidence| (at, at + inner.len(), evidence.clean.as_str()));
+        }
+        let Some((start, end, clean)) = rewrite else {
+            continue;
+        };
+        let item_start = body[line.start..line.end]
+            .find(item)
+            .map_or(line.start, |offset| line.start + offset);
+        let after = format!("{}{clean}{}", &item[..start], &item[end..]);
+        repairs.push(SelfRepair {
+            kind: SelfRepairKind::ClaimLabelResidue,
+            detail: item.to_string(),
+            rewritten: Some((item.to_string(), after)),
+        });
+        edits.push((item_start + start, item_start + end, clean.to_string()));
+    }
+    if edits.is_empty() {
+        return body.to_string();
+    }
+    let mut out = body.to_string();
+    for (start, end, clean) in edits.into_iter().rev() {
+        out.replace_range(start..end, &clean);
+    }
+    out
+}
+
+/// Restore rows holding a retired claim label's residue (see the module
+/// docs) to the clean text `agent:exchange` proves. `is_live(owner,
+/// generation)` says whether the claim ledger still holds that attempt.
+pub fn restore_claim_label_residue(
+    document: &str,
+    is_live: &dyn Fn(&str, u64) -> bool,
+) -> (String, Vec<SelfRepair>) {
+    let (bullets, spans) = exchange_label_evidence(document, is_live);
+    if bullets.is_empty() && spans.is_empty() {
+        return (document.to_string(), Vec::new());
+    }
+    edit_queue_bodies(document, |body, repairs| {
+        restore_label_residue_in_body(body, repairs, &bullets, &spans)
+    })
+}
+
 /// Run every self-repair over `document`: misplaced response trees
 /// (`response_proven(id)` says the `[#r-…]` id's original lives in
 /// `agent:exchange` or the response index), duplicate response trees, stale
-/// claim labels, then duplicate struck rows (a label removal can make two
-/// struck copies identical). `None` when nothing changed; a second run is a
+/// claim labels, claim-label residue, then duplicate struck rows (a label
+/// removal or residue restore can make two struck copies identical). `None` when nothing changed; a second run is a
 /// no-op.
 pub fn self_repair_document(
     document: &str,
@@ -455,6 +817,7 @@ pub fn self_repair_document(
         repairs.extend(ids.into_iter().map(|id| SelfRepair {
             kind: SelfRepairKind::MisplacedResponseTree,
             detail: id,
+            rewritten: None,
         }));
         current = retired;
     }
@@ -467,12 +830,16 @@ pub fn self_repair_document(
         repairs.extend(duplicates.into_iter().map(|id| SelfRepair {
             kind: SelfRepairKind::DuplicateResponseTree,
             detail: id,
+            rewritten: None,
         }));
         current = collapsed;
     }
     let (labelled, label_repairs) = strip_stale_claim_labels(&current, is_live);
     current = labelled;
     repairs.extend(label_repairs);
+    let (restored, residue_repairs) = restore_claim_label_residue(&current, is_live);
+    current = restored;
+    repairs.extend(residue_repairs);
     let (deduped, dedupe_repairs) = dedupe_struck_rows(&current);
     current = deduped;
     repairs.extend(dedupe_repairs);

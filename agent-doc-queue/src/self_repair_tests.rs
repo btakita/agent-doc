@@ -270,6 +270,7 @@ fn a_response_tree_under_a_guidance_line_is_retired_keeping_operator_rows() {
         vec![SelfRepair {
             kind: SelfRepairKind::MisplacedResponseTree,
             detail: "[#r-8eb6516470b1]".to_string(),
+            rewritten: None,
         }]
     );
     assert!(!repaired.contains("Both gh commands"), "{repaired}");
@@ -404,4 +405,171 @@ fn a_cleanup_ask_is_done_only_when_its_artifact_is_gone() {
         !self_repair_artifacts_absent(&doubled, extra),
         "copies self-repair keeps still need a person"
     );
+}
+
+/// `#selfrepaircleanup`: only `subagent:shortitle#1` is still held.
+fn only_shortitle_live(owner: &str, generation: u64) -> bool {
+    owner == "subagent:shortitle" && generation == 1
+}
+
+/// The live session after the first self-repair (anonymized): an earlier
+/// label strip read the truncated origin quote's stray backtick as opening a
+/// code span, so it removed `[#subagent:effectvoid#1]` from one title's
+/// quoted label but left the word (`running amend core-v1`); another title
+/// still quotes the whole label; and two struck copies of the leaf differ
+/// from it only by the word. The exchange records each title's hand-back
+/// bullet and the labelled leaf, so each is restored and the copies
+/// collapse; the id-less agent row, the running row, and the response tree's
+/// evidence prose keep their text. A second sync is a no-op.
+#[test]
+fn claim_label_residue_is_restored_from_exchange_provenance() {
+    let session = include_str!("../tests/fixtures/claim_label_residue_session.md");
+    let (repaired, repairs) =
+        self_repair_document(session, &only_shortitle_live, &unproven).unwrap();
+    let expected = session
+        .replacen(
+            "has struck `running amend core-v1` copies",
+            "has struck `amend core-v1` copies",
+            1,
+        )
+        .replacen(
+            "delete the extra struck copies of `running [#subagent:effectvoid#1] amend core-v1` (there are 3) and any doubled `~~Should we integrate these?~~`; these are real duplicate rows, so the keyed merge still correctly declines on those cuts and uses the fallback merge until cleaned up. [operator-verify]",
+            "delete the extra struck copies of `amend core-v1` (there are 3) and any doubled `~~Should we integrate these?~~`; these are real duplicate rows, so the keyed merge still correctly declines on those cuts and uses the fallback merge until cleaned up. [operator-verify]",
+            1,
+        )
+        .replacen(
+            "  - ~~amend core-v1~~\n  - ~~running amend core-v1~~\n  - ~~running amend core-v1~~\n",
+            "  - ~~amend core-v1~~\n",
+            1,
+        );
+    assert_ne!(expected, session);
+    assert_eq!(repaired, expected, "{repairs:#?}");
+    let residue = repairs
+        .iter()
+        .filter(|repair| repair.kind == SelfRepairKind::ClaimLabelResidue)
+        .collect::<Vec<_>>();
+    assert_eq!(residue.len(), 4, "{repairs:#?}");
+    assert!(residue.iter().all(|repair| repair.rewritten.is_some()));
+    assert_eq!(
+        repairs
+            .iter()
+            .filter(|repair| repair.kind == SelfRepairKind::DuplicateStruckRow)
+            .count(),
+        2,
+        "{repairs:#?}"
+    );
+    assert!(
+        repairs
+            .iter()
+            .all(|repair| repair.kind != SelfRepairKind::StaleClaimLabel),
+        "labels quoted in code are left to the residue pass: {repairs:#?}"
+    );
+    // Evidence prose in the response tree and the exchange is untouched.
+    for kept in [
+        "(`🟡 running [#subagent:effectvoid#1] amend core-v1`, original leaf",
+        "the `running [#…]` rows remain",
+        "under the first struck `running [#subagent:effectvoid#1] amend core-v1` row, plus the original).\n  - **Response [#r-2da6da4a7fd8]**",
+        "- ### 🚧 [#subagent:shortitle#1] `- 🙋 follow up",
+        "> - operator: the live `plan.md` has struck `running [#subagent:effectvoid#1] amend core-v1` copies",
+    ] {
+        assert!(repaired.contains(kept), "{kept}\n{repaired}");
+    }
+    assert!(
+        self_repair_document(&repaired, &only_shortitle_live, &unproven).is_none(),
+        "a second sync is a no-op"
+    );
+}
+
+/// Without an exchange record proving the labelled original, text that
+/// reads like residue is the operator's and stays: a row that says
+/// `running`, a title whose action item goes on past the recorded bullet,
+/// a struck residue copy with no clean sibling, a struck `running` row with
+/// no labelled leaf on record, an attempt the ledger still holds, an id-less
+/// follow-up, and a row a worker holds.
+#[test]
+fn similar_operator_text_without_provenance_is_kept() {
+    let exchange = concat!(
+        "> - operator: the doc has struck `running [#subagent:effectvoid#1] amend core-v1` copies; decide.\n",
+        "> - operator: the doc quotes `running [#subagent:held#2] build it`; decide.\n",
+        "> The leaf `running [#subagent:effectvoid#1] amend core-v1` was labelled.\n",
+    );
+    let queue = concat!(
+        "- stop the running amend core-v1 job [#q-111111111111]\n",
+        "- 🙋 follow up on an action item from queue item “x”: operator: the doc has struck `running amend core-v1` copies; decide. And also keep the running ones. [operator-verify] [#q-222222222222]\n",
+        "- ### group\n",
+        "  - ~~running amend core-v1~~\n",
+        "- ### other\n",
+        "  - ~~running tests~~\n",
+        "  - ~~tests~~\n",
+        "- 🙋 follow up on an action item from queue item “y”: operator: the doc quotes `running build it`; decide. [operator-verify] [#q-333333333333]\n",
+        "- follow up on an action item from queue item “z”: operator: the doc has struck `running amend core-v1` copies; decide.\n",
+        "- 🚧 [#subagent:worker#4] follow up on an action item from queue item “w”: operator: the doc has struck `running amend core-v1` copies; decide. [#q-444444444444]\n",
+    );
+    let document = format!(
+        "---\nagent_doc_format: template\n---\n\n## Run <!-- agent:run id=\"main\" subagents -->\n{queue}<!-- /agent:run -->\n\n## Exchange <!-- agent:exchange -->\n{exchange}<!-- /agent:exchange -->\n"
+    );
+    let is_live = |owner: &str, generation: u64| {
+        (owner == "subagent:held" && generation == 2)
+            || (owner == "subagent:worker" && generation == 4)
+    };
+    let result = self_repair_document(&document, &is_live, &unproven);
+    assert!(
+        result.is_none(),
+        "{:#?}",
+        result.map(|(_, repairs)| repairs)
+    );
+    // With no exchange at all, even the exact residue shape is kept.
+    let (unchanged, repairs) = restore_claim_label_residue(&doc(queue), &retired);
+    assert_eq!(unchanged, doc(queue), "{repairs:?}");
+}
+
+/// A follow-up title's origin quote can end inside a code span
+/// (`“… prompt ` - …”`). Its stray backtick no longer flips the action
+/// item's spans, so a label the action item quotes in code is evidence the
+/// label pass leaves whole, instead of stripping the label and leaving its
+/// lifecycle word behind.
+#[test]
+fn a_stray_origin_backtick_never_exposes_a_quoted_label() {
+    let queue = "- 🙋 follow up on an action item from queue item “agent-doc duplicated my prompt ` - …”: operator: the doc has struck `running [#subagent:effectvoid#1] amend core-v1` copies. [operator-verify] [#q-8eeadf7937c8]\n";
+    let document = doc(queue);
+    let (repaired, repairs) = strip_stale_claim_labels(&document, &retired);
+    assert_eq!(repaired, document, "{repairs:?}");
+    // A label in the origin quote outside code still goes, word included.
+    let queue = "- 🙋 follow up on an action item from queue item “running [#subagent:effectvoid#1] amend ` - …”: operator: decide. [operator-verify] [#q-8eeadf7937c8]\n";
+    let (repaired, repairs) = strip_stale_claim_labels(&doc(queue), &retired);
+    assert_eq!(
+        repaired,
+        doc(
+            "- 🙋 follow up on an action item from queue item “amend ` - …”: operator: decide. [operator-verify] [#q-8eeadf7937c8]\n"
+        )
+    );
+    assert_eq!(
+        repairs[0]
+            .rewritten
+            .as_ref()
+            .map(|(_, after)| after.as_str()),
+        Some(
+            "🙋 follow up on an action item from queue item “amend ` - …”: operator: decide. [operator-verify] [#q-8eeadf7937c8]"
+        )
+    );
+}
+
+/// A short-title follow-up row (`[#<origin>] follow-up: <item>`) is restored
+/// the same way as a legacy one.
+#[test]
+fn short_title_followup_residue_is_restored() {
+    let queue = "- ### 🙋 [#q-8834c5a41276] follow-up: operator: the doc has struck `running amend core-v1` copies; decide. [operator-verify] [#q-8eeadf7937c8]\n";
+    let document = format!(
+        "---\nagent_doc_format: template\n---\n\n## Run <!-- agent:run id=\"main\" subagents -->\n{queue}<!-- /agent:run -->\n\n## Exchange <!-- agent:exchange -->\n> - operator: the doc has struck `running [#subagent:effectvoid#1] amend core-v1` copies; decide.\n<!-- /agent:exchange -->\n"
+    );
+    let (repaired, repairs) = self_repair_document(&document, &retired, &unproven).unwrap();
+    assert_eq!(
+        repaired,
+        document.replace(
+            "struck `running amend core-v1` copies; decide. [operator-verify]",
+            "struck `amend core-v1` copies; decide. [operator-verify]"
+        ),
+        "{repairs:?}"
+    );
+    assert!(self_repair_document(&repaired, &retired, &unproven).is_none());
 }

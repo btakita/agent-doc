@@ -120,6 +120,23 @@ pub fn record_followup_roots(
     root
 }
 
+/// `#selfrepaircleanup`: carry each recorded root from a row's text `before` to its
+/// rewritten text `after` (a self-repair that rewrote the row). The old key
+/// stays until the next record drops it with its row. Best-effort.
+pub fn carry_rewritten_rows(doc: &Path, rewrites: &[(String, String)]) {
+    if rewrites.is_empty() {
+        return;
+    }
+    let previous = load(doc);
+    if previous.is_empty() {
+        return;
+    }
+    let next = followup_provenance::carry_rewritten_rows(&previous, rewrites);
+    if next != previous {
+        save(doc, &next);
+    }
+}
+
 fn save(doc: &Path, ledger: &FollowupRootLedger) {
     let Some((project_root, document_hash, canonical_path)) = state_identity(doc) else {
         return;

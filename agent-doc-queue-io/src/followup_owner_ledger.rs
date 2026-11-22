@@ -87,6 +87,34 @@ pub fn record_classified_followups(doc: &Path, content: &str) {
     save(doc, &next);
 }
 
+/// `#selfrepaircleanup`: carry each recorded key from a row's text `before` to its
+/// rewritten text `after` (a self-repair that rewrote the row), so an
+/// operator's deletion of the tag keeps sticking. The old key stays until
+/// its row is no longer live. Best-effort, like every ledger write.
+pub fn carry_rewritten_rows(doc: &Path, rewrites: &[(String, String)]) {
+    if rewrites.is_empty() {
+        return;
+    }
+    let previous = classified_followup_keys(doc);
+    let next = carried_keys(&previous, rewrites);
+    if next != previous {
+        save(doc, &next);
+    }
+}
+
+fn carried_keys(previous: &HashSet<String>, rewrites: &[(String, String)]) -> HashSet<String> {
+    use agent_doc_queue::followup_owner::followup_owner_key;
+    let mut next = previous.clone();
+    for (before, after) in rewrites {
+        if let (Some(before), Some(after)) = (followup_owner_key(before), followup_owner_key(after))
+            && previous.contains(&before)
+        {
+            next.insert(after);
+        }
+    }
+    next
+}
+
 fn next_classified(
     previous: &HashSet<String>,
     keys: &agent_doc_queue::followup_owner::FollowupRowKeys,
@@ -167,5 +195,26 @@ mod tests {
         // Struck: the key is dropped.
         record_classified_followups(&doc, &queue(&format!("- ~~{claimed}~~\n")));
         assert!(classified_followup_keys(&doc).is_empty());
+    }
+
+    /// `#selfrepaircleanup`: a self-repair that rewrites a recorded row's text
+    /// carries its key, so an operator's deletion of the tag still sticks;
+    /// an unrecorded row gains nothing.
+    #[test]
+    fn rewritten_rows_carry_their_recorded_key() {
+        let before = "follow up on an action item from `x`: operator: drop `running amend core-v1` copies [#q-0123456789ab]";
+        let after = "follow up on an action item from `x`: operator: drop `amend core-v1` copies [#q-0123456789ab]";
+        let other =
+            "follow up on an action item from `x`: operator: other `running y` [#q-0123456789ac]";
+        let key = |row: &str| agent_doc_queue::followup_owner::followup_owner_key(row).unwrap();
+        let previous = HashSet::from([key(before)]);
+        let next = carried_keys(
+            &previous,
+            &[
+                (before.to_string(), after.to_string()),
+                (other.to_string(), other.replace("running ", "")),
+            ],
+        );
+        assert_eq!(next, HashSet::from([key(before), key(after)]));
     }
 }

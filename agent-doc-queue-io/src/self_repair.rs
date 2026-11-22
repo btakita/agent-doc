@@ -1,5 +1,6 @@
 //! `#selfrepaircleanup`: [`agent_doc_queue::self_repair`] with attempt
-//! liveness read from the claim ledger.
+//! liveness read from the claim ledger; the follow-up ledgers keyed on row
+//! text follow each row the repair rewrites.
 
 use std::path::Path;
 
@@ -52,7 +53,19 @@ pub fn self_repair_document_for(file: &Path, content: &str) -> Option<(String, V
         }
     }
     let response_proven = |id: &str| originals.contains(&normalize(id));
-    self_repair_document(content, &is_live, &response_proven)
+    let repaired = self_repair_document(content, &is_live, &response_proven)?;
+    // A rewritten row keeps the follow-up records keyed on its text: its
+    // root provenance and its owner classification follow it to the new
+    // text (the old key stays until its row is gone, so a write that never
+    // lands loses nothing).
+    let rewrites: Vec<(String, String)> = repaired
+        .1
+        .iter()
+        .filter_map(|repair| repair.rewritten.clone())
+        .collect();
+    crate::followup_provenance_ledger::carry_rewritten_rows(file, &rewrites);
+    crate::followup_owner_ledger::carry_rewritten_rows(file, &rewrites);
+    Some(repaired)
 }
 
 /// `#treefinish`: [`agent_doc_queue::response_tree_sync::sync_response_trees_striking`]

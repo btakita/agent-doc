@@ -61,6 +61,28 @@ impl FollowupRootLedger {
     }
 }
 
+/// `ledger` with each recorded root also keyed by its row's rewritten text:
+/// for every `(before, after)` row text pair whose `before` has a root and
+/// whose `after` has none, `after` gets the same root. Old keys are kept.
+pub fn carry_rewritten_rows(
+    ledger: &FollowupRootLedger,
+    rewrites: &[(String, String)],
+) -> FollowupRootLedger {
+    let mut next = ledger.clone();
+    for (before, after) in rewrites {
+        let (Some(before), Some(after)) = (followup_row_key(before), followup_row_key(after))
+        else {
+            continue;
+        };
+        if let Some(root) = ledger.rows.get(&before)
+            && !next.rows.contains_key(&after)
+        {
+            next.rows.insert(after, root.clone());
+        }
+    }
+    next
+}
+
 /// The work identity of a queue row for provenance: its text without the
 /// list heading, lifecycle and attempt projection, the binary's trailing
 /// `[#q-…]` id, a report-state or effect annotation, or the
@@ -602,6 +624,36 @@ mod tests {
         assert_eq!(
             next.rows.keys().cloned().collect::<Vec<_>>(),
             vec!["struck row".to_string()]
+        );
+    }
+
+    /// `#selfrepaircleanup`: a rewritten row keeps its recorded root under its new
+    /// text; the old key stays, and a row with no root gains none.
+    #[test]
+    fn rewritten_rows_carry_their_recorded_root() {
+        let before = "🙋 follow up on an action item from `alpha`: operator: drop `running amend core-v1` copies [operator-verify] [#q-0123456789ab]";
+        let after = "🙋 follow up on an action item from `alpha`: operator: drop `amend core-v1` copies [operator-verify] [#q-0123456789ab]";
+        let mut ledger = FollowupRootLedger::default();
+        ledger.rows.insert(
+            followup_row_key(before).unwrap(),
+            FollowupRoot {
+                root_item_id: "alpha".to_string(),
+            },
+        );
+        let next = carry_rewritten_rows(
+            &ledger,
+            &[
+                (before.to_string(), after.to_string()),
+                ("unrecorded row".to_string(), "rewritten row".to_string()),
+            ],
+        );
+        assert_eq!(next.root_of_row(before), Some("alpha"));
+        assert_eq!(next.root_of_row(after), Some("alpha"));
+        assert_eq!(next.root_of_row("rewritten row"), None);
+        assert_eq!(next.rows.len(), 2);
+        assert_eq!(
+            carry_rewritten_rows(&next, &[(before.to_string(), after.to_string())]),
+            next
         );
     }
 }

@@ -3465,6 +3465,13 @@ exchange leaf; it cannot re-merge an already-composed queue as flat text.
     re-sent observation is accepted; the retired generation stays fenced, and a
     frame the editor no longer owns never re-registers. An editor that
     predates the directive ignores both fields.
+  - An editor that sent the forget itself re-registers before its first
+    observation into that endpoint, without waiting for the rejected receipt
+    (`#tmuxsyncselfretire`; JetBrains `SelfRetiredEndpoints`, same liveness
+    guard). A spanning surface that publishes to a superproject root retires
+    the focus lane on each submodule root, so otherwise every tab switch to a
+    submodule document cost a rejected round trip, and a late, superseded, or
+    unowned receipt dropped the switch.
   - `editor_surface_forget` at generation `g` (exact surface, client-wide, or
     client family) retires an endpoint registered at any generation `<= g` and
     RAISES its fence to `g`; a root registered at a newer generation is never

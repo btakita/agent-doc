@@ -1546,6 +1546,18 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   lanes. If a handoff retires the projection while the re-send is in flight, the transport retires
   the re-registered endpoint at its new generation. A frame the listener does not own keeps the
   fence.
+- A lane never needs the controller's receipt to learn about a retirement it sent itself
+  (`#tmuxsyncselfretire`). `CpRouteClient` records every `editor_surface_forget` it sends per
+  `(client, normalized root)` (`SelfRetiredEndpoints`, monotone), and the next observation of that
+  client on that root re-registers at `max(current, retired + 1)` BEFORE its first send, under the
+  same `mayReregister` guard. This matters for a spanning surface that shows a superproject
+  document beside a submodule document: each layout publication to the superproject root retires
+  the focus lane on the submodule root, and the focus lane publishes the submodule document to
+  that root. Before this rule every tab switch to the submodule document was first rejected
+  `retired_endpoint`, and a late receipt (a controller past the 1 s focus budget), a superseded
+  delivery, or a momentarily retired projection dropped the switch, so tmux kept the other pane
+  focused. The receipt-driven re-registration stays as the path for retirements another process
+  or a controller restart caused.
 - Marketplace artifacts must not statically link IntelliJ internal or override-only APIs. Gradle
   treats both Plugin Verifier categories as hard failures for classic, exact-262, and exact-263
   packages; artifact verification also rejects the private imports named by Marketplace review.

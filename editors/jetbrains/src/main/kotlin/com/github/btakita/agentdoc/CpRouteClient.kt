@@ -218,7 +218,8 @@ internal object CpRouteClient {
         get() = editorSurfaceClientId
     /**
      * Connection generation of this process's editor-surface client. Seeded once per process; only a
-     * re-registration after a typed `retired_endpoint` receipt moves it (`#surfaceretireformal`).
+     * re-registration moves it: after a typed `retired_endpoint` receipt (`#surfaceretireformal`),
+     * or before publishing into an endpoint this process retired itself (`#tmuxsyncselfretire`).
      */
     private val editorSurfaceGeneration =
         java.util.concurrent.atomic.AtomicLong(System.nanoTime().coerceAtLeast(1L))
@@ -280,6 +281,47 @@ internal object CpRouteClient {
         fun nextGeneration(current: Long, retiredGeneration: Long): Long =
             maxOf(current, retiredGeneration + 1)
     }
+
+    /**
+     * The generations at which THIS process sent `editor_surface_forget` for a lane on a controller
+     * root (`#tmuxsyncselfretire`).
+     *
+     * A spanning editor surface publishes to one controller root and retires the surface AND focus
+     * lanes on every other root that owns an open session document. The focus lane, though, routes
+     * a submodule document to that document's own root (`observeEditorFocus`), so in a superproject
+     * window that also shows a submodule document, every layout publication retired the submodule
+     * root's live focus endpoint. Each later tab switch to the submodule document was then fenced
+     * (`rejected=retired_endpoint`) and needed a second, receipt-driven round trip to re-register.
+     * When that receipt did not come back in time (a slow controller past the 1 s focus budget, a
+     * superseded delivery, a lane the projection did not own at that instant), the tab switch was
+     * dropped and tmux kept the other pane focused.
+     *
+     * The editor already knows what it retired, so it does not need the controller's receipt to
+     * learn it: a lane publishing into a root it retired itself re-registers above that generation
+     * BEFORE the first send, under the same `mayReregister` liveness guard the receipt path uses.
+     * The retired generation stays fenced on the controller; only the new, current observation
+     * gains effect authority.
+     */
+    internal class SelfRetiredEndpoints {
+        private val fences = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+        private fun key(clientId: String, projectRoot: String): String =
+            clientId + "\u0000" + normalizedRoot(projectRoot)
+
+        /** Record a forget this process sends; monotone, so a racing older forget never lowers it. */
+        fun record(clientId: String, projectRoot: String, generation: Long) {
+            fences.merge(key(clientId, projectRoot), generation, ::maxOf)
+        }
+
+        /** The generation [clientId] was retired at on [projectRoot] when [current] is still fenced by it. */
+        fun fenceFor(clientId: String, projectRoot: String, current: Long): Long? =
+            fences[key(clientId, projectRoot)]?.takeIf { current <= it }
+
+        private fun normalizedRoot(projectRoot: String): String =
+            runCatching { File(projectRoot).absoluteFile.normalize().path }.getOrDefault(projectRoot)
+    }
+
+    private val selfRetiredEndpoints = SelfRetiredEndpoints()
 
     /**
      * `#idearidereditors`: the controller retires a whole client *family* when a replacement JVM
@@ -447,8 +489,27 @@ internal object CpRouteClient {
             }
         }
         return try {
-            val publishedGeneration = generation.get()
+            val generationBeforePublish = generation.get()
+            val publishedGeneration =
+                registrationGeneration(
+                    clientId = clientId,
+                    projectRoot = projectRoot,
+                    generation = generation,
+                    logLabel = logLabel,
+                    surfaceId = surfaceId,
+                    mayReregister = mayReregister,
+                )
             var receipt = publish(publishedGeneration)
+            if (publishedGeneration != generationBeforePublish && !mayReregister()) {
+                // Same rule as the receipt-driven re-registration below: a handoff that overtook
+                // the self-retirement re-registration may have retired the older generation only.
+                forgetEditorSurfaceClient(
+                    projectRoot = projectRoot,
+                    clientId = clientId,
+                    generation = publishedGeneration,
+                    surfaceId = surfaceId,
+                )
+            }
             val retiredGeneration = SurfaceEndpointReregistration.retiredGeneration(receipt)
             if (retiredGeneration != null) {
                 if (mayReregister()) {
@@ -502,6 +563,34 @@ internal object CpRouteClient {
         }
     }
 
+    /**
+     * The generation the next observation of [clientId] on [projectRoot] publishes at: above this
+     * process's own retirement of that endpoint when the caller still owns the frame
+     * ([SelfRetiredEndpoints]), else the lane's current generation.
+     */
+    private fun registrationGeneration(
+        clientId: String,
+        projectRoot: String,
+        generation: java.util.concurrent.atomic.AtomicLong,
+        logLabel: String,
+        surfaceId: String,
+        mayReregister: () -> Boolean,
+    ): Long {
+        val current = generation.get()
+        val selfRetired = selfRetiredEndpoints.fenceFor(clientId, projectRoot, current) ?: return current
+        if (!mayReregister()) return current
+        val reregistered =
+            generation.updateAndGet {
+                SurfaceEndpointReregistration.nextGeneration(it, selfRetired)
+            }
+        log.info(
+            "[$logLabel] re-registering self-retired editor-surface endpoint before publish " +
+                "root=$projectRoot surface=$surfaceId retired_generation=$selfRetired " +
+                "generation=$current->$reregistered (#tmuxsyncselfretire)",
+        )
+        return reregistered
+    }
+
     fun forgetEditorSurface(projectRoot: String, surfaceId: String? = null): Boolean {
         return forgetEditorSurfaceClient(
             projectRoot = projectRoot,
@@ -522,10 +611,12 @@ internal object CpRouteClient {
 
     fun forgetEditorFocusWithReceipt(projectRoot: String, surfaceId: String): CpEditorRouteResult {
         val socket = cpcSocket(projectRoot)
+        val generation = editorFocusGeneration.get()
+        selfRetiredEndpoints.record(editorFocusClientId, projectRoot, generation)
         val request =
             editorSurfaceForgetRequest(
                 clientId = editorFocusClientId,
-                generation = editorFocusGeneration.get(),
+                generation = generation,
                 retireClientFamily = false,
                 surfaceId = surfaceId,
             )
@@ -552,6 +643,9 @@ internal object CpRouteClient {
         surfaceId: String?,
     ): Boolean {
         val socket = cpcSocket(projectRoot)
+        // Recorded before the send: a forget that lands while its reply is lost still retired the
+        // endpoint, and a later re-registration above a forget that never landed is harmless.
+        selfRetiredEndpoints.record(clientId, projectRoot, generation)
         val request =
             editorSurfaceForgetRequest(
                 clientId = clientId,

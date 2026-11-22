@@ -1,7 +1,15 @@
 package com.github.btakita.agentdoc
 
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
+import java.net.StandardProtocolFamily
+import java.net.UnixDomainSocketAddress
+import java.nio.channels.Channels
+import java.nio.channels.ServerSocketChannel
 import java.nio.file.Files
+import java.nio.file.Path
 import java.nio.file.Paths
+import java.util.Collections
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -84,6 +92,125 @@ class CpRouteClientSurfaceReregistrationTest {
                 "$lane must not re-register unless its caller proves the frame is live",
                 publisher.contains("mayReregister: () -> Boolean = { false }"),
             )
+        }
+    }
+
+    @Test
+    fun `a self-retirement fence is per client and root and monotone`() {
+        val fences = CpRouteClient.SelfRetiredEndpoints()
+        assertNull("nothing retired yet", fences.fenceFor("focus", "/p", 5L))
+        fences.record("focus", "/p/sub/../", 7L)
+        fences.record("focus", "/p", 4L)
+        assertEquals("the same root by another spelling, never lowered", 7L, fences.fenceFor("focus", "/p", 7L))
+        assertNull("a lane already above the fence is not fenced", fences.fenceFor("focus", "/p", 8L))
+        assertNull("another root is not fenced", fences.fenceFor("focus", "/q", 1L))
+        assertNull("another client is not fenced", fences.fenceFor("layout", "/p", 1L))
+    }
+
+    /**
+     * `#tmuxsyncselfretire`, observed 2026-11-22: the spanning surface published to the superproject
+     * root retired the submodule root's focus lane; the next tab switch to the submodule document
+     * was rejected `retired_endpoint`, and when its receipt was late (the controller answered after
+     * the 1 s focus budget) tmux never followed. The lane must re-register before that first send.
+     */
+    @Test
+    fun `a focus lane publishing into a root it retired itself is accepted on the first send`() {
+        FakeSurfaceController().use { controller ->
+            CpRouteClient.forgetEditorFocus(controller.root)
+            val receipt =
+                CpRouteClient.observeEditorFocus(
+                    projectRoot = controller.root,
+                    surfaceJson = """{"focused":"${controller.root}/tasks/a.md"}""",
+                    surfaceId = "root",
+                    mayReregister = { true },
+                )
+            assertEquals(0, receipt.exitCode)
+            assertEquals(
+                "one send, accepted: no rejected round trip for a fence the editor set itself",
+                listOf("accepted"),
+                controller.observations,
+            )
+        }
+    }
+
+    @Test
+    fun `a frame the listener does not own keeps its own retirement fence`() {
+        FakeSurfaceController().use { controller ->
+            CpRouteClient.forgetEditorFocus(controller.root)
+            CpRouteClient.observeEditorFocus(
+                projectRoot = controller.root,
+                surfaceJson = """{"focused":"${controller.root}/tasks/a.md"}""",
+                surfaceId = "root",
+                mayReregister = { false },
+            )
+            assertEquals(listOf("retired"), controller.observations)
+        }
+    }
+
+    /**
+     * Minimal `editor_surface_forget` / `editor_surface_observe` peer with the controller's fence:
+     * a forget retires the caller at its generation, and an observation at a generation `<=` that
+     * fence is the typed `retired_endpoint` receipt.
+     */
+    private class FakeSurfaceController : AutoCloseable {
+        private val dir: Path = Files.createTempDirectory("adsr")
+        val root: String = dir.toString()
+        val observations: MutableList<String> = Collections.synchronizedList(mutableListOf())
+        private val fences = mutableMapOf<String, Long>()
+        private val server =
+            ServerSocketChannel.open(StandardProtocolFamily.UNIX).also {
+                Files.createDirectories(dir.resolve(".agent-doc"))
+                it.bind(UnixDomainSocketAddress.of(dir.resolve(".agent-doc/controller.sock")))
+            }
+        private val thread =
+            Thread {
+                while (true) {
+                    val channel = runCatching { server.accept() }.getOrNull() ?: break
+                    channel.use {
+                        val line = Channels.newReader(it, Charsets.UTF_8).buffered().readLine() ?: return@use
+                        val reply = respond(JsonParser.parseString(line).asJsonObject)
+                        val writer = Channels.newWriter(it, Charsets.UTF_8)
+                        writer.write(reply.toString() + "\n")
+                        writer.flush()
+                    }
+                }
+            }.apply {
+                isDaemon = true
+                start()
+            }
+
+        private fun respond(request: JsonObject): JsonObject {
+            val caller = request.get("caller").asString
+            val generation = request.get("generation").asLong
+            val data = JsonObject()
+            when (request.get("command").asString) {
+                "editor_surface_forget" -> {
+                    fences[caller] = maxOf(fences[caller] ?: Long.MIN_VALUE, generation)
+                    data.addProperty("forgotten", true)
+                }
+                "editor_surface_observe" -> {
+                    val fence = fences[caller]
+                    if (fence != null && generation <= fence) {
+                        observations.add("retired")
+                        data.addProperty("idle", true)
+                        data.addProperty("rejected", "retired_endpoint")
+                        data.addProperty("reregister_above_generation", fence)
+                    } else {
+                        observations.add("accepted")
+                        data.addProperty("idle", false)
+                    }
+                }
+            }
+            return JsonObject().also {
+                it.addProperty("ok", true)
+                it.add("data", data)
+            }
+        }
+
+        override fun close() {
+            server.close()
+            thread.join(1_000)
+            dir.toFile().deleteRecursively()
         }
     }
 }

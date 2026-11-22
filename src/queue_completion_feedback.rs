@@ -710,6 +710,12 @@ pub(crate) fn describe_handback_followups(
             ));
         }
     }
+    if !followups.self_repair_items.is_empty() {
+        text.push_str(&format!(
+            " {} operator cleanup item(s) about agent-doc's own document artifacts were NOT queued as operator rows: agent-doc repairs them itself on the next preflight or `queue sync` (#selfrepaircleanup); do not queue them.",
+            followups.self_repair_items.len(),
+        ));
+    }
     if followups.already_present > 0 {
         text.push_str(&format!(
             " {} action item(s) already have a follow-up row in queue id `{queue}`.",
@@ -943,6 +949,19 @@ fn upsert_completion_feedback(
         &followups.inserted,
     );
     let updated = admitted.content;
+    for item in &followups.self_repair_items {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_self_repair_cleanup_item_absorbed owner={} item=\"{}\" (#selfrepaircleanup)",
+                claim.owner,
+                item.chars()
+                    .take(160)
+                    .map(|c| if c == '"' || c == '\n' { '\'' } else { c })
+                    .collect::<String>(),
+            ),
+        );
+    }
     let mut followups = followups;
     // The report names each row as it now reads, id included, so the
     // coordinator's `--ack-text` and recap quote the row the operator sees.

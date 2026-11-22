@@ -28,6 +28,11 @@
 //! `#transientcloseout` gate waits on the operator instead of refusing every
 //! turn end over it.
 //!
+//! `#selfrepaircleanup`: an `operator:` item that asks to delete or clean
+//! one of agent-doc's own document artifacts (an extra struck copy, a copied
+//! response tree, a stale claim label) is not queued as a `🙋` row; the
+//! binary's self-repair pass does it ([`crate::self_repair`]).
+//!
 //! `#handbackrefusedcommandexact`: when that placement cannot be proven, the
 //! report line prints one `queue follow-up` command on its own line. `--after`
 //! is the originating head and each `--item` is a follow-up row that was not
@@ -47,6 +52,11 @@ pub struct HandbackFollowups {
     pub operator_owned: usize,
     /// Action items whose row the queue already holds (live or struck).
     pub already_present: usize,
+    /// `#selfrepaircleanup`: operator asks to clean up agent-doc's own
+    /// document artifacts (duplicate struck rows, a copied response tree, a
+    /// stale claim label). agent-doc repairs those itself on the next sync
+    /// ([`crate::self_repair`]), so they are not queued as `🙋` rows.
+    pub self_repair_items: Vec<String>,
     /// Open items held for coordinator triage, not queued.
     pub held_for_triage: usize,
     /// Why the action items could not be queued. The worker result is still
@@ -159,6 +169,10 @@ pub fn plan_handback_followups(
         // (`#completionfeedbackscope`); a live queue row would not.
         if item.contains("<!--") || item.contains("-->") {
             withheld += 1;
+            continue;
+        }
+        if crate::self_repair::is_self_repair_cleanup_item(&item) {
+            outcome.self_repair_items.push(item);
             continue;
         }
         // `#humanfollowupowner`: a human-owned item's row waits on the
@@ -349,6 +363,33 @@ mod tests {
              <!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n\
              <!-- agent:queue id=main -->\n{queue}<!-- /agent:queue -->\n"
         )
+    }
+
+    /// `#selfrepaircleanup`: a worker that reports an agent-doc-caused
+    /// duplicate as an `operator: delete …` item gets no `🙋` row for it;
+    /// the self-repair pass removes the duplicate. Other operator work in the
+    /// same hand-back still waits on the operator.
+    #[test]
+    fn agent_doc_duplicate_cleanup_items_are_never_queued_as_operator_rows() {
+        let handback = concat!(
+            "**Summary:** fixed the merge.\n",
+            "**Action items:**\n",
+            "- operator: in the live `sample-bugs.md` queue, delete the extra struck copies of `running [#subagent:effectvoid#1] amend core-v1` (there are 3) and any doubled `~~Should we integrate these?~~`.\n",
+            "- operator: in the editor, delete the misplaced copy under ` - ~~Complete the work.~~`: the block from ` - **Response [#r-8eb6516470b1]**` through its Guidance line.\n",
+            "- operator: decide whether to revoke the PyPI API token.\n",
+        );
+        let content = doc("- ☑️ do [#decisionidstamp]\n- later work\n");
+        let (updated, outcome) =
+            plan_handback_followups(&content, "do [#decisionidstamp]", handback);
+        assert_eq!(outcome.self_repair_items.len(), 2, "{outcome:?}");
+        assert_eq!(outcome.inserted.len(), 1, "{outcome:?}");
+        assert!(outcome.inserted[0].contains("revoke the PyPI API token"));
+        assert_eq!(outcome.operator_owned, 1);
+        assert!(
+            !updated.contains("delete the extra struck copies"),
+            "{updated}"
+        );
+        assert!(!updated.contains("misplaced copy"), "{updated}");
     }
 
     #[test]

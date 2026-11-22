@@ -7680,6 +7680,29 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         ));
     }
 
+    // `#selfrepaircleanup`: agent-doc repairs its own queue artifacts (extra
+    // struck copies of a row, a response tree copied under a second row, a
+    // retired attempt's claim label left in row text) instead of asking the
+    // operator to. Each transform is provably safe and logged.
+    if let Some((repaired, repairs)) =
+        agent_doc_queue_io::self_repair::self_repair_document_for(file, &current_content)
+    {
+        current_content = repaired;
+        activation.entries_after = queue_entries_for_id(&current_content, &selected_queue_id);
+        mutated = true;
+        eprintln!(
+            "[preflight] queue: self-repaired {} agent-doc artifact(s) (#selfrepaircleanup)",
+            repairs.len()
+        );
+        for repair in &repairs {
+            effect_phase.log_op(format!(
+                "queue_self_repair file={} source=preflight {} (#selfrepaircleanup)",
+                file.display(),
+                repair.log_fields()
+            ));
+        }
+    }
+
     // `#guidancescope` / `#handbackrowstructure`: a struck row's response tree
     // follows its queue tree. The operator deleting or striking a sibling, or
     // a placed follow-up row, changes what keeps the root item open, so every
@@ -9548,6 +9571,14 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         mutated = true;
         eprintln!("[preflight] active: reconciled after queue lifecycle projection");
     }
+    // `#looseends`: the digest of every unresolved row, from the queue tree
+    // as this pass leaves it (after the lifecycle paint, so Running agrees
+    // with `agent:active`).
+    if let Some(reconciled) = agent_doc_queue::loose_ends::reconcile_loose_ends(&current_content)? {
+        current_content = reconciled;
+        mutated = true;
+        eprintln!("[preflight] loose ends: digest re-rendered (#looseends)");
+    }
     // The worktree inventory as recorded; checkouts the pass retires are
     // removed after the cut, below.
     if let Some(reconciled) =
@@ -9753,6 +9784,12 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         if let Some(reconciled) =
             agent_doc_work_projection::reconcile_managed_active_items_for(file, &new_snap)?
         {
+            new_snap = reconciled;
+        }
+        if let Some(reconciled) = agent_doc_queue::loose_ends::reconcile_loose_ends_ensuring(
+            &new_snap,
+            agent_doc_queue::loose_ends::has_loose_ends_component(&current_content),
+        )? {
             new_snap = reconciled;
         }
         if let Some(reconciled) = queue_maintenance_reconcile_worktrees(file, effect_fence, || {

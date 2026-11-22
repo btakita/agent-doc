@@ -2557,6 +2557,105 @@ fn canonicalize_duplicate_response_projections_in_queue(
     body: &str,
     seen: &mut HashSet<String>,
 ) -> String {
+    collapse_response_projections_in_queue(body, &mut |_lines, parents, response_ids| {
+        let mut duplicate_markers = HashMap::<usize, String>::new();
+        // `#ackrespdup`: duplicate markers whose retained tree (first seen in
+        // this same queue body) hangs from the same parent row.
+        let mut first_in_body = HashMap::<String, usize>::new();
+        let mut same_parent_duplicates = HashSet::<usize>::new();
+        for (index, response_id) in response_ids.iter().enumerate() {
+            let Some(response_id) = response_id else {
+                continue;
+            };
+            if seen.insert(response_id.clone()) {
+                first_in_body.insert(response_id.clone(), index);
+            } else {
+                duplicate_markers.insert(index, response_id.clone());
+                if first_in_body
+                    .get(response_id)
+                    .is_some_and(|first| parents[*first] == parents[index])
+                {
+                    same_parent_duplicates.insert(index);
+                }
+            }
+        }
+        (duplicate_markers, same_parent_duplicates)
+    })
+}
+
+/// `#selfrepaircleanup`: retire every `**Response [#r-…]**` tree that hangs
+/// directly under a generated response-structure row (a `**Guidance:**`,
+/// `**State:**`, or response-detail row never holds a response of its own)
+/// when `proven(id)` says the response's original lives elsewhere (in
+/// `agent:exchange` or the response index). Like the duplicate heal, only
+/// generated rows go: a copy with nothing else beneath it is removed, and
+/// one holding operator descendants becomes an inert `**Closed by:**`
+/// backlink over them, byte for byte. Returns the document and the retired
+/// ids.
+pub fn retire_misplaced_queue_response_projections(
+    content: &str,
+    proven: &dyn Fn(&str) -> bool,
+) -> Result<(String, Vec<String>)> {
+    let components = element::parse(content)?;
+    let mut retired = Vec::new();
+    let mut edits = Vec::new();
+    for queue in components
+        .iter()
+        .filter(|component| component.name == "queue")
+    {
+        let body = queue.content(content);
+        let repaired =
+            collapse_response_projections_in_queue(body, &mut |lines, parents, response_ids| {
+                let mut misplaced = HashMap::<usize, String>::new();
+                for (index, response_id) in response_ids.iter().enumerate() {
+                    let Some(response_id) = response_id else {
+                        continue;
+                    };
+                    let Some(parent) = parents[index] else {
+                        continue;
+                    };
+                    let Some((_, parent_item)) = markdown_list_item(lines[parent]) else {
+                        continue;
+                    };
+                    if response_ids[parent].is_none()
+                        && agent_doc_markdown_ast::overlay::is_generated_response_structure_row(
+                            parent_item,
+                        )
+                        && proven(response_id)
+                    {
+                        misplaced.insert(index, response_id.clone());
+                    }
+                }
+                retired.extend(misplaced.values().cloned());
+                let remove_outright = misplaced.keys().copied().collect();
+                (misplaced, remove_outright)
+            });
+        if repaired != body {
+            edits.push((queue.open_end, queue.close_start, repaired));
+        }
+    }
+    let mut repaired = content.to_string();
+    for (start, end, body) in edits.into_iter().rev() {
+        repaired.replace_range(start..end, &body);
+    }
+    retired.sort();
+    retired.dedup();
+    Ok((repaired, retired))
+}
+
+/// Response markers to retire (line index -> id), and which of them may be
+/// removed outright when nothing but generated metadata sits beneath them.
+type CollapseSelection = (HashMap<usize, String>, HashSet<usize>);
+
+/// Picks the [`CollapseSelection`] from a queue body's lines, each list
+/// item's parent line, and each line's response id.
+type CollapseSelect<'a> =
+    dyn FnMut(&[&str], &[Option<usize>], &[Option<String>]) -> CollapseSelection + 'a;
+
+/// The shared collapse: every marker `select` retires loses its generated
+/// rows, and becomes an inert `**Closed by:**` backlink over its operator
+/// descendants unless it may be removed outright.
+fn collapse_response_projections_in_queue(body: &str, select: &mut CollapseSelect<'_>) -> String {
     let lines = body.split_inclusive('\n').collect::<Vec<_>>();
     let mut offsets = Vec::with_capacity(lines.len() + 1);
     offsets.push(0usize);
@@ -2592,27 +2691,7 @@ fn canonicalize_duplicate_response_projections_in_queue(
             .map(str::to_string)
     };
     let response_ids = (0..lines.len()).map(response_id_at).collect::<Vec<_>>();
-    let mut duplicate_markers = HashMap::<usize, String>::new();
-    // `#ackrespdup`: duplicate markers whose retained tree (first seen in
-    // this same queue body) hangs from the same parent row.
-    let mut first_in_body = HashMap::<String, usize>::new();
-    let mut same_parent_duplicates = HashSet::<usize>::new();
-    for (index, response_id) in response_ids.iter().enumerate() {
-        let Some(response_id) = response_id else {
-            continue;
-        };
-        if seen.insert(response_id.clone()) {
-            first_in_body.insert(response_id.clone(), index);
-        } else {
-            duplicate_markers.insert(index, response_id.clone());
-            if first_in_body
-                .get(response_id)
-                .is_some_and(|first| parents[*first] == parents[index])
-            {
-                same_parent_duplicates.insert(index);
-            }
-        }
-    }
+    let (duplicate_markers, same_parent_duplicates) = select(&lines, &parents, &response_ids);
     if duplicate_markers.is_empty() {
         return body.to_string();
     }
@@ -2667,6 +2746,36 @@ fn canonicalize_duplicate_response_projections_in_queue(
         let line = lines[index];
         line.len() - line.trim_start_matches([' ', '\t']).len()
     };
+    // A removed generated row's continuation lines (a multi-line Summary's
+    // paragraphs: deeper-indented text that is not a list item) go with it.
+    let is_removed = |removed: &[(usize, usize)], index: usize| {
+        removed.iter().any(|(removed_start, removed_end)| {
+            *removed_start <= offsets[index] && offsets[index + 1] <= *removed_end
+        })
+    };
+    let mut continuation = Vec::new();
+    for index in 0..lines.len() {
+        let trimmed = lines[index].trim_start_matches([' ', '\t']);
+        if trimmed.trim().is_empty()
+            || trimmed.starts_with("- ")
+            || trimmed.starts_with("* ")
+            || trimmed.starts_with("+ ")
+            || is_removed(&removed, index)
+        {
+            continue;
+        }
+        let owner_item = (0..index).rev().find(|prior| {
+            let prior_trimmed = lines[*prior].trim_start_matches([' ', '\t']);
+            (prior_trimmed.starts_with("- ")
+                || prior_trimmed.starts_with("* ")
+                || prior_trimmed.starts_with("+ "))
+                && line_indent(*prior) < line_indent(index)
+        });
+        if owner_item.is_some_and(|item| is_removed(&removed, item)) {
+            continuation.push((offsets[index], offsets[index + 1]));
+        }
+    }
+    removed.extend(continuation);
     for (owner, start, end) in duplicate_headers {
         let response_id = &duplicate_markers[&owner];
         // The duplicate's subtree: every following line indented deeper than

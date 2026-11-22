@@ -2467,6 +2467,25 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
     // `#guidancescope` / `#handbackrowstructure`: struck rows' response trees
     // follow the current queue tree (re-rendered deletion guidance, copied
     // hand-back sections behind a `**Details:**` row).
+    // `#selfrepaircleanup`: agent-doc's own queue artifacts are repaired
+    // here, not handed to the operator as `🙋` cleanup rows.
+    let normalized_responses =
+        match crate::self_repair::self_repair_document_for(file, &normalized_responses) {
+            Some((repaired, repairs)) => {
+                for repair in &repairs {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "queue_self_repair file={} source=queue_sync {} (#selfrepaircleanup)",
+                            file.display(),
+                            repair.log_fields()
+                        ),
+                    );
+                }
+                repaired
+            }
+            None => normalized_responses,
+        };
     let normalized_responses =
         agent_doc_queue::response_tree_sync::sync_response_trees(&normalized_responses)
             .map_or(normalized_responses, |(synced, _, _)| synced);
@@ -2558,6 +2577,34 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
 
     let lifecycle_changed =
         project_all_queue_runtime_state_under_apply_guard(effects, file, &queue_edit_guard)?;
+    // `#looseends`: re-render the digest of every unresolved row after the
+    // lifecycle paint, so its Running group agrees with `agent:active`.
+    let loose_ends_changed = {
+        let content = effects.current_document_content(file, "queue_sync_loose_ends")?;
+        match agent_doc_queue::loose_ends::reconcile_loose_ends(&content)? {
+            Some(digest) => {
+                effects.converge_document_or_disk(
+                    file,
+                    &digest,
+                    &content,
+                    "queue_sync_loose_ends",
+                )?;
+                let written =
+                    effects.current_document_content(file, "queue_sync_after_loose_ends")?;
+                if let Err(warning) = agent_doc_snapshot_io::checkpoint_document_baseline(
+                    file,
+                    &written,
+                    agent_doc_ops_log_io::log_op,
+                ) {
+                    eprintln!(
+                        "[queue sync] warning: failed to update snapshot after loose-ends digest: {warning}"
+                    );
+                }
+                true
+            }
+            None => false,
+        }
+    };
     let reconciled = effects.current_document_content(file, "queue_sync_debt")?;
     let plan =
         build_queue_sync_reconciliation_plan(file, &reconciled, previous_content.as_deref())?;
@@ -2637,6 +2684,7 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
             || response_metadata_repaired
             || waiting_tree_repaired
             || lifecycle_changed
+            || loose_ends_changed
             || answered_count > 0
             || action_debt_remains =>
         {

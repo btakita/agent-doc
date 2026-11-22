@@ -20,6 +20,7 @@ agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.586" 
 parking_lot = "0.12"
 agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.35.586" }
 agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.35.586" }
+agent-doc-archive-io = { path = "../agent-doc-archive-io", version = "0.35.586" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.35.586" }
 agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.586" }
 agent-doc-element-backlog-io = { path = "../agent-doc-element-backlog-io", version = "0.35.586" }

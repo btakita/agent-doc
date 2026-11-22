@@ -549,6 +549,19 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      nothing is left its State is `Complete.` and its Guidance says the tree
      can be deleted (`#guidancescope`). Read that list instead of the whole
      tree, and resolve an operator action item by striking its answer row.
+     Its Guidance opens with a done tally (`✅ 11/11 done.`, `🙋 3/4 done, 1
+     yours.`, `⏳ 5/9 done, 1 yours.`); `Waiting on operator input.` means only
+     the operator's entries are left (`#donetrack`).
+     The binary-owned `## Loose ends` digest (`agent:loose-ends`, above
+     `## Active`) lists every unresolved row of the document, one line each
+     with its id, under Decide, Do, Blocked, and Running, re-rendered on every
+     preflight and `queue sync` (`#looseends`); read it for what is open and
+     quote its ids in a recap. agent-doc repairs its own queue artifacts
+     (extra struck copies of a row, a response tree copied under a second
+     row, a retired claim label such as `[#subagent:x#1]` left in row text)
+     on every sync, logged in ops.log (`#selfrepaircleanup`): do not write an
+     `operator:` action item asking someone to delete or clean those, and do
+     not queue one by hand.
      A handback without those labels is recorded verbatim.
      Before treating the handback as complete, compare it with the queue item,
      resolved presets, nested authorization, and any effect named by the worker.

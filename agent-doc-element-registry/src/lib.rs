@@ -104,6 +104,23 @@ pub const WORKTREES_DESCRIPTOR: ElementDescriptor = ElementDescriptor {
     realtime: true,
 };
 
+/// `#looseends`: binary-owned digest of every unresolved queue row (Decide /
+/// Do / Blocked / Running), re-rendered on every sync. Informational: its
+/// lines are never prompts and never start a turn.
+pub const LOOSE_ENDS_DESCRIPTOR: ElementDescriptor = ElementDescriptor {
+    name: "loose-ends",
+    aliases: &[],
+    source: ElementSource::BuiltIn,
+    shape: ElementShape::Component,
+    authority: ElementAuthority::DerivedProjection,
+    write_policy: ElementWritePolicy::ProjectionOnly,
+    scheduling_role: ElementSchedulingRole::None,
+    turn_role: ElementTurnRole::Informational,
+    realtime_model: ElementRealtimeModel::None,
+    composition_role: ElementCompositionRole::Observer,
+    realtime: true,
+};
+
 /// Inline prompt whose answer is written into the nested `place:out` block.
 ///
 /// The prompt body is a turn trigger. The output bytes are derived and are
@@ -134,6 +151,7 @@ pub const BUILT_IN_ELEMENTS: &[ElementDescriptor] = &[
     RECAP_DESCRIPTOR,
     ACTIVE_DESCRIPTOR,
     WORKTREES_DESCRIPTOR,
+    LOOSE_ENDS_DESCRIPTOR,
     PLACE_DESCRIPTOR,
     agent_doc_element_signals::DESCRIPTOR,
     TODO_DESCRIPTOR,
@@ -272,6 +290,19 @@ mod tests {
         assert_eq!(place.write_policy, ElementWritePolicy::MergeOnly);
         assert_eq!(place.composition_role, ElementCompositionRole::LocalOnly);
         assert!(place.realtime);
+    }
+
+    #[test]
+    fn loose_ends_is_an_informational_derived_projection() {
+        let loose_ends = find_built_in("loose-ends").unwrap();
+        assert_eq!(loose_ends.authority, ElementAuthority::DerivedProjection);
+        assert_eq!(loose_ends.write_policy, ElementWritePolicy::ProjectionOnly);
+        assert_eq!(loose_ends.scheduling_role, ElementSchedulingRole::None);
+        assert_eq!(loose_ends.turn_role, ElementTurnRole::Informational);
+        assert_eq!(
+            loose_ends.turn_role,
+            agent_doc_element::turn_role_for_component_name("loose-ends")
+        );
     }
 
     #[test]

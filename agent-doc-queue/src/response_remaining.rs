@@ -14,13 +14,22 @@
 //!
 //! ```text
 //! - **Remaining:**
-//!   - operator: unlock the `login` keyring once <!-- agent-doc:response-detail -->
-//! - **State:** Follow-up work remains.
-//! - **Guidance:** 1 item remains, listed under Remaining. Keep this tree until it is done.
+//!   - 🙋 operator: unlock the `login` keyring once <!-- agent-doc:response-detail -->
+//! - **State:** Waiting on operator input.
+//! - **Guidance:** 🙋 5/6 done, 1 yours. Only you can finish this: unlock the `login` keyring once. Strike or answer its row when done.
 //! ```
 //!
-//! and, once nothing is left, `**State:** Complete.` with a Guidance saying
-//! the row (or the response) and everything under it can be deleted.
+//! `#donetrack`: the Guidance opens with a tally of the tree (every action
+//! item once, and every queue row, in the response's scope): `✅ N/N done.`
+//! when nothing is left, `🙋 d/t done, k yours.` when only operator work is
+//! left, `⏳ d/t done, k yours.` while agent work is open. Each Remaining
+//! entry carries `⏳` (agent) or `🙋` (operator). With only operator work
+//! left the State is `Waiting on operator input.` and the Guidance names the
+//! one thing to do (or how many); with agent work left the State is
+//! `Follow-up work remains.`; once nothing is left, `**State:** Complete.`
+//! and the Guidance says `Complete. Safe to delete this tree.` (or this
+//! response). The wordings this pass wrote before the tally are still its
+//! own and are rewritten.
 //!
 //! # What remains
 //!
@@ -73,23 +82,41 @@ use crate::followup_owner::{
     ActionItemOwner, FOLLOWUP_ROW_PREFIX, OPERATOR_OWNED_TAG, classify_action_item,
     explicit_owner_label, followup_row_action_item,
 };
-use crate::queue_consume::{RESPONSE_STATE_COMPLETE, RESPONSE_STATE_FOLLOW_UP};
+use crate::queue_consume::{
+    RESPONSE_STATE_COMPLETE, RESPONSE_STATE_FOLLOW_UP, RESPONSE_STATE_WAITING_ON_OPERATOR,
+};
 use crate::queue_tree::{QueueNodeState, QueueTree};
 
 /// The response-structure label of the short list of what is left.
 pub const REMAINING_LABEL: &str = "**Remaining:**";
 
-/// Guidance once nothing remains under a response that hangs under a row.
-pub const NOTHING_REMAINS_ROW_GUIDANCE: &str = "Nothing remains: every action item and row under this row is resolved. Safe to delete this row and everything under it.";
+/// Guidance once nothing remains under a response that hangs under a row
+/// (after the tally, `✅ N/N done.`).
+pub const NOTHING_REMAINS_ROW_GUIDANCE: &str = "Complete. Safe to delete this tree.";
 
-/// Guidance once nothing remains in a response nested under another response.
-pub const NOTHING_REMAINS_RESPONSE_GUIDANCE: &str = "Nothing remains in this response: every action item and row in it is resolved. Safe to delete this response.";
+/// Guidance once nothing remains in a response nested under another response
+/// (after the tally).
+pub const NOTHING_REMAINS_RESPONSE_GUIDANCE: &str = "Complete. Safe to delete this response.";
+
+/// The earlier nothing-remains wordings, still recognized as this pass's own.
+const LEGACY_NOTHING_REMAINS_GUIDANCE: [&str; 2] = [
+    "Nothing remains: every action item and row under this row is resolved. Safe to delete this row and everything under it.",
+    "Nothing remains in this response: every action item and row in it is resolved. Safe to delete this response.",
+];
+
+/// Opens the guidance when only operator work is left.
+pub const ONLY_YOU_GUIDANCE_LEAD: &str = "Only you can finish this: ";
 
 /// The most entries a Remaining list shows; the rest are counted.
 const REMAINING_LIMIT: usize = 8;
 
 /// The longest entry text after its owner label.
 const ENTRY_TEXT_LIMIT: usize = 100;
+
+/// Status glyphs (`#donetrack`): done, agent work open, operator work open.
+pub const DONE_GLYPH: &str = "✅";
+pub const AGENT_OPEN_GLYPH: &str = "⏳";
+pub const OPERATOR_OPEN_GLYPH: &str = "🙋";
 
 /// `N item(s) remain, listed under Remaining. Keep this tree until …`.
 pub fn remaining_guidance(count: usize) -> String {
@@ -98,6 +125,45 @@ pub fn remaining_guidance(count: usize) -> String {
     } else {
         format!("{count} items remain, listed under Remaining. Keep this tree until they are done.")
     }
+}
+
+/// `#donetrack`: what is done in a response's tree, as one leading token:
+/// `✅ 11/11 done.`, `🙋 3/4 done, 1 yours.`, or `⏳ 5/9 done, 1 yours.`
+/// (`yours` counts operator-owned entries still open).
+pub fn tally(done: usize, total: usize, agent_open: usize, yours: usize) -> String {
+    let glyph = if agent_open > 0 {
+        AGENT_OPEN_GLYPH
+    } else if yours > 0 {
+        OPERATOR_OPEN_GLYPH
+    } else {
+        DONE_GLYPH
+    };
+    if yours > 0 {
+        format!("{glyph} {done}/{total} done, {yours} yours.")
+    } else {
+        format!("{glyph} {done}/{total} done.")
+    }
+}
+
+/// The tally a guidance opens with, and the rest of it.
+fn split_tally(guidance: &str) -> Option<&str> {
+    let rest = [DONE_GLYPH, AGENT_OPEN_GLYPH, OPERATOR_OPEN_GLYPH]
+        .iter()
+        .find_map(|glyph| guidance.strip_prefix(glyph))?
+        .strip_prefix(' ')?;
+    let (fraction, rest) = rest.split_once(" done")?;
+    let (done, total) = fraction.split_once('/')?;
+    if done.parse::<usize>().is_err() || total.parse::<usize>().is_err() {
+        return None;
+    }
+    let rest = match rest.strip_prefix(", ") {
+        Some(yours) => {
+            let digits = yours.chars().take_while(char::is_ascii_digit).count();
+            yours[digits..].strip_prefix(" yours.")?
+        }
+        None => rest.strip_prefix('.')?,
+    };
+    rest.strip_prefix(' ')
 }
 
 fn is_remaining_guidance(value: &str) -> bool {
@@ -110,11 +176,17 @@ fn is_remaining_guidance(value: &str) -> bool {
 
 /// Whether a State/Guidance pair is one this pass manages.
 fn managed_form(state: &str, guidance: &str) -> bool {
+    if let Some(tail) = split_tally(guidance) {
+        return (state == RESPONSE_STATE_FOLLOW_UP && is_remaining_guidance(tail))
+            || (state == RESPONSE_STATE_WAITING_ON_OPERATOR
+                && tail.starts_with(ONLY_YOU_GUIDANCE_LEAD))
+            || (state == RESPONSE_STATE_COMPLETE
+                && (tail == NOTHING_REMAINS_ROW_GUIDANCE
+                    || tail == NOTHING_REMAINS_RESPONSE_GUIDANCE));
+    }
     (state == RESPONSE_STATE_FOLLOW_UP
         && (guidance == FOLLOW_UP_ACTION_ITEMS_GUIDANCE || is_remaining_guidance(guidance)))
-        || (state == RESPONSE_STATE_COMPLETE
-            && (guidance == NOTHING_REMAINS_ROW_GUIDANCE
-                || guidance == NOTHING_REMAINS_RESPONSE_GUIDANCE))
+        || (state == RESPONSE_STATE_COMPLETE && LEGACY_NOTHING_REMAINS_GUIDANCE.contains(&guidance))
 }
 
 // ---------------------------------------------------------------------------
@@ -551,8 +623,13 @@ struct Entry {
 impl Entry {
     fn render(&self, indent: usize) -> String {
         let text = short_imperative(&self.text, ENTRY_TEXT_LIMIT);
+        let glyph = if self.owner == "agent" {
+            AGENT_OPEN_GLYPH
+        } else {
+            OPERATOR_OPEN_GLYPH
+        };
         format!(
-            "{}- {}: {} {RESPONSE_DETAIL_MARKER}\n",
+            "{}- {glyph} {}: {} {RESPONSE_DETAIL_MARKER}\n",
             " ".repeat(indent),
             self.owner,
             text
@@ -699,6 +776,14 @@ pub fn reconcile_response_remaining(document: &str) -> Option<(String, usize)> {
                     {
                         return true;
                     }
+                    // `#selfrepaircleanup`: an operator ask to clean up
+                    // agent-doc's own artifacts is agent-doc's repair, not
+                    // operator work, unless a live row still tracks it.
+                    if !matches.contains(&FollowupRow::Live)
+                        && crate::self_repair::is_self_repair_cleanup_item(&item.raw)
+                    {
+                        return true;
+                    }
                     item.agent
                         && (item.span.end.max(item.line + 1)..response.block.end).any(|line| {
                             !in_item_span(line)
@@ -773,6 +858,59 @@ pub fn reconcile_response_remaining(document: &str) -> Option<(String, usize)> {
         }
         entries.sort_by_key(|entry| entry.line);
 
+        // `#donetrack`: every action item (once per key) and queue row in
+        // scope, done or not, for the tally.
+        let mut tally_keys: Vec<String> = Vec::new();
+        let mut item_spans: Vec<std::ops::Range<usize>> = Vec::new();
+        let mut total = 0usize;
+        let mut done = 0usize;
+        for (other_index, other) in responses.iter().enumerate() {
+            if other_index != index && !scope.contains(&other.line) {
+                continue;
+            }
+            for (item, resolved_item) in other.items.iter().zip(&resolved[other_index]) {
+                item_spans.push(item.line..item.span.end.max(item.line + 1));
+                if tally_keys.contains(&item.key) {
+                    continue;
+                }
+                tally_keys.push(item.key.clone());
+                total += 1;
+                done += usize::from(*resolved_item);
+            }
+        }
+        let mut row_lines: Vec<usize> = scope.clone().collect();
+        if let Some(parent) = response.parent {
+            row_lines.insert(0, parent);
+        }
+        for line in row_lines {
+            let Some(node) = node_at(line) else {
+                continue;
+            };
+            let row = &tree.nodes[node];
+            if row.state == QueueNodeState::Group
+                || item_spans.iter().any(|span| span.contains(&line))
+                || followup_row_action_item(&plain_text(&row.full_text))
+                    .is_some_and(|item| tally_keys.contains(&item_key(item)))
+            {
+                continue;
+            }
+            if row.closed {
+                total += 1;
+                done += 1;
+            } else if crate::queue_tree::row_keeps_tree_alive(&tree, node) {
+                total += 1;
+            }
+        }
+        let yours = entries
+            .iter()
+            .filter(|entry| entry.owner != "agent")
+            .count();
+        let agent_open = entries.len() - yours;
+        // An entry the tally did not see (an open parent row folded into an
+        // item) still counts as open work.
+        let total = total.max(done + entries.len());
+        let tally = tally(done, total, agent_open, yours);
+
         let (state_range, state) = response.state.clone().expect("managed has a state");
         let (guidance_range, guidance) = response.guidance.clone().expect("managed has guidance");
         let (want_state, want_guidance, want_remaining) = if entries.is_empty() {
@@ -784,11 +922,27 @@ pub fn reconcile_response_remaining(document: &str) -> Option<(String, usize)> {
             } else {
                 NOTHING_REMAINS_RESPONSE_GUIDANCE
             };
-            (RESPONSE_STATE_COMPLETE, guidance.to_string(), None)
+            (RESPONSE_STATE_COMPLETE, format!("{tally} {guidance}"), None)
+        } else if agent_open == 0 {
+            // Only the operator can finish it: say exactly what to do.
+            let what = if yours == 1 {
+                let text = short_imperative(&entries[0].text, ENTRY_TEXT_LIMIT);
+                let text = text.trim_end_matches(['.', ' ']);
+                format!("{ONLY_YOU_GUIDANCE_LEAD}{text}. Strike or answer its row when done.")
+            } else {
+                format!(
+                    "{ONLY_YOU_GUIDANCE_LEAD}{yours} items for you, listed under Remaining. Strike or answer each row when done."
+                )
+            };
+            (
+                RESPONSE_STATE_WAITING_ON_OPERATOR,
+                format!("{tally} {what}"),
+                Some(render_remaining(&entries, response.detail_indent)),
+            )
         } else {
             (
                 RESPONSE_STATE_FOLLOW_UP,
-                remaining_guidance(entries.len()),
+                format!("{tally} {}", remaining_guidance(entries.len())),
                 Some(render_remaining(&entries, response.detail_indent)),
             )
         };

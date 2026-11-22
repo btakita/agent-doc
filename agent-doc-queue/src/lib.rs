@@ -45,6 +45,7 @@ pub mod followup_provenance;
 pub mod handback_followups;
 pub mod hourglass_lifetime;
 pub mod linked_todo_queue;
+pub mod loose_ends;
 #[cfg(test)]
 mod nest_leaf_select_tests;
 pub mod queue_closeout_guard;
@@ -76,6 +77,7 @@ pub mod reported_closeout;
 pub mod response_remaining;
 pub mod response_tree_sync;
 pub mod restart_recovery;
+pub mod self_repair;
 pub mod route_dispatch;
 pub mod session_trigger;
 pub mod stale_completion_evidence;

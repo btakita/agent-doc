@@ -61,6 +61,10 @@ fn response(document: &str, marker: &str) -> (String, String, Vec<String>) {
                 guidance.get_or_insert(value.to_string());
             }
         } else if in_remaining && let Some(rest) = line.strip_prefix(&format!("{detail}  - ")) {
+            let rest = [AGENT_OPEN_GLYPH, OPERATOR_OPEN_GLYPH]
+                .iter()
+                .find_map(|glyph| rest.strip_prefix(&format!("{glyph} ")))
+                .unwrap_or(rest);
             remaining.push(
                 rest.strip_suffix(RESPONSE_DETAIL_MARKER)
                     .unwrap_or(rest)
@@ -76,6 +80,11 @@ fn response(document: &str, marker: &str) -> (String, String, Vec<String>) {
         guidance.expect("guidance"),
         remaining,
     )
+}
+
+/// The guidance after its `#donetrack` tally.
+fn tail(guidance: &str) -> &str {
+    split_tally(guidance).unwrap_or_else(|| panic!("no tally: {guidance}"))
 }
 
 const ROOT: &str = "- **Response [#r-2da6da4a7fd8]**";
@@ -106,11 +115,12 @@ fn a_fully_resolved_tree_says_complete_with_nothing_remaining() {
     assert_eq!(changed, 2, "the root response and the nested one");
     let (state, guidance, remaining) = response(&synced, ROOT);
     assert_eq!(state, RESPONSE_STATE_COMPLETE);
-    assert_eq!(guidance, NOTHING_REMAINS_ROW_GUIDANCE);
+    assert_eq!(tail(&guidance), NOTHING_REMAINS_ROW_GUIDANCE);
+    assert!(guidance.starts_with(DONE_GLYPH), "{guidance}");
     assert!(remaining.is_empty());
     let (state, guidance, remaining) = response(&synced, NESTED);
     assert_eq!(state, RESPONSE_STATE_COMPLETE);
-    assert_eq!(guidance, NOTHING_REMAINS_RESPONSE_GUIDANCE);
+    assert_eq!(tail(&guidance), NOTHING_REMAINS_RESPONSE_GUIDANCE);
     assert!(remaining.is_empty());
     assert!(!synced.contains(REMAINING_LABEL));
     // Only the two State and two Guidance values changed.
@@ -137,7 +147,9 @@ fn the_live_tree_lists_what_is_left() {
     let (synced, _) = reconcile_response_remaining(SESSION).expect("trees synced");
     let (state, guidance, remaining) = response(&synced, ROOT);
     assert_eq!(state, RESPONSE_STATE_FOLLOW_UP);
-    assert_eq!(guidance, remaining_guidance(2));
+    assert_eq!(tail(&guidance), remaining_guidance(2));
+    assert!(guidance.starts_with(AGENT_OPEN_GLYPH), "{guidance}");
+    assert!(guidance.contains(", 1 yours."), "{guidance}");
     assert_eq!(
         remaining,
         vec![
@@ -148,7 +160,7 @@ fn the_live_tree_lists_what_is_left() {
     );
     let (state, guidance, remaining) = response(&synced, NESTED);
     assert_eq!(state, RESPONSE_STATE_FOLLOW_UP);
-    assert_eq!(guidance, remaining_guidance(1));
+    assert_eq!(tail(&guidance), remaining_guidance(1));
     assert_eq!(
         remaining,
         vec!["agent: Complete the rest of the work".to_string()]
@@ -161,8 +173,17 @@ fn the_live_tree_lists_what_is_left() {
     let (resynced, changed) = reconcile_response_remaining(&struck).expect("resynced");
     assert_eq!(changed, 2);
     assert_eq!(response(&resynced, NESTED).0, RESPONSE_STATE_COMPLETE);
-    let (_, guidance, remaining) = response(&resynced, ROOT);
-    assert_eq!(guidance, remaining_guidance(1));
+    // Only the operator's row is left: the State says so and the Guidance
+    // says exactly what to do.
+    let (state, guidance, remaining) = response(&resynced, ROOT);
+    assert_eq!(state, RESPONSE_STATE_WAITING_ON_OPERATOR);
+    assert!(guidance.starts_with(OPERATOR_OPEN_GLYPH), "{guidance}");
+    assert!(
+        tail(&guidance).starts_with(&format!(
+            "{ONLY_YOU_GUIDANCE_LEAD}in the editor, delete the misplaced copy"
+        )),
+        "{guidance}"
+    );
     assert_eq!(remaining.len(), 1);
     assert!(remaining[0].starts_with("operator: in the editor, delete the misplaced copy"));
     assert!(reconcile_response_remaining(&resynced).is_none());
@@ -179,8 +200,11 @@ fn one_unresolved_operator_item_is_a_one_item_list() {
     ];
     for marker in [ROOT, NESTED] {
         let (state, guidance, remaining) = response(&synced, marker);
-        assert_eq!(state, RESPONSE_STATE_FOLLOW_UP, "{marker}");
-        assert_eq!(guidance, remaining_guidance(1), "{marker}");
+        assert_eq!(state, RESPONSE_STATE_WAITING_ON_OPERATOR, "{marker}");
+        assert!(
+            tail(&guidance).starts_with(&format!("{ONLY_YOU_GUIDANCE_LEAD}decide whether to keep")),
+            "{marker}: {guidance}"
+        );
         assert_eq!(remaining, expected, "{marker}");
     }
     // The list is reserved response structure, never queue rows: the queue
@@ -218,7 +242,7 @@ fn an_agent_item_needs_a_completion_or_a_struck_followup_row() {
     let document = SESSION.replace("        - ~~Do the next actions.~~\n", "");
     let (synced, _) = reconcile_response_remaining(&document).expect("trees synced");
     let (_, guidance, remaining) = response(&synced, ROOT);
-    assert_eq!(guidance, remaining_guidance(3));
+    assert_eq!(tail(&guidance), remaining_guidance(3));
     assert_eq!(
         remaining[0],
         "agent: check the agent-doc CI run for `d9190e1d6a` on `main`"
@@ -286,14 +310,14 @@ fn guidance_names_rows_by_readable_text() {
 fn an_edited_remaining_list_stays() {
     let (synced, _) = reconcile_response_remaining(SESSION).expect("trees synced");
     let edited = synced.replace(
-        "      - agent: Complete the rest of the work <!-- agent-doc:response-detail -->\n",
-        "      - agent: Complete the rest of the work <!-- agent-doc:response-detail -->\n      - and also tidy the titles\n",
+        "      - ⏳ agent: Complete the rest of the work <!-- agent-doc:response-detail -->\n",
+        "      - ⏳ agent: Complete the rest of the work <!-- agent-doc:response-detail -->\n      - and also tidy the titles\n",
     );
     assert_ne!(edited, synced);
     let after = reconcile_response_remaining(&strike(&edited, LIVE_LEAF));
     let after = after.map_or_else(|| strike(&edited, LIVE_LEAF), |(doc, _)| doc);
     let (_, guidance, remaining) = response(&after, ROOT);
-    assert_eq!(guidance, remaining_guidance(2));
+    assert_eq!(tail(&guidance), remaining_guidance(2));
     assert!(remaining.contains(&"and also tidy the titles".to_string()));
 }
 

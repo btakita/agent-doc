@@ -1184,7 +1184,13 @@ fn restored_reported_claim(
 /// Join a kept `☑️` row to its one receipt as `Reported` (`#keptlineage`).
 ///
 /// `Ok(None)` is a stale `☑️` with no lineage attempt. That row is not a kept
-/// completion, so the caller admits a fresh claim. Several attempts that do
+/// completion, so the caller admits a fresh claim. A settled prose-only
+/// receipt that no ledger claim and no open reported-release receipt still
+/// holds is not a kept completion either (gh#433):
+/// its closeout facts are complete and nothing is left to consume, so a
+/// repeatable directive row such as `#upgrade` dispatches again. That
+/// receipt is closed first so the new generation is the row's only open
+/// receipt. Several attempts that do
 /// not name one receipt are an error: claim must not start a dispatch it
 /// cannot join. The caller's owner is not a new attempt. `queue release
 /// --requeue` is the explicit redispatch; this path never inserts `Claimed`.
@@ -1202,6 +1208,21 @@ fn reattach_kept_completion(
         bail!(
             "queue head {target:?} is a kept completion whose lineage generation is unset; queue claim will not start a dispatch"
         );
+    }
+    if crate::queue_lineage::attempt_is_settled_prose_only(&attempt)
+        && !settled_prose_report_still_held(file, target)?
+    {
+        crate::queue_lineage::close_settled_prose_only(file, &attempt)?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_claim_kept_prose_superseded owner={} generation={} item_bytes={} (gh#433)",
+                attempt.owner,
+                attempt.generation,
+                target.trim().len()
+            ),
+        );
+        return Ok(None);
     }
     let now = now_secs();
     let restored = restored_reported_claim(target, &attempt, now, ttl_secs, owner_session);
@@ -1248,6 +1269,22 @@ fn reattach_kept_completion(
         .filter(|head| claim_identity(head) == identity)
         .count();
     persist_claim_result(file, result, occurrences).map(Some)
+}
+
+/// Whether a reported completion for `target` is still unconsumed outside its
+/// lineage: a ledger claim for the row, or an open reported-release receipt
+/// governing it (gh#433).
+fn settled_prose_report_still_held(file: &Path, target: &str) -> Result<bool> {
+    let identity = claim_identity(target);
+    if load_ledger(file)?
+        .claims
+        .iter()
+        .any(|claim| claim.identity == identity)
+    {
+        return Ok(true);
+    }
+    let content = claim_view_text(file)?;
+    Ok(crate::claim_release_receipt::governing_receipt(file, &content, target).is_some())
 }
 
 /// [`claim_with_session`] that names the worker harness (`#claimworkerharness`).
@@ -4307,6 +4344,144 @@ mod tests {
             again_claim.state,
             agent_doc_queue::queue_claim::QueueClaimState::Reported
         );
+        assert_eq!(crate::queue_lineage::load(&doc).unwrap().attempts.len(), 1);
+    }
+
+    /// Seed one lineage attempt for `item` as `owner` with no ledger claim
+    /// left behind, the way a pruned claim leaves its receipt.
+    fn seed_unclaimed_attempt(doc: &Path, item: &str, owner: &str, worker: &str) -> QueueClaim {
+        let floor = crate::queue_lineage::max_generation(doc, item).unwrap();
+        let mut claims = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+        claims.claim_in_session_with_generation_floor(item, owner, 10, 100, None, floor);
+        let mut claim = claims.claims.remove(0);
+        claim.state = agent_doc_queue::queue_claim::QueueClaimState::Running;
+        claim.worker = Some(agent_doc_queue::queue_claim::QueueWorkerBinding {
+            worker_id: worker.to_string(),
+            started_at_secs: 11,
+        });
+        crate::queue_lineage::record_started(doc, &claim).unwrap();
+        claim
+    }
+
+    /// gh#433: a `☑️` repeatable directive row whose
+    /// only open receipt is a verified prose-only generation, with no claim in
+    /// the ledger, is not a kept completion. `queue claim` starts a new
+    /// dispatch at the next generation instead of restoring the old report,
+    /// and the settled generation is closed so it never reads as a second
+    /// open receipt for the row.
+    #[test]
+    fn claim_on_reported_row_with_a_settled_prose_only_receipt_dispatches() {
+        let dir = tempfile::tempdir().unwrap();
+        let item = "#upgrade [#q-3e8a589b1dd1]";
+        let doc = subagents_doc(
+            dir.path(),
+            &["☑️ [#subagent:upgrade-1115#2] #upgrade [#q-3e8a589b1dd1]"],
+        );
+        let cancelled = seed_unclaimed_attempt(&doc, item, "subagent:upgrade-1115", "w1");
+        crate::queue_lineage::record(
+            &doc,
+            item,
+            cancelled.generation,
+            crate::queue_lineage::RecordRequest {
+                kind: crate::queue_lineage::QueueLineageEventKind::Cancelled,
+                detail: Some("cancelled".to_string()),
+                ..crate::queue_lineage::RecordRequest::default()
+            },
+        )
+        .unwrap();
+        let prose = seed_unclaimed_attempt(&doc, item, "subagent:upgrade-1115", "w2");
+        assert_eq!(prose.generation, 2);
+        crate::queue_lineage::record_prose_only(&doc, &prose, "upgraded").unwrap();
+        let report = crate::queue_lineage::query(&doc, None, None).unwrap();
+        assert_eq!(report.attempts[1].state, "prose_only");
+        assert_eq!(report.attempts[1].verification, "verified");
+        assert!(load_ledger(&doc).unwrap().claims.is_empty());
+
+        let (outcome, admitted) = claim(&doc, item, "subagent:upgrade-1122", 600).unwrap();
+        assert_ne!(outcome, ClaimOutcome::Kept, "{admitted:?}");
+        assert_eq!(
+            admitted.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Claimed
+        );
+        assert_eq!(admitted.generation, 3);
+        assert_eq!(admitted.owner, "subagent:upgrade-1122");
+        assert!(admitted.worker.is_none());
+        assert!(
+            crate::queue_lineage::kept_completion_attempt(&doc, item)
+                .unwrap()
+                .is_none_or(|attempt| attempt.generation == 3),
+            "the settled generation 2 is no longer an open receipt"
+        );
+        start_attempt(&doc, item, "subagent:upgrade-1122", "w3", 600, 3).unwrap();
+    }
+
+    /// gh#433 boundary: a `☑️` row whose open receipt is still unsettled (a
+    /// started worker that recorded no prose-only declaration and no
+    /// repository facts) stays a kept completion with no ledger claim, and a
+    /// settled prose-only receipt that the ledger still holds as `Reported`
+    /// also stays kept until it is consumed.
+    #[test]
+    fn claim_still_keeps_an_unconsumed_reported_completion() {
+        let dir = tempfile::tempdir().unwrap();
+        let item = "#upgrade [#q-3e8a589b1dd1]";
+        let doc = subagents_doc(
+            dir.path(),
+            &["☑️ [#subagent:upgrade-1115#1] #upgrade [#q-3e8a589b1dd1]"],
+        );
+        let open = seed_unclaimed_attempt(&doc, item, "subagent:upgrade-1115", "w1");
+        let (outcome, kept) = claim(&doc, item, "subagent:other", 600).unwrap();
+        assert_eq!(outcome, ClaimOutcome::Kept);
+        assert_eq!(kept.generation, open.generation);
+        assert_eq!(
+            kept.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Reported
+        );
+
+        // The restored Reported claim now sits in the ledger. Settling its
+        // receipt as prose-only does not consume it: claim still keeps it.
+        crate::queue_lineage::record_prose_only(&doc, &kept, "upgraded").unwrap();
+        let (again, again_claim) = claim(&doc, item, "subagent:other", 600).unwrap();
+        assert_eq!(again, ClaimOutcome::Kept);
+        assert_eq!(again_claim.generation, open.generation);
+        assert_eq!(crate::queue_lineage::load(&doc).unwrap().attempts.len(), 1);
+    }
+
+    /// gh#433 boundary: a settled prose-only report that was released as
+    /// reported still has an open reported-release receipt. That report is
+    /// unconsumed writeback debt, so claim keeps it instead of dispatching.
+    #[test]
+    fn claim_keeps_a_settled_prose_report_with_an_open_release_receipt() {
+        use crate::claim_release_receipt::{ReleaseKind, release};
+        let dir = tempfile::tempdir().unwrap();
+        let item = "#upgrade [#q-3e8a589b1dd1]";
+        let doc = subagents_doc(
+            dir.path(),
+            &["☑️ [#subagent:upgrade-1115#1] #upgrade [#q-3e8a589b1dd1]"],
+        );
+        let (_, claimed) = claim(&doc, item, "subagent:upgrade-1115", 3600).unwrap();
+        let started = start_attempt(
+            &doc,
+            item,
+            "subagent:upgrade-1115",
+            "w1",
+            3600,
+            claimed.generation,
+        )
+        .unwrap();
+        crate::queue_lineage::record_prose_only(&doc, &started, "upgraded").unwrap();
+        crate::claim_release_receipt::capture_response_for_attempt(
+            &doc,
+            item,
+            started.generation,
+            "upgraded response",
+        )
+        .unwrap();
+        release(&doc, item, ReleaseKind::Reported).unwrap();
+        assert!(load_ledger(&doc).unwrap().claims.is_empty());
+
+        let (outcome, kept) = claim(&doc, item, "subagent:other", 600).unwrap();
+        assert_eq!(outcome, ClaimOutcome::Kept, "{kept:?}");
+        assert_eq!(kept.generation, started.generation);
         assert_eq!(crate::queue_lineage::load(&doc).unwrap().attempts.len(), 1);
     }
 

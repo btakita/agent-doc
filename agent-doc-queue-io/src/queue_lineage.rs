@@ -2242,6 +2242,44 @@ pub fn kept_completion_attempt(file: &Path, item: &str) -> Result<Option<QueueLi
     }
 }
 
+/// gh#433: the attempt is a settled prose-only
+/// report. It carries the explicit prose-only declaration, records no
+/// repository work, and its lineage verifies with no diagnostic. Its closeout
+/// facts are complete, so nothing about it is still owed to the ledger.
+pub fn attempt_is_settled_prose_only(attempt: &QueueLineageAttempt) -> bool {
+    attempt_declares_prose_only(attempt)
+        && !attempt_carries_repo_work(attempt)
+        && diagnose(attempt, &facts(attempt)).is_empty()
+}
+
+/// Close a settled prose-only receipt that a new queue claim supersedes
+/// (gh#433). The attempt becomes terminal, so the next
+/// generation for the same row is its only open receipt.
+pub fn close_settled_prose_only(
+    file: &Path,
+    attempt: &QueueLineageAttempt,
+) -> Result<QueueLineageAttempt> {
+    if !attempt_is_settled_prose_only(attempt) {
+        bail!(
+            "queue lineage generation {} for {:?} is not a settled prose-only receipt; refusing to close it",
+            attempt.generation,
+            attempt.item_text
+        );
+    }
+    record(
+        file,
+        &attempt.item_text,
+        attempt.generation,
+        RecordRequest {
+            kind: QueueLineageEventKind::Cancelled,
+            detail: Some(
+                "settled prose-only report superseded by a new queue claim (gh#433)".to_string(),
+            ),
+            ..RecordRequest::default()
+        },
+    )
+}
+
 /// The lineage attempt a reported `(item, generation)` names.
 enum ResolvedReportedAttempt<'a> {
     Missing,

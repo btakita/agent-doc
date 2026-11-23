@@ -441,6 +441,10 @@ impl QueueIconSet {
                 ("operator_action", "🙋"),
                 ("prioritized", "📌"),
                 ("agent_prioritized", "📍"),
+                // `#treetopglyph`: the tree glyphs are binary-owned too.
+                ("tree_delete", legend::TREE_DELETE_GLYPH),
+                ("tree_delete", legend::TREE_DELETE_GLYPH_BARE),
+                ("tree_keep", legend::TREE_KEEP_GLYPH),
             ] {
                 if value == built_in_value && name != built_in_name {
                     bail!(
@@ -459,7 +463,9 @@ mod legend;
 pub use legend::{
     AGENT_DOC_REPLY_GLYPH, ALL_QUEUE_MARKERS, QUEUE_MARKER_ANNOTATIONS, QUEUE_MARKER_LEGEND_ANCHOR,
     QUEUE_MARKER_LEGEND_LINE_PREFIX, QUEUE_MARKER_LEGEND_URL, QUEUE_REPLY_LEGEND_ENTRY,
-    QUEUE_REPLY_MEANING, QueueMarker, QueueMarkerAnnotation, is_queue_marker_legend_line,
+    QUEUE_REPLY_MEANING, QueueMarker, QueueMarkerAnnotation, TREE_DELETE_GLYPH,
+    TREE_DELETE_GLYPH_BARE, TREE_DELETE_LEGEND_ENTRY, TREE_DELETE_MEANING, TREE_KEEP_GLYPH,
+    TREE_KEEP_LEGEND_ENTRY, TREE_KEEP_MEANING, is_queue_marker_legend_line,
     queue_marker_legend_help, queue_marker_legend_help_for, queue_marker_legend_line,
     queue_marker_legend_line_for, queue_marker_legend_markdown_table,
 };

@@ -18,7 +18,7 @@
 //! the top-level row roots (the row itself included): **decision** (the
 //! operator decides), **action** (the operator acts), **blocked**, and
 //! **running**. A row is counted once per group, mirrored rows included, as
-//! in the digest. A row that holds no work for the tree's 🗑️/📌 indicator (a
+//! in the digest. A row that holds no work for the tree's 🗑️/🔒 indicator (a
 //! struck row, a row whose work a top-level row elsewhere carries, an
 //! operator cleanup row self-repair already did) counts for neither, and an
 //! operator row the operator already replied to beneath it (`~~Restarted~~`)
@@ -29,7 +29,7 @@
 //!
 //! - The token is rendered only while a row **beneath** the top-level row is
 //!   a loose end. A row with nothing open below it carries no token: its own
-//!   glyph already says what it is, and once its tree is finished the 🗑️/📌
+//!   glyph already says what it is, and once its tree is finished the 🗑️/🔒
 //!   Guidance takes over. Struck rows are never edited.
 //! - Zero groups are left out; the order is fixed (decision, action, blocked,
 //!   running). See [`agent_doc_element_queue::render_open_count_token`].

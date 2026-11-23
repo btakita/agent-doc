@@ -464,7 +464,7 @@ fn running_entry(node: &QueueTreeNode, raw: &str, handle: &str) -> String {
 /// top-level row's open-work count ([`crate::open_count`], `#looseends`), so
 /// the two never disagree. A row whose work a top-level row elsewhere
 /// carries, or that self-repair already did ([`crate::queue_tree::RowResolution`]),
-/// is not a loose end: it holds no work, exactly as the tree's 🗑️/📌
+/// is not a loose end: it holds no work, exactly as the tree's 🗑️/🔒
 /// indicator reads it (`#treefinish`).
 ///
 /// An operator row the operator already answered with a reply row beneath it

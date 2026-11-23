@@ -69,6 +69,8 @@ start` binds the replacement worker.
 | Annotation | Meaning |
 | --- | --- |
 | `~~row~~` | Integrated, terminal queue history. A prompt tree is safe to delete only when every row in it is struck; any live row, especially `☑️`, must remain. |
+| `🗑️` | On the top-most row of a subtree that is safe to delete whole: every row in it is struck and none holds work (no open response, Todo, or waiting packet). Delete that row and everything indented under it. In a struck row it sits just inside the strike (`~~🗑️ …~~`). Re-derived every sync; never part of the row's work text. |
+| `🔒` | On a top-level row whose tree still holds work but already has a 🗑️ subtree under it: keep this row and cut only at the 🗑️ rows. It follows the row's lifecycle marker (`🙋 🔒 …`), or sits just inside the strike of a struck row. Not the `📌` priority pin. Re-derived every sync; never part of the row's work text. |
 | `▫️` | Ends a row agent-doc generated under a Waiting-on-you item (`**Next:**`, `**Response:**`, `**Question:**`, an offered choice, ...). It is rewritten every closeout and is never your answer or queue work: reply on your own line under the item, without the glyph. |
 | `[#<owner>#<N>]` | Owner and claim generation of the current attempt or report receipt, for example `[#subagent:fix#2]`. Metadata, not work identity. |
 | `⟦blocked by <id>, <id>⟧` | Follows the blocked marker and names the open items the row waits on (ids without `#`). Metadata, not work identity. |
@@ -95,7 +97,7 @@ surfaces render it:
   keeps one compact legend line as the last paragraph of `agent:status`:
 
   ```text
-  Queue markers: 👀 seen · 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ keep: worker done · ⚠️ lost · ⚠️🟡 lost + claimed · ⚠️🚧 lost + running · ⚠️☑️ lost + worker done · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin · ▫️ generated row · ~~done~~ safe to delete ([legend](…/queue-markers.md#queue-markers))
+  Queue markers: 👀 seen · 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ keep: worker done · ⚠️ lost · ⚠️🟡 lost + claimed · ⚠️🚧 lost + running · ⚠️☑️ lost + worker done · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin · ▫️ generated row · 🗑️ delete this subtree · 🔒 keep (cut at 🗑️) · ~~done~~ safe to delete ([legend](…/queue-markers.md#queue-markers))
   ```
 
   New documents from the Claim Session File template start with it. An

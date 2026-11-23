@@ -54,7 +54,7 @@ fn the_ack_text_tree_is_struck_once_self_repair_resolved_its_operator_rows() {
     let synced = sync(&repaired);
     assert!(
         synced.contains(
-            "- ### ~~follow up on an action item from queue item “follow up on an action item from queue item 'agent-doc duplicated my prompt ` - …”: agent: stop `queue consume --ack-text`"
+            "- ### ~~🗑\u{fe0f} follow up on an action item from queue item “follow up on an action item from queue item 'agent-doc duplicated my prompt ` - …”: agent: stop `queue consume --ack-text`"
         ),
         "the root is struck:\n{synced}"
     );
@@ -119,7 +119,7 @@ fn an_open_operator_row_keeps_its_tree() {
     );
     assert_eq!(
         guidance_under(&synced, "**Response [#r-aaaaaaaaaaaa]**"),
-        "📌 Keep: 1 open — `operator: approve the release in the dashboard`."
+        "🔒 Keep: 1 open — `operator: approve the release in the dashboard`."
     );
     assert_eq!(
         guidance_under(&synced, "**Response [#r-cccccccccccc]**"),
@@ -167,7 +167,7 @@ fn an_origin_tree_whose_work_moved_to_top_level_followups_is_struck() {
     let document = doc(DELEGATED_TREE);
     let synced = sync(&document);
     assert!(
-        synced.contains("- ### ~~origin task [#origin]~~\n"),
+        synced.contains("- ### ~~🗑\u{fe0f} origin task [#origin]~~\n"),
         "the origin root is struck:\n{synced}"
     );
     assert!(
@@ -217,9 +217,13 @@ fn a_keep_queue_keeps_its_top_level_row() {
         "<!-- agent:queue id=\"main\" keep -->",
     );
     let synced = sync(&document);
-    assert!(synced.contains("- ### origin task [#origin]\n"), "{synced}");
+    // `#treetopglyph`: the kept root says to keep it; its finished row may go.
     assert!(
-        synced.contains("  - ~~follow up on an action item from queue item “origin task [#origin]”: operator: approve the deploy. [operator-verify]~~\n"),
+        synced.contains("- ### 🔒 origin task [#origin]\n"),
+        "{synced}"
+    );
+    assert!(
+        synced.contains("  - ~~🗑\u{fe0f} follow up on an action item from queue item “origin task [#origin]”: operator: approve the deploy. [operator-verify]~~\n"),
         "{synced}"
     );
 }
@@ -235,7 +239,7 @@ fn the_strike_keeps_row_text_byte_for_byte() {
         synced.contains("  - ~~follow up on an action item from queue item “epic”: agent: re-run `make check` (operator note: flaky on CI).~~\n"),
         "{synced}"
     );
-    assert!(synced.contains("- ### ~~epic~~\n"), "{synced}");
+    assert!(synced.contains("- ### ~~🗑\u{fe0f} epic~~\n"), "{synced}");
 }
 
 /// A row whose tracked id is still open is never struck: the strike would
@@ -254,7 +258,10 @@ fn a_row_tracking_an_open_item_is_never_struck() {
     // Once the item is done, the tree is struck.
     let done = synced.replace("- [ ] [#origin]", "- [x] [#origin]");
     let struck = sync(&done);
-    assert!(struck.contains("- ### ~~do [#origin]~~\n"), "{struck}");
+    assert!(
+        struck.contains("- ### ~~🗑\u{fe0f} do [#origin]~~\n"),
+        "{struck}"
+    );
 }
 
 /// Short follow-up titles (`[#<origin>] follow-up: <item>`) delegate the
@@ -268,7 +275,10 @@ fn a_short_title_followup_delegates_its_origin_tree() {
 - 🙋 [#shortorigin] follow-up: operator: approve the deploy. [operator-verify] [#q-0123456789ab]
 ");
     let synced = sync(&document);
-    assert!(synced.contains("- ### ~~do [#shortorigin]~~\n"), "{synced}");
+    assert!(
+        synced.contains("- ### ~~🗑\u{fe0f} do [#shortorigin]~~\n"),
+        "{synced}"
+    );
     assert!(
         synced.contains(
             "  - ~~[#shortorigin] follow-up: operator: approve the deploy. [operator-verify]~~\n"

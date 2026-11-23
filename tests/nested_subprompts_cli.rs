@@ -205,11 +205,12 @@ fn string_list(state: &serde_json::Value, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Compare authored queue work independently of binary-owned correlation ids.
-/// Stable-id spelling is covered by the identity suites; these tests pin the
-/// executable prompt tree, lifecycle projection, and parent/leaf lineage.
+/// Compare authored queue work independently of binary-owned correlation ids
+/// and tree glyphs (`#treetopglyph`). Stable-id spelling and the glyphs are
+/// covered by their own suites; these tests pin the executable prompt tree,
+/// lifecycle projection, and parent/leaf lineage.
 fn without_admitted_queue_ids(text: &str) -> String {
-    let mut normalized = text.to_string();
+    let mut normalized = text.replace("🗑\u{fe0f} ", "").replace("🔒 ", "");
     while let Some(start) = normalized.rfind(" [#q-") {
         let id_start = start + 3;
         let Some(relative_end) = normalized[id_start..].find(']') else {

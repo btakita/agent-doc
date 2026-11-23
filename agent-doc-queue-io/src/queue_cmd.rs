@@ -3690,14 +3690,21 @@ mod tests {
                 "  - **Response [#r-fedcba987654]:**",
             )
             .replace("- another live row\n", "- 📥 another live row\n");
+        // `#treetopglyph`: the finished row's 🗑️ glyph is the only byte a
+        // sync may add to it.
+        let synced = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            synced.contains("- ~~🗑\u{fe0f} The response id belongs"),
+            "{synced}"
+        );
         assert_eq!(
-            std::fs::read_to_string(&doc).unwrap(),
+            synced.replace("🗑\u{fe0f} ", ""),
             expected,
             "queue sync may paint live siblings but must not reopen or canonicalize a terminal row"
         );
 
         sync_with_effects(&effects, &doc).expect("response metadata repair must be idempotent");
-        assert_eq!(std::fs::read_to_string(&doc).unwrap(), expected);
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), synced);
     }
 
     #[test]

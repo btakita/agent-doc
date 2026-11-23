@@ -3484,7 +3484,8 @@ fn preflight_parks_committed_heading_replay_and_strikes_its_answered_head() {
         );
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
-    let after = fs::read_to_string(&doc).unwrap();
+    // `#treetopglyph`: the finished row may carry its 🗑️ glyph.
+    let after = fs::read_to_string(&doc).unwrap().replace("🗑\u{fe0f} ", "");
     assert!(
         after.contains(&format!("~~{head}")),
         "the head the committed answer is titled with must be struck:\n{after}"

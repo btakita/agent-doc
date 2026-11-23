@@ -7716,15 +7716,20 @@ fn run_queue_maintenance_with_options_under_apply_guard(
     if let Some(synced) =
         agent_doc_queue_io::self_repair::sync_response_trees_for(file, &current_content)
     {
-        let (slimmed, guided, struck) = (synced.slimmed, synced.guided, synced.struck_trees);
+        let (slimmed, guided, struck, glyphs) = (
+            synced.slimmed,
+            synced.guided,
+            synced.struck_trees,
+            synced.indicators,
+        );
         current_content = synced.document;
         activation.entries_after = queue_entries_for_id(&current_content, &selected_queue_id);
         mutated = true;
         eprintln!(
-            "[preflight] queue: response trees synced to the queue tree (slimmed={slimmed}, guidance={guided}, struck_trees={struck}; #guidancescope, #treefinish)"
+            "[preflight] queue: response trees synced to the queue tree (slimmed={slimmed}, guidance={guided}, struck_trees={struck}, tree_glyphs={glyphs}; #guidancescope, #treefinish, #treetopglyph)"
         );
         effect_phase.log_op(format!(
-            "queue_response_trees_synced file={} slimmed={slimmed} guidance={guided} struck_trees={struck} (#guidancescope, #treefinish)",
+            "queue_response_trees_synced file={} slimmed={slimmed} guidance={guided} struck_trees={struck} tree_glyphs={glyphs} (#guidancescope, #treefinish, #treetopglyph)",
             file.display()
         ));
     }
@@ -12004,6 +12009,12 @@ mod tests {
             .ok();
 
         dir
+    }
+
+    /// `text` without the binary-owned 🗑️/🔒 tree glyphs (`#treetopglyph`),
+    /// for tests that assert strike semantics, not glyph placement.
+    fn without_tree_glyphs(text: &str) -> String {
+        text.replace("🗑\u{fe0f} ", "").replace("🔒 ", "")
     }
 
     /// Compare queue work independently of the binary-owned correlation
@@ -17933,8 +17944,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             std::fs::read_to_string(&doc).unwrap()
         );
         assert_eq!(
-            std::fs::read_to_string(&doc)
-                .unwrap()
+            without_tree_glyphs(&std::fs::read_to_string(&doc).unwrap())
                 .matches("~~release + publish~~")
                 .count(),
             usize::from(!delete_struck_row),
@@ -21359,7 +21369,13 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
 
         run_queue_maintenance(&doc, None).unwrap();
 
-        let updated = std::fs::read_to_string(&doc).unwrap();
+        let raw = std::fs::read_to_string(&doc).unwrap();
+        // `#treetopglyph`: a kept top-level row carries 🔒 above its 🗑️ rows.
+        assert!(
+            raw.contains("- ### 🔒 https://github.com/haiven-dev/haiven-infra/pull/304\n"),
+            "{raw}"
+        );
+        let updated = without_tree_glyphs(&raw);
         assert!(
             !updated.contains("~~https://github.com/haiven-dev/haiven-infra/pull/304~~"),
             "keep reopens the struck top-level row: {updated}"
@@ -21942,7 +21958,8 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             queue_work_texts(&state.queue_prompts),
             vec!["#review ⟦effect:2⟧"]
         );
-        let updated = std::fs::read_to_string(&doc).unwrap();
+        let raw = std::fs::read_to_string(&doc).unwrap();
+        let updated = without_tree_glyphs(&raw);
         assert!(
             updated.contains("  - ~~#review~~\n")
                 && without_admitted_queue_ids(&updated).contains("#review ⟦effect:2⟧\n"),
@@ -21952,7 +21969,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let _ = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(
             std::fs::read_to_string(&doc).unwrap(),
-            updated,
+            raw,
             "the rerun surrogate id must be stable across preflight"
         );
     }
@@ -24407,7 +24424,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
 
         let _ = run_queue_maintenance(&doc, None).unwrap();
 
-        let updated = std::fs::read_to_string(&doc).unwrap();
+        let updated = without_tree_glyphs(&std::fs::read_to_string(&doc).unwrap());
         assert!(!updated.contains("📥 **Response"), "{updated}");
         assert!(!updated.contains("📥 **Choices:**"), "{updated}");
         assert!(!updated.contains("📥 **staging**"), "{updated}");
@@ -25463,7 +25480,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
 
         for pass in 0..3 {
             let _ = run_queue_maintenance(&doc, None).unwrap();
-            let updated = std::fs::read_to_string(&doc).unwrap();
+            let updated = without_tree_glyphs(&std::fs::read_to_string(&doc).unwrap());
             let main_body = {
                 let comps = agent_doc_element::element::parse(&updated).unwrap();
                 let main = agent_doc_queue::queue_set::component_for_id(&updated, &comps, "main")

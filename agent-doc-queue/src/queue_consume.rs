@@ -4992,13 +4992,15 @@ fn response_summary_row_child(
 pub const TREE_DELETE_GUIDANCE: &str = "🗑️ Safe to delete this tree.";
 
 /// `#treefinish`: opens the indicator of a tree that still holds open work.
-pub const TREE_KEEP_LEAD: &str = "📌 Keep: ";
+/// `#treetopglyph`: its glyph is the row's keep glyph (`🔒`), not the `📌`
+/// priority pin it used before.
+pub const TREE_KEEP_LEAD: &str = "🔒 Keep: ";
 
 /// `#treefinish`: a finished row inside a tree; the root carries the
 /// keep/delete indicator.
 pub const ROW_DONE_GUIDANCE: &str = "✅ Done.";
 
-/// `📌 Keep: N open — <first>.`: the tree (or the row's subtree) still holds
+/// `🔒 Keep: N open — <first>.`: the tree (or the row's subtree) still holds
 /// `open` rows, named by the first of them.
 pub fn tree_keep_guidance(open: usize, first: &crate::queue_tree::RowRef) -> String {
     format!("{TREE_KEEP_LEAD}{} open — {}.", open.max(1), first.label())
@@ -5009,10 +5011,10 @@ pub fn tree_keep_guidance(open: usize, first: &crate::queue_tree::RowRef) -> Str
 ///
 /// - A top-level (root) row, or an item under the Waiting-on-you root:
 ///   `🗑️ Safe to delete this tree.` when nothing in its tree holds work,
-///   else `📌 Keep: N open — <first open row>.`.
+///   else `🔒 Keep: N open — <first open row>.`.
 /// - A nested row: `✅ Done.`. The root carries the tree's indicator, so a
 ///   finished child never says to keep the rest of the tree. It adds
-///   `📌 Keep: N open — <row>.` only when an open row sits beneath this row
+///   `🔒 Keep: N open — <row>.` only when an open row sits beneath this row
 ///   itself (deleting it would drop that work), and
 ///   `🗑️ Safe to delete this tree.` once the whole tree is finished.
 ///
@@ -9189,7 +9191,7 @@ mod tests {
             annotate_newly_struck_queue_items_with_response_id(&before, &after_open, &response)
                 .unwrap();
         assert!(
-            annotated.contains("**Guidance:** 📌 Keep: 1 open — [#tdclireleasedownloads].\n"),
+            annotated.contains("**Guidance:** 🔒 Keep: 1 open — [#tdclireleasedownloads].\n"),
             "{annotated}"
         );
     }
@@ -10757,7 +10759,7 @@ mod tests {
             "- ~~do [#parent]~~\n  - ~~do [#first]~~\n  - do [#second]\n",
             "parent",
         );
-        assert_eq!(guidance, "📌 Keep: 1 open — [#second].");
+        assert_eq!(guidance, "🔒 Keep: 1 open — [#second].");
     }
 
     #[test]

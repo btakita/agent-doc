@@ -371,7 +371,8 @@ fn a_struck_queue_row_checks_the_linked_todo_on_preflight() {
         after.contains("- [ ] [#other]"),
         "an unstruck row leaves its todo open:\n{after}"
     );
-    let body = run_body(&doc);
+    // `#treetopglyph`: the finished row may carry its 🗑️ glyph.
+    let body = run_body(&doc).replace("🗑\u{fe0f} ", "");
     assert!(body.contains("~~do [#pmq]~~"), "{body}");
     assert!(!body.contains("~~do [#other]~~"), "{body}");
 }

@@ -576,8 +576,12 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      changed or Verification back under the row (`#handbackrowstructure`). A
      struck row's Guidance is one short indicator, re-rendered whenever the
      tree changes (`#guidancescope`, `#treefinish`): the root says
-     `🗑️ Safe to delete this tree.` or `📌 Keep: N open — <row>.`, and a
-     finished nested row says `✅ Done.`. When no row in a tree holds work
+     `🗑️ Safe to delete this tree.` or `🔒 Keep: N open — <row>.`, and a
+     finished nested row says `✅ Done.`. The rows carry the same glyphs
+     (`#treetopglyph`): `🗑️` on the top-most row of each subtree you can
+     delete whole (inside its strike, `~~🗑️ …~~`), and `🔒` on the top-level
+     row of a kept tree that has such a subtree, so cut at the `🗑️` rows.
+     They are binary-owned projection; do not type or remove them. When no row in a tree holds work
      (rows struck, delegated to a top-level follow-up row, or cleanup asks
      self-repair already did), agent-doc strikes the whole tree from the root
      down on the next sync; it never strikes an open operator row or a row a

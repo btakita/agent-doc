@@ -31,7 +31,7 @@
 //! struck queue rows.
 //!
 //! `#treefinish` replaced the long deletion sentence with one indicator
-//! (`🗑️ Safe to delete this tree.` / `📌 Keep: N open — <row>.` on a root,
+//! (`🗑️ Safe to delete this tree.` / `🔒 Keep: N open — <row>.` on a root,
 //! `✅ Done.` on a nested row), and [`sync_response_trees_striking`] also
 //! strikes every finished tree from the root down
 //! ([`crate::finished_tree`]).
@@ -58,9 +58,11 @@ const SUMMARY_LEAD_LIMIT: usize = 400;
 /// The generated deletion-guidance openings
 /// ([`completed_row_deletion_guidance`]), current (`#treefinish`) and
 /// earlier wordings.
-const GENERATED_GUIDANCE_OPENINGS: [&str; 9] = [
+const GENERATED_GUIDANCE_OPENINGS: [&str; 10] = [
     TREE_DELETE_GUIDANCE,
     TREE_KEEP_LEAD,
+    // `#treetopglyph`: the keep lead before it took the row's `🔒` glyph.
+    "📌 Keep: ",
     ROW_DONE_GUIDANCE,
     "Safe to delete this completed row; ",
     "Safe to delete this row and its ",
@@ -400,7 +402,7 @@ pub fn reconcile_tree_scoped_guidance(document: &str) -> Option<(String, usize)>
 ///
 /// Each such row gets one generated child, first among its children:
 /// `- **Guidance:** ✅ Done.`, the nested-row indicator
-/// ([`completed_row_deletion_guidance`]: `📌 Keep: …` when an open row sits
+/// ([`completed_row_deletion_guidance`]: `🔒 Keep: …` when an open row sits
 /// beneath it, `🗑️ Safe to delete this tree.` once its whole tree is
 /// finished). A row is covered already, and left alone, when it has its own
 /// `**Response [#r-…]**`, `**Closed by:**` or `**State:**` child, or when a
@@ -706,14 +708,17 @@ pub struct ResponseTreeSync {
     pub guided: usize,
     /// Finished trees struck from the root down (`#treefinish`).
     pub struck_trees: usize,
+    /// Rows whose 🗑️/🔒 tree glyph was added, flipped or removed
+    /// (`#treetopglyph`, [`crate::tree_indicator`]).
+    pub indicators: usize,
 }
 
 /// [`sync_response_trees`] that also strikes every finished tree
 /// (`#treefinish`, [`crate::finished_tree::strike_finished_trees`]): slim,
 /// what remains, strike, what remains again (a struck root joins its tally),
-/// then guidance. `is_claimed(row_text)` says whether a live worker claims a
-/// row; a tree with a claimed row is never struck. A second pass changes
-/// nothing.
+/// then guidance, then the rows' 🗑️/🔒 tree glyphs (`#treetopglyph`).
+/// `is_claimed(row_text)` says whether a live worker claims a row; a tree
+/// with a claimed row is never struck. A second pass changes nothing.
 pub fn sync_response_trees_striking(
     document: &str,
     is_claimed: &dyn Fn(&str) -> bool,
@@ -736,12 +741,16 @@ pub fn sync_response_trees_striking(
     let (synced, guidance_rows) =
         reconcile_tree_scoped_guidance(&remaining).unwrap_or((remaining, 0));
     let (synced, bare_rows) = guide_bare_struck_rows(&synced).unwrap_or((synced, 0));
+    // `#treetopglyph`: last, so the glyphs read the tree every other pass left.
+    let (synced, indicators) =
+        crate::tree_indicator::reconcile_tree_indicators(&synced).unwrap_or((synced, 0));
     let guided = guidance_rows + remaining_rows + bare_rows;
-    (slim_rows + guided + struck_trees > 0).then_some(ResponseTreeSync {
+    (slim_rows + guided + struck_trees + indicators > 0).then_some(ResponseTreeSync {
         document: synced,
         slimmed: slim_rows,
         guided,
         struck_trees,
+        indicators,
     })
 }
 

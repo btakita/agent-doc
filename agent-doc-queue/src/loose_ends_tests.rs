@@ -7,7 +7,7 @@ const SESSION: &str = include_str!("../tests/fixtures/loose_ends_session.md");
 
 /// `#looseends`: the three operator cleanup rows asking to tidy agent-doc's
 /// own artifacts (`q-8eeadf7937c8`, `q-dade5157fe53`, `q-e107b04c1cd5`) are
-/// self-repaired, so they hold no work for the tree's 🗑️/📌 indicator and
+/// self-repaired, so they hold no work for the tree's 🗑️/🔒 indicator and
 /// are not loose ends either: the digest, the top-level counts and the keep
 /// indicator read one classifier.
 const SESSION_DIGEST: &str = concat!(

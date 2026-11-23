@@ -2393,8 +2393,14 @@ pub fn set_prompt_runtime_projections_with(
                     *consumed = true;
                 }
                 let mut parent = source.clone();
+                // `#treetopglyph`: the label's tree glyph is re-derived by the
+                // response-tree sync, not by this projection; keep it so the
+                // two passes never undo each other.
+                let work = struck_work_text(&parent.text);
+                let carried = agent_doc_element_queue::tree_indicator_in_prefix(&parent.text)
+                    .map(|indicator| format!("{} {work}", indicator.glyph()));
                 parent.text = render_queue_effect_report_state_annotation(
-                    struck_work_text(&parent.text),
+                    carried.as_deref().unwrap_or(work),
                     None,
                 );
                 // `#keepunstrike`: the top-level row is the container the

@@ -80,25 +80,7 @@ pub fn strike_finished_trees(
     if !tree.nodes.iter().any(|node| !node.closed) {
         return None;
     }
-    let mut policies: HashMap<String, (bool, bool)> = HashMap::new();
-    for component in agent_doc_element::element::parse(document)
-        .ok()?
-        .into_iter()
-        .filter(|component| component.name == "queue")
-    {
-        let queue = component
-            .attrs
-            .get("id")
-            .cloned()
-            .unwrap_or_else(|| component.name.clone());
-        let looping = component
-            .attrs
-            .contains_key(crate::queue_schedule::QUEUE_LOOP_ATTR);
-        let keep_root = crate::queue_schedule::queue_keeps_top_level_unstruck(&component.attrs);
-        let policy = policies.entry(queue).or_insert((false, false));
-        policy.0 |= looping;
-        policy.1 |= keep_root;
-    }
+    let policies = crate::tree_indicator::queue_policies(document);
     let items = agent_doc_markdown_ast::mutations::item_nodes_all(document, "queue").ok()?;
     let mut by_line: HashMap<usize, Vec<&agent_doc_markdown_ast::mutations::MutationItemNode>> =
         HashMap::new();

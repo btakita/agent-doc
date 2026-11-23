@@ -327,7 +327,10 @@ fn full_display_text(raw: &str) -> String {
         .and_then(|inner| inner.strip_suffix("~~"))
         .unwrap_or(text)
         .trim();
-    text.to_string()
+    // `#treetopglyph`: a struck row's tree glyph sits inside its strike.
+    agent_doc_element_queue::split_leading_tree_indicators(text)
+        .1
+        .to_string()
 }
 
 fn strip_html_comments(text: &str) -> String {
@@ -377,6 +380,8 @@ fn own_id(text: &str) -> Option<String> {
         text.lines().next().unwrap_or_default(),
     ));
     let work = work.trim().trim_start_matches("~~");
+    // `#treetopglyph`: a struck row's tree glyph sits inside its strike.
+    let work = agent_doc_element_queue::split_leading_tree_indicators(work).1;
     // `#followupshorttitle`: a follow-up row leads with its origin's id. The
     // row's own id is its binary-admitted `[#q-…]`, not the origin's.
     if agent_doc_element_queue::followup_origin_reference(work).is_some() {

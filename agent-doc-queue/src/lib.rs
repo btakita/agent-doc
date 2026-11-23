@@ -94,6 +94,7 @@ pub mod subagent_brief;
 pub mod subagent_intent;
 pub mod subagent_pool;
 pub mod transient_closeout;
+pub mod tree_indicator;
 pub mod tree_status;
 pub mod waiting_archive;
 #[cfg(test)]

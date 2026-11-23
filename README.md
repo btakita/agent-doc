@@ -178,6 +178,8 @@ agent-doc prefixes each row in an `agent:run` section with its state:
 | `🙋` | an operator request is open for the row |
 | `📌` / `📍` | operator / agent priority pin |
 | `▫️` | ends a row agent-doc generated under a Waiting-on-you item; rewritten every closeout, never your answer or queue work |
+| `🗑️` | on the top-most row of a subtree you can delete whole (inside its strike, `~~🗑️ …~~`) |
+| `🔒` | on the top-level row of a tree to keep that has `🗑️` subtrees: cut only at the `🗑️` rows |
 | `~~row~~` | integrated and terminal; a prompt tree is safe to delete only when every row is struck |
 
 A session document with an `agent:run` section keeps this legend on one line

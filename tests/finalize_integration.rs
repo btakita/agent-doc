@@ -5865,8 +5865,10 @@ fn backlog_edit_on_a_struck_head_id_does_not_requeue_it() {
     };
     let assert_not_requeued = |stage: &str| {
         let queue = queue_of(&doc);
+        // `#treetopglyph`: the finished row may also carry its 🗑️ glyph.
         assert!(
-            queue.contains("~~do [#quirkbigint]~~"),
+            queue.contains("~~do [#quirkbigint]~~")
+                || queue.contains("~~🗑\u{fe0f} do [#quirkbigint]~~"),
             "{stage}: the struck head stays struck:\n{queue}"
         );
         assert_eq!(

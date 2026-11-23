@@ -685,12 +685,119 @@ fn strip_projection_token(trimmed: &str) -> Option<&str> {
         .or_else(|| strip_owner_annotation_token(trimmed))
         .or_else(|| strip_waiting_status_token(trimmed))
         .or_else(|| strip_open_count_token(trimmed))
+        // `#treetopglyph`: the tree delete/keep glyph is re-derived
+        // projection, never work identity.
+        .or_else(|| strip_tree_indicator_token(trimmed))
         // `#lifecyclewordfusion`: a state word fused to its glyph
         // (`running🚧`) is one torn lifecycle token, never work identity.
         .or_else(|| {
             agent_doc_queue_icons::fused_lifecycle_word_token(trimmed)
                 .map(|(_, len)| &trimmed[len..])
         })
+}
+
+/// `#treetopglyph`: which tree glyph a row carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TreeIndicator {
+    /// `🗑️`: the top-most row of a subtree that may be deleted whole.
+    Delete,
+    /// `🔒`: the top-level row of a kept tree that holds 🗑️ subtrees.
+    Keep,
+}
+
+impl TreeIndicator {
+    /// The glyph agent-doc renders.
+    pub const fn glyph(self) -> &'static str {
+        match self {
+            Self::Delete => agent_doc_queue_icons::TREE_DELETE_GLYPH,
+            Self::Keep => agent_doc_queue_icons::TREE_KEEP_GLYPH,
+        }
+    }
+}
+
+/// Parse ONE leading tree glyph (`🗑️`, also without its variation selector,
+/// or `🔒`) from `trimmed`: which one, and the text after it.
+///
+/// The glyph is projection agent-doc re-derives on every sync from the queue
+/// tree, never work text and never identity, so every parser strips it with
+/// the rest of the leading projection prefix ([`strip_attempt_projection_prefix`],
+/// [`strip_priority_markers`]). Inside a strike (`~~🗑️ text~~`) it is the
+/// first token of the struck text, which those parsers also read past.
+pub fn tree_indicator_token(trimmed: &str) -> Option<(TreeIndicator, &str)> {
+    if let Some(rest) = trimmed.strip_prefix(agent_doc_queue_icons::TREE_DELETE_GLYPH) {
+        return Some((TreeIndicator::Delete, rest));
+    }
+    if let Some(rest) = trimmed.strip_prefix(agent_doc_queue_icons::TREE_DELETE_GLYPH_BARE) {
+        return Some((TreeIndicator::Delete, rest));
+    }
+    trimmed
+        .strip_prefix(agent_doc_queue_icons::TREE_KEEP_GLYPH)
+        .map(|rest| (TreeIndicator::Keep, rest))
+}
+
+/// Strip ONE leading tree glyph (see [`tree_indicator_token`]).
+pub fn strip_tree_indicator_token(trimmed: &str) -> Option<&str> {
+    tree_indicator_token(trimmed).map(|(_, rest)| rest)
+}
+
+/// `text` with every leading tree glyph removed (whitespace between them
+/// too), and the glyphs it held, in order. Used on the inside of a strike,
+/// where the glyph is the first token of the struck text.
+pub fn split_leading_tree_indicators(text: &str) -> (Vec<TreeIndicator>, &str) {
+    let mut present = Vec::new();
+    let mut rest = text;
+    while let Some((indicator, after)) = tree_indicator_token(rest.trim_start()) {
+        present.push(indicator);
+        rest = after;
+    }
+    if present.is_empty() {
+        (present, text)
+    } else {
+        (present, rest.trim_start())
+    }
+}
+
+/// The first tree glyph in `text`'s leading projection prefix (a live row's
+/// `🙋 🔒 …`), for a pass that re-renders the prefix and must keep the glyph
+/// the response-tree sync owns.
+pub fn tree_indicator_in_prefix(text: &str) -> Option<TreeIndicator> {
+    let trimmed = text.trim_start();
+    let work = strip_attempt_projection_prefix(trimmed);
+    prefix_without_tree_indicators(&trimmed[..trimmed.len() - work.len()])
+        .1
+        .first()
+        .copied()
+}
+
+/// A live row's projection prefix (the part of the row before
+/// [`strip_attempt_projection_prefix`]'s remainder) with every tree glyph
+/// removed, and the glyphs it held. Every other token keeps its bytes and
+/// the whitespace before it.
+pub fn prefix_without_tree_indicators(prefix: &str) -> (String, Vec<TreeIndicator>) {
+    let mut out = String::with_capacity(prefix.len());
+    let mut present = Vec::new();
+    let mut rest = prefix;
+    loop {
+        let trimmed = rest.trim_start();
+        let gap = &rest[..rest.len() - trimmed.len()];
+        if let Some((indicator, after)) = tree_indicator_token(trimmed) {
+            present.push(indicator);
+            rest = after;
+            continue;
+        }
+        match strip_operator_action_glyph(trimmed).or_else(|| strip_projection_token(trimmed)) {
+            Some(after) if after.len() < trimmed.len() => {
+                out.push_str(gap);
+                out.push_str(&trimmed[..trimmed.len() - after.len()]);
+                rest = after;
+            }
+            _ => {
+                out.push_str(rest);
+                break;
+            }
+        }
+    }
+    (out, present)
 }
 
 /// `#waitingitemstatus`: label words of the binary-owned waiting-item roll-up.

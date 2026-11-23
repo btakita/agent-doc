@@ -11,15 +11,21 @@ const SESSION: &str = include_str!("../tests/fixtures/subtree_guidance_session.m
 
 const ROOT: &str = "- ### https://github.com/sample-org/sample-sdk/pull/368\n";
 const STRUCK: &str = "  - ~~do [#completetasksplans]~~\n";
+/// [`STRUCK`] once a sync marks it the top of a deletable subtree
+/// (`#treetopglyph`).
+const STRUCK_CUT: &str = "  - ~~🗑\u{fe0f} do [#completetasksplans]~~\n";
 const FOLLOW_UP: &str = "  - 🙋 follow up on an action item from `completetasksplans`: ";
 
 /// The struck row's own subtree (its response tree), up to its next sibling.
 fn struck_tree(document: &str) -> &str {
-    let start = document.find(STRUCK).expect("struck second-level row");
-    let rest = &document[start + STRUCK.len()..];
+    let (start, row) = [STRUCK, STRUCK_CUT]
+        .into_iter()
+        .find_map(|row| document.find(row).map(|start| (start, row)))
+        .expect("struck second-level row");
+    let rest = &document[start + row.len()..];
     let end = rest
         .find("\n  - ")
-        .map_or(document.len(), |at| start + STRUCK.len() + at + 1);
+        .map_or(document.len(), |at| start + row.len() + at + 1);
     &document[start..end]
 }
 
@@ -245,7 +251,9 @@ fn summary_lead_keeps_whole_sentences() {
 /// struck with nothing beneath them.
 const STRUCK_COVER_SESSION: &str = include_str!("../tests/fixtures/closed_by_nest_session.md");
 
-const DO_NEXT: &str = "        - ~~Do the next actions.~~\n";
+/// The struck `Do the next actions.` answer, the top of a deletable subtree
+/// under a kept root (`#treetopglyph`).
+const DO_NEXT_CUT: &str = "        - ~~🗑\u{fe0f} Do the next actions.~~\n";
 const STATUS_QUESTION: &str = "          - ~~What is the status of the parent `        - ~~Do the next actions.~~`? It is struck but there's no response structure.~~\n";
 
 /// The fixture with its last operator row turned into real open operator
@@ -272,11 +280,19 @@ fn keeps_every_operator_line(before: &str, after: &str) -> bool {
             .strip_prefix("- ")
             .is_some_and(agent_doc_markdown_ast::overlay::is_generated_response_structure_row)
     };
-    let mut rest = after.lines().filter(operator);
+    // `#treetopglyph`: a row's 🗑️/🔒 glyph is binary projection, not
+    // operator text.
+    let unglyphed = |line: &str| {
+        line.replace("🗑\u{fe0f} ", "").replace(
+            &format!("{} ", agent_doc_element_queue::TreeIndicator::Keep.glyph()),
+            "",
+        )
+    };
+    let mut rest = after.lines().filter(operator).map(unglyphed);
     before
         .lines()
         .filter(operator)
-        .all(|line| rest.any(|kept| kept == line))
+        .all(|line| rest.any(|kept| kept == unglyphed(line)))
 }
 
 /// `#treefinish`: the struck `Do the next actions.` answer under a Next
@@ -288,7 +304,7 @@ fn keeps_every_operator_line(before: &str, after: &str) -> bool {
 fn struck_answer_under_a_detail_row_gets_a_done_guidance() {
     let session = open_struck_cover_session();
     let (synced, _, _) = sync_response_trees(&session).unwrap();
-    let guided = format!("{DO_NEXT}          - **Guidance:** ✅ Done.\n{STATUS_QUESTION}");
+    let guided = format!("{DO_NEXT_CUT}          - **Guidance:** ✅ Done.\n{STATUS_QUESTION}");
     assert!(synced.contains(&guided), "{synced}");
     assert_eq!(
         synced.matches("**Guidance:** ✅ Done.\n").count(),
@@ -313,7 +329,7 @@ fn struck_answer_under_a_detail_row_gets_a_done_guidance() {
     let (done, _, _) = sync_response_trees(&finished).unwrap();
     assert!(
         done.contains(&format!(
-            "{DO_NEXT}          - **Guidance:** ✅ Done. 🗑️ Safe to delete this tree.\n{STATUS_QUESTION}"
+            "{DO_NEXT_CUT}          - **Guidance:** ✅ Done. 🗑️ Safe to delete this tree.\n{STATUS_QUESTION}"
         )),
         "{done}"
     );
@@ -326,8 +342,10 @@ fn struck_answer_under_a_detail_row_gets_a_done_guidance() {
 fn struck_rows_in_a_finished_tree_are_covered_by_the_root() {
     let session = crate::self_repair::renest_closed_by_rows(STRUCK_COVER_SESSION).0;
     let (synced, _, _) = sync_response_trees(&session).unwrap();
+    // The plain sync never strikes, so the live root is kept and the struck
+    // subtree under it is where to cut (`#treetopglyph`).
     assert!(
-        synced.contains(&format!("{DO_NEXT}{STATUS_QUESTION}")),
+        synced.contains(&format!("{DO_NEXT_CUT}{STATUS_QUESTION}")),
         "{synced}"
     );
     assert!(

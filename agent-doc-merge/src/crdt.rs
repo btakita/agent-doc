@@ -5023,6 +5023,32 @@ mod tests {
         }
     }
 
+    /// `#treetopglyph`: a row's binary-owned tree glyph (`🗑️` inside a
+    /// strike, `🔒` after the projection prefix) is projection. The merge
+    /// keyer gives the marked and the bare row one key, so a glyph re-render
+    /// and an operator edit of the same row stay one cell.
+    #[test]
+    fn tree_glyph_is_not_part_of_a_merge_key() {
+        for (bare, marked) in [
+            (
+                "- ### 🙋 follow up: operator: Decide whether to keep it. [operator-verify] [#q-0e29d5fdf1c4]",
+                "- ### 🙋 🔒 follow up: operator: Decide whether to keep it. [operator-verify] [#q-0e29d5fdf1c4]",
+            ),
+            (
+                "- ### ~~Fix the parser. ⟦published⟧~~",
+                "- ### ~~🗑\u{fe0f} Fix the parser. ⟦published⟧~~",
+            ),
+            ("  - ~~do [#foo]~~", "  - ~~🗑 do [#foo]~~"),
+            (
+                "- 🚧 [#subagent:x#1] do [#foo]",
+                "- 🚧 [#subagent:x#1] 🔒 do [#foo]",
+            ),
+        ] {
+            assert_eq!(normalize_item_text(marked), normalize_item_text(bare));
+            assert_eq!(list_item_key(marked), list_item_key(bare), "{marked}");
+        }
+    }
+
     /// Deleting a word from a typed row: tasks/agent-doc/agent-doc-bugs.md, 2026-11-21. The
     /// operator typed a nested queue row, deleted a word, and typed a
     /// different one while `queue consume --ack-text` struck a sibling leaf.

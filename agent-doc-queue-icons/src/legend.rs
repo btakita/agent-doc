@@ -44,6 +44,25 @@ pub const AGENT_DOC_REPLY_GLYPH: &str = "▫️";
 pub const QUEUE_REPLY_LEGEND_ENTRY: &str = "▫️ generated row";
 pub const QUEUE_REPLY_MEANING: &str = "Ends a row agent-doc generated under a Waiting-on-you item (`**Next:**`, `**Response:**`, `**Question:**`, an offered choice, ...). It is rewritten every closeout and is never your answer or queue work: reply on your own line under the item, without the glyph.";
 
+/// `#treetopglyph`: the glyph agent-doc paints on the top-most row of a
+/// queue subtree that may be deleted whole: every row in it is struck and none
+/// still holds work (an open response, an open Todo, a waiting packet).
+/// Deleting that row and everything indented under it loses nothing.
+pub const TREE_DELETE_GLYPH: &str = "🗑\u{fe0f}";
+/// [`TREE_DELETE_GLYPH`] without its emoji variation selector, as an editor
+/// may save it. Accepted on parse; never rendered.
+pub const TREE_DELETE_GLYPH_BARE: &str = "🗑";
+/// `#treetopglyph`: the glyph agent-doc paints on the top-level row of a tree
+/// that must be kept (it still holds work) while some subtree under it is
+/// already marked [`TREE_DELETE_GLYPH`]: keep this row, cut at the 🗑️ rows.
+/// It is not `📌`, which is the operator's priority pin.
+pub const TREE_KEEP_GLYPH: &str = "🔒";
+/// Legend entries for the two tree glyphs.
+pub const TREE_DELETE_LEGEND_ENTRY: &str = "🗑\u{fe0f} delete this subtree";
+pub const TREE_KEEP_LEGEND_ENTRY: &str = "🔒 keep (cut at 🗑\u{fe0f})";
+pub const TREE_DELETE_MEANING: &str = "On the top-most row of a subtree that is safe to delete whole: every row in it is struck and none holds work (no open response, Todo, or waiting packet). Delete that row and everything indented under it. In a struck row it sits just inside the strike (`~~🗑️ …~~`). Re-derived every sync; never part of the row's work text.";
+pub const TREE_KEEP_MEANING: &str = "On a top-level row whose tree still holds work but already has a 🗑️ subtree under it: keep this row and cut only at the 🗑️ rows. It follows the row's lifecycle marker (`🙋 🔒 …`), or sits just inside the strike of a struck row. Not the `📌` priority pin. Re-derived every sync; never part of the row's work text.";
+
 /// Every visible prefix the binary paints on (or accepts from) a queue row.
 ///
 /// Lifecycle markers are mutually exclusive: a row shows exactly one. The
@@ -209,10 +228,18 @@ pub struct QueueMarkerAnnotation {
 
 /// Annotations and legacy spellings that appear on queue rows. Like the
 /// prefixes, every one is stripped before queue work identity is computed.
-pub const QUEUE_MARKER_ANNOTATIONS: [QueueMarkerAnnotation; 12] = [
+pub const QUEUE_MARKER_ANNOTATIONS: [QueueMarkerAnnotation; 14] = [
     QueueMarkerAnnotation {
         token: QUEUE_TERMINAL_TOKEN,
         meaning: QUEUE_TERMINAL_MEANING,
+    },
+    QueueMarkerAnnotation {
+        token: TREE_DELETE_GLYPH,
+        meaning: TREE_DELETE_MEANING,
+    },
+    QueueMarkerAnnotation {
+        token: TREE_KEEP_GLYPH,
+        meaning: TREE_KEEP_MEANING,
     },
     QueueMarkerAnnotation {
         token: AGENT_DOC_REPLY_GLYPH,
@@ -268,6 +295,8 @@ pub fn queue_marker_legend_line_for(icons: &QueueIconSet) -> String {
         .map(|marker| format!("{} {}", marker.prefix_in(icons), marker.label()))
         .collect::<Vec<_>>();
     entries.push(QUEUE_REPLY_LEGEND_ENTRY.to_string());
+    entries.push(TREE_DELETE_LEGEND_ENTRY.to_string());
+    entries.push(TREE_KEEP_LEGEND_ENTRY.to_string());
     entries.push(QUEUE_TERMINAL_LEGEND_ENTRY.to_string());
     let entries = entries.join(" · ");
     format!("{QUEUE_MARKER_LEGEND_LINE_PREFIX} {entries} ([legend]({QUEUE_MARKER_LEGEND_URL}))")
@@ -505,6 +534,19 @@ mod tests {
         assert!(help.contains("☑️  keep: worker done"));
         assert!(line.contains("☑️ keep: worker done"));
         assert!(line.contains(QUEUE_TERMINAL_LEGEND_ENTRY));
+        // `#treetopglyph`: both tree glyphs are on every surface.
+        for (glyph, entry, meaning) in [
+            (
+                TREE_DELETE_GLYPH,
+                TREE_DELETE_LEGEND_ENTRY,
+                TREE_DELETE_MEANING,
+            ),
+            (TREE_KEEP_GLYPH, TREE_KEEP_LEGEND_ENTRY, TREE_KEEP_MEANING),
+        ] {
+            assert!(line.contains(entry), "{line}");
+            assert!(help.contains(glyph) && help.contains(meaning));
+            assert!(table.contains(glyph) && table.contains(meaning));
+        }
         assert_eq!(
             line.matches(AGENT_DOC_REPLY_GLYPH).count(),
             1,

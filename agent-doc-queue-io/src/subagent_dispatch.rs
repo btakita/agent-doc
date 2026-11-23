@@ -511,6 +511,9 @@ fn queue_attr_subagent_plan_with_pools(
         .into_iter()
         .map(|evidence| evidence.item)
         .collect::<Vec<_>>();
+    let evidence_index = agent_doc_queue::queue_claim::CompletionEvidenceIndex::new(
+        evidence_items.iter().map(String::as_str),
+    );
     if !evidence_items.is_empty() {
         let mut matched = Vec::new();
         for block in graph.blocks() {
@@ -532,13 +535,8 @@ fn queue_attr_subagent_plan_with_pools(
                     prompt.text.trim(),
                 );
                 let norm = core::normalize_queue_text(&raw);
-                let hits = evidence_items.iter().any(|item| {
-                    agent_doc_queue::queue_claim::completion_evidence_matches_row(item, &norm)
-                        || (lineage != raw
-                            && agent_doc_queue::queue_claim::completion_evidence_matches_row(
-                                item, &lineage,
-                            ))
-                });
+                let hits = evidence_index.matches_row(&norm)
+                    || (lineage != raw && evidence_index.matches_row(&lineage));
                 if hits {
                     // A top-level row's hold is the normalized head. A nested
                     // non-tracked leaf is held as its nest vector, so one

@@ -7,10 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use agent_doc_markdown_ast::{
-    mutations::{MutationItemNode, all_item_nodes},
-    overlay::ItemKind,
-};
+use agent_doc_markdown_ast::{mutations::MutationItemNode, overlay::ItemKind};
 use serde::{Deserialize, Serialize};
 
 const GENERATED_ID_PREFIX: &str = "q-";
@@ -479,9 +476,11 @@ pub fn relation_graph(content: &str) -> QueueRelationGraph {
 }
 
 fn executable_queue_nodes(content: &str) -> Vec<MutationItemNode> {
-    let nodes = all_item_nodes(content)
-        .into_iter()
+    // Shared per document revision (`#incrementalreconcile`).
+    let nodes = crate::derived_memo::queue_item_nodes(content)
+        .iter()
         .filter(|node| node.component == "queue")
+        .cloned()
         .collect::<Vec<_>>();
     // `#waitingpacketowner`: a waiting item is identified by its Todo id, and
     // every row in its packet is decision evidence for it. Neither is an
@@ -539,11 +538,12 @@ fn executable_queue_nodes(content: &str) -> Vec<MutationItemNode> {
 }
 
 fn identified_queue_nodes(content: &str) -> Vec<MutationItemNode> {
-    all_item_nodes(content)
-        .into_iter()
+    crate::derived_memo::queue_item_nodes(content)
+        .iter()
         .filter(|node| {
             node.component == "queue" && matches!(node.item.kind, ItemKind::Do | ItemKind::FreeText)
         })
+        .cloned()
         .collect()
 }
 
@@ -589,9 +589,10 @@ fn source_indent(content: &str, byte: usize) -> usize {
 /// the same leaf under a different parent. Labels are authored work, so
 /// admitting a parent's own `[#q-…]` does not change a child's seed.
 fn queue_ancestor_paths(content: &str) -> HashMap<String, String> {
-    let nodes = all_item_nodes(content)
-        .into_iter()
+    let nodes = crate::derived_memo::queue_item_nodes(content)
+        .iter()
         .filter(|node| node.component == "queue" && !node.item.struck)
+        .cloned()
         .collect::<Vec<_>>();
     let mut paths = HashMap::new();
     let mut stack: Vec<(usize, String)> = Vec::new();
@@ -1042,7 +1043,7 @@ mod tests {
                 .all(|prompt| !prompt.text.contains("Duplicate #build"))
         );
         assert_eq!(
-            all_item_nodes(&projection.content)
+            agent_doc_markdown_ast::mutations::all_item_nodes(&projection.content)
                 .into_iter()
                 .filter(|node| node.component == "queue")
                 .count(),

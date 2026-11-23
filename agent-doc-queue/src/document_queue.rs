@@ -557,13 +557,16 @@ pub mod parse_spans_memo {
 
     type Spans = Vec<(QueueEntry, std::ops::Range<usize>)>;
 
-    /// Bodies at least this large are memoized and counted by
-    /// [`large_evaluations`]; smaller ones parse in well under a millisecond.
+    /// Bodies at least this large are counted by [`large_evaluations`].
     pub const LARGE_BODY_BYTES: usize = 1024;
 
     thread_local! {
+        // 64 bodies: a pass that walks every queue of a large session (two
+        // dozen run components) must not evict the bodies it reads next
+        // (`#incrementalreconcile`).
+        // Small bodies too: each still runs a tree-sitter inline parse.
         pub(super) static MEMO: RefCell<ContentMemo<Spans>> =
-            const { RefCell::new(ContentMemo::new(LARGE_BODY_BYTES, 16, 2 * 1024 * 1024)) };
+            const { RefCell::new(ContentMemo::new(1, 64, 4 * 1024 * 1024)) };
         pub(super) static LARGE_EVALUATIONS: Cell<u64> = const { Cell::new(0) };
     }
 
@@ -5183,6 +5186,33 @@ fn github_slug(part: &str) -> bool {
 /// not part of the row. A `do [#id]` leaf stays `do [#id]`; only an ancestor
 /// collapses to `#id`.
 fn nest_row_work_text(text: &str) -> String {
+    // A pure function of the row text, asked for the same rows once per other
+    // row and once per dispatched item (`#incrementalreconcile`): memoized per
+    // thread for row-sized texts.
+    const MAX_TEXT: usize = 4096;
+    const MAX_ENTRIES: usize = 16384;
+    thread_local! {
+        static MEMO: std::cell::RefCell<std::collections::HashMap<Box<str>, String>> =
+            std::cell::RefCell::new(std::collections::HashMap::new());
+    }
+    if text.len() > MAX_TEXT {
+        return nest_row_work_text_uncached(text);
+    }
+    if let Some(hit) = MEMO.with(|memo| memo.borrow().get(text).cloned()) {
+        return hit;
+    }
+    let work = nest_row_work_text_uncached(text);
+    MEMO.with(|memo| {
+        let mut memo = memo.borrow_mut();
+        if memo.len() >= MAX_ENTRIES {
+            memo.clear();
+        }
+        memo.insert(text.into(), work.clone());
+    });
+    work
+}
+
+fn nest_row_work_text_uncached(text: &str) -> String {
     let unstruck = unwrap_nest_strike(text.trim());
     let projected = agent_doc_element_queue::strip_attempt_projection_prefix(unstruck);
     strip_queue_effect_annotation(&strip_priority_markers(unwrap_nest_strike(
@@ -5789,6 +5819,22 @@ fn row_is_tracked_directive(text: &str) -> bool {
 /// out of the key. A tracked directive, a group label, and a top-level row
 /// keep the marker-stripped row text.
 pub fn lineage_claim_text(entries: &[QueueEntry], index: usize) -> Option<String> {
+    if index >= entries.len() {
+        return None;
+    }
+    let derived = entries_derived(entries);
+    if let Some(Some(hit)) = derived.borrow().lineages.get(index) {
+        return hit.clone();
+    }
+    // Derived outside the borrow: a lineage reads other rows' identities.
+    let lineage = lineage_claim_text_uncached(entries, index);
+    if let Some(slot) = derived.borrow_mut().lineages.get_mut(index) {
+        *slot = Some(lineage.clone());
+    }
+    lineage
+}
+
+fn lineage_claim_text_uncached(entries: &[QueueEntry], index: usize) -> Option<String> {
     let prompt = prompt_of(entries.get(index)?)?;
     let bare = strip_in_progress_marker(prompt.text.trim());
     if bare.trim().is_empty() {
@@ -5812,13 +5858,7 @@ pub fn lineage_claim_text(entries: &[QueueEntry], index: usize) -> Option<String
     // its rows share lifecycle without changing singleton nested-head policy.
     // Explicit effect ids remain in `canonical`, keeping intentional repeats
     // distinct.
-    let alias_identity = generated_prompt_alias_identity(entries, index);
-    let is_projection_alias = alias_identity.as_ref().is_some_and(|identity| {
-        entries.iter().enumerate().any(|(other_index, _)| {
-            other_index != index
-                && generated_prompt_alias_identity(entries, other_index).as_ref() == Some(identity)
-        })
-    });
+    let is_projection_alias = generated_alias_is_shared(entries, index);
     let canonical = if is_projection_alias {
         agent_doc_element_queue::strip_queue_prompt_stable_id_annotation(&bare)
     } else {
@@ -7584,6 +7624,81 @@ pub fn collapse_generated_prompt_aliases(entries: &[QueueEntry]) -> Option<Vec<Q
     }
 
     changed.then_some(collapsed)
+}
+
+/// Derivations of one queue entry list, kept per thread and keyed by the
+/// exact entries (`#incrementalreconcile`): the row parsers ask for the same
+/// rows' identities once per other row and once per dispatched item, which
+/// made them cubic in the queue length.
+#[derive(Default)]
+struct EntriesDerived {
+    /// Every row's [`generated_prompt_alias_identity`], and how many rows
+    /// share each identity.
+    aliases: Option<std::rc::Rc<AliasTable>>,
+    /// Each row's [`lineage_claim_text`], once derived.
+    lineages: Vec<Option<Option<String>>>,
+}
+
+/// Every row's alias identity, and how many rows share each identity.
+type AliasTable = (
+    Vec<Option<agent_doc_element_queue::QueueItemIdentity>>,
+    std::collections::HashMap<agent_doc_element_queue::QueueItemIdentity, usize>,
+);
+
+fn entries_derived(entries: &[QueueEntry]) -> std::rc::Rc<std::cell::RefCell<EntriesDerived>> {
+    type Shared = std::rc::Rc<std::cell::RefCell<EntriesDerived>>;
+    thread_local! {
+        static TABLES: std::cell::RefCell<Vec<(Vec<QueueEntry>, Shared)>> =
+            const { std::cell::RefCell::new(Vec::new()) };
+    }
+    const KEPT: usize = 4;
+    TABLES.with(|tables| {
+        let mut tables = tables.borrow_mut();
+        if let Some(at) = tables
+            .iter()
+            .position(|(key, _)| key.len() == entries.len() && key.as_slice() == entries)
+        {
+            let entry = tables.remove(at);
+            let shared = entry.1.clone();
+            tables.insert(0, entry);
+            return shared;
+        }
+        let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(EntriesDerived {
+            aliases: None,
+            lineages: vec![None; entries.len()],
+        }));
+        tables.insert(0, (entries.to_vec(), shared.clone()));
+        tables.truncate(KEPT);
+        shared
+    })
+}
+
+/// Whether the row at `index` has a [`generated_prompt_alias_identity`] that
+/// another row of `entries` shares.
+fn generated_alias_is_shared(entries: &[QueueEntry], index: usize) -> bool {
+    let derived = entries_derived(entries);
+    let cached = derived.borrow().aliases.clone();
+    let table = match cached {
+        Some(table) => table,
+        None => {
+            // Derived outside the borrow: the identities read other rows.
+            let identities = (0..entries.len())
+                .map(|at| generated_prompt_alias_identity(entries, at))
+                .collect::<Vec<_>>();
+            let mut counts = std::collections::HashMap::new();
+            for identity in identities.iter().flatten() {
+                *counts.entry(identity.clone()).or_insert(0usize) += 1;
+            }
+            let table = std::rc::Rc::new((identities, counts));
+            derived.borrow_mut().aliases = Some(table.clone());
+            table
+        }
+    };
+    table
+        .0
+        .get(index)
+        .and_then(Option::as_ref)
+        .is_some_and(|identity| table.1.get(identity).copied().unwrap_or(0) > 1)
 }
 
 /// Canonical lifecycle identity for a generated-id nested projection alias.

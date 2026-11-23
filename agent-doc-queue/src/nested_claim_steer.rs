@@ -101,6 +101,15 @@ fn installed_snapshots() -> Option<Vec<ClaimTimeSnapshot>> {
     })
 }
 
+/// A text naming the installed claim-time snapshots (empty when no guard is
+/// installed), so a memo of a derivation that expands entries under the guard
+/// can key on it alongside the document (`#incrementalreconcile`).
+pub fn installed_fingerprint() -> String {
+    installed_snapshots()
+        .map(|snapshots| format!("{snapshots:?}"))
+        .unwrap_or_default()
+}
+
 /// Expand `entries` when a guard is installed. Otherwise return them as-is.
 pub fn expand_if_installed(entries: Vec<QueueEntry>) -> Vec<QueueEntry> {
     match installed_snapshots() {

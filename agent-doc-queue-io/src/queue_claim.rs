@@ -3760,6 +3760,37 @@ pub fn worker_owned_items_for_content(file: &Path, content: &str) -> ClaimedQueu
 /// the vector alone dropped `unblock the sample` under `do [#alpha]` because
 /// the cell quotes the child, not `#alpha: unblock the sample`.
 fn completion_evidence_rows(content: &str) -> Vec<(String, String)> {
+    // A pure function of the document, read several times per admission
+    // (dispatch candidates, claim holds, continuation): once per revision
+    // (`#incrementalreconcile`).
+    type Rows = std::sync::Arc<Vec<(String, String)>>;
+    thread_local! {
+        static MEMO: std::cell::RefCell<agent_doc_element::content_memo::ContentMemo<Rows>> =
+            const {
+                std::cell::RefCell::new(agent_doc_element::content_memo::ContentMemo::new(
+                    4 * 1024,
+                    4,
+                    8 * 1024 * 1024,
+                ))
+            };
+    }
+    // The rows' lineages expand under an installed nested-claim steer guard,
+    // so the guard's snapshots are part of the key.
+    let steer = agent_doc_queue::nested_claim_steer::installed_fingerprint();
+    let key = if steer.is_empty() {
+        std::borrow::Cow::Borrowed(content)
+    } else {
+        std::borrow::Cow::Owned(format!("{steer}\u{0}{content}"))
+    };
+    let Ok(rows) = agent_doc_element::content_memo::memoized(&MEMO, &key, |_| {
+        Ok::<_, std::convert::Infallible>(std::sync::Arc::new(completion_evidence_rows_uncached(
+            content,
+        )))
+    });
+    rows.as_ref().clone()
+}
+
+fn completion_evidence_rows_uncached(content: &str) -> Vec<(String, String)> {
     let items = agent_doc_document::subagent_completion::completion_evidence(content)
         .into_iter()
         .map(|evidence| evidence.item)
@@ -3767,17 +3798,14 @@ fn completion_evidence_rows(content: &str) -> Vec<(String, String)> {
     if items.is_empty() {
         return Vec::new();
     }
+    let index = agent_doc_queue::queue_claim::CompletionEvidenceIndex::new(
+        items.iter().map(String::as_str),
+    );
     agent_doc_queue::queue_continuation::live_executable_row_keys(content)
         .unwrap_or_default()
         .into_iter()
         .filter(|(display, lineage)| {
-            items.iter().any(|item| {
-                agent_doc_queue::queue_claim::completion_evidence_matches_row(item, display)
-                    || (lineage != display
-                        && agent_doc_queue::queue_claim::completion_evidence_matches_row(
-                            item, lineage,
-                        ))
-            })
+            index.matches_row(display) || (lineage != display && index.matches_row(lineage))
         })
         .collect()
 }

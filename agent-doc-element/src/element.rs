@@ -1276,6 +1276,46 @@ fn split_attr_tokens(attr_text: &str) -> Vec<(String, Option<String>)> {
 /// Uses `pulldown-cmark` AST parsing with `offset_iter()` to accurately detect
 /// code regions per the CommonMark spec.
 pub fn find_code_ranges(doc: &str) -> Vec<(usize, usize)> {
+    // `#incrementalreconcile`: CommonMark code is a backtick span, a backtick
+    // or tilde fence, or a block indented four columns or more. Text with none
+    // of those (most single queue rows, which the row parsers pass here once
+    // per ancestor) holds no code, so skip the Markdown parse.
+    if !could_hold_code(doc) {
+        return Vec::new();
+    }
+    if doc.len() <= SMALL_CODE_RANGE_TEXT {
+        return small_code_ranges(doc);
+    }
+    find_code_ranges_uncached(doc)
+}
+
+/// Texts this short (a queue row, a heading) are memoized per thread by their
+/// exact bytes: the row parsers re-read the same rows once per ancestor.
+const SMALL_CODE_RANGE_TEXT: usize = 4096;
+const SMALL_CODE_RANGE_ENTRIES: usize = 8192;
+
+type CodeRanges = Vec<(usize, usize)>;
+
+fn small_code_ranges(text: &str) -> CodeRanges {
+    thread_local! {
+        static MEMO: std::cell::RefCell<HashMap<Box<str>, CodeRanges>> =
+            std::cell::RefCell::new(HashMap::new());
+    }
+    if let Some(hit) = MEMO.with(|memo| memo.borrow().get(text).cloned()) {
+        return hit;
+    }
+    let ranges = find_code_ranges_uncached(text);
+    MEMO.with(|memo| {
+        let mut memo = memo.borrow_mut();
+        if memo.len() >= SMALL_CODE_RANGE_ENTRIES {
+            memo.clear();
+        }
+        memo.insert(text.into(), ranges.clone());
+    });
+    ranges
+}
+
+fn find_code_ranges_uncached(doc: &str) -> Vec<(usize, usize)> {
     let mut ranges = Vec::new();
     let parser = Parser::new_ext(doc, Options::empty());
     let mut iter = parser.into_offset_iter();
@@ -1325,6 +1365,13 @@ pub fn find_code_ranges(doc: &str) -> Vec<(usize, usize)> {
     // find_code_ranges: 2ms` text painted over a live Claude composer. A pure
     // crate owns no I/O; latency belongs to the `-io` caller's ops-log phase.
     ranges
+}
+
+/// Whether `text` has anything CommonMark code needs: a backtick, a tilde, a
+/// tab, or four spaces in a row (indented code, also after a block quote or
+/// list marker).
+fn could_hold_code(text: &str) -> bool {
+    text.bytes().any(|byte| matches!(byte, b'`' | b'~' | b'\t')) || text.contains("    ")
 }
 
 /// Byte ranges whose contents Markdown classifies as literal rather than
@@ -3418,6 +3465,46 @@ fn match_html_comment_at(content: &str, pos: usize) -> Option<(usize, &str)> {
         i += 1;
     }
     None
+}
+
+#[cfg(test)]
+mod code_range_fast_path_tests {
+    use super::*;
+
+    /// `#incrementalreconcile`: the no-code fast path and the small-text memo
+    /// answer exactly what the Markdown parse does.
+    #[test]
+    fn fast_path_and_memo_equal_the_markdown_parse() {
+        let samples = [
+            "- plain row [#q-0123456789ab]",
+            "- row with `code` [#q-0123456789ab]",
+            "-     indented after a marker",
+            ">     indented in a quote",
+            "    indented line",
+            "\tTabbed",
+            "~~~\nfence\n~~~",
+            "```\nfence",
+            "text with ~~strike~~ and `a`",
+            "two\n\n    code after a blank",
+            "a  b   c",
+            "",
+        ];
+        for text in samples {
+            assert_eq!(
+                find_code_ranges(text),
+                find_code_ranges_uncached(text),
+                "{text:?}"
+            );
+            assert_eq!(
+                find_code_ranges(text),
+                find_code_ranges_uncached(text),
+                "{text:?}"
+            );
+            if !could_hold_code(text) {
+                assert!(find_code_ranges_uncached(text).is_empty(), "{text:?}");
+            }
+        }
+    }
 }
 
 #[cfg(test)]

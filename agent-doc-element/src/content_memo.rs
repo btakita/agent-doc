@@ -15,7 +15,7 @@
 //! `thread_local!` for recursive local parsing or behind a process-wide mutex
 //! when controller request threads must share pure results. The budgets bound
 //! either scope (the shared element memo keeps at most 16 interleaved
-//! documents/16 MiB of keys; each local queue-body memo keeps 2 MiB).
+//! documents/16 MiB of keys; each local queue-body memo keeps 64 bodies/4 MiB).
 //!
 //! [`ContentMemo::evaluations`] counts real evaluations (misses and inputs
 //! outside the memoized size band).

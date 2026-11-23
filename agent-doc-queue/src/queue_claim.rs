@@ -3949,6 +3949,48 @@ pub fn completion_evidence_matches_row(cell_item: &str, row_text: &str) -> bool 
         )
 }
 
+/// Completion cells' items, indexed so a row is matched against all of them
+/// at once: `index.matches_row(row)` equals
+/// `items.iter().any(|item| completion_evidence_matches_row(item, row))`.
+///
+/// `#incrementalreconcile`: a row matches a cell when the cell's heading text
+/// is one of the row's four heading forms, so the row's forms are derived
+/// once per row instead of once per (row, cell) pair.
+#[derive(Debug, Clone, Default)]
+pub struct CompletionEvidenceIndex {
+    cells: std::collections::HashSet<String>,
+}
+
+impl CompletionEvidenceIndex {
+    pub fn new<'a>(items: impl IntoIterator<Item = &'a str>) -> Self {
+        Self {
+            cells: items
+                .into_iter()
+                .map(agent_doc_document::subagent_completion::heading_item_text)
+                .collect(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.cells.is_empty()
+    }
+
+    /// Whether any indexed cell names `row_text`
+    /// ([`completion_evidence_matches_row`]).
+    pub fn matches_row(&self, row_text: &str) -> bool {
+        if self.cells.is_empty() {
+            return false;
+        }
+        let (full, head) = completion_row_heading_forms(row_text);
+        if self.cells.contains(&full) || self.cells.contains(&head) {
+            return true;
+        }
+        let (full, head) =
+            completion_row_heading_forms(&completion_row_without_occurrence_annotations(row_text));
+        self.cells.contains(&full) || self.cells.contains(&head)
+    }
+}
+
 fn completion_row_heading_forms_match(cell: &str, row_text: &str) -> bool {
     let (full, head) = completion_row_heading_forms(row_text);
     cell == full || cell == head
@@ -4638,6 +4680,46 @@ impl ClaimedQueueItems {
 
 #[cfg(test)]
 mod tests {
+    /// `#incrementalreconcile`: the index answers exactly what matching every
+    /// cell one by one does.
+    #[test]
+    fn completion_evidence_index_equals_matching_each_cell() {
+        let cells = [
+            "do [#alpha]",
+            "parent: #rebase",
+            "fix the build ⟦effect:1⟧",
+            "follow up on an action item from queue item “x”: agent: run it",
+        ];
+        let rows = [
+            "do [#alpha]",
+            "🚧 [#subagent:x#1] do [#alpha]",
+            "parent: #rebase",
+            "#rebase",
+            "fix the build ⟦effect:1⟧ [#q-0123456789ab]",
+            "fix the build",
+            "unrelated row",
+            "### ~~do [#alpha]~~",
+        ];
+        for subset in 0..(1 << cells.len()) {
+            let chosen = cells
+                .iter()
+                .enumerate()
+                .filter(|(at, _)| subset & (1 << at) != 0)
+                .map(|(_, cell)| *cell)
+                .collect::<Vec<_>>();
+            let index = CompletionEvidenceIndex::new(chosen.iter().copied());
+            for row in rows {
+                assert_eq!(
+                    index.matches_row(row),
+                    chosen
+                        .iter()
+                        .any(|cell| completion_evidence_matches_row(cell, row)),
+                    "{chosen:?} {row:?}"
+                );
+            }
+        }
+    }
+
     use super::*;
 
     /// `#lostrowreportreopen`: the end-freeze the SubagentStop hook writes

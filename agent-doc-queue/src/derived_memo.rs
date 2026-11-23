@@ -70,6 +70,7 @@ const MIN_SLICE_BYTES: usize = 1;
 type Items = Option<Arc<Vec<Item>>>;
 type SliceItems = Option<Arc<Vec<Item>>>;
 type TreeNodes = Arc<Vec<crate::queue_tree::QueueTreeNode>>;
+type QueueNodes = Arc<Vec<agent_doc_markdown_ast::mutations::MutationItemNode>>;
 type Evidence = Arc<Vec<agent_doc_document::subagent_completion::CompletionEvidence>>;
 /// One text revision's completion responses, filled per key as they are read.
 type Responses = std::rc::Rc<RefCell<std::collections::HashMap<String, Option<String>>>>;
@@ -93,6 +94,9 @@ thread_local! {
         const { RefCell::new(ContentMemo::new(MIN_DOCUMENT_BYTES, DOCUMENT_ENTRIES, DOCUMENT_KEY_BYTES)) };
     static COMPLETION_RESPONSES: RefCell<ContentMemo<Responses>> =
         const { RefCell::new(ContentMemo::new(MIN_DOCUMENT_BYTES, DOCUMENT_ENTRIES, DOCUMENT_KEY_BYTES)) };
+    static QUEUE_NODES: RefCell<ContentMemo<Option<QueueNodes>>> = const {
+        RefCell::new(ContentMemo::new(MIN_DOCUMENT_BYTES, DOCUMENT_ENTRIES, DOCUMENT_KEY_BYTES))
+    };
     static COMPONENT_SCOPE: Cell<bool> = const { Cell::new(false) };
     static BYPASS: Cell<bool> = const { Cell::new(false) };
     static STATS: Cell<DerivedStats> = const { Cell::new(DerivedStats::ZERO) };
@@ -212,10 +216,29 @@ pub(crate) fn queue_items(document: &str) -> Items {
 }
 
 fn whole_document_items(document: &str) -> Items {
-    count(|stats| stats.document_parses += 1);
-    agent_doc_markdown_ast::mutations::item_nodes_all(document, "queue")
-        .ok()
-        .map(|nodes| Arc::new(nodes.into_iter().map(|node| node.item).collect()))
+    queue_item_nodes_result(document)
+        .map(|nodes| Arc::new(nodes.iter().map(|node| node.item.clone()).collect()))
+}
+
+/// The keyed item nodes of every queue component of `document`: exactly
+/// `item_nodes_all(document, "queue")`, empty where that is an error (as
+/// `all_item_nodes` filtered to `queue` is), memoized by the document bytes.
+pub(crate) fn queue_item_nodes(document: &str) -> QueueNodes {
+    queue_item_nodes_result(document).unwrap_or_default()
+}
+
+/// `item_nodes_all(document, "queue")`, `None` where it is an error.
+fn queue_item_nodes_result(document: &str) -> Option<QueueNodes> {
+    let build = |document: &str| {
+        count(|stats| stats.document_parses += 1);
+        agent_doc_markdown_ast::mutations::item_nodes_all(document, "queue")
+            .ok()
+            .map(Arc::new)
+    };
+    if bypassed() {
+        return build(document);
+    }
+    memo(&QUEUE_NODES, document, build)
 }
 
 /// Start of the line holding byte `offset`.

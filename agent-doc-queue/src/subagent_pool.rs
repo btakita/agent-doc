@@ -921,6 +921,13 @@ impl PoolRefill {
         out.push_str(
             "\n  Do these NOW, in this order, in this turn (spawn and start every claimed head before integrating any reported result):",
         );
+        if !self.next_heads.is_empty() {
+            // `#subagentworkpool`: an offered head has no claim, so no running
+            // worker covers it (sdk-dev.md, 2026-11-23).
+            out.push_str(
+                "\n  No worker has claimed the offered heads below. A worker running on another row, or one you are waiting on in the background, does not cover them; claim and start them before any wait.",
+            );
+        }
         for (index, step) in steps.iter().enumerate() {
             out.push_str(&format!("\n  {}. {step}", index + 1));
         }

@@ -2902,6 +2902,33 @@ fn status_sync_checkpoint_with_content(
 /// `project_runtime_state` key prefix of the last surfaced pool refill.
 const SUBAGENT_POOL_REFILL_KEY_PREFIX: &str = "subagent_pool_refill";
 
+/// `#subagentworkpool`: an unchanged refill that still owes dispatch (an
+/// unstarted claim or a free-slot head) is surfaced again once this long has
+/// passed since it was last surfaced. haiven-dev `tasks/sdk/sdk-dev.md`,
+/// 2026-11-23: the coordinator saw five free-slot heads once at 08:35Z, then
+/// spent 30 minutes in ten-minute foreground waits; each wait's PostToolUse
+/// found the same fingerprint and stayed silent, so no head was claimed
+/// until 09:05Z. A refill with only heartbeats or owed reports stays
+/// once-per-change.
+const SUBAGENT_POOL_REFILL_RESURFACE_MS: u64 = 120_000;
+
+/// The surfaced-refill record: the fingerprint and when it was surfaced.
+fn subagent_pool_refill_record(fingerprint: &str, surfaced_at_ms: u64) -> String {
+    format!("{fingerprint}@{surfaced_at_ms}")
+}
+
+/// `(fingerprint, surfaced_at_ms)` of a stored record. A record written
+/// before `#subagentworkpool` has no time and reads as surfaced at 0.
+fn parse_subagent_pool_refill_record(record: &str) -> (&str, u64) {
+    match record.rsplit_once('@') {
+        Some((fingerprint, at)) => match at.parse::<u64>() {
+            Ok(at) => (fingerprint, at),
+            Err(_) => (record, 0),
+        },
+        None => (record, 0),
+    }
+}
+
 /// Stable fingerprint of what a refill asks the coordinator to do, so the
 /// PostToolUse hook surfaces each distinct refill once instead of after every
 /// tool call.
@@ -2992,27 +3019,39 @@ fn subagent_pool_checkpoint_with_content(
         return Ok(None);
     }
     let fingerprint = subagent_pool_refill_fingerprint(&refill);
-    if agent_doc_sqlite::state_store::load_project_runtime_state_from_db(&conn, &key)?.as_deref()
-        == Some(fingerprint.as_str())
+    let mut resurfaced = false;
+    if let Some(record) =
+        agent_doc_sqlite::state_store::load_project_runtime_state_from_db(&conn, &key)?
     {
-        return Ok(None);
+        let (previous, surfaced_at_ms) = parse_subagent_pool_refill_record(&record);
+        if previous == fingerprint {
+            // `#subagentworkpool`: unclaimed free-slot heads are not a refill
+            // the coordinator has handled; surface them again after a while.
+            if !dispatch_now
+                || observed_at_ms.saturating_sub(surfaced_at_ms) < SUBAGENT_POOL_REFILL_RESURFACE_MS
+            {
+                return Ok(None);
+            }
+            resurfaced = true;
+        }
     }
     agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
         &conn,
         &key,
-        &fingerprint,
+        &subagent_pool_refill_record(&fingerprint, observed_at_ms),
         observed_at_ms,
     )?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "subagent_pool_refill_surfaced file={} cycle={} unstarted={} refresh_due={} next_heads={} report_owed={} (#subagentworkpool)",
+            "subagent_pool_refill_surfaced file={} cycle={} unstarted={} refresh_due={} next_heads={} report_owed={} resurfaced={} (#subagentworkpool)",
             file.display(),
             cycle.cycle_id,
             refill.unstarted.len(),
             refill.refresh_due.len(),
             refill.next_heads.len(),
             refill.report_owed.len(),
+            u8::from(resurfaced),
         ),
     );
     Ok(refill.render())
@@ -3682,6 +3721,62 @@ mod tests {
         assert!(second.contains("do [#b]"), "{second}");
     }
 
+    /// `#subagentworkpool`: a free-slot head the coordinator left unclaimed is
+    /// not a handled refill. The same refill comes back once the resurface
+    /// interval has passed, so a coordinator returning from a long foreground
+    /// wait sees it again; inside the interval it stays quiet.
+    #[test]
+    fn pool_checkpoint_resurfaces_unclaimed_free_slot_heads_after_the_interval() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let content = "---\nsession: sid\nagent_doc_format: template\n---\n\n<!-- agent:queue subagents=2 go -->\n- do [#a]\n- do [#b]\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, content).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&file, Some(content), Some(content)).unwrap();
+
+        let first = subagent_pool_checkpoint(&file, 1_000)
+            .unwrap()
+            .expect("the free-slot heads are surfaced");
+        assert!(first.contains("Refill a free pool slot"), "{first}");
+        assert!(
+            first.contains("do [#a]") && first.contains("do [#b]"),
+            "{first}"
+        );
+        assert_eq!(
+            subagent_pool_checkpoint(&file, 1_000 + SUBAGENT_POOL_REFILL_RESURFACE_MS - 1).unwrap(),
+            None,
+            "inside the interval the unchanged refill stays quiet"
+        );
+        let again = subagent_pool_checkpoint(&file, 1_000 + SUBAGENT_POOL_REFILL_RESURFACE_MS)
+            .unwrap()
+            .expect("unclaimed heads come back after the interval");
+        assert_eq!(again, first);
+        assert_eq!(
+            subagent_pool_checkpoint(&file, 1_001 + SUBAGENT_POOL_REFILL_RESURFACE_MS).unwrap(),
+            None,
+            "the interval restarts at each surfacing"
+        );
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("next_heads=2 report_owed=0 resurfaced=0"),
+            "{log}"
+        );
+        assert!(
+            log.contains("next_heads=2 report_owed=0 resurfaced=1"),
+            "{log}"
+        );
+
+        assert_eq!(
+            parse_subagent_pool_refill_record("abc"),
+            ("abc", 0),
+            "a record from before the interval reads as surfaced at 0"
+        );
+        assert_eq!(
+            parse_subagent_pool_refill_record(&subagent_pool_refill_record("abc", 42)),
+            ("abc", 42)
+        );
+    }
+
     fn report_running(file: &Path, item: &str, owner: &str) -> u64 {
         let clock = agent_doc_queue_io::queue_claim::claim_clock_now_secs();
         let _pin = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(clock);
@@ -3878,6 +3973,11 @@ mod tests {
             subagent_pool_checkpoint(&file, 2_000).unwrap(),
             None,
             "the same owed report is surfaced once"
+        );
+        assert_eq!(
+            subagent_pool_checkpoint(&file, 1_000 + SUBAGENT_POOL_REFILL_RESURFACE_MS).unwrap(),
+            None,
+            "a refill with no dispatch debt stays once-per-change (#subagentworkpool)"
         );
     }
 

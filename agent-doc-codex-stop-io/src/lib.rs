@@ -2322,11 +2322,82 @@ fn transient_turn_end_continuation(
             input.stop_hook_active,
         ),
     );
+    // `#subagentworkpool`: the pool's free slots and holds for the pending
+    // subagent rows this refusal names.
+    let dispatch = pending_pool_dispatch_section(file, &content, &assessment)
+        .map(|section| format!("\n{section}"))
+        .unwrap_or_default();
     Ok(ClaudeStopAnswer::Continue(ClaudeStopContinuation {
         reason: format!(
-            "{failure}\nDo not send the final answer yet. Finish each owed transition in this turn."
+            "{failure}{dispatch}\nDo not send the final answer yet. Finish each owed transition in this turn."
         ),
     }))
+}
+
+/// `#subagentworkpool`: the work-pool section of a transient-closeout
+/// refusal. Read-only: the refill is observed without lost-worker recovery.
+/// A refill that cannot be computed adds nothing; the pending rows still
+/// refuse with their own claim.
+fn pending_pool_dispatch_section(
+    file: &Path,
+    content: &str,
+    assessment: &agent_doc_queue::transient_closeout::TransientCloseoutAssessment,
+) -> Option<String> {
+    let pending = assessment
+        .debts
+        .iter()
+        .filter(|debt| {
+            debt.marker == agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+        })
+        .filter_map(|debt| debt.pending_dispatch.as_ref())
+        .collect::<Vec<_>>();
+    if pending.is_empty() {
+        return None;
+    }
+    stop_phase("claude_stop_pending_pool_dispatch");
+    let refill = match agent_doc_queue_io::subagent_pool::observe_pool_refill_for_content(
+        file, content,
+    ) {
+        Ok(refill) => refill,
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "claude_stop_pending_pool_dispatch_unavailable error={} (#subagentworkpool)",
+                    format!("{err:#}").replace('\n', " ")
+                ),
+            );
+            return None;
+        }
+    };
+    let section = agent_doc_queue::transient_closeout::pending_pool_dispatch_guidance(
+        &assessment.debts,
+        &refill,
+        &file.display().to_string(),
+    )?;
+    let held = pending
+        .iter()
+        .filter(|dispatch| {
+            let identity = agent_doc_queue::queue_claim::claim_identity(&dispatch.item);
+            !refill
+                .next_heads
+                .iter()
+                .any(|head| agent_doc_queue::queue_claim::claim_identity(&head.item) == identity)
+        })
+        .map(|dispatch| dispatch.item.as_str())
+        .collect::<Vec<_>>();
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "claude_stop_pending_pool_dispatch pending={} offered={} not_offered={} waiting_for_slot={} quota_withheld={} not_offered_rows={held:?} (#subagentworkpool)",
+            pending.len(),
+            pending.len() - held.len(),
+            held.len(),
+            refill.waiting_for_slot,
+            u8::from(refill.quota_refill_block.is_some()),
+        ),
+    );
+    Some(section)
 }
 
 /// The queue half of [`apply_claude_stop_with_drain_readiness`]: a durably
@@ -11435,6 +11506,99 @@ agent: grok
     /// `⚠️🚧`. A recursive Stop over that unchanged set keeps refusing
     /// (`state=inbox_or_running`). A closed cycle that captured no response
     /// consults the same gate and does not order `/loop` (`#stopnoresponserun`).
+    /// `#subagentworkpool`, the haiven-dev `tasks/sdk/sdk-dev.md` miss of
+    /// 2026-11-23: a worker runs on one PR while two `📥 #adversarial-pr`
+    /// rows wait under two other PRs and the pool has one free slot. Each
+    /// Stop, the recursive one included, gives the offered row its full
+    /// claim/brief/start and names the row the pool holds with why.
+    #[test]
+    fn claude_stop_names_offered_pending_heads_with_claim_commands_beside_running_workers() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        let content = "---\nsession: sid\nagent_doc_format: template\nprompt_presets:\n  '#adversarial-pr': 'Review the pull request adversarially'\n---\n\n\
+## PRs <!-- agent:run id=\"prs\" subagents=2 go -->\n\
+- ### https://example.test/pull/381\n\
+\x20\x20- 🚧 [#subagent:adv381#1] #adversarial-pr\n\
+- ### https://example.test/pull/385\n\
+\x20\x20- 📥 #adversarial-pr\n\
+- ### https://example.test/pull/386\n\
+\x20\x20- 📥 #adversarial-pr\n\
+<!-- /agent:run -->\n";
+        fs::write(&doc, content).unwrap();
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        complete_run(&doc);
+        let running = "https://example.test/pull/381: #adversarial-pr";
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&doc, running, "subagent:adv381", 7200).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            running,
+            "subagent:adv381",
+            "worker:adv381",
+            7200,
+            claim.generation,
+        )
+        .unwrap();
+        invalidate_stop_document_cache();
+        let input = |stop_hook_active: bool| ClaudeStopInput {
+            session_id: "codex-session".to_string(),
+            cwd: dir.path().display().to_string(),
+            stop_hook_active,
+            transcript_path: None,
+            reason: None,
+            subagent_type: None,
+        };
+        for stop_hook_active in [false, true] {
+            let refusal = apply_claude_stop(&input(stop_hook_active))
+                .unwrap()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "offered pending heads keep the turn open beside a running worker: {}",
+                        std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+                            .unwrap_or_default()
+                    )
+                });
+            let reason = refusal.reason;
+            assert!(reason.contains("#subagentworkpool"), "{reason}");
+            assert!(
+                reason.contains("1 of these pending row(s) have a free slot"),
+                "{reason}"
+            );
+            assert!(
+                reason.contains("queue item `https://example.test/pull/385: #adversarial-pr`"),
+                "{reason}"
+            );
+            assert!(
+                reason.contains("agent-doc queue claim")
+                    && reason.contains("agent-doc queue brief")
+                    && reason.contains("agent-doc queue start"),
+                "{reason}"
+            );
+            assert!(
+                reason.contains(
+                    "- row `https://example.test/pull/386: #adversarial-pr`: its queue's subagent plan holds it"
+                ),
+                "the held row is named with its reason: {reason}"
+            );
+            assert!(
+                !reason.contains("queue item `https://example.test/pull/381"),
+                "the running row is never offered: {reason}"
+            );
+            assert!(
+                reason.contains("Start each one now, before waiting on any background worker"),
+                "{reason}"
+            );
+        }
+        let log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            log.contains("claude_stop_pending_pool_dispatch pending=2 offered=1 not_offered=1"),
+            "{log}"
+        );
+        assert!(log.contains("state=inbox_or_running"), "{log}");
+    }
+
     #[test]
     fn claude_stop_keeps_an_inbox_or_running_row_from_ending_the_turn() {
         let dir = setup_project();

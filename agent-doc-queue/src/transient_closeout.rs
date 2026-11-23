@@ -1124,6 +1124,88 @@ fn dispatch_item_handle(
     crate::queue_claim::claim_item_handle(&lineage)
 }
 
+/// `#subagentworkpool`: the work pool's view of the pending subagent rows a
+/// turn-end refusal names (`#pendingdispatchstop`), so the coordinator knows
+/// which ones it can start right now and why each other one waits.
+///
+/// haiven-dev `tasks/sdk/sdk-dev.md`, 2026-11-23: the pool offered
+/// `pull/384: #adversarial-pr` and `pull/386: #adversarial-pr` with free
+/// slots for about two hours. The coordinator answered each Stop with "the
+/// workers are still running" and parked in ten-minute foreground waits. A
+/// row the pool offers is startable now. Its exact brief and start commands
+/// sit next to the claim, and the free slot is stated. A pending row the pool
+/// does not offer is named with the reason (harness quota, a full pool or an
+/// open `after=` predecessor, or not offered as a new head), so "dispatch it
+/// in this turn" is never read as an order that cannot be carried out.
+///
+/// `None` when no refused row is a pending subagent row.
+pub fn pending_pool_dispatch_guidance(
+    debts: &[TransientCloseoutDebt],
+    refill: &crate::subagent_pool::PoolRefill,
+    document: &str,
+) -> Option<String> {
+    let pending = debts
+        .iter()
+        .filter(|debt| debt.marker == QueueLifecycleMarker::Pending)
+        .filter_map(|debt| debt.pending_dispatch.as_ref())
+        .collect::<Vec<_>>();
+    if pending.is_empty() {
+        return None;
+    }
+    let mut offered = Vec::new();
+    let mut not_offered = Vec::new();
+    for dispatch in pending {
+        let identity = crate::queue_claim::claim_identity(&dispatch.item);
+        match refill
+            .next_heads
+            .iter()
+            .find(|head| crate::queue_claim::claim_identity(&head.item) == identity)
+        {
+            Some(head) => offered.push(head),
+            None => not_offered.push(dispatch),
+        }
+    }
+    let mut out = String::new();
+    if !offered.is_empty() {
+        out.push_str(&format!(
+            "Work pool now (#subagentworkpool): {} of these pending row(s) have a free slot. Start each one now, before waiting on any background worker or on machine load:",
+            offered.len()
+        ));
+        for (index, head) in offered.iter().enumerate() {
+            out.push_str(&format!(
+                "\n  {}. queue item `{}`: run `{}`; spawn one background worker with the preamble from `{}`; then immediately run `{}` with the printed generation and the returned worker id.",
+                index + 1,
+                head.item,
+                head.claim_command,
+                head.brief_command,
+                head.start_command,
+            ));
+        }
+    }
+    if !not_offered.is_empty() {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(
+            "Pending subagent rows the work pool does not offer now, and why (#subagentworkpool):",
+        );
+        let reason = if let Some(block) = &refill.quota_refill_block {
+            format!("no new worker may start: {}", block.reason)
+        } else if refill.waiting_for_slot > 0 {
+            "its queue's subagent plan holds it: every slot of its pool is taken, or an `after=` predecessor is still open. The next report-complete, release, or freeze offers it".to_string()
+        } else {
+            format!(
+                "the work pool does not offer it as a new head. Run `agent-doc queue pool {}` to see its state, or answer it inline in this turn",
+                crate::reported_closeout::shell_command(&[document.to_string()])
+            )
+        };
+        for dispatch in not_offered {
+            out.push_str(&format!("\n- row `{}`: {reason}.", dispatch.item));
+        }
+    }
+    Some(out)
+}
+
 /// `#personrowselect`: a `🟡`/`🚧` that an in-session selection painted on a
 /// row whose own text waits on a person (`[operator-verify]`, no inline
 /// answer). `queue claim` refuses such a row (`#humanfollowupowner`), so the

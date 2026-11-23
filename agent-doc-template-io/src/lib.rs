@@ -437,7 +437,7 @@ pub fn apply_patches_with_overrides_with_project_config(
     let summary = file.file_stem().and_then(|s| s.to_str());
     let component_configs = load_component_configs(file, project_config.as_ref());
     let max_lines_configs = load_max_lines_configs(file, project_config.as_ref());
-    apply_patches_with_overrides_pure(
+    let applied = apply_patches_with_overrides_pure(
         doc,
         patches,
         unmatched,
@@ -445,7 +445,15 @@ pub fn apply_patches_with_overrides_with_project_config(
         &component_configs,
         &max_lines_configs,
         mode_overrides,
-    )
+    )?;
+    // GH #40 / `#ghrecvpolicy`: a response that creates a component
+    // (`patch:todo` scaffolding `agent:todo`, the recap section, any component
+    // the agent adds) follows the recipient's `[receive]` policy for non-owner
+    // senders. No I/O when the response creates no component.
+    agent_doc_project_config_io::workspace_access::enforce_sender_created_components(
+        file, doc, &applied,
+    )?;
+    Ok(applied)
 }
 
 /// Get template info for a document (for plugin rendering).
@@ -584,6 +592,47 @@ mod tests {
             msg.contains("<!-- patch:exchange -->"),
             "diagnostic must point to the supported patch form, got: {msg}"
         );
+    }
+
+    /// GH #40 / `#ghrecvpolicy` phase 2: a response whose `patch:todo`
+    /// scaffolds `agent:todo` follows the recipient's `[receive]` policy for
+    /// a distinct sender; the workspace owner is never limited.
+    #[test]
+    fn response_component_scaffold_follows_recipient_receive_policy() {
+        use agent_doc_project_config_io::workspace_access::{
+            current_principal, enter_sender_principal,
+        };
+        let temp = TempDir::new().unwrap();
+        std::fs::create_dir_all(temp.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            temp.path().join(".agent-doc/config.toml"),
+            "[receive]\nauto_create_components = [\"backlog\"]\n",
+        )
+        .unwrap();
+        let file = temp.path().join("doc.md");
+        let doc = "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\nhello\n<!-- /agent:exchange -->\n";
+        std::fs::write(&file, doc).unwrap();
+        let (patches, unmatched) = agent_doc_template::parse_patches(
+            "<!-- patch:todo -->\n- [ ] check the deploy\n<!-- /patch:todo -->\n",
+        )
+        .unwrap();
+        let sender = agent_doc_frontmatter::workspace_access::Principal::os_user(
+            current_principal().uid.wrapping_add(7919),
+        );
+        {
+            let _sender = enter_sender_principal(Some(sender));
+            let err =
+                apply_patches_with_overrides(doc, &patches, &unmatched, &file, &HashMap::new())
+                    .expect_err("a member may not create agent:todo under a backlog-only policy");
+            assert!(
+                format!("{err:#}").contains("no agent:todo component"),
+                "{err:#}"
+            );
+        }
+        let applied =
+            apply_patches_with_overrides(doc, &patches, &unmatched, &file, &HashMap::new())
+                .unwrap();
+        assert!(applied.contains("<!-- agent:todo"), "{applied}");
     }
 
     #[test]

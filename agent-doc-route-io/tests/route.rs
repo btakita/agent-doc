@@ -1021,6 +1021,80 @@ mod tests {
             "route must fail closed before dispatching against duplicate prompt Markdown residue: {err}"
         );
     }
+    /// GH #40 / `#ghrecvpolicy` phase 2: route dispatch creating `agent:run`
+    /// follows the recipient's `[receive]` policy for a distinct sender (a
+    /// controller request's principal), and never limits the owner.
+    #[test]
+    fn route_enqueue_dispatch_prompt_follows_recipient_receive_policy() {
+        use agent_doc_project_config_io::workspace_access::{
+            current_principal, enter_sender_principal,
+        };
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "[receive]\nauto_create_components = [\"backlog\"]\n",
+        )
+        .unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_format: template\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "❯ prior prompt\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#qipc] Fix queue dispatch.\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let _force_disk_guard =
+            agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
+
+        let sender = agent_doc_frontmatter::workspace_access::Principal::os_user(
+            current_principal().uid.wrapping_add(7919),
+        );
+        {
+            let _sender = enter_sender_principal(Some(sender));
+            let err = enqueue_route_dispatch_prompt(
+                &doc,
+                "❯ do [#qipc].",
+                "test_member_route",
+                false,
+                route_queue_effects(),
+            )
+            .expect_err("a member may not create agent:run under a backlog-only policy");
+            let err = format!("{err:#}");
+            assert!(err.contains("no agent:queue component"), "{err}");
+            assert!(err.contains(&sender.to_string()), "{err}");
+        }
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+
+        // The recipient workspace's owner is never limited by its own policy.
+        let outcome = enqueue_route_dispatch_prompt(
+            &doc,
+            "❯ do [#qipc].",
+            "test_owner_route",
+            false,
+            route_queue_effects(),
+        )
+        .expect("the owner creates agent:run");
+        assert!(outcome.component_created);
+        assert!(
+            std::fs::read_to_string(&doc)
+                .unwrap()
+                .contains("<!-- agent:run go -->")
+        );
+    }
+
     #[test]
     fn route_enqueue_dispatch_prompt_creates_visible_plain_queue_and_snapshot() {
         let dir = tempfile::TempDir::new().unwrap();

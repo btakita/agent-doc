@@ -1718,6 +1718,12 @@ pub(crate) fn print_stale_completion_scan(root: &Path) {
 }
 
 fn publish_document_update(file: &Path, current: &str, updated: &str) -> Result<Option<String>> {
+    // GH #40 / `#ghrecvpolicy`: hoisting a prompt blocker may create
+    // `agent:review`; that follows the recipient's `[receive]` policy for
+    // non-owner senders.
+    agent_doc_project_config_io::workspace_access::enforce_sender_created_components(
+        file, current, updated,
+    )?;
     match changed_component_scope(current, updated) {
         Some(scope) => publish_exchange_update(file, current, updated, scope),
         None => {

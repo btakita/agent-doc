@@ -15816,6 +15816,10 @@ pub use rpc::*;
 /// `#ghrecvpolicy` — controller-socket peer admission via workspace membership.
 mod workspace_access;
 
+/// `#ghrecvpolicy` phase 2 — per-request authorization and session ownership.
+mod request_authz;
+pub use request_authz::claim_session_owner;
+
 /// `#installstrandsreplica` — native cdylib reload admission + deferred intent.
 mod native_reload;
 pub use native_reload::*;

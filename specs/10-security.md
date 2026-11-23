@@ -2,7 +2,7 @@
 
 # Security
 
-agent-doc is designed for a single operator by default. Controller connections are local to a machine. The optional browser editor uses bearer tokens on non-loopback binds. A multi-user access-control model is being built in phases (see [Multi-user workspaces](#multi-user-workspaces-ghrecvpolicy)). Phase 1 has landed: the principal and membership model, controller admission by membership, and the recipient-side `[receive]` policy. Session isolation and shared controller access have not landed yet.
+agent-doc is designed for a single operator by default. Controller connections are local to a machine. The optional browser editor uses bearer tokens on non-loopback binds. A multi-user access-control model is being built in phases (see [Multi-user workspaces](#multi-user-workspaces-ghrecvpolicy)). Phases 1 and 2 have landed: the principal and membership model, controller admission by membership, per-request authorization, session ownership, and the recipient-side `[receive]` policy on every component-creation path. Shared controller access (phase 3) has not landed, so in practice only the owner can reach the controller socket.
 
 ## Threat Model
 
@@ -23,7 +23,7 @@ agent-doc is designed for a single operator by default. Controller connections a
 - Use a **private git repository** for the project containing session documents.
 - Avoid putting secrets (API keys, credentials) in documents or agent context.
 - If you are experimenting with shared/collaborative docs, mark the document with `agent_doc_collaboration: shared` and require an auditable `agent_doc_security_review: <review-id>` before cross-document `extract` / `transfer` or plan-backed `do #id` work that reads another `.md` file.
-- For broader shared/collaborative use cases, wait for the remaining multi-user phases (per-request authorization, session isolation, content scanning). Until then, give other members of a shared project only the OS file permissions they need, and set `[receive] auto_create_components` to limit what they can add to your documents.
+- For broader shared/collaborative use cases, wait for the remaining multi-user phases (shared controller transport, editor replica attribution, per-document ACLs, content scanning). Until then, give other members of a shared project only the OS file permissions they need, and set `[receive] auto_create_components` to limit what they can add to your documents.
 - Review agent responses before sharing or publishing document content.
 
 ## Browser editor writes (`agent-doc serve`, `#servesavebypass`)
@@ -32,7 +32,7 @@ agent-doc is designed for a single operator by default. Controller connections a
 
 ## Local controller access
 
-On Unix, the project controller requires an owner-owned, non-symlink socket directory. It creates or restricts the project `.agent-doc` directory to mode `0700` and binds public and replacement sockets with mode `0600`. A custom socket directory outside that project directory must already have mode `0700`. Before reading a request, the controller reads the peer's kernel credentials (Linux `SO_PEERCRED`) and admits the peer only when the workspace model gives its effective UID the `owner` role. That is the controller's own UID, or, in a `multi-user` workspace, a member listed with `role = "owner"`. In the default single-user workspace this is exactly the previous rule: the effective UID must match the controller's own. Non-owner members (`editor`, `viewer`) are refused with a reason until per-request authorization lands. A peer with no effective UID in its credentials is refused. Windows uses a local named pipe.
+On Unix, the project controller requires an owner-owned, non-symlink socket directory. It creates or restricts the project `.agent-doc` directory to mode `0700` and binds public and replacement sockets with mode `0600`. A custom socket directory outside that project directory must already have mode `0700`. Before reading a request, the controller reads the peer's kernel credentials (Linux `SO_PEERCRED`) and admits the peer only when the workspace model gives its effective UID a role. That is the controller's own UID (`owner`), or, in a `multi-user` workspace, a listed member with its entry's role. In the default single-user workspace this is exactly the previous rule: the effective UID must match the controller's own. Admission is not authorization: every request from a non-owner is then checked per command (see [Multi-user workspaces](#multi-user-workspaces-ghrecvpolicy)). A peer with no effective UID in its credentials is refused. The socket directory stays `0700` and the socket `0600` until the shared transport (phase 3), so other users cannot connect yet. Windows uses a local named pipe.
 
 ## Multi-user workspaces (`#ghrecvpolicy`)
 
@@ -53,13 +53,35 @@ Design and phase plan: [proposals/multi-user-access-control.md](proposals/multi-
   A refused sender gets an error naming the component, the policy, and the owner to ask. A sender-side `--no-create-backlog` applies first. A component that already exists needs no permission. Enforcement points:
   - `notify --backlog-add`/`--backlog-add-gated`, before auto-creating `agent:backlog`.
   - Focused `extract` into an existing target, for every component the plan adds.
+- **Per-request authorization (phase 2).** The admitted principal and role travel with each request (a thread-scoped context beside the peer pid). Each command needs one capability from a fixed table (`CONTROLLER_COMMAND_CAPABILITIES` in `agent-doc-frontmatter::workspace_access`):
+  - `observe` (status, projections, current text): every role.
+  - `write-document` (the editor replica plane): `editor` and `owner`.
+  - `claim-session` (`start_session`, `attach_pane`, `session_owner_claim`): `editor` and `owner`.
+  - `drive-session` (dispatch, queue control, lifecycle, pane focus, closeout, route): `editor` and `owner`.
+  - `administer`: `owner` only. Every command the table does not list needs it, so new commands deny non-owners by default.
+
+  The owner is never limited and is authorized without file I/O. A refused request gets an error envelope naming the command, the principal, and the reason.
+- **Session ownership (phase 2).** `.agent-doc/session-owners.toml` records the principal that took each document's session, keyed by its registry key. Only sessions a non-owner took are listed; an absent key is the workspace owner's session, and a single-user project never writes the file.
+  - An `editor` may claim, start, or attach a session that no other principal holds and that the registry does not already bind. The record is written only when the request succeeds.
+  - An `editor` may drive only a session recorded as its own. A drive request must name a document, or a pane bound to exactly one document; otherwise it is refused.
+  - Owners may drive any session. An owner taking a session drops any earlier member record, so that member cannot drive the owner's new session.
+  - `agent-doc claim` by a member asks the running controller to record the owner before it mutates any file. The controller takes the principal from the socket's credentials, never from the request. A member never launches the owner's controller; with none running, the claim fails closed.
+
+  So one principal never drives another principal's session, pane, or claimed queue item through agent-doc.
+- **Recipient policy on every creation path (phase 2).** A sender is this process's user, or, inside the controller, the request's principal. Beyond `notify` and focused `extract`, the policy now applies at the binary's write boundaries, which compare the document before and after the write:
+  - route dispatch creating `agent:run`;
+  - tracked-work commands (`backlog`, `review`, `icebox`, done archive) creating their components;
+  - response writes (template patches, `patch:todo` scaffolding `agent:todo`, the recap section, any component the agent adds);
+  - prompt-blocker hoists creating `agent:review`;
+  - editor convergence and rebased disk writes;
+  - `claim`'s empty-file and default-component scaffolds.
+
+  A write that creates no component does no extra I/O. A cheap marker scan runs first; candidates are confirmed by the component parser, which ignores markers in code.
 - **Not yet enforced.** These are later phases in the design:
-  - per-command authorization inside the controller;
-  - session ownership (one member driving another's pane);
   - a group-shared controller socket;
-  - editor replica attribution;
+  - editor replica attribution (viewer replicas read-only, CRDT ops attributed);
   - per-document ACLs;
-  - principal-mapped `serve` tokens.
+  - principal-mapped `serve` tokens and `queue add --source` review routing.
 
   OS file permissions remain the only boundary for direct file writes.
 

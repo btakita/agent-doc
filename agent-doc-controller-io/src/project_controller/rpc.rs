@@ -2808,7 +2808,7 @@ fn request_controller_with_timeout<T: DeserializeOwned>(
     })
 }
 
-fn request_existing_controller_with_timeout<T: DeserializeOwned>(
+pub(super) fn request_existing_controller_with_timeout<T: DeserializeOwned>(
     project_root: &Path,
     request: ControllerRequest,
     timeout: Duration,
@@ -24549,18 +24549,22 @@ fn controller_request_peer_pid() -> Option<u32> {
 /// Admit or refuse the peer on `stream` (`#ghrecvpolicy`): its kernel
 /// peer credentials name a principal, and the project's `[workspace]`
 /// membership decides. The single-user default admits only the controller's
-/// own user. Returns the peer's pid for request attribution.
-fn controller_stream_peer_pid(
+/// own user. Returns the peer's pid for request attribution and the admitted
+/// principal and role for per-request authorization (phase 2).
+fn controller_stream_peer(
     stream: &interprocess::local_socket::Stream,
     access: &super::workspace_access::ControllerWorkspaceAccess,
-) -> Result<Option<u32>> {
+) -> Result<(Option<u32>, Option<super::request_authz::AdmittedPrincipal>)> {
     use interprocess::local_socket::traits::StreamCommon as _;
     #[cfg(unix)]
-    let credentials = {
+    let (credentials, admitted) = {
         let credentials = stream
             .peer_creds()
             .context("read project controller client peer credentials")?;
-        let Some(peer) = credentials.euid() else {
+        let peer = credentials.euid();
+        #[cfg(test)]
+        let peer = super::request_authz::simulated_peer_euid().or(peer);
+        let Some(peer) = peer else {
             anyhow::bail!(
                 "project controller client does not belong to the current user (no effective user in its peer credentials)"
             );
@@ -24569,20 +24573,28 @@ fn controller_stream_peer_pid(
             agent_doc_frontmatter::workspace_access::Principal::os_user(controller_user()),
             agent_doc_frontmatter::workspace_access::Principal::os_user(peer),
         );
-        if let Some(refusal) = decision.refusal_message() {
-            anyhow::bail!(refusal);
-        }
-        Some(credentials)
+        let agent_doc_frontmatter::workspace_access::ControllerPeerDecision::Admit {
+            principal,
+            role,
+        } = decision
+        else {
+            anyhow::bail!(decision.refusal_message().unwrap_or_default());
+        };
+        (
+            Some(credentials),
+            Some(super::request_authz::AdmittedPrincipal { principal, role }),
+        )
     };
     #[cfg(not(unix))]
-    let credentials = {
+    let (credentials, admitted) = {
         let _ = access;
-        stream.peer_creds().ok()
+        (stream.peer_creds().ok(), None)
     };
-    Ok(credentials
+    let pid = credentials
         .and_then(|credentials| credentials.pid())
         .and_then(|pid| u32::try_from(pid).ok())
-        .filter(|pid| *pid != 0))
+        .filter(|pid| *pid != 0);
+    Ok((pid, admitted))
 }
 
 pub(crate) fn serve_client(
@@ -24591,9 +24603,13 @@ pub(crate) fn serve_client(
     should_stop: &AtomicBool,
     sock: &Path,
 ) -> Result<()> {
-    let peer_pid = controller_stream_peer_pid(&stream, &runtime.workspace_access)?;
+    let (peer_pid, admitted) = controller_stream_peer(&stream, &runtime.workspace_access)?;
     install_controller_request_thread_context(runtime);
     let _peer = enter_controller_request_peer(peer_pid);
+    let controller_principal =
+        agent_doc_frontmatter::workspace_access::Principal::os_user(controller_user());
+    let _principal =
+        super::request_authz::enter_controller_request_principal(controller_principal, admitted);
     stream
         .set_recv_timeout(Some(CONTROLLER_IDLE_CLIENT_TIMEOUT))
         .context("failed to set project controller client read timeout")?;
@@ -24608,6 +24624,26 @@ pub(crate) fn serve_client(
                 command: String,
             }
             let selector: CommandSelector = serde_json::from_str(line.trim())?;
+            // `#ghrecvpolicy` phase 2: per-command authorization for the
+            // admitted principal. Owners pass without I/O.
+            let gate = match super::request_authz::authorize_controller_request(
+                &runtime.workspace_access,
+                controller_principal,
+                admitted,
+                &selector.command,
+                &line,
+            ) {
+                Ok(gate) => gate,
+                Err(refusal) => {
+                    eprintln!("[controller] {refusal}");
+                    let response =
+                        controller_envelope::<serde_json::Value>(Err(anyhow::anyhow!(refusal)))?;
+                    writer_half.write_all(response.as_bytes())?;
+                    writer_half.write_all(b"\n")?;
+                    writer_half.flush()?;
+                    return Ok(());
+                }
+            };
             if selector.command == "document_turn_authority_stream" {
                 let request = serde_json::from_str(line.trim())?;
                 return serve_document_turn_authority_stream(
@@ -24618,6 +24654,7 @@ pub(crate) fn serve_client(
                 );
             }
             let (response, request_should_stop) = handle_request_for_client(&line, runtime)?;
+            gate.finish(&runtime.workspace_access, &response);
             writer_half.write_all(response.as_bytes())?;
             writer_half.write_all(b"\n")?;
             writer_half.flush()?;
@@ -25596,6 +25633,12 @@ pub(crate) fn handle_request_locked(
         "crdt_route_disk_change_signal" => controller_envelope(
             handle_crdt_route_disk_change_signal_rpc(&bootstrap_snapshot, request),
         ),
+        // `#ghrecvpolicy` phase 2: `agent-doc claim` by a workspace member.
+        // Authorization already decided and records the owner on success.
+        "session_owner_claim" => controller_envelope(Ok(serde_json::json!({
+            "principal": super::request_authz::controller_request_principal()
+                .map(|admitted| admitted.principal.uid),
+        }))),
         "admin_operation" => {
             controller_envelope(handle_admin_operation(&bootstrap_snapshot, request))
         }
@@ -51628,7 +51671,7 @@ mod tests {
         // the single-user default admits.
         let access = super::super::workspace_access::ControllerWorkspaceAccess::new(dir.path());
         assert_eq!(
-            controller_stream_peer_pid(&accepted, &access).unwrap(),
+            controller_stream_peer(&accepted, &access).unwrap().0,
             Some(std::process::id())
         );
         drop(client);

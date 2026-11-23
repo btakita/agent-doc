@@ -4542,6 +4542,11 @@ pub fn converge_document_or_disk(
     current: &str,
     source: &str,
 ) -> Result<()> {
+    // GH #40 / `#ghrecvpolicy`: a write that creates a component follows the
+    // recipient's `[receive]` policy for non-owner senders. No I/O otherwise.
+    agent_doc_project_config_io::workspace_access::enforce_sender_created_components(
+        file, current, target,
+    )?;
     if try_editor_converge(effects, file, target, current, source)? {
         return guard_visible_delivery_convergence_settling_cli_writes(
             effects, file, current, target, source,
@@ -4560,6 +4565,9 @@ pub fn converge_or_disk_write(
     target: &str,
     source: &str,
 ) -> Result<()> {
+    agent_doc_project_config_io::workspace_access::enforce_sender_created_components(
+        file, current, target,
+    )?;
     if try_editor_converge(effects, file, target, current, source)? {
         return guard_visible_delivery_convergence_settling_cli_writes(
             effects, file, current, target, source,

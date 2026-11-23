@@ -74,6 +74,18 @@ pub fn enqueue_route_dispatch_prompt(
                 prompt_text,
                 priority,
             )?;
+            // GH #40 / `#ghrecvpolicy`: creating `agent:run` on a document
+            // follows its workspace's `[receive] auto_create_components`
+            // policy for senders other than the workspace owner. The sender
+            // is this process's user, or the project controller request's
+            // principal when the route runs inside the controller.
+            if update.component_created {
+                agent_doc_project_config_io::workspace_access::enforce_component_auto_create(
+                    agent_doc_project_config_io::workspace_access::sender_principal(),
+                    file,
+                    "queue",
+                )?;
+            }
             if let Some(parse_err) = update.unparseable_queue_error.as_deref() {
                 agent_doc_ops_log_io::log_op(
                     file,

@@ -1123,6 +1123,13 @@ pub fn atomic_write_through_authority(path: &Path, content: &str) -> Result<()> 
     // ACKed the same canonical frontier. The existing disk projection is the
     // best available merge base for this legacy no-CAS API.
     let projection_base = std::fs::read_to_string(path).unwrap_or_default();
+    // GH #40 / `#ghrecvpolicy`: the legacy no-CAS write already read its base,
+    // so the component-creation guard costs no extra I/O here.
+    agent_doc_project_config_io::workspace_access::enforce_sender_created_components(
+        path,
+        &projection_base,
+        content,
+    )?;
     atomic_write_rebased_through_authority_inner(
         path,
         &projection_base,
@@ -1145,6 +1152,13 @@ pub fn atomic_write_rebased_through_authority(
     source: &str,
 ) -> Result<()> {
     validate_canonical_document_target(path, content, source)?;
+    // GH #40 / `#ghrecvpolicy`: a write that creates a component follows the
+    // recipient's `[receive]` policy for non-owner senders. No I/O otherwise.
+    agent_doc_project_config_io::workspace_access::enforce_sender_created_components(
+        path,
+        expected_current,
+        content,
+    )?;
     let visible_document = agent_doc_document_realtime::write_authority::is_visible_document(path);
     if visible_document && !agent_doc_document_realtime::write_authority::within_owner_scope() {
         log_fence_count_drop_if_any(path, content);

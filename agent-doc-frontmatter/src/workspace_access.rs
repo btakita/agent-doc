@@ -128,10 +128,6 @@ pub enum ControllerPeerRefusal {
     NotOwner,
     /// Multi-user workspace and the peer is not a listed member.
     NotMember,
-    /// A listed non-owner member. Their connection needs per-request
-    /// authorization (phase 2 of the design), which has not landed, so the
-    /// controller still refuses them rather than granting owner powers.
-    MemberAccessNotEnabled { role: Role },
 }
 
 /// The project controller's admission decision for one socket peer.
@@ -164,30 +160,25 @@ impl ControllerPeerDecision {
             ControllerPeerRefusal::NotMember => format!(
                 "project controller client {principal} is not a member of this multi-user workspace"
             ),
-            ControllerPeerRefusal::MemberAccessNotEnabled { role } => format!(
-                "project controller client {principal} is a workspace {} but controller access for non-owner members is not enabled yet (needs per-request authorization)",
-                role.as_str()
-            ),
         })
     }
 }
 
 /// Admission rule for a peer on the project controller socket. `owner` is the
-/// controller's own effective user. Owners (the controller's user and any
-/// member with [`Role::Owner`]) are admitted; everyone else is refused.
+/// controller's own effective user. Every principal with a role is admitted
+/// with that role: the owner always, and in multi-user mode each listed member.
+/// Everyone else is refused. Admission is not authorization: each request is
+/// then checked against [`controller_request_decision`] (phase 2), which
+/// denies non-owners anything the command table does not grant their role.
 pub fn controller_peer_decision(
     owner: Principal,
     workspace: &WorkspaceConfig,
     peer: Principal,
 ) -> ControllerPeerDecision {
     match role_of(owner, workspace, peer) {
-        Some(Role::Owner) => ControllerPeerDecision::Admit {
+        Some(role) => ControllerPeerDecision::Admit {
             principal: peer,
-            role: Role::Owner,
-        },
-        Some(role) => ControllerPeerDecision::Refuse {
-            principal: peer,
-            refusal: ControllerPeerRefusal::MemberAccessNotEnabled { role },
+            role,
         },
         None => ControllerPeerDecision::Refuse {
             principal: peer,
@@ -196,6 +187,307 @@ pub fn controller_peer_decision(
                 WorkspaceMode::MultiUser => ControllerPeerRefusal::NotMember,
             },
         },
+    }
+}
+
+/// What a project-controller command needs from the requesting principal
+/// (phase 2). The project owner holds every capability; the table decides what
+/// the other roles may do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ControllerCapability {
+    /// Read documents, projections, and status. Every role.
+    Observe,
+    /// Edit document text through the editor plane. `editor` and `owner`.
+    WriteDocument,
+    /// Take a document's session: claim, start, or attach a pane. An `editor`
+    /// may take a session no other principal owns, and becomes its owner.
+    ClaimSession,
+    /// Drive an existing session: dispatch, queue control, lifecycle, pane
+    /// focus, closeout. An `editor` may drive only a session it owns.
+    DriveSession,
+    /// Controller administration, cross-session layout, repair, and every
+    /// command the table does not list. `owner` only.
+    Administer,
+}
+
+impl ControllerCapability {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Observe => "observe",
+            Self::WriteDocument => "write-document",
+            Self::ClaimSession => "claim-session",
+            Self::DriveSession => "drive-session",
+            Self::Administer => "administer",
+        }
+    }
+
+    /// Whether this capability targets one document's session.
+    pub fn targets_session(self) -> bool {
+        matches!(self, Self::ClaimSession | Self::DriveSession)
+    }
+}
+
+impl Role {
+    /// Whether this role may use `capability` at all. Session-scoped
+    /// capabilities still need [`controller_request_decision`]'s ownership
+    /// check.
+    pub fn grants(self, capability: ControllerCapability) -> bool {
+        use ControllerCapability as C;
+        match self {
+            Self::Owner => true,
+            Self::Editor => !matches!(capability, C::Administer),
+            Self::Viewer => matches!(capability, C::Observe),
+        }
+    }
+}
+
+/// The per-command capability table. A command missing from it needs
+/// [`ControllerCapability::Administer`], so a new command is owner-only until
+/// someone classifies it here (deny by default).
+pub const CONTROLLER_COMMAND_CAPABILITIES: &[(&str, ControllerCapability)] = {
+    use ControllerCapability::{ClaimSession, DriveSession, Observe, WriteDocument};
+    &[
+        // Observe: status, projections, and current text.
+        ("api", Observe),
+        ("status", Observe),
+        ("handoff_status", Observe),
+        ("session_status", Observe),
+        ("inspect_actor", Observe),
+        ("tmux_focus_state", Observe),
+        ("main_layout_eligibility", Observe),
+        ("pane_layout_retained_columns", Observe),
+        ("tmux_layout_sync_state", Observe),
+        ("document_state_projection", Observe),
+        ("document_closeout_projection", Observe),
+        ("turn_admission_projection", Observe),
+        ("queue_context_clear_status", Observe),
+        ("queue_drain_stall_status", Observe),
+        ("route_submit_status", Observe),
+        ("visible_write_commit_candidate_status", Observe),
+        ("visible_write_commit_candidate_patch_status", Observe),
+        ("visible_write_materialized_carry_forward_status", Observe),
+        ("reliable_sync_status", Observe),
+        ("supervisor_recycle_status", Observe),
+        ("editor_command_status", Observe),
+        ("crdt_current_text", Observe),
+        ("crdt_revision", Observe),
+        ("preflight_read_projection", Observe),
+        ("state_subscribe", Observe),
+        // WriteDocument: the editor replica plane.
+        ("crdt_replica", WriteDocument),
+        ("crdt_cp_write", WriteDocument),
+        ("crdt_text_adopt", WriteDocument),
+        ("crdt_commit_barrier", WriteDocument),
+        ("editor_op_capture_update", WriteDocument),
+        ("editor_surface_observe", WriteDocument),
+        ("editor_surface_forget", WriteDocument),
+        ("editor_view_snapshot_observe", WriteDocument),
+        ("editor_view_client_retire", WriteDocument),
+        ("editor_view_presentation_receipt", WriteDocument),
+        ("document_path_transition_observe", WriteDocument),
+        ("reliable_sync", WriteDocument),
+        ("reliable_sync_outbox", WriteDocument),
+        // ClaimSession: establishes the session owner.
+        ("session_owner_claim", ClaimSession),
+        ("start_session", ClaimSession),
+        ("attach_pane", ClaimSession),
+        // DriveSession: one document's session, owner-checked.
+        ("register_supervisor", DriveSession),
+        ("mark_lifecycle", DriveSession),
+        ("set_actor_harness", DriveSession),
+        ("supervisor_heartbeat", DriveSession),
+        ("actor_binding", DriveSession),
+        ("dispatch", DriveSession),
+        ("editor_route", DriveSession),
+        ("focus_document_pane", DriveSession),
+        ("queue_control", DriveSession),
+        ("route_submit_started", DriveSession),
+        ("route_submit_settled", DriveSession),
+        ("route_submit_blocked", DriveSession),
+        ("queue_context_clear_started", DriveSession),
+        ("queue_context_clear_deferred", DriveSession),
+        ("queue_context_clear_settled", DriveSession),
+        ("queue_drain_stall_continuation_recorded", DriveSession),
+        ("queue_drain_stall_continuation_cleared", DriveSession),
+        ("supervisor_recycle_requested", DriveSession),
+        ("supervisor_recycle_started", DriveSession),
+        ("supervisor_recycle_settled", DriveSession),
+        ("supervisor_recycle_settle_ready_after_start", DriveSession),
+        ("supervisor_recycle_wait_settled", DriveSession),
+        ("closeout_owner_claim", DriveSession),
+        ("closeout_owner_release", DriveSession),
+        ("record_owner_pane_wedge", DriveSession),
+        ("clear_owner_pane_wedge", DriveSession),
+        ("resume_claimant", DriveSession),
+        ("commit_document", DriveSession),
+    ]
+};
+
+/// The capability `command` needs; unlisted commands need
+/// [`ControllerCapability::Administer`].
+pub fn controller_command_capability(command: &str) -> ControllerCapability {
+    CONTROLLER_COMMAND_CAPABILITIES
+        .iter()
+        .find(|(name, _)| *name == command)
+        .map(|(_, capability)| *capability)
+        .unwrap_or(ControllerCapability::Administer)
+}
+
+/// What the controller knows about the session a request targets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionTarget {
+    /// The principal recorded as the session's owner at claim/start, when a
+    /// non-owner took it. `None` means the workspace owner's (or no) session.
+    pub recorded_owner: Option<Principal>,
+    /// Whether the document already has a session bound (a registry entry).
+    pub bound: bool,
+}
+
+/// How the session-owner ledger changes when an allowed request succeeds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionOwnerUpdate {
+    Keep,
+    /// A non-owner took the session: record it.
+    Record(Principal),
+    /// An owner took the session: drop any earlier non-owner record, so the
+    /// previous owner cannot drive the new session.
+    Clear,
+}
+
+/// Why a request from an admitted principal was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControllerRequestRefusal {
+    /// The role does not grant the command's capability at all.
+    RoleLacksCapability {
+        role: Role,
+        capability: ControllerCapability,
+    },
+    /// A session-scoped command that names no document or pane the controller
+    /// can resolve.
+    NoSessionTarget { capability: ControllerCapability },
+    /// The target session belongs to another principal.
+    SessionOwnedByOther { owner: Principal },
+}
+
+/// The per-request authorization decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControllerRequestDecision {
+    Allow(SessionOwnerUpdate),
+    Refuse {
+        principal: Principal,
+        command_capability: ControllerCapability,
+        refusal: ControllerRequestRefusal,
+    },
+}
+
+impl ControllerRequestDecision {
+    pub fn is_allowed(&self) -> bool {
+        matches!(self, Self::Allow(_))
+    }
+
+    /// Operator-facing refusal text, `None` when allowed.
+    pub fn refusal_message(&self, command: &str) -> Option<String> {
+        let Self::Refuse {
+            principal,
+            command_capability,
+            refusal,
+        } = self
+        else {
+            return None;
+        };
+        Some(match refusal {
+            ControllerRequestRefusal::RoleLacksCapability { role, capability } => format!(
+                "project controller refused `{command}` from {principal}: a workspace {} cannot {} (needs the owner role)",
+                role.as_str(),
+                capability.as_str()
+            ),
+            ControllerRequestRefusal::NoSessionTarget { capability } => format!(
+                "project controller refused `{command}` from {principal}: {} needs a document or pane the controller can resolve",
+                capability.as_str()
+            ),
+            ControllerRequestRefusal::SessionOwnedByOther { owner } => format!(
+                "project controller refused `{command}` ({}) from {principal}: the session belongs to {owner}",
+                command_capability.as_str()
+            ),
+        })
+    }
+}
+
+/// Authorize one controller request. `owner` is the workspace owner, `role`
+/// the admitted principal's role, and `session` the target session when the
+/// command is session-scoped and the controller could resolve one.
+///
+/// Owners may do anything. Other roles get only what [`Role::grants`] allows;
+/// an `editor` may claim a session nobody else holds and drive only sessions
+/// it owns, so one principal never drives another principal's session, pane,
+/// or claimed queue item.
+pub fn controller_request_decision(
+    owner: Principal,
+    principal: Principal,
+    role: Role,
+    command: &str,
+    session: Option<SessionTarget>,
+) -> ControllerRequestDecision {
+    let capability = controller_command_capability(command);
+    let refuse = |refusal| ControllerRequestDecision::Refuse {
+        principal,
+        command_capability: capability,
+        refusal,
+    };
+    if role == Role::Owner {
+        return ControllerRequestDecision::Allow(
+            if capability == ControllerCapability::ClaimSession {
+                SessionOwnerUpdate::Clear
+            } else {
+                SessionOwnerUpdate::Keep
+            },
+        );
+    }
+    if !role.grants(capability) {
+        return refuse(ControllerRequestRefusal::RoleLacksCapability { role, capability });
+    }
+    if !capability.targets_session() {
+        return ControllerRequestDecision::Allow(SessionOwnerUpdate::Keep);
+    }
+    let Some(session) = session else {
+        return refuse(ControllerRequestRefusal::NoSessionTarget { capability });
+    };
+    match session.recorded_owner {
+        Some(recorded) if recorded == principal => {
+            ControllerRequestDecision::Allow(SessionOwnerUpdate::Keep)
+        }
+        Some(recorded) => refuse(ControllerRequestRefusal::SessionOwnedByOther { owner: recorded }),
+        None if capability == ControllerCapability::ClaimSession && !session.bound => {
+            ControllerRequestDecision::Allow(SessionOwnerUpdate::Record(principal))
+        }
+        None => refuse(ControllerRequestRefusal::SessionOwnedByOther { owner }),
+    }
+}
+
+/// The session-owner ledger (`.agent-doc/session-owners.json`): the
+/// principal that took each document's session, keyed by the registry key.
+/// Only sessions a non-owner took are listed; an absent key is the workspace
+/// owner's. A single-user project never writes it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionOwners {
+    #[serde(default)]
+    pub sessions: std::collections::BTreeMap<String, Principal>,
+}
+
+impl SessionOwners {
+    pub fn owner_of(&self, key: &str) -> Option<Principal> {
+        self.sessions.get(key).copied()
+    }
+
+    /// Apply `update` for `key`; returns whether the ledger changed.
+    pub fn apply(&mut self, key: &str, update: SessionOwnerUpdate) -> bool {
+        match update {
+            SessionOwnerUpdate::Keep => false,
+            SessionOwnerUpdate::Record(principal) => {
+                self.sessions.insert(key.to_string(), principal) != Some(principal)
+            }
+            SessionOwnerUpdate::Clear => self.sessions.remove(key).is_some(),
+        }
     }
 }
 
@@ -422,14 +714,20 @@ mod tests {
     }
 
     #[test]
-    fn multi_user_admits_owners_and_refuses_other_members_until_per_request_authz() {
+    fn multi_user_admits_members_with_their_role_and_refuses_strangers() {
         let workspace = multi_user();
-        assert!(controller_peer_decision(OWNER, &workspace, BOB).is_admitted());
+        assert_eq!(
+            controller_peer_decision(OWNER, &workspace, BOB),
+            ControllerPeerDecision::Admit {
+                principal: BOB,
+                role: Role::Owner,
+            }
+        );
         assert_eq!(
             controller_peer_decision(OWNER, &workspace, ALICE),
-            ControllerPeerDecision::Refuse {
+            ControllerPeerDecision::Admit {
                 principal: ALICE,
-                refusal: ControllerPeerRefusal::MemberAccessNotEnabled { role: Role::Editor },
+                role: Role::Editor,
             }
         );
         assert_eq!(
@@ -682,5 +980,220 @@ auto_create_components = ["pending", "Run"]
             unreachable!()
         };
         assert_eq!(policy.describe(), "[\"backlog\"]");
+    }
+
+    // --- Phase 2: per-request authorization and session ownership. ---
+
+    const CAROL: Principal = Principal::os_user(1003);
+
+    fn team() -> WorkspaceConfig {
+        let mut workspace = multi_user();
+        workspace.members.push(WorkspaceMember {
+            uid: CAROL.uid,
+            name: Some("carol".into()),
+            role: Role::Viewer,
+        });
+        workspace.members.push(WorkspaceMember {
+            uid: MALLORY.uid,
+            name: Some("mallory".into()),
+            role: Role::Editor,
+        });
+        workspace
+    }
+
+    #[test]
+    fn unlisted_commands_need_the_owner_role() {
+        assert_eq!(
+            controller_command_capability("shutdown"),
+            ControllerCapability::Administer
+        );
+        assert_eq!(
+            controller_command_capability("a_command_added_tomorrow"),
+            ControllerCapability::Administer
+        );
+        for role in [Role::Editor, Role::Viewer] {
+            assert!(
+                !controller_request_decision(OWNER, ALICE, role, "a_command_added_tomorrow", None)
+                    .is_allowed()
+            );
+        }
+        assert!(
+            controller_request_decision(OWNER, BOB, Role::Owner, "a_command_added_tomorrow", None)
+                .is_allowed()
+        );
+    }
+
+    #[test]
+    fn command_table_lists_each_command_once() {
+        let mut seen = BTreeSet::new();
+        for (name, _) in CONTROLLER_COMMAND_CAPABILITIES {
+            assert!(seen.insert(*name), "{name} listed twice");
+        }
+    }
+
+    #[test]
+    fn roles_grant_capabilities_in_order() {
+        use ControllerCapability as C;
+        let all = [
+            C::Observe,
+            C::WriteDocument,
+            C::ClaimSession,
+            C::DriveSession,
+            C::Administer,
+        ];
+        assert!(all.iter().all(|cap| Role::Owner.grants(*cap)));
+        assert_eq!(
+            all.iter().filter(|cap| Role::Editor.grants(**cap)).count(),
+            4
+        );
+        assert!(!Role::Editor.grants(C::Administer));
+        assert_eq!(
+            all.iter()
+                .filter(|cap| Role::Viewer.grants(**cap))
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![C::Observe]
+        );
+    }
+
+    #[test]
+    fn viewer_reads_but_never_writes_or_drives() {
+        let unbound = Some(SessionTarget {
+            recorded_owner: None,
+            bound: false,
+        });
+        assert!(
+            controller_request_decision(OWNER, CAROL, Role::Viewer, "status", None).is_allowed()
+        );
+        for command in ["crdt_cp_write", "start_session", "dispatch", "shutdown"] {
+            let decision =
+                controller_request_decision(OWNER, CAROL, Role::Viewer, command, unbound);
+            assert!(
+                matches!(
+                    decision,
+                    ControllerRequestDecision::Refuse {
+                        refusal: ControllerRequestRefusal::RoleLacksCapability {
+                            role: Role::Viewer,
+                            ..
+                        },
+                        ..
+                    }
+                ),
+                "{command}: {decision:?}"
+            );
+            assert!(
+                decision
+                    .refusal_message(command)
+                    .unwrap()
+                    .contains("a workspace viewer cannot")
+            );
+        }
+    }
+
+    #[test]
+    fn session_scoped_commands_without_a_target_are_refused_for_non_owners() {
+        assert_eq!(
+            controller_request_decision(OWNER, ALICE, Role::Editor, "dispatch", None),
+            ControllerRequestDecision::Refuse {
+                principal: ALICE,
+                command_capability: ControllerCapability::DriveSession,
+                refusal: ControllerRequestRefusal::NoSessionTarget {
+                    capability: ControllerCapability::DriveSession,
+                },
+            }
+        );
+        // The owner needs no target.
+        assert_eq!(
+            controller_request_decision(OWNER, OWNER, Role::Owner, "dispatch", None),
+            ControllerRequestDecision::Allow(SessionOwnerUpdate::Keep)
+        );
+    }
+
+    /// SessionWorld: several principals claim, drive, and retake sessions on
+    /// one workspace; the ledger is the only shared state, exactly as the
+    /// controller keeps it.
+    struct SessionWorld {
+        owner: Principal,
+        workspace: WorkspaceConfig,
+        ledger: SessionOwners,
+        bound: BTreeSet<String>,
+    }
+
+    impl SessionWorld {
+        fn new() -> Self {
+            Self {
+                owner: OWNER,
+                workspace: team(),
+                ledger: SessionOwners::default(),
+                bound: BTreeSet::new(),
+            }
+        }
+
+        fn request(&mut self, principal: Principal, command: &str, doc: &str) -> bool {
+            let role = role_of(self.owner, &self.workspace, principal).expect("admitted member");
+            let session = Some(SessionTarget {
+                recorded_owner: self.ledger.owner_of(doc),
+                bound: self.bound.contains(doc),
+            });
+            match controller_request_decision(self.owner, principal, role, command, session) {
+                ControllerRequestDecision::Allow(update) => {
+                    self.ledger.apply(doc, update);
+                    if controller_command_capability(command) == ControllerCapability::ClaimSession
+                    {
+                        self.bound.insert(doc.to_string());
+                    }
+                    true
+                }
+                ControllerRequestDecision::Refuse { .. } => false,
+            }
+        }
+    }
+
+    #[test]
+    fn session_world_one_principal_never_drives_another_principals_session() {
+        let mut world = SessionWorld::new();
+        // The owner runs its own document; editors cannot touch it.
+        assert!(world.request(OWNER, "start_session", "tasks/owner.md"));
+        assert!(!world.request(ALICE, "dispatch", "tasks/owner.md"));
+        assert!(!world.request(ALICE, "start_session", "tasks/owner.md"));
+        assert!(!world.request(ALICE, "queue_control", "tasks/owner.md"));
+
+        // Alice claims a free document and drives it.
+        assert!(world.request(ALICE, "session_owner_claim", "tasks/alice.md"));
+        assert_eq!(world.ledger.owner_of("tasks/alice.md"), Some(ALICE));
+        assert!(world.request(ALICE, "start_session", "tasks/alice.md"));
+        assert!(world.request(ALICE, "dispatch", "tasks/alice.md"));
+        assert!(world.request(ALICE, "queue_control", "tasks/alice.md"));
+
+        // Mallory, another editor, can neither drive nor take Alice's session.
+        assert!(!world.request(MALLORY, "dispatch", "tasks/alice.md"));
+        assert!(!world.request(MALLORY, "focus_document_pane", "tasks/alice.md"));
+        assert!(!world.request(MALLORY, "attach_pane", "tasks/alice.md"));
+        // Carol only watches.
+        assert!(world.request(CAROL, "session_status", "tasks/alice.md"));
+        assert!(!world.request(CAROL, "dispatch", "tasks/alice.md"));
+
+        // The owner can always drive, and retaking the session clears Alice's
+        // record so she cannot drive the owner's new session.
+        assert!(world.request(OWNER, "dispatch", "tasks/alice.md"));
+        assert!(world.request(OWNER, "start_session", "tasks/alice.md"));
+        assert_eq!(world.ledger.owner_of("tasks/alice.md"), None);
+        assert!(!world.request(ALICE, "dispatch", "tasks/alice.md"));
+
+        // A co-owner member (Bob) acts as the owner and records nothing.
+        assert!(world.request(BOB, "dispatch", "tasks/alice.md"));
+        assert!(world.ledger.sessions.is_empty());
+    }
+
+    #[test]
+    fn session_owner_ledger_reports_whether_it_changed() {
+        let mut ledger = SessionOwners::default();
+        assert!(!ledger.apply("tasks/a.md", SessionOwnerUpdate::Keep));
+        assert!(ledger.apply("tasks/a.md", SessionOwnerUpdate::Record(ALICE)));
+        assert!(!ledger.apply("tasks/a.md", SessionOwnerUpdate::Record(ALICE)));
+        assert!(ledger.apply("tasks/a.md", SessionOwnerUpdate::Record(MALLORY)));
+        assert_eq!(ledger.owner_of("tasks/a.md"), Some(MALLORY));
+        assert!(ledger.apply("tasks/a.md", SessionOwnerUpdate::Clear));
+        assert!(!ledger.apply("tasks/a.md", SessionOwnerUpdate::Clear));
     }
 }

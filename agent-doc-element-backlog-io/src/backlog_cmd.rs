@@ -386,6 +386,12 @@ fn persist_pending_write_now(
     target: &str,
     force_disk: bool,
 ) -> Result<()> {
+    // GH #40 / `#ghrecvpolicy`: creating `agent:review`, `agent:done`,
+    // `agent:icebox`, ... follows the recipient's `[receive]` policy for
+    // non-owner senders. No I/O when the write creates no component.
+    agent_doc_project_config_io::workspace_access::enforce_sender_created_components(
+        file, current, target,
+    )?;
     if force_disk {
         std::fs::write(file, target)
             .with_context(|| format!("pending_write: failed to write {}", file.display()))?;
@@ -1790,8 +1796,15 @@ pub fn gate(file: &Path, id: &str) -> Result<()> {
 /// only when a new item was inserted so the caller can record actual same-cycle
 /// adds (`#opsproof-samecycle-add`).
 pub fn review_add(file: &Path, item: &str) -> Result<Option<String>> {
-    let full_content = read_command_document(file, "review_add")?;
-    let (full_content, comp) = ensure_review_component_in_document(&full_content)?;
+    let read_content = read_command_document(file, "review_add")?;
+    let (full_content, comp) = ensure_review_component_in_document(&read_content)?;
+    // GH #40: the write below starts from the scaffolded cut, so check the
+    // scaffold itself against the recipient's `[receive]` policy here.
+    agent_doc_project_config_io::workspace_access::enforce_sender_created_components(
+        file,
+        &read_content,
+        &full_content,
+    )?;
     // `#todoaddidhijack`: like `--backlog-add` / `--icebox-add`, an explicit
     // review id must not take an id another active source already owns. A
     // replay of this very add (same id, same text, already in agent:review)
@@ -3118,6 +3131,47 @@ mod tests {
         assert_eq!(
             queue_operator_answer_row_ids(&content).unwrap(),
             vec![id.to_string()]
+        );
+    }
+
+    /// GH #40 / `#ghrecvpolicy` phase 2: a tracked-work command that would
+    /// scaffold `agent:review` follows the recipient's `[receive]` policy for
+    /// a distinct sender and leaves the document untouched when refused; the
+    /// workspace owner is never limited.
+    #[test]
+    fn review_scaffold_follows_recipient_receive_policy() {
+        use agent_doc_project_config_io::workspace_access::{
+            current_principal, enter_sender_principal,
+        };
+        let (tmp, doc) = doc_with_pending("- [ ] [#keep] Keep this.");
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        fs::write(
+            tmp.path().join(".agent-doc/config.toml"),
+            "[receive]\nauto_create_components = [\"backlog\"]\n",
+        )
+        .unwrap();
+        let before = fs::read_to_string(&doc).unwrap();
+        let sender = agent_doc_frontmatter::workspace_access::Principal::os_user(
+            current_principal().uid.wrapping_add(7919),
+        );
+        {
+            let _sender = enter_sender_principal(Some(sender));
+            let err = with_test_effects(|| {
+                with_force_disk_pending_writes(true, || review_add(&doc, "[#rv] Review me."))
+            })
+            .expect_err("a member may not create agent:review under a backlog-only policy");
+            assert!(
+                format!("{err:#}").contains("no agent:review component"),
+                "{err:#}"
+            );
+        }
+        assert_eq!(fs::read_to_string(&doc).unwrap(), before);
+
+        force_pending(|| review_add(&doc, "[#rv] Review me."));
+        assert!(
+            fs::read_to_string(&doc)
+                .unwrap()
+                .contains("<!-- agent:review")
         );
     }
 

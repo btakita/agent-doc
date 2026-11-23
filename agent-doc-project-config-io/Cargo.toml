@@ -14,6 +14,7 @@ name = "agent_doc_project_config_io"
 agent-doc-config = { path = "../agent-doc-config", version = "0.35.586" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.586" }
 agent-doc-editor-surface = { path = "../agent-doc-editor-surface", version = "0.35.586" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.586" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.586" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.586" }
 anyhow = "1"

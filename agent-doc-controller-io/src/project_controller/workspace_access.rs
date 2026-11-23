@@ -13,28 +13,113 @@
 //! effect on the next connection without a controller restart. A config that
 //! cannot be read or parsed falls back to single-user, the most restrictive
 //! mode.
+//!
+//! Phase 2 admits every member with their role; each request is then
+//! authorized per command in [`super::request_authz`]. This type also keeps
+//! the session-owner ledger handle that authorization updates.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::time::SystemTime;
 
 use agent_doc_frontmatter::workspace_access::{
-    ControllerPeerDecision, Principal, Role, WorkspaceConfig, controller_peer_decision,
+    ControllerPeerDecision, Principal, Role, SessionOwnerUpdate, WorkspaceConfig,
+    controller_peer_decision,
 };
 use parking_lot::Mutex;
 
 type ConfigStamp = (Option<SystemTime>, u64);
 
+/// Session-owner ledger presence, learned once per controller (phase 2).
+const LEDGER_UNKNOWN: u8 = 0;
+const LEDGER_ABSENT: u8 = 1;
+const LEDGER_PRESENT: u8 = 2;
+
 pub(crate) struct ControllerWorkspaceAccess {
+    project_root: PathBuf,
     config_path: PathBuf,
     cache: Mutex<Option<(ConfigStamp, WorkspaceConfig)>>,
+    /// `[workspace]` config lookups, for the single-user zero-I/O proof.
+    config_reads: AtomicU64,
+    /// Whether `.agent-doc/session-owners.toml` can exist. Only this
+    /// controller records non-owner sessions, so after one check an absent
+    /// ledger stays absent until it records one.
+    ledger_state: AtomicU8,
+    ledger_checks: AtomicU64,
+    ledger_write: Mutex<()>,
 }
 
 impl ControllerWorkspaceAccess {
     pub(crate) fn new(project_root: &Path) -> Self {
         Self {
+            project_root: project_root.to_path_buf(),
             config_path: agent_doc_project_config_io::project_config_path_for_root(project_root),
             cache: Mutex::new(None),
+            config_reads: AtomicU64::new(0),
+            ledger_state: AtomicU8::new(LEDGER_UNKNOWN),
+            ledger_checks: AtomicU64::new(0),
+            ledger_write: Mutex::new(()),
         }
+    }
+
+    pub(crate) fn project_root(&self) -> &Path {
+        &self.project_root
+    }
+
+    #[cfg(test)]
+    pub(crate) fn config_reads(&self) -> u64 {
+        self.config_reads.load(Ordering::SeqCst)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn ledger_checks(&self) -> u64 {
+        self.ledger_checks.load(Ordering::SeqCst)
+    }
+
+    /// Whether the session-owner ledger may hold a record (one existence
+    /// check per controller lifetime).
+    pub(crate) fn session_ledger_may_exist(&self) -> bool {
+        match self.ledger_state.load(Ordering::SeqCst) {
+            LEDGER_ABSENT => false,
+            LEDGER_PRESENT => true,
+            _ => {
+                self.ledger_checks.fetch_add(1, Ordering::SeqCst);
+                let present = agent_doc_project_config_io::workspace_access::session_owners_path(
+                    &self.project_root,
+                )
+                .exists();
+                let state = if present {
+                    LEDGER_PRESENT
+                } else {
+                    LEDGER_ABSENT
+                };
+                // PRESENT > ABSENT > UNKNOWN: a concurrent record that set
+                // PRESENT is never downgraded.
+                self.ledger_state
+                    .fetch_max(state, Ordering::SeqCst)
+                    .max(state)
+                    == LEDGER_PRESENT
+            }
+        }
+    }
+
+    /// Apply a session-owner update after a request succeeded. Serialized so
+    /// two concurrent claims never lose each other's record.
+    pub(crate) fn update_session_owner(
+        &self,
+        key: &str,
+        update: SessionOwnerUpdate,
+    ) -> anyhow::Result<()> {
+        let _write = self.ledger_write.lock();
+        if matches!(update, SessionOwnerUpdate::Record(_)) {
+            self.ledger_state.store(LEDGER_PRESENT, Ordering::SeqCst);
+        }
+        agent_doc_project_config_io::workspace_access::update_session_owner(
+            &self.project_root,
+            key,
+            update,
+        )?;
+        Ok(())
     }
 
     /// Admission decision for a socket peer. `owner` is the controller's own
@@ -50,6 +135,7 @@ impl ControllerWorkspaceAccess {
     }
 
     fn workspace(&self) -> WorkspaceConfig {
+        self.config_reads.fetch_add(1, Ordering::SeqCst);
         let Ok(metadata) = std::fs::metadata(&self.config_path) else {
             return WorkspaceConfig::default();
         };
@@ -119,9 +205,9 @@ mod tests {
         assert!(access.decide(OWNER, BOB).is_admitted());
         assert_eq!(
             access.decide(OWNER, ALICE),
-            ControllerPeerDecision::Refuse {
+            ControllerPeerDecision::Admit {
                 principal: ALICE,
-                refusal: ControllerPeerRefusal::MemberAccessNotEnabled { role: Role::Editor },
+                role: Role::Editor,
             }
         );
     }

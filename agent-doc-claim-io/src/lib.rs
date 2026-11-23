@@ -174,6 +174,33 @@ fn provision_authoritative_pane(
         .map(|_| ())
 }
 
+/// Record who takes `file`'s session (`#ghrecvpolicy` phase 2). The workspace
+/// owner drops any earlier member record for the document (an existence check
+/// when no ledger exists, so a single-user claim writes nothing); any other
+/// claimant asks the running project controller, which takes the principal
+/// from the socket's kernel credentials and fails closed when it cannot.
+fn record_claim_session_owner(file: &Path, store_root: &Path) -> Result<()> {
+    use agent_doc_project_config_io::workspace_access as access;
+    let claimant = access::current_principal();
+    match access::store_owner(store_root) {
+        Some(owner) if owner != claimant => {
+            agent_doc_controller_io::project_controller::claim_session_owner(store_root, file)
+        }
+        _ => {
+            let key = tmux_router::registry::canonical_registry_key_in(
+                store_root,
+                &file.to_string_lossy(),
+            );
+            access::update_session_owner(
+                store_root,
+                &key,
+                agent_doc_frontmatter::workspace_access::SessionOwnerUpdate::Clear,
+            )?;
+            Ok(())
+        }
+    }
+}
+
 fn project_root_for_claim(file: &Path) -> Option<std::path::PathBuf> {
     agent_doc_project_root_io::project_root_containing(file)
         .or_else(|| file.parent().map(Path::to_path_buf))
@@ -508,6 +535,12 @@ pub fn run(
         }
     }
 
+    // `#ghrecvpolicy` phase 2: the claim takes the document's session, so its
+    // owner is recorded before any file mutation. A member other than the
+    // workspace owner asks the project controller, which refuses when another
+    // principal holds the session.
+    record_claim_session_owner(file, &store_root)?;
+
     // Auto-scaffold empty files with full template BEFORE ensure_session.
     // ensure_session only writes agent_doc_session — it doesn't set agent_doc_format
     // or add components. Empty files need the full template in one step.
@@ -518,6 +551,9 @@ pub fn run(
             eprintln!("[claim] auto-scaffolding empty file: {}", file.display());
             let session_id = uuid::Uuid::new_v4();
             let scaffold = render_empty_template_scaffold_for_path(&session_id.to_string(), file);
+            agent_doc_project_config_io::workspace_access::enforce_sender_created_components(
+                file, &raw, &scaffold,
+            )?;
             effects.atomic_write(file, &scaffold)?;
             agent_doc_snapshot_io::checkpoint_document_baseline(
                 file,
@@ -673,6 +709,13 @@ pub fn run(
     {
         let is_template = uses_template_format(&content)?;
         if let Some(scaffolded) = scaffold_default_template_components(&content)? {
+            // GH #40: the claim's default components follow the recipient's
+            // `[receive]` policy when the claimant is not the workspace owner.
+            agent_doc_project_config_io::workspace_access::enforce_sender_created_components(
+                file,
+                &content,
+                &scaffolded,
+            )?;
             effects.atomic_write(file, &scaffolded).with_context(|| {
                 format!(
                     "failed to write component scaffolding to {}",

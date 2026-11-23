@@ -1,8 +1,9 @@
 # Multi-user workspace access control (`#ghrecvpolicy`)
 
-Status: phase 1 landed (identity and membership model, controller-socket
-admission, recipient `[receive]` policy for GH #40). Phases 2 through 6 are
-open.
+Status: phases 1 and 2 landed (identity and membership model,
+controller-socket admission, per-request authorization, session ownership,
+and the recipient `[receive]` policy on every component-creation path, which
+closes GH #40). Phases 3 through 6 are open.
 
 Tracking: [GH #40](https://github.com/btakita/agent-doc/issues/40) (recipient
 policy), backlog `[#ghrecvpolicy]`.
@@ -106,22 +107,25 @@ Rules (pure, `agent_doc_frontmatter::workspace_access::role_of`):
 
 1. **Controller socket (phase 1, landed).** The controller reads the peer's
    kernel credentials before it reads a request. `controller_peer_decision`
-   admits owners (the controller's user and `owner` members) and refuses
-   everyone else with a reason:
+   admits every principal with a role (the controller's user as `owner`, and
+   in multi-user mode each listed member with its role) and refuses everyone
+   else with a reason:
    - not the owner (single-user);
-   - not a member (multi-user);
-   - a member whose controller access is not enabled yet (non-owner roles
-     until phase 2).
+   - not a member (multi-user).
 
    The owner is admitted without file I/O. Other peers read `[workspace]`
    through an mtime/length-keyed cache, so membership edits apply without a
    restart. An unreadable or unparseable config falls back to single-user.
    Today the socket directory is `0700` and the socket `0600`, so in practice
    only the owner can connect at all. Phase 3 opens the transport.
-2. **Controller RPC (phase 2).** The admitted principal and role travel with
-   the request, beside the existing peer pid
-   (`CONTROLLER_REQUEST_PEER_PID`). Each command is classified by the
-   capability it needs; non-owners are denied anything unclassified.
+2. **Controller RPC (phase 2, landed).** The admitted principal and role
+   travel with the request in a thread-scoped context beside the existing
+   peer pid (`CONTROLLER_REQUEST_PEER_PID`); see
+   `agent-doc-controller-io/src/project_controller/request_authz.rs`. Each
+   command is classified by the capability it needs
+   (`CONTROLLER_COMMAND_CAPABILITIES`); non-owners are denied anything
+   unclassified. A principal other than the controller's user is also the
+   sender that component creation on that request thread is attributed to.
 3. **Editor replicas (phase 4).** A replica's registration records the
    principal from the socket that registered it. A `viewer` replica is
    read-only, and CRDT ops are attributed to their principal in the state
@@ -154,11 +158,21 @@ may restrict who can edit `agent:queue` (runnable work) separately from
 ## Session isolation (phases 2 and 4)
 
 A session (its supervisor, agent pane, and claim) belongs to the principal
-that started it. The registry records `owner_uid` at claim/start.
+that started it. Phase 2 records it in the session-owner ledger
+(`.agent-doc/session-owners.toml`, keyed by registry key) at claim/start/attach,
+only for sessions a non-owner takes and only once the request succeeds. An
+absent key is the workspace owner's session, so a single-user project never
+writes the ledger. (The tmux-router registry entry itself is unchanged.)
 
 - **Drive.** `route`, `queue` dispatch, `start`/`restart`, send-keys,
-  focus/sync layout, and `session` admin require `owner` role or session
-  ownership.
+  focus layout, and lifecycle require `owner` role or session ownership.
+  Cross-session layout sync and `session` admin stay owner-only. A
+  drive request must name a document, or a pane bound to exactly one; an
+  owner taking a session drops the earlier member record.
+- **Claim.** `agent-doc claim` by a member asks the running controller
+  (`session_owner_claim`) before it mutates a file; the controller reads the
+  principal from the socket credentials and refuses a session another
+  principal holds. With no controller running the claim fails closed.
 - **Observe.** Status, read, and dashboards need any role. A future option
   could hide other members' sessions.
 - **Agent pane input.** Only the session owner's principal can cause input to
@@ -197,13 +211,26 @@ Already strict, so no change: `write --backlog-add-to` refuses a target with
 no backlog. `transfer` appends to the end of a target that lacks the component
 rather than creating it.
 
-Still to cover (phase 2, where the controller knows the requesting principal):
-route-dispatch `insert_queue_component`, and the review/todo/done/recap
-scaffolds the binary adds while maintaining a document. These run as the
-document's own session today.
+Phase 2 covers the rest. The sender is the process's user, or inside the
+controller the request's principal. The binary's write boundaries compare the
+document before and after each write (`created_component_names`, a marker
+scan confirmed by the component parser) and check every new component:
 
-Pure rule: `component_auto_create_decision`. Adapter:
-`agent_doc_project_config_io::workspace_access::enforce_component_auto_create`.
+- route dispatch creating `agent:run` (`insert_queue_component`);
+- tracked-work command writes (`agent:review`, `agent:done`, `agent:icebox`,
+  ...);
+- response writes through template patches (`patch:todo` scaffolding
+  `agent:todo`, the recap section, any component the agent adds);
+- prompt-blocker hoists creating `agent:review`;
+- editor convergence (`converge_document_or_disk`, `converge_or_disk_write`)
+  and rebased disk writes;
+- `claim`'s empty-file and default-component scaffolds.
+
+A write that creates no component does no extra I/O.
+
+Pure rule: `component_auto_create_decision`. Adapters:
+`agent_doc_project_config_io::workspace_access::enforce_component_auto_create`
+and `enforce_created_components` / `enforce_sender_created_components`.
 
 ## Migration
 
@@ -212,8 +239,9 @@ Pure rule: `component_auto_create_decision`. Adapter:
   same peers (its own uid).
 - A project opts in by setting `[workspace] mode = "multi-user"` and listing
   members. Until phase 3 the socket stays owner-only, so opting in changes
-  nothing at runtime except `owner` members' admission (once they can reach
-  the socket) and the `[receive]` policy for non-owner senders.
+  nothing at runtime except members' admission and per-request authorization
+  (once they can reach the socket) and the `[receive]` policy for non-owner
+  senders.
 - `[receive]` can be set in single-user mode too. It then governs cross-user
   senders on the machine (another account that can write the file), and has
   no effect for the owner.
@@ -231,13 +259,14 @@ Each phase lands with its tests and leaves single-user behaviour unchanged.
    - Controller admission through `ControllerWorkspaceAccess`.
    - `[receive]` enforced in `notify` and focused `extract`, tested end to end
      with distinct sender and recipient uids.
-2. **Per-request authorization and session ownership.**
+2. **Per-request authorization and session ownership (landed).**
    - Admitted principal and role in the request context.
-   - Command capability table (read, write-document, drive-session, admin);
-     deny-by-default for non-owners.
-   - `owner_uid` recorded on claim/start; drive operations check it.
-   - Enable `editor`/`viewer` admission at the socket only once this lands.
-   - Cover the remaining component-creation paths that run in the controller.
+   - Command capability table (observe, write-document, claim-session,
+     drive-session, administer); deny-by-default for non-owners.
+   - Session owner recorded on claim/start/attach in the session-owner
+     ledger; drive operations check it.
+   - `editor`/`viewer` admission at the socket, enabled with this phase.
+   - The remaining component-creation paths, in and outside the controller.
 3. **Shared controller transport.**
    - `[workspace] group = "<name>"`: a group-owned socket directory (`0750`
      or `0770`) and socket (`0660`), with startup validation that the group
@@ -270,6 +299,23 @@ Each phase lands with its tests and leaves single-user behaviour unchanged.
 - Controller: `agent-doc-controller-io/src/project_controller/workspace_access.rs`.
   These cover the single-user default, membership reload without restart, and
   the fallback to single-user on a bad config.
+- Controller authorization (phase 2):
+  `agent-doc-controller-io/src/project_controller/request_authz.rs`. Distinct
+  simulated principals (owner, two editors, a viewer, a stranger) talk to a
+  real controller runtime over a real Unix socket through `serve_client`;
+  a test-only override supplies the peer's effective uid, since the socket is
+  still `0700`/`0600`. They cover role limits, one editor never driving
+  another's session, the owner retaking a session, no record for a failed
+  claim, and the single-user default reading no workspace files (zero config
+  reads, one ledger existence check per controller, no ledger created). A
+  source test keeps the capability table in step with the dispatcher.
+- Pure session world: `SessionWorld` in
+  `agent-doc-frontmatter/src/workspace_access.rs`.
+- Component-creation paths: `agent-doc-element/src/created_components.rs`,
+  `agent-doc-route-io/tests/route.rs`
+  (`route_enqueue_dispatch_prompt_follows_recipient_receive_policy`),
+  `agent-doc-element-backlog-io` (`review_scaffold_follows_recipient_receive_policy`),
+  and `agent-doc-template-io` (`response_component_scaffold_follows_recipient_receive_policy`).
 - End to end: `src/notify.rs` `recipient_policy_*` (real documents written or
   left untouched, via `run_as` with a distinct sender) and
   `src/focused_extract.rs` recipient-policy tests.

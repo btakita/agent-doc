@@ -594,7 +594,10 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      An answer the operator writes under a Remaining entry (such as
      `#justdoit`) stays under it: the entry turns `⏳` while the answer row is
      open and `✅` once it is struck with a `Complete.` response (or none),
-     and the tally counts it done (`#answeredentry`).
+     and the tally counts it done (`#answeredentry`). One answer speaks for
+     every copy of the entry: the nested response that owns the item and
+     each enclosing response that lists it flip together, so no tally in the
+     tree still counts it as yours.
      Its Guidance opens with a done tally (`✅ 11/11 done.`, `🙋 3/4 done, 1
      yours.`, `⏳ 5/9 done, 1 yours.`); `Waiting on operator input.` means only
      the operator's entries are left (`#donetrack`).

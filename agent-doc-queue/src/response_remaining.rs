@@ -66,7 +66,12 @@
 //!    the turn that closes such a row (`#finishactionable`);
 //! 4. `#treefinish`: its follow-up row is live in another top-level tree.
 //!    The work was delegated to that row, so this tree no longer holds it
-//!    (a live follow-up row inside the same tree still keeps it open).
+//!    (a live follow-up row inside the same tree still keeps it open);
+//! 5. `#answeredentry`: a struck, finished answer sits under a Remaining
+//!    entry that lists it, in its own response or in any enclosing response
+//!    it was hoisted into. One answer speaks for every copy of the entry:
+//!    each copy turns `✅` (a copy without its own answer stays as a bare
+//!    `✅` entry), and while the answer is live each copy is `⏳`.
 //!
 //! Nothing else resolves an item: prose that says "done" does not, and an
 //! operator-owned item is never covered by agent work.
@@ -964,17 +969,21 @@ pub fn reconcile_response_remaining(document: &str) -> Option<(String, usize)> {
     // range. Both are computed against `document`; one pass applies only
     // edits that do not overlap, the inner ones first, and the deferred
     // outer one is recomputed against the text the inner ones produced.
+    // `#answeredentry`: a response whose State changed changes its
+    // ancestors' view of the tree (a nested response turning `Complete.`
+    // lets the root's Guidance carry the delete indicator), so that pass is
+    // also followed by another, until one changes no State.
     let mut current: Option<(String, usize)> = None;
     for _ in 0..RECONCILE_PASS_LIMIT {
         let text = current.as_ref().map_or(document, |(text, _)| text.as_str());
-        let Some((next, changed, deferred)) = reconcile_response_remaining_once(text) else {
+        let Some((next, changed, again)) = reconcile_response_remaining_once(text) else {
             break;
         };
         // A response a later pass finishes was already counted when its
         // edit was deferred.
         let total = current.as_ref().map_or(0, |(_, total)| *total).max(changed);
         current = Some((next, total));
-        if !deferred {
+        if !again {
             break;
         }
     }
@@ -1012,7 +1021,8 @@ fn apply_disjoint_edits(
 }
 
 /// One pass of [`reconcile_response_remaining`]: the document, how many
-/// responses changed, and whether an overlapping edit was deferred.
+/// responses changed, and whether another pass is due (an overlapping edit
+/// was deferred, or a State changed).
 fn reconcile_response_remaining_once(document: &str) -> Option<(String, usize, bool)> {
     if !document.contains("**Response [#r-") {
         return None;
@@ -1085,16 +1095,56 @@ fn reconcile_response_remaining_once(document: &str) -> Option<(String, usize, b
             .find(|node| node.depth == 0 && node.line <= line + 1 && line < node.end_line)
             .map(|node| node.line..=node.end_line)
     };
-    // Rule 1–4 for each item of each response.
-    let resolved: Vec<Vec<bool>> = responses
+    // `#answeredentry`: what an answer under any entry listing an item says
+    // about it. An item is listed by its own response and hoisted into every
+    // enclosing one (each response whose scope holds the item); the operator
+    // answers whichever copy is in front of them, and that one answer speaks
+    // for every copy, so no tree says the same item is done and still yours.
+    let answered: Vec<Vec<Option<EntryStatus>>> = responses
         .iter()
         .map(|response| {
-            let own_tree = tree_lines_of(response.line);
             response
                 .items
                 .iter()
                 .map(|item| {
+                    let key = Entry::new(item.line, item.owner.clone(), item.text.clone()).key();
+                    let mut status = None;
+                    for listing in responses
+                        .iter()
+                        .filter(|listing| listing.scope.contains(&item.line))
+                    {
+                        for entry in listing
+                            .remaining_entries
+                            .iter()
+                            .filter(|entry| !entry.children.is_empty() && entry.key == key)
+                        {
+                            match entry_answer_status(&lines, &tree.nodes, &responses, entry) {
+                                EntryStatus::Done => return Some(EntryStatus::Done),
+                                EntryStatus::Working => status = Some(EntryStatus::Working),
+                                EntryStatus::Open => {}
+                            }
+                        }
+                    }
+                    status
+                })
+                .collect()
+        })
+        .collect();
+    // Rule 1–5 for each item of each response.
+    let resolved: Vec<Vec<bool>> = responses
+        .iter()
+        .zip(&answered)
+        .map(|(response, answered)| {
+            let own_tree = tree_lines_of(response.line);
+            response
+                .items
+                .iter()
+                .zip(answered)
+                .map(|(item, answered)| {
+                    // Rule 5 (`#answeredentry`): a struck, finished answer
+                    // under any entry that lists the item.
                     if item.struck
+                        || *answered == Some(EntryStatus::Done)
                         || item
                             .span
                             .clone()
@@ -1145,6 +1195,7 @@ fn reconcile_response_remaining_once(document: &str) -> Option<(String, usize, b
 
     let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
     let mut changed = 0;
+    let mut state_changed = false;
     for index in managed {
         let response = &responses[index];
         let scope = response.scope.clone();
@@ -1212,20 +1263,33 @@ fn reconcile_response_remaining_once(document: &str) -> Option<(String, usize, b
                 // its word; only this pass's own Complete is recomputed.
                 continue;
             }
-            for (item, done) in other.items.iter().zip(&resolved[other_index]) {
+            for ((item, done), answered) in other
+                .items
+                .iter()
+                .zip(&resolved[other_index])
+                .zip(&answered[other_index])
+            {
                 if listed_keys.contains(&item.key) {
                     continue;
                 }
-                let entry = Entry::new(item.line, item.owner.clone(), item.text.clone());
+                let mut entry = Entry::new(item.line, item.owner.clone(), item.text.clone());
                 if *done {
                     // A resolved item keeps only an answer written under its
-                    // entry.
-                    if answer_of(&entry.key()).is_some() {
-                        let mut entry = entry;
+                    // entry, or, answered under another copy of its entry
+                    // (`#answeredentry`), a bare `✅` entry, so this list
+                    // says what the answered copy says.
+                    let own_answer = answer_of(&entry.key()).is_some();
+                    if own_answer || *answered == Some(EntryStatus::Done) {
+                        listed_keys.push(item.key.clone());
                         entry.status = EntryStatus::Done;
                         push_entry(entry, &mut entries, &mut used_answers, &mut answered_done);
                     }
                     continue;
+                }
+                if *answered == Some(EntryStatus::Working) {
+                    // Answered under another copy and still being worked:
+                    // agent work here too, never the operator's.
+                    entry.status = EntryStatus::Working;
                 }
                 listed_keys.push(item.key.clone());
                 covered.push(item.span.clone());
@@ -1404,6 +1468,7 @@ fn reconcile_response_remaining_once(document: &str) -> Option<(String, usize, b
         };
         let mut response_edits = Vec::new();
         if state != want_state {
+            state_changed = true;
             response_edits.push((state_range, want_state.to_string()));
         }
         if guidance != want_guidance {
@@ -1431,7 +1496,7 @@ fn reconcile_response_remaining_once(document: &str) -> Option<(String, usize, b
         return None;
     }
     let (out, deferred) = apply_disjoint_edits(document, edits);
-    Some((out, changed, deferred))
+    Some((out, changed, deferred || state_changed))
 }
 
 /// `#answeredentry`: drop a State/Guidance pair this pass rendered once no
@@ -1535,3 +1600,7 @@ mod tally_sync_tests;
 #[cfg(test)]
 #[path = "response_remaining_splice_tests.rs"]
 mod splice_tests;
+
+#[cfg(test)]
+#[path = "response_remaining_ancestor_answer_tests.rs"]
+mod ancestor_answer_tests;

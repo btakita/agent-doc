@@ -88,7 +88,9 @@ fn drops_the_torn_tail_and_moves_the_answer_up_under_its_entry() {
 }
 
 /// Self-repair then the tree sync settle the tree: the answered entry is
-/// done and nothing torn is left.
+/// done and nothing torn is left. The answer also resolves the nested copy
+/// of its entry (`#answeredentry`), so the whole tree is finished and the
+/// root, not the answer row, carries the 🗑️ glyph.
 #[test]
 fn the_repaired_tree_syncs_its_answered_entry() {
     let (repaired, repairs) =
@@ -104,10 +106,12 @@ fn the_repaired_tree_syncs_its_answered_entry() {
     assert!(!synced.contains(TAIL_LINE), "{synced}");
     assert!(
         synced.contains(
-            "      - ✅ operator: reload any open VSCodium windows <!-- agent-doc:response-detail -->\n        - ~~🗑️ VSCodium not running."
+            "      - ✅ operator: reload any open VSCodium windows <!-- agent-doc:response-detail -->\n        - ~~VSCodium not running."
         ),
         "{synced}"
     );
+    assert!(synced.contains("- ### ~~🗑️ [#q-e9483473162d]"), "{synced}");
+    assert!(!synced.contains("🙋"), "{synced}");
     assert_eq!(
         crate::response_tree_sync::sync_response_trees(&synced),
         None

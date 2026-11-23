@@ -157,15 +157,29 @@ fn leaves_operator_text_and_a_unique_guidance_alone() {
             .any(|repair| repair.kind == SelfRepairKind::TornResponseTail),
         "{repairs:?}"
     );
-    // A Guidance under an entry no other Guidance line repeats is not a copy.
+    // A Guidance under an entry no other Guidance line repeats is not a
+    // copy, unless it is a response tally (`#answeredentry`): only a
+    // response carries one, so a tally under a Remaining entry is a copy
+    // even once the response it came from re-rendered its own.
     let unique = TORN.replacen(
         &format!("{TAIL}        {COPIED_GUIDANCE}"),
-        "        - **Guidance:** ✅ 9/9 done.\n",
+        "        - **Guidance:** 🗑️ Safe to delete this tree.\n",
         1,
     );
     let (kept, repairs) = drop_torn_response_tails(&unique);
     assert!(repairs.is_empty(), "{repairs:?}");
     assert_eq!(kept, unique);
+    let unique_tally = TORN.replacen(
+        &format!("{TAIL}        {COPIED_GUIDANCE}"),
+        "        - **Guidance:** ✅ 9/9 done.\n",
+        1,
+    );
+    let (_, repairs) = drop_torn_response_tails(&unique_tally);
+    assert_eq!(
+        kinds(&repairs),
+        vec![SelfRepairKind::DuplicateEntryGuidance],
+        "{repairs:?}"
+    );
     // A tail inside fenced code is code, not a tear.
     let fenced = format!("```\n{ENTRY}{TAIL}```\n");
     let document = TORN.replacen(

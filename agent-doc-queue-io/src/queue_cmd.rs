@@ -2543,72 +2543,45 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
     // the child cannot reopen its parent or enter the sync payload. The shared
     // normalizer recognizes only canonical response metadata and leaves ordinary
     // operator rows, including lookalikes with malformed ids, byte-for-byte.
-    let normalized_responses =
-        agent_doc_markdown_ast::overlay::normalize_generated_response_lifecycle_markers(&content);
-    let normalized_responses =
-        agent_doc_queue::queue_consume::reconcile_superseded_response_blockers(
-            &normalized_responses,
-        )
-        .unwrap_or(normalized_responses);
     // `#guidancescope` / `#handbackrowstructure`: struck rows' response trees
     // follow the current queue tree (re-rendered deletion guidance, copied
     // hand-back sections behind a `**Details:**` row).
     // `#selfrepaircleanup`: agent-doc's own queue artifacts are repaired
     // here, not handed to the operator as `🙋` cleanup rows.
-    let normalized_responses =
-        match crate::self_repair::self_repair_document_for(file, &normalized_responses) {
-            Some((repaired, repairs)) => {
-                for repair in &repairs {
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!(
-                            "queue_self_repair file={} source=queue_sync {} (#selfrepaircleanup)",
-                            file.display(),
-                            repair.log_fields()
-                        ),
-                    );
-                }
-                repaired
-            }
-            None => normalized_responses,
-        };
     // `#treefinish`: finished trees are struck from the root down.
-    let normalized_responses = match crate::self_repair::sync_response_trees_for(
-        file,
-        &normalized_responses,
-    ) {
-        Some(synced) => {
-            if synced.struck_trees > 0 {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "queue_finished_trees_struck file={} source=queue_sync trees={} (#treefinish)",
-                        file.display(),
-                        synced.struck_trees
-                    ),
-                );
-            }
-            synced.document
-        }
-        None => normalized_responses,
-    };
     // `#queuemarkerlegend`: upgrade a stale generated `Queue markers:` line.
-    let normalized_responses =
-        match agent_doc_document::status_projection::refresh_stale_queue_marker_legend(
-            &normalized_responses,
-        ) {
-            Some(refreshed) => {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "queue_marker_legend_refreshed file={} source=queue_sync (#queuemarkerlegend)",
-                        file.display()
-                    ),
-                );
-                refreshed
-            }
-            None => normalized_responses,
-        };
+    // One pure chain (`#answeredentry`), so tests drive these exact passes.
+    let chain = crate::self_repair::queue_sync_response_chain_for(file, &content);
+    for repair in &chain.repairs {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_self_repair file={} source=queue_sync {} (#selfrepaircleanup)",
+                file.display(),
+                repair.log_fields()
+            ),
+        );
+    }
+    if chain.struck_trees > 0 {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_finished_trees_struck file={} source=queue_sync trees={} (#treefinish)",
+                file.display(),
+                chain.struck_trees
+            ),
+        );
+    }
+    if chain.legend_refreshed {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_marker_legend_refreshed file={} source=queue_sync (#queuemarkerlegend)",
+                file.display()
+            ),
+        );
+    }
+    let normalized_responses = chain.document;
     let response_metadata_repaired = normalized_responses != content;
     if response_metadata_repaired {
         effects.converge_document_or_disk(

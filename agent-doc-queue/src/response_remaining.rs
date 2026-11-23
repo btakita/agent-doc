@@ -206,6 +206,12 @@ fn split_tally(guidance: &str) -> Option<&str> {
     rest.strip_prefix(' ')
 }
 
+/// Whether a Guidance value opens with a response tally (`#donetrack`):
+/// only a response's own Guidance carries one.
+pub(crate) fn is_tally_guidance(value: &str) -> bool {
+    split_tally(value).is_some()
+}
+
 /// Whether a Guidance value is in a form a binary pass rendered: a tally
 /// (`#donetrack`), the follow-up or remaining forms, or a completed row's
 /// deletion guidance (`#tornsplice`).
@@ -225,8 +231,33 @@ fn is_remaining_guidance(value: &str) -> bool {
             .is_ok_and(|count| remaining_guidance(count) == value)
 }
 
+/// How the superseded-blocker pass
+/// ([`crate::queue_consume::reconcile_superseded_response_blockers`])
+/// rewrites a historical operator wait's Guidance.
+const HISTORICAL_BLOCKER_LEAD: &str = "Historical blocker resolved by ";
+const HISTORICAL_BLOCKER_TAIL: &str =
+    "This response remains as history and requires no operator action.";
+
+/// `#answeredentry`: a response this pass owned (its Remaining list is all
+/// generated) whose tally the superseded-blocker pass once rewrote to
+/// `Complete.` + `Historical blocker resolved by …`. That froze the list (an
+/// entry answered elsewhere stayed `🙋`), so this pass takes it back and
+/// re-renders it from the live tree; that pass no longer rewrites a tally.
+fn reclaimed_historical_blocker(response: &ResponseBlock) -> bool {
+    matches!(
+        (&response.state, &response.guidance),
+        (Some((_, state)), Some((_, guidance)))
+            if state == RESPONSE_STATE_COMPLETE
+                && guidance.starts_with(HISTORICAL_BLOCKER_LEAD)
+                && guidance.ends_with(HISTORICAL_BLOCKER_TAIL)
+    ) && response
+        .remaining
+        .as_ref()
+        .is_some_and(|(_, generated)| *generated)
+}
+
 /// Whether a State/Guidance pair is one this pass manages.
-fn managed_form(state: &str, guidance: &str) -> bool {
+pub(crate) fn managed_form(state: &str, guidance: &str) -> bool {
     if let Some(tail) = split_tally(guidance) {
         return (state == RESPONSE_STATE_FOLLOW_UP && is_remaining_guidance(tail))
             || (state == RESPONSE_STATE_WAITING_ON_OPERATOR
@@ -1033,13 +1064,14 @@ fn reconcile_response_remaining_once(document: &str) -> Option<(String, usize, b
         .iter()
         .enumerate()
         .filter(|(_, response)| {
-            matches!(
+            (matches!(
                 (&response.state, &response.guidance),
                 (Some((_, state)), Some((_, guidance))) if managed_form(state, guidance)
-            ) && response
-                .remaining
-                .as_ref()
-                .is_none_or(|(_, generated)| *generated)
+            ) || reclaimed_historical_blocker(response))
+                && response
+                    .remaining
+                    .as_ref()
+                    .is_none_or(|(_, generated)| *generated)
         })
         .map(|(index, _)| index)
         .collect::<Vec<_>>();
@@ -1245,11 +1277,10 @@ fn reconcile_response_remaining_once(document: &str) -> Option<(String, usize, b
         };
         let mut listed_keys: Vec<String> = Vec::new();
         let mut covered: Vec<std::ops::Range<usize>> = answer_spans.clone();
-        for (other_index, other) in responses.iter().enumerate() {
-            if other_index != index && !scope.contains(&other.line) {
-                continue;
-            }
-            if other_index != index
+        // A response that says it is complete by another rule keeps its
+        // word: its items are neither listed nor counted open.
+        let keeps_its_word = |other_index: usize, other: &ResponseBlock| {
+            other_index != index
                 && other
                     .state
                     .as_ref()
@@ -1258,7 +1289,13 @@ fn reconcile_response_remaining_once(document: &str) -> Option<(String, usize, b
                     .guidance
                     .as_ref()
                     .is_some_and(|(_, guidance)| managed_form(RESPONSE_STATE_COMPLETE, guidance))
-            {
+                && !reclaimed_historical_blocker(other)
+        };
+        for (other_index, other) in responses.iter().enumerate() {
+            if other_index != index && !scope.contains(&other.line) {
+                continue;
+            }
+            if keeps_its_word(other_index, other) {
                 // A response that says it is complete by another rule keeps
                 // its word; only this pass's own Complete is recomputed.
                 continue;
@@ -1381,7 +1418,11 @@ fn reconcile_response_remaining_once(document: &str) -> Option<(String, usize, b
                     item.owner,
                     short_imperative(&item.text, ENTRY_TEXT_LIMIT)
                 ));
-                done += usize::from(*resolved_item || answered_done.contains(&key));
+                done += usize::from(
+                    *resolved_item
+                        || answered_done.contains(&key)
+                        || keeps_its_word(other_index, other),
+                );
             }
         }
         let mut row_lines: Vec<usize> = scope.clone().collect();
@@ -1416,6 +1457,9 @@ fn reconcile_response_remaining_once(document: &str) -> Option<(String, usize, b
         // An entry the tally did not see (an open parent row folded into an
         // item) still counts as open work.
         let total = total.max(done + open);
+        // The Remaining list decides what is open, and the State follows it;
+        // so does the count: an empty list never sits beside `✅ 4/5`.
+        let done = if open == 0 { total } else { done };
         let tally = tally(done, total, agent_open, yours);
 
         let (state_range, state) = response.state.clone().expect("managed has a state");
@@ -1604,3 +1648,7 @@ mod splice_tests;
 #[cfg(test)]
 #[path = "response_remaining_ancestor_answer_tests.rs"]
 mod ancestor_answer_tests;
+
+#[cfg(test)]
+#[path = "response_remaining_live_fixed_point_tests.rs"]
+mod live_fixed_point_tests;

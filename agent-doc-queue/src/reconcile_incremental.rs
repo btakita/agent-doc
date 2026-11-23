@@ -158,6 +158,60 @@ pub fn reconcile_full(document: &str, inputs: &ReconcileInputs<'_>) -> Reconcile
     crate::derived_memo::outside_component_scope(|| run_chain(document, inputs))
 }
 
+/// What [`queue_sync_response_chain`] changed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct QueueSyncResponses {
+    /// The document after every pass (the input when nothing changed).
+    pub document: String,
+    /// Self-repairs, in the order they ran (`#selfrepaircleanup`).
+    pub repairs: Vec<SelfRepair>,
+    /// Finished trees struck from the root down (`#treefinish`).
+    pub struck_trees: usize,
+    /// The generated `Queue markers:` line was refreshed.
+    pub legend_refreshed: bool,
+}
+
+/// The response passes `agent-doc queue sync` runs, in its order: retained
+/// response lifecycle markers, superseded operator blockers, self-repair,
+/// the response-tree sync (`#treefinish`), then the `Queue markers:` legend.
+/// One pure entry point, so the command and the tests run the same passes
+/// in the same order (`#answeredentry`).
+pub fn queue_sync_response_chain(
+    document: &str,
+    inputs: &ReconcileInputs<'_>,
+) -> QueueSyncResponses {
+    let normalized =
+        agent_doc_markdown_ast::overlay::normalize_generated_response_lifecycle_markers(document);
+    let normalized = crate::queue_consume::reconcile_superseded_response_blockers(&normalized)
+        .unwrap_or(normalized);
+    let mut out = QueueSyncResponses {
+        document: normalized,
+        ..QueueSyncResponses::default()
+    };
+    if let Some((repaired, repairs)) = crate::self_repair::self_repair_document_with_provenance(
+        &out.document,
+        inputs.is_live,
+        inputs.response_proven,
+        inputs.struck_provenance,
+    ) {
+        out.document = repaired;
+        out.repairs = repairs;
+    }
+    if let Some(synced) =
+        crate::response_tree_sync::sync_response_trees_striking(&out.document, inputs.is_claimed)
+    {
+        out.document = synced.document;
+        out.struck_trees = synced.struck_trees;
+    }
+    if let Some(refreshed) =
+        agent_doc_document::status_projection::refresh_stale_queue_marker_legend(&out.document)
+    {
+        out.document = refreshed;
+        out.legend_refreshed = true;
+    }
+    out
+}
+
 /// Reconcile revision `next` (see the module docs). `prev` is the revision
 /// the caller last saw, when it knows it; without it the cache's previous
 /// revision names the dirty components. Byte-identical to

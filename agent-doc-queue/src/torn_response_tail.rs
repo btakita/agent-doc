@@ -24,7 +24,10 @@
 //! - **Duplicate entry guidance** (`duplicate_entry_guidance`). A generated
 //!   `- **Guidance:** …` line that is the first child of a Remaining entry
 //!   (a response-detail row, never response structure), and whose value
-//!   another Guidance line in the same queue already carries, is dropped.
+//!   another Guidance line in the same queue already carries, is dropped;
+//!   so is a response tally (`🙋 1/2 done, …`) as the first child of an
+//!   entry in a `**Remaining:**` list, even after the response it was
+//!   copied from re-rendered its own (`#answeredentry`).
 //!   Rows nested under it move up by the same amount to be the entry's
 //!   answers, their text unchanged.
 //!
@@ -111,6 +114,19 @@ fn is_remaining_entry(text: &str) -> bool {
     })
 }
 
+/// Whether the row at `row` is an entry of a `**Remaining:**` list: its
+/// parent line is the list's label.
+fn in_remaining_list(lines: &[Line<'_>], row: usize) -> bool {
+    let indent = lines[row].indent;
+    lines[..row]
+        .iter()
+        .rev()
+        .find(|line| !line.text.is_empty() && !line.fenced && line.indent < indent)
+        .is_some_and(|parent| {
+            parent.text == format!("- {}", crate::response_remaining::REMAINING_LABEL)
+        })
+}
+
 fn generated_guidance(text: &str) -> Option<&str> {
     text.strip_prefix(GUIDANCE_LEAD)
         .filter(|value| crate::response_remaining::is_generated_guidance(value))
@@ -172,17 +188,22 @@ fn repair_body(body: &str, repairs: &mut Vec<SelfRepair>) -> String {
             next += 1;
         }
         // A generated Guidance line as the entry's first child, carrying a
-        // value another Guidance line in the queue already has.
+        // value another Guidance line in the queue already has, or a
+        // response tally under an entry of a Remaining list: a tally belongs
+        // to a response, never to an entry, so it is a copy even once the
+        // response it was copied from re-rendered its own.
         if is_remaining_entry(lines[row].text)
             && let Some(guidance) = lines.get(next)
             && !guidance.fenced
             && guidance.indent > lines[row].indent
             && let Some(value) = generated_guidance(guidance.text)
-            && guidance_values
+            && (guidance_values
                 .iter()
                 .filter(|other| **other == value)
                 .count()
                 > 1
+                || (crate::response_remaining::is_tally_guidance(value)
+                    && in_remaining_list(&lines, row)))
         {
             drop[next] = true;
             repairs.push(SelfRepair {

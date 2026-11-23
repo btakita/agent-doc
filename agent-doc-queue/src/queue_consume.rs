@@ -6164,6 +6164,17 @@ pub fn reconcile_superseded_response_blockers(document: &str) -> Option<String> 
         if cell.state != RESPONSE_STATE_WAITING_ON_OPERATOR {
             continue;
         }
+        // `#answeredentry`: a tally the Remaining pass renders is recomputed
+        // from the live tree on every sync, answers included; rewriting it
+        // here would freeze its Remaining list (an item answered elsewhere
+        // stays `🙋`) and hide operator work a struck tree still holds.
+        let guidance = document[cell.guidance_range.clone()]
+            .trim()
+            .strip_prefix("- **Guidance:** ")
+            .unwrap_or_default();
+        if crate::response_remaining::managed_form(&cell.state, guidance) {
+            continue;
+        }
         let blocked_receipt = review_receipt(document, cell, &response_sources)
             .filter(|receipt| receipt.kind == ReviewReceiptKind::Blocked);
         let superseding = blocked_receipt.as_ref().and_then(|blocked| {

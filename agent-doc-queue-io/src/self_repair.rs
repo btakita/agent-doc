@@ -200,6 +200,22 @@ pub fn self_repair_document_for(file: &Path, content: &str) -> Option<(String, V
     Some(repaired)
 }
 
+/// The response passes of `agent-doc queue sync`
+/// ([`agent_doc_queue::reconcile_incremental::queue_sync_response_chain`])
+/// with this document's ledgers and provenance, carrying self-repair
+/// rewrites into the follow-up ledgers as [`self_repair_document_for`] does.
+pub fn queue_sync_response_chain_for(
+    file: &Path,
+    content: &str,
+) -> agent_doc_queue::reconcile_incremental::QueueSyncResponses {
+    let sources = ReconcileInputSources::load(file, content);
+    let chain = sources.with_inputs(|inputs| {
+        agent_doc_queue::reconcile_incremental::queue_sync_response_chain(content, inputs)
+    });
+    carry_self_repair_rewrites(file, &chain.repairs);
+    chain
+}
+
 /// `#treefinish`: [`agent_doc_queue::response_tree_sync::sync_response_trees_striking`]
 /// with row claims read from the claim ledger. A row whose work identity, or
 /// whose text, any ledger claim holds is never struck; an unreadable ledger

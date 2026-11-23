@@ -122,7 +122,11 @@ fn origin_candidates(origin_row: &str) -> Vec<String> {
 /// row the operator deleted from the queue is still a row its action item
 /// moved to; its dispatch and completion cells quote it there. Generated
 /// response details and quotes inside the queue are not rows.
-fn followup_queue_rows(document: &str) -> Vec<String> {
+fn followup_queue_rows(document: &str) -> std::sync::Arc<Vec<String>> {
+    crate::derived_memo::followup_rows(document, followup_queue_rows_uncached)
+}
+
+fn followup_queue_rows_uncached(document: &str) -> Vec<String> {
     let Ok(components) = agent_doc_element::element::parse(document) else {
         return Vec::new();
     };
@@ -185,21 +189,22 @@ struct Line<'a> {
     text: &'a str,
 }
 
-fn lines_from(document: &str, from: usize) -> Vec<Line<'_>> {
-    let mut out = Vec::new();
+/// The lines of `document` from byte `from`, lazily: a reader that stops at
+/// the end of a row's scope never splits the rest of the document
+/// (`#incrementalreconcile`).
+fn lines_from(document: &str, from: usize) -> impl Iterator<Item = Line<'_>> {
     let mut cursor = from;
-    for raw in document[from..].split_inclusive('\n') {
+    document[from..].split_inclusive('\n').map(move |raw| {
         let start = cursor;
         cursor += raw.len();
         let body = raw.trim_end_matches(['\n', '\r']);
         let text = body.trim_start_matches([' ', '\t']);
-        out.push(Line {
+        Line {
             start,
             indent: body.len() - text.len(),
             text: text.trim_end(),
-        });
-    }
-    out
+        }
+    })
 }
 
 /// The entry text of a list line (`- x`, `* x`, `+ x`, `1. x`), else `None`.
@@ -330,18 +335,19 @@ fn followup_cell(document: &str, item_start: usize, item_end: usize) -> Option<F
 /// Returns the updated document and how many rows changed, or `None` when
 /// nothing changes. A second pass changes nothing.
 pub fn reconcile_moved_followup_states(document: &str) -> Option<(String, usize)> {
-    let nodes = agent_doc_markdown_ast::mutations::item_nodes_all(document, "queue").ok()?;
+    let nodes = crate::derived_memo::queue_items(document)?;
     let mut tree = None;
+    let line_index = crate::queue_tree::LineIndex::new(document);
     let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
     let mut rows = 0;
-    for node in &nodes {
-        if !node.item.struck || node.item.surface == ItemSurface::MultilinePrompt {
+    for node in nodes.iter() {
+        if !node.struck || node.surface == ItemSurface::MultilinePrompt {
             continue;
         }
-        let Some(cell) = followup_cell(document, node.item.start_byte, node.item.end_byte) else {
+        let Some(cell) = followup_cell(document, node.start_byte, node.end_byte) else {
             continue;
         };
-        if !action_items_held_as_rows(document, &node.item.text, &cell.action_items) {
+        if !action_items_held_as_rows(document, &node.text, &cell.action_items) {
             continue;
         }
         let tree = tree.get_or_insert_with(|| {
@@ -349,7 +355,7 @@ pub fn reconcile_moved_followup_states(document: &str) -> Option<(String, usize)
                 .ok()
         });
         let closure = tree.as_ref().and_then(|tree| {
-            crate::queue_tree::row_closure_at_offset(tree, document, node.item.start_byte)
+            crate::queue_tree::row_closure_at_indexed_offset(tree, &line_index, node.start_byte)
         });
         edits.push((cell.state_value, RESPONSE_STATE_COMPLETE.to_string()));
         edits.push((

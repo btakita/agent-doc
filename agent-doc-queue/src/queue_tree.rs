@@ -417,6 +417,30 @@ fn node_tooltip(state: QueueNodeState, rollup: Option<WaitingRollup>) -> String 
     }
 }
 
+/// The 1-based line of every byte offset of one document, by binary search
+/// over its newlines: [`line_of`] without rescanning the document per call
+/// (`#incrementalreconcile`).
+pub(crate) struct LineIndex {
+    newlines: Vec<usize>,
+}
+
+impl LineIndex {
+    pub(crate) fn new(document: &str) -> Self {
+        Self {
+            newlines: document
+                .bytes()
+                .enumerate()
+                .filter_map(|(at, byte)| (byte == b'\n').then_some(at))
+                .collect(),
+        }
+    }
+
+    /// [`line_of`] of `offset` in the indexed document.
+    pub(crate) fn line_of(&self, offset: usize) -> usize {
+        self.newlines.partition_point(|&at| at < offset) + 1
+    }
+}
+
 pub(crate) fn line_of(document: &str, offset: usize) -> usize {
     document[..offset.min(document.len())]
         .bytes()
@@ -466,6 +490,20 @@ fn is_waiting_root_line(line: &str) -> bool {
 
 /// Build the queue tree of `document`.
 pub fn queue_tree(document: &str, options: &QueueTreeOptions) -> anyhow::Result<QueueTree> {
+    // Every pass of a chain reads the same revision's tree
+    // (`#incrementalreconcile`): build it once per document revision.
+    let nodes = crate::derived_memo::queue_tree_nodes(document, queue_tree_nodes)?;
+    let nodes = select(nodes, options);
+    Ok(QueueTree {
+        summary: QueueTreeSummary::of(&nodes),
+        nodes,
+    })
+}
+
+/// Every node of `document`'s queue tree, before [`QueueTreeOptions`]
+/// selection.
+fn queue_tree_nodes(document: &str) -> anyhow::Result<Vec<QueueTreeNode>> {
+    let lines = LineIndex::new(document);
     let open_todo_ids = crate::queue_consume::open_waiting_todo_ids(document);
     let mut nodes = Vec::new();
     // The first raw line of each node, for `#treefinish` resolution.
@@ -520,8 +558,8 @@ pub fn queue_tree(document: &str, options: &QueueTreeOptions) -> anyhow::Result<
                 _ => ("", 0),
             };
             nodes.push(QueueTreeNode {
-                line: line_of(document, start),
-                end_line: line_of(document, end),
+                line: lines.line_of(start),
+                end_line: lines.line_of(end),
                 depth,
                 queue: queue.clone(),
                 state,
@@ -548,11 +586,7 @@ pub fn queue_tree(document: &str, options: &QueueTreeOptions) -> anyhow::Result<
     }
     mark_open_responses(document, &mut nodes);
     resolve_rows(document, &mut nodes, &raws);
-    let nodes = select(nodes, options);
-    Ok(QueueTree {
-        summary: QueueTreeSummary::of(&nodes),
-        nodes,
-    })
+    Ok(nodes)
 }
 
 /// `#treefinish`: mark every node whose own `**Response [#r-…]**` child (at
@@ -1112,6 +1146,15 @@ pub fn row_closure_at_offset(
     offset: usize,
 ) -> Option<RowClosure> {
     row_closure(tree, node_at_line(tree, line_of(document, offset))?)
+}
+
+/// [`row_closure_at_offset`] with the document's [`LineIndex`].
+pub(crate) fn row_closure_at_indexed_offset(
+    tree: &QueueTree,
+    lines: &LineIndex,
+    offset: usize,
+) -> Option<RowClosure> {
+    row_closure(tree, node_at_line(tree, lines.line_of(offset))?)
 }
 
 /// Render the compact text view: the summary, then one line per node.

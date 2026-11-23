@@ -82,14 +82,17 @@ pub fn strike_finished_trees(
         return None;
     }
     let policies = crate::tree_indicator::queue_policies(document);
-    let items = agent_doc_markdown_ast::mutations::item_nodes_all(document, "queue").ok()?;
-    let mut by_line: HashMap<usize, Vec<&agent_doc_markdown_ast::mutations::MutationItemNode>> =
+    // The shared per-revision items (`#incrementalreconcile`); node keys are
+    // read from the whole-document overlay only once a tree is struck.
+    let items = crate::derived_memo::queue_items(document)?;
+    let mut by_line: HashMap<usize, Vec<(usize, &agent_doc_markdown_ast::overlay::Item)>> =
         HashMap::new();
-    for item in &items {
+    let lines = crate::queue_tree::LineIndex::new(document);
+    for (index, item) in items.iter().enumerate() {
         by_line
-            .entry(crate::queue_tree::line_of(document, item.item.start_byte))
+            .entry(lines.line_of(item.start_byte))
             .or_default()
-            .push(item);
+            .push((index, item));
     }
     // A row whose tracked id is still open (`agent:todo`, backlog, icebox,
     // pending) is not struck: its strike would read as the item's completion
@@ -112,7 +115,7 @@ pub fn strike_finished_trees(
             })
             .contains(&id.to_ascii_lowercase())
     };
-    let mut keys: Vec<String> = Vec::new();
+    let mut keys: Vec<usize> = Vec::new();
     let mut trees = 0;
     for top in 0..tree.nodes.len() {
         if tree.nodes[top].depth != 0 || !tree_finished(&tree, top) {
@@ -141,13 +144,13 @@ pub fn strike_finished_trees(
                 .map(|items| {
                     items
                         .iter()
-                        .filter(|item| !item.item.struck)
+                        .filter(|(_, item)| !item.struck)
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
             match live.as_slice() {
-                [item] if !is_claimed(&item.item.text) && !tracked_open(&item.item.text) => {
-                    tree_keys.push(item.node_key.clone())
+                [(index, item)] if !is_claimed(&item.text) && !tracked_open(&item.text) => {
+                    tree_keys.push(*index)
                 }
                 _ => {
                     safe = false;
@@ -163,6 +166,31 @@ pub fn strike_finished_trees(
     if keys.is_empty() {
         return None;
     }
+    // The node key of each struck item: the whole-document overlay holds the
+    // same items in the same order, each with its key.
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes_all(document, "queue")
+        .ok()
+        .filter(|nodes| {
+            nodes.len() == items.len()
+                && keys
+                    .iter()
+                    .all(|&index| nodes.get(index).map(|node| &node.item) == items.get(index))
+        });
+    let Some(nodes) = nodes else {
+        // Only the component layer can disagree with the overlay: answer
+        // from the whole-document derivation instead.
+        return crate::derived_memo::in_component_scope()
+            .then(|| {
+                crate::derived_memo::outside_component_scope(|| {
+                    strike_finished_trees(document, is_claimed)
+                })
+            })
+            .flatten();
+    };
+    let keys = keys
+        .into_iter()
+        .map(|index| nodes[index].node_key.clone())
+        .collect::<Vec<_>>();
     let refs = keys.iter().map(String::as_str).collect::<Vec<_>>();
     let struck =
         agent_doc_markdown_ast::mutations::consume_nodes_all(document, "queue", &refs).ok()?;

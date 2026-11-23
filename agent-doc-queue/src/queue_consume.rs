@@ -6768,13 +6768,12 @@ fn structured_handback_for_row(
     }
     let mut renders = Vec::<(String, RowHandback)>::new();
     for (source_index, source) in sources.into_iter().enumerate() {
-        for evidence in agent_doc_document::subagent_completion::completion_evidence(source) {
+        // Per document revision, not per row (`#incrementalreconcile`).
+        for evidence in crate::derived_memo::completion_evidence(source).iter() {
             if !completion_cell_matches_row(&evidence.item, row) {
                 continue;
             }
-            let Some(body) =
-                agent_doc_document::subagent_completion::completion_response(source, &evidence.key)
-            else {
+            let Some(body) = crate::derived_memo::completion_response(source, &evidence.key) else {
                 continue;
             };
             let Some(handback) = agent_doc_document::worker_handback::WorkerHandback::parse(&body)

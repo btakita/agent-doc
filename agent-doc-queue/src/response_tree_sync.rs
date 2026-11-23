@@ -226,21 +226,25 @@ struct Line<'a> {
 }
 
 fn lines_from(document: &str, from: usize) -> Vec<Line<'_>> {
-    let mut out = Vec::new();
+    line_iter(document, from).collect()
+}
+
+/// [`lines_from`], lazily: a reader that stops at the end of a row's scope
+/// never splits the rest of the document (`#incrementalreconcile`).
+fn line_iter(document: &str, from: usize) -> impl Iterator<Item = Line<'_>> {
     let mut cursor = from;
-    for raw in document[from..].split_inclusive('\n') {
+    document[from..].split_inclusive('\n').map(move |raw| {
         let start = cursor;
         cursor += raw.len();
         let body = raw.trim_end_matches(['\n', '\r']);
         let text = body.trim_start_matches([' ', '\t']);
-        out.push(Line {
+        Line {
             start,
             end: cursor,
             indent: body.len() - text.len(),
             text: text.trim_end(),
-        });
-    }
-    out
+        }
+    })
 }
 
 /// The struck row's own `**Response [#r-…]**` child: the lines beneath it
@@ -291,7 +295,7 @@ fn own_response(document: &str, item_start: usize, item_end: usize) -> Option<Ow
             .map_or(document.len(), |at| item_end + at + 1)
     };
     let mut scope = Vec::new();
-    for line in lines_from(document, after_item) {
+    for line in line_iter(document, after_item) {
         if !line.text.is_empty() && line.indent <= item_indent {
             break;
         }
@@ -325,12 +329,18 @@ fn own_response(document: &str, item_start: usize, item_end: usize) -> Option<Ow
     })
 }
 
-fn struck_rows(document: &str) -> Vec<agent_doc_markdown_ast::mutations::MutationItemNode> {
-    agent_doc_markdown_ast::mutations::item_nodes_all(document, "queue")
+/// The struck, single-line queue items of `document`, from the shared
+/// per-revision derivation ([`crate::derived_memo::queue_items`]).
+fn struck_rows(document: &str) -> Vec<agent_doc_markdown_ast::overlay::Item> {
+    crate::derived_memo::queue_items(document)
+        .map(|items| {
+            items
+                .iter()
+                .filter(|item| item.struck && item.surface != ItemSurface::MultilinePrompt)
+                .cloned()
+                .collect()
+        })
         .unwrap_or_default()
-        .into_iter()
-        .filter(|node| node.item.struck && node.item.surface != ItemSurface::MultilinePrompt)
-        .collect()
 }
 
 fn apply_edits(document: &str, mut edits: Vec<(std::ops::Range<usize>, String)>) -> String {
@@ -353,10 +363,10 @@ fn apply_edits(document: &str, mut edits: Vec<(std::ops::Range<usize>, String)>)
 /// matches its tree. A second pass changes nothing.
 pub fn reconcile_tree_scoped_guidance(document: &str) -> Option<(String, usize)> {
     let mut tree = None;
+    let line_index = crate::queue_tree::LineIndex::new(document);
     let mut edits = Vec::new();
     for node in struck_rows(document) {
-        let Some(response) = own_response(document, node.item.start_byte, node.item.end_byte)
-        else {
+        let Some(response) = own_response(document, node.start_byte, node.end_byte) else {
             continue;
         };
         if response.value("**State:**").map(|(_, value)| value) != Some(RESPONSE_STATE_COMPLETE) {
@@ -373,7 +383,7 @@ pub fn reconcile_tree_scoped_guidance(document: &str) -> Option<(String, usize)>
                 .ok()
         });
         let Some(closure) = tree.as_ref().and_then(|tree| {
-            crate::queue_tree::row_closure_at_offset(tree, document, node.item.start_byte)
+            crate::queue_tree::row_closure_at_indexed_offset(tree, &line_index, node.start_byte)
         }) else {
             continue;
         };
@@ -425,9 +435,10 @@ pub fn guide_bare_struck_rows(document: &str) -> Option<(String, usize)> {
     let lines = lines_from(document, 0);
     let line_at = |offset: usize| lines.partition_point(|line| line.end <= offset);
     let mut tree = None;
+    let line_index = crate::queue_tree::LineIndex::new(document);
     let mut edits = Vec::new();
     for node in struck_rows(document) {
-        let at = line_at(node.item.start_byte);
+        let at = line_at(node.start_byte);
         let Some(row) = lines.get(at) else {
             continue;
         };
@@ -490,7 +501,7 @@ pub fn guide_bare_struck_rows(document: &str) -> Option<(String, usize)> {
                 .ok()
         });
         let Some(closure) = tree.as_ref().and_then(|tree| {
-            crate::queue_tree::row_closure_at_offset(tree, document, node.item.start_byte)
+            crate::queue_tree::row_closure_at_indexed_offset(tree, &line_index, node.start_byte)
         }) else {
             continue;
         };
@@ -553,8 +564,7 @@ pub fn slim_handback_response_details(document: &str) -> Option<(String, usize)>
     let mut rows = 0;
     let mut handbacks = None;
     for node in struck_rows(document) {
-        let Some(response) = own_response(document, node.item.start_byte, node.item.end_byte)
-        else {
+        let Some(response) = own_response(document, node.start_byte, node.end_byte) else {
             continue;
         };
         let copied = DETAIL_KINDS
@@ -566,7 +576,7 @@ pub fn slim_handback_response_details(document: &str) -> Option<(String, usize)>
         }
         let handbacks =
             handbacks.get_or_insert_with(|| crate::queue_consume::DocumentHandbacks::new(document));
-        let Some(found) = handbacks.for_row(&node.item.text, node.item.start_byte) else {
+        let Some(found) = handbacks.for_row(&node.text, node.start_byte) else {
             continue;
         };
         let complete =
@@ -575,7 +585,7 @@ pub fn slim_handback_response_details(document: &str) -> Option<(String, usize)>
         let action_items_moved = complete
             && crate::followup_moved_state::action_items_held_as_rows(
                 document,
-                &node.item.text,
+                &node.text,
                 &action_items,
             );
         let indent = " ".repeat(response.detail_indent);

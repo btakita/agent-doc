@@ -18,6 +18,7 @@ pub mod component_attrs;
 pub mod control_binding;
 pub mod coordinator_drain;
 pub mod cross_harness_handoff;
+pub mod derived_memo;
 pub mod dispatch_item;
 pub mod document_queue;
 pub mod duplicate_head_report;
@@ -50,6 +51,8 @@ pub mod followup_owner;
 pub mod followup_provenance;
 pub mod handback_followups;
 pub mod hourglass_lifetime;
+#[cfg(test)]
+mod incremental_corpus;
 pub mod linked_todo_queue;
 pub mod loose_ends;
 #[cfg(test)]
@@ -81,6 +84,7 @@ pub mod queue_schedule_runtime;
 pub mod queue_set;
 pub mod queue_sync_payload;
 pub mod queue_tree;
+pub mod reconcile_incremental;
 pub mod reported_closeout;
 pub mod response_remaining;
 pub mod response_tree_rehome;

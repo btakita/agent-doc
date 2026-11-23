@@ -90,6 +90,7 @@ pub mod session_trigger;
 pub mod stale_completion_evidence;
 #[cfg(test)]
 mod stray_close_text_tests;
+pub mod struck_prompt_response;
 pub mod subagent_brief;
 pub mod subagent_intent;
 pub mod subagent_pool;

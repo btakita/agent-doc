@@ -120,6 +120,19 @@ fn queue_mismatch(file: &Path, content: &str) -> Result<Option<ListMismatch>> {
     })
 }
 
+/// `#strucknoresponse`: struck operator prompts nothing answered (a reply
+/// the semantic strike buried as finished work, or a struck question with no
+/// response). Reported, never rewritten: un-striking would restore operator
+/// text from a guess about who struck it, and the operator may have struck it
+/// on purpose. The line names the row so the agent answers it, or the
+/// operator un-strikes or deletes it.
+pub fn unanswered_struck_prompt_lines(content: &str) -> Vec<String> {
+    agent_doc_queue::struck_prompt_response::unanswered_struck_prompt_rows(content)
+        .into_iter()
+        .map(|row| format!("[session-check] warning: {row}"))
+        .collect()
+}
+
 /// `☑️` rows no durable record backs: kept (retiring them could re-run
 /// finished work), and reported so the operator decides.
 pub fn unbacked_reported_lines(file: &Path, content: &str) -> Vec<String> {
@@ -240,6 +253,7 @@ pub fn check_managed_list_invariants(file: &Path, rc: &CycleContext) -> Result<G
     lines.extend(tracked_finding_lines(&content));
     lines.extend(unbacked_reported_lines(file, &content));
     lines.extend(overdue_reported_closeout_lines(file, &content));
+    lines.extend(unanswered_struck_prompt_lines(&content));
     Ok(if lines.is_empty() {
         GuardResult::None
     } else {
@@ -257,6 +271,27 @@ mod tests {
         let file = dir.path().join("plan.md");
         std::fs::write(&file, content).unwrap();
         (dir, file)
+    }
+
+    #[test]
+    fn unanswered_struck_operator_prompts_are_reported_by_line() {
+        let content = concat!(
+            "## Run <!-- agent:run -->\n",
+            "- ### Choose the C++ SDK license before the first cpp zip ships.\n",
+            "  - ~~Apache-2.0 — auto-struck: completed by #decideapi (#qftbklgstrike)~~\n",
+            "- ### ~~Is this ready?~~\n",
+            "  - **Response [#r-0123456789ab]**\n",
+            "    - **Summary:** Yes.\n",
+            "<!-- /agent:run -->\n",
+        );
+        let lines = unanswered_struck_prompt_lines(content);
+        assert_eq!(lines.len(), 1, "{lines:#?}");
+        assert!(
+            lines[0].starts_with("[session-check] warning: struck operator prompt has no response (#strucknoresponse): line 3 "),
+            "{}",
+            lines[0]
+        );
+        assert!(lines[0].contains("Apache-2.0"), "{}", lines[0]);
     }
 
     #[test]

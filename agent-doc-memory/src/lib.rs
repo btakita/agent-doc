@@ -264,7 +264,19 @@ pub fn semantic_queue_strike_matches(
             continue;
         }
 
-        let best_done = rank_task_equivalence_events(&candidate.text, &done_events)
+        // `#strucknoresponse`: "completed by" needs the done item's OWN line
+        // to state this work. The lexical score also counts the item's
+        // metadata (its `done` state, its source path) and its archived
+        // continuation (worker reports that quote anything), so a short reply
+        // such as `Is this done?` or `Apache-2.0` used to clear the threshold
+        // against an unrelated item. Only a done item whose first line
+        // contains the head's whole words can complete it.
+        let related_done = done_events
+            .iter()
+            .filter(|event| done_event_states_the_head(&candidate.text, event))
+            .cloned()
+            .collect::<Vec<_>>();
+        let best_done = rank_task_equivalence_events(&candidate.text, &related_done)
             .into_iter()
             .next();
         // `#freetextqueue`: "tracked by backlog" needs exact lineage, never a
@@ -345,6 +357,20 @@ fn normalize_prompt_identity(text: &str) -> String {
         }
     }
     out
+}
+
+/// `#strucknoresponse`: whether the done `event`'s own first line (its
+/// `#id` and text, never its metadata or archived continuation) contains the
+/// free-text head's whole words, in order. The relation a "completed by"
+/// strike needs: the done item says it did this work.
+pub fn done_event_states_the_head(head_text: &str, event: &MemoryEvent) -> bool {
+    let head = normalize_prompt_identity(head_text);
+    if head.is_empty() {
+        return false;
+    }
+    let own_line = event.text.lines().next().unwrap_or_default();
+    let own_line = normalize_prompt_identity(own_line);
+    format!(" {own_line} ").contains(&format!(" {head} "))
 }
 
 /// Whether the backlog `event` is the exact-lineage record of free-text queue
@@ -592,6 +618,16 @@ pub fn parse_done_archive_items(body: &str) -> Vec<PendingItem> {
         {
             item.continuation.push_str(line);
             item.continuation.push('\n');
+        } else if !line.trim().is_empty() && current.is_some() {
+            // `#strucknoresponse`: a column-zero line that is not an archive
+            // item (`- 2026-11-04 archived waiting item ...`, a heading) ends
+            // the current item. Before, every later indented block attached
+            // to the last dated item, so one item's continuation absorbed
+            // hundreds of unrelated archived lines and lexically "completed"
+            // any head they happened to quote.
+            if let Some(item) = current.take() {
+                items.push(item);
+            }
         }
     }
 
@@ -957,6 +993,58 @@ mod tests {
                 .is_empty(),
             "a referenced completed parent must not consume a newly filed child prompt"
         );
+    }
+
+    /// `#strucknoresponse`: "completed by" needs the done item's own line to
+    /// state the work. Live 2026-11-22: a decision answer matched a done item
+    /// only because that item's archived continuation (worker reports and
+    /// absorbed unrelated archive lines) quoted the same words.
+    #[test]
+    fn semantic_queue_strike_ignores_a_done_item_that_only_quotes_the_head_below_its_line() {
+        let head = "Ship the C++ SDK under the Apache-2.0 license";
+        let candidates = vec![queue_candidate(0, head, false)];
+        let events = vec![done_event(
+            "doc#done:decideapi",
+            "decideapi",
+            &format!("#decideapi 2026-11-04 Decide the API change PR base\n  > options: {head}"),
+        )];
+        assert!(
+            rank_task_equivalence_events(head, &events)
+                .first()
+                .is_some_and(|result| result.score >= QUEUE_STRIKE_THRESHOLD),
+            "the lexical scorer must reproduce the unsafe continuation match"
+        );
+        assert!(
+            semantic_queue_strike_matches(&candidates, &events, QUEUE_STRIKE_THRESHOLD, 5)
+                .is_empty(),
+            "a done item whose own line does not state the head must not complete it"
+        );
+
+        let stated = vec![done_event(
+            "doc#done:cpplicense",
+            "cpplicense",
+            &format!("#cpplicense 2026-11-04 {head}."),
+        )];
+        let matches =
+            semantic_queue_strike_matches(&candidates, &stated, QUEUE_STRIKE_THRESHOLD, 5);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].matched_id.as_deref(), Some("cpplicense"));
+    }
+
+    #[test]
+    fn done_archive_item_ends_at_a_column_zero_non_item_line() {
+        let archive = concat!(
+            "- 2026-11-04 [#decideapi] Decide the API change PR base\n",
+            "  > chose sdk-dev\n",
+            "- 2026-11-04 archived waiting item `#v002` (its Todo closed)\n",
+            "  > the license is Apache-2.0\n",
+            "- 2026-11-05 [#next] Next item\n",
+        );
+        let items = parse_done_archive_items(archive);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].id, "decideapi");
+        assert_eq!(items[0].continuation, "  > chose sdk-dev\n");
+        assert_eq!(items[1].id, "next");
     }
 
     #[test]

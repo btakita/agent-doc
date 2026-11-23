@@ -1087,6 +1087,16 @@ annotated `— auto-struck: completed by #<id>` or `— auto-struck: tracked by 
 restatement of the tracked item), so an unrelated operator prompt is never struck:
 you do not need to do anything to trigger or avoid this — a genuinely unanswered,
 unrelated head always survives. id-backed heads are unaffected (they strike by id).
+An operator reply is never a candidate (`#strucknoresponse`): a nested row (typed
+under a queue or decision row), a question, or a short decision answer such as
+`Apache-2.0` gets a response, never a completion strike. A done match must be an
+item of this document's own done list or archive whose own line states the head.
+Every strike writes an abbreviated `**Response [#r-…]**` tree (Summary, State)
+under the struck row, so no strike is bare. `session-check` warns
+`struck operator prompt has no response (#strucknoresponse)` for a struck reply or
+struck question that nothing answers, naming its line: answer it in the cycle (a
+response under the row), or tell the operator to un-strike it. Never un-strike or
+rewrite operator text yourself to clear the warning.
 
 The `#ftstrike` pass is **conservative about in-flight edits (`#qstrikeexplain`)**: it
 strikes a free-text head only when that head was present in the stable pre-turn

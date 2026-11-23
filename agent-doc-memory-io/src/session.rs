@@ -220,11 +220,16 @@ pub fn semantic_queue_strike_matches(
         return Ok(Vec::new());
     }
 
-    let db_path = resolve_memory_db_path(file, db)?;
+    // `#strucknoresponse`: a strike's corpus is THIS document's own lineage
+    // (its backlog, its done list and its done archive), never the
+    // project-wide memory DB. Live 2026-11-22: an operator's `Is this done?`
+    // reply was struck as "completed by" a done item of a different session
+    // document whose text happened to end with the same question. Another
+    // document's finished work is not evidence about this queue; the warning
+    // sibling (`semantic_completion_matches`) still searches the DB.
+    let _ = db;
     let session = collect_session_events(file)?;
-    let mut events = read_memory_events(&db_path, MAX_EVENT_READ_LIMIT)?;
-    events.extend(session.events.clone());
-    let events = dedupe_events(events);
+    let events = dedupe_events(session.events);
     Ok(match_semantic_queue_strikes(
         &candidates,
         &events,
@@ -293,14 +298,18 @@ fn collect_completion_candidates(file: &Path) -> Result<Vec<CompletionCandidate>
                     source: "queue".to_string(),
                     source_ref: format!("{session_ref}#queue:{index}"),
                     item_id: None,
-                    exclude_from_queue_strike:
-                        agent_doc_queue::queue_continuation::is_recurring_imperative_head(&text)
-                            || agent_doc_queue::document_queue::entry_is_group_parent(
-                                &entries, index,
-                            )
-                            || agent_doc_queue::document_queue::entry_has_nested_list_comment(
-                                &entries, index,
-                            ),
+                    // `#strucknoresponse`: an operator reply is never a
+                    // restatement of finished work. A nested row (typed under
+                    // a queue or decision row), a question, or a short
+                    // decision answer gets a response, never a lexical
+                    // completion strike.
+                    exclude_from_queue_strike: prompt.indent > 0
+                        || agent_doc_queue::struck_prompt_response::is_operator_reply_shape(&text)
+                        || agent_doc_queue::queue_continuation::is_recurring_imperative_head(&text)
+                        || agent_doc_queue::document_queue::entry_is_group_parent(&entries, index)
+                        || agent_doc_queue::document_queue::entry_has_nested_list_comment(
+                            &entries, index,
+                        ),
                     text,
                     queue_index: Some(index),
                 });
@@ -704,6 +713,74 @@ Shipped cache repair.
         assert!(
             matches.is_empty(),
             "an unresolved nested comment must veto heuristic auto-strike: {matches:?}"
+        );
+    }
+
+    /// `#strucknoresponse`: the 2026-11-22 live shapes (private names
+    /// replaced). The operator typed `Is this done?` under a 🙋 decision row
+    /// and `Apache-2.0` under a license question; the semantic strike buried
+    /// both as "completed by" unrelated ids (one from ANOTHER document's done
+    /// archive in the project memory DB, one whose archived continuation had
+    /// absorbed an unrelated line mentioning Apache-2.0). Neither may match.
+    #[test]
+    fn queue_strike_never_matches_operator_replies_or_another_documents_done_items() {
+        let tmp = tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("tasks.done.md"),
+            concat!(
+                "- 2026-11-04 [#decideapi] Decide the API change PR base\n",
+                "- 2026-11-04 archived waiting item `#v002` (its Todo closed)\n",
+                "  > the SDK license is Apache-2.0\n",
+            ),
+        )
+        .unwrap();
+        // Another session document in the same project, indexed into the
+        // shared memory DB, finished work whose text ends with the question.
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let other = tmp.path().join("tasks/other.md");
+        std::fs::create_dir_all(other.parent().unwrap()).unwrap();
+        std::fs::write(
+            tmp.path().join("tasks/other.done.md"),
+            concat!(
+                "- 2026-10-15 [#installplugin] Install the editor plugin 0.2.624: Is this done?\n",
+                "- 2026-10-15 [#cachefix] Repair cache duplication on save\n",
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            &other,
+            "<!-- agent:done archive=document:other.done.md -->\n<!-- /agent:done -->\n",
+        )
+        .unwrap();
+        let db = tmp.path().join(".tsift/memory.db");
+        let indexed = index_session(&other, &db).unwrap();
+        assert_eq!(
+            indexed.inserted_events, 2,
+            "the other document's done archive must reach the shared DB: {indexed:?}"
+        );
+        let doc = write_doc(
+            tmp.path(),
+            r#"
+<!-- agent:run id="scratch" subagents keep go -->
+- ### 🙋 🔒 follow up: operator: decide whether code comments that cite private ids count as an IP issue. [operator-verify] [#q-5296275f2730]
+  - Is this done?
+- ### Choose the C++ SDK license before the first cpp zip ships.
+  - Apache-2.0
+- Is this done?
+- Repair cache duplication on save
+<!-- /agent:run -->
+
+<!-- agent:done archive=document:../tasks.done.md -->
+<!-- /agent:done -->
+"#,
+        );
+
+        let matches =
+            semantic_queue_strike_matches(&doc, Some(&db), QUEUE_STRIKE_THRESHOLD, 5).unwrap();
+
+        assert!(
+            matches.is_empty(),
+            "operator replies and another document's done items must never strike: {matches:?}"
         );
     }
 

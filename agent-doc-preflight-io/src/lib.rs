@@ -8279,13 +8279,20 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                 let new_entries: Vec<agent_doc_queue::document_queue::QueueEntry> = activation
                     .entries_after
                     .iter()
-                    .map(|entry| match entry {
+                    .flat_map(|entry| match entry {
                         agent_doc_queue::document_queue::QueueEntry::Prompt(p)
+                            // `#strucknoresponse`: an operator reply (a nested
+                            // row, a question, a short decision answer) is
+                            // answered, never struck as finished work. The
+                            // scorer's candidates already exclude it; this
+                            // repeats the rule at the writer.
+                            if p.indent == 0
+                                && !agent_doc_queue::struck_prompt_response::is_operator_reply_shape(&p.text)
                             // `#qimpstrike`: a recurring-imperative command head is a
                             // standing directive — a semantic match against a tracked
                             // backlog/done item must never retire it, or a fresh
                             // `deploy` request gets struck with no action taken.
-                            if !agent_doc_queue::queue_continuation::is_recurring_imperative_head(&p.text)
+                            && !agent_doc_queue::queue_continuation::is_recurring_imperative_head(&p.text)
                                 && queue_prompt_text_is_free_text(&current_content, &p.text)
                                 && !in_flight_claimed.claims(&p.text)
                                 && committed_free_text.contains(&gate_norm(&p.text)) =>
@@ -8316,18 +8323,47 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                                     let head_clean = strip_in_progress_marker(p.text.trim_end());
                                     let annotated = format!("{head_clean} — {reason}");
                                     struck.push((m.clone(), annotated.clone()));
-                                    agent_doc_queue::document_queue::QueueEntry::Completed(agent_doc_queue::document_queue::QueuePrompt {
+                                    // `#strucknoresponse`: a strike is never
+                                    // bare. The abbreviated response says what
+                                    // answered the row, so the operator reads
+                                    // why it is struck under the row itself.
+                                    let matched_line = m
+                                        .matched_text
+                                        .lines()
+                                        .next()
+                                        .unwrap_or_default()
+                                        .trim()
+                                        .trim_start_matches(&format!("#{id}"))
+                                        .trim();
+                                    let matched_line: String = matched_line.chars().take(160).collect();
+                                    let summary = match m.matched_kind {
+                                        agent_doc_memory::QueueStrikeMatchKind::Done => format!(
+                                            "Already done: `#{id}` completed this work (“{matched_line}”). Un-strike the row if it still needs doing."
+                                        ),
+                                        agent_doc_memory::QueueStrikeMatchKind::Backlog => format!(
+                                            "Already tracked: backlog item `#{id}` carries this work (“{matched_line}”). Un-strike the row if it needs its own answer."
+                                        ),
+                                    };
+                                    let mut replaced = vec![agent_doc_queue::document_queue::QueueEntry::Completed(agent_doc_queue::document_queue::QueuePrompt {
                                         note: None,
-                                        text: annotated,
+                                        text: annotated.clone(),
                                         multiline: p.multiline,
                                         indent: p.indent,
                                         ordered_marker: p.ordered_marker.clone(),
-                                    })
+                                    })];
+                                    replaced.extend(
+                                        agent_doc_queue::struck_prompt_response::abbreviated_strike_response_entries(
+                                            &annotated,
+                                            p.indent,
+                                            &summary,
+                                        ),
+                                    );
+                                    replaced
                                 }
-                                None => entry.clone(),
+                                None => vec![entry.clone()],
                             }
                         }
-                        _ => entry.clone(),
+                        _ => vec![entry.clone()],
                     })
                     .collect();
                 if !struck.is_empty() {
@@ -26355,6 +26391,119 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             }),
             "head must be struck + annotated 'completed by #jbcache':\ncompleted={completed:?}"
         );
+        // `#strucknoresponse`: the strike carries an abbreviated response tree
+        // naming what completed the row, never a bare strike.
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let struck_line = updated
+            .lines()
+            .position(|line| line.contains("auto-struck: completed by #jbcache"))
+            .expect("struck row");
+        let below = updated
+            .lines()
+            .skip(struck_line + 1)
+            .take(3)
+            .collect::<Vec<_>>();
+        assert!(
+            below[0].starts_with("  - **Response [#r-")
+                && below[1]
+                    .starts_with("    - **Summary:** Already done: `#jbcache` completed this work")
+                && below[2] == "    - **State:** Complete.",
+            "the struck row must carry its abbreviated response:\n{updated}"
+        );
+        assert!(
+            agent_doc_queue::struck_prompt_response::unanswered_struck_prompt_rows(&updated)
+                .is_empty(),
+            "a strike with its response is answered:\n{updated}"
+        );
+        // A second maintenance pass keeps exactly one response tree.
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &updated,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+        let again = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            again.matches("**Response [#r-").count(),
+            1,
+            "the abbreviated response must not duplicate:\n{again}"
+        );
+    }
+
+    /// `#strucknoresponse`: the 2026-11-22 live shapes (private names
+    /// replaced). The operator typed a follow-up question under a 🙋 decision
+    /// row and a decision answer under a free-text license question. Both were
+    /// struck as "completed by" an unrelated done id, with no response. Here
+    /// each done item's own line even states the reply text, so only the
+    /// reply rule can keep them live: an operator reply is answered, never
+    /// struck as finished work.
+    #[test]
+    fn run_queue_maintenance_never_strikes_operator_replies_as_completed() {
+        let dir = setup_project();
+        std::fs::write(
+            dir.path().join("tasks.done.md"),
+            concat!(
+                "- 2026-10-15 [#installplugin] Install the editor plugin 0.2.624: Is this done?\n",
+                "- 2026-11-04 [#decideapi] Decide the PR base; Apache-2.0\n",
+            ),
+        )
+        .unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: unrelated — opus-4-8\n\nAn answer about a different topic.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- follow up: operator: decide whether code comments that cite private ids count as an IP issue [#q-5296275f2730]\n",
+            "  - Is this done?\n",
+            "- Choose the C++ SDK license before the first cpp zip ships.\n",
+            "  - Apache-2.0\n",
+            "- Is this done?\n",
+            "- do [#stillopen]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#stillopen] unrelated open work item\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done archive=tasks.done.md -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !updated.contains("#qftbklgstrike"),
+            "an operator reply must never be struck as completed:\n{updated}"
+        );
+        let entries = read_queue_entries(&doc);
+        let live: Vec<String> = entries
+            .iter()
+            .filter_map(|e| match e {
+                agent_doc_queue::document_queue::QueueEntry::Prompt(p) => Some(p.text.clone()),
+                _ => None,
+            })
+            .collect();
+        for reply in ["Is this done?", "Apache-2.0"] {
+            assert!(
+                live.iter().any(|text| text.contains(reply))
+                    && !updated.contains(&format!("~~{reply}")),
+                "operator reply {reply:?} must stay live:\nlive={live:?}\n{updated}"
+            );
+        }
     }
 
     #[test]

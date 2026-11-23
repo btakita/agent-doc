@@ -28,7 +28,13 @@ internal object TurnStateBannerProvider {
         // Empty label == idle / not-an-agent-doc-turn → no banner.
         val presentation = refresher.cachedPresentationFor(file.path)
         val label = presentation.label
-        if (label.isEmpty() || !presentation.showBanner) return null
+        if (label.isEmpty() || !presentation.showBanner) {
+            refresher.recordBannerHidden(file.path)
+            return null
+        }
+        // GH #436: a banner drawn from the cache leaves its own `idea.log` line, so an
+        // `input required` banner is explainable even when its change line is in an older log.
+        refresher.recordBannerShown(file.path, presentation, "editor-notification")
         return TurnStateBanner(label, presentation.tooltip)
     }
 }

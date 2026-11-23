@@ -163,6 +163,10 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
     private val inputRequiredNotifications =
         InputRequiredNotifications<Notification> { AgentDocNotices.expire(it, "TurnStateBannerRefresher.inputRequired") }
     private val deferredClearSupersededNotices = DeferredClearSupersededNotices()
+    // GH #436: what last changed each document's presentation, and which banner label was last
+    // logged as drawn, so a banner drawn from the cache still leaves an `idea.log` line.
+    private val presentationChanges = ConcurrentHashMap<String, TurnStateBannerDisplayLog.Change>()
+    private val bannerDisplayLog = TurnStateBannerDisplayLog()
     private val listeners = CopyOnWriteArrayList<Listener>()
 
     fun start() {
@@ -210,6 +214,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
 
     fun showTransientStatus(filePath: String, label: String, tooltip: String? = null): Long {
         val token = transientStatuses.begin(filePath, label, tooltip)
+        presentationChanges[filePath] = TurnStateBannerDisplayLog.Change("transient-status", System.currentTimeMillis())
         notifyUi(filePath, "transient-status-start")
         return token
     }
@@ -218,6 +223,22 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
         if (!transientStatuses.finish(filePath, token)) return
         notifyUi(filePath, "transient-status-finish")
         requestRefresh(filePath, "transient-status-finish")
+    }
+
+    /**
+     * GH #436: the banner provider drew [presentation]'s label for [filePath] from [source]. Logs
+     * `[turn-state] banner shown` the first time each label is drawn for the document, naming the
+     * frame reason that produced it and how old it is.
+     */
+    fun recordBannerShown(filePath: String, presentation: TurnStateBridge.TurnStatePresentation, source: String) {
+        bannerDisplayLog
+            .shown(filePath, presentation.label, presentationChanges[filePath], source, System.currentTimeMillis())
+            ?.let(LOG::info)
+    }
+
+    /** GH #436: the banner provider drew no banner for [filePath]. */
+    fun recordBannerHidden(filePath: String) {
+        bannerDisplayLog.hidden(filePath)
     }
 
     fun requestRefresh(file: VirtualFile, reason: String) {
@@ -275,6 +296,8 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
         transientStatuses.clear(filePath)
         inputRequiredNotifications.clear(filePath)
         deferredClearSupersededNotices.forget(filePath)
+        presentationChanges.remove(filePath)
+        bannerDisplayLog.forget(filePath)
         notifyUi(filePath, "file-closed")
     }
 
@@ -343,6 +366,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
                 presentations.put(filePath, next)
             }
         if (next != null && previous != next) {
+            presentationChanges[filePath] = TurnStateBannerDisplayLog.Change(reason, System.currentTimeMillis())
             // GH #323: INFO, once per change per document, so a missing banner can be matched
             // against the controller's `turn_in_flight` for that document.
             LOG.info(
@@ -355,7 +379,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
             // later edge stacked another balloon beside the stale one.
             if (next.inputRequired) {
                 if (previous?.inputRequired != true) {
-                    notifyInputRequired(filePath)
+                    notifyInputRequired(filePath, reason)
                 }
             } else {
                 inputRequiredNotifications.clear(filePath)
@@ -364,11 +388,11 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
         }
     }
 
-    private fun notifyInputRequired(filePath: String) {
-        inputRequiredNotifications.raise(filePath) { buildInputRequiredNotification(filePath) }
+    private fun notifyInputRequired(filePath: String, reason: String) {
+        inputRequiredNotifications.raise(filePath) { buildInputRequiredNotification(filePath, reason) }
     }
 
-    private fun buildInputRequiredNotification(filePath: String): Notification {
+    private fun buildInputRequiredNotification(filePath: String, reason: String): Notification {
         val fileName = java.io.File(filePath).name
         val notification =
             NotificationGroupManager.getInstance()
@@ -414,7 +438,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
                 }
             },
         )
-        AgentDocNotices.show(project, notification, "TurnStateBannerRefresher.buildInputRequiredNotification")
+        AgentDocNotices.show(project, notification, inputRequiredNoticeSource(reason))
         return notification
     }
 
@@ -466,6 +490,8 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
         transientStatuses.clearAll()
         inputRequiredNotifications.clearAll()
         deferredClearSupersededNotices.clearAll()
+        presentationChanges.clear()
+        bannerDisplayLog.clear()
         listeners.clear()
     }
 
@@ -481,5 +507,12 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
         }
 
         private fun isMarkdown(file: VirtualFile): Boolean = file.name.endsWith(".md")
+
+        /**
+         * GH #436: the `[notify] shown source=` of the input-required toast names the controller
+         * frame that raised it (the same `via` as the `[turn-state] projection changed` line).
+         */
+        internal fun inputRequiredNoticeSource(reason: String): String =
+            "TurnStateBannerRefresher.inputRequired[via=$reason]"
     }
 }

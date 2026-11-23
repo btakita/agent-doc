@@ -100,7 +100,7 @@ class AgentDocNoticesTest {
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/TurnStateBannerRefresher.kt").readText()
         assertTrue(
             refresher.contains(
-                "AgentDocNotices.show(project, notification, \"TurnStateBannerRefresher.buildInputRequiredNotification\")",
+                "AgentDocNotices.show(project, notification, inputRequiredNoticeSource(reason))",
             ),
         )
         assertTrue(refresher.contains("AgentDocNotices.expire(it, \"TurnStateBannerRefresher.inputRequired\")"))

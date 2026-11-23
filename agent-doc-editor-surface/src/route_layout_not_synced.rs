@@ -21,40 +21,88 @@ pub const ROUTE_LAYOUT_NOT_SYNCED_MARKER: &str = "[route] layout-not-synced:";
 /// focus-only dispatch (GH #347).
 pub const ROUTE_LAYOUT_DEFERRED_FOCUS_ONLY_REASON: &str = "layout_deferred_focus_only";
 
+/// What the route's own payload proved about its missing column geometry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteLayoutEvidence {
+    /// The route named no document and declared no frontend authority: the
+    /// flat Remote Dev `--col` fallback (GH #373), whose remedy is installing
+    /// the frontend module in the JetBrains Client.
+    FlatNoDocument,
+    /// The route declared `layout_authority=frontend_measured`: the JetBrains
+    /// Client's frontend module is installed and owns the layout (GH #376), but
+    /// the controller held no measurement for this route (after a controller or
+    /// Client restart, or while a forward is late). Reinstalling cannot help.
+    FrontendMeasurementNotReceived,
+    /// The route named its documents in an unknown column order, which a
+    /// one-sided Remote Dev backend and a local single-split editor both send:
+    /// the controller cannot tell them apart, so the notice claims neither.
+    ColumnOrderUnknown,
+}
+
+impl RouteLayoutEvidence {
+    /// Classify the route's payload. A declared frontend authority wins: it is
+    /// positive proof that the Client module is installed.
+    pub const fn of_route(editor_observed_no_document: bool, frontend_measured: bool) -> Self {
+        if frontend_measured {
+            Self::FrontendMeasurementNotReceived
+        } else if editor_observed_no_document {
+            Self::FlatNoDocument
+        } else {
+            Self::ColumnOrderUnknown
+        }
+    }
+
+    /// Stable reason token for the ops log and the notice.
+    pub const fn reason(self) -> &'static str {
+        match self {
+            Self::FlatNoDocument => ROUTE_LAYOUT_FLAT_EVIDENCE_REASON,
+            Self::FrontendMeasurementNotReceived => {
+                ROUTE_LAYOUT_FRONTEND_MEASUREMENT_NOT_RECEIVED_REASON
+            }
+            Self::ColumnOrderUnknown => ROUTE_LAYOUT_COLUMN_ORDER_UNKNOWN_REASON,
+        }
+    }
+}
+
 /// Why a dispatched route left the tmux layout unchanged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RouteLayoutNotSynced {
     /// The editor's route named no visible document, so only the routed
     /// document was ensured a column (GH #373).
-    EditorObservedNoDocument,
+    EditorObservedNoDocument { evidence: RouteLayoutEvidence },
     /// No authoritative frontend snapshot exists, so the structural effect was
     /// deferred and the route dispatched focus-only (GH #347).
-    ///
-    /// `flat_evidence` is whether the route itself proved the flat Remote Dev
-    /// fallback (it named no document, GH #373). Otherwise the route named its
-    /// documents with an unknown column order, which a one-sided Remote Dev
-    /// backend and a local single-split editor both send: the controller cannot
-    /// tell them apart, so the notice must not claim either.
-    DeferredFocusOnly { flat_evidence: bool },
+    DeferredFocusOnly { evidence: RouteLayoutEvidence },
 }
 
 /// Reason token of a route whose own evidence was the flat Remote Dev fallback.
 pub const ROUTE_LAYOUT_FLAT_EVIDENCE_REASON: &str = "flat_evidence_has_no_column_geometry";
+
+/// Reason token of a route that declared the Client's measured layout the
+/// controller had not received.
+pub const ROUTE_LAYOUT_FRONTEND_MEASUREMENT_NOT_RECEIVED_REASON: &str =
+    "frontend_measurement_not_received";
 
 /// Reason token of a route that named its documents but no column order.
 pub const ROUTE_LAYOUT_COLUMN_ORDER_UNKNOWN_REASON: &str = "route_column_order_unknown";
 
 impl RouteLayoutNotSynced {
     /// Classify one route: `editor_observed_no_document` is the GH #373
-    /// substitution, `receipt_reason` the converged layout receipt's reason.
-    /// A deferral wins: it is the stronger statement (nothing was published).
-    pub fn classify(editor_observed_no_document: bool, receipt_reason: &str) -> Option<Self> {
+    /// substitution, `frontend_measured` whether the route declared
+    /// `layout_authority=frontend_measured`, `receipt_reason` the converged
+    /// layout receipt's reason. A deferral wins: it is the stronger statement
+    /// (nothing was published).
+    pub fn classify(
+        editor_observed_no_document: bool,
+        frontend_measured: bool,
+        receipt_reason: &str,
+    ) -> Option<Self> {
+        let evidence =
+            RouteLayoutEvidence::of_route(editor_observed_no_document, frontend_measured);
         if receipt_reason == ROUTE_LAYOUT_DEFERRED_FOCUS_ONLY_REASON {
-            Some(Self::DeferredFocusOnly {
-                flat_evidence: editor_observed_no_document,
-            })
+            Some(Self::DeferredFocusOnly { evidence })
         } else if editor_observed_no_document {
-            Some(Self::EditorObservedNoDocument)
+            Some(Self::EditorObservedNoDocument { evidence })
         } else {
             None
         }
@@ -63,25 +111,25 @@ impl RouteLayoutNotSynced {
     /// Stable wire token for the ops log and the notice.
     pub const fn cause(self) -> &'static str {
         match self {
-            Self::EditorObservedNoDocument => "editor_observed_no_document",
+            Self::EditorObservedNoDocument { .. } => "editor_observed_no_document",
             Self::DeferredFocusOnly { .. } => {
                 "incomplete_frontend_layout_no_authoritative_snapshot"
             }
         }
     }
 
-    /// Stable reason token: what the route's own evidence was. Only a route
-    /// that named no document proves the flat Remote Dev fallback.
-    pub const fn reason(self) -> &'static str {
+    /// What the route's own payload proved.
+    pub const fn evidence(self) -> RouteLayoutEvidence {
         match self {
-            Self::EditorObservedNoDocument
-            | Self::DeferredFocusOnly {
-                flat_evidence: true,
-            } => ROUTE_LAYOUT_FLAT_EVIDENCE_REASON,
-            Self::DeferredFocusOnly {
-                flat_evidence: false,
-            } => ROUTE_LAYOUT_COLUMN_ORDER_UNKNOWN_REASON,
+            Self::EditorObservedNoDocument { evidence } | Self::DeferredFocusOnly { evidence } => {
+                evidence
+            }
         }
+    }
+
+    /// Stable reason token: what the route's own evidence was.
+    pub const fn reason(self) -> &'static str {
+        self.evidence().reason()
     }
 }
 
@@ -89,25 +137,29 @@ impl RouteLayoutNotSynced {
 /// did not move the tmux layout to the editor's visible documents.
 pub fn route_layout_not_synced_notice(relative_path: &str, cause: RouteLayoutNotSynced) -> String {
     let remedy = crate::FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY;
-    let detail = match cause {
-        RouteLayoutNotSynced::EditorObservedNoDocument => format!(
-            "the editor sent no column geometry for this route; the editor reported no visible document, \
-             so the route only made sure {relative_path} has a pane. The tmux columns follow the editor \
-             again once it publishes its split layout (Remote Dev: {remedy})."
+    let effect = match cause {
+        RouteLayoutNotSynced::EditorObservedNoDocument { .. } => {
+            format!("the route only made sure {relative_path} has a pane")
+        }
+        RouteLayoutNotSynced::DeferredFocusOnly { .. } => format!(
+            "the route sent the prompt to {relative_path}'s existing pane and left the tmux layout unchanged"
         ),
-        RouteLayoutNotSynced::DeferredFocusOnly {
-            flat_evidence: true,
-        } => format!(
-            "the editor sent no column geometry for this route; the route sent the prompt to \
-             {relative_path}'s existing pane and left the tmux layout unchanged. The tmux columns follow \
-             the editor again once it publishes its split layout (Remote Dev: {remedy})."
+    };
+    let detail = match cause.evidence() {
+        RouteLayoutEvidence::FlatNoDocument => format!(
+            "the editor sent no column geometry for this route and reported no visible document; {effect}. \
+             The tmux columns follow the editor again once it publishes its split layout (Remote Dev: {remedy})."
         ),
-        RouteLayoutNotSynced::DeferredFocusOnly {
-            flat_evidence: false,
-        } => format!(
+        RouteLayoutEvidence::FrontendMeasurementNotReceived => format!(
+            "the route deferred to the JetBrains Client's measured layout (layout_authority=frontend_measured), \
+             but the controller has not received that measurement yet (for example right after a controller \
+             or Client restart); {effect}. The tmux columns follow once the Client's measured columns reach the \
+             controller (`[rd-layout] forwarded measured columns` in the backend idea.log); if they never do, \
+             read the Remote Dev geometry hop in runbooks/coder-workspace.md."
+        ),
+        RouteLayoutEvidence::ColumnOrderUnknown => format!(
             "the route named its documents but no column order, and the controller holds no editor \
-             layout to keep yet (for example right after a controller restart); the route sent the \
-             prompt to {relative_path}'s existing pane and left the tmux layout unchanged. A single \
+             layout to keep yet (for example right after a controller restart); {effect}. A single \
              editor split sends no column order; the tmux columns follow the editor again on its next \
              layout sync. If this IDE is a Remote Dev backend whose layout never syncs: {remedy}."
         ),
@@ -124,25 +176,50 @@ mod tests {
     use super::*;
     use crate::{RouteOutcomeEvidence, RouteOutcomeKind, derive_route_outcome};
 
+    const FLAT: RouteLayoutEvidence = RouteLayoutEvidence::FlatNoDocument;
+    const MEASURED: RouteLayoutEvidence = RouteLayoutEvidence::FrontendMeasurementNotReceived;
+    const UNKNOWN: RouteLayoutEvidence = RouteLayoutEvidence::ColumnOrderUnknown;
+
+    fn all_causes() -> Vec<RouteLayoutNotSynced> {
+        [FLAT, MEASURED, UNKNOWN]
+            .into_iter()
+            .flat_map(|evidence| {
+                [
+                    RouteLayoutNotSynced::EditorObservedNoDocument { evidence },
+                    RouteLayoutNotSynced::DeferredFocusOnly { evidence },
+                ]
+            })
+            .collect()
+    }
+
     #[test]
     fn a_deferred_route_is_classified_before_the_substitution() {
+        let deferred = ROUTE_LAYOUT_DEFERRED_FOCUS_ONLY_REASON;
         assert_eq!(
-            RouteLayoutNotSynced::classify(true, ROUTE_LAYOUT_DEFERRED_FOCUS_ONLY_REASON),
-            Some(RouteLayoutNotSynced::DeferredFocusOnly {
-                flat_evidence: true
-            })
+            RouteLayoutNotSynced::classify(true, false, deferred),
+            Some(RouteLayoutNotSynced::DeferredFocusOnly { evidence: FLAT })
         );
         assert_eq!(
-            RouteLayoutNotSynced::classify(false, ROUTE_LAYOUT_DEFERRED_FOCUS_ONLY_REASON),
-            Some(RouteLayoutNotSynced::DeferredFocusOnly {
-                flat_evidence: false
-            })
+            RouteLayoutNotSynced::classify(false, false, deferred),
+            Some(RouteLayoutNotSynced::DeferredFocusOnly { evidence: UNKNOWN })
         );
         assert_eq!(
-            RouteLayoutNotSynced::classify(true, "applied"),
-            Some(RouteLayoutNotSynced::EditorObservedNoDocument)
+            RouteLayoutNotSynced::classify(true, true, deferred),
+            Some(RouteLayoutNotSynced::DeferredFocusOnly { evidence: MEASURED })
         );
-        assert_eq!(RouteLayoutNotSynced::classify(false, "applied"), None);
+        assert_eq!(
+            RouteLayoutNotSynced::classify(true, false, "applied"),
+            Some(RouteLayoutNotSynced::EditorObservedNoDocument { evidence: FLAT })
+        );
+        assert_eq!(
+            RouteLayoutNotSynced::classify(true, true, "applied"),
+            Some(RouteLayoutNotSynced::EditorObservedNoDocument { evidence: MEASURED })
+        );
+        assert_eq!(
+            RouteLayoutNotSynced::classify(false, false, "applied"),
+            None
+        );
+        assert_eq!(RouteLayoutNotSynced::classify(false, true, "applied"), None);
     }
 
     /// The notice rides a successful route's output. It must name the reason
@@ -150,15 +227,7 @@ mod tests {
     /// stays a success, never queued, busy, or steering.
     #[test]
     fn the_notice_names_the_reason_and_keeps_the_route_a_success() {
-        for cause in [
-            RouteLayoutNotSynced::EditorObservedNoDocument,
-            RouteLayoutNotSynced::DeferredFocusOnly {
-                flat_evidence: true,
-            },
-            RouteLayoutNotSynced::DeferredFocusOnly {
-                flat_evidence: false,
-            },
-        ] {
+        for cause in all_causes() {
             let notice = route_layout_not_synced_notice("tasks/a.md", cause);
             assert!(
                 notice.starts_with(ROUTE_LAYOUT_NOT_SYNCED_MARKER),
@@ -189,45 +258,54 @@ mod tests {
         }
     }
 
-    /// A route that named its documents with an unknown column order is what a
-    /// local single-split editor sends too, so its notice never claims the flat
-    /// Remote Dev evidence: only a route that named no document proves it.
+    /// Each notice claims only what the route's own payload proved: only a
+    /// route that named no document and declared no frontend authority is the
+    /// flat Remote Dev evidence with the outright reinstall remedy; a route that
+    /// declared the Client's measured layout proves the Client module is
+    /// installed, so it is never told to reinstall it; and a route that named
+    /// its documents in an unknown order (a local single split too) gets the
+    /// remedy only conditionally.
     #[test]
-    fn only_a_route_that_named_no_document_claims_flat_remote_dev_evidence() {
-        let unknown_order = route_layout_not_synced_notice(
-            "tasks/a.md",
-            RouteLayoutNotSynced::DeferredFocusOnly {
-                flat_evidence: false,
-            },
-        );
-        assert!(
-            unknown_order.contains("reason=route_column_order_unknown "),
-            "{unknown_order}"
-        );
-        assert!(
-            !unknown_order.contains(ROUTE_LAYOUT_FLAT_EVIDENCE_REASON),
-            "{unknown_order}"
-        );
-        assert!(
-            !unknown_order.contains("the editor sent no column geometry"),
-            "{unknown_order}"
-        );
-        assert!(
-            unknown_order.contains("If this IDE is a Remote Dev backend"),
-            "the remedy is conditional: {unknown_order}"
-        );
-        for flat in [
-            RouteLayoutNotSynced::EditorObservedNoDocument,
-            RouteLayoutNotSynced::DeferredFocusOnly {
-                flat_evidence: true,
-            },
-        ] {
-            let notice = route_layout_not_synced_notice("tasks/a.md", flat);
-            assert!(
-                notice.contains("reason=flat_evidence_has_no_column_geometry "),
-                "{notice}"
-            );
-            assert!(notice.contains("(Remote Dev: "), "{notice}");
+    fn each_notice_claims_only_the_routes_own_evidence() {
+        let reinstall = "install the same Agent Doc modular plugin ZIP";
+        for cause in all_causes() {
+            let notice = route_layout_not_synced_notice("tasks/a.md", cause);
+            match cause.evidence() {
+                RouteLayoutEvidence::FlatNoDocument => {
+                    assert!(
+                        notice.contains("reason=flat_evidence_has_no_column_geometry "),
+                        "{notice}"
+                    );
+                    assert!(notice.contains("(Remote Dev: "), "{notice}");
+                }
+                RouteLayoutEvidence::FrontendMeasurementNotReceived => {
+                    assert!(
+                        notice.contains("reason=frontend_measurement_not_received "),
+                        "{notice}"
+                    );
+                    assert!(!notice.contains(reinstall), "{notice}");
+                    assert!(
+                        !notice.contains(ROUTE_LAYOUT_FLAT_EVIDENCE_REASON),
+                        "{notice}"
+                    );
+                    assert!(!notice.contains("sent no column geometry"), "{notice}");
+                }
+                RouteLayoutEvidence::ColumnOrderUnknown => {
+                    assert!(
+                        notice.contains("reason=route_column_order_unknown "),
+                        "{notice}"
+                    );
+                    assert!(
+                        !notice.contains(ROUTE_LAYOUT_FLAT_EVIDENCE_REASON),
+                        "{notice}"
+                    );
+                    assert!(!notice.contains("sent no column geometry"), "{notice}");
+                    assert!(
+                        notice.contains("If this IDE is a Remote Dev backend"),
+                        "the remedy is conditional: {notice}"
+                    );
+                }
+            }
         }
     }
 }

@@ -14550,6 +14550,11 @@ fn handle_editor_route_rpc_with_layout_delegate(
     // `--col` fallback with flat selection evidence) names only the routed
     // document, as an undetected single-document `ensure` observation.
     let mut editor_observed_no_document = false;
+    // GH #434: a route that declared the JetBrains Client's measured layout
+    // proves the Client module is installed, so its notice never tells the
+    // operator to reinstall it.
+    let frontend_measured_authority = payload.layout_authority.as_deref()
+        == Some(agent_doc_editor_surface::ROUTE_LAYOUT_AUTHORITY_FRONTEND_MEASURED);
     let layout_args = match editor_route_undetected_layout_args(
         &layout_args,
         payload.layout_mode.as_deref(),
@@ -14678,6 +14683,7 @@ fn handle_editor_route_rpc_with_layout_delegate(
             );
             layout_not_synced = agent_doc_editor_surface::RouteLayoutNotSynced::classify(
                 editor_observed_no_document,
+                frontend_measured_authority,
                 &layout_receipt.reason,
             );
             route_layout_lease
@@ -58767,6 +58773,31 @@ mod tests {
         )
         .expect("a live pane is answered focus-only");
         assert_eq!(routed.exit_code, 0, "{}", routed.output);
+        // GH #434: the route declared the Client's measured layout, which
+        // proves the Client module is installed: the notice says the
+        // measurement has not arrived and never tells the operator to
+        // reinstall the Client.
+        assert!(
+            routed.output.lines().any(|line| line.starts_with(
+                "[route] layout-not-synced: alpha.md reason=frontend_measurement_not_received cause=incomplete_frontend_layout_no_authoritative_snapshot:"
+            )),
+            "{}",
+            routed.output
+        );
+        assert!(
+            !routed
+                .output
+                .contains("install the same Agent Doc modular plugin ZIP"),
+            "{}",
+            routed.output
+        );
+        assert!(
+            other.ops_log().contains(
+                "cause=incomplete_frontend_layout_no_authoritative_snapshot reason=frontend_measurement_not_received outcome=dispatched"
+            ),
+            "{}",
+            other.ops_log()
+        );
         assert!(live.pane_layout_desired().is_none());
         let ops = other.ops_log();
         assert!(

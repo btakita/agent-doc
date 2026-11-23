@@ -54,16 +54,26 @@ creates one with the receipt's attach command.
   or custom repository the Client gets nothing. Install the same modular ZIP
   (`agent-doc-jetbrains-262-<version>.zip`) in the JetBrains Client/Gateway
   plugins on the local machine, confirm both sides report that exact version,
-  and restart both, including the Client process. Until then the backend
-  `idea.log` shows `[layout-detect] unknown windows=0
-  source=remote_client_selected_files ...
-  reason=flat_evidence_has_no_column_geometry` and `[layout-sync] frontend
-  layout publisher unavailable`, focus defers with
-  `focus_deferred:no_frontend_layout_snapshot surface_id=surface-unavailable`,
-  and Run Agent Doc still dispatches into the document's existing pane but
-  logs `[route] layout not synced for <doc>: [route] layout-not-synced: ...`
-  with the reason instead of moving tmux columns. Local (non-Gateway) IDEs
-  are unaffected.
+  and restart both, including the Client process. The backend logs
+  `[layout-detect] unknown windows=0 source=remote_client_selected_files ...
+  reason=flat_evidence_has_no_column_geometry` on every Remote Dev backend,
+  with or without the Client module, so that line does not show which side is
+  missing. The missing Client module shows as: no `[split-surface] frontend
+  surface publisher started` in the Client `idea.log`; in the backend
+  `idea.log`, no `[split-surface] lease opened` and `[layout-sync] frontend
+  layout publisher unavailable ...
+  readiness_reason=frontend_authority_absent_or_generation_mismatched`; focus
+  deferring with `focus_deferred:no_frontend_layout_snapshot
+  surface_id=surface-unavailable`. Run Agent Doc still dispatches into the
+  document's existing pane but logs `[route] layout not synced for <doc>:
+  [route] layout-not-synced: <doc> reason=<reason> ...` instead of moving
+  tmux columns. `reason=flat_evidence_has_no_column_geometry` is that missing
+  module. `reason=frontend_measurement_not_received` means the route carried
+  `layout_authority=frontend_measured`, so the Client module is installed and
+  only its measurement has not reached the controller: read the geometry hop
+  below instead of reinstalling. `reason=route_column_order_unknown` is
+  ambiguous: a local single editor split right after a controller restart
+  logs it too. Local (non-Gateway) IDEs need no Client install.
 - Upgrading on Coder (GH #435): `agent-doc upgrade` in the workspace updates
   only the backend's plugin. It prints the Client steps (download URL, quit
   the Client, delete `agent-doc-jetbrains-262` and `agent-doc-jetbrains-263`

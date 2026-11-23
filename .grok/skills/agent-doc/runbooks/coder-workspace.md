@@ -58,22 +58,29 @@ creates one with the receipt's attach command.
   `[layout-detect] unknown windows=0 source=remote_client_selected_files ...
   reason=flat_evidence_has_no_column_geometry` on every Remote Dev backend,
   with or without the Client module, so that line does not show which side is
-  missing. The missing Client module shows as: no `[split-surface] frontend
-  surface publisher started` in the Client `idea.log`; in the backend
-  `idea.log`, no `[split-surface] lease opened` and `[layout-sync] frontend
-  layout publisher unavailable ...
-  readiness_reason=frontend_authority_absent_or_generation_mismatched`; focus
-  deferring with `focus_deferred:no_frontend_layout_snapshot
-  surface_id=surface-unavailable`. Run Agent Doc still dispatches into the
-  document's existing pane but logs `[route] layout not synced for <doc>:
-  [route] layout-not-synced: <doc> reason=<reason> ...` instead of moving
-  tmux columns. `reason=flat_evidence_has_no_column_geometry` is that missing
-  module. `reason=frontend_measurement_not_received` means the route carried
-  `layout_authority=frontend_measured`, so the Client module is installed and
-  only its measurement has not reached the controller: read the geometry hop
-  below instead of reinstalling. `reason=route_column_order_unknown` is
-  ambiguous: a local single editor split right after a controller restart
-  logs it too. Local (non-Gateway) IDEs need no Client install.
+  missing. On plugin 0.2.1043 (modular) or newer on both sides, a missing
+  Client module shows as no `[split-surface] frontend surface publisher
+  started` in the Client `idea.log` and no `[split-surface] lease opened` in
+  the backend `idea.log` (older builds log neither line, so their absence
+  proves nothing there: compare the plugin version each side reports). Focus
+  then defers with `focus_deferred:no_frontend_layout_snapshot
+  surface_id=surface-unavailable`. A backend `[layout-sync] frontend layout
+  publisher unavailable ...
+  readiness_reason=frontend_connected_without_accepted_publication` line
+  means the opposite: a Client frontend connected but none of its snapshots
+  was accepted (see the geometry hop below). Run Agent Doc still dispatches
+  into the document's existing pane but logs `[route] layout not synced for
+  <doc>: [route] layout-not-synced: <doc> reason=<reason> ...` instead of
+  moving tmux columns. `reason=flat_evidence_has_no_column_geometry` is the
+  missing module. `reason=frontend_measurement_not_received` means the route
+  carried `layout_authority=frontend_measured`: a Client frontend is installed
+  and connected, but its measurement has not reached the controller. Read the
+  geometry hop below; reinstall the matching ZIP in the Client only when the
+  route log shows a lasting `snapshot_refused(<STATUS>)` in
+  `frontend_layout=[...]` or the backend logs `[split-surface] frontend/backend
+  plugin mismatch`. `reason=route_column_order_unknown` is ambiguous: a local
+  single editor split right after a controller restart logs it too. Local
+  (non-Gateway) IDEs need no Client install.
 - Upgrading on Coder (GH #435): `agent-doc upgrade` in the workspace updates
   only the backend's plugin. It prints the Client steps (download URL, quit
   the Client, delete `agent-doc-jetbrains-262` and `agent-doc-jetbrains-263`
@@ -91,8 +98,12 @@ creates one with the receipt's attach command.
     `snapshot schema negotiated version=<n> ... geometry=measured`, then
     `snapshot accepted ... measured_windows=<a>/<b>` or
     `snapshot rejected status=<STATUS> ... retry_in_ms=<ms> diagnostic=<why>`.
-    A recoverable refusal (`DELIVERY_FAILED`, `PROJECT_MISMATCH`,
-    `INCOMPLETE`) republishes on a 1-30 s backoff.
+    A refusal with `DELIVERY_FAILED`, `PROJECT_MISMATCH` or `INCOMPLETE`
+    republishes on a 1-30 s backoff. A refusal that keeps repeating with
+    `INVALID_SCHEMA`, or `DELIVERY_FAILED` with
+    `diagnostic=frontend_authority_absent_or_generation_mismatched`, is a
+    Client build that does not match the backend: install the matching ZIP in
+    the Client.
   - Backend `idea.log`: `[split-surface] frontend/backend ingress accepted`
     (or `deferred`), `lease opened ... layout_authority=remote_measured`,
     `snapshot refused ... status=<STATUS> diagnostic=<why>`,

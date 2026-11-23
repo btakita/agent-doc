@@ -28,10 +28,13 @@ pub enum RouteLayoutEvidence {
     /// flat Remote Dev `--col` fallback (GH #373), whose remedy is installing
     /// the frontend module in the JetBrains Client.
     FlatNoDocument,
-    /// The route declared `layout_authority=frontend_measured`: the JetBrains
-    /// Client's frontend module is installed and owns the layout (GH #376), but
-    /// the controller held no measurement for this route (after a controller or
-    /// Client restart, or while a forward is late). Reinstalling cannot help.
+    /// The route declared `layout_authority=frontend_measured`: a JetBrains
+    /// Client frontend module is installed and connected (GH #376), but the
+    /// controller held no measurement for this route (after a controller or
+    /// Client restart, while a forward is late, or while the backend keeps
+    /// refusing that Client's snapshots). The authority proves a connected
+    /// frontend, not a matching build, so the notice names the refusal and
+    /// mismatch signs that do call for reinstalling.
     FrontendMeasurementNotReceived,
     /// The route named its documents in an unknown column order, which a
     /// one-sided Remote Dev backend and a local single-split editor both send:
@@ -154,8 +157,10 @@ pub fn route_layout_not_synced_notice(relative_path: &str, cause: RouteLayoutNot
             "the route deferred to the JetBrains Client's measured layout (layout_authority=frontend_measured), \
              but the controller has not received that measurement yet (for example right after a controller \
              or Client restart); {effect}. The tmux columns follow once the Client's measured columns reach the \
-             controller (`[rd-layout] forwarded measured columns` in the backend idea.log); if they never do, \
-             read the Remote Dev geometry hop in runbooks/coder-workspace.md."
+             controller (`[rd-layout] forwarded measured columns` in the backend idea.log). If they never do, \
+             read the Remote Dev geometry hop in runbooks/coder-workspace.md; a lasting `snapshot_refused(...)` \
+             in the route's `frontend_layout=[...]` or a backend `[split-surface] frontend/backend plugin mismatch` \
+             line means the Client runs a different build: {remedy}."
         ),
         RouteLayoutEvidence::ColumnOrderUnknown => format!(
             "the route named its documents but no column order, and the controller holds no editor \
@@ -283,7 +288,17 @@ mod tests {
                         notice.contains("reason=frontend_measurement_not_received "),
                         "{notice}"
                     );
-                    assert!(!notice.contains(reinstall), "{notice}");
+                    // The reinstall remedy appears only behind the refusal
+                    // and mismatch signs, never as the route's diagnosis.
+                    let (diagnosis, conditional) = notice
+                        .split_once("If they never do")
+                        .expect("the conditional tail");
+                    assert!(!diagnosis.contains(reinstall), "{notice}");
+                    assert!(
+                        conditional.contains("frontend/backend plugin mismatch")
+                            && conditional.contains(reinstall),
+                        "{notice}"
+                    );
                     assert!(
                         !notice.contains(ROUTE_LAYOUT_FLAT_EVIDENCE_REASON),
                         "{notice}"

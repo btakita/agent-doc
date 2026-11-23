@@ -58785,9 +58785,11 @@ mod tests {
             routed.output
         );
         assert!(
-            !routed
+            routed
                 .output
-                .contains("install the same Agent Doc modular plugin ZIP"),
+                .split_once("If they never do")
+                .is_some_and(|(diagnosis, _)| !diagnosis
+                    .contains("install the same Agent Doc modular plugin ZIP")),
             "{}",
             routed.output
         );

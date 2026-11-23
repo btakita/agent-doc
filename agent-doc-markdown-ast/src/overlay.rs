@@ -799,6 +799,12 @@ pub const GENERATED_RESPONSE_STRUCTURE_CONTAINER_LABELS: [&str; 3] =
 /// unmarked list item underneath the same response section.
 pub const RESPONSE_DETAIL_MARKER: &str = "<!-- agent-doc:response-detail -->";
 
+/// `#nestedreplyfollowup`: the generated-row marker on the inert link row
+/// (`- ↪ [#q-…] <!-- agent-doc:followup-link -->`) left where a nested
+/// operator reply was moved to its own top-level follow-up row. The link
+/// names the new row; it is never queue work.
+pub const FOLLOWUP_LINK_MARKER: &str = "<!-- agent-doc:followup-link -->";
+
 /// Whether a list item's content is a marked response detail or a generated response-structure row
 /// (`**Blocker:** …`, `**Summary:** …`, `**What changed:** …`,
 /// `**Verification:** …`, `**Action items:** …`, `**Open items:** …`,
@@ -824,9 +830,13 @@ pub fn is_generated_response_structure_row(item_content: &str) -> bool {
     let (_, inner) = split_struck_body(content);
     let inner = agent_doc_element_queue::strip_attempt_projection_prefix(inner).trim();
     if GENERATED_RESPONSE_STRUCTURE_CONTAINER_LABELS.contains(&inner)
-        || inner
-            .strip_suffix(RESPONSE_DETAIL_MARKER)
-            .is_some_and(|body| body.ends_with(char::is_whitespace) && !body.trim().is_empty())
+        || [RESPONSE_DETAIL_MARKER, FOLLOWUP_LINK_MARKER]
+            .iter()
+            .any(|marker| {
+                inner.strip_suffix(marker).is_some_and(|body| {
+                    body.ends_with(char::is_whitespace) && !body.trim().is_empty()
+                })
+            })
     {
         return true;
     }
@@ -2828,6 +2838,11 @@ mod tests {
         assert!(!is_generated_response_structure_row(
             "**Choices:** pick one"
         ));
+        // `#nestedreplyfollowup`: the link left for a moved nested reply.
+        assert!(is_generated_response_structure_row(&format!(
+            "\u{21aa} [#q-0123456789ab] {FOLLOWUP_LINK_MARKER}"
+        )));
+        assert!(!is_generated_response_structure_row(FOLLOWUP_LINK_MARKER));
     }
 
     #[test]

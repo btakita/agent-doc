@@ -52,6 +52,7 @@ pub mod linked_todo_queue;
 pub mod loose_ends;
 #[cfg(test)]
 mod nest_leaf_select_tests;
+pub mod nested_reply_followup;
 pub mod open_count;
 pub mod queue_closeout_guard;
 pub mod queue_command;

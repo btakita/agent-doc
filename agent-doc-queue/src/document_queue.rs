@@ -5544,6 +5544,20 @@ pub fn prompt_context_packet_at(
         }
     }
 
+    // `#nestedreplyfollowup`: a top-level row moved out of a response tree
+    // keeps that response as its context; the link row left in its place
+    // names the row.
+    if response.is_none()
+        && leaf.indent == 0
+        && let Some((response_id, summary)) =
+            crate::nested_reply_followup::linked_response_context(entries, &leaf.text)
+    {
+        response = Some(ResponseLineage {
+            response_id: Some(response_id),
+            summary,
+        });
+    }
+
     let (claim_owner, claim_generation) = projected_claim(&origin_prompt.text)
         .map(|(owner, generation)| (Some(owner), Some(generation)))
         .unwrap_or_default();

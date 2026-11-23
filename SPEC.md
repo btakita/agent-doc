@@ -174,6 +174,27 @@
   rewritten on sync: owner classification and root provenance are recorded
   by row text, and an old quoted origin cannot be resolved to an id safely.
 
+- An operator reply typed under a struck row's `**Response [#r-…]**` tree
+  moves to its own top-level follow-up row (`#nestedreplyfollowup`), so
+  replies form a flat chain of top-level trees instead of nesting deeper. One
+  edit inserts `- [#<origin>] follow-up: <verbatim reply> [#q-…]` after the
+  origin's top-level tree (after any follow-ups already chained to the same
+  origin) and replaces the reply line with an inert link row
+  `- ↪ [#q-…] <!-- agent-doc:followup-link -->`, never a copy. A reply under
+  a follow-up row's response chains to that row's own origin id. The reply
+  keeps a `[#q-…]` it already has; the row that owned the response, reopened
+  only because the reply was its live leaf (`#struckparentkids`), is struck
+  again. The moved row's prompt context names the response the link sits
+  under. The move runs in `queue sync` and in the idle self-heal after its
+  quiet window, through their CAS/CRDT write paths, and fails closed: the
+  reply stays nested when any claim, lineage attempt, or release receipt
+  holds it, a live claim or receipt holds its owner, its exact line is not in
+  the stable baseline the run started from, it is still being typed, disk and
+  the authority disagree, it sits in a Waiting-on-you packet or a loop, it is
+  a directive, preset, command, id reference, or owner-labelled item, it has
+  children, or the owner has no id. A second pass changes nothing. See
+  [`specs/07-orchestration-commands.md`](specs/07-orchestration-commands.md).
+
 - A template patch whose target no patch path applies is refused with a
   message, never dropped (`#staleretainedwrite`): `patch:queue`, `patch:run`,
   and `patch:loop` target runnable queue components, which all parse as the

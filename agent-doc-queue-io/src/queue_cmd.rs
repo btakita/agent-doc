@@ -1913,9 +1913,26 @@ fn project_runtime_state_with_effects(
             if runtime_projection_repairs_every_row(rows) {
                 crate::queue_claim::reconcile_completion_evidence(file, &current)?;
             }
+            // `#nestedreplyfollowup`: the background self-heal runs only after
+            // `QUEUE_PROJECTION_SELF_HEAL_QUIET` with no newer document edge,
+            // and its one CAS loses to any newer operator cut. That is where a
+            // stable nested reply moves to its own top-level follow-up row.
+            let nested_moves = (rows == RuntimeProjectionRows::BackgroundComplete
+                && only_identity.is_none()
+                && cleared_item.is_none())
+            .then(|| {
+                crate::nested_reply_followup::move_nested_replies_for(
+                    file,
+                    &current,
+                    crate::nested_reply_followup::stable_baseline(file).as_deref(),
+                )
+            })
+            .flatten();
             let projection = derive_runtime_projection_scoped(
                 file,
-                &current,
+                nested_moves
+                    .as_ref()
+                    .map_or(current.as_str(), |(moved, _)| moved.as_str()),
                 cleared_item,
                 ClaimProjectionScope::Document,
                 rows,
@@ -1986,6 +2003,13 @@ fn project_runtime_state_with_effects(
             // authoritative cut, not of the write call returning `Ok(())`.
             let authoritative =
                 effects.current_document_content(file, "queue_claim_runtime_projection_verify")?;
+            if let Some((_, moves)) = &nested_moves {
+                crate::nested_reply_followup::record_moved_nested_replies(
+                    file,
+                    &authoritative,
+                    moves,
+                );
+            }
             let settled = derive_runtime_projection_scoped(
                 file,
                 &authoritative,
@@ -2483,6 +2507,35 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
         effects.converge_captured_answered_free_text_projection(file, &queue_edit_guard)?;
     if answered_count > 0 {
         content = effects.current_document_content(file, "queue_sync_after_captured_answers")?;
+    }
+    // `#nestedreplyfollowup`: an operator reply under a struck row's response
+    // moves to its own top-level `[#<origin>] follow-up:` row, leaving a link.
+    // Stability is judged against the baseline this sync started from, never
+    // one a repair here just checkpointed. It runs before the response-tree
+    // passes, so the tree's Guidance is re-derived without the moved reply.
+    if let Some((moved, moves)) = crate::nested_reply_followup::move_nested_replies_for(
+        file,
+        &content,
+        previous_content.as_deref(),
+    ) {
+        effects.converge_document_or_disk(
+            file,
+            &moved,
+            &content,
+            "queue_sync_nested_reply_followup",
+        )?;
+        content =
+            effects.current_document_content(file, "queue_sync_after_nested_reply_followup")?;
+        crate::nested_reply_followup::record_moved_nested_replies(file, &content, &moves);
+        if let Err(warning) = agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        ) {
+            eprintln!(
+                "[queue sync] warning: failed to update snapshot after nested reply follow-up: {warning}"
+            );
+        }
     }
     // Older binaries could project `📥` onto a retained generated Response child
     // whose id differed from the terminal parent's latest response backlink.
@@ -3291,6 +3344,80 @@ mod tests {
         ) -> Result<usize> {
             Ok(0)
         }
+    }
+
+    /// `#nestedreplyfollowup`: a reply typed under a struck row's response
+    /// stays nested until a sync starts from a baseline that already holds
+    /// it, then moves to a top-level follow-up row with its bytes unchanged.
+    #[test]
+    fn sync_moves_a_stable_nested_reply_to_a_top_level_followup_row() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("s.md");
+        let reply = "Also check  the `gizmo` \u{2014} caf\u{e9}?";
+        let tree = |reply_line: &str| {
+            format!(
+                concat!(
+                    "<!-- agent:run id=\"main\" -->\n",
+                    "- ### ~~Fix the widget. [#q-aaaaaaaaaaaa]~~\n",
+                    "  - **Response [#r-56cf9a1ad146]**\n",
+                    "    - **Summary:** I fixed the widget.\n",
+                    "    - **State:** Complete.\n",
+                    "{reply_line}",
+                    "<!-- /agent:run -->\n",
+                ),
+                reply_line = reply_line
+            )
+        };
+        let before = tree("");
+        std::fs::write(&doc, &before).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(&doc, &before, |_, _| {}).unwrap();
+        std::fs::write(&doc, tree(&format!("    - {reply}\n"))).unwrap();
+        let effects = FakeEffects::default();
+
+        sync_with_effects(&effects, &doc).unwrap();
+        let first = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !first.contains("follow-up:") && first.contains(reply),
+            "typed after the baseline: still nested: {first}"
+        );
+
+        sync_with_effects(&effects, &doc).unwrap();
+        let moved = std::fs::read_to_string(&doc).unwrap();
+        let link = moved
+            .lines()
+            .find(|line| line.contains("<!-- agent-doc:followup-link -->"))
+            .unwrap_or_else(|| panic!("a link row: {moved}"));
+        let id = link
+            .split("[#")
+            .nth(1)
+            .and_then(|rest| rest.split(']').next())
+            .unwrap();
+        assert_eq!(
+            link,
+            format!("    - \u{21aa} [#{id}] <!-- agent-doc:followup-link -->")
+        );
+        let row = moved
+            .lines()
+            .find(|line| line.contains("follow-up:"))
+            .unwrap_or_else(|| panic!("a follow-up row: {moved}"));
+        assert!(
+            row.starts_with("- ")
+                && row.ends_with(&format!("[#q-aaaaaaaaaaaa] follow-up: {reply} [#{id}]")),
+            "{row}"
+        );
+        assert_eq!(
+            moved.matches(reply).count(),
+            1,
+            "moved, not copied: {moved}"
+        );
+
+        sync_with_effects(&effects, &doc).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            moved,
+            "re-sync is a no-op"
+        );
     }
 
     #[test]
@@ -5355,6 +5482,79 @@ mod tests {
         assert!(projected.contains("- IS this \n"), "{projected}");
         assert!(!projected.contains("- 📥 IS this \n"), "{projected}");
         assert_eq!(projected.matches("IS this").count(), 1, "{projected}");
+    }
+
+    /// `#nestedreplyfollowup`: the background self-heal (which only runs after
+    /// the quiet window) moves a stable nested reply in its one CAS, and the
+    /// reopened parent closes again. A reply newer than the baseline stays.
+    #[test]
+    fn background_self_heal_moves_only_a_stable_nested_reply() {
+        let reply = "Also check the gizmo?";
+        let tree = |reply_line: &str| {
+            format!(
+                concat!(
+                    "- ### Fix the widget. [#q-aaaaaaaaaaaa]\n",
+                    "  - **Response [#r-56cf9a1ad146]**\n",
+                    "    - **Summary:** I fixed the widget.\n",
+                    "    - **State:** Complete.\n",
+                    "{reply_line}",
+                ),
+                reply_line = reply_line
+            )
+        };
+        let reply_line = format!("    - \u{1f440} {reply} [#q-db447a4add9c]\n");
+
+        // Typed after the baseline: the self-heal leaves it nested.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_claim_projection_doc(dir.path(), &tree(""));
+        let typed = std::fs::read_to_string(&doc).unwrap().replace(
+            "<!-- /agent:queue -->",
+            &format!("{reply_line}<!-- /agent:queue -->"),
+        );
+        std::fs::write(&doc, &typed).unwrap();
+        let effects = FakeEffects::with_current(typed.clone());
+        let generation = queue_repair_generation(&doc).unwrap();
+        project_background_self_heal_runtime_state_once_for_generation_with_effects(
+            &effects, &doc, generation,
+        )
+        .unwrap();
+        let unmoved = effects.current.borrow().clone().unwrap();
+        assert!(!unmoved.contains("follow-up:"), "{unmoved}");
+        assert!(unmoved.contains(reply), "{unmoved}");
+
+        // In the baseline, unchanged: the self-heal moves it.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_claim_projection_doc(dir.path(), &tree(&reply_line));
+        let current = std::fs::read_to_string(&doc).unwrap();
+        let effects = FakeEffects::with_current(current);
+        let generation = queue_repair_generation(&doc).unwrap();
+        assert_eq!(
+            project_background_self_heal_runtime_state_once_for_generation_with_effects(
+                &effects, &doc, generation,
+            )
+            .unwrap(),
+            QueueRuntimeProjectionOnceOutcome::Settled { changed: true }
+        );
+        let moved = effects.current.borrow().clone().unwrap();
+        assert!(
+            moved.contains("- ### ~~Fix the widget. [#q-aaaaaaaaaaaa]~~\n"),
+            "the reopened parent closes again: {moved}"
+        );
+        assert!(
+            moved.contains("    - \u{21aa} [#q-db447a4add9c] <!-- agent-doc:followup-link -->\n"),
+            "{moved}"
+        );
+        let row = moved
+            .lines()
+            .find(|line| line.contains("follow-up:"))
+            .unwrap_or_else(|| panic!("{moved}"));
+        assert!(
+            row.ends_with(&format!(
+                "[#q-aaaaaaaaaaaa] follow-up: {reply} [#q-db447a4add9c]"
+            )),
+            "{row}"
+        );
+        assert_eq!(moved.matches(reply).count(), 1, "{moved}");
     }
 
     /// `#inboxdup`: self-heal painted `📥` onto a row the operator was still

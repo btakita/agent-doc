@@ -47,7 +47,11 @@ and the pending granular-flags-only rule. This runbook carries the rest.
     top-level follow-up tree for it instead of nesting the answer deeper.
     Chain it to its origin by id, in the follow-up title form
     `[#<origin>] follow-up: <short title>`, so the chain of top-level trees
-    reads in order.
+    reads in order. The binary does this itself for a stable plain reply under
+    a struck row's response (`#nestedreplyfollowup`): it moves the reply to a
+    top-level `[#<origin>] follow-up: <reply>` row and leaves a
+    `↪ [#q-…]` link in its place. Work that row, not the link; a reply that a
+    claim holds, or that is still being typed, stays nested.
 - **Native choice prompts are document-visible (`#choicecheckpoint`).** Before
   invoking a harness-native choice UI (Claude Code `AskUserQuestion`, Codex
   `request_user_input`, or the active harness's equivalent), materialize the

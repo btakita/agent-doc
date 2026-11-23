@@ -84,6 +84,7 @@ pub mod queue_tree;
 pub mod reported_closeout;
 pub mod response_remaining;
 pub mod response_tree_rehome;
+pub mod response_tree_slot;
 pub mod response_tree_sync;
 pub mod restart_recovery;
 pub mod route_dispatch;

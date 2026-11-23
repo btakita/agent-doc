@@ -203,7 +203,7 @@ fn last_sentence_end_within(text: &str, limit: usize) -> Option<usize> {
 /// Whether a Guidance value is one the binary rendered as completed-row
 /// deletion guidance; `Some(true)` when it carries the moved-action-items
 /// note ([`moved_followup_guidance`]), or the earlier lead sentence.
-fn generated_completed_guidance(value: &str) -> Option<bool> {
+pub(crate) fn generated_completed_guidance(value: &str) -> Option<bool> {
     let (moved, rest) = match value.strip_prefix(FOLLOW_UP_MOVED_GUIDANCE_LEAD) {
         Some(rest) => (true, rest.trim_start()),
         None => match value.strip_suffix(FOLLOW_UP_MOVED_GUIDANCE_NOTE) {

@@ -63,6 +63,11 @@
 //!   like residue (`stop the running amend job`), an id-less live row, a
 //!   row a worker holds, and generated response structure keep their text.
 //!
+//! - **Response tree slot.** A row's response tree sits one level below the
+//!   row, after the row's comment and child rows; a tree more than one level
+//!   below its row, or before the row's `%% … %%` comments, moves there, and
+//!   a row a merge glued onto a generated `**Guidance:**` line gets its line
+//!   break back ([`crate::response_tree_slot`], `#selfrepaircleanup`).
 //! - **Struck-row trailing id.** A struck row whose strike ends in its
 //!   generated id, followed by one or more copies of that same id after the
 //!   closing `~~` (`~~work [#q-x]~~ [#q-x]`, written by a retained rebase
@@ -145,6 +150,13 @@ pub enum SelfRepairKind {
     /// Removed an extra byte-identical copy of a live child row under the
     /// same parent.
     DuplicateSiblingRow,
+    /// Moved a response tree that sat more than one level below its row, or
+    /// before the row's `%% … %%` comment rows, into its slot: one level
+    /// below the row, after its comment and child rows (`#selfrepaircleanup`).
+    ResponseTreeSlot,
+    /// Restored the line break between a generated `**Guidance:**` value and
+    /// the row a merge glued onto it (`#selfrepaircleanup`).
+    GluedGuidanceRow,
 }
 
 impl SelfRepairKind {
@@ -162,6 +174,8 @@ impl SelfRepairKind {
             Self::DuplicateQueueBlock => "duplicate_queue_block",
             Self::DuplicateClaimRow => "duplicate_claim_row",
             Self::DuplicateSiblingRow => "duplicate_sibling_row",
+            Self::ResponseTreeSlot => "response_tree_slot",
+            Self::GluedGuidanceRow => "glued_guidance_row",
         }
     }
 }
@@ -1117,8 +1131,9 @@ pub fn renest_closed_by_rows(document: &str) -> (String, Vec<SelfRepair>) {
 /// Run every self-repair over `document`: misplaced response trees
 /// (`response_proven(id)` says the `[#r-…]` id's original lives in
 /// `agent:exchange` or the response index), duplicate response trees,
-/// backlink rows nested too deep, rows that skip indentation levels under
-/// their parent, stale claim labels, claim-label residue,
+/// backlink rows nested too deep, response trees out of their slot (and a
+/// row glued onto a generated Guidance line), rows that skip indentation
+/// levels under their parent, stale claim labels, claim-label residue,
 /// struck rows' trailing id copies, then duplicate struck rows (a label
 /// removal, residue restore or id fold can make two struck copies
 /// identical), then duplicate live claim and child rows. `None`
@@ -1157,6 +1172,9 @@ pub fn self_repair_document(
     let (renested, renest_repairs) = renest_closed_by_rows(&current);
     current = renested;
     repairs.extend(renest_repairs);
+    let (slotted, slot_repairs) = crate::response_tree_slot::slot_response_trees(&current);
+    current = slotted;
+    repairs.extend(slot_repairs);
     let (children, child_repairs) = crate::child_row_renest::renest_child_rows(&current);
     current = children;
     repairs.extend(child_repairs);

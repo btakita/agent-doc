@@ -37,16 +37,16 @@ use agent_doc_markdown_ast::overlay::{
 
 use crate::self_repair::{SelfRepair, SelfRepairKind};
 
-struct Row<'a> {
-    start: usize,
-    indent: usize,
-    item: Option<&'a str>,
-    blank: bool,
-    tabbed: bool,
-    fenced: bool,
+pub(crate) struct Row<'a> {
+    pub(crate) start: usize,
+    pub(crate) indent: usize,
+    pub(crate) item: Option<&'a str>,
+    pub(crate) blank: bool,
+    pub(crate) tabbed: bool,
+    pub(crate) fenced: bool,
 }
 
-fn rows_of(body: &str) -> Vec<Row<'_>> {
+pub(crate) fn rows_of(body: &str) -> Vec<Row<'_>> {
     let mut out = Vec::new();
     let mut cursor = 0;
     let mut in_fence = false;
@@ -76,7 +76,7 @@ fn rows_of(body: &str) -> Vec<Row<'_>> {
 }
 
 /// The nearest shallower list row above each list row.
-fn parents(rows: &[Row<'_>]) -> Vec<Option<usize>> {
+pub(crate) fn parents(rows: &[Row<'_>]) -> Vec<Option<usize>> {
     let mut parents = vec![None; rows.len()];
     let mut stack: Vec<(usize, usize)> = Vec::new();
     for (index, row) in rows.iter().enumerate() {
@@ -118,7 +118,11 @@ fn holds_response_rows(item: &str) -> bool {
 /// The row at `index` sits right after the column-0 row `parent`, and the
 /// tree above that row ends, exactly one level above it, on a row that holds
 /// response rows: the run may have been torn off that tree.
-fn may_be_torn_off_the_tree_above(rows: &[Row<'_>], parent: usize, index: usize) -> bool {
+pub(crate) fn may_be_torn_off_the_tree_above(
+    rows: &[Row<'_>],
+    parent: usize,
+    index: usize,
+) -> bool {
     if rows[parent].indent != 0 {
         return false;
     }
@@ -131,17 +135,24 @@ fn may_be_torn_off_the_tree_above(rows: &[Row<'_>], parent: usize, index: usize)
         .is_some_and(|above| above.indent == home && above.item.is_some_and(holds_response_rows))
 }
 
+/// The indent of a row exactly one level below `parent`: the parent's
+/// indent plus its own step below its parent (2 spaces when unknown, as for
+/// a column-0 parent).
+pub(crate) fn child_indent(rows: &[Row<'_>], parents: &[Option<usize>], parent: usize) -> usize {
+    let step = parents[parent]
+        .map(|grand| rows[parent].indent.saturating_sub(rows[grand].indent))
+        .filter(|step| (2..=4).contains(step))
+        .unwrap_or(2);
+    rows[parent].indent + step
+}
+
 /// For the row at `index`: how many leading spaces to cut from it and its
 /// subtree, when it skips levels under its parent.
 fn excess(rows: &[Row<'_>], parents: &[Option<usize>], index: usize) -> Option<usize> {
     let row = &rows[index];
     row.item?;
     let parent = parents[index]?;
-    let step = parents[parent]
-        .map(|grand| rows[parent].indent.saturating_sub(rows[grand].indent))
-        .filter(|step| (2..=4).contains(step))
-        .unwrap_or(2);
-    let target = rows[parent].indent + step;
+    let target = child_indent(rows, parents, parent);
     if row.indent <= target {
         return None;
     }

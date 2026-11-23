@@ -4078,7 +4078,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // strip_head_markers policy/tests moved from git into the focused
         // `agent-doc-document::transient_markers` module. The removed tokens are
         // document-normalization names, not removed flow guard boundaries.
-        ("agent-doc-commit-io/src/lib.rs", "guard_") => 15,
+        // +1 (key=respondfalsefail, dc9c164137): the commit-settle recap test
+        // double implements the existing `guard_visible_write_expected_current`
+        // trait method; it is a #[cfg(test)] trait impl, not a new guard boundary.
+        ("agent-doc-commit-io/src/lib.rs", "guard_") => 16,
         // #safe-mutation-extract: safe out-of-band mutation classification moved
         // into the focused realtime write policy crate. The four `guard_` tokens
         // are the existing transient marker stripper name/call plus two policy

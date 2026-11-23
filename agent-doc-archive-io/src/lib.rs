@@ -976,8 +976,11 @@ pub fn extract_response_ids(content: &str) -> BTreeSet<String> {
 /// Canonical ids shown in prose, fenced examples, or inline code are ordinary
 /// documentation and must not become archive obligations. Evidence references
 /// use one of the binary-owned projection shapes (response annotation, visible
-/// response row/details, or the legacy `%% response … %%` child). Decision pins
-/// are supplied separately by the decision registry.
+/// response row/details, or the legacy `%% response … %%` child), and only
+/// the id in that shape's own slot ([`structural_response_reference_ids`]).
+/// A `> ` quoted line and other ids on a reference line are prose: a
+/// hand-back that quotes ids of trees deleted as safe to delete never pins
+/// them. Decision pins are supplied separately by the decision registry.
 pub fn extract_response_reference_ids(content: &str) -> BTreeSet<String> {
     let mut refs = BTreeSet::new();
     let mut fence: Option<String> = None;
@@ -1000,13 +1003,13 @@ pub fn extract_response_reference_ids(content: &str) -> BTreeSet<String> {
         }
 
         let visible = strip_inline_code(raw_line);
-        let evidence_line = visible.contains("response: [#r-")
-            || visible.contains("**Response [#r-")
-            || visible.contains("%% response [#r-")
-            || visible.trim_start().starts_with("### Re:") && visible.contains("[#r-");
-        if evidence_line {
-            refs.extend(extract_response_ids(&visible));
+        // A `> ` line quotes text (a worker hand-back, a queue prompt, a
+        // report) in `agent:exchange`; ids it mentions are prose, never a
+        // binary-written backlink that pins a response.
+        if visible.trim_start().starts_with('>') {
+            continue;
         }
+        refs.extend(structural_response_reference_ids(&visible));
         let mut attributes = visible.as_str();
         const RESPONSE_ATTRIBUTE: &str = "data-agent-doc-response-id=\"";
         while let Some(start) = attributes.find(RESPONSE_ATTRIBUTE) {
@@ -1020,6 +1023,68 @@ pub fn extract_response_reference_ids(content: &str) -> BTreeSet<String> {
         }
     }
     refs
+}
+
+/// The response ids `line` names in one of the binary-written reference
+/// shapes, and only the id in that shape's own slot:
+///
+/// - the response item `**Response [#r-…]**` or legacy `**Response [#r-…]:** …`
+///   as the line's own content (optionally a list item);
+/// - a struck row's `response: [#r-…]` annotation;
+/// - the legacy `%% response [#r-…] %%` child;
+/// - the id an exchange `### Re:` response heading carries at its end
+///   (`annotate_response_heading` appends it there, before a strike or
+///   ` (HEAD)`).
+///
+/// Any other id on the same line is prose: a heading or prompt that quotes a
+/// queue item mentioning `**Response [#r-…]**` blocks and three ids pins none
+/// of them.
+fn structural_response_reference_ids(line: &str) -> BTreeSet<String> {
+    fn compact_id_at(text: &str) -> Option<&str> {
+        let end = text.strip_prefix("[#r-")?.find(']')? + "[#r-".len();
+        let candidate = &text[..=end];
+        is_compact_response_id(candidate).then_some(candidate)
+    }
+
+    let mut ids = BTreeSet::new();
+    let trimmed = line.trim();
+    let content = trimmed.strip_prefix("- ").unwrap_or(trimmed).trim_start();
+    if let Some(rest) = content.strip_prefix("**Response ")
+        && let Some(id) = compact_id_at(rest)
+        && (rest[id.len()..].starts_with("**") || rest[id.len()..].starts_with(":**"))
+    {
+        ids.insert(id.to_string());
+    }
+    for prefix in ["response: ", "%% response "] {
+        let mut rest = line;
+        while let Some(start) = rest.find(prefix) {
+            rest = &rest[start + prefix.len()..];
+            if let Some(id) = compact_id_at(rest) {
+                ids.insert(id.to_string());
+            }
+        }
+    }
+    if let Some(heading) = trimmed.strip_prefix("### ")
+        && heading
+            .strip_prefix("~~")
+            .unwrap_or(heading)
+            .starts_with("Re:")
+    {
+        let mut tail = trimmed;
+        if let Some(head) = tail.strip_suffix("(HEAD)") {
+            tail = head.trim_end();
+        }
+        if let Some(unstruck) = tail.strip_suffix("~~") {
+            tail = unstruck.trim_end();
+        }
+        if let Some(start) = tail.rfind("[#r-")
+            && let Some(id) = compact_id_at(&tail[start..])
+            && id.len() == tail.len() - start
+        {
+            ids.insert(id.to_string());
+        }
+    }
+    ids
 }
 
 fn strip_inline_code(line: &str) -> String {
@@ -1549,6 +1614,13 @@ fn scan_structured_inline_response(
     // projection; its subtree is opaque here and neither adds to nor
     // invalidates this one.
     let mut nested_response_indent: Option<usize> = None;
+    // Whether the last direct child is a prose value row a renderer may have
+    // split into its first sentence plus one marked child bullet per later
+    // sentence (`agent_doc_queue::prose_split`), and whether those sentences
+    // are summary evidence (`Some(true)` for `**Summary:**`). Joining the
+    // pieces with one space gives back the unsplit value, so a split summary
+    // keeps the identity of its single-line form.
+    let mut split_prose: Option<bool> = None;
 
     for (offset, raw_line) in lines[start + 1..].iter().enumerate() {
         let index = start + 1 + offset;
@@ -1568,6 +1640,21 @@ fn scan_structured_inline_response(
             // in it is scanned from its own item.
             if active.summary_block {
                 active.push_summary_block_line(raw_line);
+            }
+            continue;
+        }
+        if let Some(summary_sentences) = split_prose
+            && line_indent == active.indent + 4
+            && let Some(piece) = space_trimmed
+                .strip_prefix("- ")
+                .and_then(|item| item.trim_end().strip_suffix(RESPONSE_DETAIL_MARKER))
+                .map(str::trim)
+            && !piece.is_empty()
+            && !in_fence[index]
+        {
+            if summary_sentences && let Some(summary) = active.summary.as_mut() {
+                summary.push(' ');
+                summary.push_str(piece);
             }
             continue;
         }
@@ -1596,6 +1683,7 @@ fn scan_structured_inline_response(
         }
         active.nested_metadata_allowed = false;
         active.summary_block = false;
+        split_prose = None;
         if let Some(blocker) = item.strip_prefix("**Blocker:**") {
             if blocker.trim().is_empty() {
                 active.invalid = true;
@@ -1613,6 +1701,7 @@ fn scan_structured_inline_response(
                 active.nested_metadata_allowed = true;
             } else {
                 active.summary = Some(summary.to_string());
+                split_prose = Some(true);
             }
         } else if let Some(timestamp) = item.strip_prefix("**Timestamp:**") {
             if active.timestamp_seen || active.summary.is_some() || timestamp.trim().is_empty() {
@@ -1655,6 +1744,9 @@ fn scan_structured_inline_response(
             active.nested_metadata_allowed =
                 container || (handback_section && metadata.ends_with(RESPONSE_DETAIL_MARKER));
             let known = handback_section || has_value || container;
+            if (handback_section || has_value) && !metadata.ends_with(RESPONSE_DETAIL_MARKER) {
+                split_prose = Some(false);
+            }
             // An unknown `**Label:**` field still fails closed.
             let metadata_shaped = metadata
                 .strip_prefix("**")
@@ -3399,6 +3491,159 @@ mod tests {
             "```\n- **Response {MISSING}**\n  - **Timestamp:** 2026-11-22T19:29:26.000Z\n  - **Summary:** Example.\n```\n{content}"
         );
         assert_eq!(present_inline_response_ids(&fenced), all);
+    }
+
+    /// 2026-11-22, tasks/agent-doc/agent-doc-bugs.md: after the nested-tree
+    /// fix, every closeout refused again with "response index would orphan
+    /// referenced response id(s): [#r-4648c2dbc549], [#r-4fd1a32bc2c5],
+    /// [#r-5222e742146c]". Two causes, both here.
+    ///
+    /// A present tree whose `**Summary:**` the renderer split into its first
+    /// sentence plus one marked child bullet per later sentence
+    /// (`agent_doc_queue::prose_split`) was rejected: the children read as
+    /// stray nested content. The split pieces are summary evidence, joined
+    /// with one space back into the single-line value.
+    #[test]
+    fn split_prose_summary_and_sections_are_evidence() {
+        const ID: &str = "[#r-5a2be742146c]";
+        let d = agent_doc_markdown_ast::overlay::RESPONSE_DETAIL_MARKER;
+        let split = format!(
+            concat!(
+                "<!-- agent:queue -->\n",
+                "- ### 🙋 follow up on an action item: operator: decide the package layout.\n",
+                "  - ~~I authorize the combined package. ⟦published⟧~~\n",
+                "    - **Response {id}**\n",
+                "      - **Timestamp:** 2026-11-22T23:06:45.000Z\n",
+                "      - **Summary:** The tool now ships one combined package for every supported build.\n",
+                "        - It replaces the two separate packages. {d}\n",
+                "        - It is pushed to `main` as `3b3561a1b1`. {d}\n",
+                "      - **Notes:** The first note is long enough to have been split by the renderer.\n",
+                "        - The second note follows as its own sentence. {d}\n",
+                "      - **Details:** The full hand-back is in agent:exchange.\n",
+                "      - **State:** Complete.\n",
+                "      - **Guidance:** ✅ Done. Its action items moved to follow-up rows.\n",
+                "  - 🙋 follow up on an action item: operator: restart the IDE.\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            id = ID,
+            d = d,
+        );
+        assert_eq!(
+            present_inline_response_ids(&split),
+            BTreeSet::from([ID.to_string()])
+        );
+        assert_eq!(
+            structured_inline_response_summaries(&split, ID),
+            BTreeSet::from([concat!(
+                "The tool now ships one combined package for every supported build. ",
+                "It replaces the two separate packages. ",
+                "It is pushed to `main` as `3b3561a1b1`.",
+            )
+            .to_string()]),
+            "a split summary keeps the identity of its single-line form"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, &split).unwrap();
+        assert!(
+            dangling_response_references(&doc, &split)
+                .unwrap()
+                .is_empty()
+        );
+        // Only marked sentence children are split prose: an unmarked child
+        // under the summary still rejects the projection.
+        let unmarked = split.replace(&format!("separate packages. {d}"), "separate packages.");
+        assert!(present_inline_response_ids(&unmarked).is_empty());
+    }
+
+    /// The other cause: two finished trees were deleted after agent-doc said
+    /// they were safe to delete, and their ids stayed pinned by a hand-back
+    /// cell in `agent:exchange` whose heading and `> ` quoted prompt quoted a
+    /// queue item that mentioned `**Response [#r-…]**` blocks and listed the
+    /// ids. Only an id in a binary-written reference slot pins a response.
+    #[test]
+    fn quoted_and_prose_ids_in_exchange_never_pin_a_response() {
+        const DELETED_A: &str = "[#r-46a8c2dbc549]";
+        const DELETED_B: &str = "[#r-4fd1a32bc2c5]";
+        const MISSING: &str = "[#r-6b5fcd027ae5]";
+        const HEADING_OWN: &str = "[#r-7c6ade138bf6]";
+        let item = format!(
+            "fix: the orphan guard misses deeply nested **Response [#r-…]** blocks ({DELETED_A}, {DELETED_B}) and treats them as dangling"
+        );
+        let content = format!(
+            concat!(
+                "<!-- agent:exchange -->\n",
+                "### Re: Subagent completed: `subagent:sample` returned work for queue item “{item}” — agent-doc\n",
+                "\n",
+                "> {item} ⟦published⟧\n",
+                "\n",
+                "> The old code gave the 2-id refusal ({a}, {b}).\n",
+                "> - ~~row~~ — auto-struck: response: {a}\n",
+                "> **Response {b}**\n",
+                "\n",
+                "Prose that names {a} outside any reference slot.\n",
+                "<!-- /agent:exchange -->\n",
+                "<!-- agent:queue -->\n",
+                "- open prompt\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            item = item,
+            a = DELETED_A,
+            b = DELETED_B,
+        );
+        assert!(
+            extract_response_reference_ids(&content).is_empty(),
+            "{:?}",
+            extract_response_reference_ids(&content)
+        );
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, &content).unwrap();
+        assert!(
+            dangling_response_references(&doc, &content)
+                .unwrap()
+                .is_empty(),
+            "a deleted tree quoted only in exchange prose never blocks closeout"
+        );
+
+        // Structural slots still pin, and a missing response is still refused.
+        let structural = format!(
+            concat!(
+                "### Re: a response heading {own}\n",
+                "### ~~Re: a struck response heading {own2}~~ (HEAD)\n",
+                "- ~~row~~ — auto-struck: addressed this cycle; response: {missing}\n",
+                "  - %% response {a} %%\n",
+                "  - **Response {b}:** Historical summary.\n",
+            ),
+            own = HEADING_OWN,
+            own2 = "[#r-8d7befa49c07]",
+            missing = MISSING,
+            a = DELETED_A,
+            b = DELETED_B,
+        );
+        assert_eq!(
+            extract_response_reference_ids(&structural),
+            BTreeSet::from([
+                HEADING_OWN.to_string(),
+                "[#r-8d7befa49c07]".to_string(),
+                MISSING.to_string(),
+                DELETED_A.to_string(),
+                DELETED_B.to_string(),
+            ])
+        );
+        let with_missing = content.replace(
+            "- open prompt\n",
+            &format!("- ~~gone row~~ — auto-struck: response: {MISSING}\n- open prompt\n"),
+        );
+        std::fs::write(&doc, &with_missing).unwrap();
+        assert_eq!(
+            dangling_response_references(&doc, &with_missing).unwrap(),
+            [MISSING.to_string()]
+        );
     }
 
     #[test]

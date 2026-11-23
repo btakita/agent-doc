@@ -14128,7 +14128,8 @@ fn publish_editor_route_layout_locally<'a>(
             ControllerTmuxLayoutSyncReceipt {
                 gated_documents: Vec::new(),
                 applied: false,
-                reason: "layout_deferred_focus_only".to_string(),
+                reason: agent_doc_editor_surface::ROUTE_LAYOUT_DEFERRED_FOCUS_ONLY_REASON
+                    .to_string(),
                 columns: layout_invocation.columns,
                 layout_generation: None,
                 layout_publisher: None,
@@ -14393,12 +14394,14 @@ fn handle_editor_route_rpc_with_layout_delegate(
     // GH #373: an editor that observed no visible document (Remote Dev backend
     // `--col` fallback with flat selection evidence) names only the routed
     // document, as an undetected single-document `ensure` observation.
+    let mut editor_observed_no_document = false;
     let layout_args = match editor_route_undetected_layout_args(
         &layout_args,
         payload.layout_mode.as_deref(),
         &routed_document,
     )? {
         Some(undetected) => {
+            editor_observed_no_document = true;
             agent_doc_ops_log_io::log_op(
                 &canonical,
                 &format!(
@@ -14470,6 +14473,10 @@ fn handle_editor_route_rpc_with_layout_delegate(
                 None => agent_doc_tmux_io::configured_tmux().pane_session(pane).ok(),
             }
         });
+    // GH #434: why this route, if it dispatches, leaves the tmux layout as it
+    // was. Carried into the route output so the editor logs a refusal beside
+    // its `[route] SUCCESS`.
+    let mut layout_not_synced = None;
     let mut route_layout_lease = match &other_lane {
         Some(other) => {
             agent_doc_ops_log_io::log_op(
@@ -14513,6 +14520,10 @@ fn handle_editor_route_rpc_with_layout_delegate(
                         .saturating_duration_since(Instant::now())
                         .as_secs(),
                 ),
+            );
+            layout_not_synced = agent_doc_editor_surface::RouteLayoutNotSynced::classify(
+                editor_observed_no_document,
+                &layout_receipt.reason,
             );
             route_layout_lease
         }
@@ -14602,6 +14613,24 @@ fn handle_editor_route_rpc_with_layout_delegate(
         ),
     );
     let mut output = result.output;
+    if result.exit_code == 0
+        && let Some(cause) = layout_not_synced
+    {
+        let notice =
+            agent_doc_editor_surface::route_layout_not_synced_notice(&relative_path, cause);
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "controller_editor_route_layout_not_synced file={} cause={} reason=flat_evidence_has_no_column_geometry outcome=dispatched (GH #434)",
+                canonical.display(),
+                cause.cause(),
+            ),
+        );
+        if !output.is_empty() && !output.ends_with('\n') {
+            output.push('\n');
+        }
+        output.push_str(&notice);
+    }
     if let Some(other) = &other_lane {
         if !output.is_empty() && !output.ends_with('\n') {
             output.push('\n');
@@ -57894,6 +57923,25 @@ mod tests {
             successor.pane_layout_desired().is_none(),
             "the live tmux observation is dispatch evidence, never desired editor structure"
         );
+        // GH #434: this success left the tmux layout as it was. The route
+        // output says so, with the reason, so the editor's `[route] SUCCESS`
+        // line is never the only record.
+        assert!(
+            routed.output.lines().any(|line| line.starts_with(
+                "[route] layout-not-synced: beta.md reason=flat_evidence_has_no_column_geometry cause=incomplete_frontend_layout_no_authoritative_snapshot:"
+            )),
+            "{}",
+            routed.output
+        );
+        assert!(
+            fixture.ops_log().contains(
+                "controller_editor_route_layout_not_synced file="
+            ) && fixture
+                .ops_log()
+                .contains("cause=incomplete_frontend_layout_no_authoritative_snapshot reason=flat_evidence_has_no_column_geometry outcome=dispatched"),
+            "{}",
+            fixture.ops_log()
+        );
 
         // When the explicit target is stashed, the route still has no editor
         // geometry. Choosing the only live slot would invent membership just
@@ -57983,6 +58031,14 @@ mod tests {
         )
         .expect("a zero-column route to a live pane dispatches focus-only");
         assert_eq!(routed.exit_code, 0, "{}", routed.output);
+        // GH #434: the substituted, deferred route reports the deferral.
+        assert!(
+            routed.output.contains(
+                "[route] layout-not-synced: beta.md reason=flat_evidence_has_no_column_geometry cause=incomplete_frontend_layout_no_authoritative_snapshot:"
+            ),
+            "{}",
+            routed.output
+        );
         assert!(
             successor.pane_layout_desired().is_none(),
             "no structure is published from a route that observed no column"
@@ -58531,9 +58587,16 @@ mod tests {
     #[test]
     fn gh355_retained_layout_focus_refusal_names_missing_geometry_and_remedy() {
         let fixture = RouteLayoutFixture::new(&["alpha", "beta", "gamma"]);
-        fixture
+        let exact = fixture
             .route("alpha", &["alpha", "beta"], Some("exact"))
             .unwrap();
+        // GH #434: a route that published the editor's geometry carries no
+        // layout-not-synced notice.
+        assert!(
+            !exact.output.contains("[route] layout-not-synced:"),
+            "{}",
+            exact.output
+        );
         assert_eq!(
             fixture
                 .runtime

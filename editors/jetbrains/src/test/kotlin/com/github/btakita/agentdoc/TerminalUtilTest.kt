@@ -88,6 +88,26 @@ class TerminalUtilTest {
             // whose frozen floor is routePaneNotVisibleNotice.
             success.contains("outcome.paneNotVisibleNotice") && success.contains("notifyWarning("),
         )
+        // GH #434: a success that left the tmux layout unchanged logs why beside SUCCESS.
+        assertTrue(
+            success.contains("outcome.layoutNotSyncedNotice") &&
+                success.contains("LOG.warn(\"[route] layout not synced for \$relativePath: \$notice\")"),
+        )
+    }
+
+    @Test
+    fun `the layout-not-synced toast is keyed by document and cause`() {
+        val deferred =
+            "[route] layout-not-synced: a.md reason=flat_evidence_has_no_column_geometry " +
+                "cause=incomplete_frontend_layout_no_authoritative_snapshot: the editor sent no column geometry"
+        assertEquals(
+            "a.md\u0000incomplete_frontend_layout_no_authoritative_snapshot",
+            TerminalUtil.layoutNotSyncedNoticeKey("a.md", deferred),
+        )
+        assertTrue(
+            TerminalUtil.layoutNotSyncedNoticeKey("a.md", deferred) !=
+                TerminalUtil.layoutNotSyncedNoticeKey("b.md", deferred),
+        )
     }
 
     @Test

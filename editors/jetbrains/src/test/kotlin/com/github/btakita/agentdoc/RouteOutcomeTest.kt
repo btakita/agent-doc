@@ -59,6 +59,10 @@ class RouteOutcomeTest {
                 "pane_not_visible_notice",
                 result.paneNotVisibleNotice?.let { gson.toJsonTree(it) } ?: JsonNull.INSTANCE,
             )
+            add(
+                "layout_not_synced_notice",
+                result.layoutNotSyncedNotice?.let { gson.toJsonTree(it) } ?: JsonNull.INSTANCE,
+            )
         }
 
     @Test
@@ -117,6 +121,19 @@ class RouteOutcomeTest {
         assertEquals(floor, RouteOutcome.derive(output, "plan.md") { _, _ -> """{"kind":"brand_new_kind","summary":"x"}""" })
         assertEquals(floor, RouteOutcome.derive(output, "plan.md", EditorDerivation.Unavailable))
         assertEquals(floor, RouteOutcome.derive(output, "plan.md") { _, _ -> "not json" })
+    }
+
+    /** GH #434: the native answer names a dispatched route that left the tmux layout unchanged. */
+    @Test
+    fun `the native answer carries the layout-not-synced notice`() {
+        val notice = "[route] layout-not-synced: plan.md reason=flat_evidence_has_no_column_geometry cause=x: why"
+        val output = "[route] dispatched\n$notice"
+        val result =
+            RouteOutcome.derive(output, "plan.md") { _, _ ->
+                "{\"kind\":\"persistent\",\"layout_not_synced_notice\":${gson.toJson(notice)}}"
+            }
+        assertEquals(notice, result.layoutNotSyncedNotice)
+        assertEquals(null, RouteOutcome.frozen(output, "plan.md").layoutNotSyncedNotice)
     }
 
     @Test

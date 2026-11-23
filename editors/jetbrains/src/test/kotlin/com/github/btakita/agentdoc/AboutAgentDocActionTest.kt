@@ -41,6 +41,30 @@ class AboutAgentDocActionTest {
         assertNull(parseBuildInfoJson(cliJson, "zed")!!.expectedPluginVersion)
     }
 
+    /**
+     * GH #434: a 263 IDE runs the modular package (`jetbrains_262`). Comparing it with the classic
+     * generation reported `expects 0.2.1024` beside a release-paired `0.2.1029`.
+     */
+    @Test
+    fun `a 262 or 263 IDE compares its plugin with the modular package generation`() {
+        val combined =
+            cliJson.replace(
+                "\"expected_plugins\":{\"jetbrains\":\"0.2.487\"",
+                "\"expected_plugins\":{\"jetbrains\":\"0.2.1024\",\"jetbrains_262\":\"0.2.1029\"",
+            )
+        assertEquals("jetbrains_262", aboutExpectedPluginKey(263))
+        assertEquals("jetbrains_262", aboutExpectedPluginKey(262))
+        assertEquals("jetbrains", aboutExpectedPluginKey(261))
+        assertEquals("jetbrains", aboutExpectedPluginKey(null))
+        val modular = parseBuildInfoJson(combined, aboutExpectedPluginKey(263))!!
+        assertEquals("0.2.1029", modular.expectedPluginVersion)
+        assertEquals("0.2.1024", parseBuildInfoJson(combined, aboutExpectedPluginKey(261))!!.expectedPluginVersion)
+        val pairedNative = AgentDocBuildFacts("0.35.451", "0.35.451+abc", expectedPluginVersion = "0.2.1029")
+        assertTrue(aboutMismatches(facts(plugin = "0.2.1029", cli = modular, native = pairedNative)).isEmpty())
+        // A binary older than the modular key states no modular expectation, so it reports none.
+        assertNull(parseBuildInfoJson(cliJson, aboutExpectedPluginKey(263))!!.expectedPluginVersion)
+    }
+
     @Test
     fun `rejects output that is not the build info contract`() {
         assertNull(parseBuildInfoJson("agent-doc 0.35.451"))

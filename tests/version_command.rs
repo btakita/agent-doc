@@ -67,6 +67,62 @@ fn version_json_reports_the_binary_build_identity_without_notices() {
         .map(str::trim)
         .unwrap();
     assert_eq!(value["expected_plugins"]["jetbrains"], jetbrains);
+    // GH #434: the modular ZIP (builds 262-263.*) is reported beside the classic one.
+    assert_eq!(
+        value["expected_plugins"]["jetbrains_262"],
+        gradle_plugin_version("jetbrains-262")
+    );
+}
+
+fn gradle_plugin_version(project: &str) -> String {
+    let gradle = std::fs::read_to_string(format!(
+        "{}/editors/{project}/gradle.properties",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap();
+    gradle
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("pluginVersion"))
+        .and_then(|rest| rest.trim_start().strip_prefix('='))
+        .map(|value| value.trim().to_string())
+        .unwrap()
+}
+
+/// GH #434: `agent-doc version` said the CLI expected JetBrains plugin
+/// `0.2.1024` (the classic 242-261 package) while a 263 IDE held the
+/// release-paired modular `0.2.1029`. The installed plugin is now compared
+/// with the package that serves its IDE's platform build.
+#[test]
+fn version_text_compares_an_installed_263_plugin_with_the_modular_package() {
+    let tmp = tempfile::tempdir().unwrap();
+    let binary = tmp.path().join("agent-doc");
+    std::fs::copy(assert_cmd::cargo::cargo_bin!("agent-doc"), &binary).unwrap();
+    let modular = gradle_plugin_version("jetbrains-262");
+    let lib = tmp
+        .path()
+        .join(".local/share/JetBrains/IntelliJIdea2026.3/agent-doc-jetbrains/lib");
+    std::fs::create_dir_all(&lib).unwrap();
+    std::fs::write(lib.join(format!("agent.doc-{modular}.jar")), b"jar").unwrap();
+    let output = std::process::Command::new(&binary)
+        .arg("version")
+        .env("HOME", tmp.path())
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("AGENT_DOC_LOG")
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        text.contains(&format!("jetbrains-262 {modular} (builds 262-263.*)")),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!(
+            "installed jetbrains plugin: IntelliJIdea2026.3 (build 263) {modular} (current)\n"
+        )),
+        "{text}"
+    );
 }
 
 #[test]

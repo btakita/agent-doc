@@ -509,9 +509,15 @@ exit code, stdout candidate, and existence check.
 `version [--json]` reports the running binary's build identity: `version`, the
 IPC `build_id` (`<version>+<source digest>`, the identity the handshake
 compares), the `executable` path, the sibling native `library` that `lib-path`
-would print (or `null`), and `expected_plugins.{jetbrains,vscode,zed}`, the
+would print (or `null`), and `expected_plugins.{jetbrains,jetbrains_262,vscode,zed}`, the
 editor package generations this build was compiled against (`null` when that
-manifest was absent at build time). `--json` emits it under the
+manifest was absent at build time). JetBrains has two packages per release:
+`jetbrains` is the classic ZIP (builds 242-261.*) and `jetbrains_262` the one
+modular ZIP (builds 262 through 263.*). The binary report also lists
+`installed_plugins`: each IDE data directory's on-disk agent-doc JetBrains
+plugin, the generation this build expects for that IDE's platform build, and
+whether they match (`current`), so a 263 IDE running the release-paired
+modular plugin is never reported against the classic version (GH #434). `--json` emits it under the
 `agent-doc-build-info-v1` contract; the text form starts with the same
 `agent-doc <version>` line as `--version`. Like `lib-path`, it skips startup
 update checks and notices. The native library exposes the same report through

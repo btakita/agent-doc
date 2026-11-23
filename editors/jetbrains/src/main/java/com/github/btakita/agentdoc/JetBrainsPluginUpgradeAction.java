@@ -8,6 +8,7 @@ import com.intellij.notification.NotificationGroupManager;
 import com.intellij.notification.NotificationType;
 import com.intellij.openapi.application.ApplicationInfo;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.PluginDescriptor;
 import com.intellij.openapi.extensions.PluginId;
 import com.intellij.openapi.project.Project;
@@ -119,6 +120,13 @@ public final class JetBrainsPluginUpgradeAction {
                 () -> ApplicationManager.getApplication().restart()
             ));
             created.addAction(NotificationAction.createSimpleExpiring("Later", () -> {}));
+            // GH #434: every operator-facing toast has an idea.log line. This bridge
+            // loads child-first from the newly installed package, so it logs here
+            // rather than through the live generation's AgentDocNotices.
+            Logger.getInstance(JetBrainsPluginUpgradeAction.class).warn(
+                "[notify] shown source=JetBrainsPluginUpgradeAction.scheduleRestartPrompt type=WARNING "
+                    + "title=\"Agent Doc restart required\" pending_version=" + pending
+            );
             created.notify(restartPromptProject());
         };
         return scheduleRestartPrompt(pending, ApplicationManager.getApplication()::invokeLater, notification);

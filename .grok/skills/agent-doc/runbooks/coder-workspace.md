@@ -46,6 +46,24 @@ creates one with the receipt's attach command.
 - JetBrains Gateway: install the agent-doc plugin in the remote backend. The
   backend terminal hosts the tmux client; the local Gateway UI is not treated as
   an external terminal.
+- JetBrains Gateway layout sync (GH #434): the editor split geometry that tmux
+  pane auto-sync, Sync Tmux Layout, and Run Agent Doc follow is measured by the
+  plugin's frontend module, which runs in the JetBrains Client on the
+  operator's machine, not in the Coder workspace. `agent-doc plugin install
+  jetbrains` on the workspace installs only the backend side; with a local ZIP
+  or custom repository the Client gets nothing. Install the same modular ZIP
+  (`agent-doc-jetbrains-262-<version>.zip`) in the JetBrains Client/Gateway
+  plugins on the local machine, confirm both sides report that exact version,
+  and restart both, including the Client process. Until then the backend
+  `idea.log` shows `[layout-detect] unknown windows=0
+  source=remote_client_selected_files ...
+  reason=flat_evidence_has_no_column_geometry` and `[layout-sync] frontend
+  layout publisher unavailable`, focus defers with
+  `focus_deferred:no_frontend_layout_snapshot surface_id=surface-unavailable`,
+  and Run Agent Doc still dispatches into the document's existing pane but
+  logs `[route] layout not synced for <doc>: [route] layout-not-synced: ...`
+  with the reason instead of moving tmux columns. Local (non-Gateway) IDEs
+  are unaffected.
 - VS Code Remote SSH/Coder: the extension declares
   `"extensionKind": ["workspace"]`, so it runs in the remote extension host.
   Run `agent-doc plugin install vscode` on the workspace: it installs into

@@ -161,7 +161,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
     private val lastAuthority = ConcurrentHashMap<String, String>()
     private val transientStatuses = TransientDocumentStatus()
     private val inputRequiredNotifications =
-        InputRequiredNotifications<Notification> { it.expire() }
+        InputRequiredNotifications<Notification> { AgentDocNotices.expire(it, "TurnStateBannerRefresher.inputRequired") }
     private val deferredClearSupersededNotices = DeferredClearSupersededNotices()
     private val listeners = CopyOnWriteArrayList<Listener>()
 
@@ -398,20 +398,23 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
                                 "terminal tool window; activated the tool window instead",
                         )
                     TerminalFocusOutcome.NOTHING ->
-                        NotificationGroupManager.getInstance()
-                            .getNotificationGroup("Agent Doc")
-                            .createNotification(
-                                "No terminal to focus",
-                                "This IDE has no Terminal tool window, so there is no " +
-                                    "agent-doc terminal to open. Answer the prompt in the " +
-                                    "tmux pane running the session.",
-                                NotificationType.WARNING,
-                            )
-                            .notify(project)
+                        AgentDocNotices.show(
+                            project,
+                            NotificationGroupManager.getInstance()
+                                .getNotificationGroup("Agent Doc")
+                                .createNotification(
+                                    "No terminal to focus",
+                                    "This IDE has no Terminal tool window, so there is no " +
+                                        "agent-doc terminal to open. Answer the prompt in the " +
+                                        "tmux pane running the session.",
+                                    NotificationType.WARNING,
+                                ),
+                            "TurnStateBannerRefresher.focusAgentTerminal",
+                        )
                 }
             },
         )
-        notification.notify(project)
+        AgentDocNotices.show(project, notification, "TurnStateBannerRefresher.buildInputRequiredNotification")
         return notification
     }
 
@@ -441,7 +444,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
                     }
                 },
             )
-            notification.notify(project)
+            AgentDocNotices.show(project, notification, "TurnStateBannerRefresher.notifyDeferredClearSuperseded")
         }
     }
 

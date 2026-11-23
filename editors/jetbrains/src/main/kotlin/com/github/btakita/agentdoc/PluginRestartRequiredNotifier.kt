@@ -293,7 +293,7 @@ internal object PluginRestartRequiredNotifier {
             })
             created.addAction(NotificationAction.createSimpleExpiring("Later") {})
             notification = created
-            created.notify(notificationProject())
+            AgentDocNotices.show(notificationProject(), created, "PluginRestartRequiredNotifier.show")
         } catch (error: Throwable) {
             log.warn("[plugin-update] restart-required notification failed", error)
         }
@@ -316,7 +316,7 @@ internal object PluginRestartRequiredNotifier {
             })
             created.addAction(NotificationAction.createSimpleExpiring("Later") {})
             notification = created
-            created.notify(notificationProject())
+            AgentDocNotices.show(notificationProject(), created, "PluginRestartRequiredNotifier.showNativeReloadRestart")
         } catch (error: Throwable) {
             log.warn("[plugin-update] native-reload restart notification failed", error)
         }

@@ -670,14 +670,17 @@ object TypingTracker : DocumentListener {
                 null
             } ?: return
         try {
-            NotificationGroupManager.getInstance()
-                .getNotificationGroup("Agent Doc")
-                .createNotification(
-                    "Component marker removed in ${java.io.File(filePath).name}",
-                    TerminalUtil.notificationHtml(diagnostic),
-                    NotificationType.WARNING,
-                )
-                .notify(project)
+            AgentDocNotices.show(
+                project,
+                NotificationGroupManager.getInstance()
+                    .getNotificationGroup("Agent Doc")
+                    .createNotification(
+                        "Component marker removed in ${java.io.File(filePath).name}",
+                        TerminalUtil.notificationHtml(diagnostic),
+                        NotificationType.WARNING,
+                    ),
+                "TypingTracker.notifyComponentMarkersRemoved",
+            )
         } catch (e: Throwable) {
             LOG.debug("[op-capture] component marker warning skipped: ${e.message}")
         }

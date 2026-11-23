@@ -44,6 +44,11 @@ internal object RouteOutcome {
         val snapshotPath: String,
         val ownedByOtherLaneNotice: String?,
         val paneNotVisibleNotice: String?,
+        /**
+         * GH #434: the `[route] layout-not-synced:` line of a route that dispatched but left the tmux
+         * layout unchanged. Native only: the frozen floor predates it and answers null.
+         */
+        val layoutNotSyncedNotice: String? = null,
     )
 
     internal fun evidence(output: String, relativePath: String): Evidence = Evidence(output, relativePath)
@@ -101,6 +106,12 @@ internal object RouteOutcome {
                             root.get("pane_not_visible_notice").stringOrNull()
                         } else {
                             floor.paneNotVisibleNotice
+                        },
+                    layoutNotSyncedNotice =
+                        if (root.has("layout_not_synced_notice")) {
+                            root.get("layout_not_synced_notice").stringOrNull()
+                        } else {
+                            floor.layoutNotSyncedNotice
                         },
                 )
             }

@@ -41,6 +41,7 @@ pub mod pane_placement;
 pub mod remote_client_surface;
 pub mod remote_layout;
 pub mod replica_registration;
+pub mod route_layout_not_synced;
 pub mod route_outcome;
 pub mod session_command_outcome;
 pub mod surface_layout_reference;
@@ -101,6 +102,10 @@ pub use remote_layout::{
 pub use replica_registration::{
     RegistrationProjection, RegistrationProjectionAction, RegistrationProjectionEvidence,
     derive_registration_projection,
+};
+pub use route_layout_not_synced::{
+    ROUTE_LAYOUT_DEFERRED_FOCUS_ONLY_REASON, ROUTE_LAYOUT_NOT_SYNCED_MARKER, RouteLayoutNotSynced,
+    route_layout_not_synced_notice,
 };
 pub use route_outcome::{
     RouteOutcome, RouteOutcomeEvidence, RouteOutcomeKind, derive_route_outcome,

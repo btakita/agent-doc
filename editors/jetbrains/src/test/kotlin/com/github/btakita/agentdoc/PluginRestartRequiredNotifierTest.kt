@@ -135,7 +135,7 @@ class PluginRestartRequiredNotifierTest {
         }
         assertTrue(
             "the loaded plugin notification must be scoped to an editor project",
-            notifier.contains("created.notify(notificationProject())"),
+            notifier.contains("AgentDocNotices.show(notificationProject(), created,"),
         )
         assertTrue(
             "the compatibility bridge notification must be scoped to an editor project",

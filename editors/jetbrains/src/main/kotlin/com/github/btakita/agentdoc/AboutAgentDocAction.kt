@@ -13,6 +13,23 @@ import java.awt.datatransfer.StringSelection
 
 /** Editor kind this plugin registers as; selects `expected_plugins.<kind>` in build info. */
 internal const val ABOUT_EDITOR_KIND = "jetbrains"
+
+/**
+ * GH #434: the `expected_plugins` key of the package this IDE runs. Builds 262 through 263.* run
+ * the one modular ZIP, whose generation the build info reports as `jetbrains_262`; comparing it
+ * with the classic `jetbrains` generation warned about a mismatch on every release-paired install.
+ */
+internal fun aboutExpectedPluginKey(baselineVersion: Int?): String =
+    if (baselineVersion != null && baselineVersion in 262..263) "jetbrains_262" else ABOUT_EDITOR_KIND
+
+private fun runningIdeExpectedPluginKey(): String =
+    try {
+        aboutExpectedPluginKey(
+            com.intellij.openapi.application.ApplicationInfo.getInstance().build.baselineVersion,
+        )
+    } catch (_: Throwable) {
+        ABOUT_EDITOR_KIND
+    }
 private const val ABOUT_CLI_TIMEOUT_MS = 10_000L
 
 /** `editoractionmenu`: what the loaded native generation reports, without loading anything. */
@@ -151,7 +168,7 @@ internal fun nativeAboutFacts(snapshot: NativeAboutSnapshot): Pair<AgentDocBuild
     if (snapshot.version == null) {
         return null to (snapshot.loadError ?: "loads when an agent-doc markdown document is opened")
     }
-    val parsed = snapshot.buildInfoJson?.let { parseBuildInfoJson(it) }
+    val parsed = snapshot.buildInfoJson?.let { parseBuildInfoJson(it, runningIdeExpectedPluginKey()) }
     val facts =
         AgentDocBuildFacts(
             version = parsed?.version ?: snapshot.version,
@@ -225,7 +242,7 @@ class AboutAgentDocAction : ImplAction {
                     ABOUT_CLI_TIMEOUT_MS,
                     captureStderrSeparately = true,
                 )
-            val parsed = if (json.exitCode == 0) parseBuildInfoJson(json.output) else null
+            val parsed = if (json.exitCode == 0) parseBuildInfoJson(json.output, runningIdeExpectedPluginKey()) else null
             if (parsed != null) {
                 parsed.copy(executable = parsed.executable ?: agentDoc) to null
             } else {

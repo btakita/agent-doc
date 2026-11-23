@@ -95,6 +95,10 @@ pub struct RouteOutcome {
     pub owned_by_other_lane_notice: Option<String>,
     /// The `[route] pane-not-visible:` line (GH #243), trimmed.
     pub pane_not_visible_notice: Option<String>,
+    /// The `[route] layout-not-synced:` line (GH #434), trimmed: the route
+    /// dispatched but left the tmux layout unchanged, and why.
+    #[serde(default)]
+    pub layout_not_synced_notice: Option<String>,
 }
 
 const UI_OUTCOME_QUEUED_BEHIND_OWNER: &str = "queued_behind_owner";
@@ -486,6 +490,14 @@ fn owned_by_other_lane_notice(lines: &[&str]) -> Option<String> {
     (!notice.is_empty()).then(|| notice.to_string())
 }
 
+fn layout_not_synced_notice(lines: &[&str]) -> Option<String> {
+    lines
+        .iter()
+        .map(|line| kotlin_trim(line))
+        .find(|line| line.starts_with(crate::ROUTE_LAYOUT_NOT_SYNCED_MARKER))
+        .map(str::to_string)
+}
+
 fn pane_not_visible_notice(lines: &[&str]) -> Option<String> {
     lines
         .iter()
@@ -573,6 +585,7 @@ pub fn derive_route_outcome(evidence: &RouteOutcomeEvidence) -> RouteOutcome {
         snapshot_path: latest_regex_value(&lines, &SNAPSHOT_PATH),
         owned_by_other_lane_notice: owned_by_other_lane_notice(&lines),
         pane_not_visible_notice: pane_not_visible_notice(&lines),
+        layout_not_synced_notice: layout_not_synced_notice(&lines),
     }
 }
 

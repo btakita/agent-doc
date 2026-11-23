@@ -247,6 +247,6 @@ internal object IdeTerminalCoordinator {
         notification.addAction(NotificationAction.createSimple("Copy attach command") {
             CopyPasteManager.getInstance().setContents(StringSelection(attachCommand))
         })
-        notification.notify(project)
+        AgentDocNotices.show(project, notification, "IdeTerminalCoordinator.notifyManualAttach")
     }
 }

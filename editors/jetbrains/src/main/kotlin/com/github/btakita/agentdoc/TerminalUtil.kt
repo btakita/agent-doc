@@ -658,6 +658,15 @@ object TerminalUtil {
                         outcome.paneNotVisibleNotice?.let { notice ->
                             notifyWarning(project, notice)
                         }
+                        // GH #434: the route dispatched but left the tmux layout unchanged (no
+                        // column geometry: on Coder/Gateway, no frontend layout snapshot). Log the
+                        // refusal beside SUCCESS, and tell the operator once per document.
+                        outcome.layoutNotSyncedNotice?.let { notice ->
+                            LOG.warn("[route] layout not synced for $relativePath: $notice")
+                            if (layoutNotSyncedNoticeShown.add(layoutNotSyncedNoticeKey(relativePath, notice))) {
+                                notifyWarning(project, notice)
+                            }
+                        }
                         StateProjectionBridge.recordRouteDispatchProven(
                             documentPath,
                             routeGeneration,
@@ -709,6 +718,13 @@ object TerminalUtil {
             notifyError(project, "Failed to send Run Agent Doc through CP: ${e.message}")
         }
     }
+
+    /** GH #434: documents (and causes) whose layout-not-synced toast this session already showed. */
+    private val layoutNotSyncedNoticeShown: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    /** One toast per document per cause; every occurrence is still logged. */
+    internal fun layoutNotSyncedNoticeKey(relativePath: String, notice: String): String =
+        relativePath + "\u0000" + (Regex("""\bcause=(\S+?):?(\s|$)""").find(notice)?.groupValues?.get(1) ?: notice)
 
     /** GH #243: the route's `[route] pane-not-visible:` notice, if it reported one. */
     internal fun routePaneNotVisibleNotice(output: String): String? =
@@ -2489,7 +2505,10 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
 
     fun showHint(project: Project, message: String) {
         GenerationWork.invokeLater {
-            val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return@invokeLater
+            // GH #434: every operator-facing bubble has an idea.log line.
+            val editor = FileEditorManager.getInstance(project).selectedTextEditor
+            AgentDocNotices.hintShown(message, shown = editor != null)
+            if (editor == null) return@invokeLater
             HintManager.getInstance().showInformationHint(editor, message)
         }
     }
@@ -2647,7 +2666,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
                 CopyPasteManager.getInstance().setContents(StringSelection(rawOutput))
                 showHint(project, "Copied busy session details for $relativePath")
             })
-            notification.notify(project)
+            AgentDocNotices.show(project, notification, "TerminalUtil.notifyBusySessionClearBlocked")
         } catch (_: Exception) {
             System.err.println("[agent-doc] $summary")
         }
@@ -2676,7 +2695,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
                 CopyPasteManager.getInstance().setContents(StringSelection(rawOutput))
                 showHint(project, "Copied busy restart details for $relativePath")
             })
-            notification.notify(project)
+            AgentDocNotices.show(project, notification, "TerminalUtil.notifyBusySessionRestartBlocked")
         } catch (_: Exception) {
             System.err.println("[agent-doc] $summary")
         }
@@ -2705,7 +2724,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
                 CopyPasteManager.getInstance().setContents(StringSelection(rawOutput))
                 showHint(project, "Copied starting-actor restart details for $relativePath")
             })
-            notification.notify(project)
+            AgentDocNotices.show(project, notification, "TerminalUtil.notifyStartingSessionRestartBlocked")
         } catch (_: Exception) {
             System.err.println("[agent-doc] $summary")
         }
@@ -2732,7 +2751,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
                 CopyPasteManager.getInstance().setContents(StringSelection(rawOutput))
                 showHint(project, "Copied editor-holds-pane restart details for $relativePath")
             })
-            notification.notify(project)
+            AgentDocNotices.show(project, notification, "TerminalUtil.notifyEditorHoldsPaneRestartBlocked")
         } catch (_: Exception) {
             System.err.println("[agent-doc] $summary")
         }
@@ -2859,7 +2878,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
                     },
                 )
             }
-            notification.notify(project)
+            AgentDocNotices.show(project, notification, "TerminalUtil.notify")
         } catch (e: Exception) {
             // NEVER swallow: the notification is the operator's only view of this text.
             System.err.println("[agent-doc] notification failed (${e.message}): $content")
@@ -3011,7 +3030,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
                 CopyPasteManager.getInstance().setContents(StringSelection(routeOutput))
                 showHint(project, "Copied running route details for $relativePath")
             })
-            notification.notify(project)
+            AgentDocNotices.show(project, notification, "TerminalUtil.notifyRunAgentDocStillRunning")
         } catch (_: Exception) {
             System.err.println("[agent-doc] $summary")
         }
@@ -3040,7 +3059,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
                     showHint(project, "Copied route snapshot path for $relativePath")
                 })
             }
-            notification.notify(project)
+            AgentDocNotices.show(project, notification, "TerminalUtil.notifyRunAgentDocDispatchUnproven")
         } catch (_: Exception) {
             System.err.println("[agent-doc] $summary")
         }
@@ -3069,7 +3088,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
                     showHint(project, "Copied route snapshot path for $relativePath")
                 })
             }
-            notification.notify(project)
+            AgentDocNotices.show(project, notification, "TerminalUtil.notifyRunAgentDocProtectedPromptInput")
         } catch (_: Exception) {
             System.err.println("[agent-doc] $summary")
         }
@@ -3107,7 +3126,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
                 CopyPasteManager.getInstance().setContents(StringSelection(routeOutput))
                 showHint(project, "Copied paused queue details for $relativePath")
             })
-            notification.notify(project)
+            AgentDocNotices.show(project, notification, "TerminalUtil.notifyRunAgentDocQueuePaused")
         } catch (_: Exception) {
             System.err.println("[agent-doc] $summary")
         }
@@ -3162,7 +3181,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
                 CopyPasteManager.getInstance().setContents(StringSelection(routeOutput))
                 showHint(project, "Copied harness-switch route details for $relativePath")
             })
-            notification.notify(project)
+            AgentDocNotices.show(project, notification, "TerminalUtil.notifyRunAgentDocAgentSwitchDeferred")
         } catch (_: Exception) {
             System.err.println("[agent-doc] $summary")
         }
@@ -3170,10 +3189,13 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
 
     private fun notifyRunAgentDocOwnedByOtherLane(project: Project, notice: String) {
         try {
-            NotificationGroupManager.getInstance()
-                .getNotificationGroup("Agent Doc")
-                .createNotification(notificationHtml(notice), NotificationType.INFORMATION)
-                .notify(project)
+            AgentDocNotices.show(
+                project,
+                NotificationGroupManager.getInstance()
+                    .getNotificationGroup("Agent Doc")
+                    .createNotification(notificationHtml(notice), NotificationType.INFORMATION),
+                "TerminalUtil.notifyRunAgentDocOwnedByOtherLane",
+            )
         } catch (_: Exception) {
             System.err.println("[agent-doc] $notice")
         }
@@ -3195,7 +3217,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
                 CopyPasteManager.getInstance().setContents(StringSelection(routeOutput))
                 showHint(project, "Copied queued route details for $relativePath")
             })
-            notification.notify(project)
+            AgentDocNotices.show(project, notification, "TerminalUtil.notifyRunAgentDocQueued")
         } catch (_: Exception) {
             System.err.println("[agent-doc] $summary")
         }
@@ -3339,7 +3361,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
                     showHint(project, "Copied saved error path for $relativePath")
                 })
             }
-            notification.notify(project)
+            AgentDocNotices.show(project, notification, "TerminalUtil.notifyPersistentRouteFailure")
         } catch (_: Exception) {
             System.err.println("[agent-doc] $summary")
         }
@@ -3392,7 +3414,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
             val notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")
                 .createNotification(notificationHtml(content), NotificationType.INFORMATION)
-            notification.notify(project)
+            AgentDocNotices.show(project, notification, "TerminalUtil.notifyInfo")
             // Auto-expire after 3 seconds
             GenerationWork.newThread {
                 Thread.sleep(3000)

@@ -11,6 +11,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "startup_not_ready",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -27,6 +28,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "busy_running",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -43,6 +45,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "startup_not_ready",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -59,6 +62,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "persistent",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -75,6 +79,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "busy_running",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -91,6 +96,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "busy_running",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -100,6 +106,7 @@
       "frozen_expected": {
         "agent_switch_deferred": null,
         "kind": "busy_running",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -116,6 +123,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "busy_running",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -125,6 +133,7 @@
       "frozen_expected": {
         "agent_switch_deferred": null,
         "kind": "persistent",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -141,6 +150,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "busy_running",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -150,6 +160,7 @@
       "frozen_expected": {
         "agent_switch_deferred": null,
         "kind": "persistent",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -166,6 +177,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "queued_pending",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -175,6 +187,7 @@
       "frozen_expected": {
         "agent_switch_deferred": null,
         "kind": "queued_pending",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -191,6 +204,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "busy_running",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -207,6 +221,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "persistent",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": "plan.md runs in pane %7 of navigation lane IU-0a1b2c3d (tmux session proj-IU-0a1b2c3d); the route dispatched it there and left this IDE's tmux layout unchanged. Use Claim Session File to move the pane into this IDE's lane.",
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -223,6 +238,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "persistent",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -239,6 +255,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "persistent",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": "[route] pane-not-visible: pane %4 is in window @2, which no attached tmux client shows",
         "queue_paused": null,
@@ -255,6 +272,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "queued_pending",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -271,6 +289,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "protected_prompt_input",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -287,6 +306,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "queue_paused",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": {
@@ -307,6 +327,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "queue_paused",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": {
@@ -327,6 +348,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "queue_paused",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": {
@@ -347,6 +369,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "queue_paused",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": {
@@ -367,6 +390,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "queue_paused",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": {
@@ -394,6 +418,7 @@
           "target_harness": "codex"
         },
         "kind": "agent_switch_deferred",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -417,6 +442,7 @@
           "target_harness": "opencode"
         },
         "kind": "agent_switch_deferred",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -440,6 +466,7 @@
           "target_harness": "claude-code"
         },
         "kind": "agent_switch_deferred",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -463,6 +490,7 @@
           "target_harness": "claude-code"
         },
         "kind": "agent_switch_deferred",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -486,6 +514,7 @@
           "target_harness": "claude-code"
         },
         "kind": "agent_switch_deferred",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -502,6 +531,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "dispatch_start_unproven",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -518,6 +548,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "dispatch_start_unproven",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -534,6 +565,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "queued_pending",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -550,6 +582,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "steering_delivered",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -559,6 +592,7 @@
       "frozen_expected": {
         "agent_switch_deferred": null,
         "kind": "steering_delivered",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -575,6 +609,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "steering_delivered",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -584,6 +619,7 @@
       "frozen_expected": {
         "agent_switch_deferred": null,
         "kind": "steering_delivered",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -600,6 +636,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "persistent",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -616,6 +653,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "queued_pending",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -632,6 +670,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "persistent",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -648,6 +687,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "persistent",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -664,6 +704,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "busy_running",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": null,
@@ -680,6 +721,7 @@
       "expected": {
         "agent_switch_deferred": null,
         "kind": "queue_paused",
+        "layout_not_synced_notice": null,
         "owned_by_other_lane_notice": null,
         "pane_not_visible_notice": null,
         "queue_paused": {
@@ -689,6 +731,33 @@
         },
         "snapshot_path": "",
         "summary": "Agent Doc queue is paused for tasks/agent-doc/agent-doc-bugs2.md.\nThis pause looks like stale-supervisor churn. Restart Supervisor and resume the queue, then run Agent Doc again.\nStale supervisor pid: 77\nReason: r"
+      }
+    },
+    {
+      "name": "GH #434: a dispatched route that left the tmux layout unchanged names why",
+      "input": {
+        "output": "[route] dispatched via controller editor_route for tasks/a.md\n  [route] layout-not-synced: tasks/a.md reason=flat_evidence_has_no_column_geometry cause=incomplete_frontend_layout_no_authoritative_snapshot: the editor sent no column geometry for this route; the route sent the prompt to tasks/a.md's existing pane and left the tmux layout unchanged. The tmux columns follow the editor again once it publishes its split layout (Remote Dev: install the same Agent Doc modular plugin ZIP in JetBrains Client/Gateway and the Remote Dev backend, verify both sides report that exact plugin version, restart both (including the JetBrains Client/Gateway process; restarting only the Remote Dev backend cannot replace its already-loaded frontend module)).",
+        "relative_path": "tasks/a.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "persistent",
+        "layout_not_synced_notice": "[route] layout-not-synced: tasks/a.md reason=flat_evidence_has_no_column_geometry cause=incomplete_frontend_layout_no_authoritative_snapshot: the editor sent no column geometry for this route; the route sent the prompt to tasks/a.md's existing pane and left the tmux layout unchanged. The tmux columns follow the editor again once it publishes its split layout (Remote Dev: install the same Agent Doc modular plugin ZIP in JetBrains Client/Gateway and the Remote Dev backend, verify both sides report that exact plugin version, restart both (including the JetBrains Client/Gateway process; restarting only the Remote Dev backend cannot replace its already-loaded frontend module)).",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": null
+      },
+      "frozen_expected": {
+        "agent_switch_deferred": null,
+        "kind": "persistent",
+        "layout_not_synced_notice": null,
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": null
       }
     }
   ]

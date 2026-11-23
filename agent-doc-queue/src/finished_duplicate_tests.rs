@@ -334,3 +334,26 @@ fn ack_text_resolves_exactly_one_completion_reply() {
         CompletionReplyAck::Ambiguous(parents) if parents.len() == 2
     ));
 }
+
+#[test]
+fn a_painted_completion_reply_is_still_the_operators_answer() {
+    // The reply was admitted as a leaf and painted `📥` after the baseline.
+    let baseline = session(&format!("{OPERATOR_ROW}\n  - done\n"), "");
+    let document = session(&format!("{OPERATOR_ROW}\n  - 📥 done\n"), "");
+    let resolved = reconcile_finished_rows(&document, Some(&baseline), &never_in_flight)
+        .unwrap()
+        .expect("the painted reply resolves its row");
+    assert!(
+        resolved.contains("“done” (#opdonereply)~~\n  - ~~done~~\n"),
+        "{resolved}"
+    );
+    // A reply a worker attempt holds is not the operator's answer yet.
+    let claimed = session(
+        &format!("{OPERATOR_ROW}\n  - 🚧 [#subagent:x#1] done\n"),
+        "",
+    );
+    assert_eq!(
+        reconcile_finished_rows(&claimed, Some(&claimed), &never_in_flight).unwrap(),
+        None
+    );
+}

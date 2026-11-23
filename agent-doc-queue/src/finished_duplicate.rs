@@ -539,10 +539,22 @@ fn best_twin<'a>(body: &str, twins: &'a [FinishedTwin]) -> Option<(&'a FinishedT
     best
 }
 
-/// Whether `line` (trimmed) is a line of `baseline`.
+/// Whether the row on `line` is in `baseline` at the same list position: a
+/// baseline row with the same prefix and the same work text (projection
+/// markers painted since then do not count as an edit).
 fn settled(baseline: Option<&str>, line: &str) -> bool {
-    let line = line.trim();
-    baseline.is_some_and(|baseline| baseline.lines().any(|candidate| candidate.trim() == line))
+    let Some((prefix, body)) = split_row(line) else {
+        return false;
+    };
+    let work = agent_doc_element_queue::struck_work_text(body);
+    baseline.is_some_and(|baseline| {
+        baseline.lines().any(|candidate| {
+            split_row(candidate.trim_end()).is_some_and(|(candidate_prefix, candidate_body)| {
+                candidate_prefix == prefix
+                    && agent_doc_element_queue::struck_work_text(candidate_body) == work
+            })
+        })
+    })
 }
 
 /// Whether a request id the row carries names an open `agent:todo` item. The
@@ -578,13 +590,13 @@ fn strike_guards_pass(
         && !crate::queue_continuation::is_recurring_imperative_head(work)
 }
 
-/// One planned rewrite: replace line `line` with `text`, and insert `after`
-/// lines after line `insert_after`.
+/// One planned rewrite: replace document line `line` with `text`.
 struct Rewrite {
     line: usize,
     text: String,
 }
 
+/// Lines to insert after document line `after`.
 struct Insert {
     after: usize,
     lines: Vec<String>,
@@ -899,10 +911,16 @@ fn operator_done_reply(
             || reply.is_some()
             || !is_completion_reply(child_body)
             || !settled(baseline, raw)
+            || qp::owner_projection(child_body).is_some()
+            || qp::lifecycle_marker(child_body)
+                .is_some_and(crate::document_queue::durable_backed_marker)
         {
             return None;
         }
-        reply = Some((child.line, child_body.trim().to_string()));
+        reply = Some((
+            child.line,
+            agent_doc_element_queue::struck_work_text(child_body).to_string(),
+        ));
     }
     reply
 }

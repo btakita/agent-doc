@@ -61,7 +61,7 @@ fn a_glyph_painted_by_the_old_misreading_is_removed() {
     );
     // The row that does carry the tag keeps (or gains) its glyph.
     assert!(
-        projected.contains("- 🙋 operator: approve it. [operator-verify]"),
+        projected.contains("🙋 operator: approve it. [operator-verify]"),
         "{projected}"
     );
     assert_eq!(

@@ -329,9 +329,13 @@ mod tests {
                 )
                 .unwrap();
                 let (reader, mut writer) = stream.split();
-                writer.write_all(line.as_bytes()).unwrap();
-                writer.write_all(b"\n").unwrap();
-                writer.flush().unwrap();
+                // A connection refused at admission may be closed before the
+                // request is written; the write then fails with BrokenPipe,
+                // and the refusal is read from the controller's side.
+                let _ = writer
+                    .write_all(line.as_bytes())
+                    .and_then(|()| writer.write_all(b"\n"))
+                    .and_then(|()| writer.flush());
                 let mut response = String::new();
                 let _ = BufReader::new(reader).read_line(&mut response);
                 response

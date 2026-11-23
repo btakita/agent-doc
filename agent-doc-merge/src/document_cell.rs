@@ -817,12 +817,44 @@ fn repeat_side_needs_align(ids: &[String], indexes: &[usize], primary: &str) -> 
 /// Match `side` onto `base` by instruction text. When the unmatched counts are
 /// equal, pair those leftovers in order so a pure edit of one repeated row
 /// still lands on that row. Unequal leftovers are inserts or deletes.
-fn match_repeat_side(side_texts: &[String], base_texts: &[String]) -> Vec<Option<usize>> {
+///
+/// `#e107moved`: byte-identical nested rows (three `~~#justdoit~~` answers
+/// under three different parents) are matched by the row they hang under
+/// first. Text alone gave the deletion of the last copy to the first one: the
+/// LCS keeps the later rows, so the removed row under the struck
+/// `[#q-e107b04c1cd5]` head was read as the answer under a Remaining entry.
+/// The head then survived as that answer's parent anchor, inside another
+/// response tree, and the answer it lost was written back as a duplicate.
+/// Rows whose parent changed fall back to the text-only pass.
+fn match_repeat_side(
+    side_scoped: &[String],
+    side_texts: &[String],
+    base_scoped: &[String],
+    base_texts: &[String],
+) -> Vec<Option<usize>> {
     let mut matched = vec![None; side_texts.len()];
     let mut base_taken = vec![false; base_texts.len()];
-    for (side, base) in lcs_index_pairs(side_texts, base_texts) {
+    for (side, base) in lcs_index_pairs(side_scoped, base_scoped) {
         matched[side] = Some(base);
         base_taken[base] = true;
+    }
+    let side_left: Vec<usize> = (0..side_texts.len())
+        .filter(|&index| matched[index].is_none())
+        .collect();
+    let base_left: Vec<usize> = (0..base_texts.len())
+        .filter(|&index| !base_taken[index])
+        .collect();
+    let side_left_texts: Vec<String> = side_left
+        .iter()
+        .map(|&index| side_texts[index].clone())
+        .collect();
+    let base_left_texts: Vec<String> = base_left
+        .iter()
+        .map(|&index| base_texts[index].clone())
+        .collect();
+    for (side, base) in lcs_index_pairs(&side_left_texts, &base_left_texts) {
+        matched[side_left[side]] = Some(base_left[base]);
+        base_taken[base_left[base]] = true;
     }
     let unmatched_side: Vec<usize> = matched
         .iter()
@@ -844,15 +876,23 @@ fn match_repeat_side(side_texts: &[String], base_texts: &[String]) -> Vec<Option
     matched
 }
 
+/// One side's rows for repeat alignment: instruction text, and the same text
+/// scoped by the row it hangs under ([`repeat_scopes`]).
+struct RepeatRows<'a> {
+    text: &'a [String],
+    scoped: &'a [String],
+}
+
 fn align_repeat_primary(
     primary: &str,
     base_ids: &mut [String],
-    base_text: &[String],
+    base_rows: &RepeatRows<'_>,
     ours_ids: &mut [String],
-    ours_text: &[String],
+    ours_rows: &RepeatRows<'_>,
     theirs_ids: &mut [String],
-    theirs_text: &[String],
+    theirs_rows: &RepeatRows<'_>,
 ) {
+    let (base_text, ours_text, theirs_text) = (base_rows.text, ours_rows.text, theirs_rows.text);
     let base_at = repeat_indices(base_ids, primary);
     let ours_at = repeat_indices(ours_ids, primary);
     let theirs_at = repeat_indices(theirs_ids, primary);
@@ -881,8 +921,22 @@ fn align_repeat_primary(
         .iter()
         .map(|&index| theirs_text[index].clone())
         .collect();
-    let ours_match = match_repeat_side(&ours_texts, &base_texts);
-    let theirs_match = match_repeat_side(&theirs_texts, &base_texts);
+    let scoped = |rows: &RepeatRows<'_>, at: &[usize]| -> Vec<String> {
+        at.iter().map(|&index| rows.scoped[index].clone()).collect()
+    };
+    let base_scoped = scoped(base_rows, &base_at);
+    let ours_match = match_repeat_side(
+        &scoped(ours_rows, &ours_at),
+        &ours_texts,
+        &base_scoped,
+        &base_texts,
+    );
+    let theirs_match = match_repeat_side(
+        &scoped(theirs_rows, &theirs_at),
+        &theirs_texts,
+        &base_scoped,
+        &base_texts,
+    );
     for (pos, slot) in ours_match.iter().enumerate() {
         if let Some(slot) = slot {
             ours_ids[ours_at[pos]] = base_ids[base_at[*slot]].clone();
@@ -969,6 +1023,33 @@ fn rewrite_occurrence(
         occurrence: occ.occurrence,
         items,
     }
+}
+
+/// `#e107moved`: each row's instruction text prefixed with the identity of the
+/// row it hangs under (the nearest earlier row with less indentation; none for
+/// a top-level row). The parent's key ignores strikes and lifecycle markers, so
+/// a parent struck on one side keeps the scope of its children.
+fn repeat_scopes(occ: &ComponentOccurrence, texts: &[String]) -> Vec<String> {
+    let preamble = format!("{}:{}:preamble", occ.component, occ.occurrence);
+    let mut open: Vec<(usize, String)> = Vec::new();
+    occ.items
+        .iter()
+        .zip(texts)
+        .map(|((key, value), text)| {
+            let identity = node_key_identity(key);
+            if identity == preamble {
+                return format!("\u{1f}{text}");
+            }
+            let indent = value.len() - value.trim_start_matches([' ', '\t']).len();
+            while open.last().is_some_and(|(parent, _)| *parent >= indent) {
+                open.pop();
+            }
+            let scope = open.last().map_or("", |(_, parent)| parent.as_str());
+            let scoped = format!("{scope}\u{1f}{text}");
+            open.push((indent, repeat_disambiguator_primary(identity).to_string()));
+            scoped
+        })
+        .collect()
 }
 
 /// Give operator repeats a base-relative identity. A row inserted ahead keeps
@@ -1161,15 +1242,30 @@ fn align_operator_repeats(
             primaries.push(primary);
         }
     }
+    let base_scoped = repeat_scopes(base, &base_text);
+    let ours_scoped = repeat_scopes(ours, &ours_text);
+    let theirs_scoped = repeat_scopes(theirs, &theirs_text);
+    let base_rows = RepeatRows {
+        text: &base_text,
+        scoped: &base_scoped,
+    };
+    let ours_rows = RepeatRows {
+        text: &ours_text,
+        scoped: &ours_scoped,
+    };
+    let theirs_rows = RepeatRows {
+        text: &theirs_text,
+        scoped: &theirs_scoped,
+    };
     for primary in &primaries {
         align_repeat_primary(
             primary,
             &mut base_ids,
-            &base_text,
+            &base_rows,
             &mut ours_ids,
-            &ours_text,
+            &ours_rows,
             &mut theirs_ids,
-            &theirs_text,
+            &theirs_rows,
         );
     }
     (
@@ -3181,6 +3277,10 @@ fn unresolved_prompt_count(value: &str) -> usize {
         .filter(|line| line.contains("[#") && !line.contains("~~"))
         .count()
 }
+
+#[cfg(test)]
+#[path = "document_cell_repeat_scope_tests.rs"]
+mod repeat_scope_tests;
 
 #[cfg(test)]
 mod tests {

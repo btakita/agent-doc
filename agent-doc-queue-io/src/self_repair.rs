@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use agent_doc_queue::self_repair::{SelfRepair, self_repair_document};
+use agent_doc_queue::self_repair::{SelfRepair, self_repair_document_with_provenance};
 
 /// Run every self-repair over `content`. A claim label is stale when the
 /// ledger no longer holds that exact `(owner, generation)` attempt; an
@@ -53,7 +53,33 @@ pub fn self_repair_document_for(file: &Path, content: &str) -> Option<(String, V
         }
     }
     let response_proven = |id: &str| originals.contains(&normalize(id));
-    let repaired = self_repair_document(content, &is_live, &response_proven)?;
+    // `#e107moved`: a column-0 row a torn merge put inside another row's
+    // response tree gets its strike back only when a committed copy (the
+    // sync baseline or git HEAD) holds it struck outside any response tree.
+    // Both are read lazily: most syncs have no such row.
+    let committed: std::cell::OnceCell<Vec<String>> = std::cell::OnceCell::new();
+    let struck_provenance = |work: &str| {
+        committed
+            .get_or_init(|| {
+                [
+                    agent_doc_snapshot_io::load_document_baseline(file)
+                        .ok()
+                        .flatten(),
+                    agent_doc_git_io::revision::show_head(file).ok().flatten(),
+                ]
+                .into_iter()
+                .flatten()
+                .collect()
+            })
+            .iter()
+            .any(|copy| agent_doc_queue::response_tree_rehome::top_level_row_struck_in(copy, work))
+    };
+    let repaired = self_repair_document_with_provenance(
+        content,
+        &is_live,
+        &response_proven,
+        &struck_provenance,
+    )?;
     // A rewritten row keeps the follow-up records keyed on its text: its
     // root provenance and its owner classification follow it to the new
     // text (the old key stays until its row is gone, so a write that never

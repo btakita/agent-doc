@@ -2622,6 +2622,60 @@ pub fn durable_backed_marker(
     )
 }
 
+/// `#e107moved`: where `index`'s own descendants start. A row a torn merge
+/// left inside another row's response tree has that response's rows right
+/// under it, more than one level deeper and starting with a generated
+/// response-structure row (`**State:**`, `**Guidance:**`, …). They are the
+/// tree above's rows, not this row's leaves: they never reopen a struck row
+/// as a parent with live work, nor close a live one.
+fn own_descendants_start(
+    entries: &[QueueEntry],
+    index: usize,
+    own_indent: usize,
+    end: usize,
+) -> usize {
+    let first = index + 1;
+    let split_off = entries.get(first).is_some_and(|entry| {
+        list_row_indent(entry).is_some_and(|indent| indent > own_indent + 2)
+            && entry_is_generated_response_structure(entry)
+    });
+    if !split_off {
+        return first;
+    }
+    (first..end)
+        .find(|at| list_row_indent(&entries[*at]).is_some_and(|indent| indent <= own_indent + 2))
+        .unwrap_or(end)
+}
+
+/// The rows a torn merge split off the tree of the row at `index` and left
+/// under its next sibling ([`own_descendants_start`]): still that tree's rows.
+fn split_off_rows_after(
+    entries: &[QueueEntry],
+    own_indent: usize,
+    end: usize,
+) -> std::ops::Range<usize> {
+    let Some(sibling) = entries.get(end) else {
+        return end..end;
+    };
+    if entry_indent(sibling) != Some(own_indent) {
+        return end..end;
+    }
+    let sibling_end = entries[end + 1..]
+        .iter()
+        .position(|entry| entry_indent(entry).is_some_and(|indent| indent <= own_indent))
+        .map_or(entries.len(), |offset| end + 1 + offset);
+    end + 1..own_descendants_start(entries, end, own_indent, sibling_end)
+}
+
+fn entry_is_generated_response_structure(entry: &QueueEntry) -> bool {
+    let text = match entry {
+        QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => prompt.text.as_str(),
+        QueueEntry::Freeform(line) => line.trim_start().strip_prefix("- ").unwrap_or(line),
+        _ => return false,
+    };
+    agent_doc_markdown_ast::overlay::is_generated_response_structure_row(text)
+}
+
 /// Return whether every executable leaf below `index` is struck when `index`
 /// is a structural parent. Parent state is a pure projection of the current
 /// tree; it never becomes another durable lifecycle owner.
@@ -2636,7 +2690,8 @@ fn group_parent_all_leaves_struck(entries: &[QueueEntry], index: usize) -> Optio
         .map_or(entries.len(), |offset| index + 1 + offset);
     let mut saw_leaf = false;
     let mut all_struck = true;
-    for descendant in index + 1..end {
+    let own = own_descendants_start(entries, index, own_indent, end)..end;
+    for descendant in own.chain(split_off_rows_after(entries, own_indent, end)) {
         match &entries[descendant] {
             QueueEntry::Prompt(_) | QueueEntry::Completed(_)
                 if !entry_is_group_parent(entries, descendant)

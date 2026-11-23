@@ -96,6 +96,9 @@ pub enum SelfRepairKind {
     /// Moved the operator rows kept under a `**Closed by:**` backlink up to
     /// be its direct children (`#selfrepaircleanup`).
     MisnestedClosedByRows,
+    /// Moved a column-0 row that split another row's response tree back
+    /// below that tree, restoring a proven strike (`#e107moved`).
+    RowInsideResponseTree,
 }
 
 impl SelfRepairKind {
@@ -107,6 +110,7 @@ impl SelfRepairKind {
             Self::StaleClaimLabel => "stale_claim_label",
             Self::ClaimLabelResidue => "claim_label_residue",
             Self::MisnestedClosedByRows => "misnested_closed_by_rows",
+            Self::RowInsideResponseTree => "row_inside_response_tree",
         }
     }
 }
@@ -954,6 +958,28 @@ pub fn self_repair_document(
     current = deduped;
     repairs.extend(dedupe_repairs);
     (current != document).then_some((current, repairs))
+}
+
+/// [`self_repair_document`] after moving every column-0 row that split a
+/// response tree back below it
+/// ([`crate::response_tree_rehome::rehome_rows_inside_response_trees`]);
+/// `struck_provenance(work)` says a committed or baseline copy of the
+/// document holds that row struck at column 0 (`#e107moved`).
+pub fn self_repair_document_with_provenance(
+    document: &str,
+    is_live: &dyn Fn(&str, u64) -> bool,
+    response_proven: &dyn Fn(&str) -> bool,
+    struck_provenance: &dyn Fn(&str) -> bool,
+) -> Option<(String, Vec<SelfRepair>)> {
+    let (rehomed, mut repairs) =
+        crate::response_tree_rehome::rehome_rows_inside_response_trees(document, struck_provenance);
+    match self_repair_document(&rehomed, is_live, response_proven) {
+        Some((repaired, more)) => {
+            repairs.extend(more);
+            Some((repaired, repairs))
+        }
+        None => (rehomed != document).then_some((rehomed, repairs)),
+    }
 }
 
 /// Whether a hand-back action item asks the operator to clean up one of

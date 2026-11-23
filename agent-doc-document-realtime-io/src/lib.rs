@@ -6711,7 +6711,99 @@ fn ensure_deferred_document_write_intent(
     )
 }
 
+/// `#retainedrevert`: bound on recomposing one retained write after another
+/// writer advanced the pending intent between this writer's read and its
+/// append. Each refusal means some other intent landed, so the bound only
+/// stops a pathological livelock; it never turns a lost race into a drop.
+const DEFERRED_WRITE_RECOMPOSE_ATTEMPTS: u32 = 16;
+
+/// Whether `error` is the ingress refusal of a successor composed over a
+/// pending intent that has since advanced. The refusal crosses the controller
+/// RPC as text, so it is classified by its stable token.
+fn deferred_write_basis_advanced(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<agent_doc_state_backbone::DeferredWriteBasisAdvanced>()
+        .is_some()
+        || format!("{error:#}")
+            .contains(agent_doc_state_backbone::DEFERRED_WRITE_BASIS_ADVANCED_TOKEN)
+}
+
+/// Deterministic seam for `#retainedrevert`: runs on the writer's thread after
+/// it composed its successor and immediately before it appends it, so a test
+/// lands a concurrent writer's intent exactly inside the read→append window.
+#[cfg(test)]
+mod deferred_write_append_hook {
+    use std::cell::RefCell;
+
+    thread_local! {
+        static HOOK: RefCell<Option<Box<dyn FnMut()>>> = const { RefCell::new(None) };
+    }
+
+    pub(super) fn install(hook: impl FnMut() + 'static) {
+        HOOK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+    }
+
+    pub(super) fn clear() {
+        HOOK.with(|slot| slot.borrow_mut().take());
+    }
+
+    /// Run the installed hook once. It is taken before running, so a hook
+    /// that itself retains a write does not re-enter itself.
+    pub(super) fn fire() {
+        let hook = HOOK.with(|slot| slot.borrow_mut().take());
+        if let Some(mut hook) = hook {
+            hook();
+        }
+    }
+}
+
+/// Retain one deferred write as the successor of the lineage's pending intent.
+///
+/// `#retainedrevert`: the successor replaces the pending intent, so it must be
+/// composed over the pending intent that is current when it is appended. The
+/// composition reads the pending intent, merges (seconds for a large
+/// document), then appends; a concurrent writer can append in between. The
+/// append therefore carries the intent it was composed over and the controller
+/// ingress refuses it when that is no longer pending. The refused writer
+/// recomposes over the new pending intent, so neither writer's change is lost.
 fn ensure_deferred_document_write_intent_with_mode(
+    file: &Path,
+    expected_current: &str,
+    content: &str,
+    source: &str,
+    reason: DocumentWriteDeferredReason,
+    refine_current_cut: bool,
+) -> Result<String> {
+    let mut attempt = 1;
+    loop {
+        match ensure_deferred_document_write_intent_attempt(
+            file,
+            expected_current,
+            content,
+            source,
+            reason.clone(),
+            refine_current_cut,
+        ) {
+            Err(error)
+                if deferred_write_basis_advanced(&error)
+                    && attempt < DEFERRED_WRITE_RECOMPOSE_ATTEMPTS =>
+            {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "{source}_deferred_write_recomposed_over_advanced_pending file={} attempt={attempt} error={} (#retainedrevert)",
+                        file.display(),
+                        format!("{error:#}").replace('\n', "\\n"),
+                    ),
+                );
+                attempt += 1;
+            }
+            result => return result,
+        }
+    }
+}
+
+fn ensure_deferred_document_write_intent_attempt(
     file: &Path,
     expected_current: &str,
     content: &str,
@@ -6736,6 +6828,11 @@ fn ensure_deferred_document_write_intent_with_mode(
         pending_external_disk_candidate(file)
     } else {
         pending_document_write(file)
+    };
+    let composed_over = agent_doc_state_backbone::DocumentWriteComposedOver {
+        pending_intent_id: existing_pending
+            .as_ref()
+            .map(|pending| pending.intent_id.clone()),
     };
     if let Some(pending) = existing_pending {
         if pending
@@ -6999,8 +7096,11 @@ fn ensure_deferred_document_write_intent_with_mode(
             target_content,
             source: typed_source,
             reason,
+            composed_over: Some(composed_over),
         },
     );
+    #[cfg(test)]
+    deferred_write_append_hook::fire();
     publish_reactive_state_event(&project_root, &event).with_context(|| {
         format!(
             "failed to retain deferred document write in Lazily state for {}",
@@ -7414,6 +7514,7 @@ pub fn retain_external_disk_candidate_without_editor_cut(
             target_content: disk_content.to_string(),
             source: source.into(),
             reason: DocumentWriteDeferredReason::PendingUserDecisionExternalDiskVsEditor,
+            composed_over: None,
         },
     );
     publish_reactive_state_event(&project_root, &event).with_context(|| {
@@ -7778,6 +7879,17 @@ fn publish_reactive_state_event(
     // launching a second agent-doc process. Production has no direct route.
     agent_doc_controller_io::project_controller::publish_state_event_existing(project_root, event)
         .or_else(|_| {
+            // The controller ingress owns the `#retainedrevert` basis
+            // precondition in production; the direct fixture append applies
+            // the same pure check against the durable ledger.
+            let ledger =
+                agent_doc_controller_io::project_controller::load_state_event_ledger(project_root)?;
+            if let Some(refusal) = agent_doc_state_backbone::deferred_write_basis_advanced(
+                ledger.project_document(event.document_hash()).as_ref(),
+                &event.fact,
+            ) {
+                return Err(anyhow::Error::new(refusal));
+            }
             agent_doc_controller_io::project_controller::append_state_event_for_test(
                 project_root,
                 event,
@@ -14927,6 +15039,7 @@ mod tests {
                         "legacy_delivery_failed_to_all",
                     ),
                     reason: DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
+                    composed_over: None,
                 },
             );
             agent_doc_controller_io::project_controller::append_state_event_for_test(
@@ -17535,6 +17648,99 @@ mod tests {
         );
     }
 
+    /// `#retainedrevert` (2026-11-23, `agent-doc-bugs.md`): a `status_set`
+    /// intent (S2) was appended while a `serialized_atomic_write` was composing
+    /// its own successor over the PREVIOUS pending intent (S1). The writer then
+    /// appended a successor that never saw S2, it replaced S2 as the pending
+    /// intent, and the retained transition effect re-projected S1 over the
+    /// editor: `status set` reported a durable, visible write that was gone
+    /// minutes later. The append must be refused and recomposed over the
+    /// pending intent that is current at append time.
+    #[test]
+    fn deferred_write_appended_during_composition_is_not_dropped() {
+        let doc = |status: &str, notes: &str| {
+            format!(
+                "---\nagent_doc_format: template\n---\n\n<!-- agent:status -->\n{status}\n<!-- /agent:status -->\n\n<!-- agent:notes -->\n{notes}\n<!-- /agent:notes -->\n"
+            )
+        };
+        let base = doc("status S0 committed", "note one");
+        let older_status = doc("status S1 installing now", "note one");
+        let newer_status = doc("status S2 installed and recycled", "note one");
+        let notes_write = doc("status S0 committed", "note one\nnote two");
+        let (_dir, file, _canonical) = temp_doc(&base);
+
+        // The earlier retained status write (S1), still pending.
+        let older_intent = ensure_deferred_document_write_intent(
+            &file,
+            &base,
+            &older_status,
+            "status_set",
+            DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
+        )
+        .unwrap();
+
+        // The newer status write (S2) lands while the notes writer is between
+        // reading the pending S1 intent and appending its successor.
+        let racing_file = file.clone();
+        let racing_base = older_status.clone();
+        let racing_target = newer_status.clone();
+        let racing_intent = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let racing_intent_slot = racing_intent.clone();
+        deferred_write_append_hook::install(move || {
+            let intent = ensure_deferred_document_write_intent(
+                &racing_file,
+                &racing_base,
+                &racing_target,
+                "status_set",
+                DocumentWriteDeferredReason::EditorProjectionPending,
+            )
+            .expect("the racing status write retains its intent");
+            *racing_intent_slot.borrow_mut() = Some(intent);
+        });
+        let result = ensure_deferred_document_write_intent(
+            &file,
+            &base,
+            &notes_write,
+            "serialized_atomic_write",
+            DocumentWriteDeferredReason::EditorProjectionPending,
+        );
+        deferred_write_append_hook::clear();
+        let notes_intent = result.expect("the notes write retains its intent");
+        let racing_intent = racing_intent
+            .borrow()
+            .clone()
+            .expect("the hook ran inside the composition window");
+        assert_ne!(racing_intent, older_intent);
+        assert_ne!(notes_intent, racing_intent);
+
+        let pending = pending_document_write(&file).expect("a retained target stays pending");
+        assert_eq!(pending.intent_id, notes_intent);
+        assert!(
+            pending
+                .target_content
+                .contains("status S2 installed and recycled"),
+            "the status write appended during the composition must survive in the pending target:\n{}",
+            pending.target_content
+        );
+        assert!(
+            !pending.target_content.contains("status S1 installing now"),
+            "the superseded status must not be re-projected:\n{}",
+            pending.target_content
+        );
+        assert!(
+            pending.target_content.contains("note two"),
+            "the composing writer keeps its own change:\n{}",
+            pending.target_content
+        );
+        assert!(
+            ops_log(&file).contains(
+                "serialized_atomic_write_deferred_write_recomposed_over_advanced_pending"
+            ),
+            "the refused append is recomposed, not silently replaced:\n{}",
+            ops_log(&file)
+        );
+    }
+
     #[test]
     fn live_canonical_target_supersedes_stale_deferred_response_lineage() {
         let baseline = "<!-- agent:exchange -->\n### Re: committed — gpt-5\n\nCommitted.\n<!-- agent:boundary:base -->\n<!-- /agent:exchange -->\n";
@@ -18574,6 +18780,7 @@ mod tests {
                     target_content: target.to_string(),
                     source: agent_doc_state_backbone::DocumentWriteSource::from("test"),
                     reason: DocumentWriteDeferredReason::EditorProjectionPending,
+                    composed_over: None,
                 },
             );
             agent_doc_controller_io::project_controller::append_state_event_for_test(
@@ -18627,6 +18834,7 @@ mod tests {
                 target_content: target.clone(),
                 source: agent_doc_state_backbone::DocumentWriteSource::from("test"),
                 reason: DocumentWriteDeferredReason::EditorProjectionPending,
+                composed_over: None,
             },
         );
         agent_doc_controller_io::project_controller::append_state_event_for_test(
@@ -18745,6 +18953,7 @@ mod tests {
                     } else {
                         DocumentWriteDeferredReason::EditorProjectionPending
                     },
+                    composed_over: None,
                 },
             );
             agent_doc_controller_io::project_controller::append_state_event_for_test(
@@ -19461,6 +19670,7 @@ mod tests {
                 target_content: invalid.clone(),
                 source: agent_doc_state_backbone::DocumentWriteSource::SerializedAtomicWrite,
                 reason: DocumentWriteDeferredReason::EditorProjectionPending,
+                composed_over: None,
             },
         );
         agent_doc_controller_io::project_controller::append_state_event_for_test(
@@ -20121,6 +20331,7 @@ mod tests {
                     target_content: target.to_string(),
                     source: agent_doc_state_backbone::DocumentWriteSource::from(source),
                     reason,
+                    composed_over: None,
                 },
             );
             agent_doc_controller_io::project_controller::append_state_event_for_test(
@@ -20177,6 +20388,7 @@ mod tests {
                 target_content: stale,
                 source: agent_doc_state_backbone::DocumentWriteSource::from("queue_mutation"),
                 reason: DocumentWriteDeferredReason::EditorProjectionPending,
+                composed_over: None,
             },
         );
         agent_doc_controller_io::project_controller::append_state_event_for_test(

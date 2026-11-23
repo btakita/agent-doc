@@ -4329,6 +4329,7 @@ mod retained_write_generation_model {
                             target_content: format!("content-{target}"),
                             source: DocumentWriteSource::PendingWrite,
                             reason: DocumentWriteDeferredReason::EditorProjectionPending,
+                            composed_over: None,
                         });
                 }
                 Action::ReplaceController => {

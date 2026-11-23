@@ -11512,6 +11512,29 @@ impl ControllerRuntime {
             "append_apply_state_event",
             event.fact.label(),
         );
+        // `#retainedrevert`: a deferred-write successor replaces the pending
+        // intent it was composed over. Checked under the same document fence
+        // and ingress lock as the append, so no other successor can land
+        // between this check and the append.
+        if let Some(refusal) = {
+            let memory = self.memory.lock();
+            agent_doc_state_backbone::deferred_write_basis_advanced(
+                memory.state_projection.document(event.fact.document_hash()),
+                &event.fact,
+            )
+        } {
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "deferred_write_basis_advanced_refused document_hash={} intent_id={} composed_over={} current_pending={} (#retainedrevert)",
+                    event.fact.document_hash(),
+                    refusal.intent_id,
+                    refusal.composed_over.as_deref().unwrap_or("none"),
+                    refusal.current_pending.as_deref().unwrap_or("none"),
+                ),
+            );
+            return Err(anyhow::Error::new(refusal));
+        }
         let inserted = if let Some(busy_timeout) = telemetry_event_ingress_busy_timeout(event) {
             append_state_event_with_timeout(project_root, event, busy_timeout)?
         } else {
@@ -26244,8 +26267,91 @@ agent:queue\n\
                 source: agent_doc_state_backbone::DocumentWriteSource::PendingWrite,
                 reason:
                     agent_doc_state_backbone::DocumentWriteDeferredReason::EditorProjectionPending,
+                composed_over: None,
             },
         )
+    }
+
+    /// `#retainedrevert`: the serialized ingress refuses a deferred-write
+    /// successor composed over a pending intent that another writer already
+    /// replaced, appends nothing, and keeps the newer intent pending.
+    #[test]
+    fn ingress_refuses_a_deferred_write_composed_over_a_superseded_pending_intent() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let (_file, document_hash) = retained_test_document(&dir);
+        let with_basis = |event: agent_doc_state_backbone::StateEvent, pending: Option<&str>| {
+            let mut event = event;
+            if let agent_doc_state_backbone::StateFact::DocumentWriteDeferred {
+                composed_over,
+                ..
+            } = &mut event.fact
+            {
+                *composed_over = Some(agent_doc_state_backbone::DocumentWriteComposedOver {
+                    pending_intent_id: pending.map(str::to_string),
+                });
+            }
+            event
+        };
+        let first = with_basis(
+            deferred_document_write_event(&document_hash, "intent-s1", "target-s1"),
+            None,
+        );
+        assert!(
+            runtime
+                .append_apply_state_event_serialized(dir.path(), &first)
+                .unwrap()
+        );
+        let racing = with_basis(
+            deferred_document_write_event(&document_hash, "intent-s2", "target-s2"),
+            Some("intent-s1"),
+        );
+        assert!(
+            runtime
+                .append_apply_state_event_serialized(dir.path(), &racing)
+                .unwrap()
+        );
+
+        // Composed over `intent-s1` before `intent-s2` landed.
+        let stale = with_basis(
+            deferred_document_write_event(&document_hash, "intent-notes", "target-notes"),
+            Some("intent-s1"),
+        );
+        let error = runtime
+            .append_apply_state_event_serialized(dir.path(), &stale)
+            .expect_err("a successor that never saw intent-s2 must be refused");
+        assert!(
+            format!("{error:#}")
+                .contains(agent_doc_state_backbone::DEFERRED_WRITE_BASIS_ADVANCED_TOKEN),
+            "{error:#}"
+        );
+        assert_eq!(
+            pending_intent_id(&runtime, &document_hash).as_deref(),
+            Some("intent-s2")
+        );
+        let ledger = load_state_event_ledger(dir.path()).unwrap();
+        assert!(
+            ledger
+                .events()
+                .iter()
+                .all(|event| event.event_id != stale.event_id),
+            "a refused successor must not reach the durable ledger"
+        );
+
+        // Recomposed over the current pending intent, it is admitted.
+        let recomposed = with_basis(
+            deferred_document_write_event(&document_hash, "intent-notes-2", "target-notes-2"),
+            Some("intent-s2"),
+        );
+        assert!(
+            runtime
+                .append_apply_state_event_serialized(dir.path(), &recomposed)
+                .unwrap()
+        );
+        assert_eq!(
+            pending_intent_id(&runtime, &document_hash).as_deref(),
+            Some("intent-notes-2")
+        );
     }
 
     fn preflight_started_event(document_hash: &str) -> agent_doc_state_backbone::StateEvent {
@@ -26729,6 +26835,7 @@ agent:queue\n\
                     target_content: "response body\n<!-- agent:queue -->\n- ~~explain the design~~\n- strike receipt\n".to_string(),
                     source: agent_doc_state_backbone::DocumentWriteSource::FreeTextStrike,
                     reason: agent_doc_state_backbone::DocumentWriteDeferredReason::EditorProjectionPending,
+                    composed_over: None,
                 },
             ),
             agent_doc_state_backbone::StateEvent::new(
@@ -29428,6 +29535,7 @@ revised operator request
                 source: agent_doc_state_backbone::DocumentWriteSource::PendingWrite,
                 reason:
                     agent_doc_state_backbone::DocumentWriteDeferredReason::EditorProjectionPending,
+                composed_over: None,
             },
         );
         append_state_event(dir.path(), &deferred).unwrap();

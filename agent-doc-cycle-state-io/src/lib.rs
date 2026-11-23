@@ -5713,6 +5713,7 @@ mod tests {
                 ),
                 reason:
                     agent_doc_state_backbone::DocumentWriteDeferredReason::EditorProjectionPending,
+                composed_over: None,
             },
         )
         .unwrap();

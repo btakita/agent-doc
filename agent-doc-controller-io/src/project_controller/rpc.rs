@@ -64909,6 +64909,7 @@ mod tests {
                 source: agent_doc_state_backbone::DocumentWriteSource::PendingWrite,
                 reason:
                     agent_doc_state_backbone::DocumentWriteDeferredReason::EditorProjectionPending,
+                composed_over: None,
             },
         );
         let request = ControllerRequest {
@@ -66524,6 +66525,7 @@ mod tests {
                         target_content: "live".to_string(),
                         source: agent_doc_state_backbone::DocumentWriteSource::PendingWrite,
                         reason: agent_doc_state_backbone::DocumentWriteDeferredReason::EditorProjectionPending,
+                        composed_over: None,
                     },
                 ),
             ).unwrap();
@@ -78316,6 +78318,7 @@ body
                     target_content: target,
                     source: agent_doc_state_backbone::DocumentWriteSource::PendingWrite,
                     reason: agent_doc_state_backbone::DocumentWriteDeferredReason::EditorProjectionPending,
+                    composed_over: None,
                 },
             ),
         )

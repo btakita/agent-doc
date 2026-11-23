@@ -487,6 +487,14 @@ pub enum StateFact {
         target_content: String,
         source: DocumentWriteSource,
         reason: DocumentWriteDeferredReason,
+        /// `#retainedrevert`: the retained intent of the same lineage this
+        /// target was composed over, as the writer observed it. Ingress
+        /// refuses the fact when that lineage's pending intent has since
+        /// advanced, so a concurrent writer can never publish a successor
+        /// that omits an intent appended after its read. Absent on facts
+        /// written before the precondition existed (accepted unconditionally).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        composed_over: Option<DocumentWriteComposedOver>,
     },
     DocumentWriteConverged {
         document_hash: String,
@@ -3551,6 +3559,90 @@ pub struct ConvergedWriteProjection {
     pub source: DocumentWriteSource,
     #[serde(default)]
     pub ordinal: u64,
+}
+
+/// `#retainedrevert`: the pending intent a `DocumentWriteDeferred` successor
+/// was composed over. `pending_intent_id: None` means the writer observed no
+/// pending intent in that lineage and started a fresh one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocumentWriteComposedOver {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_intent_id: Option<String>,
+}
+
+/// Stable token on the ingress refusal of a `DocumentWriteDeferred` whose
+/// composition basis is no longer the pending intent. It crosses the
+/// controller RPC as text, so writers classify the refusal by this token.
+pub const DEFERRED_WRITE_BASIS_ADVANCED_TOKEN: &str = "deferred_write_basis_advanced";
+
+/// `#retainedrevert`: why a `DocumentWriteDeferred` successor must not be
+/// appended — the lineage's pending intent moved after the writer read it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeferredWriteBasisAdvanced {
+    pub intent_id: String,
+    pub composed_over: Option<String>,
+    pub current_pending: Option<String>,
+}
+
+impl std::fmt::Display for DeferredWriteBasisAdvanced {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{DEFERRED_WRITE_BASIS_ADVANCED_TOKEN}: deferred write {} was composed over pending intent {} but the pending intent is now {}; recompose over the current pending intent (#retainedrevert)",
+            self.intent_id,
+            self.composed_over.as_deref().unwrap_or("none"),
+            self.current_pending.as_deref().unwrap_or("none"),
+        )
+    }
+}
+
+impl std::error::Error for DeferredWriteBasisAdvanced {}
+
+/// `#retainedrevert`: the ingress precondition of a `DocumentWriteDeferred`
+/// fact against the current projection of its document.
+///
+/// Every successor intent is composed from the lineage's pending intent and
+/// then replaces it as `pending_write`. Two writers that read the same pending
+/// intent and both append therefore lose the first writer's change: the second
+/// successor never saw it. Observed 2026-11-23 on `agent-doc-bugs.md`: a
+/// `status_set` intent appended at 18:49:26 was replaced 5s later by a
+/// `serialized_atomic_write` successor composed over the intent before it, and
+/// the retained transition effect re-projected the older status over the
+/// editor. Facts without `composed_over` (written before this precondition)
+/// pass unconditionally.
+pub fn deferred_write_basis_advanced(
+    projection: Option<&DocumentStateProjection>,
+    fact: &StateFact,
+) -> Option<DeferredWriteBasisAdvanced> {
+    let StateFact::DocumentWriteDeferred {
+        intent_id,
+        reason,
+        composed_over: Some(composed_over),
+        ..
+    } = fact
+    else {
+        return None;
+    };
+    let lineage_pending = projection.and_then(|projection| {
+        if *reason == DocumentWriteDeferredReason::PendingUserDecisionExternalDiskVsEditor {
+            projection.document.pending_external_disk.as_ref()
+        } else {
+            projection.document.pending_write.as_ref()
+        }
+    });
+    let current_pending = lineage_pending.map(|pending| pending.intent_id.clone());
+    // Re-delivery of the same fact (an idempotent retry after a deadline)
+    // finds itself pending; the ledger's event-id dedup owns that case.
+    if current_pending.as_deref() == Some(intent_id.as_str())
+        || current_pending == composed_over.pending_intent_id
+    {
+        return None;
+    }
+    Some(DeferredWriteBasisAdvanced {
+        intent_id: intent_id.clone(),
+        composed_over: composed_over.pending_intent_id.clone(),
+        current_pending,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -6672,6 +6764,7 @@ mod tests {
             target_content: compact_target.to_string(),
             source: DocumentWriteSource::SerializedAtomicWrite,
             reason: DocumentWriteDeferredReason::EditorProjectionPending,
+            composed_over: None,
         });
         projection.apply_fact(&StateFact::DocumentCompactProjectionRetained {
             document_hash: document_hash.to_string(),
@@ -9019,6 +9112,102 @@ mod tests {
         assert!(doc.applied_visible_write_candidate("candidate-b").is_none());
     }
 
+    /// `#retainedrevert`: a deferred-write successor is admitted only while the
+    /// pending intent of its lineage is the one it was composed over.
+    #[test]
+    fn deferred_write_basis_precondition_refuses_a_successor_over_an_advanced_pending() {
+        fn deferred(
+            intent_id: &str,
+            reason: &str,
+            composed_over: Option<Option<&str>>,
+        ) -> StateFact {
+            StateFact::DocumentWriteDeferred {
+                document_hash: "doc-basis".into(),
+                intent_id: intent_id.into(),
+                expected_hash: "base".into(),
+                expected_content: Some("base".into()),
+                target_hash: format!("target-{intent_id}"),
+                target_content: format!("target {intent_id}"),
+                source: "status_set".into(),
+                reason: reason.into(),
+                composed_over: composed_over.map(|pending| DocumentWriteComposedOver {
+                    pending_intent_id: pending.map(str::to_string),
+                }),
+            }
+        }
+        let agent = "editor_projection_pending";
+        let external = "pending_user_decision_external_disk_vs_editor";
+
+        // A fresh lineage admits a successor composed over nothing.
+        assert_eq!(
+            deferred_write_basis_advanced(None, &deferred("a", agent, Some(None))),
+            None
+        );
+
+        let mut projection = DocumentStateProjection::new("doc-basis");
+        projection.apply_fact(&deferred("a", agent, Some(None)));
+
+        // Composed over the current pending intent: admitted.
+        assert_eq!(
+            deferred_write_basis_advanced(
+                Some(&projection),
+                &deferred("b", agent, Some(Some("a")))
+            ),
+            None
+        );
+        // Composed over nothing although `a` is pending: refused.
+        let refusal =
+            deferred_write_basis_advanced(Some(&projection), &deferred("b", agent, Some(None)))
+                .expect("a successor that never saw `a` must be refused");
+        assert_eq!(refusal.current_pending.as_deref(), Some("a"));
+        assert!(
+            refusal
+                .to_string()
+                .contains(DEFERRED_WRITE_BASIS_ADVANCED_TOKEN)
+        );
+
+        // `b` lands over `a`; a writer that still composed over `a` is refused.
+        projection.apply_fact(&deferred("b", agent, Some(Some("a"))));
+        let refusal = deferred_write_basis_advanced(
+            Some(&projection),
+            &deferred("c", agent, Some(Some("a"))),
+        )
+        .expect("a successor composed over the superseded `a` must be refused");
+        assert_eq!(refusal.composed_over.as_deref(), Some("a"));
+        assert_eq!(refusal.current_pending.as_deref(), Some("b"));
+
+        // Re-delivery of the pending fact itself is idempotent, not a refusal.
+        assert_eq!(
+            deferred_write_basis_advanced(
+                Some(&projection),
+                &deferred("b", agent, Some(Some("a")))
+            ),
+            None
+        );
+        // Facts written before the precondition existed are unconditional.
+        assert_eq!(
+            deferred_write_basis_advanced(Some(&projection), &deferred("d", agent, None)),
+            None
+        );
+        // The external-disk lineage is independent of the agent lineage.
+        assert_eq!(
+            deferred_write_basis_advanced(Some(&projection), &deferred("x", external, Some(None))),
+            None
+        );
+        // Convergence clears the pending intent; a fresh successor is admitted.
+        projection.apply_fact(&StateFact::DocumentWriteConverged {
+            document_hash: "doc-basis".into(),
+            intent_id: "b".into(),
+            target_hash: "target-b".into(),
+            source: "test".into(),
+            intent_source: "status_set".into(),
+        });
+        assert_eq!(
+            deferred_write_basis_advanced(Some(&projection), &deferred("e", agent, Some(None))),
+            None
+        );
+    }
+
     #[test]
     fn deferred_document_write_remains_durable_until_matching_convergence() {
         let mut ledger = EventLedger::new();
@@ -9033,6 +9222,7 @@ mod tests {
                 target_content: "editor-owned target".into(),
                 source: "boundary".into(),
                 reason: "editor_owner_without_registered_replica".into(),
+                composed_over: None,
             },
         ));
         let projected = ledger.project_document("doc-a").unwrap();
@@ -9115,6 +9305,7 @@ mod tests {
                 target_content: "response".into(),
                 source: DocumentWriteSource::PendingWrite,
                 reason: DocumentWriteDeferredReason::EditorProjectionPending,
+                composed_over: None,
             },
         ));
 
@@ -9261,6 +9452,7 @@ mod tests {
                 target_content: target,
                 source: "finalize".into(),
                 reason: DocumentWriteDeferredReason::EditorProjectionPending,
+                composed_over: None,
             },
         ));
 
@@ -9490,6 +9682,7 @@ mod tests {
                 target_content: done_target,
                 source: "pending_status_write".into(),
                 reason: DocumentWriteDeferredReason::EditorProjectionPending,
+                composed_over: None,
             },
         ));
 
@@ -9560,6 +9753,7 @@ mod tests {
                 target_content: with_body.clone(),
                 source: "finalize".into(),
                 reason: DocumentWriteDeferredReason::EditorProjectionPending,
+                composed_over: None,
             },
         ));
         ledger.append(state_event(
@@ -9595,6 +9789,7 @@ mod tests {
                 ),
                 source: "pending_status_write".into(),
                 reason: DocumentWriteDeferredReason::EditorProjectionPending,
+                composed_over: None,
             },
         ));
         let projected = ledger.project_document(document_hash).unwrap();
@@ -9667,6 +9862,7 @@ mod tests {
                 target_content: target,
                 source: "finalize".into(),
                 reason: DocumentWriteDeferredReason::EditorProjectionPending,
+                composed_over: None,
             },
         ));
         ledger.append(state_event(
@@ -9811,6 +10007,7 @@ mod tests {
                     target_content: format!("composed {target}"),
                     source: "finalize".into(),
                     reason: DocumentWriteDeferredReason::EditorProjectionPending,
+                    composed_over: None,
                 },
             ));
         }
@@ -9875,6 +10072,7 @@ mod tests {
                     target_content: format!("content-{intent}"),
                     source: "finalize".into(),
                     reason: DocumentWriteDeferredReason::EditorProjectionPending,
+                    composed_over: None,
                 },
             ));
         }
@@ -9920,6 +10118,7 @@ mod tests {
                 target_content: "external disk edit".into(),
                 source: "force_disk".into(),
                 reason: DocumentWriteDeferredReason::PendingUserDecisionExternalDiskVsEditor,
+                composed_over: None,
             },
         ));
         ledger.append(state_event(
@@ -9933,6 +10132,7 @@ mod tests {
                 target_content: "agent response".into(),
                 source: "finalize".into(),
                 reason: DocumentWriteDeferredReason::EditorProjectionPending,
+                composed_over: None,
             },
         ));
         ledger.append(state_event(
@@ -9983,6 +10183,7 @@ mod tests {
                 target_content: "agent response".into(),
                 source: "finalize".into(),
                 reason: DocumentWriteDeferredReason::EditorProjectionPending,
+                composed_over: None,
             },
         ));
         ledger.append(state_event(
@@ -9996,6 +10197,7 @@ mod tests {
                 target_content: "external disk edit".into(),
                 source: "file_watch".into(),
                 reason: DocumentWriteDeferredReason::PendingUserDecisionExternalDiskVsEditor,
+                composed_over: None,
             },
         ));
 

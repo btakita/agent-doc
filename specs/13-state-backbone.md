@@ -193,6 +193,23 @@ hash is validation metadata, not recoverable content authority.
 prior target or component-compose the prior and new targets over the retained
 base. Matching editor convergence alone retires the intent; a force-disk
 projection or commit does not erase reconnect authority.
+"The prior" is the lineage's pending intent at append time, not at read time
+(`#retainedrevert`). A writer reads the pending intent, composes (seconds for a
+large document), then appends; another writer can append in between, and a
+successor that never saw that intent would replace it and drop its change. On
+2026-11-23 a `status_set` intent was replaced this way 5s after it was retained,
+and the retained transition effect re-projected the older status over the
+editor while `status set` had reported the write as accepted. Each successor
+therefore carries `composed_over` (the pending intent id it composed over, or
+none for a fresh lineage), and the controller ingress checks it under the same
+document fence and ingress lock as the append: when the lineage's pending
+intent is no longer that id, the append is refused with
+`deferred_write_basis_advanced` and nothing is written. The writer recomposes
+over the new pending intent (logged as
+`<source>_deferred_write_recomposed_over_advanced_pending`) and appends again.
+Re-delivery of an already-pending fact passes; facts without `composed_over`
+(written before the precondition) are accepted unconditionally. The agent and
+external-disk lineages are checked independently.
 Its cause is a `DocumentWriteDeferredReason` enum in facts and projections, not
 free text. CRDT convergence phases and replica wake-event kinds follow the same
 rule: stable snake-case strings are serialization/log tokens at the boundary,

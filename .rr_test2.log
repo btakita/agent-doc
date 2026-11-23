@@ -1,0 +1,902 @@
+[agent-doc build-slot] slot 2/4 acquired after 0s (/run/user/1000/agent-doc/build-slots): cargo nextest run -p agent-doc -p agent-doc-write-runtime-io -p agent-doc-write-converge-io -p agent-doc-crdt-relay-io --lib --all-features --no-fail-fast
+info: experimental features enabled: setup-scripts
+   Compiling cmov v0.5.4
+   Compiling block-buffer v0.12.1
+   Compiling getrandom v0.4.3
+   Compiling log v0.4.33
+   Compiling serde v1.0.228
+   Compiling phf_generator v0.13.1
+   Compiling tracing-core v0.1.36
+   Compiling constant_time_eq v0.4.2
+   Compiling simd-adler32 v0.3.9
+   Compiling zlib-rs v0.6.5
+   Compiling foldhash v0.1.5
+   Compiling fixedbitset v0.5.7
+   Compiling same-file v1.0.6
+   Compiling toml_write v0.1.2
+   Compiling winnow v0.7.15
+   Compiling option-ext v0.2.0
+   Compiling unty v0.0.4
+   Compiling agent-kit v0.4.1
+   Compiling prost-derive v0.14.4
+   Compiling getrandom v0.3.4
+   Compiling inotify-sys v0.1.7
+   Compiling tempfile v3.27.0
+   Compiling zerocopy v0.8.52
+   Compiling notify-types v2.1.0
+   Compiling inout v0.2.2
+   Compiling time-core v0.1.9
+   Compiling spin v0.5.2
+   Compiling untrusted v0.7.1
+   Compiling deranged v0.5.8
+   Compiling num-conv v0.2.2
+   Compiling lazy_static v1.5.0
+   Compiling mio v1.2.1
+   Compiling uuid v1.23.4
+   Compiling string_cache_codegen v0.6.1
+   Compiling phf_codegen v0.13.1
+   Compiling portable-pty v0.9.0
+   Compiling blake3 v1.8.5
+   Compiling ureq-proto v0.6.0
+   Compiling rustls v0.23.41
+   Compiling ctutils v0.4.2
+   Compiling hashbrown v0.15.5
+   Compiling miniz_oxide v0.8.9
+   Compiling walkdir v2.5.0
+   Compiling dirs-sys v0.4.1
+   Compiling digest v0.11.3
+   Compiling phf_macros v0.13.1
+   Compiling rand_core v0.9.5
+   Compiling inotify v0.11.2
+   Compiling predicates-core v1.0.10
+   Compiling powerfmt v0.2.0
+   Compiling tracing v0.1.44
+   Compiling tracing-log v0.2.0
+   Compiling ring v0.16.20
+   Compiling smallvec v1.15.2
+   Compiling rmp-serde v1.3.1
+   Compiling agent-doc-queue-icons v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-queue-icons)
+   Compiling serde_yaml v0.9.34+deprecated
+   Compiling agent-doc-flow v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-flow)
+   Compiling agent-doc-element v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-element)
+   Compiling web_atoms v0.2.5
+   Compiling tokio v1.53.1
+   Compiling vte v0.15.0
+   Compiling sha2 v0.11.0
+   Compiling agent-doc-tmux-scope-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-tmux-scope-io)
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling dirs v5.0.1
+   Compiling bincode v2.0.1
+   Compiling tagpath-core v0.12.3
+   Compiling hmac v0.13.0
+   Compiling notify v8.2.0
+   Compiling sharded-slab v0.1.7
+   Compiling cipher v0.5.2
+   Compiling crossbeam-utils v0.8.21
+   Compiling parking_lot_core v0.9.12
+   Compiling rusqlite v0.40.1
+   Compiling sct v0.7.1
+   Compiling webpki v0.22.4
+   Compiling parking_lot v0.12.5
+   Compiling phf v0.13.1
+   Compiling float-cmp v0.10.0
+   Compiling matchers v0.2.0
+   Compiling thread_local v1.1.9
+   Compiling nu-ansi-term v0.50.3
+   Compiling petgraph v0.8.3
+   Compiling agent-doc-hash v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-hash)
+   Compiling base64 v0.13.1
+   Compiling difflib v0.4.0
+   Compiling bumpalo v3.20.3
+   Compiling bit-vec v0.8.0
+   Compiling fnv v1.0.7
+   Compiling string_cache v0.9.0
+   Compiling alacritty_terminal v0.26.0
+   Compiling normalize-line-endings v0.3.0
+   Compiling prost v0.14.4
+   Compiling quick-error v1.2.3
+   Compiling libbz2-rs-sys v0.2.5
+   Compiling cpubits v0.1.1
+   Compiling termtree v0.5.1
+   Compiling bit-set v0.8.0
+   Compiling zopfli v0.8.3
+   Compiling lazily v0.10.3
+   Compiling agent-doc-tmux-commands v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-tmux-commands)
+   Compiling agent-doc-prompt-cache v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-prompt-cache)
+   Compiling time v0.3.53
+   Compiling rustls v0.20.9
+   Compiling predicates-tree v1.0.13
+   Compiling aes v0.9.1
+   Compiling rusty-fork v0.3.1
+   Compiling lzma-rust2 v0.16.4
+   Compiling tmux-router v0.3.24 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/tmux-router)
+   Compiling prost-types v0.14.4
+   Compiling rustls-pemfile v0.2.1
+   Compiling toml_edit v0.22.27
+   Compiling predicates v3.1.4
+   Compiling tracing-subscriber v0.3.23
+   Compiling crossbeam-channel v0.5.15
+   Compiling thiserror v2.0.18
+   Compiling pbkdf2 v0.13.0
+   Compiling agent-doc v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc)
+   Compiling agent-rules v0.1.0
+   Compiling sha1 v0.11.0
+   Compiling rand v0.9.4
+   Compiling lazily v0.63.0
+   Compiling bzip2 v0.6.1
+   Compiling rand_xorshift v0.4.0
+   Compiling agent-runbooks v0.1.0
+   Compiling clap_complete v4.6.7
+   Compiling bstr v1.12.3
+   Compiling deflate64 v0.1.12
+   Compiling glob v0.3.3
+   Compiling typed-path v0.12.3
+   Compiling flate2 v1.1.9
+   Compiling httpdate v1.0.3
+   Compiling markup5ever v0.38.0
+   Compiling windows-link v0.2.1
+   Compiling unarray v0.1.4
+   Compiling ascii v1.1.0
+   Compiling symlink v0.1.0
+   Compiling tsift-core v0.1.74
+   Compiling ppmd-rust v1.4.0
+   Compiling xml5ever v0.38.0
+   Compiling html5ever v0.38.0
+   Compiling chunked_transfer v1.5.0
+   Compiling instruction-files v0.3.0
+   Compiling assert_cmd v2.2.2
+   Compiling windows-sys v0.61.2
+   Compiling module-harness v0.2.1
+   Compiling filetime v0.2.29
+   Compiling libloading v0.8.9
+   Compiling agent-doc-element-boundary v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-element-boundary)
+   Compiling agent-doc-element-icebox v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-element-icebox)
+   Compiling agent-doc-element-unknown v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-element-unknown)
+   Compiling agent-doc-element-status v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-element-status)
+   Compiling agent-doc-element-signals v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-element-signals)
+   Compiling agent-doc-session-accretion v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-session-accretion)
+   Compiling agent-doc-principles v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-principles)
+   Compiling agent-doc-response-toc v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-response-toc)
+   Compiling prost-build v0.14.4
+   Compiling toml v0.8.23
+   Compiling agent-doc-session-registry v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-session-registry)
+   Compiling ppv-lite86 v0.2.21
+   Compiling markup5ever_rcdom v0.38.0+unofficial
+   Compiling zip v8.6.0
+   Compiling tracing-appender v0.2.5
+   Compiling tiny_http v0.12.0
+   Compiling tsift-memory v0.1.74
+   Compiling existence v0.4.0
+   Compiling rand_chacha v0.9.0
+   Compiling htmd v0.5.4
+   Compiling tagpath v0.12.3
+   Compiling ureq v3.3.0
+   Compiling lazily v0.58.0 (https://github.com/lazily-hub/lazily-rs.git?rev=92656d6840e9171b3e55a9e6b11205f820ec984c#92656d68)
+   Compiling proptest v1.11.0
+   Compiling interprocess v2.4.2
+   Compiling agent-doc-state-scope v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-state-scope)
+   Compiling agent-doc-effect-cas v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-effect-cas)
+   Compiling agent-doc-element-queue v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-element-queue)
+   Compiling agent-doc-tmux v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-tmux)
+   Compiling agent-doc-markdown-ast v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-markdown-ast)
+   Compiling agent-doc-syntax v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-syntax)
+   Compiling agent-doc-model-tier v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-model-tier)
+   Compiling agent-doc-markdown-lossless v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-markdown-lossless)
+   Compiling agent-doc-ipc-protocol v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-ipc-protocol)
+   Compiling agent-doc-decision-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-decision-io)
+   Compiling agent-doc-frontmatter v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-frontmatter)
+   Compiling agent-doc-element-backlog v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-element-backlog)
+   Compiling agent-doc-config v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-config)
+   Compiling agent-doc-turn-executor v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-turn-executor)
+   Compiling agent-doc-write-command-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-write-command-io)
+   Compiling agent-doc-turn-executor-tmux v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-turn-executor-tmux)
+   Compiling agent-doc-prompt-lines v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-prompt-lines)
+   Compiling agent-doc-element-review v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-element-review)
+   Compiling agent-doc-element-done v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-element-done)
+   Compiling agent-doc-memory v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-memory)
+   Compiling agent-doc-work-graph v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-work-graph)
+   Compiling agent-doc-diff v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-diff)
+   Compiling agent-doc-element-exchange v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-element-exchange)
+   Compiling agent-doc-prompt-context v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-prompt-context)
+   Compiling agent-doc-element-registry v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-element-registry)
+   Compiling agent-doc-document v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-document)
+   Compiling agent-doc-queue v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-queue)
+   Compiling agent-doc-template v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-template)
+   Compiling agent-doc-merge v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-merge)
+   Compiling agent-doc-turn v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-turn)
+   Compiling agent-doc-work-projection v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-work-projection)
+   Compiling agent-doc-answer-ledger v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-answer-ledger)
+   Compiling agent-doc-fs v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-fs)
+   Compiling agent-doc-state-backbone v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-state-backbone)
+   Compiling agent-doc-editor-surface v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-editor-surface)
+   Compiling agent-doc-element-exchange-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-element-exchange-io)
+   Compiling agent-doc-prompt-contract v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-prompt-contract)
+   Compiling agent-doc-diff-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-diff-io)
+   Compiling agent-doc-memory-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-memory-io)
+   Compiling agent-doc-lease-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-lease-io)
+   Compiling agent-doc-harness v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-harness)
+   Compiling agent-doc-workflow v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-workflow)
+   Compiling agent-doc-supervisor v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-supervisor)
+   Compiling agent-doc-sync v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-sync)
+   Compiling agent-doc-controller v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-controller)
+   Compiling agent-doc-process-owner-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-process-owner-io)
+   Compiling agent-doc-document-realtime v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-document-realtime)
+   Compiling agent-doc-sqlite v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-sqlite)
+   Compiling agent-doc-state-wire v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-state-wire)
+   Compiling agent-doc-git v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-git)
+   Compiling agent-doc-ffi v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-ffi)
+   Compiling agent-doc-turn-scope-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-turn-scope-io)
+   Compiling agent-doc-owner-pane-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-owner-pane-io)
+   Compiling agent-doc-callback-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-callback-io)
+   Compiling agent-doc-git-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-git-io)
+   Compiling agent-doc-project-root-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-project-root-io)
+   Compiling agent-doc-agent-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-agent-io)
+   Compiling agent-doc-project-config-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-project-config-io)
+   Compiling agent-doc-ipc-forensics-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-ipc-forensics-io)
+   Compiling agent-doc-archive-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-archive-io)
+   Compiling agent-doc-admin-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-admin-io)
+   Compiling agent-doc-frontmatter-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-frontmatter-io)
+   Compiling agent-doc-tmux-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-tmux-io)
+   Compiling agent-doc-session-actor-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-session-actor-io)
+   Compiling agent-doc-session-registry-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-session-registry-io)
+   Compiling agent-doc-supervisor-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-supervisor-io)
+   Compiling agent-doc-snapshot-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-snapshot-io)
+   Compiling agent-doc-turn-status-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-turn-status-io)
+   Compiling agent-doc-focus-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-focus-io)
+   Compiling agent-doc-cycle-state-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-cycle-state-io)
+   Compiling agent-doc-gc-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-gc-io)
+   Compiling agent-doc-ops-log-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-ops-log-io)
+   Compiling agent-doc-run-context-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-run-context-io)
+   Compiling agent-doc-dynamic-context-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-dynamic-context-io)
+   Compiling agent-doc-ipc-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-ipc-io)
+   Compiling agent-doc-op-capture-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-op-capture-io)
+   Compiling agent-doc-editor-transport-health-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-editor-transport-health-io)
+   Compiling agent-doc-supervisor-process v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-supervisor-process)
+   Compiling agent-doc-capture-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-capture-io)
+   Compiling agent-doc-session-accretion-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-session-accretion-io)
+   Compiling agent-doc-codex-hook-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-codex-hook-io)
+   Compiling agent-doc-reliable-sync-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-reliable-sync-io)
+   Compiling agent-doc-merge-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-merge-io)
+   Compiling agent-doc-element-backlog-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-element-backlog-io)
+   Compiling agent-doc-supervisor-process-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-supervisor-process-io)
+   Compiling agent-doc-watch-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-watch-io)
+   Compiling agent-doc-crdt-relay-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-crdt-relay-io)
+   Compiling agent-doc-state-observer-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-state-observer-io)
+   Compiling agent-doc-controller-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-controller-io)
+   Compiling agent-doc-workflow-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-workflow-io)
+   Compiling agent-doc-write-converge-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-write-converge-io)
+   Compiling agent-doc-test-support v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-test-support)
+   Compiling agent-doc-editor-surface-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-editor-surface-io)
+   Compiling agent-doc-zed-lsp-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-zed-lsp-io)
+   Compiling agent-doc-sync-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-sync-io)
+   Compiling agent-doc-queue-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-queue-io)
+   Compiling agent-doc-claim-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-claim-io)
+   Compiling agent-doc-preflight-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-preflight-io)
+   Compiling agent-doc-flow-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-flow-io)
+   Compiling agent-doc-document-realtime-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-document-realtime-io)
+   Compiling agent-doc-template-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-template-io)
+   Compiling agent-doc-lint-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-lint-io)
+   Compiling agent-doc-hooks-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-hooks-io)
+   Compiling agent-doc-response-toc-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-response-toc-io)
+   Compiling agent-doc-element-backlog-runtime-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-element-backlog-runtime-io)
+   Compiling agent-doc-status-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-status-io)
+   Compiling agent-doc-boundary-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-boundary-io)
+   Compiling agent-doc-response-replay-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-response-replay-io)
+   Compiling agent-doc-prompt-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-prompt-io)
+   Compiling agent-doc-prompt-context-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-prompt-context-io)
+   Compiling agent-doc-session-check-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-session-check-io)
+   Compiling agent-doc-write-ipc-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-write-ipc-io)
+   Compiling agent-doc-compact-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-compact-io)
+   Compiling agent-doc-stream-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-stream-io)
+   Compiling agent-doc-repair-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-repair-io)
+   Compiling agent-doc-commit-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-commit-io)
+   Compiling agent-doc-run-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-run-io)
+   Compiling agent-doc-start-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-start-io)
+   Compiling agent-doc-preflight-runtime-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-preflight-runtime-io)
+   Compiling agent-doc-closeout-runtime-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-closeout-runtime-io)
+   Compiling agent-doc-repair-runtime-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-repair-runtime-io)
+   Compiling agent-doc-write-runtime-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-write-runtime-io)
+   Compiling agent-doc-run-runtime-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-run-runtime-io)
+   Compiling agent-doc-route-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-route-io)
+   Compiling agent-doc-preflight-command-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-preflight-command-io)
+   Compiling agent-doc-repair-command-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-repair-command-io)
+   Compiling agent-doc-start-runtime-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-start-runtime-io)
+   Compiling agent-doc-codex-stop-io v0.35.588 (/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/agent-doc-codex-stop-io)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 27s
+info: using target runner `env -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_COMMON_DIR -u GIT_CONFIG -u GIT_CONFIG_COUNT -u GIT_CONFIG_PARAMETERS -u GIT_DIR -u GIT_GRAFT_FILE -u GIT_IMPLICIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_NO_REPLACE_OBJECTS -u GIT_OBJECT_DIRECTORY -u GIT_PREFIX -u GIT_REPLACE_REF_BASE -u GIT_SHALLOW_FILE -u GIT_WORK_TREE` defined by `target.cfg(unix).runner` within `/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc/.cargo/config.toml`
+────────────
+ Nextest run ID 76013e09-269c-4045-bd50-cfe714284271 with nextest profile: default
+    Starting 587 tests across 4 binaries
+       SETUP [      1/1] test-isolation: scripts/check-test-tmpdir --nextest-env
+/tmp:/home/brian/work/btakita/agent-loop-worktrees/retrevert/agent-doc
+  SETUP PASS [   0.008s] test-isolation: scripts/check-test-tmpdir --nextest-env
+        PASS [   0.006s] (  1/587) agent-doc build_info::tests::sibling_library_sits_next_to_the_executable
+        PASS [   0.007s] (  2/587) agent-doc build_info::tests::expected_plugins_match_the_registration_fence
+        PASS [   0.007s] (  3/587) agent-doc build_info::tests::native_library_report_has_no_paths
+        PASS [   0.007s] (  4/587) agent-doc ffi::ack_content_tests::agent_doc_commit_returns_false_for_null
+        PASS [   0.007s] (  5/587) agent-doc build_info::tests::no_installed_plugin_omits_the_field
+        PASS [   0.007s] (  6/587) agent-doc ffi::ipc_listener_handler_swap_tests::v2_callback_projection_change_is_deferred_not_rejected
+        PASS [   0.007s] (  7/587) agent-doc build_info::tests::build_id_is_version_plus_source_digest
+        PASS [   0.009s] (  8/587) agent-doc build_info::tests::installed_plugins_compare_each_ide_with_its_own_package
+        PASS [   0.015s] (  9/587) agent-doc build_info::tests::build_info_json_carries_the_versioned_contract
+        PASS [   0.016s] ( 10/587) agent-doc ffi::tests::a_paused_replica_attach_event_records_and_a_later_outcome_clears_the_hold
+        PASS [   0.009s] ( 11/587) agent-doc ffi::tests::crdt_merge_no_base
+        PASS [   0.017s] ( 12/587) agent-doc build_info::tests::text_report_names_every_identity_field
+        PASS [   0.017s] ( 13/587) agent-doc build_info::tests::existing_sibling_library_is_reported
+        PASS [   0.017s] ( 14/587) agent-doc ffi::ipc_listener_handler_swap_tests::dispatch_uses_the_handler_installed_last
+        PASS [   0.010s] ( 15/587) agent-doc ffi::tests::document_base_hash_resolves_on_the_editor_plane_without_the_state_db
+        PASS [   0.010s] ( 16/587) agent-doc ffi::tests::editor_reregister_never_returns_a_divergent_whole_document_candidate
+        PASS [   0.021s] ( 17/587) agent-doc ffi::tests::apply_patch_replace
+        PASS [   0.014s] ( 18/587) agent-doc ffi::tests::apply_patch_with_boundary_marks_new_exchange_heading_with_head
+        PASS [   0.007s] ( 19/587) agent-doc ffi::tests::gh326_editor_derive_ffi_answers_layout_derivations
+        PASS [   0.022s] ( 20/587) agent-doc ffi::ack_content_tests::test_write_ack_content_legacy_abi_is_rejected
+        PASS [   0.006s] ( 21/587) agent-doc ffi::tests::identical_op_capture_refusals_write_one_receipt_not_one_per_attempt
+        PASS [   0.022s] ( 22/587) agent-doc ffi::ack_content_tests::lazily_current_observation_panic_stays_inside_the_ffi_boundary
+        PASS [   0.015s] ( 23/587) agent-doc ffi::tests::editor_ops_marker_check_ignores_in_place_marker_edits_and_bad_input
+        PASS [   0.023s] ( 24/587) agent-doc ffi::ack_content_tests::test_editor_content_applied_for_editor_v1_requires_lazily_receipt_capability
+        PASS [   0.023s] ( 25/587) agent-doc ffi::ack_content_tests::test_write_ack_content_for_editor_v2_legacy_abi_is_rejected
+        PASS [   0.024s] ( 26/587) agent-doc ffi::ack_content_tests::test_lazily_current_observed_v1_does_not_touch_legacy_sidecar
+        PASS [   0.024s] ( 27/587) agent-doc ffi::ack_content_tests::ffi_diagnostic_ignores_a_closed_host_pipe
+        PASS [   0.017s] ( 28/587) agent-doc ffi::tests::editor_surface_event_ffi_writes_one_shared_cross_editor_schema
+        PASS [   0.007s] ( 29/587) agent-doc ffi::tests::normalize_template_structure_ffi_rejects_mixed_duplicate_scaffold
+        PASS [   0.007s] ( 30/587) agent-doc ffi::tests::normalize_template_structure_ffi_rejects_truncated_agent_comment
+        PASS [   0.017s] ( 31/587) agent-doc ffi::tests::effect_failure_ledger_abi_counts_lazily_attempts_per_scope_and_key
+        PASS [   0.019s] ( 32/587) agent-doc ffi::tests::document_base_hash_failure_writes_a_named_ops_log_receipt
+        PASS [   0.010s] ( 33/587) agent-doc ffi::tests::merge_frontmatter_adds_field
+        PASS [   0.009s] ( 34/587) agent-doc ffi::tests::normalize_template_structure_ffi_repairs_safe_duplicate_scaffold
+        PASS [   0.008s] ( 35/587) agent-doc ffi::tests::op_capture_refusal_receipt_records_an_empty_detail_as_none
+        PASS [   0.022s] ( 36/587) agent-doc ffi::tests::clear_editor_op_epoch_ffi_prevents_cross_projection_replay
+        PASS [   0.022s] ( 37/587) agent-doc ffi::tests::editor_patch_applied_ffi_records_lazily_receipt
+        PASS [   0.007s] ( 38/587) agent-doc ffi::tests::queue_tree_json_exposes_node_states_for_editor_gutters
+        PASS [   0.007s] ( 39/587) agent-doc ffi::tests::queue_tree_status_json_answers_for_the_caret_subtree
+        PASS [   0.025s] ( 40/587) agent-doc ffi::tests::admin_queue_control_ffi_returns_typed_receipt_json
+        PASS [   0.016s] ( 41/587) agent-doc ffi::tests::normalize_template_structure_ffi_accepts_any_heading_prefixed_opener
+        PASS [   0.005s] ( 42/587) agent-doc ffi::tests::resolve_project_path_prefers_nearest_ancestor
+        PASS [   0.025s] ( 43/587) agent-doc ffi::tests::editor_ops_marker_check_warns_on_a_removed_marker_and_clears_on_repair
+        PASS [   0.011s] ( 44/587) agent-doc ffi::tests::parse_components_roundtrip
+        PASS [   0.027s] ( 45/587) agent-doc ffi::tests::editor_patch_rejected_ffi_records_durable_lazily_receipt
+        PASS [   0.008s] ( 46/587) agent-doc ffi::tests::state_projection_ffi_accepts_editor_patch_applied_event
+        PASS [   0.010s] ( 47/587) agent-doc ffi::tests::reposition_preserve_head_with_id_keeps_head_and_id
+        PASS [   0.021s] ( 48/587) agent-doc ffi::tests::gh343_remote_layout_ffi_never_invents_split_columns
+        PASS [   0.012s] ( 49/587) agent-doc ffi::tests::reposition_boundary_removes_stale
+        PASS [   0.009s] ( 50/587) agent-doc ffi::tests::state_projection_ffi_rejects_unknown_legacy_receipt_event
+        PASS [   0.016s] ( 51/587) agent-doc ffi::tests::post_register_projection_accepts_exact_idempotent_relay_target_only
+        PASS [   0.005s] ( 52/587) agent-doc op_capture_refusal_coalesce::tests::a_repeat_after_the_window_carries_the_suppressed_count
+        PASS [   0.012s] ( 53/587) agent-doc ffi::tests::resolve_project_path_finds_nested_submodule
+        PASS [   0.007s] ( 54/587) agent-doc ffi::tests::sync_try_lock_supersedes_a_guard_wedged_past_the_bound
+        PASS [   0.017s] ( 55/587) agent-doc ffi::tests::record_editor_op_ffi_preserves_non_ascii_byte_offsets
+        PASS [   0.010s] ( 56/587) agent-doc ffi::tests::state_projection_ffi_round_trip
+        PASS [   0.013s] ( 57/587) agent-doc ffi::tests::reposition_preserve_head_keeps_head_markers
+        PASS [   0.036s] ( 58/587) agent-doc ffi::tests::admin_inspect_ffi_returns_queue_diagnostics_json
+        PASS [   0.013s] ( 59/587) agent-doc ffi::tests::sync_tmux_layout_for_client_ffi_names_the_requesting_client
+        PASS [   0.022s] ( 60/587) agent-doc ffi::tests::op_capture_refusal_receipt_names_its_reason_on_one_line
+        PASS [   0.018s] ( 61/587) agent-doc ffi::tests::reposition_boundary_with_id_reuses_requested_marker
+        PASS [   0.015s] ( 62/587) agent-doc ffi::tests::state_subscribe_ffi_emits_snapshot_then_delta
+        PASS [   0.012s] ( 63/587) agent-doc op_capture_refusal_coalesce::tests::a_different_refusal_flushes_the_prior_run
+        PASS [   0.006s] ( 64/587) agent-doc-crdt-relay-io tests::absent_socket_is_definitive_only_when_its_process_is_dead
+        PASS [   0.007s] ( 65/587) agent-doc-crdt-relay-io tests::a_stale_sender_does_not_drop_a_live_editor_replica
+        PASS [   0.021s] ( 66/587) agent-doc ffi::tests::record_state_event_stamps_and_gates_queue_hosting_epoch
+        PASS [   0.047s] ( 67/587) agent-doc ffi::ack_content_tests::ffi_git_commit_commits_staged_file
+        PASS [   0.010s] ( 68/587) agent-doc-crdt-relay-io editor_attach_hold::tests::a_malformed_hold_is_reported_not_observed
+        PASS [   0.012s] ( 69/587) agent-doc-crdt-relay-io binary_write_attribution::tests::a_record_round_trips_and_holds_no_document_text
+        PASS [   0.010s] ( 70/587) agent-doc-crdt-relay-io editor_attach_hold::tests::a_hold_from_an_exited_editor_is_not_observed_and_is_removed
+        PASS [   0.012s] ( 71/587) agent-doc op_capture_refusal_coalesce::tests::the_tracked_path_table_is_bounded
+        PASS [   0.027s] ( 72/587) agent-doc ffi::tests::record_editor_op_ffi_writes_base_keyed_sidecar
+        PASS [   0.010s] ( 73/587) agent-doc-crdt-relay-io tests::a_busy_document_hub_does_not_block_another_document
+        PASS [   0.010s] ( 74/587) agent-doc-crdt-relay-io tests::a_deferred_receipt_from_a_slow_editor_is_never_a_definitive_answer
+        PASS [   0.050s] ( 75/587) agent-doc ffi::ack_content_tests::test_editor_content_applied_for_editor_v1_records_receipt_without_live_buffer_sidecar
+        PASS [   0.025s] ( 76/587) agent-doc ffi::tests::record_editor_ops_json_ffi_bases_an_attested_burst_on_its_pre_text
+        PASS [   0.011s] ( 77/587) agent-doc-crdt-relay-io tests::a_transport_failure_is_never_a_definitive_answer
+        PASS [   0.015s] ( 78/587) agent-doc op_capture_refusal_coalesce::tests::first_refusal_is_emitted_and_identical_repeats_are_counted
+        PASS [   0.018s] ( 79/587) agent-doc ffi::tests::visual_tokens_json_uses_utf16_document_offsets
+        PASS [   0.008s] ( 80/587) agent-doc-crdt-relay-io tests::adopt_authoritative_text_converges_a_stale_canonical_for_the_commit_read
+        PASS [   0.013s] ( 81/587) agent-doc-crdt-relay-io editor_attach_hold::tests::a_recorded_hold_round_trips_and_clears
+        PASS [   0.006s] ( 82/587) agent-doc-crdt-relay-io tests::adopt_authoritative_text_is_none_when_headless
+        PASS [   0.053s] ( 83/587) agent-doc ffi::ack_content_tests::patch_content_already_committed_requires_disk_to_match_head
+        PASS [   0.027s] ( 84/587) agent-doc ffi::tests::resolve_project_path_file_directly_in_root
+        PASS [   0.018s] ( 85/587) agent-doc-crdt-relay-io binary_write_attribution::tests::a_malformed_record_is_an_error_not_an_attribution
+        PASS [   0.010s] ( 86/587) agent-doc-crdt-relay-io tests::an_exhausted_build_mismatch_resets_transport_health_refusals
+        PASS [   0.009s] ( 87/587) agent-doc-crdt-relay-io tests::an_answered_refusal_is_never_weaker_evidence_than_an_unreachable_endpoint
+        PASS [   0.008s] ( 88/587) agent-doc-crdt-relay-io tests::cold_start_decision_prefers_the_editor_only_over_the_disk_rung
+        PASS [   0.008s] ( 89/587) agent-doc-crdt-relay-io tests::captured_base_registration_never_bootstraps_a_missing_model_from_disk
+        PASS [   0.012s] ( 90/587) agent-doc-crdt-relay-io tests::an_exhausted_build_mismatch_is_a_definitive_answer
+        PASS [   0.015s] ( 91/587) agent-doc-crdt-relay-io tests::apply_disk_change_host_is_none_when_headless
+        PASS [   0.014s] ( 92/587) agent-doc-crdt-relay-io tests::apply_disk_change_host_reconciles_noop_when_editor_already_has_it
+        PASS [   0.016s] ( 93/587) agent-doc-crdt-relay-io tests::allocating_a_new_document_hub_does_not_block_on_a_busy_one
+        PASS [   0.012s] ( 94/587) agent-doc-crdt-relay-io tests::commit_barrier_rebuilds_canonical_after_out_of_band_disk_correction_without_live_editor
+        PASS [   0.016s] ( 95/587) agent-doc-crdt-relay-io tests::an_existing_hub_never_decodes_its_retained_recovery_projection
+        PASS [   0.015s] ( 96/587) agent-doc-crdt-relay-io tests::bounded_barrier_release_is_not_a_visible_projection_receipt
+        PASS [   0.016s] ( 97/587) agent-doc-crdt-relay-io tests::commit_barrier_preserves_live_editor_when_disk_is_an_intermediate_save
+        PASS [   0.018s] ( 98/587) agent-doc-crdt-relay-io tests::commit_barrier_keeps_in_memory_when_disk_matches_last_commit
+        PASS [   0.013s] ( 99/587) agent-doc-crdt-relay-io tests::controller_hydration_keeps_every_struck_attempt_state_struck
+        PASS [   0.022s] (100/587) agent-doc-crdt-relay-io tests::clobberfollowups_commit_barrier_refuses_while_a_live_replica_is_quarantined
+        PASS [   0.023s] (101/587) agent-doc-crdt-relay-io tests::cold_disk_seed_is_overlaid_by_the_durable_running_attempt
+        PASS [   0.008s] (102/587) agent-doc-crdt-relay-io tests::controllerrecyclelost_reseed_history_classification
+        PASS [   0.013s] (103/587) agent-doc-crdt-relay-io tests::convergence_await_wakes_on_one_cell_transition
+        PASS [   0.026s] (104/587) agent-doc-crdt-relay-io tests::cold_controller_restart_reprojects_a_durable_claim_onto_stale_disk
+        PASS [   0.044s] (105/587) agent-doc ffi::tests::tmux_focus_state_for_client_ffi_reports_the_clients_navigation_lane
+        PASS [   0.010s] (106/587) agent-doc-crdt-relay-io tests::cp_relay_write_without_projection_still_fails_closed_on_missing_replica
+        PASS [   0.013s] (107/587) agent-doc-crdt-relay-io tests::current_liveness_endpoint_retires_a_stale_same_pid_replica_route
+        PASS [   0.029s] (108/587) agent-doc-crdt-relay-io tests::controller_restart_never_replays_a_cancelled_generation_onto_readded_text
+        PASS [   0.011s] (109/587) agent-doc-crdt-relay-io tests::dead_editor_registration_cannot_bootstrap_detached_authority
+        PASS [   0.038s] (110/587) agent-doc-crdt-relay-io tests::committed_empty_hub_is_evicted_and_recontact_restores_canonical
+        PASS [   0.081s] (111/587) agent-doc ffi::tests::document_base_hash_maps_a_null_projection_response_to_the_empty_baseline
+        PASS [   0.017s] (112/587) agent-doc-crdt-relay-io tests::cp_relay_write_zero_live_editors_keeps_doc_op_canonical_authority
+        PASS [   0.035s] (113/587) agent-doc-crdt-relay-io tests::controller_hydration_derives_exact_queue_attempt_markers_idempotently
+        PASS [   0.023s] (114/587) agent-doc-crdt-relay-io tests::cp_relay_write_requires_current_canonical_baseline
+        PASS [   0.005s] (115/587) agent-doc-crdt-relay-io tests::detached_current_text_is_a_noop_and_allocates_no_hub
+        PASS [   0.028s] (116/587) agent-doc-crdt-relay-io tests::cp_relay_write_queues_editor_pull_without_file_ipc_sidecar
+        PASS [   0.041s] (117/587) agent-doc-crdt-relay-io tests::concurrent_refresh_registrations_elect_one_logical_successor
+        PASS [   0.021s] (118/587) agent-doc-crdt-relay-io tests::current_text_releases_document_relay_before_turn_attribution_log
+        PASS [   0.030s] (119/587) agent-doc-crdt-relay-io tests::cp_relay_write_recovers_missing_replica_from_retained_projection
+        PASS [   0.008s] (120/587) agent-doc-crdt-relay-io tests::detached_durable_checkpoint_skips_without_allocating_hub
+        PASS [   0.036s] (121/587) agent-doc-crdt-relay-io tests::converged_revision_cursor_waits_for_later_visible_receipt
+        PASS [   0.025s] (122/587) agent-doc-crdt-relay-io tests::cyclic_replica_update_is_quarantined_without_mutating_canonical
+        PASS [   0.008s] (123/587) agent-doc-crdt-relay-io tests::disk_demotion_is_skipped_on_the_headless_path
+        PASS [   0.016s] (124/587) agent-doc-crdt-relay-io tests::detached_commit_barrier_is_a_trivial_noop
+        PASS [   0.015s] (125/587) agent-doc-crdt-relay-io tests::disk_demotion_in_memory_wins_at_the_live_load_seam
+        PASS [   0.070s] (126/587) agent-doc-crdt-relay-io tests::a_member_retired_by_an_epoch_rebuild_is_refused_deltas_until_a_full_reregister
+        PASS [   0.016s] (127/587) agent-doc-crdt-relay-io tests::durable_recovery_projection_keeps_lineage_with_exact_bytes
+        PASS [   0.052s] (128/587) agent-doc-crdt-relay-io tests::controller_recycle_keeps_a_running_claim_running_across_reseed
+        PASS [   0.059s] (129/587) agent-doc-crdt-relay-io tests::componentownclose_cold_start_adopts_disk_that_did_not_lose_a_marker
+        PASS [   0.023s] (130/587) agent-doc-crdt-relay-io tests::detached_disk_commit_supersedes_evicted_retained_projection_on_recontact
+        PASS [   0.051s] (131/587) agent-doc-crdt-relay-io tests::convergence_await_is_bounded_when_the_cell_does_not_change
+        PASS [   0.054s] (132/587) agent-doc-crdt-relay-io tests::controllerrecyclelost_reseed_with_editor_only_text_stays_authoritative
+        PASS [   0.066s] (133/587) agent-doc-crdt-relay-io tests::componentownclose_commit_barrier_fences_an_out_of_band_marker_break
+        PASS [   0.070s] (134/587) agent-doc-crdt-relay-io tests::canonical_replica_projection_clears_transport_health_episode
+        PASS [   0.032s] (135/587) agent-doc-crdt-relay-io tests::detached_cp_write_fences_reattach_and_is_exactly_once
+        PASS [   0.070s] (136/587) agent-doc-crdt-relay-io tests::componentownclose_cold_start_fences_broken_disk_against_head
+        PASS [   0.132s] (137/587) agent-doc ffi::ipc_listener_handler_swap_tests::restarting_a_live_listener_routes_to_the_new_handler
+        PASS [   0.071s] (138/587) agent-doc-crdt-relay-io tests::controllerrecyclelost_fresh_controller_reseed_hydrates_the_newest_committed_text
+        PASS [   0.078s] (139/587) agent-doc-crdt-relay-io tests::controller_hydration_never_marks_the_waiting_on_you_heading
+        PASS [   0.041s] (140/587) agent-doc-crdt-relay-io tests::durable_response_cell_barrier_does_not_wait_for_outbound_projection_receipt
+        PASS [   0.061s] (141/587) agent-doc-crdt-relay-io tests::deliveries_carry_the_registered_history_and_a_foreign_retained_history_bootstraps_in_full
+        PASS [   0.036s] (142/587) agent-doc-crdt-relay-io tests::editor_attach_simworld::a_restored_settled_shadow_publishes_the_saved_operator_text_over_an_unmoved_hub
+        PASS [   0.008s] (143/587) agent-doc-crdt-relay-io tests::editor_attached_commit_barrier_does_not_block_on_a_disconnected_editor
+        PASS [   0.019s] (144/587) agent-doc-crdt-relay-io tests::editor_attached_commit_barrier_defers_when_relay_model_missing
+        PASS [   0.077s] (145/587) agent-doc-crdt-relay-io tests::definitive_replica_and_native_save_refusals_share_transport_health
+        PASS [   0.011s] (146/587) agent-doc-crdt-relay-io tests::editor_attached_commit_barrier_flushes_live_replicas_on_a_consistent_cut
+        PASS [   0.142s] (147/587) agent-doc ffi::tests::post_register_reconnect_returns_semantic_replay_over_exact_editor_cut
+        PASS [   0.011s] (148/587) agent-doc-crdt-relay-io tests::editor_attached_current_text_reads_relay_canonical_after_flush
+        PASS [   0.011s] (149/587) agent-doc-crdt-relay-io tests::editor_attached_current_text_without_replica_does_not_read_disk
+        PASS [   0.158s] (150/587) agent-doc ffi::tests::gh274_post_register_reconnect_refuses_original_beside_lossy_copy
+        PASS [   0.014s] (151/587) agent-doc-crdt-relay-io tests::editor_attached_projection_observation_does_not_write_recovery_sidecar
+        PASS [   0.069s] (152/587) agent-doc-crdt-relay-io tests::editor_attach_simworld::a_plain_ide_restart_never_adopts_a_differing_surviving_canonical
+        PASS [   0.066s] (153/587) agent-doc-crdt-relay-io tests::editor_attach_simworld::a_restored_settled_shadow_adopts_a_canonical_that_advanced_while_the_ide_was_down
+        PASS [   0.010s] (154/587) agent-doc-crdt-relay-io tests::editor_replica_reregister_reason_has_a_distinct_wire_token
+        PASS [   0.015s] (155/587) agent-doc-crdt-relay-io tests::editor_process_id_recognizes_supported_editor_identities_only
+        PASS [   0.068s] (156/587) agent-doc-crdt-relay-io tests::editor_attach_simworld::an_empty_fresh_canonical_takes_the_attached_buffer_and_loses_nothing
+        PASS [   0.025s] (157/587) agent-doc-crdt-relay-io tests::editor_attached_projection_recovery_read_still_requires_live_editor_publish
+        PASS [   0.090s] (158/587) agent-doc-crdt-relay-io tests::editor_attach_simworld::a_fresh_controller_reseed_yields_to_the_saved_operator_buffer_without_operator_evidence
+        PASS [   0.025s] (159/587) agent-doc-crdt-relay-io tests::editor_exit_reap_leaves_another_editor_process_attached
+        PASS [   0.087s] (160/587) agent-doc-crdt-relay-io tests::editor_attach_simworld::a_replacement_controller_attributes_its_predecessors_binary_writes
+        PASS [   0.029s] (161/587) agent-doc-crdt-relay-io tests::editor_exit_reaps_the_ghost_member_without_waiting_for_a_replacement
+        PASS [   0.095s] (162/587) agent-doc-crdt-relay-io tests::editor_attach_simworld::a_lagging_controller_projection_with_extra_text_still_yields_to_the_ide_buffer
+        PASS [   0.081s] (163/587) agent-doc-crdt-relay-io tests::editor_attach_simworld::a_two_sided_reseed_conflict_publishes_the_ide_buffer
+        PASS [   0.100s] (164/587) agent-doc-crdt-relay-io tests::editor_attach_simworld::a_controller_rewrite_of_the_retyped_row_yields_to_the_ide_buffer
+        PASS [   0.100s] (165/587) agent-doc-crdt-relay-io tests::editor_attach_simworld::a_durable_record_proves_nothing_about_a_canonical_past_its_tip
+        PASS [   0.089s] (166/587) agent-doc-crdt-relay-io tests::editor_attach_simworld::a_restart_with_operator_text_beside_binary_projections_publishes_the_ide_buffer
+        PASS [   0.080s] (167/587) agent-doc-crdt-relay-io tests::editor_attach_simworld::an_unattributed_controller_difference_still_yields_to_the_ide_buffer
+        PASS [   0.009s] (168/587) agent-doc-crdt-relay-io tests::ensure_document_model_poll_backoff_bounds_unavailable_endpoint_probes
+        PASS [   0.009s] (169/587) agent-doc-crdt-relay-io tests::every_diagnosis_token_round_trips_to_the_class_that_wrote_it
+        PASS [   0.008s] (170/587) agent-doc-crdt-relay-io tests::gh236_native_save_fence_admits_every_protocol_compatible_ide_line
+        PASS [   0.008s] (171/587) agent-doc-crdt-relay-io tests::gh90_dead_editor_registration_never_reaches_the_generation_fence
+        PASS [   0.074s] (172/587) agent-doc-crdt-relay-io tests::editor_attach_simworld::continuous_typing_with_a_stale_shadow_still_publishes_the_ide_buffer
+        PASS [   0.008s] (173/587) agent-doc-crdt-relay-io tests::idempotent_retained_target_preserves_expected_cut_for_reattach
+        PASS [   0.020s] (174/587) agent-doc-crdt-relay-io tests::ensure_document_model_observes_registered_replica
+        PASS [   0.108s] (175/587) agent-doc-crdt-relay-io tests::editor_attach_simworld::a_lost_frontier_adopts_a_controller_claim_projection_it_can_attribute
+        PASS [   0.006s] (176/587) agent-doc-crdt-relay-io tests::identity_derived_pid_stays_fail_closed_for_dead_and_headless_replicas
+        PASS [   0.126s] (177/587) agent-doc-crdt-relay-io tests::delete_only_edit_invalidates_shared_text_and_revision
+        PASS [   0.007s] (178/587) agent-doc-crdt-relay-io tests::logical_replica_identity_collapses_only_numeric_refresh_generations
+        PASS [   0.097s] (179/587) agent-doc-crdt-relay-io tests::editor_attach_simworld::continuous_typing_beside_an_undelivered_controller_write_publishes_the_ide_buffer
+        PASS [   0.006s] (180/587) agent-doc-crdt-relay-io tests::native_save_routes_require_a_protocol_compatible_plugin_generation
+        PASS [   0.008s] (181/587) agent-doc-crdt-relay-io tests::missing_replica_dispositions_are_distinguishable
+        PASS [   0.083s] (182/587) agent-doc-crdt-relay-io tests::editor_attach_simworld::structure_quarantined_typing_with_durable_ingest_publishes_the_ide_buffer
+        PASS [   0.021s] (183/587) agent-doc-crdt-relay-io tests::idempotent_cp_relay_write_preserves_the_acked_delivery_frontier
+        PASS [   0.006s] (184/587) agent-doc-crdt-relay-io tests::native_save_suppresses_a_refusing_endpoint_until_the_probe_window
+        PASS [   0.104s] (185/587) agent-doc-crdt-relay-io tests::editor_attach_simworld::an_install_reload_never_adopts_canonical_over_unsynced_operator_text
+        PASS [   0.027s] (186/587) agent-doc-crdt-relay-io tests::fresh_controller_reseeds_from_a_retained_native_replica
+        PASS [   0.026s] (187/587) agent-doc-crdt-relay-io tests::fresh_controller_without_a_frontier_keeps_an_unsaved_canonical
+        PASS [   0.022s] (188/587) agent-doc-crdt-relay-io tests::identity_derived_pid_bootstraps_a_registration_that_carries_no_explicit_pid
+        PASS [   0.018s] (189/587) agent-doc-crdt-relay-io tests::live_relay_identity_follows_a_filesystem_path_transition
+        PASS [   0.022s] (190/587) agent-doc-crdt-relay-io tests::live_editor_registration_bootstraps_detached_authority_without_open_fact_race
+        PASS [   0.010s] (191/587) agent-doc-crdt-relay-io tests::newer_liveness_generation_retires_the_rejected_generation_fence
+        PASS [   0.008s] (192/587) agent-doc-crdt-relay-io tests::only_a_definitive_refusal_drops_a_replica_from_the_delivery_cut
+        PASS [   0.007s] (193/587) agent-doc-crdt-relay-io tests::projection_observation_defers_without_creating_a_repair_request
+        PASS [   0.008s] (194/587) agent-doc-crdt-relay-io tests::projection_changed_native_save_receipt_survives_the_relay_as_typed_drift
+        PASS [   0.033s] (195/587) agent-doc-crdt-relay-io tests::idempotent_cp_relay_retry_accepts_an_already_published_target_with_a_stale_base
+        PASS [   0.010s] (196/587) agent-doc-crdt-relay-io tests::pending_delivery_rewake_keeps_waking_until_the_receipt
+        PASS [   0.124s] (197/587) agent-doc-crdt-relay-io tests::editor_attach_simworld::a_replacement_controller_without_a_readable_record_yields_to_the_ide_buffer
+        PASS [   0.024s] (198/587) agent-doc-crdt-relay-io tests::moved_disk_is_not_replaced_by_the_carried_canonical
+        PASS [   0.008s] (199/587) agent-doc-crdt-relay-io tests::pull_rebootstrap_is_none_when_headless
+        PASS [   0.018s] (200/587) agent-doc-crdt-relay-io tests::nonblocking_current_text_does_not_flush_pending_editor_ops
+        PASS [   0.007s] (201/587) agent-doc-crdt-relay-io tests::queue_region_observation_accepts_run_and_legacy_queue_markers
+        PASS [   0.106s] (202/587) agent-doc-crdt-relay-io tests::editor_attach_simworld::library_reload_then_refused_swap_reregisters_with_the_retained_frontier
+        PASS [   0.008s] (203/587) agent-doc-crdt-relay-io tests::recover_hub_from_projection_rebuilds_canonical_on_restart
+        PASS [   0.028s] (204/587) agent-doc-crdt-relay-io tests::new_classloader_prunes_its_old_editor_id_from_other_documents
+        PASS [   0.029s] (205/587) agent-doc-crdt-relay-io tests::new_plugin_classloader_retires_the_same_pid_document_replica
+        PASS [   0.021s] (206/587) agent-doc-crdt-relay-io tests::provisional_classloader_replacement_retires_same_pid_member_on_promotion
+        PASS [   0.017s] (207/587) agent-doc-crdt-relay-io tests::reconcile_removes_replicas_whose_editor_process_is_gone
+        PASS [   0.148s] (208/587) agent-doc-crdt-relay-io tests::editor_attach_simworld::a_frontier_released_before_the_swap_check_still_preserves_the_ide_buffer
+        PASS [   0.023s] (209/587) agent-doc-crdt-relay-io tests::provisional_replacement_preserves_predecessor_until_promoted
+        PASS [   0.020s] (210/587) agent-doc-crdt-relay-io tests::register_replica_seeds_fresh_hub_from_current_document_text
+        PASS [   0.026s] (211/587) agent-doc-crdt-relay-io tests::pull_from_dropped_replica_is_refused_until_reregister_delivers_missed_response
+        PASS [   0.048s] (212/587) agent-doc-crdt-relay-io tests::legacy_document_op_fences_same_replica_before_partial_queue_update
+        PASS [   0.145s] (213/587) agent-doc-crdt-relay-io tests::editor_attach_simworld::a_restart_whose_canonical_differs_only_by_binary_authored_projections_adopts_canonical
+        PASS [   0.022s] (214/587) agent-doc-crdt-relay-io tests::rejected_endpoint_quarantine_disconnects_only_the_exact_current_route
+        PASS [   0.012s] (215/587) agent-doc-crdt-relay-io tests::repeated_unknown_document_probe_does_not_replay_hydrated_liveness_history
+        PASS [   0.009s] (216/587) agent-doc-crdt-relay-io tests::replica_identity_preserves_a_routable_editor_endpoint_without_liveness_registration
+        PASS [   0.026s] (217/587) agent-doc-crdt-relay-io tests::relay_update_opening_code_fence_is_operator_text_not_corruption
+        PASS [   0.009s] (218/587) agent-doc-crdt-relay-io tests::replica_signal_diagnosis_and_disposition_agree
+        PASS [   0.006s] (219/587) agent-doc-crdt-relay-io tests::replica_signal_diagnosis_separates_missing_registration_from_failed_delivery
+        PASS [   0.037s] (220/587) agent-doc-crdt-relay-io tests::refresh_replaces_one_logical_replica_and_fences_both_late_frame_paths
+        PASS [   0.076s] (221/587) agent-doc-crdt-relay-io tests::ensure_document_model_retries_transient_observer_timeout_until_ready
+        PASS [   0.036s] (222/587) agent-doc-crdt-relay-io tests::relay_update_deleting_a_whole_marker_line_is_fenced_until_restored
+        PASS [   0.021s] (223/587) agent-doc-crdt-relay-io tests::replacement_registration_rejects_a_retained_frontier_ahead_of_canonical
+        PASS [   0.040s] (224/587) agent-doc-crdt-relay-io tests::relay_ahead_of_disk_keeps_authority_over_a_retained_registration
+        PASS [   0.008s] (225/587) agent-doc-crdt-relay-io tests::response_cell_target_weld_is_repaired_before_apply
+        PASS [   0.010s] (226/587) agent-doc-crdt-relay-io tests::response_cell_relay_lands_the_recap_in_the_same_cut
+        PASS [   0.032s] (227/587) agent-doc-crdt-relay-io tests::relay_update_stray_keystroke_inside_marker_prefix_is_operator_text
+        PASS [   0.044s] (228/587) agent-doc-crdt-relay-io tests::rejected_endpoint_quarantine_keeps_editor_authority_fail_closed
+        PASS [   0.108s] (229/587) agent-doc-crdt-relay-io tests::ensure_document_model_does_not_promote_projection_after_publish_timeout
+        PASS [   0.027s] (230/587) agent-doc-crdt-relay-io tests::replica_membership_replacement_does_not_close_document_authority
+        PASS [   0.014s] (231/587) agent-doc-crdt-relay-io tests::response_cell_repairs_duplicate_review_close_on_live_canonical_cut
+        PASS [   0.164s] (232/587) agent-doc-crdt-relay-io tests::editor_attach_simworld::an_install_reload_reattaches_an_unedited_buffer_without_an_operator_step
+        PASS [   0.035s] (233/587) agent-doc-crdt-relay-io tests::replacement_registration_prunes_dead_member_and_preserves_delivery_barrier
+        PASS [   0.006s] (234/587) agent-doc-crdt-relay-io tests::route_signal_ignores_non_change_delivery
+        PASS [   0.038s] (235/587) agent-doc-crdt-relay-io tests::relay_update_that_corrupts_canonical_structure_is_fenced_not_reverted
+        PASS [   0.037s] (236/587) agent-doc-crdt-relay-io tests::replacement_registration_preserves_unsettled_canonical_projection_receipt
+        PASS [   0.006s] (237/587) agent-doc-crdt-relay-io tests::route_signal_leaves_headless_disk_as_authority
+        PASS [   0.050s] (238/587) agent-doc-crdt-relay-io tests::relay_update_after_handoff_reseeds_from_the_editor_not_disk
+        PASS [   0.101s] (239/587) agent-doc-crdt-relay-io tests::ensure_document_model_fails_closed_for_missing_replica_within_short_window
+        PASS [   0.011s] (240/587) agent-doc-crdt-relay-io tests::retired_relay_authority_never_serves_the_frozen_hub_as_current
+        PASS [   0.037s] (241/587) agent-doc-crdt-relay-io tests::replacement_registration_returns_only_the_canonical_delta_from_retained_state
+        PASS [   0.005s] (242/587) agent-doc-crdt-relay-io tests::superseded_endpoint_selection_spares_other_processes_and_the_current_document
+        PASS [   0.020s] (243/587) agent-doc-crdt-relay-io tests::retired_refresh_deregister_preserves_same_pid_attachment_until_last_generation_closes
+        PASS [   0.010s] (244/587) agent-doc-crdt-relay-io tests::stale_same_pid_classloader_cannot_reclaim_membership_after_liveness_advances
+        PASS [   0.010s] (245/587) agent-doc-crdt-relay-io tests::update_removed_component_marker_counts_heading_prefixed_openers
+        PASS [   0.115s] (246/587) agent-doc-crdt-relay-io tests::ensure_document_model_extends_window_when_editor_registers_a_replica
+        PASS [   0.246s] (247/587) agent-doc-crdt-relay-io tests::componentownclose_cold_start_fences_broken_disk_against_the_snapshot
+        PASS [   0.012s] (248/587) agent-doc-crdt-relay-io tests::update_removed_component_marker_keys_on_deleted_lines_not_changed_text
+        PASS [   0.020s] (249/587) agent-doc-crdt-relay-io tests::route_signal_defers_reconcile_and_preserves_editor_text_while_operator_edit_in_flight
+        PASS [   0.063s] (250/587) agent-doc-crdt-relay-io tests::relay_update_editing_marker_attributes_mid_rename_is_operator_text
+        PASS [   0.126s] (251/587) agent-doc-crdt-relay-io tests::ensure_document_model_does_not_promote_projection_after_publish_transport_failure
+        PASS [   0.008s] (252/587) agent-doc-crdt-relay-io unsaved_canonical::tests::a_record_round_trips_and_carries_only_while_disk_is_the_baseline
+        PASS [   0.014s] (253/587) agent-doc-crdt-relay-io tests::visible_roll_forward_event_carries_its_canonical_hash_fence
+        PASS [   0.019s] (254/587) agent-doc-crdt-relay-io tests::stale_rejection_cannot_quarantine_a_newer_registration_generation
+        PASS [   0.013s] (255/587) agent-doc-crdt-relay-io unsaved_canonical::tests::a_hash_mismatch_does_not_seed_the_cut
+        PASS [   0.010s] (256/587) agent-doc-crdt-relay-io unsaved_canonical::tests::a_moved_disk_is_not_replaced_and_the_record_stays
+        PASS [   0.133s] (257/587) agent-doc-crdt-relay-io tests::ensure_document_model_does_not_promote_compacted_projection_over_live_editor
+        PASS [   0.023s] (258/587) agent-doc-crdt-relay-io tests::stale_replacement_precondition_preserves_current_replica_and_authority
+        PASS [   0.051s] (259/587) agent-doc-crdt-relay-io tests::replica_notify_acks_do_not_erase_a_native_save_refusal_run
+        PASS [   0.040s] (260/587) agent-doc-crdt-relay-io tests::retained_frontier_reseed_is_not_replaced_by_the_carried_canonical
+        PASS [   0.010s] (261/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::live_prompt_drift_auto_recovery_preserves_disk_only_backlog_text
+        PASS [   0.046s] (262/587) agent-doc-crdt-relay-io tests::response_cell_relay_supersedes_restored_uncommitted_tail
+        PASS [   0.027s] (263/587) agent-doc-crdt-relay-io tests::warm_supervisor_refreshes_routes_from_appended_durable_liveness
+        PASS [   0.033s] (264/587) agent-doc-crdt-relay-io tests::typing_relays_while_a_bootstrap_receipt_is_outstanding
+        PASS [   0.014s] (265/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::live_prompt_drift_auto_recovery_preserves_operator_deleted_backlog_text
+        PASS [   0.014s] (266/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::live_prompt_drift_auto_recovery_preserves_disk_only_queue_item
+        PASS [   0.013s] (267/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::live_prompt_drift_auto_recovery_preserves_partial_exchange_word
+        PASS [   0.010s] (268/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::live_prompt_drift_auto_recovery_safe_accepts_benign_wedge
+        PASS [   0.042s] (269/587) agent-doc-crdt-relay-io tests::silent_replica_release_claims_reregister_without_a_pull
+        PASS [   0.017s] (270/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::live_prompt_drift_auto_recovery_preserves_operator_edited_backlog_text
+        PASS [   0.030s] (271/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::capability_guard_does_not_request_live_buffer_over_file_signal
+        PASS [   0.046s] (272/587) agent-doc-crdt-relay-io tests::route_signal_reconciles_once_operator_edit_settles
+        PASS [   0.029s] (273/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::converge_document_or_disk_blocks_diverged_under_capable_registration_before_ipc
+        PASS [   0.014s] (274/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::live_prompt_drift_auto_recovery_safe_rejects_no_wedge
+        PASS [   0.017s] (275/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::live_prompt_drift_auto_recovery_safe_accepts_disk_only_exchange_prompt
+        PASS [   0.013s] (276/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::live_prompt_drift_response_patches_ignore_operator_owned_components
+        PASS [   0.049s] (277/587) agent-doc-crdt-relay-io tests::stale_document_op_fences_same_replica_before_partial_queue_update
+        PASS [   0.011s] (278/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::snapshot_contains_dropped_prompt_matches_consumed_and_active
+        PASS [   0.071s] (279/587) agent-doc-crdt-relay-io tests::response_cell_relay_keeps_completion_cells_accepted_after_head
+        PASS [   0.041s] (280/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::converge_document_or_disk_blocks_matching_under_capable_registration_before_ipc
+        PASS [   0.024s] (281/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::queue_consume_editor_convergence_payload_is_node_keyed_and_fenced
+        PASS [   0.167s] (282/587) agent-doc-crdt-relay-io tests::ensure_document_model_failure_is_bounded_and_names_reconciliation
+        PASS [   0.052s] (283/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::converge_or_disk_write_writes_detached_disk_without_listener
+        PASS [   0.057s] (284/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::converge_document_or_disk_writes_detached_disk_without_listener
+        PASS [   0.061s] (285/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::converge_document_or_disk_ignores_editorless_controller_socket
+        PASS [   0.091s] (286/587) agent-doc-crdt-relay-io tests::retained_replica_handoff_cannot_regress_a_running_queue_attempt_to_bare
+        PASS [   0.026s] (287/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::try_auto_recover_live_prompt_drift_skips_without_blocked_flag
+        PASS [   0.030s] (288/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::try_auto_recover_live_prompt_drift_skips_when_dropped_prompts_recorded
+        PASS [   0.010s] (289/587) agent-doc-write-converge-io retained_cli_write::tests::a_converged_landed_retained_write_succeeds
+        PASS [   0.012s] (290/587) agent-doc-write-converge-io retained_cli_write::tests::a_converged_but_clobbered_write_is_deferred_not_claimed
+        PASS [   0.010s] (291/587) agent-doc-write-converge-io retained_cli_write::tests::a_refusal_without_the_pending_token_still_fails
+        PASS [   0.048s] (292/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::try_auto_recover_live_prompt_drift_never_reappends_a_materialized_echoed_response
+        PASS [   0.135s] (293/587) agent-doc-crdt-relay-io tests::relay_update_retyping_a_component_opening_marker_is_operator_text
+        PASS [   0.024s] (294/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::try_editor_converge_treats_active_listener_already_current_as_noop
+        PASS [   0.007s] (295/587) agent-doc-write-converge-io retained_cli_write::tests::without_the_policy_the_refusal_propagates_unchanged
+        PASS [   0.010s] (296/587) agent-doc-write-converge-io retained_cli_write::tests::landing_ignores_unrelated_concurrent_edits
+        PASS [   0.008s] (297/587) agent-doc-write-converge-io retained_cli_write::tests::the_guard_restores_the_previous_policy
+        PASS [   0.013s] (298/587) agent-doc-write-converge-io retained_cli_write::tests::an_expired_wait_is_a_typed_deferral_that_keeps_the_refusal_tokens
+        PASS [   0.012s] (299/587) agent-doc-write-converge-io retained_cli_write::tests::an_explicit_bound_settles_without_the_cli_policy
+        PASS [   0.059s] (300/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::try_auto_recover_live_prompt_drift_never_moves_a_committed_response_to_the_tail
+        PASS [   0.012s] (301/587) agent-doc-write-converge-io tests::a_rejected_receipt_is_classified_as_a_recordable_failure
+        PASS [   0.359s] (302/587) agent-doc-crdt-relay-io tests::componentownclose_recycle_reregistration_never_adopts_a_mismatched_buffer
+        PASS [   0.236s] (303/587) agent-doc-crdt-relay-io tests::ensure_document_model_does_not_request_editor_recovery
+        PASS [   0.053s] (304/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::try_compact_editor_converge_writes_detached_disk_without_listener
+        PASS [   0.028s] (305/587) agent-doc-write-converge-io tests::a_refused_visible_write_receipt_accrues_transport_health
+        PASS [   0.029s] (306/587) agent-doc-write-converge-io tests::a_rejection_run_is_recorded_distinctly_and_reset_by_a_timeout
+        PASS [   0.029s] (307/587) agent-doc-write-converge-io tests::a_serialized_write_retention_accrues_failures_and_carries_the_refusal_run
+        PASS [   0.027s] (308/587) agent-doc-write-converge-io tests::a_socket_ack_without_a_refusal_run_clears_timeouts
+        PASS [   0.088s] (309/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::try_auto_recover_live_prompt_drift_fires_when_dropped_prompt_is_consumed_in_snapshot
+        PASS [   0.116s] (310/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::converge_document_or_disk_route_source_writes_detached_disk_without_listener
+        PASS [   0.092s] (311/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::try_auto_recover_live_prompt_drift_advances_snapshot_to_operator_preserving_merge
+        PASS [   0.082s] (312/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::try_auto_recover_live_prompt_drift_rebases_onto_post_preflight_response_block_deletion
+        PASS [   0.008s] (313/587) agent-doc-write-converge-io tests::detached_disk_write_requires_explicit_detached_authority
+        PASS [   0.015s] (314/587) agent-doc-write-converge-io tests::attached_crdt_write_has_no_secondary_transport
+        PASS [   0.010s] (315/587) agent-doc-write-converge-io tests::ipc_closeout_checkpoint_accepts_only_reliable_sync_provenance
+        PASS [   0.014s] (316/587) agent-doc-write-converge-io tests::strong_convergence_blocks_secondary_effects_until_retained_delivery_is_acked
+        PASS [   0.032s] (317/587) agent-doc-write-converge-io tests::an_unregistered_endpoint_expires_into_a_fresh_health_episode
+        PASS [   0.046s] (318/587) agent-doc-write-converge-io tests::an_endpoint_is_unregistered_after_n_consecutive_refusals_and_reset_on_success
+        PASS [   0.022s] (319/587) agent-doc-write-converge-io tests::editor_ipc_write_wedged_reads_latched_degraded_marker
+        PASS [   0.020s] (320/587) agent-doc-write-converge-io tests::ipc_receipt_rejections_arm_the_wedge_like_timeouts
+        PASS [   0.020s] (321/587) agent-doc-write-converge-io tests::lazily_editor_ack_recovers_content_when_relay_and_disk_are_stale
+        PASS [   0.023s] (322/587) agent-doc-write-converge-io tests::ipc_ack_timeouts_record_health_without_authorizing_disk
+        PASS [   0.027s] (323/587) agent-doc-write-converge-io tests::successful_delivery_clears_transport_health_without_a_sidecar
+        PASS [   0.150s] (324/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::capability_guard_does_not_request_live_buffer_over_editor_ipc
+        PASS [   0.008s] (325/587) agent-doc-write-runtime-io closeout_owner_network_tests::a_lost_claim_reply_never_leaves_an_orphan_that_refuses_its_own_owner
+        PASS [   0.127s] (326/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::queue_consume_ack_mismatch_does_not_refresh_user_prompt_drift
+        PASS [   0.128s] (327/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::queue_consume_ack_accepts_node_patch_with_editor_owned_queue_addition
+        PASS [   0.122s] (328/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::queue_consume_writeback_converges_via_editor_ipc_with_listener
+        PASS [   0.011s] (329/587) agent-doc-write-runtime-io closeout_owner_network_tests::a_claim_whose_reply_was_lost_is_resent_until_answered
+        PASS [   0.006s] (330/587) agent-doc-write-runtime-io held_back_status_tests::a_held_back_status_lands_before_the_closeout_continues
+        PASS [   0.009s] (331/587) agent-doc-write-runtime-io closeout_pass_guard::the_write_command_entry_point_opens_the_projection_pass
+        PASS [   0.036s] (332/587) agent-doc-write-converge-io tests::wedge_needs_recycle_latches_once_per_episode
+        PASS [   0.011s] (333/587) agent-doc-write-runtime-io closeout_owner_network_tests::heartbeat_retries_a_lost_refresh_and_reports_an_answered_loss
+        PASS [   0.009s] (334/587) agent-doc-write-runtime-io held_back_status_tests::a_retained_status_write_is_awaited_before_the_commit
+        PASS [   0.112s] (335/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::try_auto_recover_live_prompt_drift_writes_realtime_merge_when_blocked_and_safe
+        PASS [   0.013s] (336/587) agent-doc-write-runtime-io closeout_owner_network_tests::stable_owner_ids_differ_across_threads_so_the_cas_still_excludes
+        PASS [   0.040s] (337/587) agent-doc-write-converge-io tests::write_converge_payload_cycle_id_uses_latest_state_projection
+        PASS [   0.174s] (338/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::converge_document_or_disk_blocks_disk_fallback_with_active_listener_without_visible_write_receipt
+        PASS [   0.139s] (339/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::try_auto_recover_live_prompt_drift_prefers_editor_ipc_when_listener_active
+        PASS [   0.013s] (340/587) agent-doc-write-runtime-io ipc::core_tests::ipc_snapshot_adoption_allowed_is_silent_when_blocked
+        PASS [   0.018s] (341/587) agent-doc-write-runtime-io held_back_status_tests::no_status_is_a_no_op_and_other_failures_refuse_the_commit
+        PASS [   0.172s] (342/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::converge_or_disk_write_blocks_plain_disk_fallback_with_active_listener_without_visible_write_receipt
+        PASS [   0.150s] (343/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::try_auto_recover_live_prompt_drift_editor_ipc_preserves_partial_exchange_word
+        PASS [   0.019s] (344/587) agent-doc-write-runtime-io ipc::core_tests::ipc_snapshot_adoption_allowed_logs_benign_recheck
+        PASS [   0.011s] (345/587) agent-doc-write-runtime-io ipc::core_tests::ipcfullprompt_corruption_logged_on_deleted_response
+        PASS [   0.010s] (346/587) agent-doc-write-runtime-io ipc::core_tests::ipcfullprompt_corruption_silent_on_clean_candidate
+        PASS [   0.008s] (347/587) agent-doc-write-runtime-io ipc::transport::late_fallback_patch_guard_tests::cycle_already_committed_returns_none_when_no_state
+        PASS [   0.016s] (348/587) agent-doc-write-runtime-io ipc::core_tests::ipcfullprompt_scaffold_duplication_logged_without_baseline
+        PASS [   0.030s] (349/587) agent-doc-write-runtime-io ipc::core_tests::ipc_live_prompt_drift_replaces_visible_write_candidate_and_records_queue_proof
+        PASS [   0.140s] (350/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::try_compact_editor_converge_converges_via_editor_ipc_with_listener
+        PASS [   0.012s] (351/587) agent-doc-write-runtime-io ipc::transport::late_fallback_patch_guard_tests::full_content_operator_ipc_is_disabled_before_source_buffer_delivery
+        PASS [   0.014s] (352/587) agent-doc-write-runtime-io ipc::transport::late_fallback_patch_guard_tests::full_content_operator_ipc_rejects_late_post_exchange_scratch_comment
+        PASS [   0.023s] (353/587) agent-doc-write-runtime-io ipc::transport::late_fallback_patch_guard_tests::cycle_already_committed_returns_none_for_open_cycle
+        PASS [   0.177s] (354/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::queue_consume_ack_mismatch_refreshes_editor_back_to_preconsume
+        PASS [   0.013s] (355/587) agent-doc-write-runtime-io ipc::transport::late_fallback_patch_guard_tests::ipc_dedupe_redelivery_skips_when_bad_state_is_stale
+        PASS [   0.187s] (356/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::pending_write_shorter_ack_replays_missing_agent_response
+        PASS [   0.014s] (357/587) agent-doc-write-runtime-io ipc::transport::late_fallback_patch_guard_tests::ipc_repair_decision_records_ack_prefix_repair_bad_state
+        PASS [   0.118s] (358/587) agent-doc-write-converge-io tests::already_applied_publish_upgrades_legacy_hash_only_receipt_in_lazily_state
+        PASS [   0.030s] (359/587) agent-doc-write-runtime-io ipc::transport::late_fallback_patch_guard_tests::cycle_already_committed_uses_ledger_projection
+        PASS [   0.022s] (360/587) agent-doc-write-runtime-io ipc::transport::late_fallback_patch_guard_tests::ipc_repair_decision_preserves_original_bad_state_when_dedupe_follows_prefix_repair
+        PASS [   0.054s] (361/587) agent-doc-write-runtime-io ipc::core_tests::ipc_live_prompt_drift_ignores_operator_edit_confined_to_unowned_queue_cell
+        PASS [   0.024s] (362/587) agent-doc-write-runtime-io ipc::transport::late_fallback_patch_guard_tests::response_fallback_full_content_is_disabled_before_socket_delivery
+        PASS [   0.054s] (363/587) agent-doc-write-runtime-io ipc::transport::late_fallback_patch_guard_tests::cycle_already_committed_returns_some_for_committed_cycle
+        PASS [   0.077s] (364/587) agent-doc-write-runtime-io ipc::committed_blob_authority_autoheal_tests::unblocks_when_stale_buffer_matches_a_committed_blob
+        PASS [   0.079s] (365/587) agent-doc-write-runtime-io ipc::committed_blob_authority_autoheal_tests::still_refuses_when_stale_buffer_matches_no_committed_blob
+        PASS [   0.024s] (366/587) agent-doc-write-runtime-io ipc::transport::late_fallback_patch_guard_tests::stale_full_document_redelivery_does_not_overwrite_live_typing
+        PASS [   0.024s] (367/587) agent-doc-write-runtime-io ipc::transport::late_fallback_patch_guard_tests::socket_full_content_is_disabled_before_payload_delivery
+        PASS [   0.054s] (368/587) agent-doc-write-runtime-io ipc::transport::late_fallback_patch_guard_tests::ipc_dedupe_full_content_redelivery_is_disabled
+        PASS [   0.212s] (369/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::try_auto_recover_live_prompt_drift_blocks_disk_fallback_with_active_listener_without_visible_write_receipt
+        PASS [   0.044s] (370/587) agent-doc-write-runtime-io ipc::transport::late_fallback_patch_guard_tests::live_prompt_drift_repair_without_listener_still_fails_closed
+        PASS [   0.015s] (371/587) agent-doc-write-runtime-io ipc::transport::submodule_patch_routing_tests::adopt_current_response_without_duplication_rejects_partial_line_overlap
+        PASS [   0.044s] (372/587) agent-doc-write-runtime-io ipc::transport::late_fallback_patch_guard_tests::recover_empty_response_for_strict_closeout_refuses_when_not_strict_closeout
+        PASS [   0.029s] (373/587) agent-doc-write-runtime-io ipc::transport::late_fallback_patch_guard_tests::template_ipc_dedupe_audit_candidate_never_reaches_editor_delivery
+        PASS [   0.014s] (374/587) agent-doc-write-runtime-io ipc::transport::submodule_patch_routing_tests::cleanup_resolved_backlog_prompts_preserves_non_prompt_backlog_edits
+        PASS [   0.514s] (375/587) agent-doc-crdt-relay-io tests::componentownclose_running_controller_keeps_operator_text_when_markers_are_removed
+        PASS [   0.037s] (376/587) agent-doc-write-runtime-io ipc::transport::submodule_patch_routing_tests::adopt_current_response_without_duplication_repairs_bare_prompt_prefix
+        PASS [   0.221s] (377/587) agent-doc-write-converge-io convergence_fixture_tests::core_tests::try_compact_editor_converge_durable_open_zero_live_replica_fails_closed_without_receipt
+        PASS [   0.014s] (378/587) agent-doc-write-runtime-io ipc::transport::submodule_patch_routing_tests::normalize_final_template_content_preserves_baseline_prompt_html_comment_body
+        PASS [   0.019s] (379/587) agent-doc-write-runtime-io ipc::transport::submodule_patch_routing_tests::cleanup_resolved_backlog_prompts_removes_new_prompt_target_only
+        PASS [   0.018s] (380/587) agent-doc-write-runtime-io ipc::transport::submodule_patch_routing_tests::normalize_final_template_content_preserves_current_prompt_html_comment_body
+        PASS [   0.015s] (381/587) agent-doc-write-runtime-io ipc::transport::submodule_patch_routing_tests::normalize_final_template_content_removes_adjacent_duplicate_response_blocks
+        PASS [   0.083s] (382/587) agent-doc-write-runtime-io ipc::transport::late_fallback_patch_guard_tests::socket_full_content_disabled_path_does_not_save_snapshot
+        PASS [   0.017s] (383/587) agent-doc-write-runtime-io ipc::transport::submodule_patch_routing_tests::normalize_final_template_content_repairs_duplicate_exchange_close_after_merge
+        PASS [   0.011s] (384/587) agent-doc-write-runtime-io ipc::transport::submodule_patch_routing_tests::normalize_final_template_content_strips_response_body_prompt_prefix_after_merge
+        PASS [   0.027s] (385/587) agent-doc-write-runtime-io ipc::transport::submodule_patch_routing_tests::normalize_final_template_content_repairs_bare_prompt_prefix_after_merge
+        PASS [   0.011s] (386/587) agent-doc-write-runtime-io ipc::transport::submodule_patch_routing_tests::normalize_template_structure_preserves_unique_post_exchange_html_comment_tail
+        PASS [   0.009s] (387/587) agent-doc-write-runtime-io ipc::transport::submodule_patch_routing_tests::normalize_template_structure_rejects_duplicate_scaffold_with_user_text
+        PASS [   0.010s] (388/587) agent-doc-write-runtime-io ipc::transport::submodule_patch_routing_tests::normalize_template_structure_repairs_duplicate_scaffold_close
+        PASS [   0.007s] (389/587) agent-doc-write-runtime-io ipc::transport::submodule_patch_routing_tests::normalize_template_structure_scrubs_answered_prompt_html_comment_body
+        PASS [   0.030s] (390/587) agent-doc-write-runtime-io ipc::transport::submodule_patch_routing_tests::normalize_final_template_content_repairs_response_before_prompt_tail
+        PASS [   0.028s] (391/587) agent-doc-write-runtime-io ipc::transport::submodule_patch_routing_tests::normalize_final_template_content_scrubs_duplicate_prompt_html_comment_body
+        PASS [   0.007s] (392/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::extract_post_commit_targets_ignores_prefixed_assistant_prose_before_next_heading
+        PASS [   0.008s] (393/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::extract_post_commit_normalization_targets_preserves_duplicate_missing_lines
+        PASS [   0.007s] (394/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::extract_post_commit_targets_ignores_prefixed_assistant_commit_label
+        PASS [   0.171s] (395/587) agent-doc-write-runtime-io gh131_pending_only_tests::pending_only_retention_settled_before_inspection_continues_after_landing_proof
+        PASS [   0.016s] (396/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::a_warm_actor_socket_gets_a_hang_ceiling_and_other_sockets_keep_the_fast_fail_deadline
+        PASS [   0.019s] (397/587) agent-doc-write-runtime-io ipc::transport::submodule_patch_routing_tests::shared_final_template_closeout_repairs_concurrent_multiline_prompt_before_response
+        PASS [   0.133s] (398/587) agent-doc-write-runtime-io ipc::transport::late_fallback_patch_guard_tests::live_prompt_drift_repair_converges_in_cycle_via_editor_ipc
+        PASS [   0.008s] (399/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::guard_refuses_structurally_corrupt_content_ours
+        PASS [   0.009s] (400/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::guard_live_prompt_drift_preserves_visible_write_union_with_response
+        PASS [   0.010s] (401/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::extract_post_commit_targets_ignores_prefixed_markdown_lists
+        PASS [   0.012s] (402/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::guard_live_prompt_drift_reconciles_independent_visible_prompt
+        PASS [   0.010s] (403/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::guard_replaces_visible_write_candidate_when_agent_target_would_absorb_drift
+        PASS [   0.011s] (404/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::guard_response_contamination_restores_canonical_queue_and_redelivers
+        PASS [   0.010s] (405/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::normalization_divergence_repair_decision_keeps_lazily_event_authoritative
+        PASS [   0.010s] (406/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::normalization_fallback_adopts_visible_write_response_delta_before_merge
+        PASS [   0.008s] (407/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::normalization_fallback_redelivery_skips_when_bad_state_is_stale
+        PASS [   0.011s] (408/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::normalization_fallback_dedupes_already_applied_editor_response
+        PASS [   0.102s] (409/587) agent-doc-write-runtime-io ipc::transport::submodule_patch_routing_tests::already_applied_visible_write_content_does_not_overwrite_newer_visible_operator_edit
+        PASS [   0.012s] (410/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::normalize_exchange_prefixes_for_targets_repairs_late_duplicate_occurrence
+        PASS [   0.009s] (411/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::normalize_exchange_prefixes_for_targets_skips_assistant_verification_lists
+        PASS [   0.007s] (412/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::normalize_exchange_prefixes_for_targets_treats_prefixed_response_heading_as_assistant_boundary
+        PASS [   0.011s] (413/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::normalize_exchange_prefixes_for_targets_requires_targeted_prompt_start_after_response
+        PASS [   0.012s] (414/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::normalize_exchange_prefixes_for_targets_skips_assistant_commit_label
+        PASS [   0.009s] (415/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::normalize_exchange_prefixes_for_targets_skips_later_assistant_commit_label_after_stale_target
+        PASS [   0.006s] (416/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::normalize_patch_content_skips_assistant_commit_label
+        PASS [   0.117s] (417/587) agent-doc-write-runtime-io ipc::transport::submodule_patch_routing_tests::already_applied_socket_stale_receipt_leaves_response_pending_without_disk_write
+        PASS [   0.005s] (418/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::smconv_declines_on_structurally_corrupt_ours_falls_through
+        PASS [   0.121s] (419/587) agent-doc-write-runtime-io ipc::transport::submodule_patch_routing_tests::already_applied_receipt_missing_response_retries_cell_without_document_write
+        PASS [   0.125s] (420/587) agent-doc-write-runtime-io ipc::transport::submodule_patch_routing_tests::already_applied_visible_write_content_does_not_overwrite_unsaved_live_editor_edit
+        PASS [   0.131s] (421/587) agent-doc-write-runtime-io ipc::transport::submodule_patch_routing_tests::already_applied_empty_response_probe_requires_authoritative_retry
+        PASS [   0.171s] (422/587) agent-doc-write-runtime-io ipc::transport::late_fallback_patch_guard_tests::recover_dedupe_only_drift_skips_when_drift_is_not_a_dedupe_outcome
+        PASS [   0.017s] (423/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::smconv_preserves_freetext_fenced_queue_head_on_drift
+        PASS [   0.020s] (424/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::smconv_operator_deletion_beats_the_agents_edit_of_the_same_line
+        PASS [   0.022s] (425/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::smconv_disjoint_drift_merges_both_change_sets
+        PASS [   0.044s] (426/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::normalization_redelivery_blocks_capability_unknown_live_editor_before_ipc
+        PASS [   0.030s] (427/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::reconcile_visible_write_snapshot_forward_adopts_newer_operator_buffer_presenting_response
+        PASS [   0.031s] (428/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::reconcile_visible_write_snapshot_forward_declines_when_newer_buffer_dropped_the_response
+        PASS [   0.014s] (429/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::socket_visible_write_drift_missing_response_materializes_only_with_content_ours_proof
+        PASS [   0.027s] (430/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::smconv_merges_heading_prose_response_preserving_both_changesets
+        PASS [   0.033s] (431/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::reconcile_visible_write_snapshot_defers_while_canonical_is_still_pre_write
+        PASS [   0.016s] (432/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::smconv_same_node_conflict_is_safe
+        PASS [   0.010s] (433/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::socket_visible_write_drift_missing_response_refuses_without_content_ours_response
+        PASS [   0.185s] (434/587) agent-doc-write-runtime-io ipc::transport::late_fallback_patch_guard_tests::recover_dedupe_only_drift_skips_when_file_matches_head
+        PASS [   0.007s] (435/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::verify_visible_normalization_requires_duplicate_occurrences
+        PASS [   0.015s] (436/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::socket_visible_write_drift_missing_response_refuses_partial_heading
+        PASS [   0.006s] (437/587) agent-doc-write-runtime-io reap_done_in_same_write_policy::a_non_committing_write_still_defers_its_archive_move
+        PASS [   0.011s] (438/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::verify_visible_normalization_rejects_assistant_list_prefix_substitute
+        PASS [   0.019s] (439/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::socket_visible_write_drift_recovers_invalid_candidate_without_double_materialization
+        PASS [   0.024s] (440/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::socket_visible_write_drift_missing_response_materializes_over_prefix_repair
+        PASS [   0.048s] (441/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::redelivery_skips_when_cp_editor_buffer_diverges_from_bad_state
+        PASS [   0.016s] (442/587) agent-doc-write-runtime-io reap_done_in_same_write_policy::a_retained_commit_mode_closeout_still_reaps
+        PASS [   0.014s] (443/587) agent-doc-write-runtime-io reap_done_in_same_write_policy::a_successful_commit_mode_closeout_reaps
+        PASS [   0.020s] (444/587) agent-doc-write-runtime-io response_status_sync_payload_tests::patch_status_payload_is_the_managed_block_body
+        PASS [   0.017s] (445/587) agent-doc-write-runtime-io run_entry::tests::annotation_added_mid_turn_is_gated_against_the_live_head
+        PASS [   0.020s] (446/587) agent-doc-write-runtime-io run_entry::tests::annotated_id_head_requires_answered_operator_note_at_closeout
+        PASS [   0.287s] (447/587) agent-doc-write-runtime-io binary_owned_cli_write_tests::backlog_remove_contains_converges_after_retention_and_succeeds
+        PASS [   0.295s] (448/587) agent-doc-write-runtime-io binary_owned_cli_write_tests::a_still_retained_write_after_the_bound_is_a_deferral_not_a_failure
+        PASS [   0.285s] (449/587) agent-doc-write-runtime-io binary_owned_cli_write_tests::the_retained_refusal_is_unchanged_outside_the_cli_policy
+        PASS [   0.279s] (450/587) agent-doc-write-runtime-io gh131_pending_only_tests::pending_only_retention_beside_committed_response_is_absorbed
+        PASS [   0.276s] (451/587) agent-doc-write-runtime-io held_back_status_tests::landing_the_held_back_status_on_a_detached_document_is_idempotent
+        PASS [   0.299s] (452/587) agent-doc-write-runtime-io binary_owned_cli_write_tests::backlog_add_converges_after_retention_and_succeeds
+        PASS [   0.042s] (453/587) agent-doc-write-runtime-io response_status_sync_payload_tests::a_landed_patch_status_payload_is_recorded_once
+        PASS [   0.014s] (454/587) agent-doc-write-runtime-io run_entry::tests::crdt_convergence_timeout_retains_closeout_mutations
+        PASS [   0.022s] (455/587) agent-doc-write-runtime-io run_entry::tests::closepressure_refuses_a_setup_head_closed_on_an_existing_pull_request
+        PASS [   0.208s] (456/587) agent-doc-write-runtime-io ipc::transport::submodule_patch_routing_tests::already_applied_socket_without_visible_receipt_never_repairs_disk_behind_editor
+        PASS [   0.019s] (457/587) agent-doc-write-runtime-io run_entry::tests::effect_identity_metadata_is_not_operator_steering_but_real_notes_are
+        PASS [   0.205s] (458/587) agent-doc-write-runtime-io ipc::transport::submodule_patch_routing_tests::already_applied_without_response_in_content_ours_requires_authoritative_retry
+        PASS [   0.326s] (459/587) agent-doc-write-runtime-io binary_owned_cli_write_tests::backlog_add_attributes_the_converged_write_to_the_baseline
+        PASS [   0.021s] (460/587) agent-doc-write-runtime-io run_entry::tests::finalize_refuses_to_strike_a_row_a_worker_still_runs_on
+        PASS [   0.028s] (461/587) agent-doc-write-runtime-io run_entry::tests::explicit_id_closeout_is_not_blocked_by_unrelated_selected_free_text
+        PASS [   0.039s] (462/587) agent-doc-write-runtime-io run_entry::tests::done_of_the_leading_directive_id_satisfies_the_free_text_gate
+        PASS [   0.138s] (463/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::normalization_fallback_missing_lazily_receipt_preserves_pending_mutations
+        PASS [   0.094s] (464/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::test_lazily_visible_write_event_read
+        PASS [   0.341s] (465/587) agent-doc-write-runtime-io binary_owned_cli_write_tests::queue_consume_id_converges_after_retention_and_succeeds
+        PASS [   0.018s] (466/587) agent-doc-write-runtime-io run_entry::tests::recovery_merge_uses_document_model_for_crdt_documents_without_diff3_markers
+        PASS [   0.034s] (467/587) agent-doc-write-runtime-io run_entry::tests::invalid_strict_stream_closeout_does_not_create_captured_cycle
+        PASS [   0.028s] (468/587) agent-doc-write-runtime-io run_entry::tests::prompt_preset_gate_uses_expansion_evidence_and_names_missing_presets
+        PASS [   0.102s] (469/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::test_poll_lazily_event_present_immediately
+        PASS [   0.032s] (470/587) agent-doc-write-runtime-io run_entry::tests::paused_closeout_merges_response_over_durable_operator_queue_deletion
+        PASS [   0.018s] (471/587) agent-doc-write-runtime-io run_entry::tests::response_cell_fast_path_carries_the_recap_with_the_response
+        PASS [   0.021s] (472/587) agent-doc-write-runtime-io run_entry::tests::response_cell_fast_path_accepts_only_one_exchange_operation
+        PASS [   0.036s] (473/587) agent-doc-write-runtime-io run_entry::tests::prompt_typed_after_preflight_remains_carry_forward
+        PASS [   0.042s] (474/587) agent-doc-write-runtime-io run_entry::tests::preflight_visible_prompt_is_the_response_application_base
+        PASS [   0.054s] (475/587) agent-doc-write-runtime-io run_entry::tests::fresh_prompt_preemption_does_not_require_unselected_queue_head_evidence
+        PASS [   0.020s] (476/587) agent-doc-write-runtime-io run_entry::tests::response_cell_projection_proof_tolerates_terminal_head_annotation
+        PASS [   0.121s] (477/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::test_poll_lazily_event_timeout
+        PASS [   0.019s] (478/587) agent-doc-write-runtime-io run_entry::tests::strict_stream_and_ipc_closeout_reject_legacy_markers_before_capture
+        PASS [   0.027s] (479/587) agent-doc-write-runtime-io run_entry::tests::stream_model_merge_preserves_response_and_operator_components
+        PASS [   0.010s] (480/587) agent-doc-write-runtime-io tests::a_retained_intent_is_attributed_to_the_cycle_that_created_it
+        PASS [   0.008s] (481/587) agent-doc-write-runtime-io tests::apply_patches_sanitize_unmatched_prevents_duplicate_exchange_block
+        PASS [   0.114s] (482/587) agent-doc-write-runtime-io run_entry::tests::apply_template_from_string_rejects_raw_component_form_without_mutating
+        PASS [   0.018s] (483/587) agent-doc-write-runtime-io tests::actionable_mutation_record_unifies_adds_and_ungates_for_queue_closeout
+        PASS [   0.138s] (484/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::warm_controller_serves_receipt_while_another_client_is_mid_request
+        PASS [   0.106s] (485/587) agent-doc-write-runtime-io run_entry::tests::apply_template_from_string_rejects_trailing_unmatched_patchback_text
+        PASS [   0.041s] (486/587) agent-doc-write-runtime-io run_entry::tests::strict_closeout_uses_durable_free_text_selection_after_marker_loss
+        PASS [   0.008s] (487/587) agent-doc-write-runtime-io tests::atomic_write_correct_content
+        PASS [   0.033s] (488/587) agent-doc-write-runtime-io tests::a_newly_authored_packet_with_an_unexplained_numeric_choice_term_is_accepted
+        PASS [   0.044s] (489/587) agent-doc-write-runtime-io run_entry::tests::write_path_never_uses_disk_during_registered_replica_liveness_gap
+        PASS [   0.039s] (490/587) agent-doc-write-runtime-io run_entry::tests::write_path_reliable_sync_authority_controls_ipc_skip
+        PASS [   0.012s] (491/587) agent-doc-write-runtime-io tests::build_ipc_node_patches_json_tracks_reorder_without_text_matching
+        PASS [   0.015s] (492/587) agent-doc-write-runtime-io tests::build_ipc_node_patches_json_tracks_strike_and_insert_by_node_key
+        PASS [   0.037s] (493/587) agent-doc-write-runtime-io tests::active_capture_response_body_for_write_uses_projection_without_capture_sidecar
+        PASS [   0.017s] (494/587) agent-doc-write-runtime-io tests::captured_finalize_replay_edits_an_already_gated_review_item
+        PASS [   0.126s] (495/587) agent-doc-write-runtime-io run_entry::tests::apply_template_from_string_strips_safe_progress_before_exchange_patch
+        PASS [   0.011s] (496/587) agent-doc-write-runtime-io tests::closeout_quotes_component_markers_in_tracked_item_inputs
+        PASS [   0.134s] (497/587) agent-doc-write-runtime-io run_entry::tests::apply_template_from_string_same_base_retry_adopts_existing_response
+        PASS [   0.014s] (498/587) agent-doc-write-runtime-io tests::concurrent_writes_no_corruption
+        PASS [   0.034s] (499/587) agent-doc-write-runtime-io tests::capture_undo_checkpoint_records_current_content
+        PASS [   0.010s] (500/587) agent-doc-write-runtime-io tests::count_code_fence_openings_handles_backtick_and_tilde
+        PASS [   0.153s] (501/587) agent-doc-write-runtime-io run_entry::tests::apply_template_from_string_compact_exchange_replaces_exchange_body
+        PASS [   0.007s] (502/587) agent-doc-write-runtime-io tests::effective_unmatched_cleared_when_synthesis_consumes_content
+        PASS [   0.013s] (503/587) agent-doc-write-runtime-io tests::exchange_write_diagnostic_logs_live_edit_provenance
+        PASS [   0.014s] (504/587) agent-doc-write-runtime-io tests::every_write_mode_admits_pane_authority_before_capture_or_mutation
+        PASS [   0.450s] (505/587) agent-doc-write-runtime-io binary_owned_cli_write_tests::queue_sync_converges_after_retention_and_succeeds
+        PASS [   0.021s] (506/587) agent-doc-write-runtime-io tests::guard_rejects_normal_write_when_diff_requests_compact_exchange
+        PASS [   0.092s] (507/587) agent-doc-write-runtime-io tests::a_retained_envelope_lands_once_delivery_is_proven
+        PASS [   0.011s] (508/587) agent-doc-write-runtime-io tests::ipc_json_preserves_utf8_em_dash
+        PASS [   0.013s] (509/587) agent-doc-write-runtime-io tests::ipc_snapshot_preserves_owned_post_exchange_prompt_html_comment_body
+        PASS [   0.013s] (510/587) agent-doc-write-runtime-io tests::ipc_snapshot_dedupes_live_prompt_prefix_variant
+        PASS [   0.010s] (511/587) agent-doc-write-runtime-io tests::ipc_snapshot_removes_bodiless_duplicate_response_heading
+        PASS [   0.013s] (512/587) agent-doc-write-runtime-io tests::ipc_snapshot_rejects_plain_markdown_duplicate_prompt_residue
+        PASS [   0.012s] (513/587) agent-doc-write-runtime-io tests::ipc_snapshot_scrubs_post_exchange_duplicate_prompt_html_comment_body
+        PASS [   0.196s] (514/587) agent-doc-write-runtime-io run_entry::tests::claimed_selected_free_text_head_passes_the_evidence_gate
+        PASS [   0.101s] (515/587) agent-doc-write-runtime-io tests::closeout_consume_never_takes_a_duplicate_text_head_after_a_concurrent_strike
+        PASS [   0.013s] (516/587) agent-doc-write-runtime-io tests::new_blocking_packet_rejects_recommended_choice_without_reason
+        PASS [   0.013s] (517/587) agent-doc-write-runtime-io tests::normalize_patch_content_applies_prefix_to_matching_lines
+        PASS [   0.101s] (518/587) agent-doc-write-runtime-io tests::closeout_consume_without_an_approved_head_takes_nothing
+        PASS [   0.009s] (519/587) agent-doc-write-runtime-io tests::normalize_patch_content_idempotent_already_prefixed
+        PASS [   0.011s] (520/587) agent-doc-write-runtime-io tests::normalize_patch_content_counts_duplicate_targets
+        PASS [   0.013s] (521/587) agent-doc-write-runtime-io tests::normalize_patch_content_non_matching_lines_unchanged
+        PASS [   0.011s] (522/587) agent-doc-write-runtime-io tests::normalize_prefix_lines_skipped_for_replace_mode_components
+        PASS [   0.023s] (523/587) agent-doc-write-runtime-io tests::normalize_patch_content_empty_prefix_lines_passthrough
+        PASS [   0.122s] (524/587) agent-doc-write-runtime-io tests::closeout_consume_never_takes_the_next_head_after_a_concurrent_answered_strike
+        PASS [   0.257s] (525/587) agent-doc-write-runtime-io retained_closeout_reap::the_retained_case_flag_archives_the_item_instead_of_marking_it
+        PASS [   0.017s] (526/587) agent-doc-write-runtime-io tests::normalize_template_structure_keeps_prefix_variant_inside_response_body
+        PASS [   0.011s] (527/587) agent-doc-write-runtime-io tests::operator_todo_advisory_names_unreferenced_gates_and_the_todo_add_command
+        PASS [   0.014s] (528/587) agent-doc-write-runtime-io tests::operator_gate_ids_cover_review_adds_gated_adds_and_gate_moves_once
+        PASS [   0.019s] (529/587) agent-doc-write-runtime-io tests::normalize_template_structure_rejects_mixed_duplicate_scaffold_prompt_prefix_variant
+        PASS [   0.184s] (530/587) agent-doc-write-runtime-io run_entry::tests::strict_stream_closeout_gates_free_text_queue_on_current_document_not_baseline
+        PASS [   0.012s] (531/587) agent-doc-write-runtime-io tests::operator_todo_response_advisory_quotes_unrecorded_asks_and_matched_text
+        PASS [   0.015s] (532/587) agent-doc-write-runtime-io tests::operator_todo_done_advisory_names_open_items_and_the_todo_done_command
+        PASS [   0.139s] (533/587) agent-doc-write-runtime-io tests::closeout_consume_refuses_an_approved_but_unclaimed_subagent_head
+        PASS [   0.103s] (534/587) agent-doc-write-runtime-io tests::force_disk_status_set_writes_without_listener
+        PASS [   0.753s] (535/587) agent-doc-crdt-relay-io tests::one_await_releases_a_totally_silent_replica_but_grants_no_editor_receipt
+        PASS [   0.012s] (536/587) agent-doc-write-runtime-io tests::prevalidation_fallback_is_scoped_to_the_attached_editor_refusal
+        PASS [   0.014s] (537/587) agent-doc-write-runtime-io tests::packettodo_texts_pick_one_tracked_id_and_respect_existing_todo_records
+        PASS [   0.192s] (538/587) agent-doc-write-runtime-io run_entry::tests::tracked_work_mutation_plan_is_captured_before_authority_resolution
+        PASS [   0.011s] (539/587) agent-doc-write-runtime-io tests::prompt_dedupe_skips_assistant_response_quotes
+        PASS [   0.015s] (540/587) agent-doc-write-runtime-io tests::pre_capture_guard_only_bypasses_for_the_matching_retained_capture
+        PASS [   0.011s] (541/587) agent-doc-write-runtime-io tests::resolved_ids_cover_done_and_review_resolve_once
+        PASS [   0.010s] (542/587) agent-doc-write-runtime-io tests::retained_response_outcome_keeps_same_closeout_mutation_envelope
+        PASS [   0.033s] (543/587) agent-doc-write-runtime-io tests::normalize_template_structure_repairs_live_prompt_prefix_variant_after_boundary
+        PASS [   0.015s] (544/587) agent-doc-write-runtime-io tests::retained_planned_actionable_ids_cover_adds_and_ungates_but_not_review_adds
+        PASS [   0.490s] (545/587) agent-doc-write-runtime-io ipc::transport::late_fallback_patch_guard_tests::recover_dedupe_only_drift_commits_when_file_matches_dedupe_of_head
+        PASS [   0.013s] (546/587) agent-doc-write-runtime-io tests::retained_tracked_work_branch_records_actionable_ids_for_queue_mirror
+        PASS [   0.011s] (547/587) agent-doc-write-runtime-io tests::splice_pending_warns_when_target_missing_pending
+        PASS [   0.010s] (548/587) agent-doc-write-runtime-io tests::stale_baseline_guard_prefix_check
+        PASS [   0.012s] (549/587) agent-doc-write-runtime-io tests::splice_pending_replaces_content_when_both_have_pending
+        PASS [   0.306s] (550/587) agent-doc-write-runtime-io retained_closeout_reap::completing_the_last_blocker_repaints_the_dependent_in_the_same_mutation
+        PASS [   0.011s] (551/587) agent-doc-write-runtime-io tests::try_ipc_full_content_returns_false_when_disabled
+        PASS [   0.023s] (552/587) agent-doc-write-runtime-io tests::splice_pending_noop_when_source_has_no_pending
+        PASS [   0.020s] (553/587) agent-doc-write-runtime-io tests::stdin_read_deadline_bounds_only_non_interactive_input
+        PASS [   0.019s] (554/587) agent-doc-write-runtime-io tests::stdin_read_deadline_zero_disables_the_bound
+        PASS [   0.012s] (555/587) agent-doc-write-runtime-io tests::tracked_closeout_prevalidation_rejects_heading_outside_patch_block
+        PASS [   0.195s] (556/587) agent-doc-write-runtime-io tests::an_abandoned_cycle_still_owes_its_landed_uncommitted_tracked_work
+        PASS [   0.015s] (557/587) agent-doc-write-runtime-io tests::strip_boundary_for_dedup_removes_markers
+        PASS [   0.015s] (558/587) agent-doc-write-runtime-io tests::tracked_closeout_prevalidation_accepts_heading_inside_patch_block
+        PASS [   0.014s] (559/587) agent-doc-write-runtime-io tests::write_appends_response
+        PASS [   0.009s] (560/587) agent-doc-write-runtime-io tests::write_no_merge_when_unchanged
+        PASS [   0.014s] (561/587) agent-doc-write-runtime-io tests::write_authority_never_routes_agent_doc_sidecars
+        PASS [   0.012s] (562/587) agent-doc-write-runtime-io tests::write_preserves_user_edits_via_merge
+        PASS [   0.336s] (563/587) agent-doc-write-runtime-io ipc::visible_write_content_snapshot_tests::test_poll_lazily_event_appears_after_delay
+        PASS [   0.016s] (564/587) agent-doc-write-runtime-io tests::write_checkpoint_uses_typed_ledger_without_snapshot_sidecar
+        PASS [   0.201s] (565/587) agent-doc-write-runtime-io tests::atomic_write_records_provenance_for_document_not_sidecar
+        PASS [   0.254s] (566/587) agent-doc-write-runtime-io run_entry::tests::strict_closeout_blocks_an_overdue_unstarted_claim_with_both_remedies
+        PASS [   0.123s] (567/587) agent-doc-write-runtime-io tests::landed_retained_tracked_work_is_still_work_for_an_empty_retry
+        PASS [   0.220s] (568/587) agent-doc-write-runtime-io tests::closeout_consume_never_takes_an_unselected_next_head
+        PASS [   0.196s] (569/587) agent-doc-write-runtime-io tests::fence_count_drop_is_logged_for_visible_document_write
+        PASS [   0.235s] (570/587) agent-doc-write-runtime-io tests::closeout_pending_maintenance_skips_status_only_housekeeping_with_active_listener
+        PASS [   0.226s] (571/587) agent-doc-write-runtime-io tests::force_disk_closeout_pending_maintenance_bypasses_active_listener
+        PASS [   0.172s] (572/587) agent-doc-write-runtime-io tests::landed_retained_envelope_records_backlog_gate_for_the_closeout_gate
+        PASS [   0.142s] (573/587) agent-doc-write-runtime-io tests::status_set_writes_detached_disk_without_listener
+        PASS [   0.620s] (574/587) agent-doc-write-runtime-io ipc::transport::late_fallback_patch_guard_tests::recover_empty_response_for_strict_closeout_lands_dedupe_only_drift_through_binary_commit
+        PASS [   0.152s] (575/587) agent-doc-write-runtime-io tests::snapshot_matches_disk_state
+        PASS [   0.149s] (576/587) agent-doc-write-runtime-io tests::write_authority_visible_write_routes_through_queue_without_deadlock
+        PASS [   0.149s] (577/587) agent-doc-write-runtime-io tests::write_authority_routed_write_records_provenance
+        PASS [   0.422s] (578/587) agent-doc-write-runtime-io run_entry::tests::durable_empty_selection_does_not_fall_back_to_visible_queue_heads
+        PASS [   0.310s] (579/587) agent-doc-write-runtime-io tests::force_disk_closeout_queue_consume_bypasses_active_listener
+        PASS [   0.567s] (580/587) agent-doc-write-runtime-io ipc::transport::submodule_patch_routing_tests::required_closeout_fails_when_parent_submodule_pointer_commit_fails
+        PASS [   0.373s] (581/587) agent-doc-write-runtime-io tests::empty_response_recovery_merges_missing_committed_head_response
+        PASS [   1.075s] (582/587) agent-doc-crdt-relay-io tests::shared_text_readers_never_observe_stale_text_after_an_edit
+        PASS [   0.601s] (583/587) agent-doc-write-runtime-io run_entry::tests::response_cell_projection_defers_with_retained_authority_and_no_live_replica
+        PASS [   0.435s] (584/587) agent-doc-write-runtime-io tests::strict_empty_response_recovery_continues_after_stale_preflight_repair
+        PASS [   1.330s] (585/587) agent-doc-write-runtime-io binary_owned_cli_write_tests::a_refused_write_without_a_live_replica_still_fails
+        PASS [   1.325s] (586/587) agent-doc-write-runtime-io tests::prevalidation_reads_disk_without_authority_when_attached_editor_refuses
+        PASS [   6.116s] (587/587) agent-doc-crdt-relay-io tests::concurrent_readers_of_one_revision_share_one_materialization
+────────────
+     Summary [   6.189s] 587 tests run: 587 passed, 0 skipped

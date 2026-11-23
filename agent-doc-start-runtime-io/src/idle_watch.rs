@@ -384,6 +384,40 @@ fn idle_watch_revision_observation_due(
             .is_none_or(|last| now.duration_since(last) >= IDLE_WATCH_SAFETY_REVISION_INTERVAL)
 }
 
+/// A controller revision that identifies the document text, for the re-exec
+/// preflight memo. `None` when the controller cannot
+/// name one: detached (disk is the authority), no replica, or a controller that
+/// predates `text_revision` (its state vector alone misses a late tombstone).
+fn reexec_document_revision(file: &Path) -> Option<agent_doc_crdt_relay_io::CurrentRevision> {
+    text_identifying_revision(
+        agent_doc_controller_io::project_controller::revision_via_controller_model_read_for_doc(
+            file,
+            "idle_watch_supervisor_reexec_preflight_revision",
+        )
+        .ok()
+        .flatten(),
+    )
+}
+
+fn text_identifying_revision(
+    revision: Option<agent_doc_crdt_relay_io::CurrentRevision>,
+) -> Option<agent_doc_crdt_relay_io::CurrentRevision> {
+    revision.filter(|revision| {
+        matches!(
+            revision,
+            agent_doc_crdt_relay_io::CurrentRevision::Current { text_revision, .. }
+                if *text_revision != 0
+        )
+    })
+}
+
+fn reexec_validation_memo_hit(
+    current: Option<&agent_doc_crdt_relay_io::CurrentRevision>,
+    validated: Option<&agent_doc_crdt_relay_io::CurrentRevision>,
+) -> bool {
+    current.is_some() && current == validated
+}
+
 fn idle_watch_projection_reconcile_due(
     queue_state_observed: bool,
     delivery_edge_pending: bool,
@@ -2855,6 +2889,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // blocked interval and retry after the document becomes valid.
             let mut reexec_document_invalid_logged = false;
             let mut reexec_document_validation_retry_at: Option<std::time::Instant> = None;
+            // The controller revision the last successful
+            // re-exec document validation read. An unchanged revision proves the
+            // same text, so the preflight skips the full-document read.
+            let mut reexec_document_validated_revision: Option<
+                agent_doc_crdt_relay_io::CurrentRevision,
+            > = None;
             // `#supautoinstall`: dogfood auto-install rung that PRECEDES the recycle rung.
             // When this supervisor hosts an agent-doc session editing agent-doc's OWN
             // source and a finalize committed an edit, build+install at the idle boundary
@@ -6307,12 +6347,30 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     if reexec_document_validation_retry_at.is_some_and(|retry_at| now < retry_at) {
                         reexec_document_ready = false;
                     } else {
-                        let validation =
-                            agent_doc_document_realtime_io::try_resolve_current_document_content(
-                                &path,
-                                "idle_watch_supervisor_reexec_preflight",
-                            )
-                            .and_then(|content| validate_supervisor_reexec_document(&content));
+                        // A recycle that stays pending
+                        // re-ran this full read every tick — 354 reads of the
+                        // 659 KB haiven-dev `sdk-dev.md` in one window, most
+                        // of one unchanged revision. Probe the compact revision
+                        // first (observed BEFORE the read, so a concurrent edit
+                        // can only cost a re-read, never pair new text with a
+                        // stale revision).
+                        let revision = reexec_document_revision(&path);
+                        let validation = if reexec_validation_memo_hit(
+                            revision.as_ref(),
+                            reexec_document_validated_revision.as_ref(),
+                        ) {
+                            Ok(())
+                        } else {
+                            let validation =
+                                agent_doc_document_realtime_io::try_resolve_current_document_content(
+                                    &path,
+                                    "idle_watch_supervisor_reexec_preflight",
+                                )
+                                .and_then(|content| validate_supervisor_reexec_document(&content));
+                            reexec_document_validated_revision =
+                                validation.is_ok().then_some(revision).flatten();
+                            validation
+                        };
                         match validation {
                             Ok(()) => {
                                 reexec_document_invalid_logged = false;
@@ -7979,6 +8037,40 @@ pub(super) fn spawn_idle_queue_watch_thread(
 mod tests {
     use super::*;
 
+    /// The re-exec preflight skips its full-document
+    /// read only for an unchanged revision that names the text. A delete-only
+    /// edit moves `text_revision` while the state vector can hold still, and a
+    /// controller without the field (zero) never short-circuits the read.
+    #[test]
+    fn reexec_preflight_memo_hits_only_an_unchanged_text_revision() {
+        let revision = |text_revision| agent_doc_crdt_relay_io::CurrentRevision::Current {
+            lineage: "lineage-a".to_string(),
+            state_vector: b"sv-1".to_vec(),
+            text_revision,
+            live_editors: 1,
+            delivery_converged: true,
+        };
+        let validated = text_identifying_revision(Some(revision(7)));
+        assert!(reexec_validation_memo_hit(
+            text_identifying_revision(Some(revision(7))).as_ref(),
+            validated.as_ref(),
+        ));
+        assert!(
+            !reexec_validation_memo_hit(
+                text_identifying_revision(Some(revision(8))).as_ref(),
+                validated.as_ref(),
+            ),
+            "same state vector, new text revision: the text changed"
+        );
+        assert_eq!(text_identifying_revision(Some(revision(0))), None);
+        assert_eq!(
+            text_identifying_revision(Some(agent_doc_crdt_relay_io::CurrentRevision::Detached)),
+            None
+        );
+        assert!(!reexec_validation_memo_hit(None, None));
+        assert!(!reexec_validation_memo_hit(validated.as_ref(), None));
+    }
+
     fn reported_closeout_fixture() -> (tempfile::TempDir, PathBuf, IdleQueueLifecycleEffects) {
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("task.md");
@@ -8754,6 +8846,7 @@ Waiting on the reported row.\n\
             agent_doc_crdt_relay_io::CurrentRevision::Current {
                 lineage: lineage.to_string(),
                 state_vector: sv.to_vec(),
+                text_revision: 0,
                 live_editors: live,
                 delivery_converged: converged,
             }
@@ -8821,6 +8914,7 @@ Waiting on the reported row.\n\
         let revision = agent_doc_crdt_relay_io::CurrentRevision::Current {
             lineage: "lineage-a".to_string(),
             state_vector: b"sv-1".to_vec(),
+            text_revision: 0,
             live_editors: 1,
             delivery_converged: true,
         };

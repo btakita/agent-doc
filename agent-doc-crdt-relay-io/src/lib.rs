@@ -63,6 +63,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
+pub use agent_doc_document_realtime::crdt_relay::TextSnapshot;
 use agent_doc_document_realtime::crdt_relay::{
     AutomaticHistoryCompaction, AwarenessState, DiskChangeOutcome, DocumentOpDeltaOutcome,
     DocumentOpOriginFence, PendingReplicaUpdate, RelayHub, ReplicaDeliverySnapshot,
@@ -2329,6 +2330,14 @@ pub enum CurrentRevision {
         #[serde(default)]
         lineage: String,
         state_vector: Vec<u8>,
+        /// The canonical's text revision
+        /// ([`RelayHub::canonical_text_revision`]). The state vector alone does
+        /// not identify the text: a tombstone delivered behind a later op from
+        /// the same peer changes the document without moving any per-peer
+        /// maximum. Zero from a controller that predates the field, which then
+        /// keys on the state vector as before.
+        #[serde(default)]
+        text_revision: u64,
         live_editors: usize,
         delivery_converged: bool,
     },
@@ -2356,6 +2365,7 @@ pub fn current_revision_for_file_with_authority(
     Ok(CurrentRevision::Current {
         lineage: hub.lineage().to_string(),
         state_vector: hub.canonical_state_vector(),
+        text_revision: hub.canonical_text_revision(),
         live_editors: hub.live_count(),
         delivery_converged: hub.delivery_converged(),
     })
@@ -2400,6 +2410,90 @@ pub fn current_text_for_file_with_authority(
     authority: CrdtAuthority,
 ) -> Result<CurrentText> {
     current_text_for_file_with_authority_inner(file, authority, false, true, true)
+}
+
+/// How a [`current_text_snapshot_for_file_with_authority`] read treats the
+/// relay, mirroring the [`CurrentText`] entry points.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CurrentTextRead {
+    /// [`current_text_for_file_with_authority`]: drive the commit barrier.
+    FlushBarrier,
+    /// [`current_text_for_file_with_authority_nonblocking`]: no flush.
+    NonBlocking,
+    /// [`peek_current_text_for_file_with_authority_nonblocking`]: no flush,
+    /// recovery, or diagnostics.
+    Peek,
+}
+
+/// [`CurrentText`] whose body is the relay's shared per-revision
+/// materialization instead of an owned copy.
+///
+/// The controller serves every reader of a document from one canonical hub.
+/// Reading through this keeps one buffer and one content hash per canonical
+/// revision however many readers (queue claims, closeouts, steering checks,
+/// idle watches) ask for it.
+#[derive(Debug, Clone)]
+pub enum CurrentTextSnapshot {
+    Detached,
+    EditorAttachedMissingReplica,
+    EditorSyncPending,
+    Current {
+        text: TextSnapshot,
+        live_editors: usize,
+        delivery_converged: bool,
+        delivery_version: u64,
+        semantics: Option<CurrentDocumentSemantics>,
+        quarantined_replicas: usize,
+    },
+}
+
+impl CurrentTextSnapshot {
+    /// The owned [`CurrentText`] for callers that need a `String`. This copies
+    /// the shared text once; it never re-materializes it.
+    pub fn into_current_text(self) -> CurrentText {
+        match self {
+            Self::Detached => CurrentText::Detached,
+            Self::EditorAttachedMissingReplica => CurrentText::EditorAttachedMissingReplica,
+            Self::EditorSyncPending => CurrentText::EditorSyncPending,
+            Self::Current {
+                text,
+                live_editors,
+                delivery_converged,
+                delivery_version,
+                semantics,
+                quarantined_replicas,
+            } => CurrentText::Current {
+                text: text.as_str().to_owned(),
+                live_editors,
+                delivery_converged,
+                delivery_version,
+                semantics,
+                quarantined_replicas,
+            },
+        }
+    }
+}
+
+/// [`current_text_for_file_with_authority`] and its siblings, answering with
+/// the shared per-revision snapshot.
+pub fn current_text_snapshot_for_file_with_authority(
+    file: &Path,
+    authority: CrdtAuthority,
+    read: CurrentTextRead,
+) -> Result<CurrentTextSnapshot> {
+    let (flush_barrier, publish_diagnostic) = match read {
+        CurrentTextRead::FlushBarrier => (true, true),
+        CurrentTextRead::NonBlocking => (false, true),
+        CurrentTextRead::Peek => (false, false),
+    };
+    current_text_snapshot_for_file_inner(
+        file,
+        authority,
+        false,
+        flush_barrier,
+        publish_diagnostic,
+        || {},
+    )
 }
 
 /// [`current_text_for_file_with_authority`] without flushing live editor ops.
@@ -2461,10 +2555,29 @@ fn current_text_for_file_with_authority_inner_before_log(
     recover_missing_from_projection: bool,
     flush_barrier: bool,
     publish_diagnostic: bool,
-    mut before_log: impl FnMut(),
+    before_log: impl FnMut(),
 ) -> Result<CurrentText> {
+    current_text_snapshot_for_file_inner(
+        file,
+        authority,
+        recover_missing_from_projection,
+        flush_barrier,
+        publish_diagnostic,
+        before_log,
+    )
+    .map(CurrentTextSnapshot::into_current_text)
+}
+
+fn current_text_snapshot_for_file_inner(
+    file: &Path,
+    authority: CrdtAuthority,
+    recover_missing_from_projection: bool,
+    flush_barrier: bool,
+    publish_diagnostic: bool,
+    mut before_log: impl FnMut(),
+) -> Result<CurrentTextSnapshot> {
     if !authority.editor_attached() {
-        return Ok(CurrentText::Detached);
+        return Ok(CurrentTextSnapshot::Detached);
     }
 
     let hash = agent_doc_fs::document_state_hash(file)?;
@@ -2486,7 +2599,7 @@ fn current_text_for_file_with_authority_inner_before_log(
                 ),
             );
         }
-        return Ok(CurrentText::EditorAttachedMissingReplica);
+        return Ok(CurrentTextSnapshot::EditorAttachedMissingReplica);
     }
     let mut handle = hub_handle(&hash);
     if handle.is_none() && recover_missing_from_projection {
@@ -2528,7 +2641,7 @@ fn current_text_for_file_with_authority_inner_before_log(
                 ),
             );
         }
-        return Ok(CurrentText::EditorAttachedMissingReplica);
+        return Ok(CurrentTextSnapshot::EditorAttachedMissingReplica);
     };
     let mut hub_guard = handle.lock();
     let hub = &mut *hub_guard;
@@ -2568,10 +2681,13 @@ fn current_text_for_file_with_authority_inner_before_log(
                 ),
             );
         }
-        return Ok(CurrentText::EditorSyncPending);
+        return Ok(CurrentTextSnapshot::EditorSyncPending);
     }
 
-    let text = hub.canonical_text();
+    // A reference to the canonical's per-revision
+    // materialization, not a copy. Readers queued on this document's lock
+    // behind the first one find the same buffer and hash.
+    let text = hub.canonical_text_snapshot();
     let live_editors = hub.live_count();
     let quarantined_replicas = hub.quarantined_live_replicas().len();
     let semantics =
@@ -2601,7 +2717,7 @@ fn current_text_for_file_with_authority_inner_before_log(
                 "crdt_current_text file={} authority=multi_replica len={} hash={} live_editors={} delivery_converged={} delivery_version={} quarantined_replicas={} process_pid={}",
                 file.display(),
                 text.len(),
-                agent_doc_hash::content_hash(&text),
+                text.content_hash(),
                 live_editors,
                 delivery_converged,
                 delivery.version,
@@ -2610,7 +2726,7 @@ fn current_text_for_file_with_authority_inner_before_log(
             ),
         );
     }
-    Ok(CurrentText::Current {
+    Ok(CurrentTextSnapshot::Current {
         text,
         live_editors,
         delivery_converged,
@@ -8735,6 +8851,170 @@ mod tests {
 
         assert!(reached_log_boundary.get());
         assert!(matches!(current, CurrentText::Current { .. }));
+    }
+
+    /// A tracked document backed by a live hub whose canonical is advanced by a
+    /// registered editor member, the way operator typing reaches the relay.
+    fn shared_text_fixture(name: &str, lines: usize) -> (tempfile::TempDir, PathBuf, String) {
+        let (dir, doc) = temp_doc(name);
+        let text: String = (0..lines)
+            .map(|line| format!("- [ ] queue item {line:05}: share one materialized revision\n"))
+            .collect();
+        std::fs::write(&doc, &text).unwrap();
+        with_hub_seeded_from_file(&doc, |hub| hub.register(7).unwrap()).unwrap();
+        (dir, doc, text)
+    }
+
+    fn editor_edit(doc: &Path, offset: u32, delete_len: u32, insert: &str) {
+        with_hub(doc, |hub| {
+            hub.apply_local(7, offset, delete_len, insert).unwrap()
+        })
+        .unwrap();
+    }
+
+    fn concurrent_snapshot_reads(doc: &Path, readers: usize) -> Vec<TextSnapshot> {
+        let start = std::sync::Barrier::new(readers);
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..readers)
+                .map(|_| {
+                    scope.spawn(|| {
+                        start.wait();
+                        match current_text_snapshot_for_file_with_authority(
+                            doc,
+                            CrdtAuthority::MultiReplica,
+                            CurrentTextRead::FlushBarrier,
+                        )
+                        .unwrap()
+                        {
+                            CurrentTextSnapshot::Current { text, .. } => {
+                                // Every reader asks for the hash, as the controller's
+                                // log line and response both do.
+                                let _ = text.content_hash();
+                                text
+                            }
+                            other => panic!("expected current text, got {other:?}"),
+                        }
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        })
+    }
+
+    fn canonical_materializations(doc: &Path) -> u64 {
+        with_hub(doc, |hub| hub.canonical_text_materializations()).unwrap()
+    }
+
+    /// Step 4: N concurrent readers of one revision cost
+    /// exactly one materialization between them and share its buffer and hash.
+    #[test]
+    fn concurrent_readers_of_one_revision_share_one_materialization() {
+        let (_dir, doc, text) = shared_text_fixture("shared-text-concurrent.md", 6_000);
+        let before = canonical_materializations(&doc);
+        editor_edit(&doc, 0, 0, "# edited\n");
+        let snapshots = concurrent_snapshot_reads(&doc, 16);
+        assert_eq!(
+            canonical_materializations(&doc) - before,
+            1,
+            "one edit plus 16 concurrent readers must build the text exactly once"
+        );
+        let expected = format!("# edited\n{text}");
+        let first = &snapshots[0];
+        assert_eq!(first.as_str(), expected);
+        assert_eq!(
+            first.content_hash(),
+            agent_doc_hash::content_hash(&expected)
+        );
+        for snapshot in &snapshots {
+            assert_eq!(snapshot.revision(), first.revision());
+            assert!(snapshot.shares_materialization_with(first));
+            assert_eq!(snapshot.content_hash(), first.content_hash());
+        }
+
+        // A later reader of the unchanged revision hits the same buffer, and the
+        // owned `CurrentText` entry point copies it without rebuilding.
+        let built = canonical_materializations(&doc);
+        let later = concurrent_snapshot_reads(&doc, 4);
+        assert!(later[0].shares_materialization_with(first));
+        match current_text_for_file_with_authority(&doc, CrdtAuthority::MultiReplica).unwrap() {
+            CurrentText::Current { text, .. } => assert_eq!(text, expected),
+            other => panic!("expected current text, got {other:?}"),
+        }
+        assert_eq!(canonical_materializations(&doc), built);
+    }
+
+    /// A delete-only edit must invalidate the shared text and move the compact
+    /// revision every revision-keyed cache compares.
+    #[test]
+    fn delete_only_edit_invalidates_shared_text_and_revision() {
+        let (_dir, doc, text) = shared_text_fixture("shared-text-delete.md", 64);
+        let revision = |doc: &Path| {
+            current_revision_for_file_with_authority(doc, CrdtAuthority::MultiReplica).unwrap()
+        };
+        let cached = concurrent_snapshot_reads(&doc, 2).remove(0);
+        let before = revision(&doc);
+        let first_line = text.find('\n').unwrap() + 1;
+        editor_edit(&doc, 0, first_line as u32, "");
+        let after = revision(&doc);
+        assert_ne!(after, before, "a delete-only edit must move the revision");
+        let (
+            CurrentRevision::Current {
+                text_revision: before_text,
+                ..
+            },
+            CurrentRevision::Current {
+                text_revision: after_text,
+                ..
+            },
+        ) = (&before, &after)
+        else {
+            panic!("expected current revisions, got {before:?} / {after:?}");
+        };
+        assert_ne!(before_text, after_text);
+        let fresh = concurrent_snapshot_reads(&doc, 2).remove(0);
+        assert_eq!(fresh.as_str(), &text[first_line..]);
+        assert_eq!(fresh.revision(), *after_text);
+        assert_eq!(
+            cached.as_str(),
+            text,
+            "an earlier reader keeps its own revision"
+        );
+    }
+
+    /// Readers never see stale text: after every edit — inserts and deletes —
+    /// the next read is exactly the edited document.
+    #[test]
+    fn shared_text_readers_never_observe_stale_text_after_an_edit() {
+        let (_dir, doc, text) = shared_text_fixture("shared-text-fresh.md", 200);
+        let mut model = text;
+        let mut held = Vec::new();
+        for step in 0..24u32 {
+            if step % 3 == 2 {
+                let line_end = model.find('\n').unwrap() + 1;
+                editor_edit(&doc, 0, line_end as u32, "");
+                model.replace_range(..line_end, "");
+            } else {
+                let insert = format!("step {step}\n");
+                editor_edit(&doc, 0, 0, &insert);
+                model.insert_str(0, &insert);
+            }
+            let read = concurrent_snapshot_reads(&doc, 3);
+            for snapshot in &read {
+                assert_eq!(snapshot.as_str(), model, "step {step} read stale text");
+                assert_eq!(
+                    snapshot.content_hash(),
+                    agent_doc_hash::content_hash(&model)
+                );
+            }
+            held.push((read[0].clone(), model.clone()));
+        }
+        for (snapshot, expected) in held {
+            assert_eq!(
+                snapshot.as_str(),
+                expected,
+                "a held snapshot must not change"
+            );
+        }
     }
 
     #[test]

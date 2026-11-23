@@ -27,6 +27,8 @@ use anyhow::{Context, Result};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use lazily::{OpId, TextCrdt, TextOp, TextVersionVector};
 use std::cell::{Cell, RefCell};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 
 mod local_ops;
 use local_ops::{LocalJournal, OrderElem, OrderIndex};
@@ -38,6 +40,83 @@ thread_local! {
     /// Whole-graph text projections this thread computed (cache misses of
     /// [`ReplicaState::text`]).
     static TEXT_PROJECTION_MISSES: Cell<u64> = const { Cell::new(0) };
+}
+
+/// Process-wide source of [`ReplicaState::text_revision`] values.
+/// Every replica draws from one counter, so a revision
+/// names exactly one visible text in this process even across a canonical that
+/// was replaced wholesale (a rebuild from disk mints a fresh epoch whose state
+/// vector restarts at the same counters as the epoch it replaced).
+static NEXT_TEXT_REVISION: AtomicU64 = AtomicU64::new(1);
+
+fn mint_text_revision() -> u64 {
+    NEXT_TEXT_REVISION.fetch_add(1, Ordering::Relaxed)
+}
+
+/// One revision of a replica's visible text, shared by every reader of that
+/// revision.
+///
+/// A controller serving a large session document used to hand each reader its
+/// own copy of the projection and its own SHA-256 of it: on haiven-dev
+/// 2026-11-23 the 659 KB `sdk-dev.md` was copied and hashed ~400 times in 12
+/// minutes for queue claims, closeouts, steering checks and idle watches that
+/// all read the same few revisions. A snapshot is the replica's own projection
+/// buffer behind an [`Arc`], so a reader costs a reference count, and its hash
+/// is computed at most once per revision by whichever reader asks first; a
+/// concurrent reader of the same revision waits on that one computation instead
+/// of starting another.
+///
+/// The snapshot is immutable. When the replica next edits its projection while
+/// a snapshot is still held, the edit copies the buffer first (copy-on-write),
+/// so a reader never observes text from a later revision. Memory stays bounded
+/// to the replica's current projection plus whatever older revisions readers
+/// are still holding; the replica itself retains only its latest revision.
+#[derive(Clone)]
+pub struct TextSnapshot {
+    revision: u64,
+    text: Arc<String>,
+    content_hash: Arc<OnceLock<String>>,
+}
+
+impl TextSnapshot {
+    /// The [`ReplicaState::text_revision`] this text was materialized at.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.text.as_str()
+    }
+
+    /// The SHA-256 content hash ([`agent_doc_hash::content_hash`]), computed
+    /// once per revision and shared with every other snapshot of it.
+    pub fn content_hash(&self) -> &str {
+        self.content_hash
+            .get_or_init(|| agent_doc_hash::content_hash(self.text.as_str()))
+    }
+
+    /// Whether two snapshots share one materialized buffer (diagnostics/tests).
+    pub fn shares_materialization_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.text, &other.text)
+    }
+}
+
+impl std::ops::Deref for TextSnapshot {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl std::fmt::Debug for TextSnapshot {
+    // Never dump a whole session document into a log line or panic message.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TextSnapshot")
+            .field("revision", &self.revision)
+            .field("len", &self.text.len())
+            .finish()
+    }
 }
 
 /// How many [`ReplicaState::text`] calls on this thread had to order the
@@ -82,7 +161,25 @@ pub struct ReplicaState {
     /// refreshes this string from the order instead of dropping it: clearing it
     /// made every small delivery on a large session document reorder the whole
     /// graph inside the IDE process.
-    cached_text: RefCell<Option<String>>,
+    ///
+    /// Held behind an [`Arc`] so [`Self::text_snapshot`] shares it with readers
+    /// instead of copying it; an edit while a snapshot
+    /// is outstanding copies on write.
+    cached_text: RefCell<Option<Arc<String>>>,
+    /// Identity of the current visible text. Advances on
+    /// every mutation that can change the projection — a local splice, a remote
+    /// batch that stored a new operation, insert or tombstone alike — and never
+    /// otherwise. The state vector is not a substitute: a tombstone delivered
+    /// behind a later op from the same peer, or a fresh epoch rebuilt from text,
+    /// changes the text without moving the per-peer maxima.
+    text_revision: Cell<u64>,
+    /// The shared content-hash slot for `text_revision`, so every snapshot of
+    /// one revision computes the hash at most once between them.
+    cached_text_hash: RefCell<Option<(u64, Arc<OnceLock<String>>)>>,
+    /// Whole-document text builds this replica performed: graph projections,
+    /// folded-order projections, and copy-on-write copies of a projection a
+    /// snapshot still held. Readers of an unchanged revision never add to it.
+    text_materializations: Cell<u64>,
     /// Codepoint count paired with `cached_text`. Keeping it separately makes
     /// repeated appends constant-time instead of rescanning the whole projection.
     cached_text_chars: Cell<Option<usize>>,
@@ -517,7 +614,10 @@ impl ReplicaState {
         Self {
             text: RefCell::new(text),
             cached_state_vector: RefCell::new(Some(state_vector)),
-            cached_text: RefCell::new(Some(String::new())),
+            cached_text: RefCell::new(Some(Arc::new(String::new()))),
+            text_revision: Cell::new(mint_text_revision()),
+            cached_text_hash: RefCell::new(None),
+            text_materializations: Cell::new(0),
             cached_text_chars: Cell::new(Some(0)),
             cached_edit_anchor: Cell::new(Some((0, 0))),
             pending_local_edits: RefCell::new(Vec::new()),
@@ -539,7 +639,10 @@ impl ReplicaState {
         Self {
             text: RefCell::new(crdt),
             cached_state_vector: RefCell::new(Some(state_vector)),
-            cached_text: RefCell::new(Some(text.to_owned())),
+            cached_text: RefCell::new(Some(Arc::new(text.to_owned()))),
+            text_revision: Cell::new(mint_text_revision()),
+            cached_text_hash: RefCell::new(None),
+            text_materializations: Cell::new(0),
             cached_text_chars: Cell::new(Some(text_chars)),
             cached_edit_anchor: Cell::new(Some((text_chars, text.len()))),
             pending_local_edits: RefCell::new(Vec::new()),
@@ -575,7 +678,8 @@ impl ReplicaState {
         cached_text: &str,
     ) -> Result<Self> {
         let replica = Self::from_encoded(client_id, state)?;
-        *replica.cached_text.borrow_mut() = Some(cached_text.to_owned());
+        *replica.cached_text.borrow_mut() = Some(Arc::new(cached_text.to_owned()));
+        replica.bump_text_revision();
         replica
             .cached_text_chars
             .set(Some(cached_text.chars().count()));
@@ -590,12 +694,13 @@ impl ReplicaState {
             return;
         }
         TEXT_PROJECTION_MISSES.with(|misses| misses.set(misses.get() + 1));
+        self.count_text_materialization();
         let projected = self.text.borrow().text();
         let projected_chars = projected.chars().count();
         self.cached_text_chars.set(Some(projected_chars));
         self.cached_edit_anchor
             .set(Some((projected_chars, projected.len())));
-        *self.cached_text.borrow_mut() = Some(projected);
+        *self.cached_text.borrow_mut() = Some(Arc::new(projected));
         // The read that pays for one graph projection also rebuilds the order,
         // so the next foldable delivery can refresh [Self::cached_text] in
         // place. Remote-only editor replicas never take the local-edit path
@@ -825,12 +930,70 @@ impl ReplicaState {
     }
 
     /// The current converged text.
+    ///
+    /// An owned copy of the cached projection. Readers that only inspect the
+    /// text should prefer [`Self::text_snapshot`], which shares the projection
+    /// instead of copying it.
     pub fn text(&self) -> String {
         self.ensure_cached_text();
         if let Some(cached) = self.cached_text.borrow().as_ref() {
-            return cached.clone();
+            return String::clone(cached);
         }
         unreachable!("ensure_cached_text must materialize the projection")
+    }
+
+    /// The current visible text as a shared, immutable [`TextSnapshot`].
+    /// Every call at one [`Self::text_revision`]
+    /// returns the same buffer and the same hash slot; the projection is built
+    /// at most once per revision, and only if no earlier read or edit already
+    /// holds it.
+    pub fn text_snapshot(&self) -> TextSnapshot {
+        self.ensure_cached_text();
+        let text = self
+            .cached_text
+            .borrow()
+            .as_ref()
+            .map(Arc::clone)
+            .expect("ensure_cached_text must materialize the projection");
+        let revision = self.text_revision.get();
+        let content_hash = {
+            let mut slot = self.cached_text_hash.borrow_mut();
+            match slot.as_ref() {
+                Some((cached_revision, hash)) if *cached_revision == revision => Arc::clone(hash),
+                _ => {
+                    let hash = Arc::new(OnceLock::new());
+                    *slot = Some((revision, Arc::clone(&hash)));
+                    hash
+                }
+            }
+        };
+        TextSnapshot {
+            revision,
+            text,
+            content_hash,
+        }
+    }
+
+    /// Identity of the current visible text. See the `text_revision` field:
+    /// equal values within one process mean byte-identical text, and every
+    /// change to the text — deletions included — yields a new value.
+    pub fn text_revision(&self) -> u64 {
+        self.text_revision.get()
+    }
+
+    /// Whole-document text builds this replica has performed. See the
+    /// `text_materializations` field.
+    pub fn text_materializations(&self) -> u64 {
+        self.text_materializations.get()
+    }
+
+    fn bump_text_revision(&self) {
+        self.text_revision.set(mint_text_revision());
+    }
+
+    fn count_text_materialization(&self) {
+        self.text_materializations
+            .set(self.text_materializations.get().saturating_add(1));
     }
 
     /// Apply a local edit: delete `delete_len` chars at char `offset`, then insert
@@ -904,9 +1067,15 @@ impl ReplicaState {
         }
         {
             let mut cached = self.cached_text.borrow_mut();
-            let current = cached
+            let shared = cached
                 .as_mut()
                 .expect("cached projection must remain materialized");
+            // A reader still holding this revision's snapshot keeps its text:
+            // the edit copies the buffer rather than mutating it underneath.
+            if Arc::strong_count(shared) > 1 {
+                self.count_text_materialization();
+            }
+            let current = Arc::make_mut(shared);
             if start_char == total_chars && actual_delete == 0 {
                 current.push_str(insert);
                 self.cached_edit_anchor
@@ -927,6 +1096,7 @@ impl ReplicaState {
         }
         self.cached_text_chars
             .set(Some(total_chars - actual_delete + inserted_chars));
+        self.bump_text_revision();
         self.queue_local_edit(PendingLocalEdit {
             offset: start_char,
             delete_len: actual_delete,
@@ -1109,6 +1279,7 @@ impl ReplicaState {
         self.flush_pending_local_edits();
         if self.text.borrow_mut().apply_delta_unprojected(ops) {
             *self.cached_encoded_state.borrow_mut() = None;
+            self.bump_text_revision();
             if self.fold_remote_ops(ops) {
                 self.retain_folded_projection();
             } else {
@@ -1134,9 +1305,10 @@ impl ReplicaState {
             };
             (order.visible_text(), order.len())
         };
+        self.count_text_materialization();
         self.cached_text_chars.set(Some(chars));
         self.cached_edit_anchor.set(Some((chars, projected.len())));
-        *self.cached_text.borrow_mut() = Some(projected);
+        *self.cached_text.borrow_mut() = Some(Arc::new(projected));
     }
 
     /// Fold a remote batch lazily just stored into the order, the version
@@ -1672,7 +1844,10 @@ mod tests {
         let replica = ReplicaState::from_text(1, "cached");
         assert_eq!(replica.text(), "cached");
         assert_eq!(replica.text(), "cached");
-        assert_eq!(replica.cached_text.borrow().as_deref(), Some("cached"));
+        assert_eq!(
+            replica.cached_text.borrow().as_deref().map(String::as_str),
+            Some("cached")
+        );
 
         let remote = ReplicaState::from_text(2, "remote");
         replica.apply_update(&remote.encode_state()).unwrap();
@@ -1682,7 +1857,7 @@ mod tests {
         );
         let projected = replica.text();
         assert_eq!(
-            replica.cached_text.borrow().as_deref(),
+            replica.cached_text.borrow().as_deref().map(String::as_str),
             Some(projected.as_str())
         );
     }
@@ -1698,7 +1873,7 @@ mod tests {
             ReplicaState::from_encoded(2, &ReplicaState::from_text(1, seed).encode_state())
                 .unwrap();
         assert_eq!(
-            replica.cached_text.borrow().as_deref(),
+            replica.cached_text.borrow().as_deref().map(String::as_str),
             Some(seed),
             "a foldable snapshot must retain the visible projection"
         );
@@ -1711,7 +1886,7 @@ mod tests {
             .apply_update(&encode_update_ops(&peer.delta_since(&frontier)).unwrap())
             .unwrap();
         assert_eq!(
-            replica.cached_text.borrow().as_deref(),
+            replica.cached_text.borrow().as_deref().map(String::as_str),
             Some("hello there world"),
             "a folded remote edit must refresh the projection instead of clearing it"
         );
@@ -1747,7 +1922,7 @@ mod tests {
             .apply_update(&encode_update_ops(&reference.delta_since(&frontier)).unwrap())
             .unwrap();
         assert_eq!(
-            replica.cached_text.borrow().as_deref(),
+            replica.cached_text.borrow().as_deref().map(String::as_str),
             Some(reference.text().as_str()),
             "after one rebuild, a small remote edit must refresh the cache again"
         );
@@ -2276,5 +2451,134 @@ mod tests {
         );
         sync(&controller, &editor).unwrap();
         assert_eq!(editor.text(), controller.text());
+    }
+
+    /// Every reader of one revision shares one buffer
+    /// and one hash; the replica materializes nothing for a repeated read.
+    #[test]
+    fn text_snapshot_shares_one_materialization_per_revision() {
+        let text = large_session_text(6_000);
+        let seed = ReplicaState::from_text(1, &text);
+        let canonical = ReplicaState::from_encoded(2, &seed.encode_state()).unwrap();
+        let first = canonical.text_snapshot();
+        let built = canonical.text_materializations();
+        assert_eq!(built, 1, "an encoded bootstrap projects its graph once");
+        for _ in 0..32 {
+            let again = canonical.text_snapshot();
+            assert_eq!(again.revision(), first.revision());
+            assert!(again.shares_materialization_with(&first));
+            assert_eq!(again.content_hash(), agent_doc_hash::content_hash(&text));
+        }
+        assert_eq!(canonical.text_materializations(), built);
+        assert_eq!(&*first, text.as_str());
+        assert!(
+            Arc::ptr_eq(&first.content_hash, &canonical.text_snapshot().content_hash),
+            "one revision must share one hash slot"
+        );
+    }
+
+    /// A snapshot is immutable: an edit made while it is held copies the
+    /// buffer, so the reader keeps the revision it asked for and the next read
+    /// sees the edit under a new revision.
+    #[test]
+    fn text_snapshot_never_observes_a_later_edit() {
+        let replica = ReplicaState::from_text(1, "alpha\nbeta\n");
+        let before = replica.text_snapshot();
+        replica.apply_local_edit(0, 0, "zero\n");
+        assert_eq!(&*before, "alpha\nbeta\n");
+        let after = replica.text_snapshot();
+        assert_ne!(after.revision(), before.revision());
+        assert_eq!(&*after, "zero\nalpha\nbeta\n");
+        assert!(!after.shares_materialization_with(&before));
+        assert_ne!(after.content_hash(), before.content_hash());
+
+        // Without an outstanding snapshot the edit stays in place: no copy.
+        drop(before);
+        drop(after);
+        let built = replica.text_materializations();
+        replica.apply_local_edit(0, 5, "");
+        assert_eq!(replica.text_materializations(), built);
+        assert_eq!(&*replica.text_snapshot(), "alpha\nbeta\n");
+    }
+
+    /// The caution in the step-4 direction. A tombstone
+    /// delivered behind a later op from the same peer changes the visible text
+    /// without moving the state vector's per-peer maximum, so the vector cannot
+    /// key a text cache. The text revision still advances, and a read after it
+    /// sees the deletion.
+    #[test]
+    fn delete_only_change_invalidates_snapshot_even_when_state_vector_holds_still() {
+        let base = ReplicaState::from_text(1, "abc\n");
+        let canonical = ReplicaState::from_encoded(1, &base.encode_state()).unwrap();
+        let editor = ReplicaState::from_encoded(2, &base.encode_state()).unwrap();
+
+        let base_sv = editor.state_vector();
+        editor.apply_local_edit(1, 1, "");
+        let delete_only = editor.diff(&base_sv).unwrap();
+        let after_delete_sv = editor.state_vector();
+        editor.apply_local_edit(3, 0, "XYZ");
+        let later_inserts = editor.diff(&after_delete_sv).unwrap();
+
+        canonical.apply_update(&later_inserts).unwrap();
+        let cached = canonical.text_snapshot();
+        assert_eq!(&*cached, "abc\nXYZ");
+        let sv_before_delete = canonical.state_vector();
+
+        canonical.apply_update(&delete_only).unwrap();
+        assert_eq!(
+            canonical.state_vector(),
+            sv_before_delete,
+            "precondition: the late tombstone leaves the state vector unchanged"
+        );
+        let fresh = canonical.text_snapshot();
+        assert_ne!(
+            fresh.revision(),
+            cached.revision(),
+            "a delete-only change must move the text revision"
+        );
+        assert_eq!(&*fresh, "ac\nXYZ");
+        assert_eq!(
+            fresh.content_hash(),
+            agent_doc_hash::content_hash("ac\nXYZ")
+        );
+        assert_eq!(
+            &*cached, "abc\nXYZ",
+            "the earlier reader keeps its own revision"
+        );
+
+        // A plain in-order delete moves it as well.
+        let in_order = canonical.text_revision();
+        let sv = editor.state_vector();
+        editor.apply_local_edit(0, 1, "");
+        canonical.apply_update(&editor.diff(&sv).unwrap()).unwrap();
+        assert_ne!(canonical.text_revision(), in_order);
+        assert_eq!(&*canonical.text_snapshot(), "c\nXYZ");
+    }
+
+    /// Redelivering a known update changes nothing, so it must keep the
+    /// revision (and with it every reader's cache).
+    #[test]
+    fn text_revision_holds_across_replays_and_reads() {
+        let canonical = ReplicaState::from_text(1, "steady\n");
+        let editor = ReplicaState::from_encoded(2, &canonical.encode_state()).unwrap();
+        let sv = editor.state_vector();
+        editor.apply_local_edit(0, 0, "x");
+        let update = editor.diff(&sv).unwrap();
+        canonical.apply_update(&update).unwrap();
+        let revision = canonical.text_revision();
+        canonical.apply_update(&update).unwrap();
+        let _ = canonical.text();
+        let _ = canonical.state_vector();
+        let _ = canonical.encode_state();
+        assert_eq!(canonical.text_revision(), revision);
+    }
+
+    /// Revisions are process-unique: two replicas never share one, so a
+    /// canonical replaced wholesale cannot collide with its predecessor's key.
+    #[test]
+    fn text_revisions_are_unique_across_replicas() {
+        let a = ReplicaState::from_text(1, "same\n");
+        let b = ReplicaState::from_text(1, "same\n");
+        assert_ne!(a.text_revision(), b.text_revision());
     }
 }

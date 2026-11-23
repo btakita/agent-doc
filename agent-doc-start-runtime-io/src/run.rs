@@ -4189,6 +4189,7 @@ mod tests {
             &CurrentRevision::Current {
                 lineage: "lineage-a".to_string(),
                 state_vector: Vec::new(),
+                text_revision: 0,
                 live_editors: 1,
                 delivery_converged: true,
             }

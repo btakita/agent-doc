@@ -10830,7 +10830,7 @@ fn request_controller_crdt_current_text_with_options(
         timeout,
     )?;
     let current = controller_current_text_from_data(&data)?;
-    log_controller_current_text_result(canonical, source, &current);
+    log_controller_current_text_response(canonical, source, &current, &data);
     Ok(current)
 }
 
@@ -10901,7 +10901,7 @@ fn request_existing_controller_crdt_current_text_read_with_diagnostics(
     };
     let current = controller_current_text_from_data(&data)?;
     if publish_diagnostic {
-        log_controller_current_text_result(canonical, source, &current);
+        log_controller_current_text_response(canonical, source, &current, &data);
     }
     let write_typing = data
         .get("write_typing")
@@ -12356,6 +12356,154 @@ fn controller_current_text_response(
     }
 }
 
+/// [`controller_current_text_response`] over the relay's shared snapshot
+/// : one memoized hash, and the body serialized from
+/// the shared buffer. `text_revision` lets a reader recognize an unchanged
+/// revision without comparing or rehashing the text.
+fn controller_current_text_snapshot_response(
+    current: &agent_doc_crdt_relay_io::CurrentTextSnapshot,
+) -> serde_json::Value {
+    match current {
+        agent_doc_crdt_relay_io::CurrentTextSnapshot::Detached => {
+            serde_json::json!({ "status": "detached" })
+        }
+        agent_doc_crdt_relay_io::CurrentTextSnapshot::EditorAttachedMissingReplica => {
+            serde_json::json!({ "status": "editor_attached_model_missing" })
+        }
+        agent_doc_crdt_relay_io::CurrentTextSnapshot::EditorSyncPending => {
+            serde_json::json!({ "status": "editor_sync_pending" })
+        }
+        agent_doc_crdt_relay_io::CurrentTextSnapshot::Current {
+            text,
+            live_editors,
+            delivery_converged,
+            delivery_version,
+            semantics,
+            quarantined_replicas,
+        } => serde_json::json!({
+            "status": "current",
+            "text_len": text.len(),
+            "text_hash": text.content_hash(),
+            "text_revision": text.revision(),
+            "text": text.as_str(),
+            "live_editors": live_editors,
+            "delivery_converged": delivery_converged,
+            "delivery_version": delivery_version,
+            "semantics": semantics,
+            "quarantined_replicas": quarantined_replicas,
+        }),
+    }
+}
+
+fn log_controller_current_text_snapshot_result(
+    canonical: &Path,
+    source: &str,
+    current: &agent_doc_crdt_relay_io::CurrentTextSnapshot,
+) {
+    match current {
+        agent_doc_crdt_relay_io::CurrentTextSnapshot::Detached => {
+            log_controller_current_text_result(
+                canonical,
+                source,
+                &agent_doc_crdt_relay_io::CurrentText::Detached,
+            )
+        }
+        agent_doc_crdt_relay_io::CurrentTextSnapshot::EditorAttachedMissingReplica => {
+            log_controller_current_text_result(
+                canonical,
+                source,
+                &agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica,
+            )
+        }
+        agent_doc_crdt_relay_io::CurrentTextSnapshot::EditorSyncPending => {
+            log_controller_current_text_result(
+                canonical,
+                source,
+                &agent_doc_crdt_relay_io::CurrentText::EditorSyncPending,
+            )
+        }
+        agent_doc_crdt_relay_io::CurrentTextSnapshot::Current {
+            text,
+            live_editors,
+            delivery_converged,
+            delivery_version,
+            ..
+        } => log_controller_current_text_current(
+            canonical,
+            source,
+            text.len(),
+            text.content_hash(),
+            *live_editors,
+            *delivery_converged,
+            *delivery_version,
+        ),
+    }
+}
+
+fn log_controller_current_text_current(
+    canonical: &Path,
+    source: &str,
+    text_len: usize,
+    text_hash: &str,
+    live_editors: usize,
+    delivery_converged: bool,
+    delivery_version: u64,
+) {
+    agent_doc_ops_log_io::log_op(
+        canonical,
+        &format!(
+            "controller_crdt_current_text file={} source={} status=current authority=cp_model text_len={} text_hash={} live_editors={} delivery_converged={} delivery_version={}",
+            canonical.display(),
+            source,
+            text_len,
+            text_hash,
+            live_editors,
+            delivery_converged,
+            delivery_version,
+        ),
+    )
+}
+
+/// The controller's `text_hash` for `text` when its response carried one for
+/// exactly this length, so the client-side log line does not hash the whole
+/// document a second time.
+fn controller_response_text_hash<'a>(data: &'a serde_json::Value, text: &str) -> Option<&'a str> {
+    let len = data.get("text_len").and_then(serde_json::Value::as_u64)?;
+    (usize::try_from(len).ok()? == text.len())
+        .then(|| data.get("text_hash").and_then(serde_json::Value::as_str))
+        .flatten()
+        .filter(|hash| !hash.is_empty())
+}
+
+fn log_controller_current_text_response(
+    canonical: &Path,
+    source: &str,
+    current: &agent_doc_crdt_relay_io::CurrentText,
+    data: &serde_json::Value,
+) {
+    match current {
+        agent_doc_crdt_relay_io::CurrentText::Current {
+            text,
+            live_editors,
+            delivery_converged,
+            delivery_version,
+            ..
+        } => match controller_response_text_hash(data, text) {
+            Some(hash) => log_controller_current_text_current(
+                canonical,
+                source,
+                text.len(),
+                hash,
+                *live_editors,
+                *delivery_converged,
+                *delivery_version,
+            ),
+            None => log_controller_current_text_result(canonical, source, current),
+        },
+        _ => log_controller_current_text_result(canonical, source, current),
+    }
+}
+
 fn log_controller_current_text_result(
     canonical: &Path,
     source: &str,
@@ -12394,18 +12542,14 @@ fn log_controller_current_text_result(
             delivery_converged,
             delivery_version,
             ..
-        } => agent_doc_ops_log_io::log_op(
+        } => log_controller_current_text_current(
             canonical,
-            &format!(
-                "controller_crdt_current_text file={} source={} status=current authority=cp_model text_len={} text_hash={} live_editors={} delivery_converged={} delivery_version={}",
-                canonical.display(),
-                source,
-                text.len(),
-                agent_doc_hash::content_hash(text),
-                live_editors,
-                delivery_converged,
-                delivery_version,
-            ),
+            source,
+            text.len(),
+            &agent_doc_hash::content_hash(text),
+            *live_editors,
+            *delivery_converged,
+            *delivery_version,
         ),
     }
 }
@@ -12762,26 +12906,28 @@ fn handle_crdt_current_text_rpc(
     if payload.effect_free {
         pause_effect_free_current_text_after_authority_for_test()?;
     }
-    let current = if payload.effect_free {
-        agent_doc_crdt_relay_io::peek_current_text_for_file_with_authority_nonblocking(
-            &canonical, authority,
-        )?
-    } else if payload.recover_projection {
-        agent_doc_crdt_relay_io::current_text_for_file_with_authority_recovering_projection(
-            &canonical, authority,
-        )?
-    } else if !payload.flush_barrier {
-        agent_doc_crdt_relay_io::current_text_for_file_with_authority_nonblocking(
-            &canonical, authority,
-        )?
+    // Read the canonical's shared per-revision
+    // materialization. The log line and the response share its one memoized
+    // content hash, and the response body is serialized straight from the
+    // shared buffer, so a reader of an unchanged revision never rebuilds,
+    // copies-to-own, or rehashes the document. `recover_projection` has
+    // resolved to the flush-barrier read since durable projection recovery
+    // stopped being promoted into a live editor-owned hub.
+    let read = if payload.effect_free {
+        agent_doc_crdt_relay_io::CurrentTextRead::Peek
+    } else if !payload.recover_projection && !payload.flush_barrier {
+        agent_doc_crdt_relay_io::CurrentTextRead::NonBlocking
     } else {
-        agent_doc_crdt_relay_io::current_text_for_file_with_authority(&canonical, authority)?
+        agent_doc_crdt_relay_io::CurrentTextRead::FlushBarrier
     };
+    let current = agent_doc_crdt_relay_io::current_text_snapshot_for_file_with_authority(
+        &canonical, authority, read,
+    )?;
     if !payload.effect_free {
-        log_controller_current_text_result(&canonical, &source, &current);
+        log_controller_current_text_snapshot_result(&canonical, &source, &current);
     }
     let write_typing = if payload.include_write_typing
-        && let agent_doc_crdt_relay_io::CurrentText::Current { text, .. } = &current
+        && let agent_doc_crdt_relay_io::CurrentTextSnapshot::Current { text, .. } = &current
     {
         let document_hash = agent_doc_hash::document_id_for_path(&canonical);
         let active_capture = runtime
@@ -12792,15 +12938,16 @@ fn handle_crdt_current_text_rpc(
             .and_then(|capture| capture.document.editor_op_capture.clone());
         // Omit the optional field when the projection is unreadable so the
         // writer can use its established probe and diagnostic.
-        agent_doc_op_capture_io::editor_ops_in_flight_for_projection(active_capture.as_ref(), text)
-            .ok()
-            .map(|typing| {
-                typing.map_or(ControllerWriteTyping::Clear, ControllerWriteTyping::Pending)
-            })
+        agent_doc_op_capture_io::editor_ops_in_flight_for_projection(
+            active_capture.as_ref(),
+            text.as_str(),
+        )
+        .ok()
+        .map(|typing| typing.map_or(ControllerWriteTyping::Clear, ControllerWriteTyping::Pending))
     } else {
         None
     };
-    let mut response = controller_current_text_response(current);
+    let mut response = controller_current_text_snapshot_response(&current);
     if let Some(write_typing) = write_typing {
         response["write_typing"] = serde_json::to_value(write_typing)?;
     }
@@ -55872,6 +56019,45 @@ mod tests {
         assert_eq!(
             controller_current_text_from_data(&encoded).unwrap(),
             current
+        );
+    }
+
+    /// The handler's snapshot response decodes to the
+    /// same `CurrentText` as the owned encoding, carries the snapshot's one
+    /// memoized hash and its revision, and lets the client log reuse that hash
+    /// only for a body of exactly the reported length.
+    #[test]
+    fn shared_snapshot_response_round_trips_with_memoized_hash_and_revision() {
+        let replica = agent_doc_merge::crdt_sync::ReplicaState::from_text(1, "document\n");
+        let text = replica.text_snapshot();
+        let snapshot = agent_doc_crdt_relay_io::CurrentTextSnapshot::Current {
+            text: text.clone(),
+            live_editors: 1,
+            delivery_converged: true,
+            delivery_version: 4,
+            semantics: None,
+            quarantined_replicas: 0,
+        };
+        let encoded = controller_current_text_snapshot_response(&snapshot);
+        assert_eq!(
+            encoded["text_hash"],
+            agent_doc_hash::content_hash("document\n")
+        );
+        assert_eq!(encoded["text_revision"], text.revision());
+        let owned = snapshot.into_current_text();
+        assert_eq!(controller_current_text_from_data(&encoded).unwrap(), owned);
+        assert_eq!(
+            controller_response_text_hash(&encoded, "document\n"),
+            Some(text.content_hash())
+        );
+        assert_eq!(
+            controller_response_text_hash(&encoded, "document\nmore"),
+            None
+        );
+        assert_eq!(
+            controller_response_text_hash(&serde_json::json!({}), "document\n"),
+            None,
+            "a controller that predates the field leaves the client hashing"
         );
     }
 

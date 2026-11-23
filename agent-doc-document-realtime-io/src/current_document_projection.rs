@@ -462,6 +462,7 @@ mod tests {
         let current = CurrentRevision::Current {
             lineage: "lineage-a".to_string(),
             state_vector: vec![1, 2, 3],
+            text_revision: 0,
             live_editors: 1,
             delivery_converged: true,
         };
@@ -477,6 +478,7 @@ mod tests {
         let current = CurrentRevision::Current {
             lineage: "controller-lineage".to_string(),
             state_vector: vec![7, 8, 9],
+            text_revision: 0,
             live_editors: 1,
             delivery_converged: true,
         };

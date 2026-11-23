@@ -909,6 +909,27 @@ memo is dropped and the next read recomputes it. Any other novel remote update
 invalidates the memo. The next state-bearing operation flushes pending local
 edits before it answers, so memoization never exposes a stale revision.
 
+The visible text is materialized once per revision and shared by every reader.
+Each replica carries a text revision drawn from one
+process-wide counter: it advances on every mutation that can change the visible
+text (a local splice, or a remote batch that stores a new operation, insert or
+tombstone) and on nothing else, so equal revisions in one process mean
+byte-identical text. The state vector is not that key: a tombstone delivered
+behind a later op from the same peer changes the text without moving any
+per-peer maximum, and a canonical rebuilt from text restarts the vector at the
+counters of the epoch it replaced. A text snapshot is the replica's projection
+buffer behind a shared reference plus one content-hash slot per revision, so N
+readers of one revision cost one projection and at most one hash; concurrent
+readers wait on that one computation instead of starting their own. An edit
+made while a snapshot is outstanding copies the buffer first, so a reader never
+observes a later revision, and the replica retains only its latest revision.
+The controller's `crdt_current_text` RPC serves the log line, the response
+`text_hash`, and the body from that snapshot and reports `text_revision`; the
+compact `CurrentRevision` carries `text_revision` beside the state vector, so
+revision-keyed caches (idle-watch queue heads, document projections, the queue
+clean-slate fence, the supervisor re-exec preflight) re-read after a delete-only
+change and skip the read while it is unchanged.
+
 A local editor flush costs time proportional to the edit, not to the document
 (`#replicadiffcost`). The replica keeps every element of its operation graph in
 projection order, tombstones included (chunked), and a journal of the elements

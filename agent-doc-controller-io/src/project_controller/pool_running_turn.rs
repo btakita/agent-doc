@@ -696,6 +696,7 @@ mod tests {
         agent_doc_crdt_relay_io::CurrentRevision::Current {
             lineage: "lineage-a".to_string(),
             state_vector: state_vector.to_vec(),
+            text_revision: 0,
             live_editors: 1,
             delivery_converged: true,
         }

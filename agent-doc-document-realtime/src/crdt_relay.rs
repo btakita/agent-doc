@@ -52,6 +52,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use agent_doc_element::element::{self, Component};
+pub use agent_doc_merge::crdt_sync::TextSnapshot;
 use agent_doc_merge::crdt_sync::{
     ReplicaState, commit_barrier_ready, decode_update_ops, flush_to_commit_barrier,
 };
@@ -2045,6 +2046,30 @@ impl RelayHub {
         self.canonical.text()
     }
 
+    /// The canonical text as the shared per-revision materialization.
+    /// Every reader of one canonical revision gets the
+    /// same buffer and the same memoized content hash, so serving N readers
+    /// costs one projection rather than N copies and N hashes. Prefer this over
+    /// [`Self::canonical_text`] on read paths.
+    pub fn canonical_text_snapshot(&self) -> TextSnapshot {
+        self.canonical.text_snapshot()
+    }
+
+    /// Identity of the canonical's current visible text.
+    /// Unlike [`Self::canonical_state_vector`] it moves
+    /// on every visible change — a tombstone delivered behind a later op from
+    /// the same peer included — and it is unique within this process even
+    /// across a canonical rebuilt from text.
+    pub fn canonical_text_revision(&self) -> u64 {
+        self.canonical.text_revision()
+    }
+
+    /// Whole-document text builds the current canonical replica performed. See
+    /// [`ReplicaState::text_materializations`].
+    pub fn canonical_text_materializations(&self) -> u64 {
+        self.canonical.text_materializations()
+    }
+
     /// A compact revision token for the authoritative canonical replica.
     ///
     /// Unlike [`Self::canonical_text`], this does not materialize the document.
@@ -3628,14 +3653,26 @@ impl RelayHub {
         if self.retained_replica_reseed_pending() {
             return Ok(false);
         }
-        let before_text = self.canonical.text();
+        // The barrier runs on every controller
+        // current-text read. It used to copy the whole canonical twice per read
+        // to feed the live projection, even with that projection disabled and
+        // the flush a no-op. Shared snapshots cost a reference count, and an
+        // unchanged revision skips the projection update outright.
+        let before = self
+            .live_document_projection
+            .is_some()
+            .then(|| self.canonical.text_snapshot());
         let settled = flush_to_commit_barrier(&self.canonical, &self.live_editors())?;
-        let after_text = self.canonical.text();
-        self.sync_live_document_projection(&before_text, &after_text);
+        if let Some(before) = before
+            && before.revision() != self.canonical.text_revision()
+        {
+            let after = self.canonical.text_snapshot();
+            self.sync_live_document_projection(&before, &after);
+        }
         // `#componentownclose`: a canonical whose markers a live edit broke is
         // never a committable cut, however settled the replicas are.
         if self.component_structure_fenced
-            && element::component_parse_failure(&after_text).is_some()
+            && element::component_parse_failure(&self.canonical.text_snapshot()).is_some()
         {
             return Ok(false);
         }
@@ -3649,7 +3686,7 @@ impl RelayHub {
             return Ok(false);
         }
         if self.component_structure_fenced
-            && element::component_parse_failure(&self.canonical.text()).is_some()
+            && element::component_parse_failure(&self.canonical.text_snapshot()).is_some()
         {
             return Ok(false);
         }

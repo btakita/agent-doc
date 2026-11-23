@@ -8355,6 +8355,7 @@ mod terminal_convergence_tests {
         let revision = agent_doc_crdt_relay_io::CurrentRevision::Current {
             lineage: "retained-target".to_string(),
             state_vector: vec![1, 2, 3],
+            text_revision: 0,
             live_editors: 0,
             delivery_converged: true,
         };
@@ -8395,6 +8396,7 @@ mod terminal_convergence_tests {
         let revision = agent_doc_crdt_relay_io::CurrentRevision::Current {
             lineage: "retained-target".to_string(),
             state_vector: vec![1, 2, 3],
+            text_revision: 0,
             live_editors: 1,
             delivery_converged: true,
         };

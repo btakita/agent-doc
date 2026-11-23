@@ -1476,6 +1476,7 @@ dependencies = [
  "agent-doc-element",
  "agent-doc-element-queue",
  "agent-doc-frontmatter",
+ "agent-doc-hash",
  "agent-doc-markdown-ast",
  "agent-doc-markdown-lossless",
  "agent-doc-state-scope",

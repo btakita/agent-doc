@@ -538,12 +538,17 @@ fn operator_replied(nodes: &[QueueTreeNode], index: usize) -> bool {
 pub fn loose_ends(document: &str) -> Result<Vec<LooseEnd>> {
     let tree = queue_tree(document, &QueueTreeOptions::default())?;
     let nodes = &tree.nodes;
+    // `#dupdone`: a row that may duplicate finished work says so on its entry.
+    let possibly_done = crate::finished_duplicate::possible_finished_twins(document, &tree);
     let mut seen: HashSet<(LooseEndGroup, String)> = HashSet::new();
     let mut ends = Vec::new();
     for index in 0..nodes.len() {
-        let Some(end) = node_loose_end(document, nodes, index) else {
+        let Some(mut end) = node_loose_end(document, nodes, index) else {
             continue;
         };
+        if let Some(note) = possibly_done.get(&index) {
+            end.text = format!("{} ({note})", end.text);
+        }
         if !seen.insert((end.group, end.id.clone())) {
             continue;
         }

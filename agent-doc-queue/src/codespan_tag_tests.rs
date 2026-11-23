@@ -41,3 +41,31 @@ fn a_quoted_operator_verify_tag_is_not_an_operator_loose_end() {
         "{ends:#?}"
     );
 }
+
+/// `#dupdone`: a `🙋` painted while the quoted tag was still misread stays
+/// only until the next projection pass, which recomputes the glyph from the
+/// row's current classification (preflight and `queue sync` both run it).
+#[test]
+fn a_glyph_painted_by_the_old_misreading_is_removed() {
+    let document = format!(
+        "<!-- agent:queue -->\n- ### 🙋 {SHORT} [#q-04fe97a25402]\n- operator: approve it. [operator-verify] [#q-0123456789ab]\n<!-- /agent:queue -->\n"
+    );
+    let open = std::collections::HashSet::new();
+    let projected =
+        crate::document_queue::project_all_prompt_operator_actions(&document, &[], &open)
+            .unwrap()
+            .expect("the stale glyph is removed");
+    assert!(
+        projected.contains(&format!("\n- ### {SHORT} [#q-04fe97a25402]\n")),
+        "{projected}"
+    );
+    // The row that does carry the tag keeps (or gains) its glyph.
+    assert!(
+        projected.contains("- 🙋 operator: approve it. [operator-verify]"),
+        "{projected}"
+    );
+    assert_eq!(
+        crate::document_queue::project_all_prompt_operator_actions(&projected, &[], &open).unwrap(),
+        None
+    );
+}

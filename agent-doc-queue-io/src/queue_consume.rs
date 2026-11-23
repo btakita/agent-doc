@@ -1065,6 +1065,68 @@ pub fn acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
     // lineage across every queue block. Repeated short leaves require the full
     // nest vector; an owner fence may then settle only the exact projections of
     // that one attempt, preserving the automatic `#subagentinlineveto` contract.
+    // `#dupdone`: an operator completion reply (`done`, `✅`, …) typed under
+    // an `[operator-verify]` row is the operator's answer, not an executable
+    // leaf. `--ack-text 'done'` resolves that one row: the row and the reply
+    // are struck and the response quotes the reply. Several such rows refuse.
+    // It runs before the exact-leaf match: struck alone, the reply would
+    // leave its operator row open.
+    if selector.is_none() {
+        let in_flight = crate::queue_claim::in_flight_claimed_items_for_content(file, &content);
+        let summary = match response {
+            AckTextResponse::Summary(summary) => Some(summary),
+            _ => None,
+        };
+        match agent_doc_queue::finished_duplicate::resolve_completion_reply_ack(
+            &content,
+            expected_head,
+            &|text: &str| in_flight.claims(text),
+            summary,
+        )? {
+            agent_doc_queue::finished_duplicate::CompletionReplyAck::None => {}
+            agent_doc_queue::finished_duplicate::CompletionReplyAck::Ambiguous(parents) => {
+                anyhow::bail!(
+                    "{}: --ack-text {:?} is the operator's completion reply under {} operator-verify rows ({}); no change was applied. Acknowledge one row by its full text instead.",
+                    file.display(),
+                    expected_head,
+                    parents.len(),
+                    parents
+                        .iter()
+                        .map(|parent| format!("{parent:?}"))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                );
+            }
+            agent_doc_queue::finished_duplicate::CompletionReplyAck::Resolved {
+                document: target,
+                parent,
+            } => {
+                effects
+                    .converge_document_or_disk(file, &target, &content, "queue_consume_ack_text")
+                    .context("queue consume --ack-text: failed to converge document")?;
+                save_snapshot_recovery_only(file, &target, "queue consume --ack-text writeback");
+                let remaining = addressable_executable_rows(&target)?.len();
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_consume_operator_completion_reply file={} head_hash={} remaining={} proof=operator_completion_reply (#dupdone)",
+                        file.display(),
+                        agent_doc_hash::content_hash(parent.trim()),
+                        remaining,
+                    ),
+                );
+                return Ok(Some(QueueConsumptionOutcome {
+                    consumed_text: parent,
+                    consumed_count: 1,
+                    node_ops: Vec::new(),
+                    remaining,
+                    drained: remaining == 0,
+                    auto: false,
+                }));
+            }
+        }
+    }
+
     let addressable = acknowledgeable_rows(&content)?;
     if let Some(rows) = exact_acknowledgement_rows(&addressable, expected_head, selector)? {
         let row = rows[0];
@@ -6711,6 +6773,59 @@ mod core_tests {
         let updated = fs::read_to_string(&doc).unwrap();
         assert!(updated.contains("  - ~~#justdoit~~"), "{updated}");
         assert!(!updated.contains("**Response [#r-"), "{updated}");
+    }
+
+    /// `#dupdone`: the 2026-11-23 live shape, private names replaced. The
+    /// operator did the action and typed `done` under the `🙋`
+    /// `[operator-verify]` row; `--ack-text 'done'` found no executable leaf.
+    /// It now resolves that row: the row and the reply are struck, and the
+    /// response quotes the reply and carries the summary.
+    #[test]
+    fn ack_text_resolves_an_operator_completion_reply_under_an_operator_verify_row() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let row = "- 🙋 [#q-0d58062d875f] follow-up: operator: in `tasks/x/dev.md`, remove one of the two `do [#pushchanges]` rows (lines 192 `📥` and 353 bare). Then dispatch can re-admit it. [operator-verify] [#q-76f0eded2463]";
+        let content = format!(
+            "---\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n<!-- agent:run id=\"main\" subagents -->\n{row}\n  - done\n- keep this queued\n<!-- /agent:run -->\n"
+        );
+        fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let guard = crate::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        let summary = "`tasks/x/dev.md` now has one `do [#pushchanges]` row.";
+        let outcome =
+            super::acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
+                &doc,
+                "done",
+                None,
+                super::AckTextResponse::Summary(summary),
+                &TEST_EFFECTS,
+                &guard,
+            )
+            .unwrap()
+            .expect("the completion reply resolves its operator-verify row");
+        assert!(
+            outcome
+                .consumed_text
+                .contains("[#q-0d58062d875f] follow-up: operator:")
+        );
+        assert_eq!(outcome.remaining, 1, "{outcome:?}");
+        let updated = fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains("[#q-76f0eded2463] — operator answered “done” (#opdonereply)~~\n  - ~~done~~\n  - **Response [#r-"),
+            "{updated}"
+        );
+        assert!(
+            updated.contains(&format!(
+                "    - **Summary:** The operator answered “done” under this row. {summary}\n    - **State:** Complete.\n- keep this queued\n"
+            )),
+            "{updated}"
+        );
     }
 
     #[test]

@@ -45,6 +45,7 @@ pub use agent_doc_element_queue::QueueReportState;
 pub mod child_row_renest;
 #[cfg(test)]
 mod codespan_tag_tests;
+pub mod finished_duplicate;
 pub mod finished_tree;
 pub mod followup_moved_state;
 pub mod followup_owner;

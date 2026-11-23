@@ -2695,6 +2695,51 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
         },
     )?;
 
+    // `#dupdone`: the `🙋` glyph is recomputed from each row's current
+    // classification (a glyph a since-fixed misclassification painted is
+    // removed, as preflight does), and a live row whose work is already
+    // finished is resolved: an operator-verify row the operator answered
+    // `done` beneath, and a re-queued duplicate of finished work. Stability
+    // is judged against the baseline this sync started from.
+    let finished_rows_changed = {
+        let current = effects.current_document_content(file, "queue_sync_finished_rows")?;
+        let open_todo_ids = agent_doc_element::todo::open_todo_ids(&current);
+        let glyphs = agent_doc_queue::document_queue::project_all_prompt_operator_actions(
+            &current,
+            &[],
+            &open_todo_ids,
+        )?;
+        let base = glyphs.clone().unwrap_or_else(|| current.clone());
+        let in_flight = crate::queue_claim::in_flight_claimed_items_for_content(file, &base);
+        let resolved = agent_doc_queue::finished_duplicate::reconcile_finished_rows(
+            &base,
+            previous_content.as_deref(),
+            &|text: &str| in_flight.claims(text),
+        )?;
+        match resolved.or(glyphs) {
+            Some(target) => {
+                effects.converge_document_or_disk(
+                    file,
+                    &target,
+                    &current,
+                    "queue_sync_finished_rows",
+                )?;
+                let written =
+                    effects.current_document_content(file, "queue_sync_after_finished_rows")?;
+                if let Err(warning) = agent_doc_snapshot_io::checkpoint_document_baseline(
+                    file,
+                    &written,
+                    agent_doc_ops_log_io::log_op,
+                ) {
+                    eprintln!(
+                        "[queue sync] warning: failed to update snapshot after resolving finished rows: {warning}"
+                    );
+                }
+                true
+            }
+            None => false,
+        }
+    };
     let lifecycle_changed =
         project_all_queue_runtime_state_under_apply_guard(effects, file, &queue_edit_guard)?;
     // `#looseends`: re-render the digest of every unresolved row after the
@@ -2809,6 +2854,7 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
             || waiting_tree_repaired
             || lifecycle_changed
             || loose_ends_changed
+            || finished_rows_changed
             || answered_count > 0
             || action_debt_remains =>
         {

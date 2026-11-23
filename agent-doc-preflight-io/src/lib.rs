@@ -8470,6 +8470,40 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         }
     }
 
+    // `#dupdone`: a live row whose work is already finished is resolved, not
+    // left open: an operator-verify row the operator answered `done` beneath,
+    // and a re-queued `[from:<source> key=…2]` duplicate of a request that
+    // already finished. Every strike carries an abbreviated response. Only
+    // rows present in the committed snapshot and with no attempt in flight
+    // are eligible, so an edit still being typed is never struck.
+    {
+        let in_flight_claimed =
+            agent_doc_queue_io::queue_claim::in_flight_claimed_items_for_content(
+                file,
+                &current_content,
+            );
+        if let Some(resolved) = agent_doc_queue::finished_duplicate::reconcile_finished_rows(
+            &current_content,
+            snapshot_content.as_deref(),
+            &|text: &str| in_flight_claimed.claims(text),
+        )? {
+            current_content = resolved;
+            activation.entries_after = queue_entries_for_id(&current_content, &selected_queue_id);
+            mutated = true;
+            eprintln!(
+                "[preflight] queue: resolved finished rows (operator completion replies, duplicates of finished work) (#dupdone)"
+            );
+            effect_phase.log_op(format!(
+                "preflight_finished_rows_resolved file={} (#dupdone)",
+                file.display(),
+            ));
+            if agent_doc_queue::document_queue::prompts(&activation.entries_after).is_empty() {
+                activation.active = false;
+                activation.trigger = None;
+            }
+        }
+    }
+
     // `#strikeretires`: every strike above (`#qdonestrike`, the `#qheadresidue`
     // catch-up, `#qftbklgstrike`) closes finished work. Retire the struck rows'
     // binary completion cells in this same maintenance successor, before a
@@ -26557,6 +26591,98 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
                 "operator reply {reply:?} must stay live:\nlive={live:?}\n{updated}"
             );
         }
+    }
+
+    /// `#dupdone` / `#ftquotedid`: the 2026-11-23 live shapes, private names
+    /// replaced. Preflight recomputes the `🙋` glyph from the row's current
+    /// classification (a code-span quote no longer makes the row
+    /// operator-verify), strikes a re-queued duplicate of finished work with a
+    /// response naming the twin and its commit, and resolves an operator-verify
+    /// row the operator answered `done` beneath. A second pass is a no-op.
+    #[test]
+    fn run_queue_maintenance_resolves_finished_rows_and_stale_operator_glyphs() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let twin = "[from:chat key=report2] do the top-level open-work count request, and fix: a row that quotes the operator-verify bracket token inside a code span is misread as an operator-verify row and refused for dispatch. [#q-bbbbbbbbbbbb]";
+        let content = format!(
+            concat!(
+                "---\n",
+                "agent_doc_session: test\n",
+                "agent_doc_format: template\n",
+                "agent_doc_write: crdt\n",
+                "queue: start\n",
+                "---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: counts\n\n> **Queue prompt:**\n>\n> {twin}\n\n**Counts: landed** (`9d07673718`).\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue priority go -->\n",
+                "- ### 🙋 [from:chat key=quoted] fix: a row that quotes a `[operator-verify]` token inside a code span is misread as one.\n",
+                "- ### 🙋 [from:chat key=report] do the top-level open-work count request, and fix: a row that quotes a [operator-verify] token inside a code span is misread as an operator-verify row and refused for dispatch. [#q-aaaaaaaaaaaa]\n",
+                "- ### ~~{twin}~~\n",
+                "- 🙋 [#q-0d58062d875f] follow-up: operator: remove one of the two duplicate rows in the other document. [operator-verify] [#q-76f0eded2463]\n",
+                "  - done\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            twin = twin
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let line = |needle: &str| {
+            updated
+                .lines()
+                .find(|line| line.contains(needle))
+                .unwrap_or_else(|| panic!("{needle}:\n{updated}"))
+                .to_string()
+        };
+        let quoted = line("key=quoted]");
+        assert!(
+            !quoted.contains('🙋') && !quoted.contains("~~"),
+            "a stale glyph is removed and the row stays live:\n{updated}"
+        );
+        let duplicate = line("key=report]");
+        assert!(
+            duplicate.starts_with("- ### ~~[from:chat key=report]")
+                && duplicate.ends_with("— auto-struck: done by #q-bbbbbbbbbbbb (#dupdone)~~"),
+            "{updated}"
+        );
+        assert!(
+            updated.contains("Duplicate of finished work: done by `[#q-bbbbbbbbbbbb]`"),
+            "{updated}"
+        );
+        assert!(
+            line("q-0d58062d875f").ends_with("— operator answered “done” (#opdonereply)~~")
+                && updated.contains("  - ~~done~~\n  - **Response [#r-"),
+            "{updated}"
+        );
+        assert!(
+            agent_doc_queue::struck_prompt_response::unanswered_struck_prompt_rows(&updated)
+                .is_empty(),
+            "{updated}"
+        );
+
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &updated,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+        let again = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            again.matches("**Response [#r-").count(),
+            updated.matches("**Response [#r-").count(),
+            "a second pass adds nothing:\n{again}"
+        );
+        assert!(again.contains("(#dupdone)~~") && again.contains("(#opdonereply)~~"));
     }
 
     #[test]

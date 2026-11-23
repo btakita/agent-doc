@@ -500,14 +500,14 @@ mod tests {
             self.runs.lock().unwrap().push(file.to_path_buf());
             if self
                 .panic_runs
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
                 .is_ok()
             {
                 panic!("injected maintenance panic");
             }
             if self
                 .fail_runs
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
                 .is_ok()
             {
                 anyhow::bail!("injected maintenance failure");

@@ -832,15 +832,38 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   both peers (GH #371). When no Client/Gateway plugins directory was reconciled
   locally, the summary prints the exact steps for that peer: the release
   download URL of `agent-doc-jetbrains-262-<version>.zip`, quitting the Client,
-  the per-OS Client plugins directory, deleting both the
-  `agent-doc-jetbrains-262` and the older `agent-doc-jetbrains-263` folder,
-  extracting the ZIP, and the Client `idea.log` line that proves the new build
-  loaded. A Coder or SSH environment makes the headline say the Client was not
-  updated (GH #435). The modular backend is the version check: the first
-  snapshot of each Client lease compares the frontend's activation-receipt
-  shell digest (or its lower negotiated schema) with its own, and on a split
-  logs `[split-surface] frontend/backend plugin mismatch` and shows a warning
-  in the Client.
+  the per-OS Client plugins directory, deleting the `agent-doc-jetbrains`,
+  `agent-doc-jetbrains-262` and older `agent-doc-jetbrains-263` folders,
+  extracting the ZIP, trusting the release key, and the Client `idea.log` line
+  that proves the new build loaded. A Coder or SSH environment makes the
+  headline say the Client was not updated (GH #435). The modular backend is the
+  version check: the first snapshot of each Client lease compares the
+  frontend's activation-receipt shell digest (or its lower negotiated schema)
+  with its own, and on a split logs `[split-surface] frontend/backend plugin
+  mismatch` and shows a warning in the Client. That warning and log line name
+  the backend's exact `agent-doc-jetbrains-262-<v>.zip` (no `<version>`
+  placeholder, which the HTML notification rendered as an empty tag).
+- A JetBrains Client started by Toolbox or Gateway for an `IntelliJIdea2026.3`
+  backend loads its plugins from `IntelliJIdea2026.3/plugins/frontend` under
+  its JetBrains data root (Windows
+  `%APPDATA%\JetBrains\IntelliJIdea2026.3\plugins\frontend`);
+  `JetBrainsClient<YYYY.N>/plugins` is only a standalone Client's directory.
+  Discovery reconciles `<IDE data dir>/plugins/frontend` as a Client target when
+  it holds an Agent Doc tree, so `agent-doc upgrade` run on the Client machine
+  installs the same modular ZIP there. The Client steps printed on a backend
+  name that directory using the reconciled backend's data directory name. For
+  every Client target (thin-client `plugins/frontend` or
+  `JetBrainsClient`/Gateway roots) the upgrade also adds the release asset
+  `jetbrains-frontend-release-ed25519.pub` (verified against the GitHub asset
+  digest and parsed as an Ed25519 X.509 public key) to
+  `.agent-doc-frontend-release/trusted-ed25519-public-keys` in that plugins
+  directory, the Client's `PathManager.getPluginsPath()`, keeping any keys
+  already there. It does so even when the Client already has the current
+  package. Without that key the Client logs `[frontend-impl] refused: ... not
+  configured on the JetBrains Client host` and the backend refuses snapshots
+  with `frontend_authority_absent_or_generation_mismatched` (GH #439). A
+  backend plugins directory never receives the key; backend metadata still
+  cannot add a signer to the Client.
 - A live IDE counts as owning a JetBrains install target only when it loads
   plugins from that target (GH #238). Ownership is decided from process
   evidence BEFORE any package-level refusal, strongest first: an agent-doc

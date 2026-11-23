@@ -542,7 +542,13 @@ rather than acting on a half-upgraded pair.
   JAR; releases emit detached signatures when the organization release key is
   configured; and the installer writes the digest/epoch handoff atomically.
   Enabling release swaps still requires provisioning that organization-owned
-  key and its public half in the JetBrains Client's local trust file. Before
+  key and its public half in the JetBrains Client's local trust file. Run on
+  the Client machine, `agent-doc upgrade` adds the release's
+  `jetbrains-frontend-release-ed25519.pub` to
+  `.agent-doc-frontend-release/trusted-ed25519-public-keys` in each Client
+  plugins directory it reconciles, including a Toolbox/Gateway thin client's
+  `<IDE data dir>/plugins/frontend`; a backend-side upgrade prints that step
+  for a Client on another machine (GH #439). Before
   enabling a swap, verify on both
   exact platform ranges that scope stays on the same descriptor, module graph
   and registrations, both JVMs report the same digest and epoch, and the

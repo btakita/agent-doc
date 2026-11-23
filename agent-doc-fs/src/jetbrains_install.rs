@@ -85,38 +85,34 @@ pub fn newest_installed_artifact(plugins_dirs: &[PathBuf]) -> Option<InstalledPl
 /// Every agent-doc plugin directory layout, including the retired exact-263
 /// package's `agent-doc-jetbrains-263/` tree that older releases installed.
 pub fn installed_artifacts_in(plugins_dir: &Path) -> Vec<InstalledPluginArtifact> {
-    [
-        "agent-doc-jetbrains",
-        "agent-doc-jetbrains-262",
-        "agent-doc-jetbrains-263",
-    ]
-    .into_iter()
-    .filter_map(|plugin_dir| std::fs::read_dir(plugins_dir.join(plugin_dir).join("lib")).ok())
-    .flat_map(|entries| entries.flatten())
-    .filter_map(|entry| {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let version = [
-            "agent-doc-jetbrains-263-",
-            "agent-doc-jetbrains-",
-            "agent.doc-",
-        ]
+    AGENT_DOC_PLUGIN_TREES
         .into_iter()
-        .find_map(|prefix| name.strip_prefix(prefix)?.strip_suffix(".jar"))?;
-        if version.is_empty()
-            || !version
-                .split('.')
-                .all(|part| !part.is_empty() && part.chars().all(|ch| ch.is_ascii_digit()))
-        {
-            return None;
-        }
-        let modified = entry.metadata().ok()?.modified().ok()?;
-        Some(InstalledPluginArtifact {
-            path: entry.path(),
-            version: version.to_string(),
-            modified,
+        .filter_map(|plugin_dir| std::fs::read_dir(plugins_dir.join(plugin_dir).join("lib")).ok())
+        .flat_map(|entries| entries.flatten())
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let version = [
+                "agent-doc-jetbrains-263-",
+                "agent-doc-jetbrains-",
+                "agent.doc-",
+            ]
+            .into_iter()
+            .find_map(|prefix| name.strip_prefix(prefix)?.strip_suffix(".jar"))?;
+            if version.is_empty()
+                || !version
+                    .split('.')
+                    .all(|part| !part.is_empty() && part.chars().all(|ch| ch.is_ascii_digit()))
+            {
+                return None;
+            }
+            let modified = entry.metadata().ok()?.modified().ok()?;
+            Some(InstalledPluginArtifact {
+                path: entry.path(),
+                version: version.to_string(),
+                modified,
+            })
         })
-    })
-    .collect()
+        .collect()
 }
 
 pub fn jetbrains_plugin_dirs() -> Vec<PathBuf> {
@@ -142,6 +138,12 @@ pub fn jetbrains_plugin_dirs_in_roots(search_roots: &[PathBuf]) -> Vec<PathBuf> 
                 }
                 let plugins = path.join("plugins");
                 if plugins.is_dir() {
+                    // GH #439: a Toolbox/Gateway thin client for this IDE
+                    // loads its frontend plugins from `plugins/frontend`.
+                    let frontend = plugins.join(JETBRAINS_CLIENT_FRONTEND_DIR);
+                    if has_agent_doc_plugin_tree(&frontend) {
+                        dirs.push(frontend);
+                    }
                     dirs.push(plugins);
                 } else {
                     // Modern IDEs commonly expose the product-version data root itself as
@@ -154,6 +156,54 @@ pub fn jetbrains_plugin_dirs_in_roots(search_roots: &[PathBuf]) -> Vec<PathBuf> 
     dirs.sort();
     dirs.dedup();
     dirs
+}
+
+/// GH #439: the child of an IDE's `plugins` directory from which a JetBrains
+/// Client started by Toolbox or Gateway loads its frontend plugins (Windows
+/// `%APPDATA%\JetBrains\IntelliJIdea2026.3\plugins\frontend`). It is the
+/// Client's `PathManager.getPluginsPath()`.
+pub const JETBRAINS_CLIENT_FRONTEND_DIR: &str = "frontend";
+
+const AGENT_DOC_PLUGIN_TREES: [&str; 3] = [
+    "agent-doc-jetbrains",
+    "agent-doc-jetbrains-262",
+    "agent-doc-jetbrains-263",
+];
+
+fn has_agent_doc_plugin_tree(plugins_dir: &Path) -> bool {
+    AGENT_DOC_PLUGIN_TREES
+        .iter()
+        .any(|tree| plugins_dir.join(tree).is_dir())
+}
+
+/// GH #439: whether `dir` is `<IDE data dir>/plugins/frontend`, a thin
+/// client's plugins directory.
+pub fn is_jetbrains_client_frontend_dir(dir: &Path) -> bool {
+    dir.file_name()
+        .is_some_and(|name| name == JETBRAINS_CLIENT_FRONTEND_DIR)
+        && dir
+            .parent()
+            .is_some_and(|plugins| plugins.file_name().is_some_and(|name| name == "plugins"))
+        && dir
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::file_name)
+            .is_some_and(|name| is_jetbrains_ide_data_dir(&name.to_string_lossy()))
+}
+
+/// The versioned IDE data directory name (`IntelliJIdea2026.3`) a plugins
+/// directory belongs to: the directory itself, its `plugins` parent, or the
+/// grandparent of a thin client's `plugins/frontend`.
+pub fn jetbrains_ide_data_dir_name(target_dir: &Path) -> Option<String> {
+    let named = if is_jetbrains_client_frontend_dir(target_dir) {
+        target_dir.parent()?.parent()
+    } else if target_dir.file_name().is_some_and(|name| name == "plugins") {
+        target_dir.parent()
+    } else {
+        Some(target_dir)
+    };
+    let label = named?.file_name()?.to_string_lossy().into_owned();
+    is_jetbrains_ide_data_dir(&label).then_some(label)
 }
 
 pub fn is_jetbrains_ide_data_dir(name: &str) -> bool {
@@ -193,15 +243,7 @@ pub fn jetbrains_platform_build_supported(build: u32) -> bool {
 /// IDE data directory, or its `plugins` child, belongs to. `None` when the path
 /// does not name a versioned IDE data directory, so no build can be proven.
 pub fn jetbrains_platform_build(target_dir: &Path) -> Option<u32> {
-    let named = if target_dir.file_name().is_some_and(|name| name == "plugins") {
-        target_dir.parent()
-    } else {
-        Some(target_dir)
-    };
-    let label = named?.file_name()?.to_string_lossy().into_owned();
-    if !is_jetbrains_ide_data_dir(&label) {
-        return None;
-    }
+    let label = jetbrains_ide_data_dir_name(target_dir)?;
     let version_start = label.find(|ch: char| ch.is_ascii_digit())?;
     let (year, release) = label[version_start..].split_once('.')?;
     if year.len() != 4 || release.is_empty() || !release.chars().all(|ch| ch.is_ascii_digit()) {
@@ -973,6 +1015,46 @@ mod tests {
             ["0.2.800"]
         );
         assert!(!is_jetbrains_ide_data_dir("JetBrainsToolbox2026.3"));
+    }
+
+    /// GH #439: a JetBrains Client started by Toolbox or Gateway for an
+    /// `IntelliJIdea2026.3` backend loads its frontend plugins from
+    /// `IntelliJIdea2026.3/plugins/frontend`, not from `JetBrainsClient<v>`.
+    /// That directory is a reconcile target once it holds an Agent Doc tree.
+    #[test]
+    fn thin_client_frontend_plugins_dir_is_discovered_and_versioned() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ide = tmp.path().join("IntelliJIdea2026.3/plugins");
+        let frontend = ide.join(JETBRAINS_CLIENT_FRONTEND_DIR);
+        let other = tmp.path().join("PyCharm2026.3/plugins");
+        let empty_frontend = other.join(JETBRAINS_CLIENT_FRONTEND_DIR);
+        std::fs::create_dir_all(frontend.join("agent-doc-jetbrains/lib")).unwrap();
+        std::fs::write(
+            frontend.join("agent-doc-jetbrains/lib/agent.doc-0.2.1029.jar"),
+            b"client",
+        )
+        .unwrap();
+        std::fs::create_dir_all(&empty_frontend).unwrap();
+
+        assert_eq!(
+            jetbrains_plugin_dirs_in_roots(&[tmp.path().to_path_buf()]),
+            [ide.clone(), frontend.clone(), other.clone()]
+        );
+        assert!(is_jetbrains_client_frontend_dir(&frontend));
+        assert!(!is_jetbrains_client_frontend_dir(&ide));
+        assert!(!is_jetbrains_client_frontend_dir(&empty_frontend.join("x")));
+        assert_eq!(jetbrains_platform_build(&frontend), Some(263));
+        assert_eq!(
+            jetbrains_ide_data_dir_name(&frontend).as_deref(),
+            Some("IntelliJIdea2026.3")
+        );
+        assert_eq!(
+            installed_artifacts_in(&frontend)
+                .into_iter()
+                .map(|artifact| artifact.version)
+                .collect::<Vec<_>>(),
+            ["0.2.1029"]
+        );
     }
 
     #[test]

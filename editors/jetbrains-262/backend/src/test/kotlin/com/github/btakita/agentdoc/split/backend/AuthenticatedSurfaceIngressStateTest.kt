@@ -411,10 +411,24 @@ class AuthenticatedSurfaceIngressStateTest {
         )
         assertTrue(frontendPluginMismatch(current, null, "a".repeat(64))!!.contains("frontend_receipt=unreadable"))
         assertEquals(null, frontendPluginMismatch(current, sameBuild, "unknown"), "an unbuilt identity proves nothing")
-        val line = frontendPluginMismatchLine("client-a", 3, "frontend_shell=x backend_shell=y")
+        val line = frontendPluginMismatchLine(
+            "client-a",
+            3,
+            "frontend_shell=x backend_shell=y",
+            frontendPluginMismatchRemedy("0.2.1043", "IntelliJIdea2026.3"),
+        )
         assertTrue(line.contains("frontend/backend plugin mismatch client=client-a generation=3"), line)
         assertTrue(line.contains("agent-doc-jetbrains-263"), line)
         assertTrue(line.contains("start the Client again"), line)
+        // GH #439: the full asset name, the thin-client directory and the trust file; no `<...>`
+        // placeholder, which the HTML notification body rendered as `agent-doc-jetbrains-262-.zip`.
+        assertTrue(line.contains("agent-doc-jetbrains-262-0.2.1043.zip"), line)
+        assertTrue(line.contains("%APPDATA%\\JetBrains\\IntelliJIdea2026.3\\plugins\\frontend"), line)
+        assertTrue(line.contains("delete every agent-doc-jetbrains, agent-doc-jetbrains-262"), line)
+        assertTrue(line.contains(".agent-doc-frontend-release/trusted-ed25519-public-keys"), line)
+        assertFalse(line.contains('<') || line.contains('>'), line)
+        val unknown = frontendPluginMismatchRemedy("unknown", null)
+        assertFalse(unknown.contains("262-unknown") || unknown.contains('<'), unknown)
     }
 
     @Test

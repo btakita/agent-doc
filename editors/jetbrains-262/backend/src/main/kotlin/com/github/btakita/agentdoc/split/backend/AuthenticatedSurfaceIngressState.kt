@@ -20,9 +20,11 @@ import com.github.btakita.agentdoc.split.SurfaceRole
 import com.github.btakita.agentdoc.AgentDocNotices
 import com.github.btakita.agentdoc.pluginVersion
 import com.intellij.notification.NotificationGroupManager
+import com.intellij.openapi.application.PathManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
+import java.nio.file.Path
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -66,7 +68,7 @@ private fun notifyFrontendPluginMismatch(project: Project, detail: String) {
         .getNotificationGroup("Agent Doc")
         .createNotification(
             "Agent Doc: the JetBrains Client frontend is not the backend's plugin ${pluginVersion()}",
-            "$detail. Layout sync needs both halves of one ZIP: $FRONTEND_PLUGIN_MISMATCH_REMEDY.",
+            "$detail. Layout sync needs both halves of one ZIP: ${currentFrontendPluginMismatchRemedy()}.",
             NotificationType.WARNING,
         )
     AgentDocNotices.show(project, notification, "ControllerSurfaceIngress.frontendPluginMismatch")
@@ -556,15 +558,43 @@ internal fun frontendPluginMismatch(
         "(the JetBrains Client and the Remote Dev backend run different Agent Doc builds)"
 }
 
-internal const val FRONTEND_PLUGIN_MISMATCH_REMEDY =
-    "install the same agent-doc-jetbrains-262-<version>.zip in the JetBrains Client: quit the Client, " +
-        "delete every agent-doc-jetbrains-262 and agent-doc-jetbrains-263 folder from its plugins directory, " +
-        "extract the ZIP there, and start the Client again (`agent-doc upgrade` on the backend prints the " +
-        "exact download URL and directory)"
+/**
+ * GH #435/#439: how to put this backend's ZIP into the JetBrains Client. It names the real asset
+ * (a `<version>` placeholder rendered as an empty HTML tag in the Client notification, which showed
+ * `agent-doc-jetbrains-262-.zip`) and the directory a Client started by Toolbox or Gateway actually
+ * loads: the backend IDE's data directory name with `plugins/frontend`, not `JetBrainsClient<v>`.
+ * The text carries no angle brackets because the notification body is HTML.
+ */
+internal fun frontendPluginMismatchRemedy(version: String?, ideDataDir: String?): String {
+    val asset = version?.takeIf { it.isNotBlank() && it != "unknown" }
+        ?.let { "agent-doc-jetbrains-262-$it.zip" }
+        ?: "agent-doc-jetbrains-262 ZIP of this backend's version"
+    val ide = ideDataDir?.takeIf(String::isNotBlank) ?: "IntelliJIdea2026.3"
+    return "install the same $asset in the JetBrains Client: quit the Client, delete every " +
+        "agent-doc-jetbrains, agent-doc-jetbrains-262 and agent-doc-jetbrains-263 folder from its plugins " +
+        "directory (a Client started by Toolbox or Gateway loads them from $ide/plugins/frontend in its " +
+        "JetBrains data directory, for example %APPDATA%\\JetBrains\\$ide\\plugins\\frontend on Windows), extract " +
+        "the ZIP there, save the release's jetbrains-frontend-release-ed25519.pub in that directory as " +
+        ".agent-doc-frontend-release/trusted-ed25519-public-keys, and start the Client again " +
+        "(`agent-doc upgrade` on the backend prints the exact download URLs and steps; run on the Client " +
+        "machine it does all of this)"
+}
 
-internal fun frontendPluginMismatchLine(clientId: String, generation: Long, detail: String): String =
+/** GH #439: the backend IDE's data directory name (`IntelliJIdea2026.3`), from its config path. */
+internal fun backendIdeDataDirName(): String? =
+    runCatching { Path.of(PathManager.getConfigPath()).fileName?.toString() }.getOrNull()
+
+internal fun currentFrontendPluginMismatchRemedy(): String =
+    frontendPluginMismatchRemedy(runCatching { pluginVersion() }.getOrNull(), backendIdeDataDirName())
+
+internal fun frontendPluginMismatchLine(
+    clientId: String,
+    generation: Long,
+    detail: String,
+    remedy: String = currentFrontendPluginMismatchRemedy(),
+): String =
     "[split-surface] frontend/backend plugin mismatch client=$clientId generation=$generation $detail " +
-        "remedy=$FRONTEND_PLUGIN_MISMATCH_REMEDY"
+        "remedy=$remedy"
 
 /** GH #435: the editor windows of [this] snapshot that carry measured on-screen bounds, as `n/total`. */
 internal fun FrontendSurfaceSnapshot.measuredWindowCount(): String {

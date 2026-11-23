@@ -984,6 +984,7 @@ fn install_jetbrains_into(release: &Value, target_dir: &Path) -> Result<Jetbrain
                 "Warning: {signature_name} is absent; restart-free frontend activation remains disabled for this release."
             ),
         }
+        ensure_jetbrains_client_release_key(release, target_dir);
     }
 
     let expected_version = jetbrains_zip_plugin_version(tmp.path())?;
@@ -1044,11 +1045,21 @@ fn print_jetbrains_remote_dev_install_scope(package_range: JetbrainsPackageRange
 
 const JETBRAINS_REMOTE_DEV_LOCAL_RECONCILE_NOTICE: &str = "Remote Dev peer scope: only plugin directories visible to this process were reconciled; a Client/Gateway on another machine was not verified or updated. Install the matching modular ZIP in that peer (or use JetBrains Marketplace synchronization), then restart both peers.";
 
-/// GH #435: a JetBrains Client or Gateway data directory (`JetBrainsClient2026.3`).
+/// GH #435: a JetBrains Client or Gateway data directory (`JetBrainsClient2026.3`),
+/// or (GH #439) a thin client's `IntelliJIdea2026.3/plugins/frontend`.
 fn is_jetbrains_client_label(label: &str) -> bool {
     ["JetBrainsClient", "JetBrainsGateway", "Gateway"]
         .iter()
         .any(|product| label.starts_with(product))
+        || agent_doc_fs::jetbrains_install::is_jetbrains_client_frontend_dir(Path::new(label))
+}
+
+/// GH #439: whether `target_dir` is a plugins directory a JetBrains Client
+/// process loads its frontend from, so it needs the Client-local release key.
+fn is_jetbrains_client_target(target_dir: &Path) -> bool {
+    agent_doc_fs::jetbrains_install::is_jetbrains_client_frontend_dir(target_dir)
+        || agent_doc_fs::jetbrains_install::jetbrains_ide_data_dir_name(target_dir)
+            .is_some_and(|name| is_jetbrains_client_label(&name))
 }
 
 /// GH #435: why this process is probably a Remote Dev backend whose Client runs
@@ -1080,19 +1091,37 @@ fn compare_dotted_versions(left: &str, right: &str) -> std::cmp::Ordering {
     parts(left).cmp(&parts(right))
 }
 
-/// GH #435: copy-pasteable steps for the JetBrains Client/Gateway half of the
-/// modular package. Its frontend module runs in the Client on the operator's
-/// machine; nothing on the Remote Dev backend can replace it, and a running
-/// Client keeps its jars mapped, so the Client must be quit before the swap.
-/// The 263-only package lived in `agent-doc-jetbrains-263/`; two folders with
-/// one plugin id would conflict, so both old folder names are removed.
+/// GH #439: the release asset holding the organization's Ed25519 frontend
+/// release key (base64 X.509 SubjectPublicKeyInfo), published beside the
+/// signed modular ZIP.
+const JETBRAINS_FRONTEND_RELEASE_PUBLIC_KEY_ASSET: &str = "jetbrains-frontend-release-ed25519.pub";
+
+/// GH #439: where `FrontendReleaseTrust.fromSystemProperties` reads the Client's
+/// trusted keys, relative to the Client's `PathManager.getPluginsPath()`.
+const JETBRAINS_FRONTEND_TRUSTED_KEYS_FILE: &str = "trusted-ed25519-public-keys";
+
+/// GH #435/#439: copy-pasteable steps for the JetBrains Client/Gateway half of
+/// the modular package. Its frontend module runs in the Client on the
+/// operator's machine; nothing on the Remote Dev backend can replace it, and a
+/// running Client keeps its jars mapped, so the Client must be quit before the
+/// swap. A Client started by Toolbox or Gateway for an `IntelliJIdea2026.3`
+/// backend loads its plugins from `IntelliJIdea2026.3/plugins/frontend`;
+/// `JetBrainsClient<YYYY.N>/plugins` is only the standalone Client's. Every
+/// agent-doc folder name (`agent-doc-jetbrains` from an agent-doc install,
+/// `agent-doc-jetbrains-262`/`-263` from a hand-extracted ZIP) is removed,
+/// because two folders with one plugin id conflict. The Client also needs the
+/// release key in its own trust file, or it refuses every signed frontend
+/// generation.
 fn jetbrains_remote_dev_client_steps(
     release: &str,
     package_version: &str,
     remote_hint: Option<&str>,
+    ide_data_dir: Option<&str>,
 ) -> Vec<String> {
     let asset = format!("agent-doc-jetbrains-262-{package_version}.zip");
     let release = release.trim_start_matches('v');
+    let download = format!("https://github.com/{GITHUB_REPO}/releases/download/v{release}");
+    let ide = ide_data_dir.unwrap_or("<IDE><YYYY.N>");
     let headline = match remote_hint {
         Some(hint) => format!(
             "JetBrains Client frontend NOT updated ({hint}; the Client runs on your local machine). On the machine that runs JetBrains Client/Gateway:"
@@ -1101,11 +1130,13 @@ fn jetbrains_remote_dev_client_steps(
     };
     vec![
         headline,
-        format!("  1. Download https://github.com/{GITHUB_REPO}/releases/download/v{release}/{asset}"),
+        "  If agent-doc is installed there, quit JetBrains Client and run `agent-doc upgrade`: it installs the ZIP into the Client plugins directory below and writes the release key. Otherwise:".to_string(),
+        format!("  1. Download {download}/{asset}"),
         "  2. Quit JetBrains Client completely (every window). A running Client keeps its plugin jars mapped, so they cannot be replaced in place.".to_string(),
-        "  3. Open the Client plugins directory: Windows %APPDATA%\\JetBrains\\JetBrainsClient<YYYY.N>\\plugins, macOS ~/Library/Application Support/JetBrains/JetBrainsClient<YYYY.N>/plugins, Linux ~/.local/share/JetBrains/JetBrainsClient<YYYY.N>/plugins (the Client idea.log line `[split-surface] frontend surface publisher started` names the installed folder as plugin_path=).".to_string(),
-        format!("  4. Delete the agent-doc-jetbrains-262 and agent-doc-jetbrains-263 folders there, then extract {asset} into that directory (it creates agent-doc-jetbrains-262/)."),
-        format!("  5. Start the Client and reconnect. Its idea.log must show `[split-surface] frontend surface publisher started ... plugin={package_version}`; a backend idea.log line `[split-surface] frontend/backend plugin mismatch` means the Client still runs another build."),
+        format!("  3. Open the Client plugins directory. A Client started by Toolbox or Gateway for this {ide} backend loads plugins from Windows %APPDATA%\\JetBrains\\{ide}\\plugins\\frontend, macOS ~/Library/Application Support/JetBrains/{ide}/plugins/frontend, Linux ~/.local/share/JetBrains/{ide}/plugins/frontend; a standalone JetBrains Client uses JetBrainsClient<YYYY.N>/plugins instead. The Client idea.log line `[split-surface] frontend surface publisher started` names the loaded folder as plugin_path=."),
+        format!("  4. Delete the agent-doc-jetbrains, agent-doc-jetbrains-262 and agent-doc-jetbrains-263 folders there, then extract {asset} into that directory (it creates agent-doc-jetbrains-262/)."),
+        format!("  5. Download {download}/{JETBRAINS_FRONTEND_RELEASE_PUBLIC_KEY_ASSET} and save it in that directory as {JETBRAINS_FRONTEND_RELEASE_DIR}/{JETBRAINS_FRONTEND_TRUSTED_KEYS_FILE} (no extension). Without it the Client logs `[frontend-impl] refused: ... not configured on the JetBrains Client host` and the backend refuses layout snapshots."),
+        format!("  6. Start the Client and reconnect. Its idea.log must show `[split-surface] frontend surface publisher started ... plugin={package_version}`; a backend idea.log line `[split-surface] frontend/backend plugin mismatch` means the Client still runs another build."),
     ]
 }
 
@@ -3428,6 +3459,114 @@ fn write_frontend_release_handoff(
     Ok(())
 }
 
+/// GH #439: the DER prefix of an Ed25519 X.509 SubjectPublicKeyInfo; the
+/// 32-byte raw key follows it. `FrontendReleaseTrust.fromBase64` decodes
+/// exactly this shape.
+const ED25519_SPKI_PREFIX: [u8; 12] = [
+    0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClientReleaseKeyOutcome {
+    Added,
+    AlreadyTrusted,
+}
+
+/// GH #439: add `key` (base64 Ed25519 SPKI) to the JetBrains Client trust file
+/// under `target_dir`, the Client's `PathManager.getPluginsPath()`. Keys the
+/// operator configured there are kept; the file is replaced atomically.
+fn write_jetbrains_client_trusted_key(
+    target_dir: &Path,
+    key: &str,
+) -> Result<(PathBuf, ClientReleaseKeyOutcome)> {
+    let key = key.trim();
+    let decoded = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, key)
+        .context("frontend release key is not base64")?;
+    if decoded.len() != ED25519_SPKI_PREFIX.len() + 32 || !decoded.starts_with(&ED25519_SPKI_PREFIX)
+    {
+        bail!("frontend release key is not an Ed25519 X.509 public key");
+    }
+    let dir = target_dir.join(JETBRAINS_FRONTEND_RELEASE_DIR);
+    let file = dir.join(JETBRAINS_FRONTEND_TRUSTED_KEYS_FILE);
+    let existing = match fs::read_to_string(&file) {
+        Ok(text) => text,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            return Err(error).with_context(|| format!("read {}", file.display()));
+        }
+    };
+    let mut keys = existing
+        .split([',', '\n'])
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .collect::<Vec<_>>();
+    if keys.contains(&key) {
+        return Ok((file, ClientReleaseKeyOutcome::AlreadyTrusted));
+    }
+    keys.push(key);
+    fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
+    let temporary = dir.join(format!(
+        "{JETBRAINS_FRONTEND_TRUSTED_KEYS_FILE}.{}.tmp",
+        std::process::id()
+    ));
+    fs::write(&temporary, format!("{}\n", keys.join("\n")))
+        .with_context(|| format!("write {}", temporary.display()))?;
+    fs::rename(&temporary, &file).with_context(|| format!("publish {}", file.display()))?;
+    Ok((file, ClientReleaseKeyOutcome::Added))
+}
+
+/// GH #439: download the release's frontend signing key and trust it in a
+/// JetBrains Client plugins directory. `Ok(None)` when the release publishes
+/// no key (an unsigned release).
+fn provision_jetbrains_client_release_key(
+    release: &Value,
+    target_dir: &Path,
+) -> Result<Option<(PathBuf, ClientReleaseKeyOutcome)>> {
+    let Ok(asset) = find_asset_named(release, JETBRAINS_FRONTEND_RELEASE_PUBLIC_KEY_ASSET) else {
+        return Ok(None);
+    };
+    let downloaded = download_to_temp(&asset)?;
+    let bytes = fs::read(downloaded.path()).context("read frontend release key")?;
+    if let Some(expected) = asset.digest.and_then(parse_asset_digest) {
+        compare_digest(
+            asset.name,
+            expected,
+            &agent_doc_hash::bytes_hash(&bytes),
+            "the GitHub release asset digest",
+        )?;
+    }
+    let key = String::from_utf8(bytes).context("frontend release key is not UTF-8")?;
+    write_jetbrains_client_trusted_key(target_dir, &key).map(Some)
+}
+
+/// GH #439: a JetBrains Client refuses every signed frontend generation until
+/// its own plugins directory trusts the release key, and nothing on the
+/// backend can provide it. When this process reconciles a Client plugins
+/// directory, write the key there too. A failure leaves the installed plugin
+/// working (restart-free activation stays off), so it is a warning.
+fn ensure_jetbrains_client_release_key(release: &Value, target_dir: &Path) {
+    if !is_jetbrains_client_target(target_dir) {
+        return;
+    }
+    match provision_jetbrains_client_release_key(release, target_dir) {
+        Ok(Some((file, ClientReleaseKeyOutcome::Added))) => {
+            eprintln!(
+                "Trusted the frontend release key for the JetBrains Client in {}.",
+                file.display()
+            )
+        }
+        Ok(Some((_, ClientReleaseKeyOutcome::AlreadyTrusted))) => {}
+        Ok(None) => eprintln!(
+            "Warning: this release publishes no {JETBRAINS_FRONTEND_RELEASE_PUBLIC_KEY_ASSET}; the JetBrains Client in {} keeps restart-free frontend activation disabled.",
+            target_dir.display()
+        ),
+        Err(error) => eprintln!(
+            "Warning: could not trust the frontend release key in {}: {error:#}. The JetBrains Client will log `[frontend-impl] refused` until {JETBRAINS_FRONTEND_RELEASE_DIR}/{JETBRAINS_FRONTEND_TRUSTED_KEYS_FILE} holds it.",
+            target_dir.display()
+        ),
+    }
+}
+
 fn jetbrains_plugin_jar_version(file_name: &str) -> Option<String> {
     [
         "agent-doc-jetbrains-263-",
@@ -4772,6 +4911,7 @@ impl PluginReconcileReport {
                     release,
                     &version,
                     remote_dev_session_hint(&std::env::vars().collect()),
+                    self.modular_ide_data_dir().as_deref(),
                 ));
             }
         }
@@ -4798,6 +4938,24 @@ impl PluginReconcileReport {
             })
             .map(|target| target.version.clone())
             .max_by(|left, right| compare_dotted_versions(left, right))
+    }
+
+    /// GH #439: the newest modular IDE data directory (`IntelliJIdea2026.3`)
+    /// this process reconciled. A Client started by Toolbox or Gateway for that
+    /// backend loads its plugins from the same-named directory's
+    /// `plugins/frontend` on the Client machine.
+    fn modular_ide_data_dir(&self) -> Option<String> {
+        self.targets
+            .iter()
+            .filter(|target| target.family == PluginEditorFamily::JetBrains)
+            .filter_map(|target| {
+                let path = Path::new(&target.label);
+                let build = agent_doc_fs::jetbrains_install::jetbrains_platform_build(path)?;
+                let name = agent_doc_fs::jetbrains_install::jetbrains_ide_data_dir_name(path)?;
+                (build >= 262 && !is_jetbrains_client_label(&target.label)).then_some((build, name))
+            })
+            .max()
+            .map(|(_, name)| name)
     }
 
     fn has_modular_jetbrains_target(&self) -> bool {
@@ -4965,8 +5123,18 @@ fn printed_reconcile_summary(
 }
 
 /// The operator-facing name of a JetBrains plugins directory: the IDE data
-/// directory (`IntelliJIdea2026.3`) rather than its `plugins` child.
+/// directory (`IntelliJIdea2026.3`) rather than its `plugins` child. A thin
+/// client's frontend directory keeps its `plugins/frontend` suffix (GH #439),
+/// so it reads as the Client, not as the IDE beside it.
 fn jetbrains_target_label(target_dir: &Path) -> String {
+    if agent_doc_fs::jetbrains_install::is_jetbrains_client_frontend_dir(target_dir)
+        && let Some(name) = agent_doc_fs::jetbrains_install::jetbrains_ide_data_dir_name(target_dir)
+    {
+        return format!(
+            "{name}/plugins/{}",
+            agent_doc_fs::jetbrains_install::JETBRAINS_CLIENT_FRONTEND_DIR
+        );
+    }
     let named = if target_dir.file_name().is_some_and(|name| name == "plugins") {
         target_dir.parent()
     } else {
@@ -5099,6 +5267,16 @@ pub fn update_all_installed() -> Result<PluginReconcileReport> {
                     replaced_unreleased,
                 })
             };
+            if entry.range == JetbrainsPackageRange::Modular262To263
+                && matches!(
+                    entry.decision,
+                    JetbrainsReleaseDecision::Current | JetbrainsReleaseDecision::KeepPaired { .. }
+                )
+            {
+                // GH #439: a Client already on this package (installed by
+                // hand, as the #435 steps said) may still lack the key.
+                ensure_jetbrains_client_release_key(&plan.releases[&entry.range], &entry.target);
+            }
             match &entry.decision {
                 JetbrainsReleaseDecision::Current => {
                     record(PluginTargetOutcome::Unchanged, None);
@@ -7351,25 +7529,37 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
                 .as_deref(),
             Some("0.2.1041")
         );
+        assert_eq!(
+            backend_only.modular_ide_data_dir().as_deref(),
+            Some("IntelliJIdea2026.3")
+        );
         let steps = super::jetbrains_remote_dev_client_steps(
             "v0.35.590",
             "0.2.1041",
             Some("this is a Coder workspace"),
+            Some("IntelliJIdea2026.3"),
         )
         .join("\n");
         for needle in [
             "JetBrains Client frontend NOT updated (this is a Coder workspace",
             "https://github.com/btakita/agent-doc/releases/download/v0.35.590/agent-doc-jetbrains-262-0.2.1041.zip",
             "Quit JetBrains Client completely",
-            "%APPDATA%\\JetBrains\\JetBrainsClient<YYYY.N>\\plugins",
-            "Delete the agent-doc-jetbrains-262 and agent-doc-jetbrains-263 folders",
+            // GH #439: a Toolbox/Gateway thin client loads from the backend
+            // IDE's `plugins/frontend`, not `JetBrainsClient<YYYY.N>`.
+            "Windows %APPDATA%\\JetBrains\\IntelliJIdea2026.3\\plugins\\frontend",
+            "~/.local/share/JetBrains/IntelliJIdea2026.3/plugins/frontend",
+            "a standalone JetBrains Client uses JetBrainsClient<YYYY.N>/plugins instead",
+            "Delete the agent-doc-jetbrains, agent-doc-jetbrains-262 and agent-doc-jetbrains-263 folders",
+            "https://github.com/btakita/agent-doc/releases/download/v0.35.590/jetbrains-frontend-release-ed25519.pub",
+            ".agent-doc-frontend-release/trusted-ed25519-public-keys",
+            "run `agent-doc upgrade`",
             "plugin=0.2.1041",
             "frontend/backend plugin mismatch",
         ] {
             assert!(steps.contains(needle), "missing {needle:?}: {steps}");
         }
         assert!(
-            super::jetbrains_remote_dev_client_steps("0.35.590", "0.2.1041", None)[0]
+            super::jetbrains_remote_dev_client_steps("0.35.590", "0.2.1041", None, None)[0]
                 .starts_with("If a JetBrains Client/Gateway on another machine connects"),
         );
         let summary = backend_only.summary("0.35.590");
@@ -7386,6 +7576,23 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         };
         assert_eq!(
             with_local_client.unreconciled_client_package_version(),
+            None
+        );
+        // GH #439: a thin client's `plugins/frontend` reconciled on this
+        // machine is the Client too.
+        let with_local_thin_client = super::PluginReconcileReport {
+            targets: vec![
+                reconcile_target(JetBrains, "IntelliJIdea2026.3", "0.2.1041", O::Unchanged),
+                reconcile_target(
+                    JetBrains,
+                    "IntelliJIdea2026.3/plugins/frontend",
+                    "0.2.1041",
+                    O::Installed,
+                ),
+            ],
+        };
+        assert_eq!(
+            with_local_thin_client.unreconciled_client_package_version(),
             None
         );
         assert!(
@@ -9621,6 +9828,78 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
                 }
             ),
             super::PluginTargetOutcome::RestartRequired { permanent: false }
+        );
+    }
+
+    /// GH #439: the Client loaded 0.2.1029 from
+    /// `%APPDATA%\JetBrains\IntelliJIdea2026.3\plugins\frontend`; that target
+    /// is labelled and treated as the Client.
+    #[test]
+    fn thin_client_frontend_target_is_a_client_target() {
+        let frontend =
+            Path::new("/h/AppData/Roaming/JetBrains/IntelliJIdea2026.3/plugins/frontend");
+        let label = super::jetbrains_target_label(frontend);
+        assert_eq!(label, "IntelliJIdea2026.3/plugins/frontend");
+        assert!(super::is_jetbrains_client_label(&label));
+        assert!(super::is_jetbrains_client_target(frontend));
+        assert_eq!(
+            super::jetbrains_platform_build(Path::new(&label)),
+            Some(263)
+        );
+        assert_eq!(
+            super::jetbrains_package_range(frontend).unwrap(),
+            super::JetbrainsPackageRange::Modular262To263
+        );
+        assert!(super::is_jetbrains_client_target(Path::new(
+            "/h/.local/share/JetBrains/JetBrainsClient2026.3/plugins"
+        )));
+        assert!(!super::is_jetbrains_client_target(Path::new(
+            "/h/.local/share/JetBrains/IntelliJIdea2026.3/plugins"
+        )));
+        assert!(!super::is_jetbrains_client_label("IntelliJIdea2026.3"));
+    }
+
+    /// GH #439: `agent-doc upgrade` wrote the backend handoff but never the
+    /// Client trust file `FrontendReleaseTrust.fromSystemProperties` reads, so
+    /// the Client refused every signed generation. The key lands beside the
+    /// Client's plugins, keeps operator-configured keys, and rejects bytes that
+    /// are not an Ed25519 public key.
+    #[test]
+    fn client_release_key_is_trusted_once_and_keeps_operator_keys() {
+        use super::ClientReleaseKeyOutcome::{Added, AlreadyTrusted};
+        const RELEASE: &str = "MCowBQYDK2VwAyEAAAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+        const OPERATOR: &str = "MCowBQYDK2VwAyEABwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=";
+        let tmp = tempfile::tempdir().unwrap();
+        let frontend = tmp.path().join("IntelliJIdea2026.3/plugins/frontend");
+        let file = frontend.join(".agent-doc-frontend-release/trusted-ed25519-public-keys");
+
+        let (written, outcome) =
+            super::write_jetbrains_client_trusted_key(&frontend, &format!("{RELEASE}\n")).unwrap();
+        assert_eq!((written.as_path(), outcome), (file.as_path(), Added));
+        assert_eq!(fs::read_to_string(&file).unwrap(), format!("{RELEASE}\n"));
+        assert_eq!(
+            super::write_jetbrains_client_trusted_key(&frontend, RELEASE)
+                .unwrap()
+                .1,
+            AlreadyTrusted
+        );
+
+        fs::write(&file, format!("{OPERATOR},\n")).unwrap();
+        super::write_jetbrains_client_trusted_key(&frontend, RELEASE).unwrap();
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            format!("{OPERATOR}\n{RELEASE}\n")
+        );
+
+        for bad in ["not base64!", "AAAA", &RELEASE[..RELEASE.len() - 4]] {
+            assert!(
+                super::write_jetbrains_client_trusted_key(&frontend, bad).is_err(),
+                "{bad}"
+            );
+        }
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            format!("{OPERATOR}\n{RELEASE}\n")
         );
     }
 

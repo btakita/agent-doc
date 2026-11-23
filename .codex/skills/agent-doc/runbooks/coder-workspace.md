@@ -86,12 +86,22 @@ creates one with the receipt's attach command.
   the backend cannot resolve. `reason=route_column_order_unknown` is
   ambiguous: a local single editor split right after a controller restart
   logs it too. Local (non-Gateway) IDEs need no Client install.
-- Upgrading on Coder (GH #435): `agent-doc upgrade` in the workspace updates
-  only the backend's plugin. It prints the Client steps (download URL, quit
-  the Client, delete `agent-doc-jetbrains-262` and `agent-doc-jetbrains-263`
-  from the Client plugins directory, extract the ZIP, restart). Until the
-  Client matches, the backend logs `[split-surface] frontend/backend plugin
-  mismatch` and shows a warning in the Client.
+- Upgrading on Coder (GH #435, #439): `agent-doc upgrade` in the workspace
+  updates only the backend's plugin. It prints the Client steps (download URL,
+  quit the Client, delete `agent-doc-jetbrains`, `agent-doc-jetbrains-262` and
+  `agent-doc-jetbrains-263` from the Client plugins directory, extract the ZIP,
+  save `jetbrains-frontend-release-ed25519.pub` as
+  `.agent-doc-frontend-release/trusted-ed25519-public-keys` there, restart).
+  A Client started by Toolbox or Gateway loads plugins from the backend IDE's
+  data directory name plus `plugins/frontend`, e.g.
+  `%APPDATA%\JetBrains\IntelliJIdea2026.3\plugins\frontend`, not
+  `JetBrainsClient<YYYY.N>`. If agent-doc is installed on the Client machine,
+  quit the Client and run `agent-doc upgrade` there instead: it installs into
+  that directory and writes the key. Until the Client matches, the backend
+  logs `[split-surface] frontend/backend plugin mismatch` and shows a warning
+  in the Client. Without the key the Client logs `[frontend-impl] refused` and
+  the backend refuses snapshots with
+  `frontend_authority_absent_or_generation_mismatched`.
 - JetBrains Gateway with the frontend installed (GH #435): once the Client's
   frontend opens its lease, the backend logs `reason=frontend_measured_layout_authority`
   and `[layout-detect] unknown windows=0 ... flat_evidence_has_no_column_geometry`

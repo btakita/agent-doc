@@ -33,6 +33,62 @@ const QUEUE_APPLY_HANDOFF_GRACE: Duration = Duration::from_secs(2);
 /// was asked to apply never ran.
 pub const OPERATOR_REPAIR_OWNER_WAIT: Duration = Duration::from_secs(180);
 const OPERATOR_REPAIR_OWNER_POLL: Duration = Duration::from_millis(100);
+/// dogfood `maintlockhold`: the longest an operator-initiated mutation (an editor
+/// command such as `Run Agent Doc`, or an operator queue CLI) waits behind a
+/// background maintenance owner that keeps proving progress. The generic
+/// foreground grace ([`FOREGROUND_BACKGROUND_WAIT`]) assumed a short detached
+/// apply; controller-owned maintenance on a ~1MB document held the claim for
+/// 42-185 s, so `editor_route` failed with `queue mutation deferred`
+/// (haiven-dev sdk-dev.md, 2026-11-23 22:48:22Z). The wait only extends while
+/// the owner's lease heartbeat stays fresh and its pid is live; a wedged owner
+/// still fails the mutation after the generic grace.
+pub const OPERATOR_BACKGROUND_MAINTENANCE_WAIT: Duration = Duration::from_secs(90);
+
+thread_local! {
+    static OPERATOR_BACKGROUND_PROGRESS_CEILING: std::cell::Cell<Option<Duration>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Marks the current thread as running an operator-initiated mutation
+/// (dogfood `maintlockhold`): every [`QueueEditGuard::acquire`] on this thread waits
+/// behind progressing background maintenance (bounded by
+/// [`OPERATOR_BACKGROUND_MAINTENANCE_WAIT`]) instead of failing after the
+/// generic grace. Hooks with tight harness timeouts never enter it, so their
+/// fail-fast deferral is unchanged.
+#[must_use = "the scope ends when the value is dropped"]
+pub struct OperatorMutationWaitScope {
+    previous: Option<Duration>,
+}
+
+impl OperatorMutationWaitScope {
+    pub fn enter() -> Self {
+        let previous = OPERATOR_BACKGROUND_PROGRESS_CEILING
+            .with(|cell| cell.replace(Some(OPERATOR_BACKGROUND_MAINTENANCE_WAIT)));
+        Self { previous }
+    }
+}
+
+impl Drop for OperatorMutationWaitScope {
+    fn drop(&mut self) {
+        OPERATOR_BACKGROUND_PROGRESS_CEILING.with(|cell| cell.set(self.previous));
+    }
+}
+
+pub(crate) fn operator_background_progress_ceiling() -> Option<Duration> {
+    OPERATOR_BACKGROUND_PROGRESS_CEILING.with(std::cell::Cell::get)
+}
+
+/// Whether a background lease currently proves progress: a fresh heartbeat
+/// from a live pid.
+fn background_owner_progressing(lease: &QueueEditOwnerLease) -> bool {
+    lease.holder.starts_with(BACKGROUND_QUEUE_EDIT_OWNER_PREFIX)
+        && agent_doc_lease::timestamp_is_fresh(
+            lease.heartbeat_secs,
+            now_secs(),
+            queue_edit_owner_ttl(),
+        )
+        && pid_is_live(lease.holder_pid)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueueEditOwnerLease {
@@ -576,31 +632,82 @@ impl QueueEditGuard {
     }
 
     fn acquire_with_background_wait(file: &Path, wait: Duration) -> Result<Self> {
-        Self::acquire_with_background_wait_observed(file, wait, QUEUE_APPLY_HANDOFF_GRACE, |_| {})
+        Self::acquire_with_background_progress_wait(
+            file,
+            wait,
+            QUEUE_APPLY_HANDOFF_GRACE,
+            operator_background_progress_ceiling(),
+            |_| {},
+        )
     }
 
     /// `after_contended_observation` sees the lease read after each contended
     /// attempt, before the wait-or-fail decision. Tests use it to hold the
     /// flock until the acquirer has provably observed a given state.
+    #[cfg(test)]
     pub(crate) fn acquire_with_background_wait_observed(
         file: &Path,
         wait: Duration,
         handoff_grace: Duration,
+        after_contended_observation: impl FnMut(Option<&QueueEditOwnerLease>),
+    ) -> Result<Self> {
+        Self::acquire_with_background_progress_wait(
+            file,
+            wait,
+            handoff_grace,
+            None,
+            after_contended_observation,
+        )
+    }
+
+    /// The foreground acquisition loop. `progress_ceiling` (dogfood `maintlockhold`)
+    /// lets an operator-initiated mutation keep waiting behind a background
+    /// owner for as long as that owner proves progress, up to the ceiling from
+    /// the first contended observation; each progressing observation re-arms
+    /// the generic `wait`, so an owner whose heartbeat goes stale still fails
+    /// the mutation within `wait`.
+    pub(crate) fn acquire_with_background_progress_wait(
+        file: &Path,
+        wait: Duration,
+        handoff_grace: Duration,
+        progress_ceiling: Option<Duration>,
         mut after_contended_observation: impl FnMut(Option<&QueueEditOwnerLease>),
     ) -> Result<Self> {
-        let mut background_deadline = None;
+        let started = std::time::Instant::now();
+        let mut background_deadline: Option<std::time::Instant> = None;
         let mut handoff_deadline = None;
+        let mut waited_behind_progress = false;
         loop {
             if let Some(guard) = Self::try_acquire(file)? {
+                if waited_behind_progress {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "queue_apply_waited_behind_background_maintenance file={} waited_ms={} (maintlockhold)",
+                            file.display(),
+                            started.elapsed().as_millis(),
+                        ),
+                    );
+                }
                 return Ok(guard);
             }
             let lease = read_queue_edit_owner_lease(&file.to_string_lossy());
             after_contended_observation(lease.as_ref());
-            if lease
+            if let Some(background) = lease
                 .as_ref()
-                .is_some_and(|lease| lease.holder.starts_with(BACKGROUND_QUEUE_EDIT_OWNER_PREFIX))
+                .filter(|lease| lease.holder.starts_with(BACKGROUND_QUEUE_EDIT_OWNER_PREFIX))
             {
-                background_deadline.get_or_insert_with(|| std::time::Instant::now() + wait);
+                let now = std::time::Instant::now();
+                let first = *background_deadline.get_or_insert(now + wait);
+                if let Some(ceiling) = progress_ceiling
+                    && background_owner_progressing(background)
+                {
+                    let extended = (now + wait).min(started + ceiling);
+                    if extended > first {
+                        waited_behind_progress = true;
+                        background_deadline = Some(extended);
+                    }
+                }
             }
             // GH #412: a held flock with no lease row is
             // an owner between its lease and its unlock. Drop clears the token
@@ -1237,6 +1344,155 @@ mod tests {
         release.join().unwrap();
         drop(foreground);
         assert!(read_queue_edit_owner_lease(&file_text).is_none());
+    }
+
+    /// Hold `file`'s apply flock as a background maintenance owner for `hold`
+    /// while a heartbeat thread keeps its lease fresh (or, with
+    /// `stale_heartbeat`, pins the lease heartbeat in the past).
+    fn hold_as_background_owner(
+        file: &Path,
+        token: &str,
+        hold: Duration,
+        stale_heartbeat: bool,
+    ) -> std::thread::JoinHandle<()> {
+        let file_text = file.to_string_lossy().to_string();
+        assert!(try_reserve_queue_edit_owner(&file_text, token, std::process::id()).unwrap());
+        let background = QueueEditGuard::adopt_reserved(file, token)
+            .unwrap()
+            .expect("background worker adopts the reservation");
+        if stale_heartbeat {
+            let (project_root, document_hash) = state_location(&file_text).unwrap();
+            agent_doc_controller_io::project_controller::upsert_coordination_lease(
+                &project_root,
+                &agent_doc_sqlite::state_store::CoordinationLeaseRecord {
+                    scope_kind: QUEUE_EDIT_OWNER_SCOPE.to_string(),
+                    scope_id: document_hash,
+                    holder: token.to_string(),
+                    holder_pid: Some(std::process::id()),
+                    heartbeat_secs: now_secs().saturating_sub(3600),
+                },
+            )
+            .unwrap();
+        }
+        let token = token.to_string();
+        std::thread::spawn(move || {
+            let started = std::time::Instant::now();
+            while started.elapsed() < hold {
+                if !stale_heartbeat {
+                    refresh_queue_edit_owner_lease_if_holder(
+                        &file_text,
+                        &token,
+                        std::process::id(),
+                    )
+                    .unwrap();
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            drop(background);
+        })
+    }
+
+    /// dogfood `maintlockhold`: an editor `Run Agent Doc` (editor_route) failed with
+    /// `queue mutation deferred` because controller maintenance held the apply
+    /// claim longer than the fixed foreground grace. An operator-initiated
+    /// mutation waits behind a background owner that keeps proving progress
+    /// (fresh heartbeat, live pid) and then applies on its resulting cut.
+    #[test]
+    fn operator_mutation_waits_behind_progressing_background_maintenance() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        let file_text = file.to_string_lossy().to_string();
+        let token = format!("{BACKGROUND_QUEUE_EDIT_OWNER_PREFIX}slow-controller-run");
+        let generic_wait = Duration::from_millis(60);
+        let holder = hold_as_background_owner(&file, &token, Duration::from_millis(400), false);
+
+        let started = std::time::Instant::now();
+        let foreground = QueueEditGuard::acquire_with_background_progress_wait(
+            &file,
+            generic_wait,
+            QUEUE_APPLY_HANDOFF_GRACE,
+            Some(Duration::from_secs(10)),
+            |_| {},
+        )
+        .expect("an operator mutation waits out progressing maintenance instead of failing");
+        assert!(
+            started.elapsed() > generic_wait * 3,
+            "the wait outlived the generic grace: {:?}",
+            started.elapsed()
+        );
+        holder.join().unwrap();
+        assert!(
+            read_queue_edit_owner_lease(&file_text)
+                .unwrap()
+                .holder
+                .starts_with(DIRECT_QUEUE_EDIT_OWNER_PREFIX)
+        );
+        drop(foreground);
+    }
+
+    /// The progress wait is not a blank cheque: a background owner whose
+    /// heartbeat went stale fails the operator mutation after the generic
+    /// grace, and without the operator scope the generic grace still applies.
+    #[test]
+    fn progress_wait_never_extends_for_a_stale_owner_or_outside_operator_scope() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        let generic_wait = Duration::from_millis(60);
+
+        let token = format!("{BACKGROUND_QUEUE_EDIT_OWNER_PREFIX}wedged-run");
+        let holder = hold_as_background_owner(&file, &token, Duration::from_millis(600), true);
+        let refused = QueueEditGuard::acquire_with_background_progress_wait(
+            &file,
+            generic_wait,
+            QUEUE_APPLY_HANDOFF_GRACE,
+            Some(Duration::from_secs(10)),
+            |_| {},
+        )
+        .unwrap_err();
+        assert!(refused.to_string().contains("queue mutation deferred"));
+        holder.join().unwrap();
+
+        let token = format!("{BACKGROUND_QUEUE_EDIT_OWNER_PREFIX}progressing-run");
+        let holder = hold_as_background_owner(&file, &token, Duration::from_millis(600), false);
+        let refused = QueueEditGuard::acquire_with_background_progress_wait(
+            &file,
+            generic_wait,
+            QUEUE_APPLY_HANDOFF_GRACE,
+            None,
+            |_| {},
+        )
+        .unwrap_err();
+        assert!(refused.to_string().contains("queue mutation deferred"));
+        holder.join().unwrap();
+    }
+
+    /// The operator scope is what `acquire` consults, and it is scoped: it
+    /// restores the enclosing value on drop.
+    #[test]
+    fn operator_mutation_scope_is_thread_scoped_and_restored() {
+        assert_eq!(operator_background_progress_ceiling(), None);
+        {
+            let _outer = OperatorMutationWaitScope::enter();
+            assert_eq!(
+                operator_background_progress_ceiling(),
+                Some(OPERATOR_BACKGROUND_MAINTENANCE_WAIT)
+            );
+            {
+                let _inner = OperatorMutationWaitScope::enter();
+            }
+            assert_eq!(
+                operator_background_progress_ceiling(),
+                Some(OPERATOR_BACKGROUND_MAINTENANCE_WAIT)
+            );
+            std::thread::spawn(|| assert_eq!(operator_background_progress_ceiling(), None))
+                .join()
+                .unwrap();
+        }
+        assert_eq!(operator_background_progress_ceiling(), None);
     }
 
     /// GH #412: the Stop hook's commit failed with "queue mutation deferred"

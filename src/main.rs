@@ -327,6 +327,11 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         let _navigation_client = agent_doc_route_io::invocation::NavigationClientGuard::set(
             invocation.navigation_client_id.as_deref(),
         );
+        // dogfood `maintlockhold`: an editor-initiated route (Run Agent Doc) waits
+        // behind progressing controller maintenance on this document instead
+        // of failing the editor command with `queue mutation deferred`.
+        let _operator_wait =
+            agent_doc_queue_io::queue_edit_owner::OperatorMutationWaitScope::enter();
         // GH 91: clear any deferral a previous route on this worker left behind.
         let _ = agent_doc_route_io::invocation::take_route_deferral();
         let _ = agent_doc_route_io::invocation::take_route_steering_delivery();
@@ -7727,6 +7732,10 @@ fn try_main() -> anyhow::Result<()> {
         Commands::Backlog { .. } | Commands::Icebox { .. } | Commands::Review { .. }
     )
     .then(agent_doc_element_backlog_io::enter_agent_write_baseline_attribution);
+    // dogfood `maintlockhold`: a `queue` mutation waits behind progressing background
+    // maintenance instead of failing with `queue mutation deferred`.
+    let _operator_queue_wait = matches!(cli.command, Commands::Queue { .. })
+        .then(agent_doc_queue_io::queue_edit_owner::OperatorMutationWaitScope::enter);
 
     match cli.command {
         Commands::Env { json } => env_cmd::run(json),

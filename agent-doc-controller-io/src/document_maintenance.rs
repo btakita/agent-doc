@@ -23,6 +23,20 @@
 //! - The request row, its generation claim and its hash fence are unchanged:
 //!   the runner consumes the latest request, and an operator edit after
 //!   admission still supersedes it.
+//! - dogfood `maintlockhold`: a run holds the document's maintenance claim (the
+//!   queue apply flock and lease) for its compute and fenced writes, not for
+//!   repeated whole-document reads. Each effect-fence crossing observes the
+//!   authority hash through a revision-keyed memo
+//!   (`agent_doc_document_realtime_io::authority_hash_memo`), so an unchanged
+//!   canonical is never re-materialized under the relay hub lock; on a 963KB
+//!   document those re-reads had stretched ~2 s of compute into 42-185 s
+//!   claims. Each request logs `queue_maintenance_background_claim_held` with its
+//!   hold and materialization counts.
+//! - Operator-initiated mutations (editor commands such as `Run Agent Doc`,
+//!   and `agent-doc queue`) enter `OperatorMutationWaitScope`: they wait
+//!   behind a run whose lease heartbeat stays fresh (bounded by
+//!   `OPERATOR_BACKGROUND_MAINTENANCE_WAIT`) and then apply on its resulting
+//!   cut, instead of failing with `queue mutation deferred`.
 //!
 //! ## Agentic Contracts
 //! - `enqueue` never runs maintenance inline and never waits for a run.

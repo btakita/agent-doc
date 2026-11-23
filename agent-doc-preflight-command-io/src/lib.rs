@@ -702,6 +702,10 @@ struct BackgroundRequestEffectFence<'a> {
     owner: &'a BackgroundQueueMaintenanceClaim,
     request: &'a agent_doc_queue_io::queue_edit_owner::QueueMaintenanceRequest,
     plan: agent_doc_preflight_io::queue_maintenance_effect_cas::QueueMaintenanceEffectPlan,
+    /// dogfood `maintlockhold`: every fence crossing observes the authority hash.
+    /// Keyed by the relay's compact revision, an unchanged canonical is not
+    /// re-materialized under the hub lock on each crossing.
+    authority: agent_doc_document_realtime_io::authority_hash_memo::AuthorityHashMemo,
 }
 
 impl<'a> BackgroundRequestEffectFence<'a> {
@@ -735,7 +739,12 @@ impl<'a> BackgroundRequestEffectFence<'a> {
                     &request.admitted_authority_hash,
                     progress,
                 ),
+            authority: agent_doc_document_realtime_io::authority_hash_memo::AuthorityHashMemo::new(),
         }
+    }
+
+    fn observe_authority(&self, file: &Path, label: &str) -> Result<String> {
+        self.authority.observe_hash(file, label)
     }
 
     fn fence_effect(&self, file: &Path) -> Result<()> {
@@ -747,11 +756,6 @@ impl<'a> BackgroundRequestEffectFence<'a> {
         self.owner
             .store_plan_progress(self.request, &self.plan.progress())
     }
-}
-
-fn observe_document_authority(file: &Path, label: &str) -> Result<String> {
-    agent_doc_document_realtime_io::peek_current_document_content(file, label)
-        .map(|observed| agent_doc_hash::content_hash(&observed))
 }
 
 impl agent_doc_preflight_io::PendingMaintenanceEffectFence for BackgroundRequestEffectFence<'_> {
@@ -768,8 +772,7 @@ impl agent_doc_preflight_io::PendingMaintenanceEffectFence for BackgroundRequest
         step: agent_doc_preflight_io::QueueMaintenanceEffectStep,
     ) -> Result<()> {
         self.owner.verify(self.request)?;
-        let observe =
-            || observe_document_authority(file, "background_queue_maintenance_effect_fence");
+        let observe = || self.observe_authority(file, "background_queue_maintenance_effect_fence");
         self.plan.cross(step, &observe)
     }
 
@@ -780,8 +783,7 @@ impl agent_doc_preflight_io::PendingMaintenanceEffectFence for BackgroundRequest
         effect: &mut dyn FnMut() -> Result<String>,
     ) -> Result<()> {
         self.owner.verify(self.request)?;
-        let observe =
-            || observe_document_authority(file, "background_queue_maintenance_effect_fence");
+        let observe = || self.observe_authority(file, "background_queue_maintenance_effect_fence");
         self.plan.apply_effect(step, &observe, effect)?;
         self.store_progress()
     }
@@ -794,8 +796,7 @@ impl agent_doc_preflight_io::PendingMaintenanceEffectFence for BackgroundRequest
         effect: &mut dyn FnMut() -> Result<()>,
     ) -> Result<()> {
         self.owner.verify(self.request)?;
-        let observe =
-            || observe_document_authority(file, "background_queue_maintenance_effect_fence");
+        let observe = || self.observe_authority(file, "background_queue_maintenance_effect_fence");
         self.plan
             .apply_replayable_effect(step, intent, &observe, effect)?;
         self.store_progress()
@@ -803,8 +804,7 @@ impl agent_doc_preflight_io::PendingMaintenanceEffectFence for BackgroundRequest
 
     fn record_applied_content(&self, file: &Path, content: &str) -> Result<()> {
         self.owner.verify(self.request)?;
-        let observe =
-            || observe_document_authority(file, "background_queue_maintenance_applied_cut");
+        let observe = || self.observe_authority(file, "background_queue_maintenance_applied_cut");
         self.plan
             .record_document_cut(agent_doc_hash::content_hash(content), &observe)?;
         self.store_progress()
@@ -840,13 +840,13 @@ impl agent_doc_preflight_io::PendingMaintenanceEffectFence for BackgroundRequest
     }
 
     fn observed_authority_hash(&self, file: &Path) -> Result<Option<String>> {
-        observe_document_authority(file, "background_queue_maintenance_staged_cut").map(Some)
+        self.observe_authority(file, "background_queue_maintenance_staged_cut")
+            .map(Some)
     }
 
     fn record_applied_cut_hash(&self, file: &Path, cut_hash: &str) -> Result<()> {
         self.owner.verify(self.request)?;
-        let observe =
-            || observe_document_authority(file, "background_queue_maintenance_staged_cut");
+        let observe = || self.observe_authority(file, "background_queue_maintenance_staged_cut");
         self.plan
             .record_document_cut(cut_hash.to_string(), &observe)?;
         self.store_progress()
@@ -1215,6 +1215,7 @@ fn run_queue_maintenance_worker(
             }
             Err(error) => return Err(error),
         }
+        let request_started = std::time::Instant::now();
         let effect_fence = BackgroundRequestEffectFence::new(file, &queue_mutation, &request);
         let result = (|| -> Result<()> {
             // `#implementlazilyowned` plan step 9a: a predecessor that died
@@ -1399,6 +1400,23 @@ fn run_queue_maintenance_worker(
                 }
             }
         })();
+        // dogfood `maintlockhold`: how long this request held the maintenance claim
+        // and how many fence observations actually materialized the document.
+        let fence_counts = effect_fence.authority.counts();
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_maintenance_background_claim_held file={} pid={} generation={} held_ms={} fence_observations={} fence_materializations={} outcome={} (maintlockhold)",
+                file.display(),
+                std::process::id(),
+                request.generation,
+                request_started.elapsed().as_millis(),
+                fence_counts.observations,
+                fence_counts.materializations,
+                if result.is_ok() { "ok" } else { "error" },
+            ),
+        );
+        drop(effect_fence);
 
         match result {
             Ok(()) => {

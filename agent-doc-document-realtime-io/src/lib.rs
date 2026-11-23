@@ -39,6 +39,7 @@ pub use agent_doc_document_realtime::{CurrentDocument, DocumentKey};
 pub use agent_doc_state_backbone::DocumentWriteDeferredReason;
 use agent_doc_turn::op_log::OpsLogEvent;
 
+pub mod authority_hash_memo;
 mod current_document_projection;
 pub use current_document_projection::{
     CurrentDocumentProjection, QueueDocumentProjection, invalidate_current_document_projection,

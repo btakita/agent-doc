@@ -741,6 +741,32 @@ and compares later identity/inode observations to that snapshot. It does not
 compare the unrelated payload and wrapper inodes, which would report permanent
 staleness even before an upgrade.
 
+### Receipt deadlines and lifecycle publication (GH #438)
+
+Clients wait 2 s for a `state`/`pid` answer and 10 s for an effectful command's
+receipt (`restart`, `inject`, `clear`, `stop`, `stop_agent`). A response timeout
+after a successful connect means the supervisor accepted the command and its
+receipt was late, so the command is never replayed on that evidence.
+
+- The receipt reports the supervisor's local effect: bytes delivered, child
+  signalled, restart armed or latched. The actor lifecycle transition that the
+  command produces (`busy` for `ipc_inject`, `ipc_clear`, and
+  `ipc_restart_requested`; `waiting_input` for `ipc_stop_agent_requested`) is
+  published to the project controller after the receipt is written. The
+  publication used to run before the receipt (before the kill, for Stop Agent),
+  so a stalled controller (`mark_lifecycle` connect-or-launch, a 5 s RPC
+  deadline, then handoff-refusal retries) held the receipt past 10 s.
+- Every lifecycle publication of one supervisor takes its position in a FIFO
+  order when its transition happens. A deferred publication therefore reaches
+  the controller before any later transition of the same supervisor, such as
+  the child-exit `stop_agent_prompt` or the relaunched child's `prompt_ready`.
+- Effectful handlers hold the `execve` handoff gate (`ipc_handoff`) only
+  through the effect and the receipt. The child-preserving re-exec refuses with
+  `reexec deferred: lifecycle_publication_pending` while any publication is
+  pending and retries at the next safe boundary.
+- `state` and `pid` queries perform no effect. They do not take `ipc_handoff`
+  and never wait behind an effectful handler.
+
 ### External control use cases
 
 1. **`/agent-doc` routing from a different tmux pane:** instead of `tmux send-keys`, the route subcommand opens the supervisor socket and calls `inject` with `/agent-doc <file>\r`. Removes the 5s sleep hack + race conditions in `start.rs:229`.

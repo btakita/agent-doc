@@ -390,6 +390,39 @@ impl agent_doc_supervisor_io::ipc::SupervisorIpcHandlerState for SupervisorShare
     }
 }
 
+/// Bind this supervisor's per-session IPC socket to its shared runtime state.
+///
+/// GH #438: an effectful command's receipt reports the supervisor's local
+/// effect and is written before the actor lifecycle publication that follows
+/// it, so a stalled project controller cannot hold the receipt past the
+/// client's 10s deadline. The publication runs after the receipt, outside
+/// `ipc_handoff`, in this supervisor's lifecycle order (the `execve` handoff
+/// refuses while it is pending). Read-only `state`/`pid` queries perform no
+/// effect, so they skip `ipc_handoff` and never queue behind an effect.
+pub(crate) fn start_supervisor_ipc(
+    project_root: &Path,
+    session_id: &str,
+    shared: Arc<SupervisorShared>,
+) -> Result<SupervisorIpc> {
+    SupervisorIpc::start_with_reply(project_root, session_id, move |method, reply| {
+        if agent_doc_supervisor::ipc_protocol::ipc_method_is_query(&method) {
+            reply.send(&agent_doc_supervisor_io::ipc::handle_supervisor_ipc(
+                method,
+                shared.as_ref(),
+            ));
+            return;
+        }
+        let deferred = shared.defer_lifecycle_until_reply();
+        {
+            let _handoff = shared.ipc_handoff.lock();
+            let response =
+                agent_doc_supervisor_io::ipc::handle_supervisor_ipc(method, shared.as_ref());
+            reply.send(&response);
+        }
+        drop(deferred);
+    })
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
@@ -1150,6 +1183,172 @@ mod tests {
         );
         assert!(response.ok, "{response:?}");
         assert!(shared.stop_requested.load(Ordering::Relaxed));
+    }
+
+    /// GH #438 stand-in for a project controller whose `mark_lifecycle` RPC is
+    /// stalled. Each publication records its entry, then blocks until released.
+    struct StalledLifecycleController {
+        released: Arc<(Mutex<bool>, parking_lot::Condvar)>,
+        entered: Arc<Mutex<Vec<(agent_doc_controller::actor::ActorState, String)>>>,
+    }
+
+    impl StalledLifecycleController {
+        fn install(shared: &SupervisorShared) -> Self {
+            let released = Arc::new((Mutex::new(false), parking_lot::Condvar::new()));
+            let entered = Arc::new(Mutex::new(Vec::new()));
+            let (gate, log) = (released.clone(), entered.clone());
+            *shared.lifecycle_publisher_for_test.lock() = Some(Arc::new(
+                move |state: agent_doc_controller::actor::ActorState,
+                      _caller: &str,
+                      reason: &str| {
+                    log.lock().push((state, reason.to_string()));
+                    let (lock, turn) = &*gate;
+                    let mut released = lock.lock();
+                    while !*released {
+                        turn.wait(&mut released);
+                    }
+                    anyhow::bail!("stalled test controller answered late")
+                },
+            ));
+            Self { released, entered }
+        }
+
+        fn entered(&self) -> Vec<(agent_doc_controller::actor::ActorState, String)> {
+            self.entered.lock().clone()
+        }
+
+        fn release(&self) {
+            let (lock, turn) = &*self.released;
+            *lock.lock() = true;
+            turn.notify_all();
+        }
+    }
+
+    impl Drop for StalledLifecycleController {
+        fn drop(&mut self) {
+            self.release();
+        }
+    }
+
+    fn gh438_shared(dir: &Path) -> Arc<SupervisorShared> {
+        let doc = dir.join("gh438.md");
+        std::fs::write(&doc, "# gh438\n").unwrap();
+        Arc::new(SupervisorShared::with_actor_runtime(
+            "test",
+            "gh438-instance".to_string(),
+            None,
+            "claude",
+            Some(SessionActorRuntime {
+                project_root: dir.to_path_buf(),
+                file: doc,
+                session_id: "gh438-session".to_string(),
+                pane_id: "%438".to_string(),
+                generation: 7,
+            }),
+            Some(agent_doc_controller::actor::ActorState::Ready),
+            None,
+        ))
+    }
+
+    /// GH #438: `session stop-agent` / `session clear` failed with
+    /// `supervisor response timeout (10.0s)` after a successful connect. The
+    /// effectful handler published the actor lifecycle to the project
+    /// controller (`mark_lifecycle`: connect-or-launch, a 5s RPC, then up to
+    /// minutes of handoff-refusal retries) before it answered (Stop Agent even
+    /// before it killed the child), and every handler, `pid`/`state` queries
+    /// included, held `ipc_handoff` for that whole time. A stalled controller
+    /// therefore held the receipt hostage and starved every query queued behind
+    /// it. The receipt must report the local effect without waiting on the
+    /// controller, queries must not queue behind an effect, and the deferred
+    /// publication must still reach the controller before any later lifecycle
+    /// transition of this supervisor.
+    fn assert_effect_receipt_outruns_stalled_publication(
+        method: IpcMethod,
+        deferred: (agent_doc_controller::actor::ActorState, &str),
+        effect_landed: impl Fn(&SupervisorShared) -> bool,
+    ) {
+        use agent_doc_controller::actor::ActorState;
+        let dir = tempfile::tempdir().unwrap();
+        let shared = gh438_shared(dir.path());
+        let controller = StalledLifecycleController::install(&shared);
+        let mut ipc =
+            start_supervisor_ipc(dir.path(), "gh438-session", shared.clone()).expect("ipc");
+        let sock = agent_doc_supervisor_io::ipc::socket_path(dir.path(), "gh438-session");
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let client_sock = sock.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(
+                agent_doc_supervisor_io::ipc::send_command(&client_sock, &method)
+                    .map_err(|err| format!("{err:#}")),
+            );
+        });
+        let receipt = rx.recv_timeout(Duration::from_secs(3));
+        let pid =
+            agent_doc_supervisor_io::ipc::probe_supervisor_pid(&sock, Duration::from_millis(1500))
+                .map_err(|err| format!("{err:#}"));
+
+        // A later supervisor transition (the child-exit / prompt path) issued
+        // while the deferred publication is still stalled.
+        let later_shared = shared.clone();
+        let later = std::thread::spawn(move || {
+            later_shared.transition_actor_state(ActorState::Ready, "supervisor", "prompt_ready");
+        });
+        std::thread::sleep(Duration::from_millis(200));
+        let entered_while_stalled = controller.entered();
+        controller.release();
+        later.join().expect("later transition");
+        let entered = controller.entered();
+        ipc.stop();
+
+        let receipt = receipt.expect("the effect receipt waited on the stalled controller");
+        let receipt = receipt.expect("effect command");
+        assert!(receipt.ok, "{receipt:?}");
+        assert!(
+            effect_landed(&shared),
+            "the local effect ran before the receipt"
+        );
+        assert!(pid.is_ok(), "pid query queued behind the effect: {pid:?}");
+        assert_eq!(
+            entered_while_stalled,
+            vec![(deferred.0, deferred.1.to_string())],
+            "only the deferred publication may be in flight; a later transition waits its turn"
+        );
+        assert_eq!(
+            entered,
+            vec![
+                (deferred.0, deferred.1.to_string()),
+                (ActorState::Ready, "prompt_ready".to_string()),
+            ],
+            "the deferred publication reaches the controller before any later one"
+        );
+    }
+
+    #[test]
+    fn stop_agent_receipt_does_not_wait_on_a_stalled_controller() {
+        assert_effect_receipt_outruns_stalled_publication(
+            IpcMethod::StopAgent { reason: None },
+            (
+                agent_doc_controller::actor::ActorState::WaitingInput,
+                "ipc_stop_agent_requested",
+            ),
+            |shared| shared.stop_agent_requested.load(Ordering::Relaxed),
+        );
+    }
+
+    #[test]
+    fn clear_receipt_does_not_wait_on_a_stalled_controller() {
+        // No live child: the operator Clear is served by the fresh restart.
+        assert_effect_receipt_outruns_stalled_publication(
+            IpcMethod::Clear {
+                bytes: "/clear".to_string(),
+            },
+            (
+                agent_doc_controller::actor::ActorState::Busy,
+                "ipc_restart_requested",
+            ),
+            |shared| shared.restart_requested.load(Ordering::Acquire),
+        );
     }
 
     #[test]

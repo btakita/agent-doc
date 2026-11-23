@@ -53,6 +53,15 @@ pub const fn ipc_method_requires_capability_gate(method: &IpcMethod) -> bool {
     matches!(method, IpcMethod::Inject { .. })
 }
 
+/// Return true when an IPC method only reads supervisor state (GH #438).
+///
+/// A query performs no input, capture, or lifecycle effect, so it neither
+/// needs the supervisor's effect/`execve` handoff gate nor may it queue behind
+/// an effect that holds that gate.
+pub const fn ipc_method_is_query(method: &IpcMethod) -> bool {
+    matches!(method, IpcMethod::State | IpcMethod::Pid)
+}
+
 /// Build the canonical raw-PTY submit bytes for a single-line harness input.
 ///
 /// This is only for direct child-PTY fallback writes. Tmux-bound submissions
@@ -200,6 +209,27 @@ mod tests {
             serde_json::to_string(&IpcResponse::err("no active session")).unwrap(),
             r#"{"ok":false,"error":"no active session"}"#
         );
+    }
+
+    #[test]
+    fn ipc_method_query_classification_covers_only_state_and_pid() {
+        assert!(ipc_method_is_query(&IpcMethod::State));
+        assert!(ipc_method_is_query(&IpcMethod::Pid));
+        for effect in [
+            IpcMethod::Restart {
+                mode: "fresh".to_string(),
+            },
+            IpcMethod::Inject {
+                bytes: "x".to_string(),
+            },
+            IpcMethod::Clear {
+                bytes: "/clear".to_string(),
+            },
+            IpcMethod::Stop { graceful: false },
+            IpcMethod::StopAgent { reason: None },
+        ] {
+            assert!(!ipc_method_is_query(&effect), "{effect:?}");
+        }
     }
 
     #[test]

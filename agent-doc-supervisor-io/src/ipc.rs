@@ -945,6 +945,24 @@ impl SupervisorIpc {
     where
         F: Fn(IpcMethod) -> IpcResponse + Send + Sync + 'static,
     {
+        Self::start_with_reply(project_root, session_uuid, move |method, reply| {
+            reply.send(&handler(method));
+        })
+    }
+
+    /// Start the IPC listener with a handler that answers through a
+    /// [`SupervisorIpcReply`] and may keep working after it answered.
+    ///
+    /// GH #438: the receipt for an effectful command reports the supervisor's
+    /// local effect (bytes delivered, child signalled, restart armed). Work that
+    /// only projects that effect elsewhere, such as the project-controller
+    /// lifecycle publication, runs after the reply on the same connection
+    /// thread, so a stalled controller can no longer hold the receipt past the
+    /// client's deadline.
+    pub fn start_with_reply<F>(project_root: &Path, session_uuid: &str, handler: F) -> Result<Self>
+    where
+        F: Fn(IpcMethod, &mut SupervisorIpcReply<'_>) + Send + Sync + 'static,
+    {
         let sock = socket_path(project_root, session_uuid);
 
         // Ensure parent directory exists
@@ -1096,6 +1114,46 @@ impl Drop for SupervisorIpc {
 
 // --- Client side ---
 
+/// One-shot answer to a supervisor-IPC request (GH #438).
+///
+/// The first [`send`](Self::send) writes and flushes the response line; later
+/// calls are ignored, so the client always reads exactly one receipt. A
+/// handler that never sends leaves the client to observe the closed
+/// connection.
+pub struct SupervisorIpcReply<'a> {
+    writer: &'a mut dyn Write,
+    sent: bool,
+}
+
+impl<'a> SupervisorIpcReply<'a> {
+    pub fn new(writer: &'a mut dyn Write) -> Self {
+        Self {
+            writer,
+            sent: false,
+        }
+    }
+
+    /// Write `response` as this request's receipt, once.
+    pub fn send(&mut self, response: &IpcResponse) {
+        if self.sent {
+            return;
+        }
+        self.sent = true;
+        let mut resp_json = serde_json::to_string(response)
+            .unwrap_or_else(|e| format!(r#"{{"ok":false,"error":"serialize error: {e}"}}"#));
+        resp_json.push('\n');
+        if let Err(e) = self.writer.write_all(resp_json.as_bytes()) {
+            eprintln!("[supervisor::ipc] write error: {e}");
+        }
+        let _ = self.writer.flush();
+    }
+
+    /// Whether a receipt has been written.
+    pub fn sent(&self) -> bool {
+        self.sent
+    }
+}
+
 /// Serve one supervisor-IPC request-response on an accepted connection. The
 /// client (`send_command`) connects, sends one NDJSON line, reads one response
 /// line, and drops the stream. Runs on a dedicated per-connection thread so a
@@ -1104,7 +1162,7 @@ impl Drop for SupervisorIpc {
 /// promptly instead of leaking.
 fn serve_supervisor_connection<F>(stream: interprocess::local_socket::Stream, handler: &F)
 where
-    F: Fn(IpcMethod) -> IpcResponse,
+    F: Fn(IpcMethod, &mut SupervisorIpcReply<'_>),
 {
     let (reader_half, mut writer_half) = stream.split();
     let mut reader = BufReader::new(reader_half);
@@ -1113,19 +1171,11 @@ where
     if reader.read_line(&mut line).unwrap_or(0) > 0 {
         let trimmed = line.trim();
         if !trimmed.is_empty() {
-            let response = match serde_json::from_str::<IpcMethod>(trimmed) {
-                Ok(method) => handler(method),
-                Err(e) => IpcResponse::err(format!("parse error: {e}")),
-            };
-
-            let mut resp_json = serde_json::to_string(&response)
-                .unwrap_or_else(|e| format!(r#"{{"ok":false,"error":"serialize error: {e}"}}"#));
-            resp_json.push('\n');
-
-            if let Err(e) = writer_half.write_all(resp_json.as_bytes()) {
-                eprintln!("[supervisor::ipc] write error: {e}");
+            let mut reply = SupervisorIpcReply::new(&mut writer_half);
+            match serde_json::from_str::<IpcMethod>(trimmed) {
+                Ok(method) => handler(method, &mut reply),
+                Err(e) => reply.send(&IpcResponse::err(format!("parse error: {e}"))),
             }
-            let _ = writer_half.flush();
         }
     }
 }
@@ -2039,6 +2089,41 @@ mod tests {
             Some(SupervisorCommandFailureKind::ResponseTimeout)
         );
 
+        ipc.stop();
+    }
+
+    /// GH #438: a handler that answers before its trailing work lets the client
+    /// read the receipt while that work is still blocked.
+    #[test]
+    fn reply_reaches_client_before_handler_trailing_work_finishes() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let release_rx = Mutex::new(release_rx);
+        let finished = Arc::new(AtomicBool::new(false));
+        let handler_finished = finished.clone();
+        let mut ipc =
+            SupervisorIpc::start_with_reply(root, "test-reply-first", move |_m, reply| {
+                reply.send(&IpcResponse::ok(serde_json::json!({ "receipt": 1 })));
+                // A second send is ignored: the client reads exactly one line.
+                reply.send(&IpcResponse::err("late duplicate"));
+                let _ = release_rx.lock().unwrap().recv();
+                handler_finished.store(true, Ordering::SeqCst);
+            })
+            .unwrap();
+
+        let sock = socket_path(root, "test-reply-first");
+        let response = send_command_with_response_timeout(
+            &sock,
+            &IpcMethod::StopAgent { reason: None },
+            Duration::from_secs(2),
+        )
+        .expect("receipt arrives while the handler is still blocked");
+        assert!(response.ok);
+        assert_eq!(response.data.unwrap()["receipt"], 1);
+        assert!(!finished.load(Ordering::SeqCst));
+
+        release_tx.send(()).unwrap();
         ipc.stop();
     }
 

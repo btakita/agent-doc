@@ -1951,6 +1951,14 @@ fn supervisor_perform_reexec(
             "supervisor_ipc_inflight",
         ));
     }
+    // GH #438: an IPC handler publishes its lifecycle transition after its
+    // receipt and after releasing `ipc_handoff`. Exec'ing now would drop that
+    // publication (or one in flight on another thread) with the old image.
+    if shared.lifecycle_publication.pending() {
+        return Err(SupervisorReexecError::UnsafeIoHandoff(
+            "lifecycle_publication_pending",
+        ));
+    }
     if let Some(refusal) = shared.reexec_preserve_child_refusal() {
         return Err(SupervisorReexecError::Refused(refusal));
     }
@@ -2757,7 +2765,9 @@ pub(crate) struct SupervisorShared {
     /// thread may enqueue a fresh connection after the recycle decision, but
     /// its handler cannot begin an input/capture/lifecycle effect once the
     /// handoff owns this gate; that client observes disconnect and retries
-    /// against the replacement socket.
+    /// against the replacement socket. Read-only `state`/`pid` queries do not
+    /// take it, and a handler's deferred lifecycle publication runs after it
+    /// releases this gate, guarded instead by `lifecycle_publication` (GH #438).
     ipc_handoff: Mutex<()>,
     /// Flag: IPC requested a restart.
     restart_requested: AtomicBool,
@@ -2817,7 +2827,73 @@ pub(crate) struct SupervisorShared {
     /// carried a real turn. Handed across a same-child hot-reexec, whose argv still
     /// declares the original purpose.
     route_owned_dispatch_promoted: AtomicBool,
+    /// Test seam standing in for the controller `mark_lifecycle` RPC, so a test
+    /// can stall or record lifecycle publications without a live controller.
+    /// GH #438: FIFO order for this supervisor's controller lifecycle
+    /// publications, so an IPC receipt can be written before its publication
+    /// without letting a later transition overtake it.
+    lifecycle_publication: lifecycle_publication::LifecyclePublicationOrder,
+    #[cfg(test)]
+    lifecycle_publisher_for_test: Mutex<Option<TestLifecyclePublisher>>,
 }
+
+thread_local! {
+    /// Lifecycle publications an IPC handler on this thread deferred until
+    /// after its receipt (GH #438). See [`SupervisorShared::defer_lifecycle_until_reply`].
+    static IPC_LIFECYCLE_DEFERRAL: std::cell::RefCell<Option<IpcLifecycleDeferralScope>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+struct IpcLifecycleDeferralScope {
+    /// Address of the `SupervisorShared` whose transitions are deferred.
+    owner: usize,
+    pending: Vec<DeferredLifecyclePublication>,
+}
+
+struct DeferredLifecyclePublication {
+    ticket: u64,
+    state: agent_doc_controller::actor::ActorState,
+    caller: String,
+    reason: String,
+}
+
+/// Publishes the lifecycle transitions an IPC handler deferred, in order,
+/// when dropped. Created by [`SupervisorShared::defer_lifecycle_until_reply`].
+pub(crate) struct IpcLifecycleDeferral<'a> {
+    shared: &'a SupervisorShared,
+    armed: bool,
+}
+
+impl Drop for IpcLifecycleDeferral<'_> {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let pending = IPC_LIFECYCLE_DEFERRAL
+            .with(|slot| slot.borrow_mut().take())
+            .map(|scope| scope.pending)
+            .unwrap_or_default();
+        for publication in pending {
+            self.shared.publish_actor_state_in_turn(
+                publication.ticket,
+                publication.state,
+                &publication.caller,
+                &publication.reason,
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+type TestLifecyclePublisher = Arc<
+    dyn Fn(
+            agent_doc_controller::actor::ActorState,
+            &str,
+            &str,
+        ) -> Result<agent_doc_controller::actor::ActorRecord>
+        + Send
+        + Sync,
+>;
 
 impl SupervisorShared {
     #[cfg(test)]
@@ -2905,6 +2981,9 @@ impl SupervisorShared {
             capability_proof_error: Mutex::new(None),
             capability_proof_contract: Mutex::new(None),
             route_owned_dispatch_promoted: AtomicBool::new(false),
+            lifecycle_publication: lifecycle_publication::LifecyclePublicationOrder::default(),
+            #[cfg(test)]
+            lifecycle_publisher_for_test: Mutex::new(None),
         }
     }
 
@@ -3256,7 +3335,77 @@ impl SupervisorShared {
         }
     }
 
+    /// Publish an actor lifecycle transition to the project controller.
+    ///
+    /// The transition takes its place in this supervisor's publication order
+    /// now. Inside [`Self::defer_lifecycle_until_reply`] on this thread it is
+    /// published after the IPC receipt; otherwise it is published before this
+    /// call returns, after every earlier transition (GH #438).
     fn transition_actor_state(
+        &self,
+        state: agent_doc_controller::actor::ActorState,
+        caller: &str,
+        reason: &str,
+    ) {
+        if !self.actor_generation_lease.active() || self.actor_runtime.is_none() {
+            return;
+        }
+        let ticket = self.lifecycle_publication.reserve();
+        let owner = self as *const Self as usize;
+        let deferred = IPC_LIFECYCLE_DEFERRAL.with(|slot| match slot.borrow_mut().as_mut() {
+            Some(scope) if scope.owner == owner => {
+                scope.pending.push(DeferredLifecyclePublication {
+                    ticket,
+                    state,
+                    caller: caller.to_string(),
+                    reason: reason.to_string(),
+                });
+                true
+            }
+            _ => false,
+        });
+        if !deferred {
+            self.publish_actor_state_in_turn(ticket, state, caller, reason);
+        }
+    }
+
+    /// GH #438: hold this thread's lifecycle publications until the returned
+    /// guard drops. An effectful IPC handler writes its receipt first, so a
+    /// slow or unreachable project controller (`mark_lifecycle` can spend a 5s
+    /// RPC deadline plus handoff-refusal retries) no longer holds the receipt
+    /// past the client's deadline. Each deferred transition keeps the order
+    /// position it took when it happened.
+    pub(crate) fn defer_lifecycle_until_reply(&self) -> IpcLifecycleDeferral<'_> {
+        let owner = self as *const Self as usize;
+        let armed = IPC_LIFECYCLE_DEFERRAL.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            if slot.is_some() {
+                return false;
+            }
+            *slot = Some(IpcLifecycleDeferralScope {
+                owner,
+                pending: Vec::new(),
+            });
+            true
+        });
+        IpcLifecycleDeferral {
+            shared: self,
+            armed,
+        }
+    }
+
+    fn publish_actor_state_in_turn(
+        &self,
+        ticket: u64,
+        state: agent_doc_controller::actor::ActorState,
+        caller: &str,
+        reason: &str,
+    ) {
+        let _turn = self.lifecycle_publication.wait_turn(ticket);
+        self.publish_actor_state(state, caller, reason);
+    }
+
+    fn publish_actor_state(
         &self,
         state: agent_doc_controller::actor::ActorState,
         caller: &str,
@@ -3268,7 +3417,14 @@ impl SupervisorShared {
         let Some(runtime) = self.actor_runtime.as_ref() else {
             return;
         };
-        match runtime.transition(state, caller, reason) {
+        #[cfg(test)]
+        let published = match self.lifecycle_publisher_for_test.lock().clone() {
+            Some(publisher) => publisher(state, caller, reason),
+            None => runtime.transition(state, caller, reason),
+        };
+        #[cfg(not(test))]
+        let published = runtime.transition(state, caller, reason);
+        match published {
             Ok(record) => {
                 self.record_landed_actor_state(record.state);
                 if record.state == agent_doc_controller::actor::ActorState::Ready {
@@ -3433,6 +3589,7 @@ impl agent_doc_supervisor_io::detection::SupervisorDetectionState for Supervisor
 /// and read-only methods (`State`, `Pid`) are gate-exempt so a session whose
 /// proof failed can still be inspected, cleared, and stopped without `kill -9`.
 /// Pure and deterministic for unit testing the gate-exemption classification.
+mod lifecycle_publication;
 mod supervisor_io;
 
 mod run;
@@ -3996,6 +4153,22 @@ mod tests {
             Err(SupervisorReexecError::Refused(Refusal::ChildExited)) => {}
             other => panic!("reexec must refuse a reaped child, got {other:?}"),
         }
+    }
+
+    /// GH #438: an IPC handler publishes its lifecycle transition after its
+    /// receipt and after `ipc_handoff`, so the `execve` handoff must refuse
+    /// while that publication is pending rather than drop it with the old image.
+    #[cfg(unix)]
+    #[test]
+    fn reexec_refuses_while_a_lifecycle_publication_is_pending() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let ticket = shared.lifecycle_publication.reserve();
+        match supervisor_perform_reexec(&shared, false, None) {
+            Err(SupervisorReexecError::UnsafeIoHandoff("lifecycle_publication_pending")) => {}
+            other => panic!("reexec must wait for the pending publication, got {other:?}"),
+        }
+        drop(shared.lifecycle_publication.wait_turn(ticket));
+        assert!(!shared.lifecycle_publication.pending());
     }
 
     /// GH #133: a supervisor that cannot name its own registered actor binding

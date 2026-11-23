@@ -1562,11 +1562,7 @@ pub fn run_with_reap_policy_resume_and_harness(
     }
 
     // Start IPC listener
-    let shared_for_ipc = shared.clone();
-    let mut ipc = SupervisorIpc::start(&project_root, &session_id, move |method| {
-        let _handoff = shared_for_ipc.ipc_handoff.lock();
-        agent_doc_supervisor_io::ipc::handle_supervisor_ipc(method, shared_for_ipc.as_ref())
-    })?;
+    let mut ipc = supervisor_io::start_supervisor_ipc(&project_root, &session_id, shared.clone())?;
     log_event(
         &mut session_log,
         &format!("ipc_started project_root={}", project_root.display()),

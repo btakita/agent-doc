@@ -6374,24 +6374,91 @@ impl RowRef<'_> {
         if !owners.is_empty() {
             return owners.contains(&line_start_at(self.document, self.start));
         }
-        let leaf_names_work = head
-            .rsplit_once(": ")
-            .is_some_and(|(_, leaf)| heading_item_text(leaf) == work);
-        leaf_names_work && self.lineages.rows_with_work(work) <= 1
+        let Some((head_parent, leaf)) = head.rsplit_once(": ") else {
+            return false;
+        };
+        // `#parentscopedanswer`: the leaf alone never names a row whose parent
+        // the key does not name. The old `#justdoit` VS Code row was deleted,
+        // so the step2 tree's new `#justdoit` answer was the only row with
+        // that leaf, and striking it attached the VS Code hand-back.
+        heading_item_text(leaf) == work
+            && self.lineages.rows_with_work(work) <= 1
+            && self.parent_compatible(head_parent, work)
+    }
+
+    /// Whether `head_parent`, the parent part of a claim key, can name this
+    /// row's parent after an ancestor edit: the same tracked id (`[#q-…]`,
+    /// `[#id]`) on both sides, or, when either side has none, the same parent
+    /// text up to a truncation (`…`).
+    fn parent_compatible(&self, head_parent: &str, work: &str) -> bool {
+        let at = line_start_at(self.document, self.start);
+        let Some(row) = self.lineages.rows.iter().find(|row| row.line_start == at) else {
+            return false;
+        };
+        row.lineages.iter().any(|lineage| {
+            lineage
+                .strip_suffix(work)
+                .and_then(|parent| parent.strip_suffix(": "))
+                .is_some_and(|row_parent| parents_compatible(head_parent, row_parent))
+        })
     }
 }
 
-fn completion_cell_matches_row(cell_item: &str, row: RowRef<'_>) -> bool {
-    if crate::queue_claim::completion_evidence_matches_row(cell_item, row.text) {
+/// Bracketed ids (`[#q-…]`, `[#id]`) in a lineage parent, lowercased.
+fn lineage_parent_ids(text: &str) -> HashSet<String> {
+    let mut ids = HashSet::new();
+    let mut rest = text;
+    while let Some(open) = rest.find("[#") {
+        let after = &rest[open + 2..];
+        let Some(close) = after.find(']') else {
+            break;
+        };
+        let id = after[..close].trim();
+        if !id.is_empty() && !id.contains(char::is_whitespace) {
+            ids.insert(id.to_ascii_lowercase());
+        }
+        rest = &after[close..];
+    }
+    ids
+}
+
+/// `#parentscopedanswer`: whether two lineage parents can be the same parent.
+fn parents_compatible(left: &str, right: &str) -> bool {
+    let normalize = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let (left, right) = (normalize(left), normalize(right));
+    if left == right {
         return true;
     }
+    let (left_ids, right_ids) = (lineage_parent_ids(&left), lineage_parent_ids(&right));
+    if !left_ids.is_empty() && !right_ids.is_empty() {
+        return !left_ids.is_disjoint(&right_ids);
+    }
+    let stem = |text: &str| -> String {
+        let text = text.trim_end_matches('…').trim_end();
+        text.chars().take(48).collect()
+    };
+    let (left_stem, right_stem) = (stem(&left), stem(&right));
+    let shorter = left_stem.chars().count().min(right_stem.chars().count());
+    shorter >= 8
+        && left_stem
+            .chars()
+            .take(shorter)
+            .eq(right_stem.chars().take(shorter))
+}
+
+fn completion_cell_matches_row(cell_item: &str, row: RowRef<'_>) -> bool {
     let cell = agent_doc_document::subagent_completion::heading_item_text(cell_item);
     let work = row_work_heading(row.text);
+    if crate::queue_claim::completion_evidence_matches_row(cell_item, row.text)
+        || (!work.is_empty() && cell == work)
+    {
+        // `#parentscopedanswer`: a key that is only the leaf names no parent.
+        // For a nested row it names this row only while no other queue row
+        // has the same work (`#justdoit` under two entries is two rows).
+        return leaf_names_row(row, &work);
+    }
     if work.is_empty() {
         return false;
-    }
-    if cell == work {
-        return true;
     }
     row.named_by_nested_head(&cell, &work)
 }
@@ -6446,7 +6513,9 @@ fn prompt_names_work(prompt: &str, work: &str, row: RowRef<'_>) -> bool {
         return false;
     }
     if prompt == work {
-        return true;
+        // `#parentscopedanswer`: a bare leaf names a nested row only while no
+        // other queue row has the same work.
+        return leaf_names_row(row, work);
     }
     // `#nestlistlineage`: a quoted nest vector names only the row it spells.
     prompt.ends_with(&format!(": {work}")) && row.named_by_nested_head(prompt, work)
@@ -6460,6 +6529,9 @@ fn echo_cell_names_row(document: &str, cell: &str, row: RowRef<'_>) -> bool {
         .any(|prompt| prompt_names_work(prompt, &work, row))
     {
         return true;
+    }
+    if !leaf_names_row(row, &work) {
+        return false;
     }
     let heads = [
         row_text.to_string(),
@@ -6563,23 +6635,47 @@ fn queue_response_child_ids(document: &str) -> HashSet<String> {
         .collect()
 }
 
-fn stopped_response_id(row_text: &str, summary: &str) -> String {
-    let hash = agent_doc_hash::content_hash(&format!(
-        "stopped-row\n{}\n{summary}",
-        row_work_heading(row_text)
-    ));
+/// The identity a row's generated response id is scoped to
+/// (`#parentscopedanswer`): its claim lineage when it is nested, so an
+/// identical answer (`#justdoit`) under another parent or Remaining entry
+/// derives another id. A top-level row keeps its work text, as before.
+/// Identical siblings under one parent still share it (`#ackrespdup`).
+fn response_scope(row: RowRef<'_>) -> String {
+    let work = row_work_heading(row.text);
+    let at = line_start_at(row.document, row.start);
+    row.lineages
+        .rows
+        .iter()
+        .find(|lineage| lineage.line_start == at)
+        .and_then(|lineage| {
+            lineage
+                .lineages
+                .iter()
+                .find(|vector| vector.len() > work.len() && vector.ends_with(&format!(": {work}")))
+                .cloned()
+        })
+        .unwrap_or(work)
+}
+
+/// `#parentscopedanswer`: whether text that is only the row's leaf `work`
+/// (no parent) can name `row`. A top-level row is its own leaf. A nested
+/// row is named by its bare leaf only while no other queue row has the same
+/// work; a `#justdoit` under two parents is two rows.
+fn leaf_names_row(row: RowRef<'_>, work: &str) -> bool {
+    response_scope(row) == work || row.lineages.rows_with_work(work) <= 1
+}
+
+fn stopped_response_id(scope: &str, summary: &str) -> String {
+    let hash = agent_doc_hash::content_hash(&format!("stopped-row\n{scope}\n{summary}"));
     format!("[#r-{}]", &hash[..12])
 }
 
 fn handback_response_id(
-    row_text: &str,
+    scope: &str,
     handback: &agent_doc_document::worker_handback::WorkerHandback,
 ) -> String {
-    let hash = agent_doc_hash::content_hash(&format!(
-        "handback-row\n{}\n{}",
-        row_work_heading(row_text),
-        handback.render()
-    ));
+    let hash =
+        agent_doc_hash::content_hash(&format!("handback-row\n{scope}\n{}", handback.render()));
     format!("[#r-{}]", &hash[..12])
 }
 
@@ -6864,14 +6960,14 @@ impl<'a> DocumentHandbacks<'a> {
 /// read only from the response body has no copy in the document, so the row
 /// keeps every section, as before.
 fn handback_response_row_child(
-    row_text: &str,
+    response_scope: &str,
     found: &RowHandback,
     addressed_at: &str,
     closure: Option<&crate::queue_tree::RowClosure>,
     action_items_moved: bool,
 ) -> Option<String> {
     let handback = &found.handback;
-    let response_id = handback_response_id(row_text, handback);
+    let response_id = handback_response_id(response_scope, handback);
     let marker = agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(&response_id)?;
     let bodies = handback_section_bodies(handback);
     if bodies.is_empty() {
@@ -7117,10 +7213,16 @@ pub fn attach_ack_summary_response(
         ));
     };
     let summary = summary.split_whitespace().collect::<Vec<_>>().join(" ");
-    let hash = agent_doc_hash::content_hash(&format!(
-        "ack-summary-row\n{}\n{summary}",
-        row_work_heading(&node.item.text)
-    ));
+    // `#parentscopedanswer`: the id is scoped to the row's own lineage, so the
+    // same answer and summary under another parent mint another tree.
+    let lineages = QueueRowLineages::new(after);
+    let scope = response_scope(RowRef {
+        text: &node.item.text,
+        start: node.item.start_byte,
+        lineages: &lineages,
+        document: after,
+    });
+    let hash = agent_doc_hash::content_hash(&format!("ack-summary-row\n{scope}\n{summary}"));
     let response_id = format!("[#r-{}]", &hash[..12]);
     let Some(marker) =
         agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(&response_id)
@@ -7262,7 +7364,7 @@ pub fn attach_stopped_row_responses(
             continue;
         }
         if let Some(reason) = stopped_reason_for_row(after, response_body, row) {
-            let response_id = stopped_response_id(&node.item.text, &reason);
+            let response_id = stopped_response_id(&response_scope(row), &reason);
             if !rendered_response_ids.insert(response_id.clone()) {
                 continue;
             }
@@ -7291,7 +7393,8 @@ pub fn attach_stopped_row_responses(
         let Some(found) = handback else {
             continue;
         };
-        if !rendered_response_ids.insert(handback_response_id(&node.item.text, &found.handback)) {
+        let scope = response_scope(row);
+        if !rendered_response_ids.insert(handback_response_id(&scope, &found.handback)) {
             continue;
         }
         let closure = closure_tree.as_ref().and_then(|tree| {
@@ -7303,7 +7406,7 @@ pub fn attach_stopped_row_responses(
             &found.handback.action_items(),
         );
         let Some(child) = handback_response_row_child(
-            &node.item.text,
+            &scope,
             &found,
             addressed_at,
             closure.as_ref(),
@@ -8892,6 +8995,111 @@ fn render_waiting_metadata(
     // generated queue state, so encode that boundary token in the mirror while
     // leaving the Todo authority untouched.
     out.replace("> **Queue prompt:**", "&gt; **Queue prompt:**")
+}
+
+/// A queue row whose Response tree shows another row's worker hand-back
+/// (`#parentscopedanswer`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MismatchedRowResponse {
+    /// The row's text after its bullet.
+    pub row: String,
+    /// 1-based document line of the row.
+    pub line: usize,
+    /// The response id on the row (`[#r-…]`).
+    pub response_id: String,
+    /// The worker whose hand-back the response names (`subagent:x`).
+    pub owner: String,
+    /// The queue item that worker's completion cell reports.
+    pub reported_item: String,
+}
+
+/// Report, never rewrite, every queue row whose `**Response [#r-…]**` child
+/// names a worker hand-back (`**Details:** … the `subagent:x` hand-back …`)
+/// while none of that worker's completion cells in the document names this
+/// row under its own parent.
+///
+/// Before `#parentscopedanswer`, striking a `#justdoit` answer under the
+/// step2 tree attached the VS Code hand-back of an older, deleted `#justdoit`
+/// row elsewhere (`[#r-6837aa93963f]`). Which response the row should hold
+/// is not provable after the fact (the coordinator's summary is gone), so the
+/// operator replaces or deletes the tree; a worker with no completion cell in
+/// the document is not judged.
+pub fn mismatched_row_responses(document: &str) -> Vec<MismatchedRowResponse> {
+    let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes_all(document, "queue") else {
+        return Vec::new();
+    };
+    let evidence = crate::derived_memo::completion_evidence(document);
+    if evidence.is_empty() {
+        return Vec::new();
+    }
+    let lineages = QueueRowLineages::new(document);
+    let mut out = Vec::new();
+    for node in &nodes {
+        let raw = document
+            .get(node.item.start_byte..node.item.end_byte)
+            .unwrap_or("");
+        let indent = raw.len() - raw.trim_start_matches([' ', '\t']).len();
+        let scope_end = descendant_region_end(document, node.item.end_byte, indent);
+        let scope = document.get(node.item.end_byte..scope_end).unwrap_or("");
+        let mut response_id = None;
+        let mut response_indent = 0;
+        let mut owner = None;
+        for line in scope.lines() {
+            let Some((line_indent, item)) = markdown_list_item(line) else {
+                continue;
+            };
+            match &response_id {
+                None if line_indent == indent + 2 => {
+                    if let Some(id) = generated_response_id(item) {
+                        response_id = Some(id);
+                        response_indent = line_indent;
+                    }
+                }
+                Some(_) if line_indent <= response_indent => break,
+                Some(_) if line_indent == response_indent + 2 => {
+                    if let Some(details) = item.strip_prefix("**Details:**")
+                        && let Some(rest) = details.split("`subagent:").nth(1)
+                        && let Some((name, tail)) = rest.split_once('`')
+                        && tail.trim_start().starts_with("hand-back")
+                    {
+                        owner = Some(format!("subagent:{name}"));
+                        break;
+                    }
+                }
+                Some(_) | None => {}
+            }
+        }
+        let (Some(response_id), Some(owner)) = (response_id, owner) else {
+            continue;
+        };
+        let cells = evidence
+            .iter()
+            .filter(|cell| cell.owner == owner)
+            .collect::<Vec<_>>();
+        let Some(first) = cells.first() else {
+            continue;
+        };
+        let row = RowRef {
+            text: &node.item.text,
+            start: node.item.start_byte,
+            lineages: &lineages,
+            document,
+        };
+        if cells
+            .iter()
+            .any(|cell| completion_cell_matches_row(&cell.item, row))
+        {
+            continue;
+        }
+        out.push(MismatchedRowResponse {
+            row: raw.trim().trim_start_matches("- ").to_string(),
+            line: document[..node.item.start_byte].matches('\n').count() + 1,
+            response_id,
+            owner,
+            reported_item: first.item.clone(),
+        });
+    }
+    out
 }
 
 #[cfg(test)]

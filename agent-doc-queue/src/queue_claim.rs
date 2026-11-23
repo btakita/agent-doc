@@ -3264,7 +3264,16 @@ impl QueueClaimLedger {
                 .map(|(index, _)| index)
                 .filter(unheld)
                 .filter(|n| {
-                    anchored.contains(n) || identity_lines.contains(n) || families[*n] == family
+                    anchored.contains(n)
+                        || identity_lines.contains(n)
+                        || families[*n] == family
+                        // `#parentscopedanswer`: the operator edited the
+                        // claimed row's text (`#justdoit1p` -> `#justdoit`)
+                        // and nothing else locates it. The exact attempt
+                        // annotation on a row under the same parent is it.
+                        || (anchored.is_empty()
+                            && identity_lines.is_empty()
+                            && same_claim_parent(&claim_keys[*n], &claim.item_text))
                 })
                 .collect();
             let (mut lines, is_exclusive) = if let [only] = attested.as_slice() {
@@ -4178,6 +4187,18 @@ pub fn claim_row_id(text: &str) -> Option<String> {
         .or_else(|| id_of(head))
         // A binary-admitted trailing `[#q-…]` names otherwise free-text work.
         .or_else(|| queue_prompt_stable_id(head))
+}
+
+/// Whether two nested claim keys (`parent: …: leaf`) name rows under the same
+/// parent (`#parentscopedanswer`). A top-level key has no parent and never
+/// matches.
+fn same_claim_parent(left: &str, right: &str) -> bool {
+    let parent = |key: &str| {
+        key.trim()
+            .rsplit_once(": ")
+            .map(|(parent, _)| claim_identity(parent))
+    };
+    parent(left).is_some_and(|left| Some(left) == parent(right))
 }
 
 /// Whether `new` is the same free-text work as `old` with a note appended,

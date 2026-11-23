@@ -1,3 +1,4 @@
+- Identical answer rows under different parents are different rows (`#parentscopedanswer`). An answer under a generated Remaining or Action-items entry carries that entry in its claim lineage; a struck row's response id is scoped to its lineage; a completion cell names a nested row only under a compatible parent; a claimed row the operator edits keeps its claim and is never restored as a stray copy; session-check reports a Response tree that shows another row's hand-back. See [Orchestration](specs/07-orchestration-commands.md).
 # agent-doc Functional Specification
 
 - Subagent build concurrency is binary-owned (`#buildconcurrencygate`): workers run heavy verification through `agent-doc build-slot -- <command...>` (machine-wide flock slots, one per 8 cores, fewer under load), and every worker brief names that command. See [Core Commands: build-slot](specs/07-core-commands.md#build-slot).

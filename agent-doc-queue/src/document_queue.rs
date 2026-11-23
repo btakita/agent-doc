@@ -5295,6 +5295,39 @@ fn ancestor_label(prompt: &QueuePrompt) -> String {
     }
 }
 
+/// Status glyphs a generated Remaining entry carries; they change as the
+/// entry's work progresses and are never part of its identity.
+const RESPONSE_DETAIL_STATUS_GLYPHS: [&str; 3] = ["✅", "⏳", "🙋"];
+
+/// The lineage label of a generated response-detail list row
+/// (`- ⏳ agent: move ownership … <!-- agent-doc:response-detail -->`) that an
+/// answer row sits directly under (`#parentscopedanswer`): its text without
+/// the marker or status glyph, whitespace collapsed. `None` for any other row.
+fn response_detail_parent_label(entry: &QueueEntry) -> Option<(usize, String)> {
+    let QueueEntry::Freeform(raw) = entry else {
+        return None;
+    };
+    if raw.lines().filter(|line| !line.trim().is_empty()).count() != 1 {
+        return None;
+    }
+    let (indent, _, content) = split_list_item(raw.trim_end_matches(['\n', '\r']))?;
+    let body = content
+        .trim()
+        .strip_suffix(agent_doc_markdown_ast::overlay::RESPONSE_DETAIL_MARKER)?
+        .trim();
+    let body = RESPONSE_DETAIL_STATUS_GLYPHS
+        .iter()
+        .find_map(|glyph| body.strip_prefix(glyph))
+        .map_or(body, str::trim_start);
+    if body.is_empty() || body.starts_with("**") {
+        return None;
+    }
+    Some((
+        indent,
+        body.split_whitespace().collect::<Vec<_>>().join(" "),
+    ))
+}
+
 fn prefix_nest_vector(ancestors: &str, item_text: &str) -> String {
     let trailing_newline = item_text.ends_with('\n');
     let body = item_text.trim_end_matches(['\n', '\r']);
@@ -5739,7 +5772,9 @@ fn nest_vector_at_with_work(entries: &[QueueEntry], index: usize, shown: &str) -
     let mut depth = own_indent;
     let mut labels = Vec::new();
     for earlier in entries[..index].iter().rev() {
-        let Some(indent) = entry_indent(earlier) else {
+        let detail_parent = response_detail_parent_label(earlier);
+        let Some(indent) = entry_indent(earlier).or(detail_parent.as_ref().map(|(at, _)| *at))
+        else {
             continue;
         };
         if indent < depth {
@@ -5751,6 +5786,17 @@ fn nest_vector_at_with_work(entries: &[QueueEntry], index: usize, shown: &str) -
                 if depth == 0 {
                     break;
                 }
+                continue;
+            }
+            if let Some((_, label)) = detail_parent {
+                // `#parentscopedanswer`: an answer row under a generated
+                // response-detail row (a Remaining entry, an Action item) is
+                // that entry's answer. Two `#justdoit` answers under two
+                // entries of one tree are different rows; without the entry
+                // in the vector they shared one claim key, one response id
+                // and one ack-text target.
+                labels.push(label);
+                depth = indent;
                 continue;
             }
             if response_metadata_row_indent(earlier).is_some() {
@@ -6048,6 +6094,17 @@ pub fn restore_missing_nested_claim_row(
     }) {
         return Ok(None);
     }
+    // `#parentscopedanswer`: a live row that carries this exact attempt's
+    // owner annotation is the claimed row under edited text (the operator
+    // changed `#justdoit1p` to `#justdoit`). Restoring the claim-time text
+    // added a stray copy under the tree root and pinned the claim to it;
+    // `follow_edits_in_view` carries the claim onto the edited row instead.
+    if entries.iter().filter_map(prompt_of).any(|prompt| {
+        agent_doc_document::queue_projection::owner_projection(&prompt.text)
+            .is_some_and(|owner| owner.owner == claim.owner && owner.generation == claim.generation)
+    }) {
+        return Ok(None);
+    }
 
     let parent_identity = crate::queue_claim::claim_identity(parent_text);
     let candidates = entries
@@ -6066,6 +6123,17 @@ pub fn restore_missing_nested_claim_row(
         return Ok(None);
     };
     if parent_subtree_continues_claim_row(&entries, *parent_index, *parent_indent, row) {
+        return Ok(None);
+    }
+    // `#parentscopedanswer`: under a parent whose response lists entries an
+    // operator answers under (Remaining, Action items), the missing row may
+    // have been one of those answers (a claim keyed before the entry joined
+    // the lineage). The restore can only append a direct child after the
+    // tree, which would relocate that answer to the tree root.
+    if (*parent_index + 1..entries.len())
+        .take_while(|index| list_row_remains_in_subtree(&entries[*index], *parent_indent))
+        .any(|index| response_detail_parent_label(&entries[index]).is_some())
+    {
         return Ok(None);
     }
 

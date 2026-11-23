@@ -216,8 +216,9 @@ fn ambiguous_shapes_are_left_alone() {
 
 /// The writer of the live tree: an exact `--ack-text` strike of the child
 /// row `squash and merge` renders its summary tree one level below that row,
-/// after the row's own children, with a line break after Guidance. The live
-/// id was this hash of the row heading and the summary.
+/// after the row's own children, with a line break after Guidance. The id
+/// hashes the row's lineage (parent-scoped, `#parentscopedanswer`) and the
+/// summary.
 #[test]
 fn an_ack_summary_tree_is_inserted_after_the_rows_children_one_level_below() {
     let before = queue(concat!(
@@ -235,9 +236,9 @@ fn an_ack_summary_tree_is_inserted_after_the_rows_children_one_level_below() {
         "2026-11-23T03:23:10.000Z",
     )
     .unwrap();
-    let id =
-        &agent_doc_hash::content_hash(&format!("ack-summary-row\nsquash and merge\n{SUMMARY}"))
-            [..12];
+    let id = &agent_doc_hash::content_hash(&format!(
+        "ack-summary-row\nhttps://example.test/pull/375: squash and merge\n{SUMMARY}"
+    ))[..12];
     let document = attached.document;
     let lines: Vec<&str> = document.lines().collect();
     let at = lines

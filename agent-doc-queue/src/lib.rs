@@ -60,6 +60,8 @@ pub mod loose_ends;
 mod nest_leaf_select_tests;
 pub mod nested_reply_followup;
 pub mod open_count;
+#[cfg(test)]
+mod parent_scoped_answer_rows_tests;
 pub mod queue_closeout_guard;
 pub mod queue_command;
 pub mod queue_consume;

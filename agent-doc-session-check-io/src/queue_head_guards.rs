@@ -243,3 +243,50 @@ pub fn check_duplicate_queue_heads_guard(file: &Path, rc: &CycleContext) -> Resu
     }
     Ok(GuardResult::Warn(lines))
 }
+
+/// Report, never rewrite, queue rows whose Response tree shows another row's
+/// worker hand-back ([`agent_doc_queue::queue_consume::mismatched_row_responses`],
+/// `#parentscopedanswer`). Striking one `#justdoit` answer used to attach the
+/// hand-back of an older `#justdoit` row under another parent; the right
+/// response is not provable afterwards, so the operator replaces or deletes the
+/// tree. ops.log records `queue_response_parent_mismatch` with each row's line.
+pub fn check_mismatched_row_responses_guard(file: &Path, rc: &CycleContext) -> Result<GuardResult> {
+    const SHOWN: usize = 12;
+    let content = rc.doc_content();
+    let mismatched = agent_doc_queue::queue_consume::mismatched_row_responses(&content);
+    if mismatched.is_empty() {
+        return Ok(GuardResult::None);
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_response_parent_mismatch file={} count={} rows=[{}] (#parentscopedanswer)",
+            file.display(),
+            mismatched.len(),
+            mismatched
+                .iter()
+                .map(|row| format!("{}:{}", row.line, row.response_id))
+                .collect::<Vec<_>>()
+                .join(","),
+        ),
+    );
+    let mut lines = vec![format!(
+        "{} queue row(s) in {} show a worker hand-back that reports a different row (another parent); replace or delete each Response tree in the editor:",
+        mismatched.len(),
+        file.display(),
+    )];
+    lines.extend(mismatched.iter().take(SHOWN).map(|row| {
+        let reported: String = row.reported_item.chars().take(120).collect();
+        format!(
+            "  line {}: `{}` holds {} from `{}`, which reports “{}”",
+            row.line, row.row, row.response_id, row.owner, reported,
+        )
+    }));
+    if mismatched.len() > SHOWN {
+        lines.push(format!(
+            "  … and {} more (ops.log `queue_response_parent_mismatch`)",
+            mismatched.len() - SHOWN
+        ));
+    }
+    Ok(GuardResult::Warn(lines))
+}

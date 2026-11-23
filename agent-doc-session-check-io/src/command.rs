@@ -4189,6 +4189,16 @@ fn inspect_with_warnings_sweep(
                 return Ok(report);
             }
         }
+        match crate::profile::timed("guard_mismatched_row_responses", || {
+            crate::check_mismatched_row_responses_guard(file, &rc)
+        })? {
+            GuardResult::None => {}
+            GuardResult::Warn(lines) => report.warnings.extend(lines),
+            GuardResult::Error(message) => {
+                report.status = SessionCheckStatus::Interrupted(message);
+                return Ok(report);
+            }
+        }
         match crate::profile::timed("guard_queue_response_contamination", || {
             crate::check_queue_response_contamination_guard(file, &rc)
         })? {

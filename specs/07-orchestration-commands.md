@@ -846,6 +846,37 @@ became `📥 … ⟦effect:2⟧`. Regressions:
 `a_legacy_multi_slot_claim_migrates_onto_its_projected_row_only`, and
 `queue_cmd::tests::reported_claim_keeps_its_row_through_a_duplicate_effect_annotation`.
 
+**Identical answer rows under different parents are different rows
+(`#parentscopedanswer`).** Short operator answers (`#justdoit`, `done`,
+`squash and merge`) repeat across a document, so a row's identity is never its
+leaf text alone. An answer written under a generated response-detail row (a
+Remaining entry `- ⏳ agent: … <!-- agent-doc:response-detail -->`, an Action
+item) carries that entry, without its status glyph, in its nest vector
+(`root: entry: #justdoit`); other generated response rows stay transparent. A
+struck row's response id (`stopped-row`, `handback-row`, `ack-summary-row`)
+hashes the row's nest vector rather than its leaf, so identical siblings under
+one parent still share an id (`#ackrespdup`) and the same answer under another
+parent mints another. A completion cell whose key is only the leaf names a
+nested row only while no other queue row has that work; a longer key whose
+parent no live row spells (an ancestor was edited) names the row only when its
+parent is compatible: a shared tracked id (`[#q-…]`), or, when a side has none,
+the same parent text up to a truncation. The missing-row claim restore
+(`#adnestedidenticalchildprojection`) refuses while a live row carries the
+attempt's exact `[#owner#generation]` annotation (the operator edited the
+claimed row) and under a parent whose response lists answerable entries, so it
+never appends a stray copy under the tree root; `follow_edits_in_view` carries
+the claim onto the one annotated row under the same parent. `session-check`
+warns (never rewrites) when a row's Response names a `subagent:x` hand-back
+whose completion cells all report another row, and logs
+`queue_response_parent_mismatch`. Observed 2026-11-23 in
+`tasks/agent-doc/agent-doc-bugs.md`: under the step2 tree the operator answered
+`#justdoit1p` and `#justdoit` under two Remaining entries; `queue consume
+--ack-text '#justdoit' --summary …` attached the VS Code hand-back
+(`[#r-6837aa93963f]`) of an older, deleted `#justdoit` row instead of the
+summary, and after the operator edited the claimed `#justdoit1p` to
+`#justdoit` the restore appended `- #justdoit1p` under the tree root and held
+the claim there. Regressions: `parent_scoped_answer_rows_tests::*`.
+
 **A claim survives its row gaining or losing a generated id
 (`#claimidsurvives`).** A binary-generated trailing `[#q-…]` is part of the
 claim identity (a free-text row keys as `queue-id:q-…`, a nest vector carries

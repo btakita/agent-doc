@@ -78,15 +78,20 @@
 //!   rule (the first copy holding each distinct subtree stays, else the first
 //!   copy; a copy is removed only when its subtree is empty or byte-identical
 //!   to a kept copy's):
+//!   - first, whole top-level blocks (a live row and its subtree) that
+//!     repeat an earlier block byte for byte and carry work (a child row
+//!     other than a `%% … %%` title comment); a heading whose only child is
+//!     its title comment is the operator's own list entry and is kept;
 //!   - live claim rows (an exact-attempt owner projection leads the row)
 //!     with byte-identical text at the same indent anywhere in the queue: one
 //!     attempt claims one row;
 //!   - other live child rows with byte-identical text under the same parent
 //!     at the same indent.
 //!
-//!   A row whose text differs by a byte, a top-level row (the operator's own
-//!   repeated headings), a struck row (the struck pass owns it), and
-//!   generated response structure are never removed.
+//!   A row whose text differs by a byte, a top-level row outside a
+//!   byte-identical working block (the operator's own repeated headings), a
+//!   struck row (the struck pass owns it), and generated response structure
+//!   are never removed.
 //!
 //! Generated response structure (`**Label:**` rows and response-detail rows)
 //! is never rewritten by the label pass. Every repair is returned so the
@@ -131,6 +136,9 @@ pub enum SelfRepairKind {
     /// Moved a row that sat more than one level below its parent row up to
     /// sit exactly one level below it, with its subtree (`#selfrepaircleanup`).
     MisnestedChildRow,
+    /// Removed an extra byte-identical copy of a top-level queue block (a
+    /// live row and its subtree) that carries work.
+    DuplicateQueueBlock,
     /// Removed an extra byte-identical copy of a live claim row
     /// (`🚧 [#subagent:x#1] work`) anywhere in the queue.
     DuplicateClaimRow,
@@ -151,6 +159,7 @@ impl SelfRepairKind {
             Self::RowInsideResponseTree => "row_inside_response_tree",
             Self::StruckRowTrailingId => "struck_row_trailing_id",
             Self::MisnestedChildRow => "misnested_child_row",
+            Self::DuplicateQueueBlock => "duplicate_queue_block",
             Self::DuplicateClaimRow => "duplicate_claim_row",
             Self::DuplicateSiblingRow => "duplicate_sibling_row",
         }
@@ -308,10 +317,62 @@ fn dedupe_live_rows_in_body(body: &str, repairs: &mut Vec<SelfRepair>) -> String
     })
 }
 
-/// remove extra byte-identical copies of live claim rows and of
-/// live child rows under one parent (see the module docs).
+/// Remove extra byte-identical copies of live queue blocks, live claim rows,
+/// and live child rows under one parent (see the module docs).
 pub fn dedupe_live_rows(document: &str) -> (String, Vec<SelfRepair>) {
-    edit_queue_bodies(document, dedupe_live_rows_in_body)
+    edit_queue_bodies(document, |body, repairs| {
+        let blocks = dedupe_queue_blocks_in_body(body, repairs);
+        dedupe_live_rows_in_body(&blocks, repairs)
+    })
+}
+
+/// A top-level live row with its whole subtree that repeats an earlier block
+/// byte for byte is a copy when it carries work: some child row other than a
+/// `%% … %%` title comment (a claim, an operator row, a response). A heading
+/// whose only child is its title comment is the operator's own list entry,
+/// and repeated entries of that shape are kept.
+fn dedupe_queue_blocks_in_body(body: &str, repairs: &mut Vec<SelfRepair>) -> String {
+    let lines = lines_of(body);
+    let mut seen: Vec<&str> = Vec::new();
+    let mut removed: Vec<(usize, usize)> = Vec::new();
+    let mut index = 0;
+    while index < lines.len() {
+        let line = &lines[index];
+        let end_line = subtree_end(&lines, index);
+        let Some(item) = line.item.filter(|_| line.indent == 0) else {
+            index += 1;
+            continue;
+        };
+        if is_struck_row(item) || end_line == index + 1 {
+            index = end_line;
+            continue;
+        }
+        let start = line.start;
+        let end = lines[end_line - 1].end;
+        let block = &body[start..end];
+        let carries_work = lines[index + 1..end_line].iter().any(|child| {
+            child.item.is_some_and(|child| {
+                let child = child.trim();
+                !(child.starts_with("%%") && child.ends_with("%%"))
+            })
+        });
+        if carries_work && seen.contains(&block) {
+            removed.push((start, end));
+            repairs.push(SelfRepair {
+                kind: SelfRepairKind::DuplicateQueueBlock,
+                detail: item.to_string(),
+                rewritten: None,
+            });
+        } else {
+            seen.push(block);
+        }
+        index = end_line;
+    }
+    let mut out = body.to_string();
+    for (start, end) in removed.into_iter().rev() {
+        out.replace_range(start..end, "");
+    }
+    out
 }
 
 /// Collapse rows `classify` groups: it returns the repair kind and the scope

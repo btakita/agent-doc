@@ -915,3 +915,49 @@ fn dupsdk_rows_that_differ_or_hold_different_children_are_kept() {
     assert_eq!(repaired, document);
     assert!(self_repair_document(&document, &retired, &unproven).is_none());
 }
+
+/// `#selfrepaircleanup`: the retained rebase repeated whole PR blocks of the
+/// queue section. A block that repeats an earlier one byte for byte and
+/// carries work (a claim, operator rows) collapses to its first copy; a
+/// heading whose only child is its title comment is the operator's own list
+/// entry (the last known-good queue repeats those) and stays; a block that
+/// differs by one row stays, and its claim copy collapses into the first.
+#[test]
+fn duplicated_queue_blocks_collapse_and_title_only_entries_stay() {
+    const PR378: &str = concat!(
+        "- ### https://github.com/acme/widget-sdk/pull/378\n",
+        "  - %% feat(sdk): port the credential lifecycle %%\n",
+    );
+    const PR380: &str = concat!(
+        "- ### https://github.com/acme/widget-sdk/pull/380\n",
+        "  - %% test(conformance): prove the credential lifecycle %%\n",
+        "  - 🚧 [#subagent:rebase380#1] #rebase\n",
+    );
+    const PR381: &str = concat!(
+        "- ### 🔒 https://github.com/acme/widget-sdk/pull/381\n",
+        "  - %% chore(contracts): advance the pin %%\n",
+        "  - 📥 #rebase\n",
+        "  - 📥 #adversarial-pr\n",
+    );
+    let damaged = doc(&format!(
+        "{PR378}{PR380}{PR381}{PR378}{PR380}{PR381}{PR378}{PR380}  - squash and merge\n{PR381}"
+    ));
+    let (repaired, repairs) =
+        self_repair_document(&damaged, &retired, &unproven).expect("the copies collapse");
+    assert_eq!(
+        repaired,
+        doc(&format!(
+            "{PR378}{PR380}{PR381}{PR378}{PR378}{}  - squash and merge\n",
+            PR380.replace("  - 🚧 [#subagent:rebase380#1] #rebase\n", ""),
+        )),
+    );
+    let kinds = |kind: SelfRepairKind| repairs.iter().filter(|r| r.kind == kind).count();
+    assert_eq!(kinds(SelfRepairKind::DuplicateQueueBlock), 3, "{repairs:?}");
+    assert_eq!(kinds(SelfRepairKind::DuplicateClaimRow), 1, "{repairs:?}");
+    assert!(repairs.iter().any(|repair| {
+        repair
+            .log_fields()
+            .starts_with("kind=duplicate_queue_block detail=")
+    }));
+    assert!(self_repair_document(&repaired, &retired, &unproven).is_none());
+}

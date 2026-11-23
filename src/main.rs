@@ -11194,6 +11194,23 @@ fn try_main() -> anyhow::Result<()> {
                         );
                         return Ok(());
                     }
+                    // The report is durable now. Say so
+                    // before the mechanical closeout, which reads the document
+                    // through the controller and can run for minutes on a busy
+                    // one; a caller that gives up on it must still learn the
+                    // report landed (haiven-dev 2026-11-23: an accepted
+                    // `durablecred` report printed nothing while closeout waited).
+                    eprintln!(
+                        "[queue] recorded subagent completion feedback for {:?} (owner {}, generation {}){}; running the mechanical closeout next",
+                        outcome.claim.item_text,
+                        outcome.claim.owner,
+                        outcome.claim.generation,
+                        outcome
+                            .intent_id
+                            .as_deref()
+                            .map(|intent| format!(" as retained intent {intent}"))
+                            .unwrap_or_default(),
+                    );
                     let mechanical = match queue_completion_feedback::close_mechanical_reported_rows(
                         &file,
                         &CliQueueCommandEffects,

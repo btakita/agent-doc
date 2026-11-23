@@ -1811,7 +1811,7 @@ fn request_path_json(path: &Path, request_value: serde_json::Value) -> Result<St
     note_controller_round_trip();
     // `#preflightdeadline`: inside a preflight admission, no RPC may wait past
     // the admission deadline, and none may start once it is spent.
-    let timeout = agent_doc_debounce::admission_deadline::clamp_or_exhausted(
+    let timeout = agent_doc_debounce::admission_deadline::clamp_controller_rpc(
         "project_controller_rpc",
         controller_response_timeout(path, CONTROLLER_RPC_TIMEOUT),
     )?;
@@ -1954,15 +1954,23 @@ fn read_controller_response_line_with_timeout<R: BufRead>(
 ) -> Result<()> {
     match reader.read_line(response) {
         Ok(0) => anyhow::bail!("project controller closed connection without a response"),
-        Ok(_) => Ok(()),
-        Err(err) if is_timeout_error(&err) => Err(std::io::Error::new(
-            ErrorKind::TimedOut,
-            format!(
-                "timed out after {:.1}s waiting for project controller response",
-                timeout.as_secs_f32()
-            ),
-        )
-        .into()),
+        Ok(_) => {
+            agent_doc_debounce::admission_deadline::note_controller_rpc_answered();
+            Ok(())
+        }
+        Err(err) if is_timeout_error(&err) => {
+            // Later RPCs of this preflight admission
+            // probe with a short bound instead of each waiting the full one.
+            agent_doc_debounce::admission_deadline::note_controller_rpc_missed();
+            Err(std::io::Error::new(
+                ErrorKind::TimedOut,
+                format!(
+                    "timed out after {:.1}s waiting for project controller response",
+                    timeout.as_secs_f32()
+                ),
+            )
+            .into())
+        }
         Err(err) => Err(err).context("failed to read project controller response"),
     }
 }
@@ -2863,7 +2871,7 @@ fn request_controller_on_stream_with_timeout<T: DeserializeOwned>(
     // `#preflightdeadline`: every per-call timeout is clamped to the preflight
     // admission deadline (unchanged outside an admission), and a request is
     // refused before it is sent once that deadline is spent.
-    let timeout = agent_doc_debounce::admission_deadline::clamp_or_exhausted(
+    let timeout = agent_doc_debounce::admission_deadline::clamp_controller_rpc(
         "project_controller_rpc",
         controller_response_timeout(&socket_path(project_root), timeout),
     )?;
@@ -20897,9 +20905,91 @@ const IDLE_ROOT_RETIRE_QUIET: Duration = Duration::from_secs(60);
 /// `sdk-dev.md` controller reached 116.
 const CONTROLLER_MAX_ACTIVE_CLIENTS: usize = 64;
 
-fn controller_accept_capacity_available(active_clients: usize) -> bool {
-    active_clients < CONTROLLER_MAX_ACTIVE_CLIENTS
+/// Maximum number of accepted clients parked on a
+/// controller wait (a state-plane long-poll, the editor's document-turn
+/// authority stream, an `*_await`) that the accept loop does not count against
+/// [`CONTROLLER_MAX_ACTIVE_CLIENTS`].
+///
+/// A parked client does no controller work while it waits: it sleeps on a
+/// condvar until a state edge or its own deadline. Counting it against the
+/// short-RPC budget let steady-state subscriptions fill the budget on their own.
+/// The haiven-dev controller (2026-11-23, build 5004616a) held exactly 64
+/// connections: 24 editor authority streams from the IDE plus three wake
+/// long-polls from each of 14 idle supervisors. The accept loop sat in its
+/// at-capacity sleep, so every `status`, `crdt_current_text`, document-model
+/// lookup and `editor_route` queued in the kernel backlog until a long-poll
+/// happened to wake, and the clients hit their 5s deadline. This separate,
+/// larger bound still caps the threads a reconnect storm can create.
+const CONTROLLER_MAX_PARKED_CLIENTS: usize = 512;
+
+/// Whether the accept loop may admit another client. `active_clients` counts
+/// every accepted connection; `parked_clients` is the subset parked on a wait
+///, which does not use the short-RPC budget.
+fn controller_accept_capacity_available(active_clients: usize, parked_clients: usize) -> bool {
+    active_clients.saturating_sub(parked_clients) < CONTROLLER_MAX_ACTIVE_CLIENTS
 }
+
+/// Controller commands that park the client thread on a
+/// state edge or a bounded wait instead of doing request work.
+fn controller_command_parks_client(command: &str) -> bool {
+    matches!(
+        command,
+        "document_turn_authority_stream"
+            | "state_plane_subscribe"
+            | "state_subscribe"
+            | "delivery_convergence_await"
+            | "visible_write_commit_candidate_patch_await"
+            | "closeout_cycle_progress_await"
+            | "editor_command_await"
+            | "supervisor_recycle_wait_settled"
+    )
+}
+
+/// The accept loop's count of admitted clients parked on a
+/// wait. A client moves itself here after it names a parking command; the
+/// guard moves it back when the request ends.
+#[derive(Debug, Default)]
+pub(crate) struct ControllerParkedClients {
+    count: AtomicUsize,
+}
+
+impl ControllerParkedClients {
+    pub(crate) fn count(&self) -> usize {
+        self.count.load(Ordering::SeqCst)
+    }
+
+    /// Take a parked slot for `command`, or `None` when the command does real
+    /// request work or every parked slot is taken (the client then keeps using
+    /// the short-RPC budget, which is the pre-split behavior).
+    fn park(self: &Arc<Self>, command: &str) -> Option<ControllerParkedClientGuard> {
+        if !controller_command_parks_client(command) {
+            return None;
+        }
+        self.count
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |parked| {
+                (parked < CONTROLLER_MAX_PARKED_CLIENTS).then_some(parked + 1)
+            })
+            .ok()?;
+        Some(ControllerParkedClientGuard {
+            parked: Arc::clone(self),
+        })
+    }
+}
+
+pub(crate) struct ControllerParkedClientGuard {
+    parked: Arc<ControllerParkedClients>,
+}
+
+impl Drop for ControllerParkedClientGuard {
+    fn drop(&mut self) {
+        self.parked.count.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// How often the accept loop may log that it is holding
+/// clients in the backlog. Before this the saturation had no log line at all;
+/// the only evidence was clients' 5s timeouts.
+const CONTROLLER_ACCEPT_CAPACITY_LOG_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Observe, from inside the controller, whether anybody uses its project root:
 /// live reliable-sync registrations and allocated editor models in this process,
@@ -21280,6 +21370,10 @@ pub(crate) fn serve_with_options(
 
     let should_stop = Arc::new(AtomicBool::new(false));
     let active_clients = Arc::new(AtomicUsize::new(0));
+    // The admitted clients parked on a wait; they do not
+    // use the short-RPC budget the accept loop enforces.
+    let parked_clients = Arc::new(ControllerParkedClients::default());
+    let mut accept_capacity_logged_at: Option<Instant> = None;
     let watchdog_threshold = stale_preparing_controller_threshold();
     let controller_launched_at = Instant::now();
     let recycle_grace = recycle_idle_grace();
@@ -21322,8 +21416,25 @@ pub(crate) fn serve_with_options(
     // controller's live socket, so retirement must not unlink it.
     let mut socket_pathname_relinquished = false;
     while !should_stop.load(Ordering::SeqCst) && !runtime.controller_generation_poisoned() {
-        let accept_at_capacity =
-            !controller_accept_capacity_available(active_clients.load(Ordering::SeqCst));
+        let accept_at_capacity = !controller_accept_capacity_available(
+            active_clients.load(Ordering::SeqCst),
+            parked_clients.count(),
+        );
+        if accept_at_capacity
+            && accept_capacity_logged_at
+                .is_none_or(|at| at.elapsed() >= CONTROLLER_ACCEPT_CAPACITY_LOG_INTERVAL)
+        {
+            accept_capacity_logged_at = Some(Instant::now());
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "controller_accept_capacity_reached active_clients={} parked_clients={} max_active={} effect=new_clients_wait_in_backlog",
+                    active_clients.load(Ordering::SeqCst),
+                    parked_clients.count(),
+                    CONTROLLER_MAX_ACTIVE_CLIENTS,
+                ),
+            );
+        }
         let accept_result = if accept_at_capacity {
             Err(std::io::Error::new(
                 ErrorKind::WouldBlock,
@@ -21338,10 +21449,17 @@ pub(crate) fn serve_with_options(
                 let runtime = Arc::clone(&runtime);
                 let should_stop = Arc::clone(&should_stop);
                 let active_clients = Arc::clone(&active_clients);
+                let parked_clients = Arc::clone(&parked_clients);
                 let sock = sock.clone();
                 active_clients.fetch_add(1, Ordering::SeqCst);
                 std::thread::spawn(move || {
-                    if let Err(err) = serve_client(stream, &runtime, &should_stop, &sock) {
+                    if let Err(err) = serve_client_admitted(
+                        stream,
+                        &runtime,
+                        &should_stop,
+                        &sock,
+                        Some(&parked_clients),
+                    ) {
                         eprintln!("[controller] client error: {err}");
                     }
                     active_clients.fetch_sub(1, Ordering::SeqCst);
@@ -24632,6 +24750,19 @@ pub(crate) fn serve_client(
     should_stop: &AtomicBool,
     sock: &Path,
 ) -> Result<()> {
+    serve_client_admitted(stream, runtime, should_stop, sock, None)
+}
+
+/// [`serve_client`] for a client the accept loop admitted against its
+/// short-RPC budget. Once the request names a parking command, the client moves
+/// to `parked_clients` for the rest of the request.
+pub(crate) fn serve_client_admitted(
+    stream: interprocess::local_socket::Stream,
+    runtime: &Arc<ControllerRuntime>,
+    should_stop: &AtomicBool,
+    sock: &Path,
+    parked_clients: Option<&Arc<ControllerParkedClients>>,
+) -> Result<()> {
     let (peer_pid, admitted) = controller_stream_peer(&stream, &runtime.workspace_access)?;
     install_controller_request_thread_context(runtime);
     let _peer = enter_controller_request_peer(peer_pid);
@@ -24653,6 +24784,7 @@ pub(crate) fn serve_client(
                 command: String,
             }
             let selector: CommandSelector = serde_json::from_str(line.trim())?;
+            let _parked = parked_clients.and_then(|parked| parked.park(&selector.command));
             // `#ghrecvpolicy` phase 2: per-command authorization for the
             // admitted principal. Owners pass without I/O.
             let gate = match super::request_authz::authorize_controller_request(
@@ -69410,6 +69542,153 @@ mod tests {
         handle.join().unwrap();
     }
 
+    /// Inside a preflight admission, once a controller
+    /// RPC misses its deadline the next one gives up after the short probe
+    /// bound instead of spending its full bound too. The silent peer is a real
+    /// bound socket that accepts and never answers (a saturated or wedged
+    /// controller, as the caller sees it).
+    #[test]
+    fn a_missed_controller_deadline_shortens_the_next_rpc_of_the_same_admission() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let project_root = dir.path().to_path_buf();
+        let sock = socket_path(&project_root);
+        prepare_controller_socket_parent(&sock, &sock).unwrap();
+        let listener = bind_controller_listener(&sock).unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let accept_stop = Arc::clone(&stop);
+        listener
+            .set_nonblocking(ListenerNonblockingMode::Accept)
+            .unwrap();
+        let silent = std::thread::spawn(move || {
+            let mut held = Vec::new();
+            while !accept_stop.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok(stream) => held.push(stream),
+                    Err(_) => std::thread::sleep(Duration::from_millis(5)),
+                }
+            }
+        });
+        let full = Duration::from_secs(4);
+        let request = || {
+            serde_json::from_value::<ControllerRequest>(serde_json::json!({
+                "command": "handoff_status",
+            }))
+            .unwrap()
+        };
+        let _admission = agent_doc_debounce::admission_deadline::install(
+            agent_doc_debounce::admission_deadline::AdmissionDeadline {
+                at: Instant::now() + Duration::from_secs(80),
+                budget: Duration::from_secs(90),
+            },
+        );
+
+        let first_started = Instant::now();
+        let first = request_existing_controller_effect_free_with_timeout::<serde_json::Value>(
+            &project_root,
+            request(),
+            full,
+        )
+        .unwrap_err();
+        assert!(first_started.elapsed() >= full, "{first:#}");
+        assert!(controller_request_deadline_exceeded(&first), "{first:#}");
+
+        let second_started = Instant::now();
+        let second = request_existing_controller_effect_free_with_timeout::<serde_json::Value>(
+            &project_root,
+            request(),
+            full,
+        )
+        .unwrap_err();
+        let second_elapsed = second_started.elapsed();
+        assert!(
+            second_elapsed < full,
+            "the RPC after a miss spent {second_elapsed:?}, its full bound"
+        );
+        assert!(
+            format!("{second:#}").contains(&format!(
+                "timed out after {:.1}s",
+                agent_doc_debounce::admission_deadline::CONTROLLER_RPC_PROBE_AFTER_MISS
+                    .as_secs_f32()
+            )),
+            "{second:#}"
+        );
+
+        stop.store(true, Ordering::SeqCst);
+        silent.join().unwrap();
+    }
+
+    /// A controller whose admitted clients are all parked
+    /// on waits (editor authority streams, supervisor wake long-polls) still
+    /// answers short RPCs. The haiven-dev controller (2026-11-23) held exactly
+    /// `CONTROLLER_MAX_ACTIVE_CLIENTS` such connections, sat in its at-capacity
+    /// sleep, and every `status`/`crdt_current_text`/`editor_route` timed out
+    /// at 5s in the kernel backlog.
+    #[test]
+    fn controller_answers_short_rpcs_while_parked_waiters_exceed_the_rpc_budget() {
+        use std::io::{BufRead, BufReader, Write};
+        let dir = tempfile::TempDir::new().unwrap();
+        let project_root = dir.path().to_path_buf();
+        let server_root = project_root.clone();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            serve_announcing_ready(&server_root, LaunchMode::Lazy, ready_tx).unwrap()
+        });
+        wait_for_test_controller(&project_root, &ready_rx);
+
+        // More parked long-polls than the whole short-RPC budget, on a channel
+        // nobody publishes to, so each one waits out its own deadline. They
+        // connect first, so the FIFO accept backlog admits all of them before
+        // the status probe below.
+        const PARKED_WAIT: Duration = Duration::from_secs(30);
+        let parked_count = CONTROLLER_MAX_ACTIVE_CLIENTS + 8;
+        let request_line = serde_json::json!({
+            "command": "state_plane_subscribe",
+            "diagnostic_payload": serde_json::json!({
+                "channel": "test/parkedadmission/never-published",
+                "after_version": u64::MAX,
+                "timeout_ms": PARKED_WAIT.as_millis() as u64,
+            })
+            .to_string(),
+        })
+        .to_string();
+        let mut parked = Vec::with_capacity(parked_count);
+        for _ in 0..parked_count {
+            let mut stream = connect(&project_root).unwrap();
+            stream.write_all(request_line.as_bytes()).unwrap();
+            stream.write_all(b"\n").unwrap();
+            stream.flush().unwrap();
+            parked.push(stream);
+        }
+
+        let started = Instant::now();
+        let response = request(&project_root, "handoff_status")
+            .expect("a short RPC is admitted while every parked waiter still waits");
+        let elapsed = started.elapsed();
+        let status: ControllerStatus = serde_json::from_str(&response).unwrap();
+        assert_eq!(status.project_root, project_root);
+        assert!(
+            elapsed < PARKED_WAIT / 2,
+            "handoff_status took {elapsed:?}: it waited for a parked long-poll to expire"
+        );
+
+        // The waiters really were parked the whole time: none has answered.
+        let probe = parked.last_mut().unwrap();
+        probe
+            .set_recv_timeout(Some(Duration::from_millis(50)))
+            .unwrap();
+        let mut line = String::new();
+        let read = BufReader::new(&mut *probe).read_line(&mut line);
+        assert!(
+            read.as_ref().is_err_and(is_timeout_error),
+            "the last parked long-poll should still be waiting, got {read:?} {line:?}"
+        );
+
+        drop(parked);
+        let shutdown = request_with_reason(&project_root, "shutdown", "test_shutdown").unwrap();
+        assert!(shutdown.contains("\"ok\":true"), "{shutdown}");
+        handle.join().unwrap();
+    }
+
     #[test]
     fn mark_committed_and_abandoned_route_through_command_plane_when_controller_live() {
         // The remaining closeout transitions route through the command plane:
@@ -79005,16 +79284,52 @@ mod supthrash_idle_root_tests {
 
     #[test]
     fn controller_accept_capacity_bounds_server_side_timeout_backlog() {
-        assert!(controller_accept_capacity_available(0));
+        assert!(controller_accept_capacity_available(0, 0));
         assert!(controller_accept_capacity_available(
-            CONTROLLER_MAX_ACTIVE_CLIENTS - 1
+            CONTROLLER_MAX_ACTIVE_CLIENTS - 1,
+            0
         ));
         assert!(!controller_accept_capacity_available(
-            CONTROLLER_MAX_ACTIVE_CLIENTS
+            CONTROLLER_MAX_ACTIVE_CLIENTS,
+            0
         ));
         assert!(!controller_accept_capacity_available(
-            CONTROLLER_MAX_ACTIVE_CLIENTS + 1
+            CONTROLLER_MAX_ACTIVE_CLIENTS + 1,
+            0
         ));
+    }
+
+    #[test]
+    fn parked_clients_do_not_use_the_short_rpc_budget() {
+        // The haiven-dev shape -- 24 editor streams plus 42
+        // supervisor wake long-polls -- leaves the short-RPC budget open.
+        assert!(controller_accept_capacity_available(66, 66));
+        assert!(controller_accept_capacity_available(
+            66 + CONTROLLER_MAX_ACTIVE_CLIENTS - 1,
+            66
+        ));
+        assert!(!controller_accept_capacity_available(
+            66 + CONTROLLER_MAX_ACTIVE_CLIENTS,
+            66
+        ));
+        let parked = Arc::new(ControllerParkedClients::default());
+        assert!(parked.park("handoff_status").is_none());
+        assert!(parked.park("crdt_current_text").is_none());
+        let stream = parked.park("document_turn_authority_stream").unwrap();
+        let poll = parked.park("state_plane_subscribe").unwrap();
+        assert_eq!(parked.count(), 2);
+        drop(stream);
+        drop(poll);
+        assert_eq!(parked.count(), 0);
+        let held: Vec<_> = (0..CONTROLLER_MAX_PARKED_CLIENTS)
+            .map(|_| parked.park("state_plane_subscribe").unwrap())
+            .collect();
+        assert!(
+            parked.park("state_plane_subscribe").is_none(),
+            "past the parked bound a waiter falls back to the short-RPC budget"
+        );
+        drop(held);
+        assert_eq!(parked.count(), 0);
     }
 
     #[test]

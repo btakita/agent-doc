@@ -46,7 +46,23 @@ impl AdmissionDeadline {
 
 thread_local! {
     static INSTALLED: Cell<Option<AdmissionDeadline>> = const { Cell::new(None) };
+    /// Whether a controller RPC under the installed
+    /// deadline has missed its response deadline since the last answer.
+    static CONTROLLER_MISSED: Cell<bool> = const { Cell::new(false) };
 }
+
+/// The per-RPC bound inside an admission once a
+/// controller RPC there has missed its deadline.
+///
+/// Each controller RPC in preflight keeps its own 5s bound, and preflight issues
+/// dozens of them across its phases. When the controller stops answering, each
+/// one spends its full 5s before its caller falls back, so the SUM drained the
+/// 90s budget: the haiven-dev `sdk-dev.md` preflight (2026-11-23) spent
+/// closeout_drift_check 26.6s, repair 15.0s, resolve_initial_document 10.4s and
+/// was refused at 85.7s ("Start-of-cycle check timed out"). After one miss, the
+/// later RPCs of the same run still ask the controller (an answer clears the
+/// state) but give up after this shorter probe and take their fallback.
+pub const CONTROLLER_RPC_PROBE_AFTER_MISS: Duration = Duration::from_secs(2);
 
 /// A bounded wait found the admission deadline already spent.
 ///
@@ -83,13 +99,50 @@ impl Drop for DeadlineGuard {
     fn drop(&mut self) {
         let previous = self.previous;
         INSTALLED.with(|slot| slot.set(previous));
+        CONTROLLER_MISSED.with(|missed| missed.set(false));
     }
 }
 
 /// Install `deadline` for every bounded wait on this thread until the guard drops.
 pub fn install(deadline: AdmissionDeadline) -> DeadlineGuard {
     let previous = INSTALLED.with(|slot| slot.replace(Some(deadline)));
+    CONTROLLER_MISSED.with(|missed| missed.set(false));
     DeadlineGuard { previous }
+}
+
+/// Record that a controller RPC missed its response
+/// deadline. Only meaningful inside an admission; outside one it is ignored.
+pub fn note_controller_rpc_missed() {
+    if current().is_some() {
+        CONTROLLER_MISSED.with(|missed| missed.set(true));
+    }
+}
+
+/// Record that the controller answered an RPC.
+pub fn note_controller_rpc_answered() {
+    CONTROLLER_MISSED.with(|missed| missed.set(false));
+}
+
+/// Whether a controller RPC in this admission has missed its deadline since
+/// the controller last answered.
+pub fn controller_rpc_missed() -> bool {
+    current().is_some() && CONTROLLER_MISSED.with(Cell::get)
+}
+
+/// The bound for one controller RPC: [`clamp_or_exhausted`], further capped to
+/// [`CONTROLLER_RPC_PROBE_AFTER_MISS`] once a controller RPC in this admission
+/// has missed its deadline. Unchanged outside an
+/// admission.
+pub fn clamp_controller_rpc(
+    wait_name: &'static str,
+    wait: Duration,
+) -> Result<Duration, AdmissionDeadlineExhausted> {
+    let bound = clamp_or_exhausted(wait_name, wait)?;
+    Ok(if controller_rpc_missed() {
+        bound.min(CONTROLLER_RPC_PROBE_AFTER_MISS)
+    } else {
+        bound
+    })
 }
 
 /// The deadline installed on this thread, if any.
@@ -144,6 +197,31 @@ pub fn ensure_remaining(wait_name: &'static str) -> Result<(), AdmissionDeadline
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_controller_miss_shortens_later_rpcs_in_the_same_admission_only() {
+        let wait = Duration::from_secs(5);
+        // Outside an admission a miss changes nothing.
+        note_controller_rpc_missed();
+        assert!(!controller_rpc_missed());
+        assert_eq!(clamp_controller_rpc("rpc", wait).unwrap(), wait);
+
+        let guard = install(deadline_in(Duration::from_secs(80)));
+        assert_eq!(clamp_controller_rpc("rpc", wait).unwrap(), wait);
+        note_controller_rpc_missed();
+        assert_eq!(
+            clamp_controller_rpc("rpc", wait).unwrap(),
+            CONTROLLER_RPC_PROBE_AFTER_MISS
+        );
+        // An answer restores the full bound.
+        note_controller_rpc_answered();
+        assert_eq!(clamp_controller_rpc("rpc", wait).unwrap(), wait);
+        note_controller_rpc_missed();
+        drop(guard);
+        // A new run starts without the previous run's miss.
+        let _next = install(deadline_in(Duration::from_secs(80)));
+        assert_eq!(clamp_controller_rpc("rpc", wait).unwrap(), wait);
+    }
 
     fn deadline_in(left: Duration) -> AdmissionDeadline {
         AdmissionDeadline {

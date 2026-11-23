@@ -20966,7 +20966,7 @@ impl ControllerParkedClients {
             return None;
         }
         self.count
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |parked| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |parked| {
                 (parked < CONTROLLER_MAX_PARKED_CLIENTS).then_some(parked + 1)
             })
             .ok()?;

@@ -24375,12 +24375,18 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         ) && !orchestration_supervisor_io.contains("agent_doc_debounce::editor_sync_statuses"),
         "orchestration supervisor IPC adapter should expose snapshot fields without assembling editor-sync JSON"
     );
+    // The GH #438 receipt tests in this file's test module assert the lifecycle
+    // reasons the owning crate publishes; only production code must not own them.
+    let orchestration_supervisor_io_production = orchestration_supervisor_io
+        .split("\n#[cfg(test)]\nmod tests {")
+        .next()
+        .unwrap();
     assert!(
-        orchestration_supervisor_io.contains(
+        orchestration_supervisor_io_production.contains(
             "impl agent_doc_supervisor_io::ipc::SupervisorIpcLifecycleState for SupervisorShared"
-        ) && !orchestration_supervisor_io.contains("ipc_restart_requested")
-            && !orchestration_supervisor_io.contains("ipc_stop_agent_requested")
-            && !orchestration_supervisor_io.contains("fn request_restart("),
+        ) && !orchestration_supervisor_io_production.contains("ipc_restart_requested")
+            && !orchestration_supervisor_io_production.contains("ipc_stop_agent_requested")
+            && !orchestration_supervisor_io_production.contains("fn request_restart("),
         "orchestration supervisor IPC adapter should expose lifecycle fields without owning restart/stop semantics"
     );
     for relative in [

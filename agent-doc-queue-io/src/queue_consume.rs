@@ -988,6 +988,73 @@ pub fn acknowledge_paused_free_text_queue_head_under_apply_guard(
     effects: &dyn QueueConsumeWriteEffects,
     apply_guard: &crate::queue_edit_owner::QueueEditGuard,
 ) -> Result<Option<QueueConsumptionOutcome>> {
+    acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
+        file,
+        expected_head,
+        selector,
+        AckTextResponse::AsAttached,
+        effects,
+        apply_guard,
+    )
+}
+
+/// What an exact `--ack-text` strike does about the struck row's response
+/// tree (`#ackresponse`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AckTextResponse<'a> {
+    /// Keep what the hand-back attach step gives the row (automatic closeout
+    /// paths, which strike reported rows whose completion cell supplies it).
+    #[default]
+    AsAttached,
+    /// Refuse a strike that would leave its row without a response tree
+    /// (`agent-doc queue consume --ack-text` without `--summary`).
+    Required,
+    /// When no hand-back gives the row a response tree, attach this summary
+    /// as a short one (`--summary`).
+    Summary(&'a str),
+}
+
+/// Apply `response` to a `--ack-text` strike from `before` to `after`.
+fn apply_ack_text_response(
+    file: &Path,
+    before: &str,
+    after: String,
+    response: AckTextResponse<'_>,
+) -> Result<String> {
+    let summary = match response {
+        AckTextResponse::AsAttached => return Ok(after),
+        AckTextResponse::Required => None,
+        AckTextResponse::Summary(summary) => Some(summary),
+    };
+    let attached = agent_doc_queue::queue_consume::attach_ack_summary_response(
+        before,
+        &after,
+        summary,
+        &addressed_at_for_current_cycle(file),
+    )?;
+    if !attached.bare_rows.is_empty() {
+        anyhow::bail!(
+            "{}: --ack-text would strike {:?} without a response tree; no change was applied. \
+             Pass --summary '<one or two sentences: what was done, and where (commit, file, or \
+             exchange entry)>' so the struck row carries Summary and State (#ackresponse).",
+            file.display(),
+            attached.bare_rows[0],
+        );
+    }
+    Ok(attached.document)
+}
+
+/// [`acknowledge_paused_free_text_queue_head_under_apply_guard`] with the
+/// struck row's response policy (`#ackresponse`).
+#[doc(hidden)]
+pub fn acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
+    file: &Path,
+    expected_head: &str,
+    selector: Option<&AckTextSelector>,
+    response: AckTextResponse<'_>,
+    effects: &dyn QueueConsumeWriteEffects,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<Option<QueueConsumptionOutcome>> {
     apply_guard.ensure_protects(file)?;
     let content = effects.current_document_content(file, "queue_consume_ack_text")?;
     let (fm, _) = frontmatter::parse(&content)?;
@@ -1081,6 +1148,7 @@ pub fn acknowledge_paused_free_text_queue_head_under_apply_guard(
         let consumed_count = node_keys.len();
         let mut target = consume_queue_nodes_by_key(&content, &node_keys)?;
         target = attach_stopped_row_responses_for_file(file, &content, target)?;
+        target = apply_ack_text_response(file, &content, target, response)?;
         let remaining = addressable_executable_rows(&target)?.len();
         let response_first_line = projected_capture_response_body(file)
             .and_then(|body| first_nonempty_line(&body).map(str::to_string));
@@ -1260,6 +1328,7 @@ pub fn acknowledge_paused_free_text_queue_head_under_apply_guard(
         (node_ops, remaining, target)
     };
     target = attach_stopped_row_responses_for_file(file, &content, target)?;
+    target = apply_ack_text_response(file, &content, target, response)?;
     let response_first_line = projected_capture_response_body(file)
         .and_then(|body| first_nonempty_line(&body).map(str::to_string));
     target = embed_consumed_prompt_in_response(
@@ -6519,6 +6588,129 @@ mod core_tests {
                 .count(),
             1
         );
+    }
+
+    /// `#ackresponse`: the live shape, anonymized. Two operator answers
+    /// `#justdoit` sit under one parent; the first is already struck with its
+    /// worker's response. Striking the second by exact text without a summary
+    /// is refused with no change; with `--summary` it carries its own short
+    /// response tree (Summary, State, Guidance), and the first keeps its own.
+    #[test]
+    fn exact_text_ack_strike_carries_a_summary_response_or_is_refused() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:run id=\"main\" subagents -->\n",
+            "- ### clean up the sample titles\n",
+            "  - ~~#justdoit~~\n",
+            "    - **Response [#r-4fa4a87420e5]**\n",
+            "      - **Timestamp:** 2026-11-22T23:06:45.000Z\n",
+            "      - **Summary:** The first answer is done.\n",
+            "      - **State:** Complete.\n",
+            "      - **Guidance:** ✅ Done.\n",
+            "  - #justdoit\n",
+            "- keep this queued\n",
+            "<!-- /agent:run -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let head = "clean up the sample titles: #justdoit";
+        let ack = |response| {
+            let guard = crate::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+            super::acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
+                &doc,
+                head,
+                None,
+                response,
+                &TEST_EFFECTS,
+                &guard,
+            )
+        };
+
+        let refused = ack(super::AckTextResponse::Required)
+            .unwrap_err()
+            .to_string();
+        assert!(refused.contains("without a response tree"), "{refused}");
+        assert!(refused.contains("--summary"), "{refused}");
+        assert_eq!(fs::read_to_string(&doc).unwrap(), content, "no change");
+
+        let summary = "Applied title edits 1–3 in `sample-bugs.md`; see the exchange entry.";
+        ack(super::AckTextResponse::Summary(summary))
+            .unwrap()
+            .expect("the exact nested answer is acknowledged");
+        let updated = fs::read_to_string(&doc).unwrap();
+        let struck = updated
+            .find("  - ~~#justdoit~~\n    - **Response [#r-")
+            .and_then(|first| {
+                updated[first + 1..]
+                    .find("  - ~~#justdoit~~\n    - **Response [#r-")
+                    .map(|second| first + 1 + second)
+            })
+            .unwrap_or_else(|| panic!("both answers carry a response: {updated}"));
+        let tree = &updated[struck..];
+        let tree = &tree[..tree.find("- keep this queued").expect("next row")];
+        assert!(!tree.contains("#r-4fa4a87420e5"), "{tree}");
+        assert!(
+            tree.contains(&format!("      - **Summary:** {summary}\n")),
+            "{tree}"
+        );
+        assert!(tree.contains("      - **State:** Complete.\n"), "{tree}");
+        assert!(tree.contains("      - **Guidance:** "), "{tree}");
+        assert!(tree.contains("      - **Timestamp:** "), "{tree}");
+        assert!(
+            tree.lines().all(|line| !line.trim().is_empty()),
+            "no blank line in the tree: {tree:?}"
+        );
+        assert_eq!(updated.matches("**Response [#r-4fa4a87420e5]**").count(), 1);
+    }
+
+    /// Without `--summary`, a strike whose row gets a response tree from
+    /// elsewhere is not refused, and an automatic (`AsAttached`) strike
+    /// keeps its old shape.
+    #[test]
+    fn exact_text_ack_without_summary_keeps_the_automatic_shape() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:run id=\"main\" subagents -->\n",
+            "- ### clean up the sample titles\n",
+            "  - #justdoit\n",
+            "<!-- /agent:run -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        super::acknowledge_paused_free_text_queue_head_with_outcome(
+            &doc,
+            "clean up the sample titles: #justdoit",
+            &TEST_EFFECTS,
+        )
+        .unwrap()
+        .expect("acknowledged");
+        let updated = fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("  - ~~#justdoit~~"), "{updated}");
+        assert!(!updated.contains("**Response [#r-"), "{updated}");
     }
 
     #[test]

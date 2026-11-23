@@ -550,7 +550,11 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      `#finishactionable`, and the coordinator does each one now under the
      originating item's authorization (inline, or by dispatching its row in
      this same turn when it is a substantial new task), verifies it, and
-     strikes its row. Never end the turn, hand the tree back, or write
+     strikes its row with `agent-doc queue consume <FILE> --ack-text '<row>'
+     --summary '<what was done, and where>'`: the summary becomes the struck
+     row's short response tree (Summary, State, Guidance) when no worker
+     hand-back supplies one, and a strike that would leave the row bare is
+     refused (`#ackresponse`). Never end the turn, hand the tree back, or write
      "More work remains" over an open agent row; leave one open only with its
      concrete blocker recorded on the row. "More work remains" is only for
      operator-owned or genuinely blocked work. When that
@@ -579,6 +583,10 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      nothing is left its State is `Complete.` and its Guidance says the tree
      can be deleted (`#guidancescope`). Read that list instead of the whole
      tree, and resolve an operator action item by striking its answer row.
+     An answer the operator writes under a Remaining entry (such as
+     `#justdoit`) stays under it: the entry turns `⏳` while the answer row is
+     open and `✅` once it is struck with a `Complete.` response (or none),
+     and the tally counts it done (`#answeredentry`).
      Its Guidance opens with a done tally (`✅ 11/11 done.`, `🙋 3/4 done, 1
      yours.`, `⏳ 5/9 done, 1 yours.`); `Waiting on operator input.` means only
      the operator's entries are left (`#donetrack`).

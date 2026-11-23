@@ -1803,6 +1803,25 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffec
         .map(|outcome| outcome.map(queue_command_consume_outcome))
     }
 
+    fn acknowledge_paused_free_text_queue_head_with_response(
+        &self,
+        file: &Path,
+        expected_head: &str,
+        selector: Option<&agent_doc_queue_io::queue_consume::AckTextSelector>,
+        response: agent_doc_queue_io::queue_consume::AckTextResponse<'_>,
+        apply_guard: &agent_doc_queue_io::queue_edit_owner::QueueEditGuard,
+    ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
+        agent_doc_queue_io::queue_consume::acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
+            file,
+            expected_head,
+            selector,
+            response,
+            &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+            apply_guard,
+        )
+        .map(|outcome| outcome.map(queue_command_consume_outcome))
+    }
+
     fn prune_noise_queue_heads(
         &self,
         file: &Path,
@@ -6455,6 +6474,13 @@ enum QueueAction {
             conflicts_with = "id"
         )]
         ack_owner: Option<String>,
+        /// With `--ack-text`: one or two sentences on what was done (and
+        /// where: commit, file, or exchange entry). When no worker hand-back
+        /// gives the struck row a response tree, this becomes a short one
+        /// (Summary, State, Guidance). Without it, a strike that would leave
+        /// its row bare is refused (`#ackresponse`).
+        #[arg(long, value_name = "TEXT", requires = "ack_text")]
+        summary: Option<String>,
     },
     /// Strike every non-drainable NOISE queue head at any position (#goqstall2):
     /// pasted console output, agent-response fragments, and bare observations that
@@ -11652,6 +11678,7 @@ fn try_main() -> anyhow::Result<()> {
                 ack_text,
                 ack_occurrence,
                 ack_owner,
+                summary,
             } => {
                 let queue_effects = CliQueueCommandEffects;
                 if let Some(id) = id {
@@ -11671,6 +11698,7 @@ fn try_main() -> anyhow::Result<()> {
                         &file,
                         &text,
                         selector.as_ref(),
+                        summary.as_deref(),
                     )
                 } else if ack_owner.is_some() {
                     anyhow::bail!(

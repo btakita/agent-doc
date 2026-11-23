@@ -7033,6 +7033,137 @@ fn handback_sections_missing_from_response(
     Some((insert_at, rendered))
 }
 
+/// What [`attach_ack_summary_response`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AckSummaryResponse {
+    /// The document after the attach.
+    pub document: String,
+    /// The work text of each row this strike leaves without a response tree
+    /// (empty once one of them carries one).
+    pub bare_rows: Vec<String>,
+}
+
+/// `#ackresponse`: every row an exact `--ack-text` strike closes carries a
+/// short response tree (Summary, State, Guidance), as a worker-completed row
+/// does.
+///
+/// Runs after [`attach_stopped_row_responses`]. When none of the rows newly
+/// struck between `before` and `after` has a Response (or `**Closed by:**`)
+/// child, `summary` becomes one under the first of them:
+///
+/// ```text
+/// - ~~#justdoit~~
+///   - **Response [#r-…]**
+///     - **Timestamp:** 2026-11-22T23:06:45.000Z
+///     - **Summary:** Applied the three title edits.
+///     - **State:** Complete.
+///     - **Guidance:** ✅ Done. …
+/// ```
+///
+/// Without a summary the bare rows are returned so the caller can refuse the
+/// strike. When one newly struck row already carries a response, its
+/// identical siblings stay bare (`#ackrespdup`).
+pub fn attach_ack_summary_response(
+    before: &str,
+    after: &str,
+    summary: Option<&str>,
+    addressed_at: &str,
+) -> anyhow::Result<AckSummaryResponse> {
+    let unchanged = |bare_rows: Vec<String>| AckSummaryResponse {
+        document: after.to_string(),
+        bare_rows,
+    };
+    let struck_before = agent_doc_markdown_ast::mutations::item_nodes_all(before, "queue")
+        .map(|nodes| {
+            nodes
+                .into_iter()
+                .filter(|node| node.item.struck)
+                .map(|node| node.node_key)
+                .collect::<HashSet<_>>()
+        })
+        .unwrap_or_default();
+    let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes_all(after, "queue") else {
+        return Ok(unchanged(Vec::new()));
+    };
+    let mut newly = Vec::new();
+    for node in &nodes {
+        if !node.item.struck
+            || struck_before.contains(&node.node_key)
+            || node.item.surface == agent_doc_markdown_ast::overlay::ItemSurface::MultilinePrompt
+        {
+            continue;
+        }
+        let raw = after
+            .get(node.item.start_byte..node.item.end_byte)
+            .unwrap_or("");
+        let indent = raw.len() - raw.trim_start_matches([' ', '\t']).len();
+        let scope_end = descendant_region_end(after, node.item.end_byte, indent);
+        if row_has_response_child(after, node.item.end_byte, scope_end) {
+            return Ok(unchanged(Vec::new()));
+        }
+        newly.push((node, indent, scope_end));
+    }
+    let Some(&(node, indent, scope_end)) = newly.first() else {
+        return Ok(unchanged(Vec::new()));
+    };
+    let summary = summary.map(str::trim).filter(|summary| !summary.is_empty());
+    let Some(summary) = summary else {
+        return Ok(unchanged(
+            newly
+                .iter()
+                .map(|(node, _, _)| node.item.text.clone())
+                .collect(),
+        ));
+    };
+    let summary = summary.split_whitespace().collect::<Vec<_>>().join(" ");
+    let hash = agent_doc_hash::content_hash(&format!(
+        "ack-summary-row\n{}\n{summary}",
+        row_work_heading(&node.item.text)
+    ));
+    let response_id = format!("[#r-{}]", &hash[..12]);
+    let Some(marker) =
+        agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(&response_id)
+    else {
+        return Ok(unchanged(vec![node.item.text.clone()]));
+    };
+    let addressed_at = if addressed_at.trim().is_empty() {
+        FALLBACK_RESPONSE_TIMESTAMP
+    } else {
+        addressed_at.trim()
+    };
+    let closure =
+        crate::queue_tree::queue_tree(after, &crate::queue_tree::QueueTreeOptions::default())
+            .ok()
+            .and_then(|tree| {
+                crate::queue_tree::row_closure_at_offset(&tree, after, node.item.start_byte)
+            });
+    let mut child = format!("{marker}\n- **Timestamp:** {addressed_at}\n");
+    push_prose_row(&mut child, "", "**Summary:**", &summary);
+    child.push_str("- **State:** ");
+    child.push_str(RESPONSE_STATE_COMPLETE);
+    child.push_str("\n- **Guidance:** ");
+    child.push_str(&completed_row_deletion_guidance(closure.as_ref()));
+    let rendered = render_response_lookup_child(&child, &" ".repeat(indent + 2));
+    let insert_at = response_child_insert_at(after, node.item.end_byte, scope_end);
+    let mut out = after.to_string();
+    let mut block = String::new();
+    if !out
+        .get(..insert_at)
+        .is_some_and(|prefix| prefix.ends_with('\n'))
+    {
+        block.push('\n');
+    }
+    block.push_str(&rendered);
+    out.insert_str(insert_at, &block);
+    if let Some((synced, _)) = crate::response_tree_sync::reconcile_tree_scoped_guidance(&out) {
+        out = synced;
+    }
+    Ok(AckSummaryResponse {
+        document: out,
+        bare_rows: Vec::new(),
+    })
+}
+
 /// Attach a response child to each newly struck row whose stop explanation is
 /// already in `after` or in a row-specific completion cell (`#stoppedstruckqueue`).
 ///

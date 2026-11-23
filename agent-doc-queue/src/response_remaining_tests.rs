@@ -356,3 +356,183 @@ fn short_text_is_the_owner_and_first_clause() {
     assert!(long.ends_with('…') && long.chars().count() <= 41, "{long}");
     assert_eq!(long.matches('`').count() % 2, 0);
 }
+
+/// `#answeredentry`: the live shape, anonymized. The operator answered both
+/// 🙋 Remaining entries with `#justdoit` rows written under the entries; the
+/// agent struck both (the first with a `Complete.` response, the second bare
+/// through `--ack-text`), while the two `[operator-verify]` follow-up rows the
+/// entries stand for are still live.
+const ANSWERED: &str = include_str!("../tests/fixtures/response_remaining_answered_entries.md");
+const ANSWERED_ROOT: &str = "- **Response [#r-ed4566860530]**";
+const VSCODE_ENTRY: &str = "operator: decide whether to refresh the VS Code package";
+const TITLES_ENTRY: &str =
+    "operator: apply edits 1–3 above in the editor if you want the old titles cleaned";
+
+/// The Remaining entry lines (glyph included) of the response `marker`.
+fn entry_lines(document: &str, marker: &str) -> Vec<String> {
+    let start = document.find(marker).expect("response");
+    let indent = document[..start].len() - document[..start].trim_end_matches(' ').len();
+    let entry_prefix = format!("{}- ", " ".repeat(indent + 4));
+    let mut in_remaining = false;
+    let mut out = Vec::new();
+    for line in document[start..].lines().skip(1) {
+        let line_indent = line.len() - line.trim_start().len();
+        if !line.trim().is_empty() && line_indent <= indent {
+            break;
+        }
+        if line_indent == indent + 2 {
+            in_remaining = line.trim_start() == format!("- {REMAINING_LABEL}");
+        } else if in_remaining && let Some(rest) = line.strip_prefix(&entry_prefix) {
+            out.push(
+                rest.strip_suffix(RESPONSE_DETAIL_MARKER)
+                    .unwrap_or(rest)
+                    .trim_end()
+                    .to_string(),
+            );
+        }
+    }
+    out
+}
+
+/// Two struck answers under the two 🙋 entries finish the tree: the tally,
+/// State and Guidance say so, both answers (and the first one's response)
+/// stay under their entries marked ✅, and a second sync changes nothing.
+#[test]
+fn struck_answers_under_remaining_entries_finish_the_tally() {
+    let (state, guidance, _) = response(ANSWERED, ANSWERED_ROOT);
+    assert_eq!(state, RESPONSE_STATE_WAITING_ON_OPERATOR);
+    assert!(guidance.starts_with("🙋 3/5 done, 2 yours."), "{guidance}");
+
+    let (synced, changed) = reconcile_response_remaining(ANSWERED).expect("the tree re-renders");
+    assert_eq!(changed, 1);
+    let (state, guidance, _) = response(&synced, ANSWERED_ROOT);
+    assert_eq!(state, RESPONSE_STATE_COMPLETE, "{synced}");
+    assert_eq!(guidance, "✅ 5/5 done.", "{synced}");
+    assert_eq!(
+        entry_lines(&synced, ANSWERED_ROOT),
+        vec![
+            format!("{DONE_GLYPH} {VSCODE_ENTRY}"),
+            format!("{DONE_GLYPH} {TITLES_ENTRY}"),
+        ]
+    );
+    // The answers and the first answer's response are kept verbatim.
+    assert_eq!(synced.matches("        - ~~#justdoit~~\n").count(), 2);
+    assert!(synced.contains("          - **Response [#r-4fa4a87420e5]**\n"));
+    // Nothing else changes: only the two glyphs, the State and the Guidance.
+    let expected = ANSWERED
+        .replace(
+            &format!("- {OPERATOR_OPEN_GLYPH} {VSCODE_ENTRY} "),
+            &format!("- {DONE_GLYPH} {VSCODE_ENTRY} "),
+        )
+        .replace(
+            &format!("- {OPERATOR_OPEN_GLYPH} {TITLES_ENTRY} "),
+            &format!("- {DONE_GLYPH} {TITLES_ENTRY} "),
+        )
+        .replace(
+            "    - **State:** Waiting on operator input.\n    - **Guidance:** 🙋 3/5 done, 2 yours. Only you can finish this: 2 items for you, listed under Remaining. Strike or answer each row when done.\n",
+            "    - **State:** Complete.\n    - **Guidance:** ✅ 5/5 done.\n",
+        );
+    assert_eq!(synced, expected);
+
+    assert_eq!(
+        reconcile_response_remaining(&synced),
+        None,
+        "re-sync is a no-op"
+    );
+}
+
+/// While the agent still works an answer (a live `#justdoit` under the
+/// entry), the entry is agent work (`⏳`), not the operator's, and the answer
+/// stays under it on every re-render.
+#[test]
+fn a_live_answer_under_an_entry_is_agent_work_and_stays() {
+    let start = ANSWERED
+        .find("        - ~~#justdoit~~\n          - **Response")
+        .expect("answer");
+    let end = ANSWERED[start..]
+        .find("      - 🙋 operator: apply edits")
+        .map(|at| start + at)
+        .expect("next entry");
+    let live = format!(
+        "{}        - #justdoit\n{}",
+        &ANSWERED[..start],
+        &ANSWERED[end..]
+    );
+
+    let (synced, _) = reconcile_response_remaining(&live).expect("the tree re-renders");
+    let (state, guidance, _) = response(&synced, ANSWERED_ROOT);
+    assert_eq!(state, RESPONSE_STATE_FOLLOW_UP, "{synced}");
+    assert_eq!(
+        guidance,
+        format!("⏳ 4/5 done. {}", remaining_guidance(1)),
+        "{synced}"
+    );
+    assert_eq!(
+        entry_lines(&synced, ANSWERED_ROOT),
+        vec![
+            format!("{AGENT_OPEN_GLYPH} {VSCODE_ENTRY}"),
+            format!("{DONE_GLYPH} {TITLES_ENTRY}"),
+        ]
+    );
+    assert!(synced.contains(&format!(
+        "      - {AGENT_OPEN_GLYPH} {VSCODE_ENTRY} {RESPONSE_DETAIL_MARKER}\n        - #justdoit\n"
+    )));
+    assert_eq!(
+        reconcile_response_remaining(&synced),
+        None,
+        "re-sync is a no-op"
+    );
+
+    // Striking the answer finishes it.
+    let done = synced.replacen("        - #justdoit\n", "        - ~~#justdoit~~\n", 1);
+    let (finished, _) = reconcile_response_remaining(&done).expect("the tree re-renders");
+    let (state, guidance, _) = response(&finished, ANSWERED_ROOT);
+    assert_eq!(state, RESPONSE_STATE_COMPLETE, "{finished}");
+    assert_eq!(guidance, "✅ 5/5 done.");
+}
+
+/// A struck answer whose own response is not `Complete.` does not finish the
+/// entry it answers.
+#[test]
+fn a_struck_answer_with_an_unfinished_response_leaves_the_entry_open() {
+    let blocked = ANSWERED.replacen(
+        "            - **State:** Complete.\n",
+        "            - **State:** Blocked.\n",
+        1,
+    );
+    let (synced, _) = reconcile_response_remaining(&blocked).expect("the tree re-renders");
+    let (state, guidance, _) = response(&synced, ANSWERED_ROOT);
+    assert_eq!(state, RESPONSE_STATE_WAITING_ON_OPERATOR, "{synced}");
+    assert!(guidance.starts_with("🙋 4/5 done, 1 yours."), "{guidance}");
+    assert_eq!(
+        entry_lines(&synced, ANSWERED_ROOT),
+        vec![
+            format!("{OPERATOR_OPEN_GLYPH} {VSCODE_ENTRY}"),
+            format!("{DONE_GLYPH} {TITLES_ENTRY}"),
+        ]
+    );
+    assert!(synced.contains("          - **Response [#r-4fa4a87420e5]**\n"));
+    assert_eq!(
+        reconcile_response_remaining(&synced),
+        None,
+        "re-sync is a no-op"
+    );
+}
+
+/// The full sync (slim, what remains, finished-tree strike, guidance)
+/// re-renders the answered tree once; a second sync is a no-op.
+#[test]
+fn the_full_sync_re_renders_the_answered_tree_once() {
+    let synced = crate::response_tree_sync::sync_response_trees_striking(ANSWERED, &|_| false)
+        .expect("the tree re-renders")
+        .document;
+    let (state, guidance, _) = response(&synced, ANSWERED_ROOT);
+    assert_eq!(state, RESPONSE_STATE_COMPLETE, "{synced}");
+    assert!(guidance.starts_with("✅ 5/5 done."), "{guidance}");
+    assert!(synced.contains("          - **Response [#r-4fa4a87420e5]**\n"));
+    assert_eq!(
+        crate::response_tree_sync::sync_response_trees_striking(&synced, &|_| false),
+        None,
+        "re-sync is a no-op"
+    );
+}

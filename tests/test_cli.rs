@@ -2092,6 +2092,7 @@ fn every_public_queue_mutation_entrypoint_acquires_apply_exclusion() {
     for internal in [
         "consume_free_text_queue_prompts_under_apply_guard",
         "acknowledge_paused_free_text_queue_head_under_apply_guard",
+        "acknowledge_paused_free_text_queue_head_with_response_under_apply_guard",
         "refresh_waiting_on_you_tree_under_apply_guard",
         "annotate_newly_completed_queue_prompts_with_response_id_under_apply_guard",
         "converge_captured_answered_free_text_projection_under_apply_guard",

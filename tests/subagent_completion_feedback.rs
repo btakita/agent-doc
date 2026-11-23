@@ -1280,7 +1280,15 @@ fn report_complete_then_ack_text_never_reads_back_as_operator_steering() {
     assert_ok(
         &run_agent_doc(
             dir.path(),
-            &["queue", "consume", path, "--ack-text", acked_inline],
+            &[
+                "queue",
+                "consume",
+                path,
+                "--ack-text",
+                acked_inline,
+                "--summary",
+                "Answered inline in the exchange.",
+            ],
         ),
         "queue consume --ack-text",
     );
@@ -3501,11 +3509,38 @@ fn followups_of_a_nested_origin_leave_the_parent_children_alone_and_stay_acknowl
         "{rows:#?}"
     );
 
-    let output = run_agent_doc(
+    // `#ackresponse`: a strike that would leave the row bare is refused.
+    let before = fs::read_to_string(&doc).unwrap();
+    let refused = run_agent_doc(
         dir.path(),
         &["queue", "consume", path, "--ack-text", followup],
     );
+    assert!(!refused.status.success(), "a bare strike is refused");
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("--summary"),
+        "{}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    assert_eq!(fs::read_to_string(&doc).unwrap(), before, "no change");
+    let output = run_agent_doc(
+        dir.path(),
+        &[
+            "queue",
+            "consume",
+            path,
+            "--ack-text",
+            followup,
+            "--summary",
+            "Wired the gutter stamp.",
+        ],
+    );
     assert_ok(&output, "ack the follow-up row");
+    assert!(
+        fs::read_to_string(&doc)
+            .unwrap()
+            .contains("- **Summary:** Wired the gutter stamp.\n"),
+        "the struck row carries its response tree"
+    );
     let rows = run_rows(&doc);
     assert!(
         rows.iter()

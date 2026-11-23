@@ -483,7 +483,7 @@ const OWED_REPORTED_RESPONSE_ORIGIN: &str = "the operator answered this reported
 /// item` row owes. The worker's hand-back listed it as agent work, so it is
 /// done in this turn under the originating item's authorization; only a
 /// concrete blocker recorded on the row leaves it for later.
-pub const OWED_AGENT_ACTION_ITEM: &str = "do this agent-owned action item now, in this turn (#finishactionable): a worker hand-back listed it as agent work under the originating item's authorization, so it is not an operator question and not work for a later turn. Do it inline (or dispatch this row now when it is a substantial new task), verify the result, and strike the row with `agent-doc queue consume <FILE> --ack-text '<row>'`; if it is genuinely blocked, record the concrete blocker on the row instead";
+pub const OWED_AGENT_ACTION_ITEM: &str = "do this agent-owned action item now, in this turn (#finishactionable): a worker hand-back listed it as agent work under the originating item's authorization, so it is not an operator question and not work for a later turn. Do it inline (or dispatch this row now when it is a substantial new task), verify the result, and strike the row with `agent-doc queue consume <FILE> --ack-text '<row>' --summary '<what was done, and where>'` so it carries its response tree (#ackresponse); if it is genuinely blocked, record the concrete blocker on the row instead";
 
 const OWED_OPERATOR_RECORD: &str = "record this row's operator-request packet in agent:exchange and its open agent:todo action, or act on the operator's answer; a 🙋 row waits on the operator only once both are recorded";
 

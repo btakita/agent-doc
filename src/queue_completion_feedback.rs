@@ -776,7 +776,7 @@ pub(crate) fn finish_agent_action_items_directive(
         return String::new();
     }
     let mut text = format!(
-        "\nDo these {} agent-owned action item(s) NOW, in this turn, before closeout (#finishactionable): they are agent work under the originating item's authorization (its queue item and resolved presets), not operator questions and not work for a later turn. Do each one inline, or dispatch its row in this same turn when it is a substantial new task; verify its result, then strike its row with `agent-doc queue consume {} --ack-text '<row>'`. Leave a row open only with its concrete blocker recorded on it (an authorization the item does not grant, an external change that has not happened). Do not end the turn, and do not write \"More work remains\" for them, while one of these rows is open:",
+        "\nDo these {} agent-owned action item(s) NOW, in this turn, before closeout (#finishactionable): they are agent work under the originating item's authorization (its queue item and resolved presets), not operator questions and not work for a later turn. Do each one inline, or dispatch its row in this same turn when it is a substantial new task; verify its result, then strike its row with `agent-doc queue consume {} --ack-text '<row>' --summary '<what was done, and where>'` so it carries its response tree (#ackresponse). Leave a row open only with its concrete blocker recorded on it (an authorization the item does not grant, an external change that has not happened). Do not end the turn, and do not write \"More work remains\" for them, while one of these rows is open:",
         rows.len(),
         file.display(),
     );

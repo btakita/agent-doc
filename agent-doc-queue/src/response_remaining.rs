@@ -71,11 +71,22 @@
 //! Nothing else resolves an item: prose that says "done" does not, and an
 //! operator-owned item is never covered by agent work.
 //!
+//! # Answers under an entry
+//!
+//! `#answeredentry`: the operator may answer a Remaining entry by writing a
+//! row under it (`#justdoit`). That row is the entry's answer, not an edit
+//! of the list: every re-render copies it under its entry verbatim. While a
+//! direct answer row is live the entry is `⏳` agent work; once it is struck
+//! (with no response, or a `Complete.` one) the entry is `✅` and its item or
+//! row counts as done in the tally. An answered entry is kept, `✅`, after
+//! its item or row resolves another way, so the answer is never deleted.
+//!
 //! # Safeguards
 //!
 //! Only binary-owned values change: a State/Guidance pair in the follow-up
 //! form above, or in a form this pass rendered, and a Remaining section whose
-//! every entry is a generated detail row. A response whose Remaining section
+//! every entry is a generated detail row (rows nested under an entry are its
+//! answer). A response whose Remaining section
 //! an operator edited (an unmarked line in it) is left alone, and so is a
 //! struck row's response whose action items all have follow-up rows while it
 //! is still in the plain follow-up form: `#followupmovedstate` owns that
@@ -441,7 +452,22 @@ struct ResponseBlock {
     /// The existing Remaining section: its byte range, and whether every
     /// line in it is generated.
     remaining: Option<(std::ops::Range<usize>, bool)>,
+    /// The entries of the existing Remaining section, with the rows nested
+    /// under each (`#answeredentry`).
+    remaining_entries: Vec<RemainingEntry>,
     items: Vec<ActionItem>,
+}
+
+/// One entry line of an existing Remaining section and the rows nested under
+/// it: an answer such as `~~#justdoit~~` written under the entry it answers
+/// (`#answeredentry`).
+struct RemainingEntry {
+    /// Line index of the entry.
+    line: usize,
+    /// [`entry_key`] of the entry.
+    key: String,
+    /// Line indexes nested under the entry (empty when it has no answer).
+    children: std::ops::Range<usize>,
 }
 
 fn value_of(
@@ -490,6 +516,7 @@ fn parse_response(
         state_line: None,
         guidance: None,
         remaining: None,
+        remaining_entries: Vec::new(),
         items: Vec::new(),
     };
     let mut index = block.start;
@@ -512,19 +539,37 @@ fn parse_response(
             let start = index - 1;
             let mut generated = true;
             let mut end = index;
+            let mut entries: Vec<RemainingEntry> = Vec::new();
             while end < block.end
                 && (lines[end].text.is_empty() || lines[end].indent > detail_indent)
             {
                 let entry = &lines[end];
-                if !entry.text.is_empty()
-                    && (entry.indent != detail_indent + 2
-                        || !entry.text.starts_with("- ")
-                        || !entry.text.ends_with(RESPONSE_DETAIL_MARKER))
+                if entry.text.is_empty() {
+                    end += 1;
+                    continue;
+                }
+                if entry.indent == detail_indent + 2
+                    && entry.text.starts_with("- ")
+                    && entry.text.ends_with(RESPONSE_DETAIL_MARKER)
                 {
+                    entries.push(RemainingEntry {
+                        line: end,
+                        key: existing_entry_key(entry.text),
+                        children: end + 1..end + 1,
+                    });
+                } else if entry.indent > detail_indent + 2
+                    && let Some(last) = entries.last_mut()
+                {
+                    // `#answeredentry`: a row nested under an entry is its
+                    // answer, kept with it, never an operator edit of the
+                    // list.
+                    last.children.end = end + 1;
+                } else {
                     generated = false;
                 }
                 end += 1;
             }
+            response.remaining_entries = entries;
             index = end;
             let mut last = end;
             while last > start + 1 && lines[last - 1].text.is_empty() {
@@ -638,35 +683,117 @@ struct Entry {
     line: usize,
     owner: String,
     text: String,
+    /// `owner: short text`, as the entry line reads after its glyph.
+    label: String,
+    /// The entry's status (`#answeredentry`).
+    status: EntryStatus,
+    /// The rows nested under the existing entry (its answer), copied
+    /// verbatim under the re-rendered entry.
+    children: Option<std::ops::Range<usize>>,
+}
+
+/// The status glyph an entry carries (`#donetrack`, `#answeredentry`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EntryStatus {
+    /// Open work for its owner: `⏳` (agent) or `🙋` (operator).
+    Open,
+    /// The operator answered it with a row the agent is still working:
+    /// `⏳`, agent work.
+    Working,
+    /// Answered and done: `✅`, kept only for the answer rows under it.
+    Done,
 }
 
 impl Entry {
-    fn render(&self, indent: usize) -> String {
-        let text = short_imperative(&self.text, ENTRY_TEXT_LIMIT);
-        let glyph = if self.owner == "agent" {
-            AGENT_OPEN_GLYPH
-        } else {
-            OPERATOR_OPEN_GLYPH
+    fn new(line: usize, owner: String, text: String) -> Self {
+        let label = format!("{owner}: {}", short_imperative(&text, ENTRY_TEXT_LIMIT));
+        Self {
+            line,
+            owner,
+            text,
+            label,
+            status: EntryStatus::Open,
+            children: None,
+        }
+    }
+
+    fn key(&self) -> String {
+        entry_key(&self.label)
+    }
+
+    /// Open work only the operator can do.
+    fn yours(&self) -> bool {
+        self.status == EntryStatus::Open && self.owner != "agent"
+    }
+
+    fn render(&self, indent: usize, document: &str, lines: &[Line<'_>]) -> String {
+        let glyph = match self.status {
+            EntryStatus::Done => DONE_GLYPH,
+            EntryStatus::Working => AGENT_OPEN_GLYPH,
+            EntryStatus::Open if self.owner == "agent" => AGENT_OPEN_GLYPH,
+            EntryStatus::Open => OPERATOR_OPEN_GLYPH,
         };
-        format!(
-            "{}- {glyph} {}: {} {RESPONSE_DETAIL_MARKER}\n",
+        let mut out = format!(
+            "{}- {glyph} {} {RESPONSE_DETAIL_MARKER}\n",
             " ".repeat(indent),
-            self.owner,
-            text
-        )
+            self.label
+        );
+        if let Some(children) = self.children.clone()
+            && !children.is_empty()
+        {
+            out.push_str(&document[lines[children.start].start..lines[children.end - 1].end]);
+        }
+        out
     }
 }
 
-fn render_remaining(entries: &[Entry], detail_indent: usize) -> String {
+/// The comparison key of a Remaining entry label (`owner: short text`).
+fn entry_key(label: &str) -> String {
+    label.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The [`entry_key`] of an existing Remaining entry line (`- 🙋 owner: text
+/// <!-- agent-doc:response-detail -->`), with or without its status glyph.
+fn existing_entry_key(text: &str) -> String {
+    let body = text.strip_prefix("- ").unwrap_or(text);
+    let body = body
+        .strip_suffix(RESPONSE_DETAIL_MARKER)
+        .unwrap_or(body)
+        .trim();
+    let body = [DONE_GLYPH, AGENT_OPEN_GLYPH, OPERATOR_OPEN_GLYPH]
+        .iter()
+        .find_map(|glyph| body.strip_prefix(glyph))
+        .map_or(body, str::trim_start);
+    entry_key(body)
+}
+
+/// Render the Remaining section. An entry with an answer under it always
+/// renders (dropping it would delete the answer rows); at most
+/// [`REMAINING_LIMIT`] of the others do, and the rest are counted.
+fn render_remaining(
+    entries: &[Entry],
+    detail_indent: usize,
+    document: &str,
+    lines: &[Line<'_>],
+) -> String {
     let mut out = format!("{}- {REMAINING_LABEL}\n", " ".repeat(detail_indent));
-    for entry in entries.iter().take(REMAINING_LIMIT) {
-        out.push_str(&entry.render(detail_indent + 2));
+    let mut shown = 0;
+    let mut more = 0;
+    for entry in entries {
+        let answered = entry.children.as_ref().is_some_and(|c| !c.is_empty());
+        if !answered && shown >= REMAINING_LIMIT {
+            more += 1;
+            continue;
+        }
+        if !answered {
+            shown += 1;
+        }
+        out.push_str(&entry.render(detail_indent + 2, document, lines));
     }
-    if entries.len() > REMAINING_LIMIT {
+    if more > 0 {
         out.push_str(&format!(
-            "{}- and {} more in this tree {RESPONSE_DETAIL_MARKER}\n",
+            "{}- and {more} more in this tree {RESPONSE_DETAIL_MARKER}\n",
             " ".repeat(detail_indent + 2),
-            entries.len() - REMAINING_LIMIT
         ));
     }
     out
@@ -684,6 +811,47 @@ fn open_row_entry(node: &crate::queue_tree::QueueTreeNode) -> (String, String) {
         None if operator => ("operator".to_string(), body.to_string()),
         None => ("agent".to_string(), body.to_string()),
     }
+}
+
+/// What the rows directly under an existing Remaining entry say about it
+/// (`#answeredentry`): `Done` when one is struck and its own response, if it
+/// has one, says `Complete.`; `Working` while one is still live; otherwise
+/// `Open`.
+fn entry_answer_status(
+    lines: &[Line<'_>],
+    tree: &QueueTree,
+    responses: &[ResponseBlock],
+    entry: &RemainingEntry,
+) -> EntryStatus {
+    let answer_indent = lines[entry.line].indent + 2;
+    let mut status = EntryStatus::Open;
+    for line in entry.children.clone() {
+        if lines[line].text.is_empty() || lines[line].indent != answer_indent {
+            continue;
+        }
+        let Some(node) = tree.nodes.iter().position(|node| node.line == line + 1) else {
+            continue;
+        };
+        if !tree.nodes[node].closed {
+            if crate::queue_tree::row_keeps_tree_alive(tree, node) {
+                return EntryStatus::Working;
+            }
+            continue;
+        }
+        let complete = responses
+            .iter()
+            .filter(|response| response.parent == Some(line))
+            .all(|response| {
+                response
+                    .state
+                    .as_ref()
+                    .is_some_and(|(_, state)| state == RESPONSE_STATE_COMPLETE)
+            });
+        if complete {
+            status = EntryStatus::Done;
+        }
+    }
+    status
 }
 
 /// Recompute every response tree's Remaining list, State and Guidance from
@@ -840,9 +1008,52 @@ pub fn reconcile_response_remaining(document: &str) -> Option<(String, usize)> {
     for index in managed {
         let response = &responses[index];
         let scope = response.scope.clone();
+        // `#answeredentry`: what each existing entry's answer says.
+        let answers: Vec<(String, EntryStatus, std::ops::Range<usize>)> = response
+            .remaining_entries
+            .iter()
+            .filter(|entry| !entry.children.is_empty())
+            .map(|entry| {
+                (
+                    entry.key.clone(),
+                    entry_answer_status(&lines, &tree, &responses, entry),
+                    entry.children.clone(),
+                )
+            })
+            .collect();
+        let answer_of = |key: &str| {
+            answers
+                .iter()
+                .find(|(answer_key, _, _)| answer_key == key)
+                .map(|(_, status, children)| (*status, children.clone()))
+        };
+        let answer_spans: Vec<std::ops::Range<usize>> = answers
+            .iter()
+            .map(|(_, _, children)| children.clone())
+            .collect();
         let mut entries: Vec<Entry> = Vec::new();
+        let mut answered_done: Vec<String> = Vec::new();
+        let mut used_answers: Vec<String> = Vec::new();
+        // An open entry, or a done one kept for its answer.
+        let push_entry = |mut entry: Entry,
+                          entries: &mut Vec<Entry>,
+                          used_answers: &mut Vec<String>,
+                          answered_done: &mut Vec<String>| {
+            let key = entry.key();
+            if let Some((status, children)) = answer_of(&key) {
+                used_answers.push(key.clone());
+                entry.children = Some(children);
+                if status != EntryStatus::Open {
+                    entry.status = status;
+                }
+                if status == EntryStatus::Done {
+                    answered_done.push(key);
+                }
+            }
+            entries.push(entry);
+        };
         let mut listed_keys: Vec<String> = Vec::new();
-        let mut covered: Vec<std::ops::Range<usize>> = Vec::new();
+        let mut covered: Vec<std::ops::Range<usize>> = answer_spans.clone();
         for (other_index, other) in responses.iter().enumerate() {
             if other_index != index && !scope.contains(&other.line) {
                 continue;
@@ -862,16 +1073,23 @@ pub fn reconcile_response_remaining(document: &str) -> Option<(String, usize)> {
                 continue;
             }
             for (item, done) in other.items.iter().zip(&resolved[other_index]) {
-                if *done || listed_keys.contains(&item.key) {
+                if listed_keys.contains(&item.key) {
+                    continue;
+                }
+                let entry = Entry::new(item.line, item.owner.clone(), item.text.clone());
+                if *done {
+                    // A resolved item keeps only an answer written under its
+                    // entry.
+                    if answer_of(&entry.key()).is_some() {
+                        let mut entry = entry;
+                        entry.status = EntryStatus::Done;
+                        push_entry(entry, &mut entries, &mut used_answers, &mut answered_done);
+                    }
                     continue;
                 }
                 listed_keys.push(item.key.clone());
                 covered.push(item.span.clone());
-                entries.push(Entry {
-                    line: item.line,
-                    owner: item.owner.clone(),
-                    text: item.text.clone(),
-                });
+                push_entry(entry, &mut entries, &mut used_answers, &mut answered_done);
             }
         }
         let mut open_lines: Vec<usize> = scope.clone().collect();
@@ -882,9 +1100,7 @@ pub fn reconcile_response_remaining(document: &str) -> Option<(String, usize)> {
             let Some(node) = node_at(line) else {
                 continue;
             };
-            if !crate::queue_tree::row_keeps_tree_alive(&tree, node)
-                || covered.iter().any(|span| span.contains(&line))
-            {
+            if covered.iter().any(|span| span.contains(&line)) {
                 continue;
             }
             let row = &tree.nodes[node];
@@ -895,14 +1111,54 @@ pub fn reconcile_response_remaining(document: &str) -> Option<(String, usize)> {
                 continue;
             }
             let (owner, text) = open_row_entry(row);
-            entries.push(Entry { line, owner, text });
+            let mut entry = Entry::new(line, owner, text);
+            if !crate::queue_tree::row_keeps_tree_alive(&tree, node) {
+                // A resolved row keeps only an answer written under its
+                // entry, in the row's place.
+                let key = entry.key();
+                if row.state == QueueNodeState::Group
+                    || used_answers.contains(&key)
+                    || answer_of(&key).is_none()
+                {
+                    continue;
+                }
+                entry.status = EntryStatus::Done;
+            }
+            push_entry(entry, &mut entries, &mut used_answers, &mut answered_done);
+        }
+        // An answered entry whose item or row is gone keeps its answer.
+        for entry in &response.remaining_entries {
+            if entry.children.is_empty() || used_answers.contains(&entry.key) {
+                continue;
+            }
+            let status = match entry_answer_status(&lines, &tree, &responses, entry) {
+                EntryStatus::Working => EntryStatus::Working,
+                _ => EntryStatus::Done,
+            };
+            let label = existing_entry_key(lines[entry.line].text);
+            let owner = label
+                .split_once(':')
+                .map_or_else(|| "operator".to_string(), |(owner, _)| owner.to_string());
+            entries.push(Entry {
+                line: entry.line,
+                owner,
+                text: label.clone(),
+                label,
+                status,
+                children: Some(entry.children.clone()),
+            });
         }
         entries.sort_by_key(|entry| entry.line);
+        let kept_done = entries
+            .iter()
+            .filter(|entry| entry.status == EntryStatus::Done)
+            .count();
+        let open = entries.len() - kept_done;
 
         // `#donetrack`: every action item (once per key) and queue row in
         // scope, done or not, for the tally.
         let mut tally_keys: Vec<String> = Vec::new();
-        let mut item_spans: Vec<std::ops::Range<usize>> = Vec::new();
+        let mut item_spans: Vec<std::ops::Range<usize>> = answer_spans.clone();
         let mut total = 0usize;
         let mut done = 0usize;
         for (other_index, other) in responses.iter().enumerate() {
@@ -916,7 +1172,12 @@ pub fn reconcile_response_remaining(document: &str) -> Option<(String, usize)> {
                 }
                 tally_keys.push(item.key.clone());
                 total += 1;
-                done += usize::from(*resolved_item);
+                let key = entry_key(&format!(
+                    "{}: {}",
+                    item.owner,
+                    short_imperative(&item.text, ENTRY_TEXT_LIMIT)
+                ));
+                done += usize::from(*resolved_item || answered_done.contains(&key));
             }
         }
         let mut row_lines: Vec<usize> = scope.clone().collect();
@@ -940,21 +1201,24 @@ pub fn reconcile_response_remaining(document: &str) -> Option<(String, usize)> {
                 done += 1;
             } else if crate::queue_tree::row_keeps_tree_alive(&tree, node) {
                 total += 1;
+                let (owner, text) = open_row_entry(row);
+                if answered_done.contains(&Entry::new(line, owner, text).key()) {
+                    done += 1;
+                }
             }
         }
-        let yours = entries
-            .iter()
-            .filter(|entry| entry.owner != "agent")
-            .count();
-        let agent_open = entries.len() - yours;
+        let yours = entries.iter().filter(|entry| entry.yours()).count();
+        let agent_open = open - yours;
         // An entry the tally did not see (an open parent row folded into an
         // item) still counts as open work.
-        let total = total.max(done + entries.len());
+        let total = total.max(done + open);
         let tally = tally(done, total, agent_open, yours);
 
         let (state_range, state) = response.state.clone().expect("managed has a state");
         let (guidance_range, guidance) = response.guidance.clone().expect("managed has guidance");
-        let (want_state, want_guidance, want_remaining) = if entries.is_empty() {
+        let render =
+            |entries: &[Entry]| render_remaining(entries, response.detail_indent, document, &lines);
+        let (want_state, want_guidance, want_remaining) = if open == 0 {
             // `#treefinish`: the root's response carries the tree's
             // indicator; a nested row's response is only its tally.
             let guidance = match response.parent.and_then(node_at) {
@@ -968,11 +1232,17 @@ pub fn reconcile_response_remaining(document: &str) -> Option<(String, usize)> {
                 Some(_) => tally.clone(),
                 None => format!("{tally} {NOTHING_REMAINS_RESPONSE_GUIDANCE}"),
             };
-            (RESPONSE_STATE_COMPLETE, guidance, None)
+            // `#answeredentry`: answers stay, under their done entries.
+            let kept = (kept_done > 0).then(|| render(&entries));
+            (RESPONSE_STATE_COMPLETE, guidance, kept)
         } else if agent_open == 0 {
             // Only the operator can finish it: say exactly what to do.
             let what = if yours == 1 {
-                let text = short_imperative(&entries[0].text, ENTRY_TEXT_LIMIT);
+                let first = entries
+                    .iter()
+                    .find(|entry| entry.yours())
+                    .expect("one entry is yours");
+                let text = short_imperative(&first.text, ENTRY_TEXT_LIMIT);
                 let text = text.trim_end_matches(['.', ' ']);
                 format!("{ONLY_YOU_GUIDANCE_LEAD}{text}. Strike or answer its row when done.")
             } else {
@@ -983,13 +1253,13 @@ pub fn reconcile_response_remaining(document: &str) -> Option<(String, usize)> {
             (
                 RESPONSE_STATE_WAITING_ON_OPERATOR,
                 format!("{tally} {what}"),
-                Some(render_remaining(&entries, response.detail_indent)),
+                Some(render(&entries)),
             )
         } else {
             (
                 RESPONSE_STATE_FOLLOW_UP,
-                format!("{tally} {}", remaining_guidance(entries.len())),
-                Some(render_remaining(&entries, response.detail_indent)),
+                format!("{tally} {}", remaining_guidance(open)),
+                Some(render(&entries)),
             )
         };
         let mut response_edits = Vec::new();

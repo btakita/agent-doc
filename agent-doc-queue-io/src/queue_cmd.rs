@@ -189,6 +189,27 @@ pub trait QueueCommandEffects {
         }
         self.acknowledge_paused_free_text_queue_head(file, expected_head, apply_guard)
     }
+    /// [`Self::acknowledge_paused_free_text_queue_head_with_selector`] with
+    /// the struck row's response policy (`#ackresponse`). An effect that
+    /// cannot attach a response refuses `--summary` and strikes as before.
+    fn acknowledge_paused_free_text_queue_head_with_response(
+        &self,
+        file: &Path,
+        expected_head: &str,
+        selector: Option<&crate::queue_consume::AckTextSelector>,
+        response: crate::queue_consume::AckTextResponse<'_>,
+        apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+    ) -> Result<Option<QueueCommandConsumeOutcome>> {
+        if matches!(response, crate::queue_consume::AckTextResponse::Summary(_)) {
+            anyhow::bail!("this queue command effect does not support --ack-text --summary");
+        }
+        self.acknowledge_paused_free_text_queue_head_with_selector(
+            file,
+            expected_head,
+            selector,
+            apply_guard,
+        )
+    }
     fn prune_noise_queue_heads(
         &self,
         file: &Path,
@@ -2250,17 +2271,29 @@ pub fn acknowledge_open_id(
     Ok(())
 }
 
+/// `agent-doc queue consume <FILE> --ack-text <ROW> [--summary <TEXT>]`.
+///
+/// `#ackresponse`: the struck row carries a response tree. A worker's
+/// completion cell supplies it when there is one; otherwise `summary`
+/// becomes a short one (Summary, State, Guidance), and without a summary the
+/// strike is refused with no change.
 pub fn acknowledge_paused_free_text(
     effects: &impl QueueCommandEffects,
     file: &Path,
     expected_head: &str,
     selector: Option<&crate::queue_consume::AckTextSelector>,
+    summary: Option<&str>,
 ) -> Result<()> {
     let queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
-    match effects.acknowledge_paused_free_text_queue_head_with_selector(
+    let response = match summary.map(str::trim).filter(|summary| !summary.is_empty()) {
+        Some(summary) => crate::queue_consume::AckTextResponse::Summary(summary),
+        None => crate::queue_consume::AckTextResponse::Required,
+    };
+    match effects.acknowledge_paused_free_text_queue_head_with_response(
         file,
         expected_head,
         selector,
+        response,
         &queue_edit_guard,
     )? {
         Some(outcome) => println!(

@@ -834,7 +834,9 @@ pub fn is_generated_response_structure_row(item_content: &str) -> bool {
             .iter()
             .any(|marker| {
                 inner.strip_suffix(marker).is_some_and(|body| {
-                    body.ends_with(char::is_whitespace) && !body.trim().is_empty()
+                    body.ends_with(char::is_whitespace)
+                        && !body.trim().is_empty()
+                        && !quotes_a_row_before_marker(content, body)
                 })
             })
     {
@@ -847,6 +849,27 @@ pub fn is_generated_response_structure_row(item_content: &str) -> bool {
                 .strip_prefix(label)
                 .is_some_and(|value| !value.trim().is_empty())
         })
+}
+
+/// `#responserowqueuehead`: whether a row that ends in a generated-row marker is
+/// really an operator's row quoting one.
+///
+/// On 2026-11-22 an operator pasted two response-tree lines inside one code
+/// span, so their new column-0 row ended `` `    - **Action items:** <!-- agent-doc:response-detail -->``
+/// (the span closed on the next line). Read as a marked response detail, the
+/// row was never queue work: the operator's question was never dispatched,
+/// and the 6-space second line under it was taken for a reply to the tree
+/// above. A generated row never carries a queue head's `### ` heading, and
+/// never ends inside an open code span that starts with a quoted list bullet
+/// (`` `- …``, `` `    - …``); either one means the marker is quoted text.
+fn quotes_a_row_before_marker(content: &str, body: &str) -> bool {
+    if content.starts_with("### ") || body.trim_start().starts_with("### ") {
+        return true;
+    }
+    body.matches('`').count() % 2 == 1
+        && body
+            .rfind('`')
+            .is_some_and(|open| body[open + 1..].trim_start().starts_with("- "))
 }
 
 /// Reserve one orphaned generated response-structure row
@@ -2843,6 +2866,34 @@ mod tests {
             "\u{21aa} [#q-0123456789ab] {FOLLOWUP_LINK_MARKER}"
         )));
         assert!(!is_generated_response_structure_row(FOLLOWUP_LINK_MARKER));
+    }
+
+    /// `#responserowqueuehead`: an operator row quoting a marked row is operator text.
+    /// The live row (anonymized) quoted two response-tree lines in one code
+    /// span that closed on the next line, so it ended in the marker.
+    #[test]
+    fn a_row_quoting_a_marked_row_is_not_a_response_detail() {
+        let quoted = format!(
+            "`- ### ~~The subitem `  - ~~Present it.~~` nests wrong.~~` is confusing with `    - **Guidance:** More work remains.` and `    - **Action items:** {RESPONSE_DETAIL_MARKER}"
+        );
+        assert!(!is_generated_response_structure_row(&quoted));
+        assert!(!is_generated_response_structure_row(&format!(
+            "### {quoted}"
+        )));
+        assert!(!is_generated_response_structure_row(&format!(
+            "### 🙋 follow up: agent: ship it {RESPONSE_DETAIL_MARKER}"
+        )));
+        // Generated rows: balanced code spans, or an odd backtick that does
+        // not open a quoted list row.
+        assert!(is_generated_response_structure_row(&format!(
+            "agent: run `make install` for `80a41b02c4`. {RESPONSE_DETAIL_MARKER}"
+        )));
+        assert!(is_generated_response_structure_row(&format!(
+            "agent: fix the stray ` in the title {RESPONSE_DETAIL_MARKER}"
+        )));
+        assert!(is_generated_response_structure_row(&format!(
+            "✅ agent: coordinator runs the single `make install` for `80a41b02c4` so sync heals the live\u{2026} {RESPONSE_DETAIL_MARKER}"
+        )));
     }
 
     #[test]

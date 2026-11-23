@@ -111,6 +111,9 @@ pub enum SelfRepairKind {
     /// closing `~~` (`~~work [#q-x]~~ [#q-x]`), so the row reads as struck
     /// again (`#struckidtrail`).
     StruckRowTrailingId,
+    /// Moved a row that sat more than one level below its parent row up to
+    /// sit exactly one level below it, with its subtree (`#selfrepaircleanup`).
+    MisnestedChildRow,
 }
 
 impl SelfRepairKind {
@@ -124,6 +127,7 @@ impl SelfRepairKind {
             Self::MisnestedClosedByRows => "misnested_closed_by_rows",
             Self::RowInsideResponseTree => "row_inside_response_tree",
             Self::StruckRowTrailingId => "struck_row_trailing_id",
+            Self::MisnestedChildRow => "misnested_child_row",
         }
     }
 }
@@ -972,7 +976,8 @@ pub fn renest_closed_by_rows(document: &str) -> (String, Vec<SelfRepair>) {
 /// Run every self-repair over `document`: misplaced response trees
 /// (`response_proven(id)` says the `[#r-…]` id's original lives in
 /// `agent:exchange` or the response index), duplicate response trees,
-/// backlink rows nested too deep, stale claim labels, claim-label residue,
+/// backlink rows nested too deep, rows that skip indentation levels under
+/// their parent, stale claim labels, claim-label residue,
 /// struck rows' trailing id copies, then duplicate struck rows (a label
 /// removal, residue restore or id fold can make two struck copies identical). `None` when nothing changed; a second run is a
 /// no-op.
@@ -1010,6 +1015,9 @@ pub fn self_repair_document(
     let (renested, renest_repairs) = renest_closed_by_rows(&current);
     current = renested;
     repairs.extend(renest_repairs);
+    let (children, child_repairs) = crate::child_row_renest::renest_child_rows(&current);
+    current = children;
+    repairs.extend(child_repairs);
     let (labelled, label_repairs) = strip_stale_claim_labels(&current, is_live);
     current = labelled;
     repairs.extend(label_repairs);

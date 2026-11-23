@@ -223,3 +223,45 @@ fn state_and_guidance(document: &str, marker: &str) -> (String, String) {
     }
     (state, guidance)
 }
+
+/// The live tree (anonymized): a response whose only Remaining entry is an
+/// agent item (`⏳ agent: coordinator runs the single make install …`), which
+/// the operator answered with `~~#justdoit~~`; its response says
+/// `Complete.`. The tree said `⏳ 1/2 done.` (earlier `More work remains.`)
+/// although nothing remained.
+const AGENT_ENTRY_ANSWERED: &str =
+    include_str!("../tests/fixtures/response_remaining_agent_entry_answered.md");
+
+/// An answered agent Remaining entry finishes the tally: the entry turns ✅,
+/// the response is `Complete.` with `✅ 2/2 done. 🗑️ Safe to delete this
+/// tree.`, the root is struck as deletable, and a second sync is a no-op.
+#[test]
+fn an_answered_agent_remaining_entry_finishes_the_tally() {
+    let (state, guidance) =
+        state_and_guidance(AGENT_ENTRY_ANSWERED, "- **Response [#r-6025882e5c0f]**");
+    assert_eq!(state, "Follow-up work remains.");
+    assert!(guidance.starts_with("⏳ 1/2 done."), "{guidance}");
+
+    let synced = full_sync(AGENT_ENTRY_ANSWERED);
+    let (state, guidance) = state_and_guidance(&synced, "- **Response [#r-6025882e5c0f]**");
+    assert_eq!(state, "Complete.", "{synced}");
+    assert_eq!(
+        guidance, "✅ 2/2 done. 🗑\u{fe0f} Safe to delete this tree.",
+        "{synced}"
+    );
+    assert!(
+        synced.contains("      - ✅ agent: coordinator runs the single `make install`"),
+        "{synced}"
+    );
+    assert!(
+        synced.contains("- ### ~~🗑\u{fe0f} The subitem "),
+        "{synced}"
+    );
+    assert!(
+        !synced.lines().any(|line| line
+            .trim_start()
+            .starts_with("- **Guidance:** More work remains")),
+        "{synced}"
+    );
+    assert_eq!(full_sync(&synced), synced);
+}

@@ -40,6 +40,7 @@ pub mod queue_auto_clear;
 pub mod queue_blocked;
 pub mod queue_claim;
 pub use agent_doc_element_queue::QueueReportState;
+pub mod child_row_renest;
 #[cfg(test)]
 mod codespan_tag_tests;
 pub mod finished_tree;

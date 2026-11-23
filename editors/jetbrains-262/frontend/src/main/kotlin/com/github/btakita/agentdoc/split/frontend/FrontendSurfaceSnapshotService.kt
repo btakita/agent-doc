@@ -13,6 +13,7 @@ import com.github.btakita.agentdoc.split.GEOMETRY_SURFACE_SNAPSHOT_SCHEMA_VERSIO
 import com.github.btakita.agentdoc.split.LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.MAIN_SURFACE_PANE_ID
 import com.github.btakita.agentdoc.split.SURFACE_SNAPSHOT_SCHEMA_VERSION
+import com.github.btakita.agentdoc.split.SurfaceIngressAck
 import com.github.btakita.agentdoc.split.SurfaceIngressLease
 import com.github.btakita.agentdoc.split.SurfaceIngressStatus
 import com.github.btakita.agentdoc.split.SurfaceRole
@@ -23,6 +24,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
@@ -68,7 +70,14 @@ class FrontendSurfaceSnapshotService(
 
     fun start() {
         if (!started.compareAndSet(false, true)) return
-        FrontendActivationReceipt.line
+        // GH #435: the first Client-side proof that `agent.doc.frontend` loaded for this project.
+        LOG.info(
+            "[split-surface] frontend surface publisher started project=${project.name} " +
+                "plugin=${frontendPluginDescriptorFact("getVersion") ?: "unknown"} " +
+                "plugin_path=${frontendPluginDescriptorFact("getPluginPath") ?: "unknown"} " +
+                "instance=$frontendInstanceId schema_max=$SURFACE_SNAPSHOT_SCHEMA_VERSION " +
+                "receipt=${FrontendActivationReceipt.line}",
+        )
 
         project.messageBus.connect(this).subscribe(
             FileEditorManagerListener.FILE_EDITOR_MANAGER,
@@ -161,22 +170,32 @@ class FrontendSurfaceSnapshotService(
 
     private suspend fun publishForLease(lease: SurfaceIngressLease) {
         val schema = negotiateSnapshotSchema()
+        val outcomes = FrontendPublicationLog(lease.connectionGeneration)
         captures.collectLatest {
             // Coalesce the burst of file-editor, AWT hierarchy, and focus events produced by one
             // dock/undock operation, while still emitting a complete authoritative snapshot.
             delay(FRONTEND_CAPTURE_DEBOUNCE_MS)
             var retry = 0
+            var refusals = 0
             do {
                 val capture = captureOnEdt()
+                val published = capture.snapshot.forSchema(schema)
                 val ack = SurfaceSnapshotRpcApi.getInstance()
-                    .publishSnapshot(lease, capture.snapshot.forSchema(schema))
+                    .publishSnapshot(lease, published)
                 if (ack.status != SurfaceIngressStatus.ACCEPTED) {
-                    LOG.warn(
-                        "[split-surface] snapshot rejected status=${ack.status} " +
-                            "generation=${ack.connectionGeneration} diagnostic=${ack.diagnostic}",
-                    )
-                    break
+                    // GH #435: a refusal the backend can outgrow (its controller was busy, the
+                    // project was not registered yet, a frame was not realized) is republished on
+                    // a bounded backoff. Before, the snapshot waited for the next editor/AWT
+                    // event, so a controller that recovered while the user was idle never
+                    // received the measured layout a deferred route was waiting for.
+                    val retryInMs = frontendSnapshotRetryDelayMillis(ack.status, refusals++)
+                    outcomes.refused(ack, published, retryInMs)?.let(LOG::warn)
+                    if (retryInMs == null) break
+                    delay(retryInMs)
+                    continue
                 }
+                outcomes.accepted(ack, published)?.let(LOG::info)
+                refusals = 0
                 val projection = ack.presentation ?: break
                 val receipts = applyPresentationOnEdt(capture, projection)
                 receipts.forEach { receipt ->
@@ -325,6 +344,80 @@ internal const val FRONTEND_IMPLEMENTATION_POLL_MS = 30_000L
 
 /** Hang guard for first-lease schema negotiation; authority is already pending during this wait. */
 internal const val FRONTEND_SCHEMA_NEGOTIATION_TIMEOUT_MS = 5_000L
+
+/**
+ * GH #435: the bounded republish delay after [status] refused a snapshot, or null when another
+ * capture of the same editor state cannot succeed (a stale lease or sequence, or a malformed
+ * snapshot) and only a new editor event or lease should publish again.
+ */
+internal fun frontendSnapshotRetryDelayMillis(status: SurfaceIngressStatus, consecutiveRefusals: Int): Long? =
+    when (status) {
+        SurfaceIngressStatus.DELIVERY_FAILED,
+        SurfaceIngressStatus.PROJECT_MISMATCH,
+        SurfaceIngressStatus.INCOMPLETE,
+        -> frontendIngressRetryDelayMillis(consecutiveRefusals)
+        else -> null
+    }
+
+/**
+ * GH #435: the frontend half of the publication log. One line when a lease's first snapshot is
+ * accepted or a refusal clears, and one per change of refusal (status + diagnostic), so the
+ * Client's idea.log shows whether geometry left this process and why the backend refused it
+ * without one line per AWT event.
+ */
+internal class FrontendPublicationLog(private val connectionGeneration: Long) {
+    private var acceptedOnce = false
+    private var lastRefusal: String? = null
+    private var repeatedRefusals = 0
+
+    fun accepted(ack: SurfaceIngressAck, snapshot: FrontendSurfaceSnapshot): String? {
+        val first = !acceptedOnce
+        val cleared = lastRefusal
+        acceptedOnce = true
+        lastRefusal = null
+        repeatedRefusals = 0
+        if (!first && cleared == null) return null
+        return "[split-surface] snapshot accepted generation=$connectionGeneration " +
+            "sequence=${ack.acceptedSequence ?: snapshot.sequence} schema=${snapshot.schemaVersion} " +
+            "surfaces=${snapshot.surfaces.size} measured_windows=${measuredWindows(snapshot)} " +
+            "first=$first after_refusal=${cleared ?: "none"}"
+    }
+
+    fun refused(ack: SurfaceIngressAck, snapshot: FrontendSurfaceSnapshot, retryInMs: Long?): String? {
+        val refusal = "${ack.status}:${ack.diagnostic ?: ""}"
+        if (refusal == lastRefusal) {
+            repeatedRefusals++
+            return null
+        }
+        val repeated = repeatedRefusals
+        lastRefusal = refusal
+        repeatedRefusals = 0
+        return "[split-surface] snapshot rejected status=${ack.status} generation=${ack.connectionGeneration} " +
+            "sequence=${snapshot.sequence} measured_windows=${measuredWindows(snapshot)} " +
+            "retry_in_ms=${retryInMs ?: "none(next_editor_event)"} previous_repeats=$repeated " +
+            "diagnostic=${ack.diagnostic}"
+    }
+
+    private fun measuredWindows(snapshot: FrontendSurfaceSnapshot): String {
+        val windows = snapshot.surfaces.flatMap { it.windows }
+        return "${windows.count { it.bounds != null }}/${windows.size}"
+    }
+}
+
+/**
+ * GH #435: one fact (`getVersion`, `getPluginPath`) of this Client's loaded Agent Doc descriptor,
+ * read reflectively (as `MarketplacePlatformBridge` does on the backend), so the Client's idea.log
+ * names the plugin version and directory the operator must replace on an upgrade.
+ */
+internal fun frontendPluginDescriptorFact(getter: String): String? = runCatching {
+    val manager = Class.forName("com.intellij.ide.plugins.PluginManagerCore")
+    val descriptor = manager.getMethod("getPlugin", PluginId::class.java)
+        .invoke(null, PluginId.getId(AGENT_DOC_PLUGIN_ID)) ?: return null
+    descriptor.javaClass.methods.first { it.name == getter && it.parameterCount == 0 }
+        .invoke(descriptor)?.toString()
+}.getOrNull()
+
+private const val AGENT_DOC_PLUGIN_ID = "com.github.btakita.agent-doc"
 
 /** Retry a normally completed, lease-less RPC flow without spinning either IDE process. */
 internal fun frontendIngressRetryDelayMillis(consecutiveEmptyCompletions: Int): Long {

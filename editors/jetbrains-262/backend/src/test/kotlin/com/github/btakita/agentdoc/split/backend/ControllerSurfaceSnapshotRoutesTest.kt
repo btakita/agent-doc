@@ -28,6 +28,15 @@ class ControllerSurfaceSnapshotRoutesTest {
         assertEquals(linkedSetOf(rootA, rootB), resolved)
     }
 
+    /** GH #435: the no-root refusal names what the frontend sent, once per path, in order. */
+    @Test
+    fun snapshotPathsAreDistinctInSurfaceOrder() {
+        assertEquals(
+            listOf("/w/a.md", "/w/b.md"),
+            ControllerSurfaceSnapshotRoutes.paths(snapshot("/w/a.md", "/w/b.md", "/w/a.md")),
+        )
+    }
+
     private fun snapshot(vararg paths: String): FrontendSurfaceSnapshot = FrontendSurfaceSnapshot(
         frontendInstanceId = "frontend-1",
         sequence = 1,

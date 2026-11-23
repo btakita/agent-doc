@@ -17,8 +17,16 @@ import java.util.concurrent.ConcurrentHashMap
 internal object RemoteClientLayoutAuthority {
     private val owners = ConcurrentHashMap<Project, MutableSet<String>>()
 
+    /**
+     * GH #435: each owning endpoint's last publication state on the frontend -> backend ->
+     * controller channel, so a route or sync that defers to the measured layout can name the hop
+     * that has not delivered it (`awaiting_first_snapshot`, `snapshot_refused`, `forwarded`, ...).
+     */
+    private val states = ConcurrentHashMap<String, String>()
+
     fun activate(project: Project, owner: String) {
         owners.computeIfAbsent(project) { ConcurrentHashMap.newKeySet() }.add(owner)
+        states[owner] = STATE_AWAITING_FIRST_SNAPSHOT
     }
 
     fun release(project: Project, owner: String) {
@@ -26,7 +34,26 @@ internal object RemoteClientLayoutAuthority {
             current.remove(owner)
             current.takeIf { it.isNotEmpty() }
         }
+        states.remove(owner)
     }
 
     fun isActive(project: Project): Boolean = owners[project]?.isNotEmpty() == true
+
+    /** Record [owner]'s publication [state]; ignored once the owner released its authority. */
+    fun note(project: Project, owner: String, state: String) {
+        if (owners[project]?.contains(owner) == true) states[owner] = state
+    }
+
+    /**
+     * The `frontend_layout=[...]` diagnostic token for [project]'s owners, or null when no
+     * measured forward owns its layout. One `owner:state` entry per endpoint, sorted.
+     */
+    fun describe(project: Project): String? {
+        val current = owners[project]?.sorted()?.takeIf { it.isNotEmpty() } ?: return null
+        return current.joinToString(",", "frontend_layout=[", "]") { owner ->
+            "$owner:${states[owner] ?: STATE_AWAITING_FIRST_SNAPSHOT}"
+        }
+    }
+
+    const val STATE_AWAITING_FIRST_SNAPSHOT = "awaiting_first_snapshot"
 }

@@ -1015,6 +1015,71 @@ fn print_jetbrains_remote_dev_install_scope(package_range: JetbrainsPackageRange
 
 const JETBRAINS_REMOTE_DEV_LOCAL_RECONCILE_NOTICE: &str = "Remote Dev peer scope: only plugin directories visible to this process were reconciled; a Client/Gateway on another machine was not verified or updated. Install the matching modular ZIP in that peer (or use JetBrains Marketplace synchronization), then restart both peers.";
 
+/// GH #435: a JetBrains Client or Gateway data directory (`JetBrainsClient2026.3`).
+fn is_jetbrains_client_label(label: &str) -> bool {
+    ["JetBrainsClient", "JetBrainsGateway", "Gateway"]
+        .iter()
+        .any(|product| label.starts_with(product))
+}
+
+/// GH #435: why this process is probably a Remote Dev backend whose Client runs
+/// elsewhere, from the same environment facts `agent-doc env` classifies.
+fn remote_dev_session_hint(
+    env: &std::collections::BTreeMap<String, String>,
+) -> Option<&'static str> {
+    let set = |key: &str| env.get(key).is_some_and(|value| !value.trim().is_empty());
+    if set("CODER")
+        || set("CODER_WORKSPACE_NAME")
+        || set("CODER_WORKSPACE_ID")
+        || set("CODER_WORKSPACE_AGENT_NAME")
+    {
+        Some("this is a Coder workspace")
+    } else if set("SSH_CONNECTION") {
+        Some("this shell is an SSH session")
+    } else {
+        None
+    }
+}
+
+fn compare_dotted_versions(left: &str, right: &str) -> std::cmp::Ordering {
+    let parts = |value: &str| {
+        value
+            .split('.')
+            .map(|part| part.parse::<u64>().unwrap_or(0))
+            .collect::<Vec<_>>()
+    };
+    parts(left).cmp(&parts(right))
+}
+
+/// GH #435: copy-pasteable steps for the JetBrains Client/Gateway half of the
+/// modular package. Its frontend module runs in the Client on the operator's
+/// machine; nothing on the Remote Dev backend can replace it, and a running
+/// Client keeps its jars mapped, so the Client must be quit before the swap.
+/// The 263-only package lived in `agent-doc-jetbrains-263/`; two folders with
+/// one plugin id would conflict, so both old folder names are removed.
+fn jetbrains_remote_dev_client_steps(
+    release: &str,
+    package_version: &str,
+    remote_hint: Option<&str>,
+) -> Vec<String> {
+    let asset = format!("agent-doc-jetbrains-262-{package_version}.zip");
+    let release = release.trim_start_matches('v');
+    let headline = match remote_hint {
+        Some(hint) => format!(
+            "JetBrains Client frontend NOT updated ({hint}; the Client runs on your local machine). On the machine that runs JetBrains Client/Gateway:"
+        ),
+        None => "If a JetBrains Client/Gateway on another machine connects to this IDE (Remote Dev), its frontend was NOT updated. On that machine:".to_string(),
+    };
+    vec![
+        headline,
+        format!("  1. Download https://github.com/{GITHUB_REPO}/releases/download/v{release}/{asset}"),
+        "  2. Quit JetBrains Client completely (every window). A running Client keeps its plugin jars mapped, so they cannot be replaced in place.".to_string(),
+        "  3. Open the Client plugins directory: Windows %APPDATA%\\JetBrains\\JetBrainsClient<YYYY.N>\\plugins, macOS ~/Library/Application Support/JetBrains/JetBrainsClient<YYYY.N>/plugins, Linux ~/.local/share/JetBrains/JetBrainsClient<YYYY.N>/plugins (the Client idea.log line `[split-surface] frontend surface publisher started` names the installed folder as plugin_path=).".to_string(),
+        format!("  4. Delete the agent-doc-jetbrains-262 and agent-doc-jetbrains-263 folders there, then extract {asset} into that directory (it creates agent-doc-jetbrains-262/)."),
+        format!("  5. Start the Client and reconnect. Its idea.log must show `[split-surface] frontend surface publisher started ... plugin={package_version}`; a backend idea.log line `[split-surface] frontend/backend plugin mismatch` means the Client still runs another build."),
+    ]
+}
+
 /// GH #108: the headline for a finished release install. A staged package left
 /// the plugin tree untouched by design, so it must not read "Plugin installed"
 /// stamped with the on-disk (old) version; it names the staged version instead.
@@ -4592,8 +4657,37 @@ impl PluginReconcileReport {
         lines.extend(self.unsupported_platform_warnings());
         if self.has_modular_jetbrains_target() {
             lines.push(JETBRAINS_REMOTE_DEV_LOCAL_RECONCILE_NOTICE.to_string());
+            if let Some(version) = self.unreconciled_client_package_version() {
+                lines.extend(jetbrains_remote_dev_client_steps(
+                    release,
+                    &version,
+                    remote_dev_session_hint(&std::env::vars().collect()),
+                ));
+            }
         }
         lines.join("\n")
+    }
+
+    /// GH #435: the modular package version a JetBrains Client/Gateway must
+    /// install by hand, or None when this process reconciled a local Client or
+    /// Gateway plugins directory itself. An upgrade on a Remote Dev backend
+    /// (Coder) cannot see the operator's Client, so it left it on its old build.
+    fn unreconciled_client_package_version(&self) -> Option<String> {
+        let jetbrains = || {
+            self.targets
+                .iter()
+                .filter(|target| target.family == PluginEditorFamily::JetBrains)
+        };
+        if jetbrains().any(|target| is_jetbrains_client_label(&target.label)) {
+            return None;
+        }
+        jetbrains()
+            .filter(|target| {
+                agent_doc_fs::jetbrains_install::jetbrains_platform_build(Path::new(&target.label))
+                    .is_some_and(|build| build >= 262)
+            })
+            .map(|target| target.version.clone())
+            .max_by(|left, right| compare_dotted_versions(left, right))
     }
 
     fn has_modular_jetbrains_target(&self) -> bool {
@@ -6938,6 +7032,101 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             plain_summary
                 .contains("a Client/Gateway on another machine was not verified or updated"),
             "{plain_summary}"
+        );
+    }
+
+    /// GH #435: `agent-doc upgrade` on a Coder backend updated the backend's
+    /// modular plugin and left the operator's JetBrains Client frontend on the
+    /// old build. The summary now prints the exact Client steps unless a local
+    /// Client/Gateway plugins directory was reconciled by this process.
+    #[test]
+    fn reconcile_summary_prints_client_steps_when_no_local_client_was_reconciled() {
+        use super::{PluginEditorFamily::JetBrains, PluginTargetOutcome as O};
+        let backend_only = super::PluginReconcileReport {
+            targets: vec![
+                reconcile_target(JetBrains, "IntelliJIdea2026.3", "0.2.1041", O::Unchanged),
+                reconcile_target(JetBrains, "IntelliJIdea2025.3", "0.2.1040", O::Unchanged),
+            ],
+        };
+        assert_eq!(
+            backend_only
+                .unreconciled_client_package_version()
+                .as_deref(),
+            Some("0.2.1041")
+        );
+        let steps = super::jetbrains_remote_dev_client_steps(
+            "v0.35.590",
+            "0.2.1041",
+            Some("this is a Coder workspace"),
+        )
+        .join("\n");
+        for needle in [
+            "JetBrains Client frontend NOT updated (this is a Coder workspace",
+            "https://github.com/btakita/agent-doc/releases/download/v0.35.590/agent-doc-jetbrains-262-0.2.1041.zip",
+            "Quit JetBrains Client completely",
+            "%APPDATA%\\JetBrains\\JetBrainsClient<YYYY.N>\\plugins",
+            "Delete the agent-doc-jetbrains-262 and agent-doc-jetbrains-263 folders",
+            "plugin=0.2.1041",
+            "frontend/backend plugin mismatch",
+        ] {
+            assert!(steps.contains(needle), "missing {needle:?}: {steps}");
+        }
+        assert!(
+            super::jetbrains_remote_dev_client_steps("0.35.590", "0.2.1041", None)[0]
+                .starts_with("If a JetBrains Client/Gateway on another machine connects"),
+        );
+        let summary = backend_only.summary("0.35.590");
+        assert!(
+            summary.contains("agent-doc-jetbrains-262-0.2.1041.zip"),
+            "{summary}"
+        );
+
+        let with_local_client = super::PluginReconcileReport {
+            targets: vec![
+                reconcile_target(JetBrains, "IntelliJIdea2026.3", "0.2.1041", O::Unchanged),
+                reconcile_target(JetBrains, "JetBrainsClient2026.3", "0.2.1041", O::Unchanged),
+            ],
+        };
+        assert_eq!(
+            with_local_client.unreconciled_client_package_version(),
+            None
+        );
+        assert!(
+            !with_local_client
+                .summary("0.35.590")
+                .contains("NOT updated")
+        );
+
+        let classic_only = super::PluginReconcileReport {
+            targets: vec![reconcile_target(
+                JetBrains,
+                "IntelliJIdea2025.3",
+                "0.2.1040",
+                O::Unchanged,
+            )],
+        };
+        assert!(!classic_only.summary("0.35.590").contains("NOT updated"));
+    }
+
+    #[test]
+    fn remote_dev_session_hint_reads_coder_then_ssh() {
+        let env = |pairs: &[(&str, &str)]| {
+            pairs
+                .iter()
+                .map(|(key, value)| (key.to_string(), value.to_string()))
+                .collect::<std::collections::BTreeMap<_, _>>()
+        };
+        assert_eq!(
+            super::remote_dev_session_hint(&env(&[("CODER", "true"), ("SSH_CONNECTION", "x")])),
+            Some("this is a Coder workspace")
+        );
+        assert_eq!(
+            super::remote_dev_session_hint(&env(&[("SSH_CONNECTION", "1 2 3 4")])),
+            Some("this shell is an SSH session")
+        );
+        assert_eq!(
+            super::remote_dev_session_hint(&env(&[("CODER_WORKSPACE_ID", " ")])),
+            None
         );
     }
 

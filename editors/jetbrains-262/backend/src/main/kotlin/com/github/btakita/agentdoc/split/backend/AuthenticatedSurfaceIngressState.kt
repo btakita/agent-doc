@@ -3,6 +3,7 @@
 package com.github.btakita.agentdoc.split.backend
 
 import com.github.btakita.agentdoc.shell.receipt.ActivationReceipt
+import com.github.btakita.agentdoc.shell.receipt.ShellIdentity
 import com.github.btakita.agentdoc.shell.ShellGenerationHost
 import com.github.btakita.agentdoc.split.ACTIVATION_RECEIPT_SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.FrontendSurface
@@ -10,14 +11,23 @@ import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
 import com.github.btakita.agentdoc.split.FrontendPresentationReceipt
 import com.github.btakita.agentdoc.split.FOCUSED_EDITOR_SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.MAIN_SURFACE_PANE_ID
+import com.github.btakita.agentdoc.split.SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.isSupportedSurfaceSnapshotSchema
 import com.github.btakita.agentdoc.split.SurfaceIngressAck
 import com.github.btakita.agentdoc.split.SurfaceIngressLease
 import com.github.btakita.agentdoc.split.SurfaceIngressStatus
 import com.github.btakita.agentdoc.split.SurfaceRole
+import com.github.btakita.agentdoc.AgentDocNotices
+import com.github.btakita.agentdoc.pluginVersion
+import com.intellij.notification.NotificationGroupManager
+import com.intellij.notification.NotificationType
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -49,14 +59,32 @@ internal class ControllerSurfaceIngressFactory : SurfaceIngressFactory {
     }
 }
 
+/** GH #435: tell the operator, in the Client UI, that the Client's frontend is a different build. */
+private fun notifyFrontendPluginMismatch(project: Project, detail: String) {
+    if (project.isDisposed) return
+    val notification = NotificationGroupManager.getInstance()
+        .getNotificationGroup("Agent Doc")
+        .createNotification(
+            "Agent Doc: the JetBrains Client frontend is not the backend's plugin ${pluginVersion()}",
+            "$detail. Layout sync needs both halves of one ZIP: $FRONTEND_PLUGIN_MISMATCH_REMEDY.",
+            NotificationType.WARNING,
+        )
+    AgentDocNotices.show(project, notification, "ControllerSurfaceIngress.frontendPluginMismatch")
+}
+
 /** One project's ingress: the controller publisher and layout forwarder behind the lease state. */
-private class ControllerSurfaceIngress(project: Project) : SurfaceIngress {
+private class ControllerSurfaceIngress(private val project: Project) : SurfaceIngress {
     private val layoutForwarder = ControllerRemoteClientLayoutForwarder(project)
     private val state = AuthenticatedSurfaceIngressState(
         ControllerSurfaceSnapshotPublisher(),
         layoutForwarder,
         backendActivationReceipt = ShellGenerationHost.getInstance().receipt(),
         backendActivationReceiptProvider = BackendFrontendReleaseActivation::receipt,
+        onFrontendPluginMismatch = { clientId, generation, detail ->
+            val line = frontendPluginMismatchLine(clientId, generation, detail)
+            Logger.getInstance(ControllerSurfaceIngress::class.java).warn(line)
+            notifyFrontendPluginMismatch(project, detail)
+        },
     )
 
     override val frontendAuthorityActive: StateFlow<Boolean> get() = state.frontendAuthorityActive
@@ -111,6 +139,19 @@ internal class AuthenticatedSurfaceIngressState(
     /** GH #339 R1: called when a connection reports a new frontend activation receipt. */
     private val onFrontendReceipt: (clientId: String, connectionGeneration: Long, receipt: ActivationReceipt) -> Unit =
         ::logFrontendReceipt,
+    /**
+     * GH #435: runs the connected-without-publication check [FRONTEND_AUTHORITY_DIAGNOSTIC_DELAY_MS]
+     * after a remote layout lease opens. Injected so tests run it synchronously.
+     */
+    private val scheduleDiagnostic: (delayMs: Long, check: () -> Unit) -> Unit = ::scheduleOnDiagnosticTimer,
+    /** GH #435: one backend idea.log line per publication-state change (refusal, acceptance, stall). */
+    private val log: (warn: Boolean, line: String) -> Unit = ::logPublication,
+    /**
+     * GH #435: called once per lease when the Client's frontend is not the backend's own build
+     * ([frontendPluginMismatch]). An upgrade on the Remote Dev backend never reaches the Client.
+     */
+    private val onFrontendPluginMismatch: (clientId: String, connectionGeneration: Long, detail: String) -> Unit =
+        { clientId, generation, detail -> logPublication(true, frontendPluginMismatchLine(clientId, generation, detail)) },
 ) {
     private val generation = AtomicLong(generationSeed)
     private val mutex = Mutex()
@@ -123,11 +164,18 @@ internal class AuthenticatedSurfaceIngressState(
     val layoutPublicationReadiness: StateFlow<LayoutPublicationReadiness> =
         mutableLayoutPublicationReadiness.asStateFlow()
 
+    /**
+     * GH #435: what the frontend -> backend -> controller channel last did for each open lease,
+     * read without the mutex by the delayed stall check. Keyed by lease id; removed on retire.
+     */
+    private val publications = ConcurrentHashMap<String, LeasePublication>()
+
     suspend fun open(
         authenticatedClientId: String,
         frontendInstanceId: String,
     ): SurfaceIngressLease = mutex.withLock {
         connections.remove(authenticatedClientId)?.let { previous ->
+            publications.remove(previous.lease.leaseId)
             if (previous.layoutAuthority) {
                 layoutForwarder.retire(previous.clientId, previous.lease.connectionGeneration)
             }
@@ -146,8 +194,60 @@ internal class AuthenticatedSurfaceIngressState(
             acceptedSurfaces = emptyMap(),
             layoutAuthority = layoutAuthority,
         )
+        val publication = LeasePublication(authenticatedClientId, lease.connectionGeneration)
+        publications[lease.leaseId] = publication
         refreshFrontendAuthority()
+        log(
+            false,
+            "[split-surface] lease opened client=$authenticatedClientId generation=${lease.connectionGeneration} " +
+                "layout_authority=${if (layoutAuthority) "remote_measured" else "local_client"} " +
+                "readiness=${mutableLayoutPublicationReadiness.value.wire()}",
+        )
+        if (layoutAuthority) {
+            scheduleDiagnostic(FRONTEND_AUTHORITY_DIAGNOSTIC_DELAY_MS) { reportStalledPublication(lease.leaseId) }
+        }
         lease
+    }
+
+    /**
+     * GH #435 / GH #352: a remote layout lease that has not had one snapshot accepted after the
+     * schema-negotiation window leaves structural routing blocked. Say so in the backend log with
+     * the last refusal, so the failing hop (frontend never published, controller delivery failed,
+     * no controller root, validation) is visible without the Client's idea.log.
+     */
+    internal fun reportStalledPublication(leaseId: String) {
+        val publication = publications[leaseId] ?: return
+        if (publication.acceptedSequence > 0) return
+        log(
+            true,
+            frontendAuthorityUnavailableDiagnostic(
+                publication.clientId,
+                "remote",
+                FRONTEND_AUTHORITY_CONNECTED_WITHOUT_PUBLICATION,
+            ) + " generation=${publication.generation} refusals=${publication.refusals} " +
+                "last_refusal=${publication.lastRefusal ?: "none(the_frontend_published_no_snapshot)"}",
+        )
+    }
+
+    private fun recordRefusal(current: ConnectionState, ack: SurfaceIngressAck, sequence: Long): SurfaceIngressAck {
+        val publication = publications[current.lease.leaseId] ?: return ack
+        val refusal = "${ack.status}:${ack.diagnostic ?: ""}"
+        publication.refusals++
+        val changed = publication.lastRefusal != refusal
+        publication.lastRefusal = refusal
+        if (current.layoutAuthority) {
+            layoutForwarder.refused(current.clientId, current.lease.connectionGeneration, ack.status.name, ack.diagnostic)
+        }
+        if (changed) {
+            log(
+                true,
+                "[split-surface] snapshot refused client=${current.clientId} " +
+                    "generation=${current.lease.connectionGeneration} sequence=$sequence status=${ack.status} " +
+                    "readiness=${mutableLayoutPublicationReadiness.value.wire()} " +
+                    "diagnostic=${ack.diagnostic ?: "none"}",
+            )
+        }
+        return ack
     }
 
     suspend fun publish(
@@ -159,9 +259,17 @@ internal class AuthenticatedSurfaceIngressState(
         if (current == null || current.lease != lease || snapshot.frontendInstanceId != current.frontendInstanceId) {
             return@withLock rejected(SurfaceIngressStatus.STALE_LEASE, lease, "lease or frontend epoch is stale")
         }
+        publications[lease.leaseId]?.takeIf { !it.pluginChecked }?.let { publication ->
+            publication.pluginChecked = true
+            frontendPluginMismatch(
+                snapshot,
+                ActivationReceipt.decodeOrNull(snapshot.activationReceipt),
+                backendActivationReceiptProvider().shellDigest,
+            )?.let { detail -> onFrontendPluginMismatch(authenticatedClientId, lease.connectionGeneration, detail) }
+        }
         val validation = SurfaceSnapshotValidator.validate(snapshot)
         if (validation != null) {
-            return@withLock rejected(validation.status, lease, validation.diagnostic)
+            return@withLock recordRefusal(current, rejected(validation.status, lease, validation.diagnostic), snapshot.sequence)
         }
         if (snapshot.sequence <= current.acceptedSequence) {
             return@withLock rejected(
@@ -186,10 +294,14 @@ internal class AuthenticatedSurfaceIngressState(
                 // is required to publish again, even if a late matching snapshot arrives.
                 publisher.retire(authenticatedClientId, lease.connectionGeneration)
             }
-            return@withLock rejected(
-                SurfaceIngressStatus.DELIVERY_FAILED,
-                lease,
-                FRONTEND_AUTHORITY_UNAVAILABLE_READINESS,
+            return@withLock recordRefusal(
+                current,
+                rejected(
+                    SurfaceIngressStatus.DELIVERY_FAILED,
+                    lease,
+                    FRONTEND_AUTHORITY_UNAVAILABLE_READINESS,
+                ),
+                snapshot.sequence,
             )
         }
         val delivery = publisher.publish(
@@ -198,10 +310,14 @@ internal class AuthenticatedSurfaceIngressState(
             snapshot = snapshot,
         )
         if (!delivery.accepted) {
-            return@withLock rejected(
-                SurfaceIngressStatus.DELIVERY_FAILED,
-                lease,
-                delivery.diagnostic ?: "controller delivery failed",
+            return@withLock recordRefusal(
+                current,
+                rejected(
+                    SurfaceIngressStatus.DELIVERY_FAILED,
+                    lease,
+                    delivery.diagnostic ?: "controller delivery failed",
+                ),
+                snapshot.sequence,
             )
         }
         connections[authenticatedClientId] = current.copy(
@@ -213,6 +329,24 @@ internal class AuthenticatedSurfaceIngressState(
             onFrontendReceipt(authenticatedClientId, lease.connectionGeneration, receipt)
         }
         refreshFrontendAuthority()
+        publications[lease.leaseId]?.let { publication ->
+            val firstAcceptance = publication.acceptedSequence == 0L
+            val recovered = publication.lastRefusal
+            publication.acceptedSequence = snapshot.sequence
+            publication.lastRefusal = null
+            if (firstAcceptance || recovered != null) {
+                log(
+                    false,
+                    "[split-surface] snapshot accepted client=$authenticatedClientId " +
+                        "generation=${lease.connectionGeneration} sequence=${snapshot.sequence} " +
+                        "schema=${snapshot.schemaVersion} surfaces=${snapshot.surfaces.size} " +
+                        "measured_windows=${snapshot.measuredWindowCount()} " +
+                        "layout_authority=${if (current.layoutAuthority) "remote_measured" else "local_client"} " +
+                        "readiness=${mutableLayoutPublicationReadiness.value.wire()} " +
+                        "first=$firstAcceptance after_refusal=${recovered ?: "none"}",
+                )
+            }
+        }
         // GH #320 option B: the controller policy has now seen the complete snapshot, so its
         // measured main-window geometry may drive pane layout. The pane-layout surface fences
         // its own generation/sequence; the policy's projection status (frozen without terminal
@@ -302,11 +436,17 @@ internal class AuthenticatedSurfaceIngressState(
         val current = connections[authenticatedClientId]
         if (current?.lease != lease) return@withLock
         connections.remove(authenticatedClientId)
+        publications.remove(lease.leaseId)
         if (current.layoutAuthority) {
             layoutForwarder.retire(authenticatedClientId, lease.connectionGeneration)
         }
         publisher.retire(authenticatedClientId, lease.connectionGeneration)
         refreshFrontendAuthority()
+        log(
+            false,
+            "[split-surface] lease retired client=$authenticatedClientId generation=${lease.connectionGeneration} " +
+                "accepted_sequence=${current.acceptedSequence}",
+        )
     }
 
     /** The latest frontend activation receipt each connected client reported (schema 5). */
@@ -339,6 +479,14 @@ internal class AuthenticatedSurfaceIngressState(
         diagnostic = diagnostic,
     )
 
+    /** GH #435: mutable publication bookkeeping of one lease; see [publications]. */
+    private class LeasePublication(val clientId: String, val generation: Long) {
+        @Volatile var acceptedSequence: Long = 0
+        @Volatile var lastRefusal: String? = null
+        @Volatile var refusals: Long = 0
+        @Volatile var pluginChecked: Boolean = false
+    }
+
     private data class ConnectionState(
         val clientId: String,
         val frontendInstanceId: String,
@@ -357,8 +505,74 @@ internal class AuthenticatedSurfaceIngressState(
         fun logFrontendReceipt(clientId: String, connectionGeneration: Long, receipt: ActivationReceipt) {
             LOG.info("[shell] frontend client=$clientId connection_generation=$connectionGeneration ${receipt.encode()}")
         }
+
+        fun logPublication(warn: Boolean, line: String) {
+            if (warn) LOG.warn(line) else LOG.info(line)
+        }
+
+        private val diagnosticTimer: ScheduledExecutorService by lazy {
+            Executors.newSingleThreadScheduledExecutor { runnable ->
+                Thread(runnable, "agent-doc-surface-ingress-diagnostic").apply { isDaemon = true }
+            }
+        }
+
+        fun scheduleOnDiagnosticTimer(delayMs: Long, check: () -> Unit) {
+            diagnosticTimer.schedule(
+                {
+                    try {
+                        check()
+                    } catch (failure: Exception) {
+                        LOG.warn("[split-surface] publication stall check failed: ${failure.message}", failure)
+                    }
+                },
+                delayMs,
+                TimeUnit.MILLISECONDS,
+            )
+        }
     }
 }
+
+/**
+ * GH #435: why the JetBrains Client's frontend is not this backend's Agent Doc build, or null when
+ * it is (or cannot be told apart). Both halves of one modular ZIP share `agent.doc.shared`, so one
+ * install reports one shell digest; a frontend that negotiated a lower snapshot schema predates
+ * this backend. An upgrade run on a Remote Dev backend never updates the Client, so this is the
+ * version check that names the stale side.
+ */
+internal fun frontendPluginMismatch(
+    snapshot: FrontendSurfaceSnapshot,
+    frontendReceipt: ActivationReceipt?,
+    backendShellDigest: String,
+): String? {
+    if (snapshot.schemaVersion < SURFACE_SNAPSHOT_SCHEMA_VERSION) {
+        return "frontend_schema=${snapshot.schemaVersion} backend_schema=$SURFACE_SNAPSHOT_SCHEMA_VERSION " +
+            "(the JetBrains Client runs an older Agent Doc frontend)"
+    }
+    val frontendShell = frontendReceipt?.shellDigest
+        ?: return "frontend_receipt=unreadable (the JetBrains Client runs a different Agent Doc frontend)"
+    if (frontendShell == ShellIdentity.UNKNOWN || backendShellDigest == ShellIdentity.UNKNOWN) return null
+    if (frontendShell == backendShellDigest) return null
+    return "frontend_shell=${frontendShell.take(12)} backend_shell=${backendShellDigest.take(12)} " +
+        "(the JetBrains Client and the Remote Dev backend run different Agent Doc builds)"
+}
+
+internal const val FRONTEND_PLUGIN_MISMATCH_REMEDY =
+    "install the same agent-doc-jetbrains-262-<version>.zip in the JetBrains Client: quit the Client, " +
+        "delete every agent-doc-jetbrains-262 and agent-doc-jetbrains-263 folder from its plugins directory, " +
+        "extract the ZIP there, and start the Client again (`agent-doc upgrade` on the backend prints the " +
+        "exact download URL and directory)"
+
+internal fun frontendPluginMismatchLine(clientId: String, generation: Long, detail: String): String =
+    "[split-surface] frontend/backend plugin mismatch client=$clientId generation=$generation $detail " +
+        "remedy=$FRONTEND_PLUGIN_MISMATCH_REMEDY"
+
+/** GH #435: the editor windows of [this] snapshot that carry measured on-screen bounds, as `n/total`. */
+internal fun FrontendSurfaceSnapshot.measuredWindowCount(): String {
+    val windows = surfaces.flatMap { it.windows }
+    return "${windows.count { it.bounds != null }}/${windows.size}"
+}
+
+private fun LayoutPublicationReadiness.wire(): String = name.lowercase()
 
 internal data class SnapshotValidationFailure(
     val status: SurfaceIngressStatus,

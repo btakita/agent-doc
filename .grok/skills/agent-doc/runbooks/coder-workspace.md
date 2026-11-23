@@ -64,6 +64,43 @@ creates one with the receipt's attach command.
   logs `[route] layout not synced for <doc>: [route] layout-not-synced: ...`
   with the reason instead of moving tmux columns. Local (non-Gateway) IDEs
   are unaffected.
+- Upgrading on Coder (GH #435): `agent-doc upgrade` in the workspace updates
+  only the backend's plugin. It prints the Client steps (download URL, quit
+  the Client, delete `agent-doc-jetbrains-262` and `agent-doc-jetbrains-263`
+  from the Client plugins directory, extract the ZIP, restart). Until the
+  Client matches, the backend logs `[split-surface] frontend/backend plugin
+  mismatch` and shows a warning in the Client.
+- JetBrains Gateway with the frontend installed (GH #435): once the Client's
+  frontend opens its lease, the backend logs `reason=frontend_measured_layout_authority`
+  and `[layout-detect] unknown windows=0 ... flat_evidence_has_no_column_geometry`
+  by design. The backend has no editor windows of its own; the geometry travels
+  Client frontend -> backend RPC -> controller `editor_view_snapshot_observe`
+  -> `[rd-layout] forwarded measured columns`. Read the hop that stopped from:
+  - Client `idea.log`: `[split-surface] frontend surface publisher started`
+    (module loaded), `frontend/backend ingress connected generation=<n>`,
+    `snapshot schema negotiated version=<n> ... geometry=measured`, then
+    `snapshot accepted ... measured_windows=<a>/<b>` or
+    `snapshot rejected status=<STATUS> ... retry_in_ms=<ms> diagnostic=<why>`.
+    A recoverable refusal (`DELIVERY_FAILED`, `PROJECT_MISMATCH`,
+    `INCOMPLETE`) republishes on a 1-30 s backoff.
+  - Backend `idea.log`: `[split-surface] frontend/backend ingress accepted`
+    (or `deferred`), `lease opened ... layout_authority=remote_measured`,
+    `snapshot refused ... status=<STATUS> diagnostic=<why>`,
+    `[split-surface] controller delivery failed`, and 5 s after an
+    unpublished lease `[layout-sync] frontend layout publisher unavailable
+    ... readiness_reason=frontend_connected_without_accepted_publication
+    ... last_refusal=<STATUS>:<why>`. A route that defers names each lease's
+    state: `[route] surface reference unavailable ...
+    layout_authority=frontend_measured frontend_layout=[remote-client:<id>:<gen>:<state>]`
+    (`awaiting_first_snapshot`, `snapshot_refused(<STATUS>)`,
+    `measured_layout_unavailable(<reason>)`, `forward_unavailable(...)`, or
+    `forwarded(columns=<n>,sequence=<n>)`).
+  - `diagnostic=Timed out waiting for 2000 ms` together with route failures
+    `Project Controller did not respond within 10000ms`, and a non-blocking
+    connect to `.agent-doc/controller.sock` returning `EAGAIN`, means the
+    controller's accept backlog is full. Builds before `2d4156fee7` counted
+    parked long-poll clients against the 64 short-RPC slots. Upgrade, or
+    recover with `agent-doc admin recycle --project-root <root>`.
 - VS Code Remote SSH/Coder: the extension declares
   `"extensionKind": ["workspace"]`, so it runs in the remote extension host.
   Run `agent-doc plugin install vscode` on the workspace: it installs into

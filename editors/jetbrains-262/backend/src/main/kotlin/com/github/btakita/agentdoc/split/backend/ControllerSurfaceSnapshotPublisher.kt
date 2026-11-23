@@ -76,9 +76,13 @@ internal class ControllerSurfaceSnapshotPublisher : SurfaceSnapshotPublisher {
         )
         val deliveryRoots = if (snapshotRoots.isEmpty()) previousRoots else snapshotRoots
         if (deliveryRoots.isEmpty()) {
+            // GH #435: name what the frontend sent, so a Client path the backend cannot resolve
+            // (`LocalFileSystem` miss) reads differently from a snapshot with no open document.
+            val paths = ControllerSurfaceSnapshotRoutes.paths(snapshot)
             return SurfaceDeliveryResult(
                 false,
-                "frontend snapshot has no session document with an agent-doc controller root",
+                "frontend snapshot has no session document with an agent-doc controller root " +
+                    "paths=${paths.size} first=${paths.firstOrNull() ?: "none"}",
             )
         }
         // Retain attempted roots before transport. A partial fan-out must still be retired if the
@@ -207,23 +211,24 @@ internal object ControllerSurfaceSnapshotRoutes {
         snapshot: FrontendSurfaceSnapshot,
         isSessionDocument: (String) -> Boolean,
         controllerRoot: (String) -> String?,
-    ): Set<String> = buildSet {
+    ): Set<String> =
+        paths(snapshot).asSequence()
+            .filter(isSessionDocument)
+            .mapNotNull(controllerRoot)
+            .toSet()
+
+    /** Every document path [snapshot] names, in surface order, without duplicates. */
+    fun paths(snapshot: FrontendSurfaceSnapshot): List<String> = buildList {
         snapshot.surfaces.forEach { surface ->
-            val paths = buildList {
-                surface.focusedEditorPath?.let(::add)
-                surface.layoutColumns?.forEach { column -> addAll(column.paths) }
-                surface.windows.forEach { window ->
-                    window.selectedPath?.let(::add)
-                    addAll(window.visiblePaths)
-                    addAll(window.openPaths)
-                }
+            surface.focusedEditorPath?.let(::add)
+            surface.layoutColumns?.forEach { column -> addAll(column.paths) }
+            surface.windows.forEach { window ->
+                window.selectedPath?.let(::add)
+                addAll(window.visiblePaths)
+                addAll(window.openPaths)
             }
-            paths.asSequence()
-                .filter(isSessionDocument)
-                .mapNotNull(controllerRoot)
-                .forEach(::add)
         }
-    }
+    }.distinct()
 
     fun mergePresentations(
         projections: List<FrontendPresentationProjection>,

@@ -877,7 +877,12 @@ object TerminalUtil {
         val measuredAuthority = RemoteClientLayoutAuthority.isActive(project)
         LOG.warn(
             "[route] surface reference unavailable reason=$reason; sending the --col snapshot" +
-                if (measuredAuthority) " layout_authority=${RouteLayoutRequest.LAYOUT_AUTHORITY_FRONTEND_MEASURED}" else "",
+                if (measuredAuthority) {
+                    " layout_authority=${RouteLayoutRequest.LAYOUT_AUTHORITY_FRONTEND_MEASURED}" +
+                        RemoteClientLayoutAuthority.describe(project)?.let { " $it" }.orEmpty()
+                } else {
+                    ""
+                },
         )
         return editorSnapshotRouteLayout(project, cwd).withMeasuredLayoutAuthority(measuredAuthority)
     }

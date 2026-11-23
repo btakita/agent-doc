@@ -319,6 +319,13 @@ internal interface RemoteClientLayoutForwarder {
 
     fun retire(clientId: String, generation: Long)
 
+    /**
+     * GH #435: the ingress refused this generation's snapshot before any forward (no controller
+     * root, controller delivery failed, validation). Recorded as the endpoint's publication state
+     * so a deferred route names the failing hop; it changes no authority.
+     */
+    fun refused(clientId: String, generation: Long, status: String, diagnostic: String?) = Unit
+
     object Disabled : RemoteClientLayoutForwarder {
         override fun open(clientId: String, generation: Long): Boolean = false
 
@@ -329,6 +336,17 @@ internal interface RemoteClientLayoutForwarder {
         override fun retire(clientId: String, generation: Long) = Unit
     }
 }
+
+/**
+ * GH #435: one compact `state(detail)` token for [RemoteClientLayoutAuthority.note]. Whitespace
+ * becomes `_` and the detail is bounded, so the token stays one field of a log line.
+ */
+internal fun publicationState(state: String, detail: String?): String {
+    val compact = detail?.trim()?.replace(Regex("\\s+"), "_")?.take(PUBLICATION_STATE_DETAIL_LIMIT)
+    return if (compact.isNullOrEmpty()) state else "$state($compact)"
+}
+
+private const val PUBLICATION_STATE_DETAIL_LIMIT = 96
 
 /** One endpoint per authenticated frontend connection, so a reconnect is never fenced. */
 internal fun remoteClientSurfaceId(clientId: String, generation: Long): String =
@@ -372,6 +390,11 @@ internal class ControllerRemoteClientLayoutForwarder(private val project: Projec
     override fun hold(clientId: String, generation: Long) {
         val surfaceId = remoteClientSurfaceId(clientId, generation)
         liveSurfaces.replace(surfaceId, SurfaceState.HELD) ?: return
+        RemoteClientLayoutAuthority.note(
+            project,
+            surfaceId,
+            publicationState("held", FRONTEND_AUTHORITY_UNAVAILABLE_READINESS),
+        )
         execute { withdrawSurface(surfaceId, reason = FRONTEND_AUTHORITY_UNAVAILABLE_READINESS) }
     }
 
@@ -379,6 +402,12 @@ internal class ControllerRemoteClientLayoutForwarder(private val project: Projec
         val surfaceId = remoteClientSurfaceId(clientId, generation)
         liveSurfaces.remove(surfaceId)
         execute { retireSurface(surfaceId, reason = "frontend_connection_retired") }
+    }
+
+    override fun refused(clientId: String, generation: Long, status: String, diagnostic: String?) {
+        val surfaceId = remoteClientSurfaceId(clientId, generation)
+        if (!liveSurfaces.containsKey(surfaceId)) return
+        RemoteClientLayoutAuthority.note(project, surfaceId, publicationState("snapshot_refused", status))
     }
 
     fun dispose() {
@@ -439,10 +468,20 @@ internal class ControllerRemoteClientLayoutForwarder(private val project: Projec
         )
         if (receipt.exitCode != 0) {
             forwarded.remove(surfaceId)
+            RemoteClientLayoutAuthority.note(
+                project,
+                surfaceId,
+                publicationState("forward_unavailable", "exit=${receipt.exitCode}"),
+            )
             LOG.warn("[rd-layout] measured layout forward unavailable surface=$surfaceId: ${receipt.output}")
             return
         }
         forwarded[surfaceId] = pending
+        RemoteClientLayoutAuthority.note(
+            project,
+            surfaceId,
+            publicationState("forwarded", "columns=${layout.columns.size},sequence=${snapshot.sequence}"),
+        )
         LOG.info(
             "[rd-layout] forwarded measured columns surface=$surfaceId root=${pending.projectRoot} " +
                 "columns=${layout.columns.size} [${layout.columns.joinToString(" | ") { it.joinToString(",") }}] " +
@@ -469,6 +508,7 @@ internal class ControllerRemoteClientLayoutForwarder(private val project: Projec
     }
 
     private fun noteUnavailable(surfaceId: String, reason: String) {
+        RemoteClientLayoutAuthority.note(project, surfaceId, publicationState("measured_layout_unavailable", reason))
         if (lastUnavailable.put(surfaceId, reason) != reason) {
             LOG.info(
                 "[rd-layout] measured layout unavailable surface=$surfaceId reason=$reason " +

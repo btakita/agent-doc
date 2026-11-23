@@ -2,7 +2,9 @@ package com.github.btakita.agentdoc
 
 import com.intellij.openapi.project.Project
 import java.lang.reflect.Proxy
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -30,6 +32,40 @@ class RemoteClientLayoutAuthorityTest {
         assertFalse(RemoteClientLayoutAuthority.isActive(project))
         RemoteClientLayoutAuthority.release(project, "remote-client:b:2")
         assertFalse(RemoteClientLayoutAuthority.isActive(project))
+    }
+
+    /**
+     * GH #435: a route that defers to the measured layout names each owner's publication state,
+     * so `frontend_measured` with no geometry says which hop has not delivered it.
+     */
+    @Test
+    fun describeNamesEachOwnersPublicationStateUntilItReleases() {
+        val project = fakeProject()
+        assertNull(RemoteClientLayoutAuthority.describe(project))
+
+        RemoteClientLayoutAuthority.activate(project, "remote-client:b:2")
+        RemoteClientLayoutAuthority.activate(project, "remote-client:a:1")
+        assertEquals(
+            "frontend_layout=[remote-client:a:1:awaiting_first_snapshot,remote-client:b:2:awaiting_first_snapshot]",
+            RemoteClientLayoutAuthority.describe(project),
+        )
+
+        RemoteClientLayoutAuthority.note(project, "remote-client:a:1", "snapshot_refused(DELIVERY_FAILED)")
+        RemoteClientLayoutAuthority.note(project, "remote-client:unknown:9", "forwarded")
+        assertEquals(
+            "frontend_layout=[remote-client:a:1:snapshot_refused(DELIVERY_FAILED)," +
+                "remote-client:b:2:awaiting_first_snapshot]",
+            RemoteClientLayoutAuthority.describe(project),
+        )
+
+        RemoteClientLayoutAuthority.release(project, "remote-client:a:1")
+        RemoteClientLayoutAuthority.note(project, "remote-client:a:1", "forwarded")
+        assertEquals(
+            "frontend_layout=[remote-client:b:2:awaiting_first_snapshot]",
+            RemoteClientLayoutAuthority.describe(project),
+        )
+        RemoteClientLayoutAuthority.release(project, "remote-client:b:2")
+        assertNull(RemoteClientLayoutAuthority.describe(project))
     }
 
     private fun fakeProject(): Project =

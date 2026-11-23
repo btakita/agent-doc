@@ -461,7 +461,8 @@ class SyncLayoutAction : ImplAction {
                 LOG.warn(
                     "[sync] surface reference unavailable reason=" +
                         (if (listener == null) "no_surface_listener" else "surface_capture_deferred") +
-                        "; sending the --col snapshot",
+                        "; sending the --col snapshot" +
+                        RemoteClientLayoutAuthority.describe(project)?.let { " $it" }.orEmpty(),
                 )
             }
             // IDEA component state is captured on the EDT exactly once; the layout it implies is

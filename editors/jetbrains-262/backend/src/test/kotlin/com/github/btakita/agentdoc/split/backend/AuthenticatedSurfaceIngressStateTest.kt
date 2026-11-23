@@ -92,9 +92,10 @@ class AuthenticatedSurfaceIngressStateTest {
     @Test
     fun frontendActivationReceiptIsRecordedOncePerChange() = runBlocking {
         val reported = mutableListOf<Triple<String, Long, ActivationReceipt>>()
-        val state = AuthenticatedSurfaceIngressState(RecordingPublisher()) { client, generation, receipt ->
-            reported += Triple(client, generation, receipt)
-        }
+        val state = AuthenticatedSurfaceIngressState(
+            RecordingPublisher(),
+            onFrontendReceipt = { client, generation, receipt -> reported += Triple(client, generation, receipt) },
+        )
         val lease = state.open("client-a", "frontend-a")
         val receipt = ActivationReceipt.shellOnly(ActivationReceipt.ROLE_FRONTEND)
 
@@ -268,6 +269,162 @@ class AuthenticatedSurfaceIngressStateTest {
         assertEquals(LayoutPublicationReadiness.INACTIVE, state.layoutPublicationReadiness.value)
     }
 
+    /**
+     * GH #435: a Coder backend held a remote measured-layout lease (`frontend_measured`) while the
+     * controller never received the Client's geometry, and its idea.log said nothing about why.
+     * The backend now logs each refusal once per change, tells the forwarder (so a deferred route
+     * names the hop), reports a lease that is still unpublished after the negotiation window with
+     * its last refusal, and logs the acceptance that clears it.
+     */
+    @Test
+    fun remoteLeaseLogsTheFailingPublicationHopAndItsRecovery() = runBlocking {
+        val publisher = RecordingPublisher()
+        val forwarder = RecordingForwarder()
+        val lines = mutableListOf<Pair<Boolean, String>>()
+        val checks = mutableListOf<Pair<Long, () -> Unit>>()
+        val state = AuthenticatedSurfaceIngressState(
+            publisher,
+            forwarder,
+            scheduleDiagnostic = { delayMs, check -> checks += delayMs to check },
+            log = { warn, line -> lines += warn to line },
+        )
+        val lease = state.open("client-a", "frontend-a")
+        assertEquals(listOf(FRONTEND_AUTHORITY_DIAGNOSTIC_DELAY_MS), checks.map { it.first })
+        assertTrue(lines.single().second.contains("lease opened client=client-a"), lines.toString())
+        assertTrue(lines.single().second.contains("layout_authority=remote_measured"), lines.toString())
+
+        publisher.deliver = false
+        publisher.diagnostic = "Timed out waiting for 2000 ms"
+        repeat(3) { attempt ->
+            assertEquals(
+                SurfaceIngressStatus.DELIVERY_FAILED,
+                state.publish("client-a", lease, snapshot("frontend-a", attempt + 1L)).status,
+            )
+        }
+        val refusals = lines.filter { it.second.contains("snapshot refused") }
+        assertEquals(1, refusals.size, "one line per refusal change, not per retry: $lines")
+        assertTrue(refusals.single().first, "a refusal is a warning")
+        assertTrue(refusals.single().second.contains("status=DELIVERY_FAILED"), refusals.toString())
+        assertTrue(refusals.single().second.contains("diagnostic=Timed out waiting for 2000 ms"), refusals.toString())
+        assertEquals(3, forwarder.refused.size, "every refusal reaches the route-visible state")
+
+        checks.single().second()
+        val stall = lines.last()
+        assertTrue(stall.first)
+        assertTrue(stall.second.contains("frontend layout publisher unavailable client=client-a"), stall.second)
+        assertTrue(
+            stall.second.contains("readiness_reason=$FRONTEND_AUTHORITY_CONNECTED_WITHOUT_PUBLICATION"),
+            stall.second,
+        )
+        assertTrue(stall.second.contains("refusals=3"), stall.second)
+        assertTrue(
+            stall.second.contains("last_refusal=DELIVERY_FAILED:Timed out waiting for 2000 ms"),
+            stall.second,
+        )
+
+        publisher.deliver = true
+        assertEquals(SurfaceIngressStatus.ACCEPTED, state.publish("client-a", lease, snapshot("frontend-a", 4)).status)
+        val accepted = lines.last()
+        assertFalse(accepted.first)
+        assertTrue(accepted.second.contains("snapshot accepted client=client-a"), accepted.second)
+        assertTrue(accepted.second.contains("sequence=4"), accepted.second)
+        assertTrue(accepted.second.contains("readiness=accepted"), accepted.second)
+        assertTrue(accepted.second.contains("first=true"), accepted.second)
+        assertTrue(accepted.second.contains("after_refusal=DELIVERY_FAILED:"), accepted.second)
+
+        val before = lines.size
+        assertEquals(SurfaceIngressStatus.ACCEPTED, state.publish("client-a", lease, snapshot("frontend-a", 5)).status)
+        assertEquals(before, lines.size, "a steady accepted stream logs nothing")
+        checks.single().second()
+        assertEquals(before, lines.size, "an accepted lease never reports a stall")
+    }
+
+    @Test
+    fun aRemoteLeaseThatNeverPublishesSaysTheFrontendSentNothing() = runBlocking {
+        val lines = mutableListOf<Pair<Boolean, String>>()
+        val checks = mutableListOf<() -> Unit>()
+        val state = AuthenticatedSurfaceIngressState(
+            RecordingPublisher(),
+            RecordingForwarder(),
+            scheduleDiagnostic = { _, check -> checks += check },
+            log = { warn, line -> lines += warn to line },
+        )
+        val lease = state.open("client-a", "frontend-a")
+        checks.single()()
+        assertTrue(lines.last().second.contains("last_refusal=none(the_frontend_published_no_snapshot)"), lines.toString())
+
+        state.retire("client-a", lease)
+        val retiredLines = lines.size
+        checks.single()()
+        assertEquals(retiredLines, lines.size, "a retired lease is not reported")
+    }
+
+    @Test
+    fun aLocalLeaseSchedulesNoLayoutStallCheck() = runBlocking {
+        val checks = mutableListOf<() -> Unit>()
+        val state = AuthenticatedSurfaceIngressState(
+            RecordingPublisher(),
+            RecordingForwarder(acquiresLayout = false),
+            scheduleDiagnostic = { _, check -> checks += check },
+            log = { _, _ -> },
+        )
+        state.open("client-a", "frontend-a")
+        assertTrue(checks.isEmpty())
+    }
+
+    /**
+     * GH #435: `agent-doc upgrade` on the Coder backend left the JetBrains Client frontend on the
+     * previous build. The backend names that split once per lease from the frontend's own receipt.
+     */
+    @Test
+    fun aFrontendFromAnotherBuildIsReportedOncePerLease() = runBlocking {
+        val mismatches = mutableListOf<String>()
+        val state = AuthenticatedSurfaceIngressState(
+            RecordingPublisher(),
+            RecordingForwarder(),
+            backendActivationReceipt = backendActivation.copy(implSha256 = null, epoch = 0),
+            scheduleDiagnostic = { _, _ -> },
+            log = { _, _ -> },
+            onFrontendPluginMismatch = { client, _, detail -> mismatches += "$client $detail" },
+        )
+        val lease = state.open("client-a", "frontend-a")
+        val stale = frontendActivation.copy(shellDigest = "d".repeat(64), implSha256 = null, epoch = 0)
+        repeat(2) { attempt ->
+            state.publish(
+                "client-a",
+                lease,
+                snapshot("frontend-a", attempt + 1L).copy(activationReceipt = stale.encode()),
+            )
+        }
+        assertEquals(1, mismatches.size, mismatches.toString())
+        assertTrue(mismatches.single().contains("frontend_shell=dddddddddddd backend_shell=aaaaaaaaaaaa"), mismatches.toString())
+    }
+
+    @Test
+    fun frontendPluginMismatchNamesTheStaleSide() {
+        val current = snapshot("frontend-a", 1)
+        val sameBuild = frontendActivation.copy(shellDigest = "a".repeat(64))
+        assertEquals(null, frontendPluginMismatch(current.copy(activationReceipt = sameBuild.encode()), sameBuild, "a".repeat(64)))
+        assertTrue(
+            frontendPluginMismatch(current.copy(schemaVersion = 4), null, "a".repeat(64))!!
+                .contains("frontend_schema=4 backend_schema=5"),
+        )
+        assertTrue(frontendPluginMismatch(current, null, "a".repeat(64))!!.contains("frontend_receipt=unreadable"))
+        assertEquals(null, frontendPluginMismatch(current, sameBuild, "unknown"), "an unbuilt identity proves nothing")
+        val line = frontendPluginMismatchLine("client-a", 3, "frontend_shell=x backend_shell=y")
+        assertTrue(line.contains("frontend/backend plugin mismatch client=client-a generation=3"), line)
+        assertTrue(line.contains("agent-doc-jetbrains-263"), line)
+        assertTrue(line.contains("start the Client again"), line)
+    }
+
+    @Test
+    fun publicationStateIsOneCompactLogField() {
+        assertEquals("forwarded", publicationState("forwarded", null))
+        assertEquals("snapshot_refused(DELIVERY_FAILED)", publicationState("snapshot_refused", "DELIVERY_FAILED"))
+        assertEquals("held(a_b_c)", publicationState("held", " a  b\tc "))
+        assertEquals(96, publicationState("x", "y".repeat(500)).removePrefix("x(").removeSuffix(")").length)
+    }
+
     @Test
     fun localFrontendLeaseNeverRetiresOrReplacesTheClassicLayoutProjection() = runBlocking {
         val publisher = RecordingPublisher()
@@ -382,6 +539,11 @@ class AuthenticatedSurfaceIngressStateTest {
         val forwarded = mutableListOf<Triple<String, Long, Long>>()
         val held = mutableListOf<Pair<String, Long>>()
         val retired = mutableListOf<Pair<String, Long>>()
+        val refused = mutableListOf<Pair<Long, String>>()
+
+        override fun refused(clientId: String, generation: Long, status: String, diagnostic: String?) {
+            refused += generation to status
+        }
 
         override fun open(clientId: String, generation: Long): Boolean {
             opened += clientId to generation
@@ -403,6 +565,7 @@ class AuthenticatedSurfaceIngressStateTest {
 
     private class RecordingPublisher : SurfaceSnapshotPublisher {
         var deliver = true
+        var diagnostic: String? = null
         val published = mutableListOf<Triple<String, Long, Long>>()
         val retired = mutableListOf<Pair<String, Long>>()
         val receipts = mutableListOf<FrontendPresentationReceipt>()
@@ -413,7 +576,7 @@ class AuthenticatedSurfaceIngressStateTest {
             snapshot: FrontendSurfaceSnapshot,
         ): SurfaceDeliveryResult {
             published += Triple(clientId, generation, snapshot.sequence)
-            return SurfaceDeliveryResult(deliver)
+            return SurfaceDeliveryResult(deliver, diagnostic.takeUnless { deliver })
         }
 
         override suspend fun retire(clientId: String, generation: Long) {

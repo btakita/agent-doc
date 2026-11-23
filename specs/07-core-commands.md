@@ -829,7 +829,18 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   Remote Dev targets it explicitly says that a Client/Gateway on another
   machine was neither verified nor updated and directs the operator to install
   the matching ZIP there (or use Marketplace synchronization) before restarting
-  both peers (GH #371).
+  both peers (GH #371). When no Client/Gateway plugins directory was reconciled
+  locally, the summary prints the exact steps for that peer: the release
+  download URL of `agent-doc-jetbrains-262-<version>.zip`, quitting the Client,
+  the per-OS Client plugins directory, deleting both the
+  `agent-doc-jetbrains-262` and the older `agent-doc-jetbrains-263` folder,
+  extracting the ZIP, and the Client `idea.log` line that proves the new build
+  loaded. A Coder or SSH environment makes the headline say the Client was not
+  updated (GH #435). The modular backend is the version check: the first
+  snapshot of each Client lease compares the frontend's activation-receipt
+  shell digest (or its lower negotiated schema) with its own, and on a split
+  logs `[split-surface] frontend/backend plugin mismatch` and shows a warning
+  in the Client.
 - A live IDE counts as owning a JetBrains install target only when it loads
   plugins from that target (GH #238). Ownership is decided from process
   evidence BEFORE any package-level refusal, strongest first: an agent-doc

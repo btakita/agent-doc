@@ -75,12 +75,17 @@ creates one with the receipt's attach command.
   missing module. `reason=frontend_measurement_not_received` means the route
   carried `layout_authority=frontend_measured`: a Client frontend is installed
   and connected, but its measurement has not reached the controller. Read the
-  geometry hop below; reinstall the matching ZIP in the Client only when the
-  route log shows a lasting `snapshot_refused(<STATUS>)` in
-  `frontend_layout=[...]` or the backend logs `[split-surface] frontend/backend
-  plugin mismatch`. `reason=route_column_order_unknown` is ambiguous: a local
-  single editor split right after a controller restart logs it too. Local
-  (non-Gateway) IDEs need no Client install.
+  geometry hop below; reinstall the matching ZIP in the Client only on a
+  build-mismatch sign: a lasting `snapshot_refused(INVALID_SCHEMA)` in the
+  route's `frontend_layout=[...]`, a backend `[split-surface] snapshot refused
+  ... status=DELIVERY_FAILED ...
+  diagnostic=frontend_authority_absent_or_generation_mismatched` line, or a
+  backend `[split-surface] frontend/backend plugin mismatch` line. The route
+  token records only the status, so `snapshot_refused(DELIVERY_FAILED)` alone
+  is not one: it also covers controller delivery timeouts and Client paths
+  the backend cannot resolve. `reason=route_column_order_unknown` is
+  ambiguous: a local single editor split right after a controller restart
+  logs it too. Local (non-Gateway) IDEs need no Client install.
 - Upgrading on Coder (GH #435): `agent-doc upgrade` in the workspace updates
   only the backend's plugin. It prints the Client steps (download URL, quit
   the Client, delete `agent-doc-jetbrains-262` and `agent-doc-jetbrains-263`

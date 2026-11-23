@@ -158,9 +158,12 @@ pub fn route_layout_not_synced_notice(relative_path: &str, cause: RouteLayoutNot
              but the controller has not received that measurement yet (for example right after a controller \
              or Client restart); {effect}. The tmux columns follow once the Client's measured columns reach the \
              controller (`[rd-layout] forwarded measured columns` in the backend idea.log). If they never do, \
-             read the Remote Dev geometry hop in runbooks/coder-workspace.md; a lasting `snapshot_refused(...)` \
-             in the route's `frontend_layout=[...]` or a backend `[split-surface] frontend/backend plugin mismatch` \
-             line means the Client runs a different build: {remedy}."
+             read the Remote Dev geometry hop in runbooks/coder-workspace.md. Only a build-mismatch sign means \
+             the Client runs a different build: a lasting `snapshot_refused(INVALID_SCHEMA)` in the route's \
+             `frontend_layout=[...]`, a backend `[split-surface] snapshot refused ... status=DELIVERY_FAILED ... \
+             diagnostic=frontend_authority_absent_or_generation_mismatched` line, or a backend \
+             `[split-surface] frontend/backend plugin mismatch` line. Then: {remedy}. Any other refusal \
+             (for example a controller delivery timeout) is not fixed by reinstalling."
         ),
         RouteLayoutEvidence::ColumnOrderUnknown => format!(
             "the route named its documents but no column order, and the controller holds no editor \
@@ -297,6 +300,15 @@ mod tests {
                     assert!(
                         conditional.contains("frontend/backend plugin mismatch")
                             && conditional.contains(reinstall),
+                        "{notice}"
+                    );
+                    // The route token records only the refusal status, so only
+                    // the INVALID_SCHEMA status is a mismatch sign by itself; a
+                    // bare DELIVERY_FAILED also covers delivery timeouts.
+                    assert!(
+                        conditional.contains("snapshot_refused(INVALID_SCHEMA)")
+                            && !conditional.contains("snapshot_refused(...)")
+                            && !conditional.contains("snapshot_refused(DELIVERY_FAILED)"),
                         "{notice}"
                     );
                     assert!(

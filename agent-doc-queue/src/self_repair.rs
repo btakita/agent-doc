@@ -157,6 +157,14 @@ pub enum SelfRepairKind {
     /// Restored the line break between a generated `**Guidance:**` value and
     /// the row a merge glued onto it (`#selfrepaircleanup`).
     GluedGuidanceRow,
+    /// Dropped the tail fragment of a generated `**State:**` or
+    /// `**Guidance:**` line that a torn splice left after a generated
+    /// response-detail row (`#tornsplice`).
+    TornResponseTail,
+    /// Dropped a generated `**Guidance:**` line a torn splice duplicated
+    /// under a Remaining entry, moving the rows under it up to be the
+    /// entry's answers (`#tornsplice`).
+    DuplicateEntryGuidance,
 }
 
 impl SelfRepairKind {
@@ -176,6 +184,8 @@ impl SelfRepairKind {
             Self::DuplicateSiblingRow => "duplicate_sibling_row",
             Self::ResponseTreeSlot => "response_tree_slot",
             Self::GluedGuidanceRow => "glued_guidance_row",
+            Self::TornResponseTail => "torn_response_tail",
+            Self::DuplicateEntryGuidance => "duplicate_entry_guidance",
         }
     }
 }
@@ -274,7 +284,7 @@ fn is_struck_row(item: &str) -> bool {
 }
 
 /// Apply `edit` to every queue component body of `document`.
-fn edit_queue_bodies(
+pub(crate) fn edit_queue_bodies(
     document: &str,
     mut edit: impl FnMut(&str, &mut Vec<SelfRepair>) -> String,
 ) -> (String, Vec<SelfRepair>) {
@@ -1128,7 +1138,8 @@ pub fn renest_closed_by_rows(document: &str) -> (String, Vec<SelfRepair>) {
     })
 }
 
-/// Run every self-repair over `document`: misplaced response trees
+/// Run every self-repair over `document`: torn State/Guidance tails
+/// (`#tornsplice`), misplaced response trees
 /// (`response_proven(id)` says the `[#r-…]` id's original lives in
 /// `agent:exchange` or the response index), duplicate response trees,
 /// backlink rows nested too deep, response trees out of their slot (and a
@@ -1144,7 +1155,11 @@ pub fn self_repair_document(
     response_proven: &dyn Fn(&str) -> bool,
 ) -> Option<(String, Vec<SelfRepair>)> {
     let mut repairs = Vec::new();
-    let mut current = document.to_string();
+    // `#tornsplice`: first, so no pass below reads a torn tail fragment as
+    // the text of the row above it.
+    let (current, torn_repairs) = crate::torn_response_tail::drop_torn_response_tails(document);
+    let mut current = current;
+    repairs.extend(torn_repairs);
     if let Ok((retired, ids)) =
         crate::queue_consume::retire_misplaced_queue_response_projections(&current, response_proven)
         && !ids.is_empty()

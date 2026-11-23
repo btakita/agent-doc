@@ -104,6 +104,7 @@ pub mod struck_prompt_response;
 pub mod subagent_brief;
 pub mod subagent_intent;
 pub mod subagent_pool;
+pub mod torn_response_tail;
 pub mod transient_closeout;
 pub mod tree_indicator;
 pub mod tree_status;

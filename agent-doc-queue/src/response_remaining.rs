@@ -201,6 +201,17 @@ fn split_tally(guidance: &str) -> Option<&str> {
     rest.strip_prefix(' ')
 }
 
+/// Whether a Guidance value is in a form a binary pass rendered: a tally
+/// (`#donetrack`), the follow-up or remaining forms, or a completed row's
+/// deletion guidance (`#tornsplice`).
+pub(crate) fn is_generated_guidance(value: &str) -> bool {
+    split_tally(value).is_some()
+        || value == FOLLOW_UP_ACTION_ITEMS_GUIDANCE
+        || is_remaining_guidance(value)
+        || LEGACY_NOTHING_REMAINS_GUIDANCE.contains(&value)
+        || crate::response_tree_sync::generated_completed_guidance(value).is_some()
+}
+
 fn is_remaining_guidance(value: &str) -> bool {
     let digits = value.chars().take_while(char::is_ascii_digit).count();
     digits > 0
@@ -948,6 +959,61 @@ pub(crate) fn rows_answered_under_remaining(
 /// when every managed response already says what is left. A second pass
 /// changes nothing.
 pub fn reconcile_response_remaining(document: &str) -> Option<(String, usize)> {
+    // `#tornsplice`: a response nested in another response's Remaining list
+    // (an answered entry's own response) sits inside the outer Remaining
+    // range. Both are computed against `document`; one pass applies only
+    // edits that do not overlap, the inner ones first, and the deferred
+    // outer one is recomputed against the text the inner ones produced.
+    let mut current: Option<(String, usize)> = None;
+    for _ in 0..RECONCILE_PASS_LIMIT {
+        let text = current.as_ref().map_or(document, |(text, _)| text.as_str());
+        let Some((next, changed, deferred)) = reconcile_response_remaining_once(text) else {
+            break;
+        };
+        // A response a later pass finishes was already counted when its
+        // edit was deferred.
+        let total = current.as_ref().map_or(0, |(_, total)| *total).max(changed);
+        current = Some((next, total));
+        if !deferred {
+            break;
+        }
+    }
+    current
+}
+
+/// The most passes [`reconcile_response_remaining`] runs to settle responses
+/// nested inside other responses' Remaining lists (one per nesting level).
+const RECONCILE_PASS_LIMIT: usize = 8;
+
+/// Apply `edits`, every range computed against `document`, latest first.
+/// An edit that overlaps one already applied (an outer Remaining range that
+/// contains a nested response's State, Guidance or Remaining edit) is not
+/// spliced at offsets the applied edit has shifted (`#tornsplice`): it is
+/// deferred, and the return says so, for the caller to recompute.
+fn apply_disjoint_edits(
+    document: &str,
+    mut edits: Vec<(std::ops::Range<usize>, String)>,
+) -> (String, bool) {
+    edits.sort_by_key(|(range, _)| std::cmp::Reverse((range.start, range.end)));
+    let mut out = document.to_string();
+    // The start of the earliest applied edit: an edit that ends after it
+    // overlaps text that has already moved.
+    let mut floor = usize::MAX;
+    let mut deferred = false;
+    for (range, value) in edits {
+        if range.end > floor {
+            deferred = true;
+            continue;
+        }
+        floor = range.start;
+        out.replace_range(range, &value);
+    }
+    (out, deferred)
+}
+
+/// One pass of [`reconcile_response_remaining`]: the document, how many
+/// responses changed, and whether an overlapping edit was deferred.
+fn reconcile_response_remaining_once(document: &str) -> Option<(String, usize, bool)> {
     if !document.contains("**Response [#r-") {
         return None;
     }
@@ -1364,12 +1430,8 @@ pub fn reconcile_response_remaining(document: &str) -> Option<(String, usize)> {
     if edits.is_empty() {
         return None;
     }
-    edits.sort_by_key(|(range, _)| std::cmp::Reverse((range.start, range.end)));
-    let mut out = document.to_string();
-    for (range, value) in edits {
-        out.replace_range(range, &value);
-    }
-    Some((out, changed))
+    let (out, deferred) = apply_disjoint_edits(document, edits);
+    Some((out, changed, deferred))
 }
 
 /// `#answeredentry`: drop a State/Guidance pair this pass rendered once no
@@ -1469,3 +1531,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tally_sync_tests.rs"]
 mod tally_sync_tests;
+
+#[cfg(test)]
+#[path = "response_remaining_splice_tests.rs"]
+mod splice_tests;

@@ -4457,7 +4457,7 @@ fn collapse_duplicate_concurrent_strikes(
                 .map(|counts| counts.get(identity).copied().unwrap_or(0))
                 .max()
                 .unwrap_or(0);
-            (*merged_count > allowed).then_some((*identity, merged_count - allowed))
+            (*merged_count > allowed).then(|| (*identity, merged_count - allowed))
         })
         .collect();
     if excess.is_empty() {

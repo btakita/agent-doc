@@ -802,6 +802,153 @@ fn lcs_index_pairs(left: &[String], right: &[String]) -> Vec<(usize, usize)> {
     pairs
 }
 
+/// Which of several equally good alignments of byte-identical
+/// rows a repeat match takes. `Late` keeps the later copies matched (an ahead
+/// insert keeps a fresh id); `Early` keeps the earlier ones. A merge whose
+/// result depends on the choice cannot tell the copies apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RepeatBias {
+    Late,
+    Early,
+}
+
+/// [`lcs_index_pairs`] under `bias`: `Early` aligns the reversed sequences,
+/// so ties keep the earlier copies.
+fn lcs_index_pairs_biased(
+    left: &[String],
+    right: &[String],
+    bias: RepeatBias,
+) -> Vec<(usize, usize)> {
+    match bias {
+        RepeatBias::Late => lcs_index_pairs(left, right),
+        RepeatBias::Early => {
+            let rev = |rows: &[String]| rows.iter().rev().cloned().collect::<Vec<_>>();
+            let (n, m) = (left.len(), right.len());
+            let mut pairs: Vec<(usize, usize)> = lcs_index_pairs(&rev(left), &rev(right))
+                .into_iter()
+                .map(|(i, j)| (n - 1 - i, m - 1 - j))
+                .collect();
+            pairs.reverse();
+            pairs
+        }
+    }
+}
+
+/// Edit-distance alignment (match 0, substitute 1, insert/delete 1), returning
+/// the matched pairs. Unlike an LCS, a row edited in place pairs with the base
+/// row at its position, so the copies around it keep their ordinal places.
+/// Ties keep the later copies matched, like [`lcs_index_pairs`].
+fn edit_alignment_late(left: &[String], right: &[String]) -> Vec<(usize, usize)> {
+    let n = left.len();
+    let m = right.len();
+    let mut dp = vec![vec![0usize; m + 1]; n + 1];
+    for (i, row) in dp.iter_mut().enumerate() {
+        row[0] = i;
+    }
+    for (j, cell) in dp[0].iter_mut().enumerate() {
+        *cell = j;
+    }
+    for i in 0..n {
+        for j in 0..m {
+            let diagonal = dp[i][j] + usize::from(left[i] != right[j]);
+            dp[i + 1][j + 1] = diagonal.min(dp[i][j + 1] + 1).min(dp[i + 1][j] + 1);
+        }
+    }
+    let mut pairs = Vec::new();
+    let (mut i, mut j) = (n, m);
+    while i > 0 && j > 0 {
+        let same = left[i - 1] == right[j - 1];
+        if same && dp[i][j] == dp[i - 1][j - 1] {
+            pairs.push((i - 1, j - 1));
+            i -= 1;
+            j -= 1;
+        } else if !same && dp[i][j] == dp[i - 1][j - 1] + 1 {
+            i -= 1;
+            j -= 1;
+        } else if dp[i][j] == dp[i - 1][j] + 1 {
+            i -= 1;
+        } else {
+            j -= 1;
+        }
+    }
+    pairs.reverse();
+    pairs
+}
+
+fn edit_alignment(left: &[String], right: &[String], bias: RepeatBias) -> Vec<(usize, usize)> {
+    match bias {
+        RepeatBias::Late => edit_alignment_late(left, right),
+        RepeatBias::Early => {
+            let rev = |rows: &[String]| rows.iter().rev().cloned().collect::<Vec<_>>();
+            let (n, m) = (left.len(), right.len());
+            let mut pairs: Vec<(usize, usize)> = edit_alignment_late(&rev(left), &rev(right))
+                .into_iter()
+                .map(|(i, j)| (n - 1 - i, m - 1 - j))
+                .collect();
+            pairs.reverse();
+            pairs
+        }
+    }
+}
+
+/// Which base row each side row is, by position in the whole
+/// component, not only among its identical copies. Two `#rebase` rows under
+/// one head share a parent and a text, so the per-copy match could only guess,
+/// and an LCS over the copies alone kept the last one: an edit to the second
+/// copy read as an edit to the first, and a strike on the first then landed
+/// on the wrong row or was lost. Aligning every row (unchanged neighbours
+/// anchor the copies, an edited row keeps its ordinal slot) settles the copy.
+///
+/// `pins` are side rows whose base row is known from the editor's captured
+/// ops (a cell no op touched is that base cell, byte for byte). They are fixed
+/// anchors; the rows between them align on their own.
+fn positional_matches(
+    side_sig: &[String],
+    base_sig: &[String],
+    bias: RepeatBias,
+    pins: Option<&[Option<usize>]>,
+) -> Vec<Option<usize>> {
+    let mut matched = vec![None; side_sig.len()];
+    let mut anchors: Vec<(usize, usize)> = pins
+        .map(|pins| {
+            pins.iter()
+                .enumerate()
+                .filter_map(|(side, base)| base.map(|base| (side, base)))
+                .filter(|&(side, base)| side < side_sig.len() && base < base_sig.len())
+                .collect()
+        })
+        .unwrap_or_default();
+    if !anchors
+        .windows(2)
+        .all(|w| w[0].0 < w[1].0 && w[0].1 < w[1].1)
+    {
+        anchors.clear();
+    }
+    let (mut side_from, mut base_from) = (0usize, 0usize);
+    for anchor in anchors
+        .iter()
+        .copied()
+        .map(Some)
+        .chain(std::iter::once(None))
+    {
+        let side_end = anchor.map_or(side_sig.len(), |(side, _)| side);
+        let base_end = anchor.map_or(base_sig.len(), |(_, base)| base);
+        for (side, base) in edit_alignment(
+            &side_sig[side_from..side_end],
+            &base_sig[base_from..base_end],
+            bias,
+        ) {
+            matched[side_from + side] = Some(base_from + base);
+        }
+        if let Some((side, base)) = anchor {
+            matched[side] = Some(base);
+            side_from = side + 1;
+            base_from = base + 1;
+        }
+    }
+    matched
+}
+
 fn repeat_indices(ids: &[String], primary: &str) -> Vec<usize> {
     ids.iter()
         .enumerate()
@@ -826,15 +973,19 @@ fn repeat_side_needs_align(ids: &[String], indexes: &[usize], primary: &str) -> 
 /// The head then survived as that answer's parent anchor, inside another
 /// response tree, and the answer it lost was written back as a duplicate.
 /// Rows whose parent changed fall back to the text-only pass.
+///
+/// `positional` is the first pass, read from the whole-component
+/// alignment ([`positional_matches`]), so copies under one parent pair by
+/// their place among their neighbours rather than by the copies alone.
 fn match_repeat_side(
-    side_scoped: &[String],
+    positional: &[(usize, usize)],
     side_texts: &[String],
-    base_scoped: &[String],
     base_texts: &[String],
+    bias: RepeatBias,
 ) -> Vec<Option<usize>> {
     let mut matched = vec![None; side_texts.len()];
     let mut base_taken = vec![false; base_texts.len()];
-    for (side, base) in lcs_index_pairs(side_scoped, base_scoped) {
+    for &(side, base) in positional {
         matched[side] = Some(base);
         base_taken[base] = true;
     }
@@ -852,7 +1003,7 @@ fn match_repeat_side(
         .iter()
         .map(|&index| base_texts[index].clone())
         .collect();
-    for (side, base) in lcs_index_pairs(&side_left_texts, &base_left_texts) {
+    for (side, base) in lcs_index_pairs_biased(&side_left_texts, &base_left_texts, bias) {
         matched[side_left[side]] = Some(base_left[base]);
         base_taken[base_left[base]] = true;
     }
@@ -876,15 +1027,39 @@ fn match_repeat_side(
     matched
 }
 
-/// One side's rows for repeat alignment: instruction text, and the same text
-/// scoped by the row it hangs under ([`repeat_scopes`]).
+/// One side's rows for repeat alignment: instruction text, and the base row
+/// each row is by its place in the whole component ([`positional_matches`];
+/// `None` for the base itself).
 struct RepeatRows<'a> {
     text: &'a [String],
-    scoped: &'a [String],
+    positional: Option<&'a [Option<usize>]>,
 }
 
+/// The group-local first-pass pairs of one side: side rows whose positional
+/// base row is a copy in the same group.
+fn positional_group_pairs(
+    rows: &RepeatRows<'_>,
+    side_at: &[usize],
+    base_at: &[usize],
+) -> Vec<(usize, usize)> {
+    let Some(positional) = rows.positional else {
+        return Vec::new();
+    };
+    side_at
+        .iter()
+        .enumerate()
+        .filter_map(|(pos, &index)| {
+            let base = positional.get(index).copied().flatten()?;
+            let slot = base_at.iter().position(|&at| at == base)?;
+            Some((pos, slot))
+        })
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
 fn align_repeat_primary(
     primary: &str,
+    bias: RepeatBias,
     base_ids: &mut [String],
     base_rows: &RepeatRows<'_>,
     ours_ids: &mut [String],
@@ -921,21 +1096,17 @@ fn align_repeat_primary(
         .iter()
         .map(|&index| theirs_text[index].clone())
         .collect();
-    let scoped = |rows: &RepeatRows<'_>, at: &[usize]| -> Vec<String> {
-        at.iter().map(|&index| rows.scoped[index].clone()).collect()
-    };
-    let base_scoped = scoped(base_rows, &base_at);
     let ours_match = match_repeat_side(
-        &scoped(ours_rows, &ours_at),
+        &positional_group_pairs(ours_rows, &ours_at, &base_at),
         &ours_texts,
-        &base_scoped,
         &base_texts,
+        bias,
     );
     let theirs_match = match_repeat_side(
-        &scoped(theirs_rows, &theirs_at),
+        &positional_group_pairs(theirs_rows, &theirs_at, &base_at),
         &theirs_texts,
-        &base_scoped,
         &base_texts,
+        bias,
     );
     for (pos, slot) in ours_match.iter().enumerate() {
         if let Some(slot) = slot {
@@ -969,9 +1140,10 @@ fn align_repeat_primary(
         .collect();
     let mut ours_taken = vec![false; ours_left.len()];
     let mut theirs_taken = vec![false; theirs_left.len()];
-    for (shared, (ours_pos, theirs_pos)) in lcs_index_pairs(&ours_left_texts, &theirs_left_texts)
-        .into_iter()
-        .enumerate()
+    for (shared, (ours_pos, theirs_pos)) in
+        lcs_index_pairs_biased(&ours_left_texts, &theirs_left_texts, bias)
+            .into_iter()
+            .enumerate()
     {
         let id = if base_at.is_empty() && shared == 0 {
             primary.to_string()
@@ -1059,6 +1231,8 @@ fn align_operator_repeats(
     base: &ComponentOccurrence,
     ours: &ComponentOccurrence,
     theirs: &ComponentOccurrence,
+    bias: RepeatBias,
+    theirs_pins: Option<&[Option<usize>]>,
 ) -> (
     ComponentOccurrence,
     ComponentOccurrence,
@@ -1242,24 +1416,45 @@ fn align_operator_repeats(
             primaries.push(primary);
         }
     }
-    let base_scoped = repeat_scopes(base, &base_text);
-    let ours_scoped = repeat_scopes(ours, &ours_text);
-    let theirs_scoped = repeat_scopes(theirs, &theirs_text);
+    // Every row's signature is its key primary plus its
+    // parent-scoped instruction text ([`repeat_scopes`]), so the whole-component
+    // alignment matches a row only to the same row under the same parent.
+    let signatures = |occ: &ComponentOccurrence, ids: &[String], texts: &[String]| {
+        repeat_scopes(occ, texts)
+            .into_iter()
+            .zip(ids)
+            .map(|(scoped, id)| format!("{}\u{1e}{scoped}", repeat_disambiguator_primary(id)))
+            .collect::<Vec<_>>()
+    };
+    let base_sig = signatures(base, &base_ids, &base_text);
+    let ours_positional = positional_matches(
+        &signatures(ours, &ours_ids, &ours_text),
+        &base_sig,
+        bias,
+        None,
+    );
+    let theirs_positional = positional_matches(
+        &signatures(theirs, &theirs_ids, &theirs_text),
+        &base_sig,
+        bias,
+        theirs_pins,
+    );
     let base_rows = RepeatRows {
         text: &base_text,
-        scoped: &base_scoped,
+        positional: None,
     };
     let ours_rows = RepeatRows {
         text: &ours_text,
-        scoped: &ours_scoped,
+        positional: Some(&ours_positional),
     };
     let theirs_rows = RepeatRows {
         text: &theirs_text,
-        scoped: &theirs_scoped,
+        positional: Some(&theirs_positional),
     };
     for primary in &primaries {
         align_repeat_primary(
             primary,
+            bias,
             &mut base_ids,
             &base_rows,
             &mut ours_ids,
@@ -1283,7 +1478,13 @@ fn diff_occurrence(old: &ComponentOccurrence, new: &ComponentOccurrence) -> Comp
     let aligned = if old.component == "exchange" || new.component == "exchange" {
         None
     } else {
-        Some(align_operator_repeats(old, new, new))
+        Some(align_operator_repeats(
+            old,
+            new,
+            new,
+            RepeatBias::Late,
+            None,
+        ))
     };
     let (old, new) = match &aligned {
         Some((old, new, _, _)) => (old, new),
@@ -1710,25 +1911,111 @@ fn compose_occurrence(
     theirs: &ComponentOccurrence,
     policy: ConflictPolicy,
     retain_operator_items: bool,
+    theirs_pins: Option<&[Option<usize>]>,
 ) -> Option<ComposedOccurrence> {
     let collapsed =
         (ours.component == "queue").then(|| collapse_queue_typing_copies(base, ours, theirs));
     let base = collapsed.as_ref().map(|(base, _, _)| base).unwrap_or(base);
     let ours = collapsed.as_ref().map(|(_, ours, _)| ours).unwrap_or(ours);
+    // Pins index the projected theirs rows; a collapsed copy shifts them.
+    let theirs_pins = theirs_pins.filter(|pins| {
+        collapsed
+            .as_ref()
+            .is_none_or(|(_, _, collapsed)| collapsed.items.len() == pins.len())
+    });
     let theirs = collapsed
         .as_ref()
         .map(|(_, _, theirs)| theirs)
         .unwrap_or(theirs);
-    let aligned = if ours.component == "exchange" {
-        None
-    } else {
-        Some(align_operator_repeats(base, ours, theirs))
+    if ours.component == "exchange" {
+        return compose_aligned(
+            base,
+            ours,
+            theirs,
+            &std::collections::HashSet::new(),
+            policy,
+            retain_operator_items,
+        );
+    }
+    let late = align_operator_repeats(base, ours, theirs, RepeatBias::Late, theirs_pins);
+    let early = align_operator_repeats(base, ours, theirs, RepeatBias::Early, theirs_pins);
+    let compose = |(base, ours, theirs, progressive): &(
+        ComponentOccurrence,
+        ComponentOccurrence,
+        ComponentOccurrence,
+        std::collections::HashSet<String>,
+    )| {
+        compose_aligned(
+            base,
+            ours,
+            theirs,
+            progressive,
+            policy,
+            retain_operator_items,
+        )
     };
-    let no_progressive_promotion_keys = std::collections::HashSet::new();
-    let (base, ours, theirs, progressive_promotion_keys) = match &aligned {
-        Some((base, ours, theirs, progressive)) => (base, ours, theirs, progressive),
-        None => (base, ours, theirs, &no_progressive_promotion_keys),
+    if late == early {
+        return compose(&late);
+    }
+    // Byte-identical copies whose place does not settle which
+    // base row each one is (a side added or removed a copy and no op says
+    // which). When both readings merge to the same rows the choice is moot.
+    // Otherwise a reading in which the two sides changed different rows (the
+    // operator deleted the copy the agent did not strike) is the one that
+    // keeps both changes; take it when it is the only one. With no such
+    // single reading, a strike or edit would land on a copy the merge only
+    // guessed at: refuse the keyed cut instead of editing the wrong row.
+    let composed = compose(&late)?;
+    let other = compose(&early)?;
+    let rows = |composed: &ComposedOccurrence| {
+        composed
+            .0
+            .iter()
+            .map(|(_, value)| value.clone())
+            .collect::<Vec<_>>()
     };
+    if rows(&composed) == rows(&other) {
+        return Some(composed);
+    }
+    match (sides_touch_one_row(&late), sides_touch_one_row(&early)) {
+        (false, true) => Some(composed),
+        (true, false) => Some(other),
+        _ => {
+            eprintln!(
+                "[cell_merge] refusing keyed cut of {}:{}: identical sibling rows are ambiguous",
+                ours.component, ours.occurrence
+            );
+            None
+        }
+    }
+}
+
+/// True when ours and theirs each removed or updated the same base row.
+fn sides_touch_one_row(
+    (base, ours, theirs, _): &(
+        ComponentOccurrence,
+        ComponentOccurrence,
+        ComponentOccurrence,
+        std::collections::HashSet<String>,
+    ),
+) -> bool {
+    let touched = |side: &ComponentOccurrence| {
+        let ops = reconcile(&base.keyed_for_diff(), &side.keyed_for_diff());
+        let mut keys = removed_keys(&ops);
+        keys.extend(updated_keys(&ops));
+        keys
+    };
+    !touched(ours).is_disjoint(&touched(theirs))
+}
+
+fn compose_aligned(
+    base: &ComponentOccurrence,
+    ours: &ComponentOccurrence,
+    theirs: &ComponentOccurrence,
+    progressive_promotion_keys: &std::collections::HashSet<String>,
+    policy: ConflictPolicy,
+    retain_operator_items: bool,
+) -> Option<ComposedOccurrence> {
     // The two keyed op sets the cutover composes: base→ours and base→theirs,
     // each via the lazily LIS keyed `reconcile`. From each we read which item
     // identities that side *touched* (Insert/Update/Move) and which it *removed*.
@@ -2245,6 +2532,20 @@ fn weave_order(spine: &[String], weave: &[String]) -> Vec<String> {
 /// and the caller runs the existing whole-doc / `merge_by_component` path. The
 /// merge never emits malformed framing.
 pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMergeOutcome {
+    merge_3way_pinned(base_doc, ours_doc, theirs_doc, None)
+}
+
+/// For each `(component, occurrence)`, the base row index of
+/// each theirs row known from the editor's captured ops (`None` when the row
+/// is in a cell the ops touched).
+type TheirsPins = std::collections::HashMap<(String, usize), Vec<Option<usize>>>;
+
+fn merge_3way_pinned(
+    base_doc: &str,
+    ours_doc: &str,
+    theirs_doc: &str,
+    theirs_pins: Option<&TheirsPins>,
+) -> CellMergeOutcome {
     if ours_doc == theirs_doc {
         return CellMergeOutcome {
             merged_text: agent_doc_element_queue::repair_generated_id_before_list_marker(ours_doc)
@@ -2497,12 +2798,17 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
                 // surfaced as suspicious), superseding the legacy #qcellconflict
                 // ours-wins+marker behavior.
                 let comp_policy = component_conflict_policy(&o_occ.component);
+                let pins = theirs_pins
+                    .and_then(|pins| pins.get(&(t_occ.component.clone(), t_occ.occurrence)))
+                    .filter(|pins| pins.len() == t_occ.items.len())
+                    .map(Vec::as_slice);
                 let (mut merged_items, conflicts) = match compose_occurrence(
                     base_ref,
                     o_occ,
                     t_occ,
                     comp_policy,
                     retain_operator_items,
+                    pins,
                 ) {
                     Some(r) => r,
                     None => return CellMergeOutcome::fallback(),
@@ -2996,7 +3302,68 @@ pub fn merge_3way_with_ops(
         return CellMergeOutcome::fallback();
     }
 
-    merge_3way(base, ours, &reconstructed_theirs)
+    let pins = theirs_pins_from_ops(base, &routed, &reconstructed_theirs);
+    merge_3way_pinned(base, ours, &reconstructed_theirs, pins.as_ref())
+}
+
+/// Op origin for the repeat match. A base cell no captured op
+/// touched is copied into theirs byte for byte, so the theirs row at that
+/// cell's (shifted) offset with the same text IS that base row. Two
+/// identical copies under one parent then need no guess: the copy the
+/// operator did not touch is pinned to its base row.
+fn theirs_pins_from_ops(
+    base: &str,
+    routed: &std::collections::HashMap<NodeKey, Vec<EditorOp>>,
+    theirs: &str,
+) -> Option<TheirsPins> {
+    let base_spans = project_document_spans(base)?;
+    let theirs_spans = project_document_spans(theirs)?;
+    // Where each untouched base cell starts in theirs: base offsets shift by
+    // the length change of every touched cell before it.
+    let mut base_index_in_occ = std::collections::HashMap::<(String, usize), usize>::new();
+    let mut untouched_at = std::collections::HashMap::<usize, (String, usize, usize, &str)>::new();
+    let mut shift: isize = 0;
+    for item in &base_spans {
+        let slot = base_index_in_occ
+            .entry((item.component.clone(), item.occurrence))
+            .or_default();
+        let index = *slot;
+        *slot += 1;
+        match routed.get(&item.node_key) {
+            Some(ops) => {
+                let replayed = replay_editor_ops(&item.value, ops)?;
+                shift += replayed.len() as isize - item.value.len() as isize;
+            }
+            None => {
+                let start = usize::try_from(item.span.start as isize + shift).ok()?;
+                untouched_at.insert(
+                    start,
+                    (
+                        item.component.clone(),
+                        item.occurrence,
+                        index,
+                        item.value.as_str(),
+                    ),
+                );
+            }
+        }
+    }
+    let mut pins = TheirsPins::new();
+    for item in &theirs_spans {
+        let pin =
+            untouched_at
+                .get(&item.span.start)
+                .and_then(|(component, occurrence, index, value)| {
+                    (*component == item.component
+                        && *occurrence == item.occurrence
+                        && *value == item.value)
+                        .then_some(*index)
+                });
+        pins.entry((item.component.clone(), item.occurrence))
+            .or_default()
+            .push(pin);
+    }
+    Some(pins)
 }
 
 /// Rebuild a full document from `base`, replacing each routed cell's body slice
@@ -3281,6 +3648,10 @@ fn unresolved_prompt_count(value: &str) -> usize {
 #[cfg(test)]
 #[path = "document_cell_repeat_scope_tests.rs"]
 mod repeat_scope_tests;
+
+#[cfg(test)]
+#[path = "document_cell_twin_sibling_tests.rs"]
+mod twin_sibling_tests;
 
 #[cfg(test)]
 mod tests {

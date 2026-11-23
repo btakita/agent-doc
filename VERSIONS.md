@@ -2,6 +2,11 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.588
+
+- **Publishes everything listed under 0.35.587.** Tag `v0.35.587` was pushed, but its Windows build failed, so it stays an incomplete prerelease and was never published to PyPI. 0.35.588 carries all of the 0.35.587 changes below.
+- **The Windows build compiles again.** The project controller resolves the request principal through the cross-platform `current_principal()`, so it no longer calls a Unix-only helper. On Unix the behavior is unchanged.
+
 ## 0.35.587
 
 - **Queue rows and response trees read as one short tree.** A row sits one level below its parent, and its response tree sits one level below the row, after its comments and child rows. Response trees list what is left as a short Remaining list. An answered Remaining entry resolves its row for every reader. A finished tree is struck from the root down, and the row where it can be cut carries one 🗑️/🔒 keep/delete glyph. Follow-up rows get short `[#<origin-id>] follow-up: <item>` titles and ids at creation. An operator reply typed under a response tree moves to its own top-level follow-up row. Top-level rows show their tree's open-work count, and a new `agent:loose-ends` digest groups open rows into Decide, Do, Blocked and Running.

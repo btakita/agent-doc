@@ -24962,8 +24962,7 @@ pub(crate) fn serve_client_admitted(
     let (peer_pid, admitted) = controller_stream_peer(&stream, &runtime.workspace_access)?;
     install_controller_request_thread_context(runtime);
     let _peer = enter_controller_request_peer(peer_pid);
-    let controller_principal =
-        agent_doc_frontmatter::workspace_access::Principal::os_user(controller_user());
+    let controller_principal = agent_doc_project_config_io::workspace_access::current_principal();
     let _principal =
         super::request_authz::enter_controller_request_principal(controller_principal, admitted);
     stream

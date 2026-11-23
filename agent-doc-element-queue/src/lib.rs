@@ -479,6 +479,15 @@ fn trailing_generated_prompt_id(text: &str) -> Option<&str> {
     generated_prompt_id_annotation(text).map(|(id, _)| id)
 }
 
+/// The binary-generated trailing `[#q-…]` a prompt's first line carries,
+/// lowercased, whatever its authored head is (`#address [#q-…]`,
+/// `parent: #leaf [#q-…]`). `None` when the row has not been admitted one.
+/// Pairs with [`strip_generated_queue_prompt_id_annotation`]: the two split a
+/// row into its authored text and its occurrence id (`#claimidsurvives`).
+pub fn generated_queue_prompt_id(text: &str) -> Option<String> {
+    trailing_generated_prompt_id(text).map(str::to_ascii_lowercase)
+}
+
 /// `#struckidtrail`: the generated `[#q-…]` id a struck row holds at the end
 /// of its strike (`~~work [#q-…]~~`), or `None` when the row's first line does
 /// not end with a closing `~~` that wraps a trailing generated id.

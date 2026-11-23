@@ -1435,6 +1435,24 @@ fn validate_generation(
     }
 }
 
+/// Carry `claim` onto `text`, its row's current text (`#claimidsurvives`):
+/// the row gained or lost its generated `[#q-…]`. The previous text joins
+/// `followed_from`, so `release` and `report` by the text the worker was
+/// handed still find this attempt.
+fn follow_row_text(claim: &mut QueueClaim, text: &str, identity: QueueItemIdentity) {
+    let previous = std::mem::replace(&mut claim.item_text, text.trim().to_string());
+    claim.identity = identity;
+    if previous != claim.item_text && !claim.followed_from.contains(&previous) {
+        claim.followed_from.push(previous);
+        let excess = claim
+            .followed_from
+            .len()
+            .saturating_sub(FOLLOWED_FROM_LIMIT);
+        claim.followed_from.drain(..excess);
+    }
+    claim.followed_generation = claim.generation;
+}
+
 /// Resolve duplicate legacy records that collapse onto one current work
 /// identity. Generation is the attempt fence; within that fence lifecycle is
 /// monotonic. A report is stronger evidence than loss because it proves the
@@ -1687,11 +1705,16 @@ impl QueueClaimLedger {
             quota_block: None,
             lost_continue: None,
         };
-        match self
+        // `#claimidsurvives`: a row that gained or lost its generated
+        // `[#q-…]` since its claim was made is the same row. Re-claiming it
+        // must reach that claim, never open a parallel generation beside a
+        // live worker.
+        let index = self
             .claims
-            .iter_mut()
-            .find(|claim| claim.identity == identity)
-        {
+            .iter()
+            .position(|claim| claim.identity == identity)
+            .or_else(|| self.same_row_claim_index(item));
+        match index.map(|index| &mut self.claims[index]) {
             Some(existing) if existing.state == QueueClaimState::QuotaBlocked => {
                 ClaimOutcome::QuotaBlocked
             }
@@ -1701,6 +1724,9 @@ impl QueueClaimLedger {
                 // Idempotent same-owner claim. It is the same worker attempt;
                 // only explicit `--refresh` supplies running evidence.
                 existing.expires_at_secs = expires_at_secs;
+                if existing.identity != identity {
+                    follow_row_text(existing, &fresh.item_text, identity);
+                }
                 if fresh.owner_session.is_some() && !existing.native_spawn_result_required() {
                     existing.owner_session = fresh.owner_session;
                 }
@@ -1880,10 +1906,11 @@ impl QueueClaimLedger {
             return Err(QueueClaimStartRefused::EmptyWorker);
         }
         let identity = claim_identity(item);
-        let Some(index) = self
+        let Some(mut index) = self
             .claims
             .iter()
             .position(|claim| claim.identity == identity)
+            .or_else(|| self.same_row_claim_index(item))
         else {
             return Err(QueueClaimStartRefused::Missing);
         };
@@ -1935,12 +1962,35 @@ impl QueueClaimLedger {
         } else {
             false
         };
+        // `#claimidsurvives`: an older generation of this same row, split off
+        // when the row gained or lost its generated `[#q-…]`, is this worker's
+        // own earlier binding, not another item's. The new generation
+        // supersedes it, so the live worker rebinds instead of being refused.
+        let target_text = self.claims[index].item_text.clone();
+        let target_generation = self.claims[index].generation;
+        let superseded: Vec<usize> = self
+            .claims
+            .iter()
+            .enumerate()
+            .filter(|(other_index, other)| {
+                *other_index != index
+                    && other.generation < target_generation
+                    && other
+                        .worker
+                        .as_ref()
+                        .is_some_and(|binding| binding.worker_id == worker_id)
+                    && (same_claim_row(&other.item_text, &target_text)
+                        || same_claim_row(&other.item_text, item))
+            })
+            .map(|(other_index, _)| other_index)
+            .collect();
         if let Some(other) = self
             .claims
             .iter()
             .enumerate()
             .find_map(|(other_index, other)| {
                 (other_index != index
+                    && !superseded.contains(&other_index)
                     && other.blocks_worker_reuse(now_secs)
                     && other
                         .worker
@@ -1954,6 +2004,17 @@ impl QueueClaimLedger {
                 item_text: other.item_text.clone(),
                 generation: other.generation,
             });
+        }
+        for &other_index in superseded.iter().rev() {
+            let other = self.claims.remove(other_index);
+            if other_index < index {
+                index -= 1;
+            }
+            let claim = &mut self.claims[index];
+            if !claim.followed_from.contains(&other.item_text) && other.item_text != claim.item_text
+            {
+                claim.followed_from.push(other.item_text);
+            }
         }
         // Reusing a worker after its prior attempt expires is legitimate, but
         // the prior binding must become terminal before the new one is stored.
@@ -2130,9 +2191,11 @@ impl QueueClaimLedger {
             .claims
             .iter()
             .position(|claim| claim.identity == identity)
+            .or_else(|| self.same_row_claim_index(item))
         else {
             return Err(refused(RefreshRefusal::Unclaimed));
         };
+        let index = self.same_row_generation(item, index, generation_fence.flatten());
         if self.claims[index]
             .frozen
             .as_ref()
@@ -2361,7 +2424,7 @@ impl QueueClaimLedger {
         expected_generation: Option<u64>,
         publication_state: Option<QueueReportState>,
     ) -> Result<QueueClaim, QueueClaimTransitionRefused> {
-        let Some(index) = self.transition_index(item) else {
+        let Some(index) = self.transition_index_for(item, expected_generation) else {
             return Err(QueueClaimTransitionRefused::Missing);
         };
         let claim = &mut self.claims[index];
@@ -2420,7 +2483,7 @@ impl QueueClaimLedger {
         now_secs: u64,
         ttl_secs: u64,
     ) -> Option<QueueClaim> {
-        let index = self.transition_index(item)?;
+        let index = self.transition_index_for(item, Some(generation))?;
         let claim = &mut self.claims[index];
         let worker_matches = claim
             .worker
@@ -2462,7 +2525,7 @@ impl QueueClaimLedger {
         expected_worker_id: &str,
         publication_state: Option<QueueReportState>,
     ) -> Result<QueueClaim, QueueClaimTransitionRefused> {
-        let Some(index) = self.transition_index(item) else {
+        let Some(index) = self.transition_index_for(item, Some(expected_generation)) else {
             return Err(QueueClaimTransitionRefused::Missing);
         };
         let claim = &mut self.claims[index];
@@ -2536,6 +2599,11 @@ impl QueueClaimLedger {
         let Some(index) = self.claim_index(item) else {
             return Ok(None);
         };
+        let index = if enforce_generation {
+            self.same_row_generation(item, index, expected_generation)
+        } else {
+            index
+        };
         if enforce_generation {
             validate_generation(&self.claims[index], expected_generation)?;
         }
@@ -2588,6 +2656,11 @@ impl QueueClaimLedger {
         if let Some(index) = self.followed_claim_index(item) {
             return Some(index);
         }
+        // `#claimidsurvives`: the same row under another generated-id form
+        // (an id backfilled or dropped after the claim was made).
+        if let Some(index) = self.same_row_claim_index(item) {
+            return Some(index);
+        }
         // `#claimfollowsedit`: an annotation followed by a claim stored
         // before `followed_from` existed.
         let continuing: Vec<usize> = self
@@ -2600,6 +2673,72 @@ impl QueueClaimLedger {
         match continuing.as_slice() {
             [only] => Some(*only),
             _ => None,
+        }
+    }
+
+    /// The one claim whose row is `item`'s row under another generated-id
+    /// form (`#claimidsurvives`): `item` and the claim's text differ only by a
+    /// generated `[#q-…]` the row gained or lost. `None` when no claim, or
+    /// more than one, is.
+    fn same_row_claim_index(&self, item: &str) -> Option<usize> {
+        let identity = claim_identity(item);
+        let key = claim_row_key(item);
+        let matching: Vec<usize> = self
+            .claims
+            .iter()
+            .enumerate()
+            .filter(|(_, claim)| {
+                claim.identity != identity && key.same_row(&claim_row_key(&claim.item_text))
+            })
+            .map(|(index, _)| index)
+            .collect();
+        match matching.as_slice() {
+            [only] => Some(*only),
+            _ => None,
+        }
+    }
+
+    /// [`Self::transition_index`] fenced on `expected_generation`
+    /// (`#claimidsurvives`). When the claim `item` resolves to holds another
+    /// generation, the one claim on that same row (under either generated-id
+    /// form) that holds `expected_generation` is the attempt the caller means:
+    /// a ledger that split one row into two generations must still let the
+    /// older attempt report or release instead of refusing it as stale.
+    fn transition_index_for(&self, item: &str, expected_generation: Option<u64>) -> Option<usize> {
+        let index = self.transition_index(item)?;
+        Some(self.same_row_generation(item, index, expected_generation))
+    }
+
+    /// `index`, or the one other claim on the same row as `item` / claim
+    /// `index` that holds `expected_generation` when claim `index` does not.
+    fn same_row_generation(
+        &self,
+        item: &str,
+        index: usize,
+        expected_generation: Option<u64>,
+    ) -> usize {
+        let Some(expected) = expected_generation else {
+            return index;
+        };
+        if self.claims[index].generation == expected {
+            return index;
+        }
+        let resolved = self.claims[index].item_text.as_str();
+        let matching: Vec<usize> = self
+            .claims
+            .iter()
+            .enumerate()
+            .filter(|(other, claim)| {
+                *other != index
+                    && claim.generation == expected
+                    && (same_claim_row(item, &claim.item_text)
+                        || same_claim_row(resolved, &claim.item_text))
+            })
+            .map(|(other, _)| other)
+            .collect();
+        match matching.as_slice() {
+            [only] => *only,
+            _ => index,
         }
     }
 
@@ -2853,6 +2992,29 @@ impl QueueClaimLedger {
                     {
                         return Some(q);
                     }
+                    // `#claimidsurvives`: the one queue holding this row under
+                    // its other generated-id form.
+                    let key = claim_row_key(&claim.item_text);
+                    let same_row_in: Vec<usize> = (0..view.queues.len())
+                        .filter(|&q| {
+                            let queue = &view.queues[q];
+                            let keys = if queue.claim_texts.len() == queue.rows.len() {
+                                &queue.claim_texts
+                            } else {
+                                &queue.rows
+                            };
+                            keys.iter().any(|text| {
+                                key.same_row(&claim_row_key(
+                                    &agent_doc_document::queue_projection::strip_in_progress_marker(
+                                        text.trim(),
+                                    ),
+                                ))
+                            })
+                        })
+                        .collect();
+                    if let [only] = same_row_in.as_slice() {
+                        return Some(*only);
+                    }
                     if view.queues.len() == 1 {
                         return Some(0);
                     }
@@ -3088,6 +3250,32 @@ impl QueueClaimLedger {
                 // that descendant is a different, still-owned sibling whose
                 // binary effect annotation the claim must follow.
                 continue;
+            }
+            if !live.contains(&claim.identity) {
+                // `#claimidsurvives`: the row gained or lost its generated
+                // `[#q-…]` (id backfill, follow-up id assignment, a projection or
+                // merge repair) while the claim ran. That is the same row, whatever
+                // the structural alignment made of it: a stale anchor, a moved
+                // row, or a containment tie with an identical leaf elsewhere must
+                // not orphan the claim and re-offer its row as new work.
+                let key = claim_row_key(&claim.item_text);
+                let same_row: Vec<usize> = claim_keys
+                    .iter()
+                    .enumerate()
+                    .filter(|(n, _)| !held.contains(&live[*n]) && !context.contains(&live[*n]))
+                    .filter(|(_, text)| key.same_row(&claim_row_key(text)))
+                    .map(|(n, _)| n)
+                    .collect();
+                // Byte-identical copies of the row (a duplicated queue
+                // section) share one identity and are still that one row;
+                // the claim then holds every copy, as it does for duplicates
+                // of an unchanged row.
+                if let Some(&first) = same_row.first()
+                    && same_row.iter().all(|&n| live[n] == live[first])
+                {
+                    proposals.push((claim_idx, first));
+                    continue;
+                }
             }
             if let Some(&first) = lines.first() {
                 proposals.push((claim_idx, first));
@@ -3434,6 +3622,64 @@ pub fn claim_identity(item: &str) -> QueueItemIdentity {
         return identity;
     }
     queue_prompt_stable_identity(trimmed)
+}
+
+/// The stable row identity of a claim text across generated-id assignment
+/// (`#claimidsurvives`).
+///
+/// A binary-generated trailing `[#q-…]` changes [`claim_identity`]: a
+/// free-text row keys on `queue-id:q-…` once it has one, and a nest vector
+/// carries the id in its text. Id backfill, follow-up id assignment,
+/// projection and merge repairs add or drop that id on a row whose work did
+/// not change, so a running claim must not lose its row when they do. This key
+/// is the row's identity with the generated id (and the projection prefix and
+/// tree glyphs [`claim_identity`] already strips) removed, plus that id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaimRowKey {
+    /// [`claim_identity`] of the text without its generated `[#q-…]`.
+    pub authored: QueueItemIdentity,
+    /// The generated `[#q-…]` id, lowercased, when the row carries one.
+    pub generated_id: Option<String>,
+}
+
+impl ClaimRowKey {
+    /// Whether two texts name one queue row: the same authored identity, and
+    /// no two different generated ids. A row that gains or loses its id is the
+    /// same row; two rows with different ids are distinct occurrences even
+    /// when their authored text is identical.
+    pub fn same_row(&self, other: &ClaimRowKey) -> bool {
+        self.authored == other.authored
+            && match (&self.generated_id, &other.generated_id) {
+                (Some(left), Some(right)) => left == right,
+                _ => true,
+            }
+    }
+}
+
+/// [`ClaimRowKey`] of `item`.
+pub fn claim_row_key(item: &str) -> ClaimRowKey {
+    let normalized =
+        crate::document_queue::render_queue_effect_report_state_annotation(item.trim(), None);
+    let trimmed = normalized.trim();
+    let generated_id = agent_doc_element_queue::generated_queue_prompt_id(trimmed);
+    let authored = match generated_id {
+        Some(_) => claim_identity(
+            &agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(trimmed),
+        ),
+        None => claim_identity(trimmed),
+    };
+    ClaimRowKey {
+        authored,
+        generated_id,
+    }
+}
+
+/// Whether claim texts `left` and `right` name the same queue row
+/// (`#claimidsurvives`): one claim identity, or one row that gained or lost
+/// its generated `[#q-…]` ([`ClaimRowKey::same_row`]).
+pub fn same_claim_row(left: &str, right: &str) -> bool {
+    claim_identity(left) == claim_identity(right)
+        || claim_row_key(left).same_row(&claim_row_key(right))
 }
 
 /// Free-text identity of a nest vector, when `text` is one.
@@ -7726,5 +7972,344 @@ Add new issues into the backlog + queue except issue #40 + #45.";
                 .with_user_prompt_backlog_same_work(doc)
                 .is_empty()
         );
+    }
+
+    fn claimid_doc(rows: &[&str]) -> String {
+        let mut out = String::from("<!-- agent:queue go -->\n");
+        for row in rows {
+            out.push_str(row);
+            out.push('\n');
+        }
+        out.push_str("<!-- /agent:queue -->\n");
+        out
+    }
+
+    fn claimid_running(item: &str, owner: &str, worker: &str) -> QueueClaimLedger {
+        let mut ledger = QueueClaimLedger::default();
+        assert_eq!(ledger.claim(item, owner, 100, 3600), ClaimOutcome::Created);
+        ledger
+            .start(item, owner, worker, 101, 3600, Some(1))
+            .unwrap();
+        ledger
+    }
+
+    const CLAIMID_ROW: &str = "The `🗑️` indicator is good. The 🗑️ should also be added to the top-most item that can be deleted.";
+
+    /// `#claimidsurvives`: a row that LOSES its generated id while its worker
+    /// runs keeps its claim. The row also moved and took a tree glyph, so the
+    /// structural alignment cannot pair it; the pool view must still see it
+    /// claimed, and claim / start / report keep working on the one attempt.
+    #[test]
+    fn claimidsurvives_id_removed_mid_run_keeps_the_running_claim() {
+        let with_id = format!("{CLAIMID_ROW} [#q-ab1838a13369]");
+        let mut ledger = claimid_running(&with_id, "subagent:trashtop", "worker:trashtop");
+        let before = claimid_doc(&[
+            &format!("- 🚧 [#subagent:trashtop#1] {with_id}"),
+            "- unrelated follow-up row number one",
+            "- unrelated follow-up row number two",
+        ]);
+        ledger.follow_edits_in_view(102, &ClaimQueueView::from_content(&before).unwrap());
+        assert!(ledger.claims[0].anchor.is_some());
+
+        let after = claimid_doc(&[
+            "- unrelated follow-up row number one",
+            "- a brand new row the operator added",
+            "- unrelated follow-up row number two",
+            &format!("- 🚧 [#subagent:trashtop#1] 🔒 {CLAIMID_ROW}"),
+        ]);
+        let claimed = ledger.claimed_live_head_texts(103, &after);
+        assert_eq!(claimed.len(), 1, "a pool refill must not offer the row");
+        assert_eq!(claim_identity(&claimed[0]), claim_identity(CLAIMID_ROW));
+        ledger.follow_edits_in_view(103, &ClaimQueueView::from_content(&after).unwrap());
+        assert_eq!(ledger.claims.len(), 1);
+        assert_eq!(ledger.claims[0].identity, claim_identity(CLAIMID_ROW));
+        assert_eq!(ledger.claims[0].generation, 1);
+
+        // A re-claim of the id-less row reaches generation 1.
+        assert_eq!(
+            ledger.claim(CLAIMID_ROW, "subagent:trashtop", 104, 3600),
+            ClaimOutcome::Refreshed
+        );
+        assert_eq!(
+            ledger.claim(CLAIMID_ROW, "subagent:other", 104, 3600),
+            ClaimOutcome::HeldByOther
+        );
+        assert_eq!(ledger.claims.len(), 1);
+        let started = ledger
+            .start(
+                CLAIMID_ROW,
+                "subagent:trashtop",
+                "worker:trashtop",
+                105,
+                3600,
+                Some(1),
+            )
+            .unwrap();
+        assert_eq!(started.generation, 1);
+        let reported = ledger.report(&with_id, Some(1)).unwrap();
+        assert_eq!(reported.state, QueueClaimState::Reported);
+    }
+
+    /// `#claimidsurvives`: an unanchored claim (claimed, then the row changed
+    /// before any reader anchored it) follows its row when the row is backfilled
+    /// an id, instead of closing as an anchorless orphan.
+    #[test]
+    fn claimidsurvives_id_added_before_the_first_anchor_keeps_the_claim() {
+        let mut ledger = claimid_running(CLAIMID_ROW, "subagent:x", "worker:x");
+        assert!(ledger.claims[0].anchor.is_none());
+        let with_id = format!("{CLAIMID_ROW} [#q-0123456789ab]");
+        let after = claimid_doc(&["- other work", &format!("- {with_id}")]);
+        assert_eq!(
+            ledger.claimed_live_head_texts(102, &after),
+            vec![with_id.clone()]
+        );
+        let followed =
+            ledger.follow_edits_in_view(102, &ClaimQueueView::from_content(&after).unwrap());
+        assert_eq!(
+            followed.followed,
+            vec![(CLAIMID_ROW.to_string(), with_id.clone())]
+        );
+        assert_eq!(ledger.claims[0].identity, claim_identity(&with_id));
+        assert_eq!(
+            ledger.claim(&with_id, "subagent:x", 103, 3600),
+            ClaimOutcome::Refreshed
+        );
+        assert_eq!(ledger.claims.len(), 1);
+    }
+
+    /// `#claimidsurvives`: a nested `#adversarial-pr` leaf that GAINS its id
+    /// while its worker runs stays claimed, even beside an identical leaf
+    /// under another parent that makes the structural alignment ambiguous.
+    #[test]
+    fn claimidsurvives_id_added_mid_run_to_a_nested_leaf_keeps_the_claim() {
+        let parent = "https://github.com/btakita/agent-doc/issues/433";
+        let other = "https://github.com/btakita/agent-doc/issues/432";
+        let leaf = format!("{parent}: #adversarial-pr");
+        let mut ledger = claimid_running(&leaf, "subagent:advpr", "worker:advpr");
+        let before = claimid_doc(&[
+            &format!("- ### {other}"),
+            "  - #adversarial-pr",
+            &format!("- ### {parent}"),
+            "  - 🚧 [#subagent:advpr#1] #adversarial-pr",
+        ]);
+        ledger.follow_edits_in_view(102, &ClaimQueueView::from_content(&before).unwrap());
+        let after = claimid_doc(&[
+            &format!("- ### {other}"),
+            "  - #adversarial-pr [#q-111111111111]",
+            &format!("- ### {parent}"),
+            "  - 🚧 [#subagent:advpr#1] #adversarial-pr [#q-3eb912c80663]",
+        ]);
+        let with_id = format!("{leaf} [#q-3eb912c80663]");
+        assert_eq!(
+            ledger.claimed_live_head_texts(103, &after),
+            vec![with_id.clone()],
+            "only this parent's leaf is claimed; the pool may offer the other"
+        );
+        ledger.follow_edits_in_view(103, &ClaimQueueView::from_content(&after).unwrap());
+        assert_eq!(ledger.claims[0].identity, claim_identity(&with_id));
+        assert_eq!(ledger.claims[0].generation, 1);
+        assert_eq!(
+            ledger.claim(&with_id, "subagent:advpr", 104, 3600),
+            ClaimOutcome::Refreshed
+        );
+        ledger
+            .start(
+                &with_id,
+                "subagent:advpr",
+                "worker:advpr",
+                105,
+                3600,
+                Some(1),
+            )
+            .unwrap();
+        assert_eq!(ledger.claims.len(), 1);
+        assert_eq!(
+            ledger.report(&leaf, Some(1)).unwrap().state,
+            QueueClaimState::Reported
+        );
+    }
+
+    /// `#claimidsurvives`: the row key splits authored text from the occurrence
+    /// id. Gaining or losing the id is one row; two different ids are two.
+    #[test]
+    fn claimidsurvives_row_key_matches_across_id_assignment_only() {
+        let bare = "review the release notes for the patch";
+        assert!(same_claim_row(bare, &format!("{bare} [#q-aaaaaaaaaaaa]")));
+        assert!(same_claim_row(&format!("{bare} [#q-aaaaaaaaaaaa]"), bare));
+        assert!(!same_claim_row(
+            &format!("{bare} [#q-aaaaaaaaaaaa]"),
+            &format!("{bare} [#q-bbbbbbbbbbbb]")
+        ));
+        assert!(same_claim_row("#address", "#address [#q-aaaaaaaaaaaa]"));
+        assert!(!same_claim_row(
+            "#address [#q-aaaaaaaaaaaa]",
+            "#address [#q-bbbbbbbbbbbb]"
+        ));
+        assert!(!same_claim_row(
+            bare,
+            "review the release notes for the minor"
+        ));
+        assert!(same_claim_row(
+            &format!("🗑️ {bare} [#q-aaaaaaaaaaaa]"),
+            &format!("🔒 {bare}")
+        ));
+    }
+
+    /// `#claimidsurvives`: a ledger that already split one row into two
+    /// generations (the 🗑️/🔒 row, 2026-11-22) heals. `queue start` rebinds the
+    /// live worker to the new generation instead of refusing it as bound to
+    /// generation 1, and `queue release` of the old text with generation 1
+    /// releases that attempt instead of refusing it as stale.
+    #[test]
+    fn claimidsurvives_split_generations_rebind_and_release_by_old_generation() {
+        let with_id = format!("{CLAIMID_ROW} [#q-ab1838a13369]");
+        let split = || {
+            let mut ledger = claimid_running(&with_id, "subagent:trashtop", "worker:trashtop");
+            // A pre-fix ledger: generation 2 opened on the id-less text.
+            let mut fresh = ledger.claims[0].clone();
+            fresh.identity = claim_identity(CLAIMID_ROW);
+            fresh.item_text = CLAIMID_ROW.to_string();
+            fresh.generation = 2;
+            fresh.state = QueueClaimState::Claimed;
+            fresh.worker = None;
+            fresh.anchor = None;
+            ledger.claims.push(fresh);
+            ledger
+        };
+
+        let mut ledger = split();
+        let started = ledger
+            .start(
+                CLAIMID_ROW,
+                "subagent:trashtop",
+                "worker:trashtop",
+                110,
+                3600,
+                Some(2),
+            )
+            .unwrap();
+        assert_eq!(started.generation, 2);
+        assert_eq!(ledger.claims.len(), 1, "generation 1 is superseded");
+        assert!(ledger.claims[0].followed_from.contains(&with_id));
+        // A worker bound to a different row is still refused.
+        let mut other = split();
+        other.claim("some other queue row entirely", "subagent:o", 110, 3600);
+        other
+            .start(
+                "some other queue row entirely",
+                "subagent:o",
+                "worker:o",
+                110,
+                3600,
+                Some(1),
+            )
+            .unwrap();
+        assert!(matches!(
+            other.start(
+                CLAIMID_ROW,
+                "subagent:trashtop",
+                "worker:o",
+                111,
+                3600,
+                Some(2),
+            ),
+            Err(QueueClaimStartRefused::WorkerAlreadyBound { .. })
+        ));
+
+        let mut ledger = split();
+        let released = ledger
+            .release_fenced(CLAIMID_ROW, Some(1))
+            .unwrap()
+            .unwrap();
+        assert_eq!(released.generation, 1);
+        assert_eq!(ledger.claims.len(), 1);
+        assert_eq!(ledger.claims[0].generation, 2);
+
+        let mut ledger = split();
+        let reported = ledger.report(CLAIMID_ROW, Some(1)).unwrap();
+        assert_eq!(reported.generation, 1);
+        assert_eq!(reported.state, QueueClaimState::Reported);
+    }
+
+    /// `#claimidsurvives`: a duplicated queue section (sdk-dev.md 2026-11-23:
+    /// every `### …/pull/377` tree copied three times) keeps a running claim on
+    /// its row. Every byte-identical copy is the same row, so the attempt stays
+    /// `Running`, bound and claimed, projects `🚧` for a live owner (never
+    /// `⚠️`), and its worker's report still lands. The same holds when the
+    /// duplicated row also gains its generated id.
+    #[test]
+    fn claimidsurvives_a_duplicated_row_keeps_its_running_claim() {
+        let parent = "https://github.com/haiven-dev/haiven-sdk/pull/377";
+        let leaf = format!("{parent}: #rebase");
+        for (suffix, anchored) in [
+            ("", true),
+            (" [#q-5a5a5a5a5a5a]", true),
+            (" [#q-5a5a5a5a5a5a]", false),
+        ] {
+            let mut ledger = claimid_running(&leaf, "subagent:rebase377", "worker:rebase377");
+            let before = claimid_doc(&[
+                &format!("- ### {parent}"),
+                "  - 🚧 [#subagent:rebase377#1] #rebase",
+                "- ### https://github.com/haiven-dev/haiven-sdk/pull/380",
+                "  - #rebase",
+            ]);
+            if anchored {
+                ledger.follow_edits_in_view(102, &ClaimQueueView::from_content(&before).unwrap());
+            }
+            // An unanchored claim has no row evidence but its text: the copies
+            // carry no owner projection yet.
+            let copy = if anchored {
+                format!("  - 🚧 [#subagent:rebase377#1] #rebase{suffix}")
+            } else {
+                format!("  - #rebase{suffix}")
+            };
+            let after = claimid_doc(&[
+                &format!("- ### {parent}"),
+                &copy,
+                "- ### https://github.com/haiven-dev/haiven-sdk/pull/380",
+                "  - #rebase",
+                &format!("- ### {parent}"),
+                &copy,
+                &copy,
+                &format!("- ### {parent}"),
+                &copy,
+            ]);
+            let current = format!("{leaf}{suffix}");
+            let claimed = ledger.claimed_live_head_texts(103, &after);
+            assert_eq!(
+                claimed.len(),
+                4,
+                "{suffix:?}: every copy is held: {claimed:?}"
+            );
+            assert!(
+                claimed
+                    .iter()
+                    .all(|head| claim_identity(head) == claim_identity(&current)),
+                "{suffix:?}: {claimed:?}"
+            );
+            ledger.follow_edits_in_view(103, &ClaimQueueView::from_content(&after).unwrap());
+            assert_eq!(ledger.claims.len(), 1, "{suffix:?}");
+            let claim = &ledger.claims[0];
+            assert_eq!(claim.identity, claim_identity(&current), "{suffix:?}");
+            assert_eq!(claim.state, QueueClaimState::Running, "{suffix:?}");
+            assert_eq!(
+                claim.worker.as_ref().map(|w| w.worker_id.as_str()),
+                Some("worker:rebase377")
+            );
+            assert_eq!(
+                claim.visible_projection_for_owner(ClaimOwnerLiveness::Live),
+                agent_doc_document::queue_projection::QueueLifecycleMarker::Running,
+                "{suffix:?}: a duplicated row is never painted lost"
+            );
+            let live = crate::queue_continuation::live_queue_head_identities(&after);
+            assert_eq!(ledger.active(104, live.as_ref()).len(), 1, "{suffix:?}");
+            assert_eq!(
+                ledger.claim(&current, "subagent:rebase377", 104, 3600),
+                ClaimOutcome::Refreshed,
+                "{suffix:?}"
+            );
+            let reported = ledger.report(&leaf, Some(1)).unwrap();
+            assert_eq!(reported.state, QueueClaimState::Reported, "{suffix:?}");
+        }
     }
 }

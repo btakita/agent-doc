@@ -9877,6 +9877,100 @@ mod tests {
         .unwrap();
     }
 
+    /// `#claimidsurvives` `#controllerhandoff`: a controller recycle reseeds
+    /// the canonical from an older cut (here one that painted the running rows
+    /// `⚠️`, duplicated the claimed tree, and gave its row a generated id).
+    /// The durable attempt is the authority: while its owner session is live
+    /// and its heartbeat fresh, every copy of its row hydrates back to `🚧`
+    /// with the same owner and generation, and the ledger attempt stays
+    /// `Running` and bound to its worker. With the owner process gone the row
+    /// is `⚠️` (the worker is not running), never re-offered, and the ledger
+    /// attempt still holds its worker, so the hand-back can be reported.
+    #[test]
+    fn controller_recycle_keeps_a_running_claim_running_across_reseed() {
+        let parent = "https://github.com/haiven-dev/haiven-sdk/pull/377";
+        let leaf = format!("{parent}: #rebase");
+        let stale = format!(
+            concat!(
+                "<!-- agent:queue -->\n",
+                "- ### {parent}\n",
+                "  - ⚠️ [#subagent:rebase377#1] #rebase [#q-5a5a5a5a5a5a]\n",
+                "- ### {parent}\n",
+                "  - ⚠️ [#subagent:rebase377#1] #rebase [#q-5a5a5a5a5a5a]\n",
+                "- unrelated operator row\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            parent = parent,
+        );
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        for (pid, expected) in [
+            (std::process::id(), "🚧 [#subagent:rebase377#1] #rebase"),
+            (u32::MAX - 7, "⚠️ [#subagent:rebase377#1] #rebase"),
+        ] {
+            let (dir, doc) = temp_doc("recycle-running-claim.md");
+            std::fs::write(&doc, &stale).unwrap();
+            let mut ledger = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+            ledger.claim_in_session(
+                &leaf,
+                "subagent:rebase377",
+                now,
+                3600,
+                Some(agent_doc_queue::queue_claim::ClaimOwnerSession {
+                    harness: None,
+                    session_id: Some("coordinator".to_string()),
+                    pane: None,
+                    pid: Some(pid),
+                }),
+            );
+            ledger
+                .start(
+                    &leaf,
+                    "subagent:rebase377",
+                    "worker:rebase377",
+                    now,
+                    3600,
+                    Some(1),
+                )
+                .unwrap();
+            persist_queue_claim_ledger(dir.path(), &doc, &ledger);
+
+            let projected = durable_queue_attempt_projection(&doc, &stale).unwrap();
+            assert_eq!(
+                projected.matches(expected).count(),
+                2,
+                "pid {pid}: every duplicated copy carries the durable attempt:\n{projected}"
+            );
+            assert!(
+                projected.contains(" unrelated operator row\n"),
+                "{projected}"
+            );
+            assert_eq!(
+                durable_queue_attempt_projection(&doc, &projected).unwrap(),
+                projected,
+                "hydration is idempotent"
+            );
+            let held = agent_doc_queue::queue_claim::QueueClaimLedger::from_state_payload(
+                &serde_json::to_string(&ledger).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(held.claims.len(), 1);
+            assert_eq!(
+                held.claims[0].state,
+                agent_doc_queue::queue_claim::QueueClaimState::Running
+            );
+            assert_eq!(
+                held.claims[0]
+                    .worker
+                    .as_ref()
+                    .map(|worker| worker.worker_id.as_str()),
+                Some("worker:rebase377")
+            );
+        }
+    }
+
     #[test]
     fn controller_hydration_derives_exact_queue_attempt_markers_idempotently() {
         let (dir, doc) = temp_doc("queue-attempt-hydration.md");

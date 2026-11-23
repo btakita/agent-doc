@@ -400,6 +400,80 @@ mod tests {
         .unwrap();
     }
 
+    const CLAIMID_ROW: &str =
+        "The 🗑️ glyph is good; also add it to the top-most deletable item of the tree";
+
+    fn offered(file: &Path, content: &str) -> Vec<String> {
+        refill_for(file, content, Some("claude"))
+            .next_heads
+            .into_iter()
+            .map(|head| head.item)
+            .collect()
+    }
+
+    /// `#claimidsurvives`: shared body for a row whose generated id changes
+    /// while its worker runs. A pool refill must not offer the row, and claim,
+    /// start and report keep working on the one generation.
+    fn assert_claim_survives_id_change(claimed: &str, after: &str) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let before_doc = pool_doc("subagents=4", &[claimed, "do [#other]"]);
+        std::fs::write(&file, &before_doc).unwrap();
+        let clock = crate::queue_claim::claim_clock_now_secs();
+        let _pin = crate::queue_claim::pin_claim_clock_for_current_thread(clock);
+        start(&file, claimed, "subagent:claimid");
+        assert_eq!(offered(&file, &before_doc), ["do [#other]"]);
+
+        let after_doc = pool_doc("subagents=4", &["do [#added]", "do [#other]", after]);
+        std::fs::write(&file, &after_doc).unwrap();
+        assert_eq!(
+            offered(&file, &after_doc),
+            ["do [#added]", "do [#other]"],
+            "the running row is never re-offered"
+        );
+        let (outcome, claim) =
+            crate::queue_claim::claim(&file, after, "subagent:claimid", 7200).unwrap();
+        assert_eq!(
+            outcome,
+            agent_doc_queue::queue_claim::ClaimOutcome::Refreshed,
+            "{claim:?}"
+        );
+        assert_eq!(claim.generation, 1);
+        crate::queue_claim::start_attempt(
+            &file,
+            after,
+            "subagent:claimid",
+            "worker:subagent:claimid",
+            7200,
+            1,
+        )
+        .unwrap();
+        let reported = crate::queue_claim::report_attempt(&file, claimed, Some(1)).unwrap();
+        assert_eq!(reported.generation, 1);
+        assert_eq!(
+            reported.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Reported
+        );
+        assert_eq!(
+            crate::queue_claim::load_ledger(&file).unwrap().claims.len(),
+            1,
+            "no parallel generation"
+        );
+    }
+
+    #[test]
+    fn claimidsurvives_a_row_that_loses_its_id_mid_run_is_not_reoffered() {
+        let with_id = format!("{CLAIMID_ROW} [#q-ab1838a13369]");
+        assert_claim_survives_id_change(&with_id, CLAIMID_ROW);
+    }
+
+    #[test]
+    fn claimidsurvives_a_row_that_gains_its_id_mid_run_is_not_reoffered() {
+        let with_id = format!("{CLAIMID_ROW} [#q-3eb912c80663]");
+        assert_claim_survives_id_change(CLAIMID_ROW, &with_id);
+    }
+
     /// One worker is running and the operator adds two heads. Free slots must
     /// name both as claim/start now (`#subagentworkpool`, infra.md 2026-11-10).
     #[test]

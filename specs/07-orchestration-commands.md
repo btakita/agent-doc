@@ -846,6 +846,51 @@ became `📥 … ⟦effect:2⟧`. Regressions:
 `a_legacy_multi_slot_claim_migrates_onto_its_projected_row_only`, and
 `queue_cmd::tests::reported_claim_keeps_its_row_through_a_duplicate_effect_annotation`.
 
+**A claim survives its row gaining or losing a generated id
+(`#claimidsurvives`).** A binary-generated trailing `[#q-…]` is part of the
+claim identity (a free-text row keys as `queue-id:q-…`, a nest vector carries
+the id in its text), but id backfill, follow-up id assignment, the projection
+and merge repairs add or drop it on a row whose work did not change. The
+*stable row key* (`queue_claim::claim_row_key`) is the claim identity of the
+text without its generated id (projection prefix and tree glyphs are already
+stripped), plus that id. Two texts name one row when their authored identities
+match and they do not carry two different ids (`same_claim_row`): gaining or
+losing the id is the same row, while two occurrences with different ids stay
+distinct. Every ledger path matches on it. `follow_edits_in_view` carries a
+claim whose identity is no longer live onto the one unheld live row with its
+row key before trusting the structural anchor, so a stale anchor, a moved row,
+or a containment tie with an identical leaf under another parent cannot orphan
+a running claim and re-offer its row to the pool. Byte-identical copies of
+that row (a duplicated queue section) share one identity and are still the one
+row, so the claim holds every copy and stays `Running` and bound; a duplicate
+never paints it `⚠️`. `claim` of the row's other
+form reaches the existing attempt (same owner: `Refreshed` and re-keyed onto
+the live text; other owner: `HeldByOther`) instead of opening a parallel
+generation. `start`, `--refresh`, `report` and `release` resolve the same way;
+a generation-fenced transition whose resolved claim holds another generation
+uses the one same-row claim holding the requested generation, and `start`
+rebinds a worker whose older generation of the same row is superseded (that
+older entry is removed and its text joins `followed_from`) instead of refusing
+it as bound elsewhere. Observed 2026-11-22 on
+`tasks/agent-doc/agent-doc-bugs.md`: the 🗑️/🔒 row lost `[#q-ab1838a13369]`
+under a running `subagent:trashtop#1`, the pool re-offered it, `queue claim`
+opened generation 2, `queue start` refused the live worker as bound to
+generation 1 and `queue release --generation 1` refused as stale; the
+`#adversarial-pr` row under GH 433 gained `[#q-3eb912c80663]` under
+`subagent:advpr#1` and was re-offered the same way. The same night the sdk-dev.md queue section was duplicated: those claims kept
+every copy and stayed `Running`; their `⚠️` came from the coordinator process
+that owned them exiting (`#claimownerliveness`): a supervisor recycle at
+04:58:45Z respawned the harness, its in-process workers stopped (their
+transcripts end before it), and the resumed coordinator continued them by
+message and reported. A controller recycle's reseed hydrates every copy of a
+running row from the durable attempt (`🚧` while the owner lives, `⚠️` once
+its process is gone), and the attempt stays `Running` and bound either way.
+Regressions:
+`queue_claim::tests::claimidsurvives_*` and
+`subagent_pool::tests::claimidsurvives_a_row_that_{loses,gains}_its_id_mid_run_is_not_reoffered`,
+and `agent-doc-crdt-relay-io`
+`controller_recycle_keeps_a_running_claim_running_across_reseed`.
+
 **A claim ends with its row's strike, and never leaves its queue
 (`#claimfollowstruck`).** Row migration (`#claimfollowedit`,
 `#claimrowmigrate`) follows only an edit of the same row of the same queue;

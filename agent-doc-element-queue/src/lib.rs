@@ -479,6 +479,40 @@ fn trailing_generated_prompt_id(text: &str) -> Option<&str> {
     generated_prompt_id_annotation(text).map(|(id, _)| id)
 }
 
+/// `#struckidtrail`: the generated `[#q-…]` id a struck row holds at the end
+/// of its strike (`~~work [#q-…]~~`), or `None` when the row's first line does
+/// not end with a closing `~~` that wraps a trailing generated id.
+///
+/// A strike wraps the whole work text, id included, so the id sits before the
+/// closing `~~` and [`queue_prompt_stable_id`] (which reads the line's tail)
+/// does not see it. A writer that adds the id when it is "missing" must ask
+/// this too, or it appends a second copy after the strike, and the row then
+/// reads as live (`~~work [#q-x]~~ [#q-x]`).
+pub fn struck_generated_prompt_id(text: &str) -> Option<&str> {
+    let first = text.lines().next()?.trim_end();
+    let inner = first.strip_suffix("~~")?;
+    let open = inner.find("~~")?;
+    trailing_generated_prompt_id(&inner[open + 2..])
+}
+
+/// `#struckidtrail`: `line` without the copies of its struck id that a
+/// writer appended after the closing `~~` (`~~work [#q-x]~~ [#q-x]` →
+/// `~~work [#q-x]~~`), or `None` when the line has no such trailing copy.
+/// Only an exact repeat of the id inside the strike is folded; any other
+/// trailing text, or a different id, leaves the line unchanged.
+pub fn fold_struck_row_trailing_id(line: &str) -> Option<String> {
+    let mut current = line.trim_end();
+    let mut copies = Vec::new();
+    while !current.ends_with("~~") {
+        let (head, annotation) = current.rsplit_once(" [#")?;
+        copies.push(annotation.strip_suffix(']')?);
+        current = head.trim_end();
+    }
+    let inside = struck_generated_prompt_id(current)?;
+    (!copies.is_empty() && copies.iter().all(|id| id.eq_ignore_ascii_case(inside)))
+        .then(|| current.to_string())
+}
+
 /// Move a generated queue id that was published ahead of its list marker back
 /// to the trailing annotation slot.
 ///
@@ -1837,6 +1871,50 @@ mod tests {
                 assert_eq!(a.join(b), b.join(a), "commutative");
             }
         }
+    }
+
+    /// `#struckidtrail`: the id at the end of a strike is the row's id, and a
+    /// copy of it appended after the closing `~~` folds back.
+    #[test]
+    fn struck_generated_id_reads_inside_the_strike_and_folds_a_trailing_copy() {
+        let struck = "- ### ~~check CI run 1001 once it finishes. [#q-0a1b2c3d4e5f]~~";
+        assert_eq!(struck_generated_prompt_id(struck), Some("q-0a1b2c3d4e5f"));
+        assert_eq!(
+            struck_generated_prompt_id("- check it [#q-0a1b2c3d4e5f]"),
+            None
+        );
+        assert_eq!(struck_generated_prompt_id("- ~~check it~~"), None);
+        assert_eq!(
+            struck_generated_prompt_id("- ~~check [#authored-id]~~"),
+            None,
+            "only a generated q-id"
+        );
+        let doubled = format!("{struck} [#q-0a1b2c3d4e5f]");
+        assert_eq!(
+            fold_struck_row_trailing_id(&doubled).as_deref(),
+            Some(struck)
+        );
+        let tripled = format!("{struck} [#q-0a1b2c3d4e5f] [#Q-0A1B2C3D4E5F]  ");
+        assert_eq!(
+            fold_struck_row_trailing_id(&tripled).as_deref(),
+            Some(struck)
+        );
+        assert_eq!(fold_struck_row_trailing_id(struck), None);
+        assert_eq!(
+            fold_struck_row_trailing_id(&format!("{struck} [#q-ffffffffffff]")),
+            None,
+            "a different id is not a copy"
+        );
+        assert_eq!(
+            fold_struck_row_trailing_id(&format!("{struck} note [#q-0a1b2c3d4e5f]")),
+            None,
+            "other trailing text is never folded"
+        );
+        assert_eq!(
+            fold_struck_row_trailing_id("- check it [#q-0a1b2c3d4e5f] [#q-0a1b2c3d4e5f]"),
+            None,
+            "a live row is not touched"
+        );
     }
 
     #[test]

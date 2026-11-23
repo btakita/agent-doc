@@ -1177,6 +1177,16 @@ and one-to-one on both sides; two live prefix-related prompts or any other
 ambiguous family remain distinct. This policy is shared by both the legacy
 component merge and the persisted document-cell merge.
 
+A struck row whose strike ends in its generated id (`~~work [#q-…]~~`)
+already carries that id (`#struckidtrail`). It is the admitted row completed,
+never a pre-admission continuation, so neither relation above pairs it with
+the admitted row, and the q-id projection never adds the id to it again. When
+the projection does add an id to a struck head that lacks one, the id goes
+inside the strike, before the closing `~~`. Appending it after the strike
+made a retained strike rebased over a later claim projection read back as
+`~~work [#q-x]~~ [#q-x]`, a live row the pool re-offered (agent-doc-bugs.md,
+2026-11-23); self-repair folds such a copy back (`#selfrepaircleanup`).
+
 A mid-clause reword during that same admission is one row (`#editsteer`).
 Prepare may project `[#q-…]` and a lifecycle marker onto an earlier spelling
 while the operator replaces that spelling in the same stable-anchor gap. When

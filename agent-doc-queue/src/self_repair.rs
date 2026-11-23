@@ -63,6 +63,14 @@
 //!   like residue (`stop the running amend job`), an id-less live row, a
 //!   row a worker holds, and generated response structure keep their text.
 //!
+//! - **Struck-row trailing id.** A struck row whose strike ends in its
+//!   generated id, followed by one or more copies of that same id after the
+//!   closing `~~` (`~~work [#q-x]~~ [#q-x]`, written by a retained rebase
+//!   that read the struck row as missing its id, `#struckidtrail`), loses
+//!   the copies. The trailing text made the row read as live, so the pool
+//!   re-offered finished work. Only an exact repeat of the id inside the
+//!   strike is folded; a different id or any other trailing text stays.
+//!
 //! Generated response structure (`**Label:**` rows and response-detail rows)
 //! is never rewritten by the label pass. Every repair is returned so the
 //! caller logs it in ops.log.
@@ -99,6 +107,10 @@ pub enum SelfRepairKind {
     /// Moved a column-0 row that split another row's response tree back
     /// below that tree, restoring a proven strike (`#e107moved`).
     RowInsideResponseTree,
+    /// Folded a copy of a struck row's id that a writer appended after the
+    /// closing `~~` (`~~work [#q-x]~~ [#q-x]`), so the row reads as struck
+    /// again (`#struckidtrail`).
+    StruckRowTrailingId,
 }
 
 impl SelfRepairKind {
@@ -111,6 +123,7 @@ impl SelfRepairKind {
             Self::ClaimLabelResidue => "claim_label_residue",
             Self::MisnestedClosedByRows => "misnested_closed_by_rows",
             Self::RowInsideResponseTree => "row_inside_response_tree",
+            Self::StruckRowTrailingId => "struck_row_trailing_id",
         }
     }
 }
@@ -323,6 +336,55 @@ fn dedupe_struck_rows_in_body(body: &str, repairs: &mut Vec<SelfRepair>) -> Stri
 /// Remove extra struck copies of a row (see the module docs).
 pub fn dedupe_struck_rows(document: &str) -> (String, Vec<SelfRepair>) {
     edit_queue_bodies(document, dedupe_struck_rows_in_body)
+}
+
+fn fold_struck_row_trailing_ids_in_body(body: &str, repairs: &mut Vec<SelfRepair>) -> String {
+    let mut out = String::with_capacity(body.len());
+    let mut fence: Option<&str> = None;
+    for line in lines_of(body) {
+        let raw = &body[line.start..line.end];
+        let trimmed = raw.trim_start_matches([' ', '\t']);
+        if let Some(marker) = fence {
+            if trimmed.starts_with(marker) {
+                fence = None;
+            }
+            out.push_str(raw);
+            continue;
+        }
+        if let Some(marker) = ["```", "~~~"]
+            .into_iter()
+            .find(|marker| trimmed.starts_with(marker))
+        {
+            fence = Some(marker);
+            out.push_str(raw);
+            continue;
+        }
+        let Some(item) = line.item else {
+            out.push_str(raw);
+            continue;
+        };
+        let Some(folded) = agent_doc_element_queue::fold_struck_row_trailing_id(item) else {
+            out.push_str(raw);
+            continue;
+        };
+        let item_start = raw.find(item).unwrap_or(0);
+        let content_end = raw.trim_end_matches(['\n', '\r']).len();
+        out.push_str(&raw[..item_start]);
+        out.push_str(&folded);
+        out.push_str(&raw[content_end..]);
+        repairs.push(SelfRepair {
+            kind: SelfRepairKind::StruckRowTrailingId,
+            detail: folded.clone(),
+            rewritten: Some((item.to_string(), folded)),
+        });
+    }
+    out
+}
+
+/// `#struckidtrail`: fold the copies of a struck row's id written after its
+/// closing `~~` (see the module docs).
+pub fn fold_struck_row_trailing_ids(document: &str) -> (String, Vec<SelfRepair>) {
+    edit_queue_bodies(document, fold_struck_row_trailing_ids_in_body)
 }
 
 /// Byte ranges of `text` outside inline code spans.
@@ -911,8 +973,8 @@ pub fn renest_closed_by_rows(document: &str) -> (String, Vec<SelfRepair>) {
 /// (`response_proven(id)` says the `[#r-…]` id's original lives in
 /// `agent:exchange` or the response index), duplicate response trees,
 /// backlink rows nested too deep, stale claim labels, claim-label residue,
-/// then duplicate struck rows (a label removal or residue restore can make
-/// two struck copies identical). `None` when nothing changed; a second run is a
+/// struck rows' trailing id copies, then duplicate struck rows (a label
+/// removal, residue restore or id fold can make two struck copies identical). `None` when nothing changed; a second run is a
 /// no-op.
 pub fn self_repair_document(
     document: &str,
@@ -954,6 +1016,9 @@ pub fn self_repair_document(
     let (restored, residue_repairs) = restore_claim_label_residue(&current, is_live);
     current = restored;
     repairs.extend(residue_repairs);
+    let (folded, fold_repairs) = fold_struck_row_trailing_ids(&current);
+    current = folded;
+    repairs.extend(fold_repairs);
     let (deduped, dedupe_repairs) = dedupe_struck_rows(&current);
     current = deduped;
     repairs.extend(dedupe_repairs);

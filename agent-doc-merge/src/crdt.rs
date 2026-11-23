@@ -1301,15 +1301,22 @@ pub(crate) fn generated_id_promotion_alias(item: &str) -> Option<String> {
     (stripped != item).then(|| list_item_key(&stripped))
 }
 
+/// `#struckidtrail`: whether a row already carries a generated `[#q-…]` id,
+/// either as the trailing annotation or at the end of its strike
+/// (`~~work [#q-…]~~`). A struck row is the admitted row completed, not a
+/// pre-admission copy, so no merge may treat it as missing its id.
+pub(crate) fn carries_generated_id(item: &str) -> bool {
+    generated_id_promotion_alias(item).is_some()
+        || agent_doc_element_queue::struck_generated_prompt_id(item).is_some()
+}
+
 /// A binary-admitted q-id row and the live editor continuation of that row are
 /// one occurrence even when the operator appended text after admission took
 /// its cut. This relation is deliberately narrow: one side must carry a
 /// generated q-id, the other must not, and their normalized work must be a
 /// progressive suffix edit rather than merely similar prose.
 pub(crate) fn generated_id_progressive_revision(promoted: &str, live: &str) -> bool {
-    if generated_id_promotion_alias(promoted).is_none()
-        || generated_id_promotion_alias(live).is_some()
-    {
+    if generated_id_promotion_alias(promoted).is_none() || carries_generated_id(live) {
         return false;
     }
     let promoted = agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(promoted);
@@ -1393,7 +1400,7 @@ pub(crate) fn admitted_queue_work(text: &str) -> String {
 /// Strict prefix continuation stays on [`generated_id_progressive_revision`].
 pub(crate) fn generated_id_steering_revision(promoted: &str, live: &str) -> bool {
     if generated_id_promotion_alias(promoted).is_none()
-        || generated_id_promotion_alias(live).is_some()
+        || carries_generated_id(live)
         || generated_id_progressive_revision(promoted, live)
     {
         return false;
@@ -1483,7 +1490,7 @@ pub(crate) fn admission_steering_plan(
             .iter()
             .enumerate()
             .filter(|(theirs_index, (live_key, live))| {
-                if !is_free_text_row_key(live_key) || generated_id_promotion_alias(live).is_some() {
+                if !is_free_text_row_key(live_key) || carries_generated_id(live) {
                     return false;
                 }
                 if gap(theirs, *theirs_index) != ours_gap {
@@ -1647,7 +1654,9 @@ fn project_generated_id_onto_live_unrepaired(promoted: &str, live: &str) -> Stri
     let Some(id) = agent_doc_element_queue::queue_prompt_stable_id(promoted) else {
         return live.to_string();
     };
-    if agent_doc_element_queue::queue_prompt_stable_id(live).is_some() {
+    if agent_doc_element_queue::queue_prompt_stable_id(live).is_some()
+        || agent_doc_element_queue::struck_generated_prompt_id(live).is_some()
+    {
         return live.to_string();
     }
     // A prefix continuation already carries its own marker. A mid-clause
@@ -1693,7 +1702,12 @@ fn project_generated_id_onto_live_unrepaired(promoted: &str, live: &str) -> Stri
     }
     let without_report =
         agent_doc_element_queue::strip_queue_report_state_annotation(&projected_head);
-    let insert_at = without_report.len();
+    // `#struckidtrail`: never append after a closing `~~`. On a struck head
+    // the id goes inside the strike, where every strike writer keeps it.
+    let insert_at = match without_report.trim_end().strip_suffix("~~") {
+        Some(inner) if inner.contains("~~") => inner.trim_end().len(),
+        _ => without_report.len(),
+    };
     projected_head.insert_str(insert_at, &format!(" [#{id}]"));
     match tail {
         Some(tail) => format!("{projected_head}\n{tail}"),
@@ -7690,6 +7704,27 @@ Second answer line three.
         );
         assert_eq!(persisted.matches("#rebase").count(), 1);
         assert!(!persisted.contains(pre_id));
+    }
+
+    /// `#struckidtrail`: a struck row whose strike ends in the admitted id is
+    /// that row completed, never a pre-admission copy, so no merge projects
+    /// the id onto it again; and a projection never lands after a closing
+    /// `~~`.
+    #[test]
+    fn a_struck_row_holding_its_id_is_not_a_pre_admission_copy() {
+        let work = "follow up on an action item: agent: check CI run 1001 once it finishes.";
+        let admitted = format!("- \u{1f6a7} [#subagent:x#1] {work} [#q-0a1b2c3d4e5f]");
+        let struck = format!("- ### ~~{work} [#q-0a1b2c3d4e5f]~~");
+        assert!(carries_generated_id(&struck));
+        assert!(!generated_id_progressive_revision(&admitted, &struck));
+        assert!(!generated_id_steering_revision(&admitted, &struck));
+        assert_eq!(project_generated_id_onto_live(&admitted, &struck), struck);
+        let struck_bare = format!("- ### ~~{work}~~");
+        assert_eq!(
+            project_generated_id_onto_live(&admitted, &struck_bare),
+            struck,
+            "an id projected onto a struck head goes inside the strike"
+        );
     }
 
     #[test]

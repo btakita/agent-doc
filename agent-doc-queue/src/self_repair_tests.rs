@@ -675,3 +675,112 @@ fn closed_by_renest_keeps_relative_structure() {
     assert!(renest_closed_by_rows(&repaired).1.is_empty());
     assert_eq!(renest_closed_by_rows(&repaired).0, repaired);
 }
+
+/// `#struckidtrail` (agent-doc-bugs.md, 2026-11-23): a retained rebase
+/// appended the struck row's own id after its closing `~~`, so the finished
+/// row read as live and the pool re-offered it. Self-repair folds the copy,
+/// the row reads as struck again, a second run is a no-op, and the sync that
+/// follows gives the finished tree its 🗑️ glyph inside the strike.
+#[test]
+fn a_struck_rows_trailing_id_copy_folds_back_into_the_strike() {
+    const WORK: &str = "follow up on an action item from queue item \u{201c}` - **Guidance:** \u{1f64b} 3/5 done, 2 yours. Only you can finish this: 2 items for you\u{2026}\u{201d}: agent: check CI run 1001 once it finishes. [#q-0a1b2c3d4e5f]";
+    let queue_doc = |row: &str| {
+        format!(
+            concat!(
+                "---\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue subagents -->\n",
+                "{}\n",
+                "  - **Response [#r-0123456789ab]**\n",
+                "    - **Timestamp:** 2026-11-23T02:22:20.000Z\n",
+                "    - **Summary:** All named commits passed CI.\n",
+                "    - **State:** Complete.\n",
+                "    - **Guidance:** \u{1f5d1}\u{fe0f} Safe to delete this tree. Its action items moved to follow-up rows.\n",
+                "- [#q-0a1b2c3d4e5f] follow-up: agent: re-check runs 1002 and 1003 once they finish. [#q-5f4e3d2c1b0a]\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            row
+        )
+    };
+    let row_closed = |document: &str| {
+        let tree = crate::queue_tree::queue_tree(
+            document,
+            &crate::queue_tree::QueueTreeOptions::default(),
+        )
+        .unwrap();
+        tree.nodes
+            .iter()
+            .find(|node| node.depth == 0 && node.full_text.contains("check CI run 1001"))
+            .map(|node| node.closed)
+            .expect("the origin row is a queue node")
+    };
+    let damaged = queue_doc(&format!("- ### ~~{WORK}~~ [#q-0a1b2c3d4e5f]"));
+    assert!(
+        !row_closed(&damaged),
+        "the trailing copy makes the row read as live"
+    );
+
+    let (repaired, repairs) =
+        self_repair_document(&damaged, &retired, &unproven).expect("the copy is folded");
+    assert_eq!(repaired, queue_doc(&format!("- ### ~~{WORK}~~")));
+    assert_eq!(repairs.len(), 1, "{repairs:?}");
+    assert_eq!(repairs[0].kind, SelfRepairKind::StruckRowTrailingId);
+    assert!(
+        repairs[0]
+            .log_fields()
+            .starts_with("kind=struck_row_trailing_id detail=")
+    );
+    assert_eq!(
+        repairs[0].rewritten,
+        Some((
+            format!("### ~~{WORK}~~ [#q-0a1b2c3d4e5f]"),
+            format!("### ~~{WORK}~~")
+        ))
+    );
+    assert!(row_closed(&repaired), "the repaired row is struck again");
+    assert!(
+        self_repair_document(&repaired, &retired, &unproven).is_none(),
+        "a second run is a no-op"
+    );
+
+    let synced = crate::response_tree_sync::sync_response_trees_striking(&repaired, &|_| false)
+        .map(|sync| sync.document)
+        .unwrap_or_else(|| repaired.clone());
+    assert!(
+        synced.contains(&format!("- ### ~~\u{1f5d1}\u{fe0f} {WORK}~~\n")),
+        "the finished tree's row carries the delete glyph inside its strike:\n{synced}"
+    );
+    let resynced = self_repair_document(&synced, &retired, &unproven)
+        .map(|(document, _)| document)
+        .unwrap_or_else(|| synced.clone());
+    let resynced = crate::response_tree_sync::sync_response_trees_striking(&resynced, &|_| false)
+        .map(|sync| sync.document)
+        .unwrap_or(resynced);
+    assert_eq!(resynced, synced, "a second repair + sync is a no-op");
+}
+
+/// `#struckidtrail`: only an exact repeat of the strike's own id is folded.
+#[test]
+fn struck_row_trailing_text_that_is_not_the_same_id_is_kept() {
+    let queue = concat!(
+        "- ~~check it now [#q-0a1b2c3d4e5f]~~ [#q-ffffffffffff]\n",
+        "- ~~check it now [#q-0a1b2c3d4e5f]~~ see [#q-0a1b2c3d4e5f]\n",
+        "- live row [#q-0a1b2c3d4e5f] [#q-0a1b2c3d4e5f]\n",
+        "- ~~check it later~~ [#q-0a1b2c3d4e5f]\n",
+    );
+    let document = format!("<!-- agent:queue -->\n{queue}<!-- /agent:queue -->\n");
+    let (repaired, repairs) = fold_struck_row_trailing_ids(&document);
+    assert!(repairs.is_empty(), "{repairs:?}");
+    assert_eq!(repaired, document);
+    let doubled = document.replace(
+        "- ~~check it later~~ [#q-0a1b2c3d4e5f]",
+        "  - ~~check it later [#q-0a1b2c3d4e5f]~~ [#q-0a1b2c3d4e5f]",
+    );
+    let (repaired, repairs) = fold_struck_row_trailing_ids(&doubled);
+    assert_eq!(repairs.len(), 1, "a nested row folds too: {repairs:?}");
+    assert!(
+        repaired.contains("  - ~~check it later [#q-0a1b2c3d4e5f]~~\n"),
+        "{repaired}"
+    );
+}

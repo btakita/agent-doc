@@ -8252,3 +8252,7 @@ mod status_patch_drop_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "write_policy_struck_id_tests.rs"]
+mod struck_id_tests;

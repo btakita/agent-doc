@@ -232,7 +232,11 @@ fn scan_file(rel: &str, source: &str, rows: &mut Vec<(String, String, String)>) 
                     if delta > 0 {
                         skip_until = Some(depth);
                         pending_test = false;
-                    } else if starts_block || trimmed.ends_with(';') {
+                    } else if starts_block || trimmed.ends_with(';') || delta < 0 {
+                        // A `}` closing the enclosing block ends a test-only
+                        // struct or struct-literal field (`#[cfg(test)] f: v,`),
+                        // which has no `{` or `;` of its own. Without this the
+                        // pending attribute swallowed the next item's body.
                         pending_test = false;
                     }
                 }
@@ -768,6 +772,16 @@ fn audit_skips_test_items_but_not_production_items() {
         "const fn const_fence() {}\n",
         "pub(crate) const RETRY_BACKOFF: u64 = 1;\n",
         "fn call() { flag.compare_exchange(false, true); }\n",
+        "fn new() -> Self {\n",
+        "    Self {\n",
+        "        #[cfg(test)]\n",
+        "        publisher_for_test: None,\n",
+        "    }\n",
+        "}\n",
+        "fn arm_retry(\n",
+        "    target: u8,\n",
+        ") {\n",
+        "}\n",
     );
     let mut rows = Vec::new();
     scan_file("x.rs", source, &mut rows);
@@ -778,7 +792,8 @@ fn audit_skips_test_items_but_not_production_items() {
             "production_fence",
             "const_fence",
             "RETRY_BACKOFF",
-            "compare_exchange"
+            "compare_exchange",
+            "arm_retry"
         ]
     );
 }

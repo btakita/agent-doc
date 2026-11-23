@@ -5742,6 +5742,48 @@ pub fn queue_clean_slate_reset_for_file(file: &Path) -> Result<QueueCleanSlateRe
     }
 }
 
+/// The controller's answer to [`enqueue_document_maintenance`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentMaintenanceEnqueueReceipt {
+    pub controller_pid: u32,
+    pub controller_generation: u64,
+    pub outcome: crate::document_maintenance::DocumentMaintenanceEnqueueOutcome,
+}
+
+/// Bound on the enqueue round trip: the handler is one SQLite write, so a
+/// controller that cannot answer in this window is treated as unavailable and
+/// the caller runs its own worker.
+const DOCUMENT_MAINTENANCE_ENQUEUE_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// `#q-e9483473162d`: hand `file`'s published maintenance request to the
+/// running project controller. Never launches a controller: with none
+/// running (or one that refuses, such as an older binary or a generation that
+/// is handing off) this returns an error and the caller keeps its fallback.
+pub fn enqueue_document_maintenance(file: &Path) -> Result<DocumentMaintenanceEnqueueReceipt> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    request_existing_controller_with_timeout(
+        &project_root,
+        ControllerRequest {
+            command: "document_maintenance_enqueue".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("preflight_admission".to_string()),
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+            sequence: None,
+        },
+        DOCUMENT_MAINTENANCE_ENQUEUE_TIMEOUT,
+    )
+}
+
 /// Publish an edge on the idle supervisor's existing maintenance channel.
 ///
 /// A durable repair request is recorded by the caller before this wake. If no
@@ -25806,6 +25848,10 @@ pub(crate) fn handle_request_locked(
             runtime.as_ref(),
             request,
         )),
+        "document_maintenance_enqueue" => controller_envelope(handle_document_maintenance_enqueue(
+            &bootstrap_snapshot,
+            request,
+        )),
         "reliable_sync" => controller_envelope(handle_reliable_sync(
             &bootstrap_snapshot.project_root,
             request,
@@ -45553,6 +45599,39 @@ fn handle_queue_clean_slate_reset(
         ),
     );
     Ok(reset)
+}
+
+/// `#q-e9483473162d`: accept one document's maintenance request for the
+/// controller's own background worker ([`crate::document_maintenance`]). The
+/// admitting hook already published the request row; this only reserves the
+/// document and schedules the run, so it answers in one SQLite write.
+fn handle_document_maintenance_enqueue(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<DocumentMaintenanceEnqueueReceipt> {
+    let file = request_file(&request)?;
+    let file = canonical_controller_request_file(bootstrap, &file);
+    // A generation that is handing off may exit before the run; the caller
+    // then runs its own detached worker instead.
+    anyhow::ensure!(
+        matches!(
+            bootstrap.handoff_state,
+            ControllerHandoffState::Stable | ControllerHandoffState::Promoted
+        ),
+        "controller generation {} is {} and does not accept document maintenance",
+        bootstrap.controller_generation,
+        bootstrap.handoff_state.as_str(),
+    );
+    anyhow::ensure!(
+        runtime_effects()?.document_maintenance_supported(),
+        "document maintenance is not wired in this controller binary"
+    );
+    let outcome = crate::document_maintenance::global().enqueue(&file)?;
+    Ok(DocumentMaintenanceEnqueueReceipt {
+        controller_pid: std::process::id(),
+        controller_generation: bootstrap.controller_generation,
+        outcome,
+    })
 }
 
 fn handle_queue_projection_repair_wake(

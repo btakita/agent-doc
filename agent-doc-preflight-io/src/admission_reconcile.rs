@@ -56,10 +56,155 @@ fn todo_ids(
     )
 }
 
+/// Test-only: also run [`agent_doc_queue::reconcile_incremental::reconcile_full`]
+/// beside every chain pass and log whether the two results are byte-identical
+/// (`full_equal=`). Read by the process running the pass (the controller for
+/// controller-hosted maintenance).
+const VERIFY_FULL_CHAIN_ENV: &str = "AGENT_DOC_TEST_RECONCILE_CHAIN_VERIFY_FULL";
+
+/// One [`ReconcileCache`] per document (`#incrementalreconcile`). The
+/// controller's background reconciler is long-lived, so a document's cache
+/// survives between its maintenance runs there; a detached worker process
+/// starts empty, which is the same chain without reuse.
+///
+/// [`ReconcileCache`]: agent_doc_queue::reconcile_incremental::ReconcileCache
+fn chain_caches() -> &'static std::sync::Mutex<
+    std::collections::HashMap<
+        std::path::PathBuf,
+        agent_doc_queue::reconcile_incremental::ReconcileCache,
+    >,
+> {
+    static CACHES: std::sync::OnceLock<
+        std::sync::Mutex<
+            std::collections::HashMap<
+                std::path::PathBuf,
+                agent_doc_queue::reconcile_incremental::ReconcileCache,
+            >,
+        >,
+    > = std::sync::OnceLock::new();
+    CACHES.get_or_init(Default::default)
+}
+
+fn chain_cache_key(file: &Path) -> std::path::PathBuf {
+    file.canonicalize().unwrap_or_else(|_| file.to_path_buf())
+}
+
+/// `#incrementalreconcile`: the queue/closeout chain (moved follow-up states,
+/// self-repair, response-tree sync, marker legend, open counts, loose ends)
+/// through [`agent_doc_queue::reconcile_incremental::reconcile_incremental`],
+/// keeping one cache per document. The queue maintenance after this step runs
+/// the same passes again inside its own pass order; on the chain's output they
+/// find nothing left to change.
+fn queue_reconcile_chain(
+    file: &Path,
+    content: &str,
+    fence: &dyn PendingMaintenanceEffectFence,
+) -> Result<Option<String>> {
+    let key = chain_cache_key(file);
+    let mut cache = chain_caches()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .remove(&key)
+        .unwrap_or_default();
+    let started = std::time::Instant::now();
+    let report = agent_doc_queue_io::self_repair::reconcile_chain_for(file, content, &mut cache);
+    let elapsed = started.elapsed();
+    chain_caches()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .insert(key, cache);
+    let full_equal = std::env::var_os(VERIFY_FULL_CHAIN_ENV).map(|_| {
+        agent_doc_queue_io::self_repair::reconcile_chain_full_for(file, content)
+            == report.reconciled
+    });
+    let reconciled = &report.reconciled;
+    let changed = reconciled.document != content;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_reconcile_chain file={} changed={changed} reused={} dirty={} slice_parses={} document_parses={} moved={} repairs={} response_trees={} legend={} open_counts={} loose_ends={} elapsed_us={}{} (#incrementalreconcile)",
+            file.display(),
+            report.reused,
+            if report.dirty_components.is_empty() {
+                "-".to_string()
+            } else {
+                report.dirty_components.len().to_string()
+            },
+            report.slice_parses,
+            report.document_parses,
+            reconciled.moved_followup_rows,
+            reconciled.repairs.len(),
+            reconciled.response_trees.is_some(),
+            reconciled.legend_refreshed,
+            reconciled.open_counts_changed,
+            reconciled.loose_ends_changed,
+            elapsed.as_micros(),
+            match full_equal {
+                Some(equal) => format!(" full_equal={equal}"),
+                None => String::new(),
+            },
+        ),
+    );
+    if !changed {
+        return Ok(None);
+    }
+    for repair in &reconciled.repairs {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_self_repair file={} source=background_reconcile {} (#selfrepaircleanup)",
+                file.display(),
+                repair.log_fields()
+            ),
+        );
+    }
+    agent_doc_queue_io::self_repair::carry_self_repair_rewrites(file, &reconciled.repairs);
+    let root = agent_doc_project_root_io::project_root_containing(file);
+    let admitted = agent_doc_hash::content_hash(content);
+    let persisted = crate::persist_queue_maintenance_doc_with_admitted_authority(
+        file,
+        &reconciled.document,
+        content,
+        root.as_deref(),
+        "background_queue_reconcile_chain",
+        Some(&admitted),
+        Some(fence),
+        None,
+    )?;
+    // The open counts and the loose-ends digest are generated projections the
+    // recovery baseline carries too (queue maintenance re-renders them into
+    // the snapshot whenever it writes); keep it aligned when this pass is the
+    // one that changed them.
+    if (reconciled.open_counts_changed || reconciled.loose_ends_changed)
+        && let Ok(Some(snapshot)) = agent_doc_snapshot_io::load_document_baseline(file)
+    {
+        let mut next = snapshot.clone();
+        if let Ok(Some(counted)) = agent_doc_queue::open_count::reconcile_open_counts(&next) {
+            next = counted;
+        }
+        if let Ok(Some(digest)) = agent_doc_queue::loose_ends::reconcile_loose_ends_ensuring(
+            &next,
+            agent_doc_queue::loose_ends::has_loose_ends_component(&persisted),
+        ) {
+            next = digest;
+        }
+        if next != snapshot {
+            crate::queue_maintenance_checkpoint_snapshot(
+                file,
+                Some(fence),
+                &next,
+                "queue_reconcile_chain",
+            )?;
+        }
+    }
+    Ok(Some(persisted))
+}
+
 /// The passes in the order admission ran them: todo ids are coined before the
 /// answer ledger reads todo rows, and moot decisions are pruned before the
-/// queue maintenance after this step rebuilds the waiting tree.
-const PASSES: [(&str, Pass); 4] = [
+/// queue maintenance after this step rebuilds the waiting tree. The queue
+/// reconcile chain runs last, on the cut those passes produced.
+const PASSES: [(&str, Pass); 5] = [
     ("todo_id_backfill", todo_ids),
     (
         "answer_ledger",
@@ -73,6 +218,7 @@ const PASSES: [(&str, Pass); 4] = [
         "blocker_settlement",
         crate::blocker_settlement::run_blocker_settlement_maintenance_on_admitted_cut,
     ),
+    ("queue_reconcile_chain", queue_reconcile_chain),
 ];
 
 fn is_superseded(error: &anyhow::Error) -> bool {
@@ -248,6 +394,68 @@ mod tests {
         assert!(report.failed.is_empty(), "{report:?}");
         assert!(fence.receipts.borrow().is_empty());
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), QUIET_DOC);
+    }
+
+    /// `#incrementalreconcile`: the chain pass persists exactly
+    /// `reconcile_full`'s document, and the per-document cache it keeps makes
+    /// the next revision of the same document reuse it.
+    #[test]
+    fn the_chain_pass_persists_the_full_chain_result_with_a_per_document_cache() {
+        let content = format!(
+            "{}\n## Exchange <!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
+            include_str!("../../agent-doc-queue/tests/fixtures/open_count_session.md")
+        );
+        let (_dir, doc) = fixture(&content);
+        let full = agent_doc_queue_io::self_repair::reconcile_chain_full_for(&doc, &content);
+        assert_ne!(full.document, content, "the fixture must have chain work");
+        let fence = CutFence {
+            expected: RefCell::new(agent_doc_hash::content_hash(&content)),
+            receipts: RefCell::new(Vec::new()),
+            refuse: None,
+        };
+        let report = run_deferred_admission_reconcile(&doc, &content, &fence).unwrap();
+        assert!(report.failed.is_empty(), "{report:?}");
+        assert!(
+            report.changed.contains(&"queue_reconcile_chain"),
+            "{report:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            full.document,
+            "the persisted chain cut must be byte-identical to reconcile_full"
+        );
+        assert!(
+            chain_caches()
+                .lock()
+                .unwrap()
+                .contains_key(&chain_cache_key(&doc)),
+            "the pass keeps one cache per document"
+        );
+
+        // The reconciled revision is a fixed point: the next run writes nothing.
+        let settled = full.document.clone();
+        let fence = CutFence {
+            expected: RefCell::new(agent_doc_hash::content_hash(&settled)),
+            receipts: RefCell::new(Vec::new()),
+            refuse: None,
+        };
+        let report = run_deferred_admission_reconcile(&doc, &settled, &fence).unwrap();
+        assert!(
+            !report.changed.contains(&"queue_reconcile_chain"),
+            "{report:?}"
+        );
+        let mut cache = chain_caches()
+            .lock()
+            .unwrap()
+            .remove(&chain_cache_key(&doc))
+            .unwrap();
+        let replay =
+            agent_doc_queue_io::self_repair::reconcile_chain_for(&doc, &settled, &mut cache);
+        assert!(
+            replay.reused,
+            "an unchanged revision replays from the cache"
+        );
+        assert_eq!(replay.reconciled.document, settled);
     }
 
     /// A refusal at a pass's own fenced write is reported as superseded, not

@@ -2,6 +2,7 @@
 
 pub mod dashboard;
 pub mod dashboard_refresh;
+pub mod document_maintenance;
 pub mod editor_route_errors;
 pub mod heap_hygiene;
 pub mod inherited_fds;

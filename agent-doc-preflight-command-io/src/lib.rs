@@ -165,24 +165,93 @@ fn new_background_queue_maintenance_token() -> String {
     )
 }
 
+/// Opt-out of controller-hosted maintenance: `process` keeps every request on
+/// the detached worker process (`#q-e9483473162d`).
+const BACKGROUND_MAINTENANCE_HOST_ENV: &str = "AGENT_DOC_BACKGROUND_MAINTENANCE_HOST";
+
+/// Whether this admission may hand its request to the project controller.
+///
+/// The integration barriers above (`AGENT_DOC_TEST_*MAINTENANCE*`) are read by
+/// the worker from its own environment, which only a worker this process
+/// spawns inherits, so a test that sets one keeps the detached worker.
+fn controller_hosted_maintenance_allowed() -> bool {
+    if std::env::var(BACKGROUND_MAINTENANCE_HOST_ENV)
+        .is_ok_and(|host| host.trim().eq_ignore_ascii_case("process"))
+    {
+        return false;
+    }
+    !std::env::vars_os().any(|(name, _)| {
+        name.to_str().is_some_and(|name| {
+            (name.starts_with("AGENT_DOC_TEST_") && name.contains("MAINTENANCE"))
+                || name == TEST_PREFLIGHT_AWAIT_PARKED_WORKER_ENV
+        })
+    })
+}
+
 /// Dispatch comprehensive queue reconciliation outside the admission process.
 ///
-/// The child re-observes editor authority before every mutation. The admitting
-/// process only pays for process creation; it never waits for queue projection,
-/// editor-native save, or disk convergence. Using the binary selected by the
-/// controller's launch policy also keeps embedded/plugin callers from trying to
-/// execute their host process as `agent-doc`.
+/// The admitting process publishes the document's request (one latest row,
+/// claimed by generation and fenced by `admitted_authority_hash`) and returns.
+/// `#q-e9483473162d`: when a project controller is running, it owns the
+/// request and runs it on its own per-document worker thread, coalesced and
+/// debounced per document ([`agent_doc_controller_io::document_maintenance`]),
+/// so the hook creates no process. Without one (or with one that refuses),
+/// this spawns the detached worker as before: the child re-observes editor
+/// authority before every mutation, and the admitting process only pays for
+/// process creation. Using the binary selected by the controller's launch
+/// policy also keeps embedded/plugin callers from trying to execute their host
+/// process as `agent-doc`.
+///
+/// Returns the pid that owns the request: the controller's, or the child's.
 pub fn spawn_background_queue_maintenance(
     file: &Path,
     commit_if_mutated: bool,
     admitted_authority_hash: &str,
 ) -> Result<u32> {
-    let binary = agent_doc_controller_io::project_controller::current_binary_identity()?.path;
     let _request = agent_doc_queue_io::queue_edit_owner::publish_queue_maintenance_request(
         file,
         admitted_authority_hash,
         commit_if_mutated,
     )?;
+    if controller_hosted_maintenance_allowed() {
+        let started = std::time::Instant::now();
+        match agent_doc_controller_io::project_controller::enqueue_document_maintenance(file) {
+            Ok(receipt) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_maintenance_controller_enqueued file={} controller_pid={} generation={} outcome={} elapsed_us={} (#q-e9483473162d)",
+                        file.display(),
+                        receipt.controller_pid,
+                        receipt.controller_generation,
+                        receipt.outcome.as_str(),
+                        started.elapsed().as_micros(),
+                    ),
+                );
+                return Ok(receipt.controller_pid);
+            }
+            Err(error) => agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "queue_maintenance_controller_unavailable file={} fallback=process elapsed_us={} error={} (#q-e9483473162d)",
+                    file.display(),
+                    started.elapsed().as_micros(),
+                    format!("{error:#}").replace('\n', " | "),
+                ),
+            ),
+        }
+    }
+    spawn_background_queue_maintenance_process(file, commit_if_mutated, admitted_authority_hash)
+}
+
+/// The detached-process fallback of [`spawn_background_queue_maintenance`];
+/// the request row is already published.
+fn spawn_background_queue_maintenance_process(
+    file: &Path,
+    commit_if_mutated: bool,
+    admitted_authority_hash: &str,
+) -> Result<u32> {
+    let binary = agent_doc_controller_io::project_controller::current_binary_identity()?.path;
     let token = new_background_queue_maintenance_token();
     // Claim before process creation. Concurrent admissions race in one SQLite
     // statement, so only the winner launches a child at all. The unique token
@@ -838,6 +907,67 @@ pub fn run_background_queue_maintenance(file: &Path, commit_if_mutated: bool) ->
     run_queue_maintenance_worker_logged(file, &token, QueueMaintenanceWorkerMode::Detached)
 }
 
+/// `#q-e9483473162d`: reserve `file`'s maintenance for a worker thread of
+/// this (controller) process, as [`spawn_background_queue_maintenance`]
+/// reserves it for a child. `Ok(None)`: no request is pending, or another live
+/// owner holds the reservation and will consume the latest request.
+pub fn reserve_controller_queue_maintenance(file: &Path) -> Result<Option<String>> {
+    if agent_doc_queue_io::queue_edit_owner::load_queue_maintenance_request(file)?.is_none() {
+        return Ok(None);
+    }
+    let token = new_background_queue_maintenance_token();
+    if agent_doc_queue_io::queue_edit_owner::try_reserve_queue_edit_owner(
+        &file.to_string_lossy(),
+        &token,
+        std::process::id(),
+    )
+    .context("failed to reserve controller queue maintenance ownership")?
+    {
+        return Ok(Some(token));
+    }
+    let holder_pid =
+        agent_doc_queue_io::queue_edit_owner::read_queue_edit_owner_lease(&file.to_string_lossy())
+            .map(|lease| lease.holder_pid)
+            .unwrap_or_default();
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_maintenance_controller_coalesced file={} holder_pid={holder_pid} (#q-e9483473162d)",
+            file.display(),
+        ),
+    );
+    Ok(None)
+}
+
+/// `#q-e9483473162d`: run `file`'s pending maintenance request on the calling
+/// controller thread under `token` (from
+/// [`reserve_controller_queue_maintenance`]). The worker body is the detached
+/// child's; this process outlives the run, so the reservation is always
+/// released afterwards. An unfinished claim keeps its retained intent and the
+/// request row, so a closeout or the next admission recovers it.
+pub fn run_controller_queue_maintenance(file: &Path, token: &str) -> Result<()> {
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_maintenance_background_worker_entered file={} pid={} mode=controller",
+            file.display(),
+            std::process::id(),
+        ),
+    );
+    let outcome =
+        run_queue_maintenance_worker_logged(file, token, QueueMaintenanceWorkerMode::Controller);
+    release_controller_queue_maintenance(file, token);
+    outcome
+}
+
+/// Release `token` if it is still `file`'s maintenance reservation.
+pub fn release_controller_queue_maintenance(file: &Path, token: &str) {
+    agent_doc_queue_io::queue_edit_owner::clear_queue_edit_owner_lease_if_holder(
+        &file.to_string_lossy(),
+        token,
+    );
+}
+
 /// How a queue-maintenance worker body came to own its reservation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum QueueMaintenanceWorkerMode {
@@ -846,6 +976,8 @@ enum QueueMaintenanceWorkerMode {
     /// A closeout that adopted an orphaned request in process
     /// (`#deadmaintworker`).
     Adopted,
+    /// A worker thread of the project controller (`#q-e9483473162d`).
+    Controller,
 }
 
 impl QueueMaintenanceWorkerMode {
@@ -853,6 +985,7 @@ impl QueueMaintenanceWorkerMode {
         match self {
             Self::Detached => "detached",
             Self::Adopted => "adopted",
+            Self::Controller => "controller",
         }
     }
 }

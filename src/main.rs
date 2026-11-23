@@ -704,6 +704,25 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         agent_dashboard::refresh_if_armed(project_root)
     }
 
+    fn document_maintenance_supported(&self) -> bool {
+        true
+    }
+
+    fn reserve_document_maintenance(&self, file: &Path) -> anyhow::Result<Option<String>> {
+        agent_doc_preflight_command_io::reserve_controller_queue_maintenance(file)
+    }
+
+    fn run_document_maintenance(&self, file: &Path, token: &str) -> anyhow::Result<()> {
+        // `#q-e9483473162d`: the controller-hosted form of the detached
+        // `preflight --queue-maintenance-only` child.
+        close_mechanical_reported_rows_before_maintenance(file, false);
+        agent_doc_preflight_command_io::run_controller_queue_maintenance(file, token)
+    }
+
+    fn release_document_maintenance(&self, file: &Path, token: &str) {
+        agent_doc_preflight_command_io::release_controller_queue_maintenance(file, token);
+    }
+
     fn restore_queue_loop_items(
         &self,
         file: &Path,
@@ -718,6 +737,32 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
             roster,
             source_content,
         )
+    }
+}
+
+/// The first step of every background maintenance run, detached child or
+/// controller worker: close mechanical ☑️ rows before the maintenance lock, so
+/// a long coordinator turn does not leave them open until closeout.
+fn close_mechanical_reported_rows_before_maintenance(file: &Path, print: bool) {
+    match queue_completion_feedback::close_mechanical_reported_rows(file, &CliQueueCommandEffects) {
+        Ok(outcomes) if print && outcomes.iter().any(|outcome| outcome.closed()) => {
+            queue_completion_feedback::print_mechanical_closeout(file, &outcomes);
+        }
+        Ok(_) => {}
+        Err(error) => {
+            eprintln!(
+                "[queue] mechanical reported closeout did not run for {}: {error:#}",
+                file.display()
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "mechanical_reported_closeout_failed file={} error={}",
+                    file.display(),
+                    format!("{error:#}").replace('\n', " | "),
+                ),
+            );
+        }
     }
 }
 
@@ -8802,29 +8847,7 @@ fn try_main() -> anyhow::Result<()> {
                 // a long coordinator turn does not leave mechanical ☑️ rows
                 // open until the model reaches closeout. Admission has already
                 // returned; this does not extend it.
-                match queue_completion_feedback::close_mechanical_reported_rows(
-                    &file,
-                    &CliQueueCommandEffects,
-                ) {
-                    Ok(outcomes) if outcomes.iter().any(|outcome| outcome.closed()) => {
-                        queue_completion_feedback::print_mechanical_closeout(&file, &outcomes);
-                    }
-                    Ok(_) => {}
-                    Err(error) => {
-                        eprintln!(
-                            "[queue] mechanical reported closeout did not run for {}: {error:#}",
-                            file.display()
-                        );
-                        agent_doc_ops_log_io::log_op(
-                            &file,
-                            &format!(
-                                "mechanical_reported_closeout_failed file={} error={}",
-                                file.display(),
-                                format!("{error:#}").replace('\n', " | "),
-                            ),
-                        );
-                    }
-                }
+                close_mechanical_reported_rows_before_maintenance(&file, true);
                 agent_doc_preflight_command_io::run_background_queue_maintenance(
                     &file,
                     commit_queue_maintenance,

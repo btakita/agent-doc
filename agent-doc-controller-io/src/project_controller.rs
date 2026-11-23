@@ -3673,6 +3673,38 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
         Ok(false)
     }
 
+    /// `#q-e9483473162d`: whether this binary wires the document-maintenance
+    /// port below. A controller that answers `false` refuses
+    /// `document_maintenance_enqueue`, and preflight falls back to its own
+    /// detached worker process.
+    fn document_maintenance_supported(&self) -> bool {
+        false
+    }
+
+    /// Reserve `file`'s queue-maintenance ownership for this controller
+    /// process (the same lease row a detached worker adopts). `Ok(None)`: no
+    /// request is pending, or another live owner holds it. The worker lives in
+    /// `agent-doc-preflight-command-io`, which depends on this crate, hence the
+    /// port.
+    fn reserve_document_maintenance(&self, file: &Path) -> Result<Option<String>> {
+        anyhow::bail!(
+            "document maintenance is not wired in this binary ({})",
+            file.display()
+        )
+    }
+
+    /// Run `file`'s pending maintenance request under `token` on the calling
+    /// controller thread, releasing the reservation when done.
+    fn run_document_maintenance(&self, file: &Path, _token: &str) -> Result<()> {
+        anyhow::bail!(
+            "document maintenance is not wired in this binary ({})",
+            file.display()
+        )
+    }
+
+    /// Release `token` if it is still `file`'s maintenance reservation.
+    fn release_document_maintenance(&self, _file: &Path, _token: &str) {}
+
     /// `#queueschedule`: put a completed `loop` pass's items back into the
     /// document's `agent:queue` through the binary-owned queue write path
     /// (live CRDT replica while an editor holds the document). The writer lives

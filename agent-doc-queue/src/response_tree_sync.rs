@@ -714,17 +714,22 @@ pub struct ResponseTreeSync {
 }
 
 /// [`sync_response_trees`] that also strikes every finished tree
-/// (`#treefinish`, [`crate::finished_tree::strike_finished_trees`]): slim,
-/// what remains, strike, what remains again (a struck root joins its tally),
-/// then guidance, then the rows' 🗑️/🔒 tree glyphs (`#treetopglyph`).
-/// `is_claimed(row_text)` says whether a live worker claims a row; a tree
-/// with a claimed row is never struck. A second pass changes nothing.
+/// (`#treefinish`, [`crate::finished_tree::strike_finished_trees`]): drop a
+/// detached tally (`#answeredentry`), slim, what remains, strike, what
+/// remains again (a struck root joins its tally), then guidance, then the
+/// rows' 🗑️/🔒 tree glyphs (`#treetopglyph`). `is_claimed(row_text)` says
+/// whether a live worker claims a row; a tree with a claimed row is never
+/// struck. A second pass changes nothing.
 pub fn sync_response_trees_striking(
     document: &str,
     is_claimed: &dyn Fn(&str) -> bool,
 ) -> Option<ResponseTreeSync> {
-    let (slimmed, slim_rows) =
-        slim_handback_response_details(document).unwrap_or_else(|| (document.to_string(), 0));
+    // `#answeredentry`: a tally no response owns any more is dropped first, so
+    // nothing below reads it as live guidance.
+    let (detached, detached_rows) =
+        crate::response_remaining::drop_detached_response_guidance(document)
+            .unwrap_or_else(|| (document.to_string(), 0));
+    let (slimmed, slim_rows) = slim_handback_response_details(&detached).unwrap_or((detached, 0));
     let (remaining, mut remaining_rows) =
         crate::response_remaining::reconcile_response_remaining(&slimmed).unwrap_or((slimmed, 0));
     let (remaining, struck_trees) =
@@ -744,7 +749,7 @@ pub fn sync_response_trees_striking(
     // `#treetopglyph`: last, so the glyphs read the tree every other pass left.
     let (synced, indicators) =
         crate::tree_indicator::reconcile_tree_indicators(&synced).unwrap_or((synced, 0));
-    let guided = guidance_rows + remaining_rows + bare_rows;
+    let guided = guidance_rows + remaining_rows + bare_rows + detached_rows;
     (slim_rows + guided + struck_trees + indicators > 0).then_some(ResponseTreeSync {
         document: synced,
         slimmed: slim_rows,

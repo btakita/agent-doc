@@ -407,7 +407,13 @@ fn struck_answers_under_remaining_entries_finish_the_tally() {
     assert_eq!(changed, 1);
     let (state, guidance, _) = response(&synced, ANSWERED_ROOT);
     assert_eq!(state, RESPONSE_STATE_COMPLETE, "{synced}");
-    assert_eq!(guidance, "✅ 5/5 done.", "{synced}");
+    // `#answeredentry`: the answered rows no longer hold the tree open, so the
+    // root's response carries the tree's indicator too.
+    assert_eq!(
+        guidance,
+        format!("✅ 5/5 done. {NOTHING_REMAINS_ROW_GUIDANCE}"),
+        "{synced}"
+    );
     assert_eq!(
         entry_lines(&synced, ANSWERED_ROOT),
         vec![
@@ -430,7 +436,7 @@ fn struck_answers_under_remaining_entries_finish_the_tally() {
         )
         .replace(
             "    - **State:** Waiting on operator input.\n    - **Guidance:** 🙋 3/5 done, 2 yours. Only you can finish this: 2 items for you, listed under Remaining. Strike or answer each row when done.\n",
-            "    - **State:** Complete.\n    - **Guidance:** ✅ 5/5 done.\n",
+            &format!("    - **State:** Complete.\n    - **Guidance:** ✅ 5/5 done. {NOTHING_REMAINS_ROW_GUIDANCE}\n"),
         );
     assert_eq!(synced, expected);
 
@@ -488,7 +494,10 @@ fn a_live_answer_under_an_entry_is_agent_work_and_stays() {
     let (finished, _) = reconcile_response_remaining(&done).expect("the tree re-renders");
     let (state, guidance, _) = response(&finished, ANSWERED_ROOT);
     assert_eq!(state, RESPONSE_STATE_COMPLETE, "{finished}");
-    assert_eq!(guidance, "✅ 5/5 done.");
+    assert_eq!(
+        guidance,
+        format!("✅ 5/5 done. {NOTHING_REMAINS_ROW_GUIDANCE}")
+    );
 }
 
 /// A struck answer whose own response is not `Complete.` does not finish the
@@ -520,7 +529,9 @@ fn a_struck_answer_with_an_unfinished_response_leaves_the_entry_open() {
 }
 
 /// The full sync (slim, what remains, finished-tree strike, guidance)
-/// re-renders the answered tree once; a second sync is a no-op.
+/// re-renders the answered tree once; a second sync is a no-op. Once both
+/// answers are done nothing in the tree holds work (`#answeredentry`), so the
+/// tree is struck from the root down and the struck root joins its tally.
 #[test]
 fn the_full_sync_re_renders_the_answered_tree_once() {
     let synced = crate::response_tree_sync::sync_response_trees_striking(ANSWERED, &|_| false)
@@ -528,7 +539,18 @@ fn the_full_sync_re_renders_the_answered_tree_once() {
         .document;
     let (state, guidance, _) = response(&synced, ANSWERED_ROOT);
     assert_eq!(state, RESPONSE_STATE_COMPLETE, "{synced}");
-    assert!(guidance.starts_with("✅ 5/5 done."), "{guidance}");
+    assert_eq!(
+        guidance,
+        format!("✅ 6/6 done. {NOTHING_REMAINS_ROW_GUIDANCE}"),
+        "{synced}"
+    );
+    assert!(
+        synced
+            .lines()
+            .any(|line| line.starts_with("- ### ~~")
+                && line.contains("agent-doc duplicated my prompt")),
+        "the root is struck: {synced}"
+    );
     assert!(synced.contains("          - **Response [#r-4fa4a87420e5]**\n"));
     assert_eq!(
         crate::response_tree_sync::sync_response_trees_striking(&synced, &|_| false),

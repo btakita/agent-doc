@@ -469,7 +469,11 @@ fn running_entry(node: &QueueTreeNode, raw: &str, handle: &str) -> String {
 ///
 /// An operator row the operator already answered with a reply row beneath it
 /// (`~~Restarted~~` under "restart the IDE") is not a loose end either: the
-/// next step is the agent's, picking the answer up, not the operator's.
+/// next step is the agent's, picking the answer up, not the operator's. The
+/// same holds for an answer written under the row's Remaining entry
+/// (`#answeredentry`): while it is live the row is
+/// [`QueueTreeNode::answer_pending`], and once it is struck and finished the
+/// row is resolved, as the response's tally counts it.
 pub fn node_loose_end(document: &str, nodes: &[QueueTreeNode], index: usize) -> Option<LooseEnd> {
     let node = nodes.get(index)?;
     if node.closed || node.resolution.is_some() {
@@ -481,7 +485,10 @@ pub fn node_loose_end(document: &str, nodes: &[QueueTreeNode], index: usize) -> 
         || (node.state == QueueNodeState::Open && carries_operator_owned_tag(raw));
     let (group, text) = if operator_row {
         let (owner, _) = row_body(&node.full_text);
-        if owner == Some(ActionItemOwner::Agent) || operator_replied(nodes, index) {
+        if owner == Some(ActionItemOwner::Agent)
+            || node.answer_pending
+            || operator_replied(nodes, index)
+        {
             return None;
         }
         let (imperative, decision) = operator_imperative(&node.full_text, &id);

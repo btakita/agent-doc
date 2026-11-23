@@ -80,6 +80,11 @@
 //! (with no response, or a `Complete.` one) the entry is `✅` and its item or
 //! row counts as done in the tally. An answered entry is kept, `✅`, after
 //! its item or row resolves another way, so the answer is never deleted.
+//! The queue tree reads the same answer as the row's own resolution
+//! (`#answeredentry`, [`rows_answered_under_remaining`]), so the 🗑️/📌
+//! indicator, the open-work count and the Loose ends digest agree with the
+//! tally; a State/Guidance pair no response owns any more is dropped
+//! ([`drop_detached_response_guidance`]).
 //!
 //! # Safeguards
 //!
@@ -103,7 +108,7 @@ use crate::followup_owner::{
 use crate::queue_consume::{
     RESPONSE_STATE_COMPLETE, RESPONSE_STATE_FOLLOW_UP, RESPONSE_STATE_WAITING_ON_OPERATOR,
 };
-use crate::queue_tree::{QueueNodeState, QueueTree};
+use crate::queue_tree::{QueueNodeState, QueueTree, QueueTreeNode};
 
 /// The response-structure label of the short list of what is left.
 pub const REMAINING_LABEL: &str = "**Remaining:**";
@@ -819,7 +824,7 @@ fn open_row_entry(node: &crate::queue_tree::QueueTreeNode) -> (String, String) {
 /// `Open`.
 fn entry_answer_status(
     lines: &[Line<'_>],
-    tree: &QueueTree,
+    nodes: &[QueueTreeNode],
     responses: &[ResponseBlock],
     entry: &RemainingEntry,
 ) -> EntryStatus {
@@ -829,11 +834,11 @@ fn entry_answer_status(
         if lines[line].text.is_empty() || lines[line].indent != answer_indent {
             continue;
         }
-        let Some(node) = tree.nodes.iter().position(|node| node.line == line + 1) else {
+        let Some(node) = nodes.iter().position(|node| node.line == line + 1) else {
             continue;
         };
-        if !tree.nodes[node].closed {
-            if crate::queue_tree::row_keeps_tree_alive(tree, node) {
+        if !nodes[node].closed {
+            if crate::queue_tree::keeps_tree_alive(nodes, node) {
                 return EntryStatus::Working;
             }
             continue;
@@ -854,6 +859,88 @@ fn entry_answer_status(
     status
 }
 
+/// Every `**Response [#r-…]**` block inside a queue component, in document
+/// order.
+fn queue_responses(document: &str, lines: &[Line<'_>]) -> Option<Vec<ResponseBlock>> {
+    let components = agent_doc_element::element::parse(document).ok()?;
+    let line_of_offset = |offset: usize| lines.partition_point(|line| line.end <= offset);
+    let mut responses = Vec::new();
+    for component in components.iter().filter(|c| c.name == "queue") {
+        let first = line_of_offset(component.open_end);
+        let limit = line_of_offset(component.close_start).min(lines.len());
+        for at in first..limit {
+            if lines[at].text.starts_with("- **Response [#r-")
+                && let Some(response) = parse_response(document, lines, at, limit)
+            {
+                responses.push(response);
+            }
+        }
+    }
+    Some(responses)
+}
+
+/// `#answeredentry`: the live rows a Remaining entry stands for whose entry the
+/// operator answered (`#answeredentry`), as `(node index, pending)`:
+/// `pending` while the answer is still live (agent work), else the answer is
+/// struck and finished, so the row's work is done.
+///
+/// The queue tree reads these before anything else does
+/// ([`crate::queue_tree::RowResolution::Answered`],
+/// [`crate::queue_tree::QueueTreeNode::answer_pending`]), so the response's
+/// tally, the tree's 🗑️/📌 indicator, the top-level open-work count and the
+/// Loose ends digest all see the same answer: a tally of `5/5 done.` never
+/// sits beside a digest that still lists the answered row as the operator's.
+/// A row matches an entry the way the tally renders it: the entry key of the
+/// row's [`open_row_entry`], within the scope of the response that lists it.
+pub(crate) fn rows_answered_under_remaining(
+    document: &str,
+    nodes: &[QueueTreeNode],
+) -> Vec<(usize, bool)> {
+    if !document.contains(REMAINING_LABEL) || !document.contains("**Response [#r-") {
+        return Vec::new();
+    }
+    let lines = document_lines(document);
+    let Some(responses) = queue_responses(document, &lines) else {
+        return Vec::new();
+    };
+    let mut out: Vec<(usize, bool)> = Vec::new();
+    for response in &responses {
+        for entry in &response.remaining_entries {
+            if entry.children.is_empty() {
+                continue;
+            }
+            let pending = match entry_answer_status(&lines, nodes, &responses, entry) {
+                EntryStatus::Open => continue,
+                EntryStatus::Working => true,
+                EntryStatus::Done => false,
+            };
+            let rows = response.parent.into_iter().chain(response.scope.clone());
+            for line in rows {
+                // The entries and their answers are the list, not rows it
+                // stands for.
+                if response
+                    .remaining_entries
+                    .iter()
+                    .any(|other| other.line == line || other.children.contains(&line))
+                {
+                    continue;
+                }
+                let Some(index) = nodes.iter().position(|node| node.line == line + 1) else {
+                    continue;
+                };
+                if nodes[index].closed || out.iter().any(|(seen, _)| *seen == index) {
+                    continue;
+                }
+                let (owner, text) = open_row_entry(&nodes[index]);
+                if Entry::new(line, owner, text).key() == entry.key {
+                    out.push((index, pending));
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Recompute every response tree's Remaining list, State and Guidance from
 /// the live document (`#guidancescope`).
 ///
@@ -864,21 +951,8 @@ pub fn reconcile_response_remaining(document: &str) -> Option<(String, usize)> {
     if !document.contains("**Response [#r-") {
         return None;
     }
-    let components = agent_doc_element::element::parse(document).ok()?;
     let lines = document_lines(document);
-    let line_of_offset = |offset: usize| lines.partition_point(|line| line.end <= offset);
-    let mut responses = Vec::new();
-    for component in components.iter().filter(|c| c.name == "queue") {
-        let first = line_of_offset(component.open_end);
-        let limit = line_of_offset(component.close_start).min(lines.len());
-        for at in first..limit {
-            if lines[at].text.starts_with("- **Response [#r-")
-                && let Some(response) = parse_response(document, &lines, at, limit)
-            {
-                responses.push(response);
-            }
-        }
-    }
+    let responses = queue_responses(document, &lines)?;
     let mut managed = responses
         .iter()
         .enumerate()
@@ -1016,7 +1090,7 @@ pub fn reconcile_response_remaining(document: &str) -> Option<(String, usize)> {
             .map(|entry| {
                 (
                     entry.key.clone(),
-                    entry_answer_status(&lines, &tree, &responses, entry),
+                    entry_answer_status(&lines, &tree.nodes, &responses, entry),
                     entry.children.clone(),
                 )
             })
@@ -1131,7 +1205,7 @@ pub fn reconcile_response_remaining(document: &str) -> Option<(String, usize)> {
             if entry.children.is_empty() || used_answers.contains(&entry.key) {
                 continue;
             }
-            let status = match entry_answer_status(&lines, &tree, &responses, entry) {
+            let status = match entry_answer_status(&lines, &tree.nodes, &responses, entry) {
                 EntryStatus::Working => EntryStatus::Working,
                 _ => EntryStatus::Done,
             };
@@ -1298,6 +1372,100 @@ pub fn reconcile_response_remaining(document: &str) -> Option<(String, usize)> {
     Some((out, changed))
 }
 
+/// `#answeredentry`: drop a State/Guidance pair this pass rendered once no
+/// response owns it any more.
+///
+/// A torn merge once left a top-level row between a response's Remaining
+/// list and its State (`#e107moved`); the column-0 row ended the tree above,
+/// so the response's State and Guidance became that row's children. When the
+/// operator then deleted the tree above, response and all, the pair stayed
+/// under the moved row, out of every response's reach: no sync could
+/// recompute it, and its `🙋 3/5 done, 2 yours.` tally was frozen while the
+/// rows it counted were long answered. A tally only means something inside
+/// its response, so a pair is dropped when:
+///
+/// - it is in a form this pass rendered ([`managed_form`]), State then
+///   Guidance on consecutive lines;
+/// - its parent is a queue row, not response structure, and it sits deeper
+///   than that row's own children (indent more than the row's plus two): a
+///   response's detail row, cut off from its `**Response [#r-…]**` row;
+/// - the row above the parent row at the response row's level is not a
+///   `**Response [#r-…]**` row that lacks a State of its own: that response
+///   still exists, and moving the row back out rejoins the pair with it
+///   (`#e107moved`), so the pair is left alone.
+///
+/// Rows nested beside the pair (follow-up rows) stay. Returns the document
+/// and how many pairs were dropped; a second pass changes nothing.
+pub fn drop_detached_response_guidance(document: &str) -> Option<(String, usize)> {
+    if !document.contains("- **State:** ") || !document.contains("- **Guidance:** ") {
+        return None;
+    }
+    let components = agent_doc_element::element::parse(document).ok()?;
+    let lines = document_lines(document);
+    let line_of_offset = |offset: usize| lines.partition_point(|line| line.end <= offset);
+    let mut drops: Vec<std::ops::Range<usize>> = Vec::new();
+    for component in components.iter().filter(|c| c.name == "queue") {
+        let first = line_of_offset(component.open_end);
+        let limit = line_of_offset(component.close_start).min(lines.len());
+        for at in first..limit.saturating_sub(1) {
+            let (state_line, guidance_line) = (&lines[at], &lines[at + 1]);
+            if guidance_line.indent != state_line.indent {
+                continue;
+            }
+            let (Some((_, state)), Some((_, guidance))) = (
+                value_of(document, state_line, "**State:**"),
+                value_of(document, guidance_line, "**Guidance:**"),
+            ) else {
+                continue;
+            };
+            if !managed_form(&state, &guidance) {
+                continue;
+            }
+            let Some(parent) = (first..at).rev().find(|&index| {
+                !lines[index].text.is_empty() && lines[index].indent < state_line.indent
+            }) else {
+                continue;
+            };
+            let parent_line = &lines[parent];
+            if !parent_line.text.starts_with("- ")
+                || parent_line.text.starts_with("- **")
+                || state_line.indent <= parent_line.indent + 2
+            {
+                continue;
+            }
+            // The response the pair was cut from still exists: leave it for
+            // the row to move back out (`#e107moved`).
+            let response_indent = state_line.indent - 2;
+            let above = (first..parent).rev().find(|&index| {
+                !lines[index].text.is_empty() && lines[index].indent <= response_indent
+            });
+            if let Some(above) = above
+                && lines[above].indent == response_indent
+                && lines[above].text.starts_with("- **Response [#r-")
+                && !lines[above + 1..parent].iter().any(|line| {
+                    line.indent == state_line.indent && line.text.starts_with("- **State:** ")
+                })
+            {
+                continue;
+            }
+            drops.push(state_line.start..guidance_line.end);
+        }
+    }
+    if drops.is_empty() {
+        return None;
+    }
+    let count = drops.len();
+    let mut out = document.to_string();
+    for range in drops.into_iter().rev() {
+        out.replace_range(range, "");
+    }
+    Some((out, count))
+}
+
 #[cfg(test)]
 #[path = "response_remaining_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tally_sync_tests.rs"]
+mod tally_sync_tests;

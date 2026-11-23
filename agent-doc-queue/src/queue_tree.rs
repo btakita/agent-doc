@@ -198,6 +198,12 @@ pub struct QueueTreeNode {
     /// response still lists open action items is not finished.
     #[serde(skip)]
     pub response_open: bool,
+    /// `#answeredentry`: the row's Remaining entry carries a live answer the
+    /// agent is still working (`#answeredentry`). The next step is the
+    /// agent's, so the row is not the operator's loose end, though it still
+    /// keeps its tree alive.
+    #[serde(skip)]
+    pub answer_pending: bool,
     /// The gutter icon's tooltip: the state label, then the roll-up of a live
     /// waiting head (`waiting on you · you 1 · agent 0 · done 2`). Editors show
     /// it verbatim so every plugin words a node the same way.
@@ -221,6 +227,10 @@ pub enum RowResolution {
     /// document artifacts that self-repair already removed
     /// (`#selfrepaircleanup`).
     SelfRepaired,
+    /// `#answeredentry`: a row a response's Remaining entry stands for, whose
+    /// entry the operator answered with a row that is now struck and finished
+    /// (`#answeredentry`): the response's tally already counts it done.
+    Answered,
 }
 
 /// Counts over the listed nodes (group nodes excluded).
@@ -529,6 +539,7 @@ pub fn queue_tree(document: &str, options: &QueueTreeOptions) -> anyhow::Result<
                 context_rows,
                 resolution: None,
                 response_open: false,
+                answer_pending: false,
                 rollup,
                 tooltip: node_tooltip(state, rollup),
             });
@@ -598,8 +609,10 @@ fn mark_open_responses(document: &str, nodes: &mut [QueueTreeNode]) {
 /// `#treefinish`: mark live follow-up rows whose work is carried elsewhere
 /// ([`RowResolution::Delegated`]) or already done by agent-doc's self-repair
 /// ([`RowResolution::SelfRepaired`]). Only binary-placed follow-up rows
-/// (`follow up on an action item from …: <item>`) are ever resolved: an
-/// operator's own row is never read as done.
+/// (`follow up on an action item from …: <item>`) are resolved from their
+/// text: an operator's own row is never read as done. The one other evidence
+/// is the operator's own: a struck, finished answer under the row's
+/// Remaining entry ([`RowResolution::Answered`], `#answeredentry`).
 fn resolve_rows(document: &str, nodes: &mut [QueueTreeNode], raws: &[String]) {
     use crate::followup_owner::{ActionItemOwner, explicit_owner_label, followup_row_action_item};
     use crate::response_remaining::{item_key, plain_text};
@@ -660,6 +673,21 @@ fn resolve_rows(document: &str, nodes: &mut [QueueTreeNode], raws: &[String]) {
             })
         {
             nodes[index].resolution = Some(RowResolution::SelfRepaired);
+        }
+    }
+    // `#answeredentry`: a row whose Remaining entry the operator answered. The
+    // answer is the operator's own explicit word on that row, so any live
+    // row the entry stands for is read, not only a follow-up row.
+    for (index, pending) in
+        crate::response_remaining::rows_answered_under_remaining(document, nodes)
+    {
+        if !candidate(&nodes[index]) || nodes[index].resolution.is_some() {
+            continue;
+        }
+        if pending {
+            nodes[index].answer_pending = true;
+        } else {
+            nodes[index].resolution = Some(RowResolution::Answered);
         }
     }
 }
@@ -963,7 +991,7 @@ fn nested_indexes(nodes: &[QueueTreeNode], index: usize) -> std::ops::Range<usiz
 /// Whether the node at `index` keeps its subtree and tree alive, as a row:
 /// a live leaf or a row with projected state. A row whose work is
 /// [`RowResolution`]-resolved does not (`#treefinish`).
-fn keeps_tree_alive(nodes: &[QueueTreeNode], index: usize) -> bool {
+pub(crate) fn keeps_tree_alive(nodes: &[QueueTreeNode], index: usize) -> bool {
     let node = &nodes[index];
     if node.closed {
         // `#answerack`: a waiting head struck while its Todo is still open

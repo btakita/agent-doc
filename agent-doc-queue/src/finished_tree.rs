@@ -17,7 +17,8 @@
 //!   resolved: a nested follow-up row whose action item a top-level row
 //!   elsewhere in the queue carries (delegated), or an operator follow-up row
 //!   asking to clean up an agent-doc artifact that self-repair already
-//!   removed ([`crate::queue_tree::RowResolution`]);
+//!   removed, or a row whose Remaining entry carries the operator's struck,
+//!   finished answer (`#answeredentry`) ([`crate::queue_tree::RowResolution`]);
 //! - no row's own response says work remains (its `**State:**` is
 //!   `Complete.`). A response's action items are resolved by the rules of
 //!   [`crate::response_remaining`], where an item whose follow-up row lives

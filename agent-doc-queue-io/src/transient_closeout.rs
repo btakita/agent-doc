@@ -391,6 +391,90 @@ mod tests {
         );
     }
 
+    /// `#lostrecoverhold` + `#interimhandback`, at the Stop gate with a real
+    /// claim ledger (haiven-dev `subagent:adv929#1`, 2026-11-23): the
+    /// subagent-end hook froze a worker whose last message said it was
+    /// waiting on a fixer. The attempt stays `Running` and its row projects
+    /// plain `⚠️`. The gate must name the continue of that exact worker and
+    /// keep the turn open through a recursive Stop; before, it gave the
+    /// generic lost text and let the turn end.
+    #[test]
+    fn lostrecoverhold_the_stop_gate_continues_a_worker_that_ended_on_an_interim_note() {
+        const ITEM: &str = "do [#adversarialpr]";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        write_doc(&doc, ITEM);
+        crate::queue_claim::claim(&doc, ITEM, "subagent:adv929", 600).unwrap();
+        crate::queue_claim::start_attempt(
+            &doc,
+            ITEM,
+            "subagent:adv929",
+            "a13b608bbd1400b23",
+            600,
+            1,
+        )
+        .unwrap();
+        let reason = agent_doc_queue::queue_claim::subagent_end_freeze_reason(Some(
+            "The fixer confirmed it is re-running the three sqlc steps directly; they are queued behind other builds on the shared build slots. After they land it will finish the fix and return its full result. I'm waiting for that.",
+        ));
+        let frozen = crate::queue_claim::freeze_attempt(&doc, ITEM, Some(1), &reason).unwrap();
+        assert_eq!(
+            frozen.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Running
+        );
+        let marker = frozen
+            .visible_projection_for_owner(agent_doc_queue::queue_claim::ClaimOwnerLiveness::Live)
+            .prefix();
+        assert_eq!(marker, "⚠️", "a frozen Running attempt paints plain lost");
+        let content = write_doc(&doc, &format!("{marker} [#subagent:adv929#1] {ITEM}"));
+
+        let evidence = closeout_evidence(&doc, &content);
+        assert!(
+            evidence
+                .report_owed
+                .values()
+                .any(|owed| owed.interim && owed.worker_id == "a13b608bbd1400b23"),
+            "{evidence:#?}"
+        );
+        let assessment =
+            agent_doc_queue::transient_closeout::assess_transient_closeout(&content, &evidence)
+                .unwrap();
+        assert_eq!(assessment.debts.len(), 1, "{assessment:#?}");
+        assert!(
+            assessment.debts[0].holds_turn_through_recursive_stop(),
+            "{assessment:#?}"
+        );
+        let failure =
+            agent_doc_queue::transient_closeout::normal_closeout_failure_for(&assessment).unwrap();
+        let document = doc.display().to_string();
+        assert!(
+            failure.contains("`SendMessage` to `a13b608bbd1400b23`"),
+            "{failure}"
+        );
+        assert!(
+            failure.contains(&format!(
+                "agent-doc queue claim {document} --item '#adversarialpr' --owner subagent:adv929 --refresh --generation 1"
+            )),
+            "{failure}"
+        );
+
+        // The named refresh is the continue's receipt: it clears the freeze,
+        // the row is running again, and the gate waits on it quietly.
+        let resumed =
+            crate::queue_claim::refresh_attempt(&doc, ITEM, "subagent:adv929", 600, Some(1))
+                .unwrap();
+        assert!(resumed.frozen.is_none(), "{resumed:#?}");
+        let content = write_doc(&doc, &format!("🚧 [#subagent:adv929#1] {ITEM}"));
+        let assessment = agent_doc_queue::transient_closeout::assess_transient_closeout(
+            &content,
+            &closeout_evidence(&doc, &content),
+        )
+        .unwrap();
+        assert!(assessment.debts.is_empty(), "{assessment:#?}");
+        assert_eq!(assessment.quiescent.len(), 1, "{assessment:#?}");
+    }
+
     /// `#dispatchheldstop`: the Stop gate reads the same refused-admission hold
     /// subagent dispatch reads (`#waitingitemclaimmarker`), so a held `📥` row
     /// names its blocker and re-admission instead of "leave pending".

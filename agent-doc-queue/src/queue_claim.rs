@@ -334,6 +334,53 @@ pub fn subagent_end_freeze_reason(message: Option<&str>) -> String {
     }
 }
 
+/// Whether a recorded end hand-back is only an interim note that defers the
+/// worker's result to work still in flight (`#interimhandback`).
+///
+/// A worker can end its turn with a progress line instead of its result: "The
+/// fixer is re-running the sqlc steps. After they land it will finish the fix
+/// and return its full result. I'm waiting for that." (haiven-dev
+/// `subagent:adv929#1`, 2026-11-23). That worker is not finished, so the
+/// coordinator owes a continue of that same worker, not a `queue
+/// report-complete` of the note or a new generation. Only first-person
+/// deferrals count: a final report that says a pull request is "waiting for
+/// review" is a result with an external wait, not this case.
+pub fn hand_back_defers_result(excerpt: &str) -> bool {
+    let text = excerpt
+        .replace(['\u{2019}', '\u{2018}'], "'")
+        .to_lowercase();
+    const DEFERRALS: &[&str] = &[
+        "i'm waiting",
+        "i am waiting",
+        "i'm still waiting",
+        "i'll wait",
+        "i will wait",
+        "waiting for that",
+        "waiting for it to",
+        "waiting for them to",
+        "before i push",
+        "before i commit",
+        "before i report",
+        "before i hand back",
+        "before i return",
+        "i'll report back",
+        "i will report back",
+        "i'll hand back",
+        "i will hand back",
+        "i'll return",
+        "i will return",
+        "i'll finish",
+        "i will finish",
+        "i'll continue",
+        "i will continue",
+        "i'll resume",
+        "i will resume",
+        "return its full result",
+        "return my full result",
+    ];
+    DEFERRALS.iter().any(|phrase| text.contains(phrase))
+}
+
 fn normalize_hand_back_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -1038,6 +1085,15 @@ impl QueueClaim {
             return None;
         }
         self.frozen.as_ref()?.recorded_end_handback()
+    }
+
+    /// [`Self::ended_hand_back_owed`] when that hand-back is only an interim
+    /// note ([`hand_back_defers_result`], `#interimhandback`). The attempt
+    /// still holds its slot and is never offered for a new claim, but the
+    /// coordinator owes a continue of the same worker, not a report.
+    pub fn interim_end_hand_back(&self) -> Option<&str> {
+        self.ended_hand_back_owed()
+            .filter(|excerpt| hand_back_defers_result(excerpt))
     }
 
     /// The bound worker still owns this attempt, so a lapsed refresh must not
@@ -4721,6 +4777,41 @@ mod tests {
     }
 
     use super::*;
+
+    /// `#interimhandback`: only a first-person deferral of the worker's own
+    /// result is an interim note. A final report with an external wait is a
+    /// result.
+    #[test]
+    fn interim_hand_back_is_a_first_person_deferral_of_the_result() {
+        for interim in [
+            "The fixer confirmed it is re-running the three sqlc steps directly; they are queued behind other builds on the shared build slots. After they land it will finish the fix and return its full result. I\u{2019}m waiting for that.",
+            "The commit is in. Waiting on `make tmux-ci` before I push.",
+            "Tests are green locally; I'll report back once CI finishes.",
+        ] {
+            assert!(hand_back_defers_result(interim), "{interim}");
+        }
+        for result in [
+            "**Summary** fixed it. **What changed** branch fix/x, commit abc123.",
+            "**Summary** PR #12 opened; it is waiting for review from the code owners.",
+            "REVIEW-CLEAN https://github.com/o/r/pull/1#pullrequestreview-9 base=a head=b",
+        ] {
+            assert!(!hand_back_defers_result(result), "{result}");
+        }
+        let mut ledger = claimid_running("#work", "subagent:work", "worker:work");
+        let claim = &mut ledger.claims[0];
+        assert_eq!(claim.state, QueueClaimState::Running);
+        claim.frozen = Some(QueueWorkerFreeze {
+            frozen_at_secs: 1_100,
+            reason: subagent_end_freeze_reason(Some("After they land I'll finish the fix.")),
+            abandoned: false,
+        });
+        assert!(claim.ended_hand_back_owed().is_some());
+        assert!(claim.interim_end_hand_back().is_some());
+        claim.frozen.as_mut().unwrap().reason =
+            subagent_end_freeze_reason(Some("**Summary** done."));
+        assert!(claim.ended_hand_back_owed().is_some());
+        assert!(claim.interim_end_hand_back().is_none());
+    }
 
     /// `#lostrowreportreopen`: the end-freeze the SubagentStop hook writes
     /// records the hand-back's opening, and only the same hand-back matches it.

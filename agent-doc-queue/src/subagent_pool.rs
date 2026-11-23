@@ -293,6 +293,15 @@ pub fn classify_attempt(claim: &QueueClaim, now_secs: u64, _frozen_secs: u64) ->
     }
 }
 
+/// ` ("<excerpt>")` for a recorded hand-back opening, or empty.
+fn quoted_excerpt(excerpt: &str) -> String {
+    if excerpt.trim().is_empty() {
+        String::new()
+    } else {
+        format!(" ({:?})", excerpt.trim())
+    }
+}
+
 /// Whether `claim` is a frozen worker.
 pub fn worker_frozen(claim: &QueueClaim, now_secs: u64, frozen_secs: u64) -> Option<WorkerFrozen> {
     match classify_attempt(claim, now_secs, frozen_secs) {
@@ -525,6 +534,29 @@ pub struct ReportOwedWorker {
     pub report_command: String,
     /// The explicit abandon, only when the result must be discarded.
     pub release_command: String,
+    /// `#interimhandback`: set when the recorded hand-back is only an interim
+    /// note ([`crate::queue_claim::hand_back_defers_result`]). The worker is
+    /// not finished, so the coordinator owes a continue of it (or, when it no
+    /// longer exists, a restart from its worktree and branch), never a report
+    /// of the note.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continue_owed: Option<ContinueOwed>,
+}
+
+/// How a worker that ended on an interim note is recovered (`#interimhandback`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContinueOwed {
+    /// The coordinator session that spawned the worker is still live, so its
+    /// harness worker can be continued in place (Claude Code: `SendMessage`
+    /// to the worker id). `false` when that session ended: the worker cannot
+    /// be reached, and only a restart from its worktree and branch recovers it.
+    pub worker_reachable: bool,
+    /// `queue claim --refresh` for this exact generation, run once the worker
+    /// has resumed; it clears the end freeze.
+    pub refresh_command: String,
+    /// `queue lineage --verbose` for this exact attempt: its worktree, branch,
+    /// and head for a restart.
+    pub lineage_command: String,
 }
 
 /// A bound worker whose heartbeat is due. The coordinator confirms it is alive
@@ -624,13 +656,36 @@ impl PoolRefill {
         for head in &self.next_heads {
             parts.push(format!("n:{}", head.item));
         }
+        // `#interimhandback`: each interim end is its own continue debt; a
+        // worker that resumes and ends on a new note is a new paste.
+        for entry in self.continue_owed() {
+            parts.push(format!(
+                "c:{}:{}:{}",
+                entry.generation,
+                entry.item,
+                agent_doc_hash::content_hash(&entry.hand_back_excerpt)
+            ));
+        }
         agent_doc_hash::content_hash(&parts.join("\n"))
+    }
+
+    /// Report-owed workers whose hand-back is only an interim note: the
+    /// coordinator owes a continue of each, not a report (`#interimhandback`).
+    pub fn continue_owed(&self) -> impl Iterator<Item = &ReportOwedWorker> {
+        self.report_owed
+            .iter()
+            .filter(|entry| entry.continue_owed.is_some())
     }
 
     /// Claim/start steps for a turn that is already running, when this refill
     /// has dispatch debt. Heartbeats and quota refusals stay on their own paths.
     pub fn running_turn_refill(&self) -> Option<PoolRunningTurnRefill> {
-        if self.unstarted.is_empty() && self.next_heads.is_empty() {
+        // `#interimhandback`: a worker that ended on an interim note is
+        // continued while the turn runs, like dispatch debt (`#lostrunningcontinue`).
+        if self.unstarted.is_empty()
+            && self.next_heads.is_empty()
+            && self.continue_owed().next().is_none()
+        {
             return None;
         }
         let text = self.render()?;
@@ -683,26 +738,84 @@ impl PoolRefill {
     pub fn report_owed_steps(&self) -> Vec<String> {
         self.report_owed
             .iter()
+            .filter(|entry| entry.continue_owed.is_none())
             .map(|entry| {
                 format!(
                     "Report the finished worker of queue item {:?} (worker {}, generation {}): it \
-                     ended with a hand-back that is not reported yet, so its head is report-owed, \
-                     not a free slot. Run `{}` with the worker's complete hand-back. To resume \
-                     the same worker instead, continue it under this generation. Only to \
+                     ended with a hand-back that is not reported yet{}, so its head is \
+                     report-owed, not a free slot. Run `{}` with the worker's complete \
+                     hand-back. If that hand-back is only an interim note (the worker says it \
+                     is waiting or will finish later), it is not finished: continue worker {} \
+                     now under this generation (Claude Code: `SendMessage` to `{}`). Only to \
                      discard its result, run `{}`. Never run `queue claim` for this item: a new \
                      generation would redo finished work.",
                     entry.item,
                     entry.worker_id,
                     entry.generation,
+                    quoted_excerpt(&entry.hand_back_excerpt),
                     entry.report_command,
+                    entry.worker_id,
+                    entry.worker_id,
                     entry.release_command,
                 )
             })
             .collect()
     }
 
-    /// Ordered commands: unstarted spawn/start first, then due heartbeats,
-    /// then refill heads, then reports owed by finished workers.
+    /// One line per worker that ended on an interim note (`#interimhandback`):
+    /// continue that same worker now, during the turn, or restart it from its
+    /// worktree and branch when its coordinator session is gone.
+    pub fn continue_owed_steps(&self) -> Vec<String> {
+        self.report_owed
+            .iter()
+            .filter_map(|entry| Some((entry, entry.continue_owed.as_ref()?)))
+            .map(|(entry, owed)| {
+                if owed.worker_reachable {
+                    format!(
+                        "URGENT, continue now, during this turn: the worker of queue item {:?} \
+                         (worker {}, generation {}) ended on an interim note, not its result{}. \
+                         It is not finished and its row shows lost. Continue that same worker \
+                         now: Claude Code `SendMessage` to `{}` (another harness: its native \
+                         continue of that worker) telling it to finish the task and hand back \
+                         its complete result, then run `{}`. If the harness says that worker no \
+                         longer exists, restart it: run `{}`, dispatch the fresh generation the \
+                         refill offers, and point the new worker at the prior attempt's worktree \
+                         and branch from `{}`. Never `queue report-complete` this note and never \
+                         end the turn with this row lost.",
+                        entry.item,
+                        entry.worker_id,
+                        entry.generation,
+                        quoted_excerpt(&entry.hand_back_excerpt),
+                        entry.worker_id,
+                        owed.refresh_command,
+                        entry.release_command,
+                        owed.lineage_command,
+                    )
+                } else {
+                    format!(
+                        "URGENT, restart now, during this turn: the worker of queue item {:?} \
+                         (worker {}, generation {}) ended on an interim note, not its result{}, \
+                         and the coordinator session that spawned it ended, so that worker \
+                         cannot be continued. Restart it: run `{}`, dispatch the fresh \
+                         generation the refill offers, and point the new worker at the prior \
+                         attempt's worktree and branch from `{}` so it continues that work \
+                         instead of redoing it. Never `queue report-complete` this note and \
+                         never end the turn with this row lost.",
+                        entry.item,
+                        entry.worker_id,
+                        entry.generation,
+                        quoted_excerpt(&entry.hand_back_excerpt),
+                        entry.release_command,
+                        owed.lineage_command,
+                    )
+                }
+            })
+            .collect()
+    }
+
+    /// Ordered commands: unstarted spawn/start first, then continues owed to
+    /// workers that ended on an interim note, then due heartbeats, then refill
+    /// heads, then reports owed by finished workers.
     pub fn ordered_steps(&self) -> Vec<String> {
         let mut steps = Vec::new();
         for entry in &self.unstarted {
@@ -720,6 +833,7 @@ impl PoolRefill {
                 entry.release_command,
             ));
         }
+        steps.extend(self.continue_owed_steps());
         steps.extend(self.refresh_due_steps());
         for head in &self.next_heads {
             steps.push(format!(
@@ -1177,6 +1291,7 @@ mod tests {
                         .to_string(),
                 release_command: "agent-doc queue release f --item 'done' --generation 1 --requeue"
                     .to_string(),
+                continue_owed: None,
             }],
             next_heads: Vec::new(),
             quota_refill_block: None,
@@ -1201,6 +1316,80 @@ mod tests {
         let text = refill.render().unwrap();
         assert!(text.contains("report-owed 1"), "{text}");
         assert!(!text.contains("Refill a free pool slot"), "{text}");
+    }
+
+    /// `#interimhandback` (haiven-dev `subagent:adv929#1`, 2026-11-23): a
+    /// worker that ended on "I'm waiting for that" is not finished. The refill
+    /// names the exact continue of that worker during the running turn, or the
+    /// restart from its worktree and branch once its coordinator is gone, and
+    /// never asks for a report of the note.
+    #[test]
+    fn an_interim_hand_back_refill_continues_the_same_worker_during_the_turn() {
+        let entry = |reachable| {
+            ReportOwedWorker {
+            item: "#adversarial-pr".to_string(),
+            owner: "subagent:adv929".to_string(),
+            generation: 1,
+            worker_id: "a13b608bbd1400b23".to_string(),
+            hand_back_excerpt: "After they land it will finish the fix and return its full result. I'm waiting for that.".to_string(),
+            report_command: "agent-doc queue report-complete f --item 'adv' --generation 1 --response '<complete worker hand-back>'".to_string(),
+            release_command: "agent-doc queue release f --item 'adv' --generation 1 --requeue".to_string(),
+            continue_owed: Some(ContinueOwed {
+                worker_reachable: reachable,
+                refresh_command: "agent-doc queue claim f --item 'adv' --owner 'subagent:adv929' --refresh --generation 1".to_string(),
+                lineage_command: "agent-doc queue lineage f --item 'adv' --generation 1 --verbose".to_string(),
+            }),
+        }
+        };
+        let refill = |reachable| PoolRefill {
+            trigger: PoolRefillTrigger::Plan,
+            pools: Vec::new(),
+            unstarted: Vec::new(),
+            refresh_due: Vec::new(),
+            frozen: Vec::new(),
+            report_owed: vec![entry(reachable)],
+            next_heads: Vec::new(),
+            quota_refill_block: None,
+            waiting_for_slot: 0,
+        };
+
+        let live = refill(true);
+        assert!(live.is_actionable());
+        let steps = live.ordered_steps();
+        assert_eq!(steps.len(), 1, "{steps:?}");
+        let step = &steps[0];
+        assert!(
+            step.contains("`SendMessage` to `a13b608bbd1400b23`"),
+            "{step}"
+        );
+        assert!(step.contains("--refresh --generation 1"), "{step}");
+        assert!(step.contains("I'm waiting for that."), "{step}");
+        assert!(
+            step.contains("Never `queue report-complete` this note"),
+            "{step}"
+        );
+        assert!(!step.starts_with("Report the finished worker"), "{step}");
+        let paste = live
+            .running_turn_refill()
+            .expect("a continue owed is pasted into the running turn");
+        assert!(paste.text.contains("SendMessage"), "{}", paste.text);
+        assert_ne!(
+            paste.fingerprint,
+            PoolRefill {
+                report_owed: Vec::new(),
+                ..live.clone()
+            }
+            .dispatch_fingerprint(),
+            "the continue debt is part of the paste identity"
+        );
+
+        let gone = refill(false).ordered_steps();
+        assert_eq!(gone.len(), 1, "{gone:?}");
+        assert!(gone[0].contains("cannot be continued"), "{}", gone[0]);
+        assert!(gone[0].contains("--generation 1 --requeue"), "{}", gone[0]);
+        assert!(gone[0].contains("--generation 1 --verbose"), "{}", gone[0]);
+        assert!(gone[0].contains("worktree and branch"), "{}", gone[0]);
+        assert!(!gone[0].contains("SendMessage"), "{}", gone[0]);
     }
 
     /// `#poolquotarefillgate`: a refusal is the report, not an empty pool.

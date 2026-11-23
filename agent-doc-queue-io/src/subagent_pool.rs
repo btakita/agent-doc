@@ -275,6 +275,25 @@ fn observe_pool_refill(
                     "agent-doc queue release {quoted_document} --item {item} --generation {} --requeue",
                     claim.generation,
                 ),
+                // `#interimhandback`: an interim note owes a continue of this
+                // worker, reachable only while its coordinator session lives.
+                continue_owed: claim.interim_end_hand_back().map(|_| {
+                    agent_doc_queue::subagent_pool::ContinueOwed {
+                        worker_reachable: !matches!(
+                            agent_doc_turn_status_io::claim_owner_liveness(file, claim),
+                            agent_doc_queue::queue_claim::ClaimOwnerLiveness::Ended(_)
+                        ),
+                        refresh_command: format!(
+                            "agent-doc queue claim {quoted_document} --item {item} --owner {} --refresh --generation {}",
+                            crate::queue_claim::shell_single_quote(&claim.owner),
+                            claim.generation,
+                        ),
+                        lineage_command: format!(
+                            "agent-doc queue lineage {quoted_document} --item {item} --generation {} --verbose",
+                            claim.generation,
+                        ),
+                    }
+                }),
             }
         })
         .collect::<Vec<_>>();
@@ -555,6 +574,72 @@ mod tests {
             .unwrap()
             .expect("the answered item and the other head fill slots");
         assert!(refill.text.contains("ghrecvpolicypark"), "{}", refill.text);
+    }
+
+    /// `#interimhandback` with a real claim ledger (haiven-dev
+    /// `subagent:adv929#1`, 2026-11-23): the subagent-end hook froze a worker
+    /// whose last message was "... I'm waiting for that." The refill said
+    /// "Report the finished worker" for an unfinished worker, and only on the
+    /// owner's next tool call; the hookless running-turn paste carried
+    /// nothing. Now the refill names the continue of that exact worker first,
+    /// the running turn receives it, the head is never offered for a new
+    /// claim, and the generation-fenced refresh after the continue clears it.
+    #[test]
+    fn interimhandback_a_worker_that_ended_on_an_interim_note_is_continued_during_the_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = pool_doc("subagents=2", &["do [#a]", "do [#b]"]);
+        std::fs::write(&file, &content).unwrap();
+        start(&file, "do [#a]", "subagent:a");
+        crate::queue_claim::freeze_attempt(
+            &file,
+            "do [#a]",
+            Some(1),
+            &agent_doc_queue::queue_claim::subagent_end_freeze_reason(Some(
+                "The fixer is re-running the sqlc steps. After they land it will finish the fix and return its full result. I'm waiting for that.",
+            )),
+        )
+        .unwrap();
+
+        let refill = pool_refill_for_content(&file, &content, PoolRefillTrigger::Frozen).unwrap();
+        assert!(
+            refill.next_heads.iter().all(|head| head.item != "do [#a]"),
+            "an unfinished worker's head is never offered for a new claim: {refill:#?}"
+        );
+        let owed = refill.continue_owed().collect::<Vec<_>>();
+        assert_eq!(owed.len(), 1, "{refill:#?}");
+        let continue_owed = owed[0].continue_owed.as_ref().unwrap();
+        assert!(continue_owed.worker_reachable, "{refill:#?}");
+        let steps = refill.ordered_steps();
+        assert!(
+            steps[0].contains("`SendMessage` to `worker:subagent:a`"),
+            "the continue comes first: {steps:#?}"
+        );
+        assert!(
+            steps[0].contains("--owner 'subagent:a' --refresh --generation 1"),
+            "{steps:#?}"
+        );
+        assert!(
+            steps
+                .iter()
+                .all(|step| !step.starts_with("Report the finished worker")),
+            "{steps:#?}"
+        );
+        let paste = pool_running_turn_refill_for_content(&file, &content, Some("claude"))
+            .unwrap()
+            .expect("the running turn receives the continue");
+        assert!(
+            paste.text.contains("SendMessage` to `worker:subagent:a`"),
+            "{}",
+            paste.text
+        );
+
+        crate::queue_claim::refresh_attempt(&file, "do [#a]", "subagent:a", 7200, Some(1)).unwrap();
+        let resumed = pool_refill_for_content(&file, &content, PoolRefillTrigger::Plan).unwrap();
+        assert_eq!(resumed.continue_owed().count(), 0, "{resumed:#?}");
+        assert!(resumed.report_owed.is_empty(), "{resumed:#?}");
+        assert_eq!(resumed.pools[0].occupancy.running, 1, "{resumed:#?}");
     }
 
     /// A frozen worker frees its slot: failed-continue recovery offers that

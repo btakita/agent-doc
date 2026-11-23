@@ -2923,6 +2923,16 @@ fn subagent_pool_refill_fingerprint(refill: &agent_doc_queue::subagent_pool::Poo
     for entry in &refill.report_owed {
         parts.push(format!("o:{}:{}", entry.generation, entry.item));
     }
+    // `#interimhandback`: a worker that resumed and ended on a new interim
+    // note owes a new continue, so the note is part of the identity.
+    for entry in refill.continue_owed() {
+        parts.push(format!(
+            "c:{}:{}:{}",
+            entry.generation,
+            entry.item,
+            agent_doc_hash::content_hash(&entry.hand_back_excerpt)
+        ));
+    }
     if let Some(block) = &refill.quota_refill_block {
         parts.push(format!(
             "q:{}:{}",
@@ -2964,7 +2974,11 @@ fn subagent_pool_checkpoint_with_content(
     };
     let refill =
         agent_doc_queue_io::subagent_pool::pool_refill_for_content(file, content, trigger)?;
-    let dispatch_now = !refill.unstarted.is_empty() || !refill.next_heads.is_empty();
+    // `#interimhandback`: a worker that ended on an interim note is continued
+    // during the turn, so its continue is surfaced like dispatch debt.
+    let dispatch_now = !refill.unstarted.is_empty()
+        || !refill.next_heads.is_empty()
+        || refill.continue_owed().next().is_some();
     if !accepts && !dispatch_now {
         return Ok(None);
     }
@@ -3865,6 +3879,92 @@ mod tests {
             None,
             "the same owed report is surfaced once"
         );
+    }
+
+    /// `#interimhandback`, the live PostToolUse sequence (haiven-dev
+    /// `sdk-dev.md`, 2026-11-23, `subagent:adv929#1`): a worker ended with
+    /// "... I'm waiting for that." after the cycle captured its response. The
+    /// captured cycle surfaced only dispatch debt, so the continue never
+    /// reached the running turn. It is now surfaced as the continue of that
+    /// exact worker, once per interim note, and a new note surfaces again.
+    #[test]
+    fn pool_checkpoint_continues_a_worker_that_ended_on_an_interim_note_in_a_captured_cycle() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let content = "---\nsession: sid\nagent_doc_format: template\n---\n\n<!-- agent:queue subagents=1 go -->\n- do [#a]\n- do [#b]\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, content).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&file, Some(content), Some(content)).unwrap();
+        let clock = agent_doc_queue_io::queue_claim::claim_clock_now_secs();
+        let _pin = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(clock);
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&file, "do [#a]", "subagent:a", 7200).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &file,
+            "do [#a]",
+            "subagent:a",
+            "worker:subagent:a",
+            7200,
+            claim.generation,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
+            &file,
+            "response_captured",
+            Some(content),
+            Some(content),
+            "abc123",
+            None,
+        )
+        .unwrap();
+        let freeze = |note: &str| {
+            agent_doc_queue_io::queue_claim::freeze_attempt(
+                &file,
+                "do [#a]",
+                Some(1),
+                &agent_doc_queue::queue_claim::subagent_end_freeze_reason(Some(note)),
+            )
+            .unwrap();
+        };
+        freeze(
+            "After they land it will finish the fix and return its full result. I'm waiting for that.",
+        );
+
+        let surfaced = subagent_pool_checkpoint(&file, 1_000)
+            .unwrap()
+            .expect("the continue reaches the running turn");
+        assert!(
+            surfaced.contains("`SendMessage` to `worker:subagent:a`"),
+            "{surfaced}"
+        );
+        assert!(surfaced.contains("--refresh --generation 1"), "{surfaced}");
+        assert!(
+            !surfaced.contains("Report the finished worker"),
+            "{surfaced}"
+        );
+        assert!(!surfaced.contains("Refill a free pool slot"), "{surfaced}");
+        assert_eq!(
+            subagent_pool_checkpoint(&file, 2_000).unwrap(),
+            None,
+            "the same interim note is surfaced once"
+        );
+
+        // The coordinator continued it: the named refresh clears the freeze,
+        // and the worker later ends on a different interim note.
+        agent_doc_queue_io::queue_claim::refresh_attempt(
+            &file,
+            "do [#a]",
+            "subagent:a",
+            7200,
+            Some(1),
+        )
+        .unwrap();
+        assert_eq!(subagent_pool_checkpoint(&file, 2_500).unwrap(), None);
+        freeze("The rebuild is still queued behind other builds. I'll report back after it lands.");
+        let again = subagent_pool_checkpoint(&file, 3_000)
+            .unwrap()
+            .expect("a new interim note is a new continue");
+        assert!(again.contains("I'll report back"), "{again}");
     }
 
     /// The owner turn is still the harness turn after the cycle captured its

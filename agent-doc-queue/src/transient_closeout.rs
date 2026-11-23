@@ -126,6 +126,30 @@ pub struct TransientCloseoutDebt {
     /// not hold the turn through a recursive Stop; every refusal names the
     /// blocker and the exact re-admission command instead.
     pub dispatch_held: Option<DispatchHold>,
+    /// `#interimhandback`: the row's current-generation worker ended on an
+    /// interim note, not its result. The turn owes a continue of that same
+    /// worker (or a restart from its worktree and branch when it is gone).
+    pub continue_worker: Option<ContinueWorker>,
+    /// `#lostrecoverhold`: the row's own attempt is report-owed or
+    /// continue-owed by this coordinator, with an exact command. A `⚠️` row
+    /// in that state is recoverable now, so it holds the turn through a
+    /// recursive Stop like `⚠️🚧`.
+    pub recoverable_attempt: bool,
+}
+
+/// The continue a worker that ended on an interim note is owed
+/// (`#interimhandback`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContinueWorker {
+    pub worker_id: String,
+    /// `queue claim --refresh` for this generation, once the worker resumed.
+    pub refresh_command: String,
+    /// `queue release --requeue` for this generation, only when the worker
+    /// no longer exists.
+    pub release_command: String,
+    /// `queue lineage --verbose` for this generation: the prior worktree,
+    /// branch, and head a restart continues from.
+    pub lineage_command: String,
 }
 
 /// A refused claim admission that holds a `📥` row from subagent dispatch
@@ -165,6 +189,18 @@ impl TransientCloseoutDebt {
                 hold.claim_command
             );
         }
+        if let Some(worker) = &self.continue_worker {
+            return format!(
+                "- row {}: {} Continue worker `{}` now (Claude Code: `SendMessage` to `{}`; another harness: its native continue of that worker), telling it to finish the task and hand back its complete result, then run `{}`. Only if the harness says that worker no longer exists, restart it: run `{}`, dispatch the fresh generation the pool offers, and point the new worker at the prior attempt's worktree and branch from `{}`.",
+                self.row,
+                self.owed,
+                worker.worker_id,
+                worker.worker_id,
+                worker.refresh_command,
+                worker.release_command,
+                worker.lineage_command,
+            );
+        }
         match &self.close_command {
             Some(command) => format!(
                 "- row {}: {} Close it now with `{command}`.",
@@ -179,7 +215,8 @@ impl TransientCloseoutDebt {
     /// nothing in this turn re-offers it until its blocker is fixed, and the
     /// refusal already named the fix (`#dispatchheldstop`).
     pub fn holds_turn_through_recursive_stop(&self) -> bool {
-        self.dispatch_held.is_none() && marker_holds_turn_through_recursive_stop(self.marker)
+        self.dispatch_held.is_none()
+            && (self.recoverable_attempt || marker_holds_turn_through_recursive_stop(self.marker))
     }
 }
 
@@ -326,6 +363,14 @@ pub struct ReportOwedAttempt {
     /// The claim's CLI handle ([`crate::queue_claim::claim_item_handle`]).
     pub item: String,
     pub generation: u64,
+    /// The claim owner, for the generation-fenced `--refresh` of a continue.
+    pub owner: String,
+    /// The bound worker that ended.
+    pub worker_id: String,
+    /// `#interimhandback`: the recorded hand-back is only an interim note
+    /// ([`crate::queue_claim::hand_back_defers_result`]), so the worker is
+    /// owed a continue, not a report.
+    pub interim: bool,
 }
 
 impl ReportOwedAttempt {
@@ -345,6 +390,65 @@ impl ReportOwedAttempt {
         Some(Self {
             item: crate::queue_claim::claim_item_handle(&claim.item_text),
             generation: claim.generation,
+            owner: claim.owner.clone(),
+            worker_id: claim
+                .worker
+                .as_ref()
+                .map(|worker| worker.worker_id.clone())
+                .unwrap_or_default(),
+            interim: claim.interim_end_hand_back().is_some(),
+        })
+    }
+
+    /// The continue an interim end owes (`#interimhandback`); `None` for a
+    /// finished worker's hand-back, which owes [`Self::report_command`].
+    pub fn continue_worker(&self, document: &str) -> Option<ContinueWorker> {
+        let argv = |words: &[&str]| {
+            crate::reported_closeout::shell_command(
+                &words
+                    .iter()
+                    .map(|word| word.to_string())
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let generation = self.generation.to_string();
+        self.interim.then(|| ContinueWorker {
+            worker_id: self.worker_id.clone(),
+            refresh_command: argv(&[
+                "agent-doc",
+                "queue",
+                "claim",
+                document,
+                "--item",
+                &self.item,
+                "--owner",
+                &self.owner,
+                "--refresh",
+                "--generation",
+                &generation,
+            ]),
+            release_command: argv(&[
+                "agent-doc",
+                "queue",
+                "release",
+                document,
+                "--item",
+                &self.item,
+                "--generation",
+                &generation,
+                "--requeue",
+            ]),
+            lineage_command: argv(&[
+                "agent-doc",
+                "queue",
+                "lineage",
+                document,
+                "--item",
+                &self.item,
+                "--generation",
+                &generation,
+                "--verbose",
+            ]),
         })
     }
 
@@ -526,6 +630,7 @@ const OWED_LOST_RECORDED_HANDBACK: &str = "report the hand-back its ended worker
 /// `#finishedheadrefill`: what a `🟡`/`🚧` row owes when its current-generation
 /// worker ended and its hand-back is recorded and unreported. It is not a
 /// stale worker: no heartbeat refresh revives it.
+const OWED_INTERIM_HANDBACK_CONTINUE: &str = "continue the worker that ended on an interim note (#interimhandback): its last message says it is waiting or will finish later, so it is not finished and its result is not in; do not `queue report-complete` the note, do not claim a new generation while the worker exists, and do not end the turn with this row lost.";
 const OWED_RUNNING_RECORDED_HANDBACK: &str = "report the hand-back its ended worker left: the worker finished and its hand-back is recorded but not reported, so run `agent-doc queue report-complete` for this exact generation with the worker's complete hand-back; do not refresh its heartbeat, continue the ended worker, or claim a new generation for finished work (only to discard the result, `agent-doc queue release --requeue` this generation)";
 
 /// `#orphanreportedrow`: what a reported row owes once its kept response
@@ -657,6 +762,8 @@ pub fn assess_transient_closeout(
                 owed,
                 close_command: None,
                 dispatch_held: None,
+                continue_worker: None,
+                recoverable_attempt: false,
             };
             let identity = crate::queue_claim::claim_identity_at(&entries, index)
                 .unwrap_or_else(|| crate::queue_claim::claim_identity(&prompt.text));
@@ -734,11 +841,11 @@ pub fn assess_transient_closeout(
                     // `#finishedheadrefill`: a finished worker's unreported
                     // hand-back owes its report, not a heartbeat refresh.
                     if let Some(owed) = evidence.report_owed.get(&identity) {
-                        let mut owed_debt = debt(OWED_RUNNING_RECORDED_HANDBACK);
-                        owed_debt.close_command = Some(
-                            owed.report_command(evidence.document.as_deref().unwrap_or("<FILE>")),
-                        );
-                        assessment.debts.push(owed_debt);
+                        assessment.debts.push(report_or_continue_debt(
+                            debt(OWED_RUNNING_RECORDED_HANDBACK),
+                            owed,
+                            evidence.document.as_deref().unwrap_or("<FILE>"),
+                        ));
                     } else if evidence
                         .fresh_claims
                         .get(&identity)
@@ -758,6 +865,25 @@ pub fn assess_transient_closeout(
                             .debts
                             .push(debt(owed_stale_worker_transition(marker)));
                     }
+                }
+                // `#lostrecoverhold`: a `⚠️` row whose attempt is still
+                // `Running` with a recorded end hand-back (the subagent-end
+                // hook froze it, and a frozen `Running` attempt paints `⚠️`)
+                // is report-owed or continue-owed exactly like a `Lost` one.
+                // Before this arm it fell through to the generic lost text,
+                // with no worker id or command, and plain `⚠️` let a
+                // recursive Stop end the turn (haiven-dev `subagent:adv929#1`).
+                QueueLifecycleMarker::Lost
+                | QueueLifecycleMarker::LostClaimed
+                | QueueLifecycleMarker::LostRunning
+                    if evidence.report_owed.contains_key(&identity) =>
+                {
+                    let owed = &evidence.report_owed[&identity];
+                    assessment.debts.push(report_or_continue_debt(
+                        debt(OWED_LOST_RECORDED_HANDBACK),
+                        owed,
+                        evidence.document.as_deref().unwrap_or("<FILE>"),
+                    ));
                 }
                 QueueLifecycleMarker::Lost
                 | QueueLifecycleMarker::LostClaimed
@@ -884,6 +1010,27 @@ pub fn assess_transient_closeout(
         }
     }
     Ok(assessment)
+}
+
+/// The debt a report-owed attempt owes (`#finishedheadrefill`,
+/// `#interimhandback`, `#lostrecoverhold`): an interim note owes a continue of
+/// the same worker; a finished hand-back owes its exact `queue
+/// report-complete`. Either way the row is recoverable by this coordinator
+/// now, so it holds the turn through a recursive Stop.
+fn report_or_continue_debt(
+    mut debt: TransientCloseoutDebt,
+    owed: &ReportOwedAttempt,
+    document: &str,
+) -> TransientCloseoutDebt {
+    debt.recoverable_attempt = true;
+    match owed.continue_worker(document) {
+        Some(worker) => {
+            debt.owed = OWED_INTERIM_HANDBACK_CONTINUE;
+            debt.continue_worker = Some(worker);
+        }
+        None => debt.close_command = Some(owed.report_command(document)),
+    }
+    debt
 }
 
 /// `#personrowselect`: a `🟡`/`🚧` that an in-session selection painted on a
@@ -1498,6 +1645,9 @@ mod tests {
             ReportOwedAttempt {
                 item: "set the flag".to_string(),
                 generation: 1,
+                owner: "subagent:flag".to_string(),
+                worker_id: "worker:flag".to_string(),
+                interim: false,
             },
         );
         for body in [content, operator_doc(&row, false, true)] {
@@ -1818,6 +1968,9 @@ mod tests {
                 ReportOwedAttempt {
                     item: "#q-4837c3f0fb56".to_string(),
                     generation: 1,
+                    owner: "subagent:tmstorm".to_string(),
+                    worker_id: "worker:tmstorm".to_string(),
+                    interim: false,
                 },
             )]),
             ..CloseoutEvidence::default()
@@ -2578,6 +2731,9 @@ EXCHANGE<!-- /agent:exchange -->
             ReportOwedAttempt {
                 item: "#work".to_string(),
                 generation: 3,
+                owner: "subagent:work".to_string(),
+                worker_id: "worker:work".to_string(),
+                interim: false,
             }
         );
         let evidence = CloseoutEvidence {
@@ -2628,6 +2784,88 @@ EXCHANGE<!-- /agent:exchange -->
             failure.contains("no bound running worker claim backs this row"),
             "{failure}"
         );
+    }
+
+    /// `#lostrecoverhold` + `#interimhandback` (haiven-dev
+    /// `subagent:adv929#1`, 2026-11-23): the subagent-end hook froze a worker
+    /// whose last message was "... I'm waiting for that." Its attempt stayed
+    /// `Running`, so the row painted plain `⚠️`. The Stop gate gave the generic
+    /// lost text with no worker id or command, and plain `⚠️` let a recursive
+    /// Stop end the turn with that resumable work stranded. It now names the
+    /// exact continue of that worker (and the restart path), and the row holds
+    /// the turn. A finished hand-back on the same `⚠️` row names its report
+    /// and holds the turn too.
+    #[test]
+    fn lostrecoverhold_a_lost_row_with_an_interim_end_owes_a_continue_and_holds_the_turn() {
+        let content = doc("- ⚠️ [#subagent:work#1] do [#work]\n");
+        let waiting = finished_worker_claim(
+            1,
+            Some(
+                "The fixer confirmed it is re-running the three sqlc steps directly. After they land it will finish the fix and return its full result. I'm waiting for that.",
+            ),
+        );
+        let owed = ReportOwedAttempt::of(&waiting).expect("an ended worker is report-owed");
+        assert!(owed.interim, "{owed:?}");
+        let evidence = CloseoutEvidence {
+            report_owed: HashMap::from([(identity_of(&content, "#work"), owed)]),
+            document: Some("tasks/session.md".to_string()),
+            ..CloseoutEvidence::default()
+        };
+        let assessment = assess_transient_closeout(&content, &evidence).unwrap();
+        assert_eq!(assessment.debts.len(), 1, "{assessment:?}");
+        assert!(
+            assessment.debts[0].holds_turn_through_recursive_stop(),
+            "a recoverable ⚠️ row must not let a recursive Stop end the turn: {assessment:?}"
+        );
+        let failure = normal_closeout_failure_for(&assessment).unwrap();
+        assert!(
+            failure.contains("`SendMessage` to `worker:work`"),
+            "{failure}"
+        );
+        assert!(
+            failure.contains(
+                "agent-doc queue claim tasks/session.md --item '#work' --owner subagent:work --refresh --generation 1"
+            ),
+            "{failure}"
+        );
+        assert!(
+            failure.contains(
+                "agent-doc queue release tasks/session.md --item '#work' --generation 1 --requeue"
+            ),
+            "{failure}"
+        );
+        assert!(failure.contains("--generation 1 --verbose"), "{failure}");
+        assert!(
+            !failure.contains("Close it now with `agent-doc queue report-complete"),
+            "an interim note is not reported: {failure}"
+        );
+
+        // The same `⚠️` row with a finished hand-back owes its exact report.
+        let finished = finished_worker_claim(1, Some("**Summary** fixed it."));
+        let evidence = CloseoutEvidence {
+            report_owed: HashMap::from([(
+                identity_of(&content, "#work"),
+                ReportOwedAttempt::of(&finished).unwrap(),
+            )]),
+            document: Some("tasks/session.md".to_string()),
+            ..CloseoutEvidence::default()
+        };
+        let assessment = assess_transient_closeout(&content, &evidence).unwrap();
+        assert_eq!(assessment.debts.len(), 1, "{assessment:?}");
+        assert!(assessment.debts[0].holds_turn_through_recursive_stop());
+        let failure = normal_closeout_failure_for(&assessment).unwrap();
+        assert!(
+            failure.contains(
+                "agent-doc queue report-complete tasks/session.md --item '#work' --generation 1"
+            ),
+            "{failure}"
+        );
+        assert!(!failure.contains("SendMessage"), "{failure}");
+
+        // Without that evidence a plain `⚠️` still may release.
+        let bare = assess_transient_closeout(&content, &CloseoutEvidence::default()).unwrap();
+        assert_eq!(bare.debts.len(), 1, "{bare:?}");
+        assert!(!bare.debts[0].holds_turn_through_recursive_stop());
     }
 
     /// Only a finished, unreported attempt is report-owed: an end with no

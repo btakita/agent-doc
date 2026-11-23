@@ -557,12 +557,7 @@ fn ledger_or_warn(file: &Path) -> ClaimReleaseReceiptLedger {
             // physically retired, the receipt is already non-governing and
             // cannot attach to a same-text re-add.
             match crate::queue_claim::load_ledger(file) {
-                Ok(claims) => ledger.receipts.retain(|receipt| {
-                    !claims.cancellations.iter().any(|cancelled| {
-                        cancelled.claim.identity == receipt.identity
-                            && cancelled.claim.generation == receipt.generation
-                    })
-                }),
+                Ok(claims) => drop_cancelled_receipts(&mut ledger, &claims),
                 Err(err) => eprintln!(
                     "[queue-claim] WARNING: could not read cancellation receipts for {}; reported receipts remain fail-closed work evidence: {err:#}",
                     file.display()
@@ -588,20 +583,50 @@ fn ledger_read_only(file: &Path) -> ClaimReleaseReceiptLedger {
         return ClaimReleaseReceiptLedger::default();
     };
     if let Ok(claims) = crate::queue_claim::load_ledger_read_only(file) {
-        ledger.receipts.retain(|receipt| {
-            !claims.cancellations.iter().any(|cancelled| {
-                cancelled.claim.identity == receipt.identity
-                    && cancelled.claim.generation == receipt.generation
-            })
-        });
+        drop_cancelled_receipts(&mut ledger, &claims);
     }
     ledger
+}
+
+/// Retire every receipt whose claim generation the ledger already cancelled.
+fn drop_cancelled_receipts(
+    ledger: &mut ClaimReleaseReceiptLedger,
+    claims: &agent_doc_queue::queue_claim::QueueClaimLedger,
+) {
+    ledger.receipts.retain(|receipt| {
+        !claims.cancellations.iter().any(|cancelled| {
+            cancelled.claim.identity == receipt.identity
+                && cancelled.claim.generation == receipt.generation
+        })
+    });
 }
 
 /// The receipt governing the live queue line `text` of `content`, if its
 /// worker reported and no live claim superseded it.
 pub fn governing_receipt(file: &Path, content: &str, text: &str) -> Option<ClaimReleaseReceipt> {
-    let ledger = ledger_or_warn(file);
+    governing_in(file, ledger_or_warn(file), content, text)
+}
+
+/// [`governing_receipt`] that fails on an unreadable receipt or claim ledger
+/// instead of reading it as "no receipts". A caller that makes an
+/// irreversible decision from the answer, such as closing a lineage receipt
+/// before a redispatch (gh#433), must refuse rather than act on a read error.
+pub fn governing_receipt_checked(
+    file: &Path,
+    content: &str,
+    text: &str,
+) -> Result<Option<ClaimReleaseReceipt>> {
+    let mut ledger = load(file)?;
+    drop_cancelled_receipts(&mut ledger, &crate::queue_claim::load_ledger(file)?);
+    Ok(governing_in(file, ledger, content, text))
+}
+
+fn governing_in(
+    file: &Path,
+    ledger: ClaimReleaseReceiptLedger,
+    content: &str,
+    text: &str,
+) -> Option<ClaimReleaseReceipt> {
     if ledger.receipts.is_empty() {
         return None;
     }

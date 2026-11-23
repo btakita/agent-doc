@@ -1284,7 +1284,9 @@ fn settled_prose_report_still_held(file: &Path, target: &str) -> Result<bool> {
         return Ok(true);
     }
     let content = claim_view_text(file)?;
-    Ok(crate::claim_release_receipt::governing_receipt(file, &content, target).is_some())
+    // Checked read: an unreadable receipt ledger refuses the claim instead of
+    // reading as "no receipt" and cancelling a report still owed writeback.
+    Ok(crate::claim_release_receipt::governing_receipt_checked(file, &content, target)?.is_some())
 }
 
 /// [`claim_with_session`] that names the worker harness (`#claimworkerharness`).
@@ -4483,6 +4485,63 @@ mod tests {
         assert_eq!(outcome, ClaimOutcome::Kept, "{kept:?}");
         assert_eq!(kept.generation, started.generation);
         assert_eq!(crate::queue_lineage::load(&doc).unwrap().attempts.len(), 1);
+    }
+
+    /// gh#433 review: the release-receipt guard reads fail-closed. When the
+    /// receipt ledger cannot be parsed, claim refuses instead of reading it as
+    /// "no receipt", so the settled prose-only generation is never cancelled
+    /// over a report that may still be owed writeback.
+    #[test]
+    fn claim_refuses_a_settled_prose_report_when_release_receipts_are_unreadable() {
+        use crate::claim_release_receipt::{ReleaseKind, release};
+        let dir = tempfile::tempdir().unwrap();
+        let item = "#upgrade [#q-3e8a589b1dd1]";
+        let doc = subagents_doc(
+            dir.path(),
+            &["☑️ [#subagent:upgrade-1115#1] #upgrade [#q-3e8a589b1dd1]"],
+        );
+        let (_, claimed) = claim(&doc, item, "subagent:upgrade-1115", 3600).unwrap();
+        let started = start_attempt(
+            &doc,
+            item,
+            "subagent:upgrade-1115",
+            "w1",
+            3600,
+            claimed.generation,
+        )
+        .unwrap();
+        crate::queue_lineage::record_prose_only(&doc, &started, "upgraded").unwrap();
+        crate::claim_release_receipt::capture_response_for_attempt(
+            &doc,
+            item,
+            started.generation,
+            "upgraded response",
+        )
+        .unwrap();
+        release(&doc, item, ReleaseKind::Reported).unwrap();
+        assert!(load_ledger(&doc).unwrap().claims.is_empty());
+
+        let root = agent_doc_fs::find_project_root(&doc).unwrap();
+        let conn = agent_doc_sqlite::state_store::open_state_db(&root).unwrap();
+        let corrupted = conn
+            .execute(
+                "UPDATE queue_document_state SET payload_json = 'not json' WHERE state_kind = ?1",
+                [agent_doc_queue::claim_release_receipt::CLAIM_RELEASE_RECEIPTS_STATE_KIND],
+            )
+            .unwrap();
+        assert_eq!(corrupted, 1);
+        drop(conn);
+
+        let err = claim(&doc, item, "subagent:other", 600).unwrap_err();
+        assert!(format!("{err:#}").contains("release receipts"), "{err:#}");
+        let attempts = crate::queue_lineage::load(&doc).unwrap().attempts;
+        assert_eq!(attempts.len(), 1);
+        assert!(
+            crate::queue_lineage::kept_completion_attempt(&doc, item)
+                .unwrap()
+                .is_some_and(|attempt| attempt.generation == started.generation),
+            "the settled generation stays the row's open receipt"
+        );
     }
 
     /// A stale `☑️` with no lineage attempt is not a kept completion. Claim

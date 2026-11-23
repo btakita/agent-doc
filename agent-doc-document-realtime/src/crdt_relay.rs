@@ -223,6 +223,42 @@ impl Member {
         self.nonconvergence_recovery_signaled = false;
         self.nonconvergence_recovery_retry = RecoveryRetryBackoff::default();
     }
+
+    /// Advance `observed_replica` to exactly `replica` once the editor has
+    /// visibly projected everything the hub queued for it.
+    ///
+    /// This used to rebuild the mirror from `replica.encode_state()` on every
+    /// such projection, which the editors report after nearly every update:
+    /// a full columnar encode, a full decode into a fresh lazily graph, and —
+    /// because a fresh graph has no order index to fold the next delta into —
+    /// a whole-graph text projection on the next `relay_update_capture`. On a
+    /// 500 KB session document that was most of a CPU-second and ~200 MB of
+    /// transient allocation per editor per edit, all under the document's hub
+    /// lock. The observed mirror only ever holds a subset of `replica`'s
+    /// operations (the editor's own updates plus acknowledged deliveries, all
+    /// of which `replica` also absorbed), so the missing suffix is exactly
+    /// `replica.diff(observed frontier)`. The rebuild stays as the fallback
+    /// whenever the catch-up does not provably land on the same frontier and
+    /// text.
+    fn catch_up_observed_replica(&mut self, client_id: u64) -> Result<()> {
+        let observed_frontier = self.observed_replica.state_vector();
+        let caught_up = self
+            .replica
+            .covers_state_vector(&observed_frontier)
+            .unwrap_or(false)
+            && self
+                .replica
+                .diff(&observed_frontier)
+                .and_then(|missing| self.observed_replica.apply_update(&missing))
+                .is_ok()
+            && self.observed_replica.state_vector() == self.replica.state_vector()
+            && self.observed_replica.text() == self.replica.text();
+        if !caught_up {
+            self.observed_replica =
+                ReplicaState::from_encoded(client_id, &self.replica.encode_state())?;
+        }
+        Ok(())
+    }
 }
 
 /// `#pullnoackdeadlock`: redeliveries of one unacked head before a replica stops
@@ -3430,8 +3466,7 @@ impl RelayHub {
         if member.pending.is_empty() {
             let projected = visible_content_hash == canonical_content_hash;
             if projected {
-                member.observed_replica =
-                    ReplicaState::from_encoded(client_id, &member.replica.encode_state())?;
+                member.catch_up_observed_replica(client_id)?;
                 self.settle_requested_epoch_compaction()?;
             }
             return Ok(projected);
@@ -3847,7 +3882,7 @@ impl RelayHub {
     ) -> Result<Option<AutomaticHistoryCompaction>> {
         let text = self.canonical.text();
         let text_bytes = text.len();
-        let before_bytes = self.canonical.encode_state().len();
+        let before_bytes = self.canonical.encoded_state_len();
         if before_bytes <= limit_bytes {
             return Ok(None);
         }
@@ -3859,7 +3894,7 @@ impl RelayHub {
         self.compact_authoritative_epoch(&text)?;
         Ok(Some(AutomaticHistoryCompaction {
             before_bytes,
-            after_bytes: self.canonical.encode_state().len(),
+            after_bytes: self.canonical.encoded_state_len(),
             text_bytes,
             limit_bytes,
         }))
@@ -4101,6 +4136,71 @@ pub fn mint_client_id(identity: &str) -> u64 {
 mod tests {
     use super::*;
     use agent_doc_merge::crdt_sync::ReplicaState;
+
+    /// Ceiling for the observed-mirror catch-up and encode cache: a steady
+    /// stream of editor updates, each followed by the editor's visible
+    /// projection and the controller's per-RPC state probes, costs at most one
+    /// full-state encode and no whole-graph text projection per edit. Before,
+    /// every projection rebuilt the observed mirror from a full encode/decode
+    /// and the next update re-projected that fresh graph.
+    #[test]
+    fn steady_editor_updates_pay_one_encode_and_no_full_projection_per_edit() {
+        use agent_doc_merge::crdt_sync::{
+            encode_state_misses_on_this_thread as encodes,
+            text_projection_misses_on_this_thread as projections,
+        };
+        let text: String = (0..2_000)
+            .map(|line| format!("- [ ] queue item {line}: keep the controller heap bounded\n"))
+            .collect();
+        let mut hub = RelayHub::from_text(1, &text);
+        hub.register(2).unwrap();
+        let editor = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        let edit = |round: usize| {
+            let frontier = editor.state_vector();
+            let end = u32::try_from(editor.text().chars().count()).unwrap();
+            editor.apply_local_edit(end, 0, &format!("edit {round}\n"));
+            editor.diff(&frontier).unwrap()
+        };
+        // Warm-up: the first update after registration may build indexes.
+        let update = edit(0);
+        hub.relay_update(2, &update).unwrap();
+        assert!(
+            hub.observe_delivery_projection(2, &content_hash(&editor.text()))
+                .unwrap()
+        );
+
+        let rounds = 12;
+        let (encodes_before, projections_before) = (encodes(), projections());
+        for round in 1..=rounds {
+            let update = edit(round);
+            hub.relay_update(2, &update).unwrap();
+            assert!(
+                hub.observe_delivery_projection(2, &content_hash(&editor.text()))
+                    .unwrap()
+            );
+            // The readers a controller replica RPC runs on the same graph.
+            let _ = hub.retained_canonical_projection();
+            let _ = hub.compact_oversized_history().unwrap();
+            let _ = hub.canonical_encoded_state();
+        }
+        assert_eq!(
+            projections() - projections_before,
+            0,
+            "no whole-graph text projection per edit"
+        );
+        assert!(
+            encodes() - encodes_before <= u64::try_from(rounds).unwrap(),
+            "at most one full encode per edit, got {}",
+            encodes() - encodes_before
+        );
+        assert_eq!(hub.canonical_text(), editor.text());
+        let member = hub.members.get(&2).unwrap();
+        assert_eq!(member.observed_replica.text(), editor.text());
+        assert_eq!(
+            member.observed_replica.state_vector(),
+            member.replica.state_vector()
+        );
+    }
 
     static CELL_DOC_TREE_ENV_LOCK: Mutex<()> = Mutex::new(());
 

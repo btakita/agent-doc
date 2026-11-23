@@ -31,6 +31,30 @@ use std::cell::{Cell, RefCell};
 mod local_ops;
 use local_ops::{LocalJournal, OrderElem, OrderIndex};
 
+thread_local! {
+    /// Full-state encodes this thread actually computed (cache misses of
+    /// [`ReplicaState::encode_state`]).
+    static ENCODE_STATE_MISSES: Cell<u64> = const { Cell::new(0) };
+    /// Whole-graph text projections this thread computed (cache misses of
+    /// [`ReplicaState::text`]).
+    static TEXT_PROJECTION_MISSES: Cell<u64> = const { Cell::new(0) };
+}
+
+/// How many [`ReplicaState::text`] calls on this thread had to order the
+/// whole operation graph instead of answering from the cached projection.
+#[doc(hidden)]
+pub fn text_projection_misses_on_this_thread() -> u64 {
+    TEXT_PROJECTION_MISSES.with(Cell::get)
+}
+
+/// How many [`ReplicaState::encode_state`] calls on this thread had to walk and
+/// encode the whole operation graph. Lets callers in other crates assert that a
+/// hot path pays at most one full encode per graph mutation.
+#[doc(hidden)]
+pub fn encode_state_misses_on_this_thread() -> u64 {
+    ENCODE_STATE_MISSES.with(Cell::get)
+}
+
 /// A durable per-replica CRDT state — one participant (an editor's FFI node, or
 /// the supervisor) in a multi-replica document session.
 ///
@@ -92,6 +116,18 @@ pub struct ReplicaState {
     /// Set when the order failed to spell the replica's projection. The replica
     /// then keeps lazily's own edit and delta paths for its lifetime.
     local_fast_path_refused: Cell<bool>,
+    /// The exact [`Self::encode_state`] bytes for the current operation graph.
+    ///
+    /// A full-state encode is `delta_since(∅)` over every retained element,
+    /// then a columnar MessagePack + zstd pass that decodes itself again to
+    /// self-verify: on a 500 KB session document that is ~150 MB of transient
+    /// allocation and most of a second of CPU. One controller replica RPC used
+    /// to pay it four or five times for the SAME graph (history-size probe,
+    /// retained canonical projection, visible-delivery check, projection
+    /// observation), all while holding the document's hub lock, so editor
+    /// requests queued behind it and the freed buffers pinned glibc arenas at
+    /// their high-water mark. Cleared by every mutation of `text`.
+    cached_encoded_state: RefCell<Option<Vec<u8>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -490,6 +526,7 @@ impl ReplicaState {
             cached_version_vector: RefCell::new(Some(version_vector)),
             visible_order: RefCell::new(Some(OrderIndex::empty())),
             local_fast_path_refused: Cell::new(false),
+            cached_encoded_state: RefCell::new(None),
         }
     }
 
@@ -512,6 +549,7 @@ impl ReplicaState {
             // Built from the graph by the first local edit.
             visible_order: RefCell::new(None),
             local_fast_path_refused: Cell::new(false),
+            cached_encoded_state: RefCell::new(None),
         }
     }
 
@@ -551,6 +589,7 @@ impl ReplicaState {
         if self.cached_text.borrow().is_some() {
             return;
         }
+        TEXT_PROJECTION_MISSES.with(|misses| misses.set(misses.get() + 1));
         let projected = self.text.borrow().text();
         let projected_chars = projected.chars().count();
         self.cached_text_chars.set(Some(projected_chars));
@@ -606,6 +645,8 @@ impl ReplicaState {
         if edits.is_empty() {
             return;
         }
+        // Both the minted fast path and lazily's own path below mutate `text`.
+        *self.cached_encoded_state.borrow_mut() = None;
         self.rebase_local_journal_if_oversized();
         if self.mint_pending_local_edits(&edits) {
             return;
@@ -1067,6 +1108,7 @@ impl ReplicaState {
     fn apply_decoded_update(&self, update: &[u8], ops: &[TextOp]) {
         self.flush_pending_local_edits();
         if self.text.borrow_mut().apply_delta_unprojected(ops) {
+            *self.cached_encoded_state.borrow_mut() = None;
             if self.fold_remote_ops(ops) {
                 self.retain_folded_projection();
             } else {
@@ -1168,8 +1210,27 @@ impl ReplicaState {
     /// replica holds, as a `TextOp` list.
     pub fn encode_state(&self) -> Vec<u8> {
         self.flush_pending_local_edits();
+        if let Some(cached) = self.cached_encoded_state.borrow().as_ref() {
+            return cached.clone();
+        }
+        ENCODE_STATE_MISSES.with(|misses| misses.set(misses.get() + 1));
         let snapshot = self.text.borrow().delta_since(&TextVersionVector::new());
-        encode_update_ops(&snapshot).unwrap_or_default()
+        let encoded = encode_update_ops(&snapshot).unwrap_or_default();
+        drop(snapshot);
+        if !encoded.is_empty() {
+            *self.cached_encoded_state.borrow_mut() = Some(encoded.clone());
+        }
+        encoded
+    }
+
+    /// Byte length of [`Self::encode_state`], served from the same cache, for
+    /// callers that only compare the retained history against a size budget.
+    pub fn encoded_state_len(&self) -> usize {
+        self.flush_pending_local_edits();
+        if let Some(cached) = self.cached_encoded_state.borrow().as_ref() {
+            return cached.len();
+        }
+        self.encode_state().len()
     }
 }
 
@@ -1315,8 +1376,13 @@ pub fn sync(a: &ReplicaState, b: &ReplicaState) -> Result<()> {
 /// unnecessary and expensive: applying the snapshot materializes the complete
 /// operation graph twice even though only delta emptiness answers this question.
 fn canonical_covers(canonical: &ReplicaState, peer: &ReplicaState) -> Result<bool> {
-    let missing = peer.diff(&canonical.state_vector())?;
-    Ok(decode_update_ops(&missing)?.is_empty())
+    // `peer.diff(canonical frontier)` is empty exactly when every id and
+    // tombstone counter `peer` stores is at or below `canonical`'s counter for
+    // that peer (`TextCrdt::delta_since`), and `peer`'s version vector is the
+    // per-peer maximum of those same counters. Comparing the two cached
+    // frontiers answers that without walking, encoding and decoding the whole
+    // graph on every controller current-text read.
+    canonical.covers_state_vector(&peer.state_vector())
 }
 
 /// State-vector **commit barrier** (`#crdtauth3`): is `canonical` a **consistent
@@ -1361,6 +1427,84 @@ pub fn flush_to_commit_barrier(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn large_session_text(lines: usize) -> String {
+        (0..lines)
+            .map(|line| format!("- [ ] queue item {line}: keep the controller heap bounded\n"))
+            .collect()
+    }
+
+    /// Repeated full-state reads of an unchanged graph pay
+    /// for one encode, and every kind of mutation (remote update, local edit)
+    /// invalidates it so the next read reflects the new graph exactly.
+    #[test]
+    fn encode_state_is_computed_once_per_graph_revision() {
+        let text = large_session_text(2_000);
+        let canonical = ReplicaState::from_text(1, &text);
+        let start = encode_state_misses_on_this_thread();
+        let editor = ReplicaState::from_encoded(2, &canonical.encode_state()).unwrap();
+
+        let first = canonical.encode_state();
+        for _ in 0..8 {
+            assert_eq!(canonical.encode_state(), first);
+            assert_eq!(canonical.encoded_state_len(), first.len());
+        }
+        assert_eq!(encode_state_misses_on_this_thread() - start, 1);
+
+        // A remote update invalidates the cache, and the re-encode carries it.
+        let before = editor.state_vector();
+        editor.apply_local_edit(0, 0, "remote ");
+        let update = editor.diff(&before).unwrap();
+        canonical.apply_update(&update).unwrap();
+        let after_remote = canonical.encode_state();
+        assert_ne!(after_remote, first);
+        let decoded = ReplicaState::from_encoded(3, &after_remote).unwrap();
+        assert_eq!(decoded.text(), canonical.text());
+        assert!(decoded.text().starts_with("remote "));
+        assert_eq!(encode_state_misses_on_this_thread() - start, 2);
+
+        // A redelivery of the same update is a no-op and keeps the cache.
+        canonical.apply_update(&update).unwrap();
+        assert_eq!(canonical.encode_state(), after_remote);
+        assert_eq!(encode_state_misses_on_this_thread() - start, 2);
+
+        // A local edit invalidates it too.
+        canonical.apply_local_edit(0, 0, "local ");
+        let after_local = canonical.encode_state();
+        let decoded = ReplicaState::from_encoded(4, &after_local).unwrap();
+        assert_eq!(decoded.text(), canonical.text());
+        assert!(decoded.text().starts_with("local remote "));
+        assert_eq!(encode_state_misses_on_this_thread() - start, 3);
+    }
+
+    /// Ceiling: N editor round trips cost at most N full
+    /// encodes no matter how many readers ask for the state in between.
+    #[test]
+    fn encode_state_misses_stay_bounded_by_mutations_under_repeated_reads() {
+        let canonical = ReplicaState::from_text(1, &large_session_text(500));
+        let editor = ReplicaState::from_encoded(2, &canonical.encode_state()).unwrap();
+        let start = encode_state_misses_on_this_thread();
+        let rounds = 20;
+        for round in 0..rounds {
+            let before = editor.state_vector();
+            editor.apply_local_edit(0, 0, &format!("{round} "));
+            canonical
+                .apply_update(&editor.diff(&before).unwrap())
+                .unwrap();
+            // The readers one controller replica RPC used to run back to back.
+            for _ in 0..5 {
+                let _ = canonical.encoded_state_len();
+                let _ = canonical.encode_state();
+            }
+        }
+        assert_eq!(encode_state_misses_on_this_thread() - start, rounds);
+        assert_eq!(
+            ReplicaState::from_encoded(3, &canonical.encode_state())
+                .unwrap()
+                .text(),
+            editor.text()
+        );
+    }
 
     fn empty_sv() -> Vec<u8> {
         ReplicaState::new(999).state_vector()

@@ -46780,7 +46780,11 @@ pub fn run_serve(
     previous_controller_pid: Option<u32>,
     handoff_state: &str,
 ) -> Result<()> {
+    // Bound the heap before any worker thread binds a malloc arena.
+    let heap_policy = crate::heap_hygiene::configure_process_allocator();
     let project_root = agent_doc_project_root_io::project_root_from_arg(root)?;
+    agent_doc_ops_log_io::log_op(&project_root, &heap_policy.ops_log_line());
+    crate::heap_hygiene::spawn_periodic_trim();
     // `#statedbfdclobber`: close only descriptors `main` proved it inherited.
     // Listing the live fd table here closed this process's own debug-log
     // descriptor, and SQLite's next open reused the number under the appender.

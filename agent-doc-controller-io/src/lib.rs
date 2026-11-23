@@ -3,6 +3,7 @@
 pub mod dashboard;
 pub mod dashboard_refresh;
 pub mod editor_route_errors;
+pub mod heap_hygiene;
 pub mod inherited_fds;
 pub mod live_turn_follow_up;
 pub mod process;

@@ -166,6 +166,30 @@ pub(crate) fn settle_retained_cli_write(
     let Some(wait) = binary_owned_cli_write_wait() else {
         return Err(refusal);
     };
+    settle_retained_write_within(effects, file, pre_write, target, source, wait, refusal)
+}
+
+/// Settle one retained write refusal with an explicit bound, independent of
+/// the thread's binary-owned CLI write policy.
+///
+/// `#respondfalsefail`: a closeout's own idempotent commit-time write (dropping
+/// the previous turn recap before staging) goes through the same authority, and
+/// a live replica that has not acknowledged it yet refuses with the narrow
+/// `retained=delivery_projection_pending` deferral. The response is already
+/// durable at that point, so the commit must wait on the same convergence edge
+/// a binary-owned CLI write waits on and continue, or report the typed
+/// deferral — never fail the closeout. Same contract as
+/// [`settle_retained_cli_write`]: any refusal without the narrow pending token
+/// propagates unchanged; no step writes disk.
+pub fn settle_retained_write_within(
+    effects: &dyn EditorConvergenceEffects,
+    file: &Path,
+    pre_write: &str,
+    target: &str,
+    source: &str,
+    wait: Duration,
+    refusal: anyhow::Error,
+) -> Result<()> {
     let rendered = format!("{refusal:#}");
     if !agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(&rendered) {
         return Err(refusal);
@@ -380,6 +404,61 @@ mod tests {
         .unwrap_err();
         assert!(retained_cli_write_deferral(&err).is_none());
         assert_eq!(effects.awaits.load(Ordering::SeqCst), 0);
+    }
+
+    /// `#respondfalsefail`: a closeout's commit-time write settles its own
+    /// retention with an explicit bound, without the CLI policy installed.
+    #[test]
+    fn an_explicit_bound_settles_without_the_cli_policy() {
+        let (_dir, file) = doc();
+        assert_eq!(binary_owned_cli_write_wait(), None);
+        let converged = scripted(RetainedDeliveryAwait::Converged {
+            observed_text: Some(target()),
+        });
+        settle_retained_write_within(
+            &converged,
+            &file,
+            PRE,
+            &target(),
+            "commit_settle_recap",
+            Duration::from_secs(5),
+            pending_refusal(),
+        )
+        .unwrap();
+        assert_eq!(converged.awaits.load(Ordering::SeqCst), 1);
+
+        let retained = scripted(RetainedDeliveryAwait::StillRetained);
+        let err = settle_retained_write_within(
+            &retained,
+            &file,
+            PRE,
+            &target(),
+            "commit_settle_recap",
+            Duration::ZERO,
+            pending_refusal(),
+        )
+        .unwrap_err();
+        assert_eq!(
+            retained_cli_write_deferral(&err).map(|deferral| deferral.source.as_str()),
+            Some("commit_settle_recap")
+        );
+
+        let unrelated = settle_retained_write_within(
+            &converged,
+            &file,
+            PRE,
+            &target(),
+            "commit_settle_recap",
+            Duration::from_secs(5),
+            anyhow::anyhow!("commit_settle_recap: refused direct disk write"),
+        )
+        .unwrap_err();
+        assert!(retained_cli_write_deferral(&unrelated).is_none());
+        assert_eq!(
+            converged.awaits.load(Ordering::SeqCst),
+            1,
+            "a refusal without the pending token never waits"
+        );
     }
 
     #[test]

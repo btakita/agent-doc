@@ -752,6 +752,18 @@ Still open → exit 75 with `[agent-doc] deferred (exit 75):
 prompt. Without a captured response or without a supervisor to resume it, the
 original refusal stays a real failure (exit 1).
 
+`#respondfalsefail` — the same captured-closeout handling covers two more
+refusals that arrive after the response is durably captured and delivered: a
+retained write carrying `retained=delivery_projection_pending` (for example the
+commit's recap-settle write while a live replica has not acknowledged it), and
+the `socket_visible_write` refusal `refusing editor receipt that diverges from
+controller canonical ... retained canonical projection remains authoritative`.
+Before that, the commit's own `#recappair` recap-settle write settles its
+retention on the delivery-convergence edge with the same bound: converged with
+the settled recap visible → the commit continues (exit 0); still retained → the
+typed `RetainedCliWriteDeferred` with source `commit_settle_recap` (exit 75).
+Neither is reported as `failed to drop the previous turn recap before commit`.
+
 ## Editor Frontend Hot Path
 
 The editor text-change callback is a capture boundary, not a convergence worker. JetBrains `DocumentListener` callbacks, VS Code

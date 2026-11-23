@@ -208,6 +208,8 @@ pub struct DuplicatePromptRepairReport {
     pub post_exchange_comments: bool,
     pub prompt_lines_against_before: bool,
     pub live_prefix_variants: bool,
+    /// `#respondfalsefail`: a `### Re:` heading duplicated without a body.
+    pub bodiless_response_headings: bool,
 }
 
 impl DuplicatePromptRepairReport {
@@ -217,6 +219,7 @@ impl DuplicatePromptRepairReport {
             || self.post_exchange_comments
             || self.prompt_lines_against_before
             || self.live_prefix_variants
+            || self.bodiless_response_headings
     }
 }
 
@@ -273,6 +276,24 @@ pub fn repair_duplicate_prompt_artifacts_with_log(
             repaired = prompt_deduped;
             report.prompt_lines_against_before = true;
         }
+        // `#respondfalsefail`: never keep a response heading an editor
+        // application duplicated without a body.
+        if let Some(heading_deduped) =
+            agent_doc_element_exchange::remove_bodiless_duplicate_response_headings(
+                before, &repaired,
+            )
+        {
+            repaired = heading_deduped;
+            report.bodiless_response_headings = true;
+            logger(
+                file,
+                &format!(
+                    "bodiless_duplicate_response_heading_removed file={} source={} before_commit=true (#respondfalsefail)",
+                    file.display(),
+                    options.source
+                ),
+            );
+        }
     }
 
     let (adjacent_prefix_deduped, adjacent_prefix_changed) =
@@ -302,14 +323,15 @@ pub fn repair_duplicate_prompt_artifacts_with_log(
         logger(
             file,
             &format!(
-                "duplicate_prompt_artifact_repair file={} source={} response_blocks={} answered_tail={} post_exchange_comments={} prompt_lines_against_before={} live_prefix_variants={} before_commit=true",
+                "duplicate_prompt_artifact_repair file={} source={} response_blocks={} answered_tail={} post_exchange_comments={} prompt_lines_against_before={} live_prefix_variants={} bodiless_response_headings={} before_commit=true",
                 file.display(),
                 options.source,
                 report.response_blocks,
                 report.answered_tail,
                 report.post_exchange_comments,
                 report.prompt_lines_against_before,
-                report.live_prefix_variants
+                report.live_prefix_variants,
+                report.bodiless_response_headings
             ),
         );
     }
@@ -534,6 +556,7 @@ mod tests {
                 post_exchange_comments: false,
                 prompt_lines_against_before: true,
                 live_prefix_variants: false,
+                bodiless_response_headings: false,
             }
         );
         assert!(repaired.contains("❯ live prompt\n### Re: response"));

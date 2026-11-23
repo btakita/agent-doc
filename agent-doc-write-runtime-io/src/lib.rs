@@ -9039,6 +9039,70 @@ mod tests {
         assert!(repaired.contains("This sentence is a prefix\n"));
         assert!(repaired.contains("This sentence is a prefix variant in assistant prose\n"));
     }
+    /// `#respondfalsefail`: the 2026-11-23 socket visible write (patch
+    /// `48c34928`) copied the previous response's heading above its own chat
+    /// prompt record without a body. The IPC snapshot dedupe must repair it
+    /// before adoption, so no bodiless heading reaches canonical or a commit.
+    #[test]
+    fn ipc_snapshot_removes_bodiless_duplicate_response_heading() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("bugs.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let before = concat!(
+            "<!-- agent:exchange -->\n",
+            "- **Dispatched:** gsync2.\n",
+            "> **Chat prompt (#chatprompt:4e7d3b234a59):** prune completed subagents\n",
+            "\n",
+            "### Re: prune completed subagents\n",
+            "\n",
+            "- **Pruned:** ctlmaint.\n",
+            "<!-- agent:boundary:ef1863ea -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let after = concat!(
+            "<!-- agent:exchange -->\n",
+            "- **Dispatched:** gsync2.\n",
+            "### Re: prune completed subagents\n",
+            "\n",
+            "> **Chat prompt (#chatprompt:4e7d3b234a59):** prune completed subagents\n",
+            "\n",
+            "### Re: prune completed subagents\n",
+            "\n",
+            "- **Pruned:** ctlmaint.\n",
+            "> **Chat prompt (#chatprompt:146ddda38227):** steering\n",
+            "\n",
+            "### Re: prune completed subagents · #gh-fix GH #436–#439 (HEAD)\n",
+            "\n",
+            "**Pruned:** again.\n",
+            "<!-- agent:boundary:485c8b0c -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, before).unwrap();
+
+        let (repaired, changed) = agent_doc_write_converge_io::dedupe_ipc_snapshot_content(
+            &doc,
+            Some(before),
+            after,
+            "socket_visible_write",
+        )
+        .unwrap();
+
+        assert!(changed);
+        assert_eq!(
+            repaired
+                .matches("### Re: prune completed subagents\n")
+                .count(),
+            1,
+            "{repaired}"
+        );
+        assert!(repaired.contains(
+            "- **Dispatched:** gsync2.\n> **Chat prompt (#chatprompt:4e7d3b234a59):** prune completed subagents\n"
+        ));
+        assert!(repaired.contains("### Re: prune completed subagents · #gh-fix"));
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("bodiless_duplicate_response_heading_removed"));
+        assert!(log.contains("ipc_snapshot_deduped"));
+    }
     #[test]
     fn ipc_snapshot_dedupes_live_prompt_prefix_variant() {
         let dir = TempDir::new().unwrap();

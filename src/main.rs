@@ -7257,6 +7257,38 @@ fn report_retained_closeout_pending(
     )
 }
 
+/// Whether a `respond` closeout refusal leaves this command's durably captured
+/// response to the retained closeout worker rather than failing the turn.
+///
+/// `#respondfalseerror` recognized only the controller's
+/// await-live-projection commit refusal. `#respondfalsefail` (2026-11-23,
+/// agent-doc-bugs.md, cycles 1795452708625 and 1795453377524): two more
+/// refusals landed AFTER the response was durably captured and delivered, and
+/// each exited 1 with the dogfood fix prompt, inviting a duplicate re-send:
+///
+/// - a retained write whose live replica had not acknowledged it yet
+///   (`retained=delivery_projection_pending`), raised by the commit's
+///   recap-settle write — the authority holds the write and it converges on
+///   its own;
+/// - the editor receipt diverging from controller canonical, where the
+///   retained canonical projection (which carries the captured response)
+///   stays authoritative.
+///
+/// Both are the same shape as the controller refusal: the captured response is
+/// durable and the closeout worker owns the rest. The caller still requires a
+/// durable capture opened by this command and a serving driver, so an unowned
+/// capture keeps its original failure and remedy.
+fn closeout_refusal_retains_captured_response(err: &anyhow::Error) -> bool {
+    if agent_doc_controller_io::project_controller::controller_commit_refusal_awaits_projection(err)
+    {
+        return true;
+    }
+    let rendered = format!("{err:#}");
+    agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(&rendered)
+        || (rendered.contains(agent_doc_ipc_protocol::EDITOR_RECEIPT_DIVERGENCE_REFUSAL)
+            && rendered.contains("retained canonical projection remains authoritative"))
+}
+
 /// Whether a retained capture has a worker that will close it: a durable
 /// active capture plus a supervisor idle watch to re-drive it. Without the
 /// supervisor nothing resumes it (`#capturedresumeunowned`), so the original
@@ -8683,7 +8715,7 @@ fn try_main() -> anyhow::Result<()> {
                     agent_doc_cycle_state_io::post_commit_error::retained_capture_awaits_projection(
                         cycle_before.as_ref(),
                         cycle_after.as_ref(),
-                        agent_doc_controller_io::project_controller::controller_commit_refusal_awaits_projection(&err),
+                        closeout_refusal_retains_captured_response(&err),
                     )
                     && retained_closeout_has_driver(&closeout_file)
                 {
@@ -12116,6 +12148,45 @@ mod terminal_error_report_tests {
             agent_doc_write_converge_io::retained_cli_write::RETAINED_CLI_WRITE_DEFERRED_EXIT_CODE,
             75
         );
+    }
+
+    /// `#respondfalsefail`: the refusals a durable captured response survives
+    /// are recognized under command context; an unrelated failure, and the
+    /// broad retained class without the narrow pending marker (an unreachable
+    /// editor authority), are not.
+    #[test]
+    fn closeout_refusals_that_keep_a_captured_response_are_recognized() {
+        let recap_settle = anyhow::anyhow!(
+            "serialized_atomic_write: binary-owned write for tasks/doc.md remains retained while \
+             the editor projection converges (content_hash=692c). [{}] [{}]",
+            agent_doc_turn::write_ownership::RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN,
+            agent_doc_turn::write_ownership::AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN,
+        )
+        .context("failed to drop the previous turn recap before commit for tasks/doc.md");
+        assert!(closeout_refusal_retains_captured_response(&recap_settle));
+
+        let receipt = anyhow::anyhow!(
+            "socket_visible_write: {} for tasks/doc.md (canonical_hash=0eb4, editor_hash=0f6c, \
+             waited_ms=12627, revisions=6, diverged_owned_cells=exchange); retained canonical \
+             projection remains authoritative",
+            agent_doc_ipc_protocol::EDITOR_RECEIPT_DIVERGENCE_REFUSAL,
+        );
+        assert!(closeout_refusal_retains_captured_response(&receipt));
+
+        let controller = anyhow::anyhow!(
+            "commit refused [{}]",
+            agent_doc_controller_io::project_controller::CONTROLLER_COMMIT_AWAIT_PROJECTION_TOKEN
+        );
+        assert!(closeout_refusal_retains_captured_response(&controller));
+
+        let unreachable = anyhow::anyhow!(
+            "the attached editor replica is not registered [{}]",
+            agent_doc_turn::write_ownership::AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN,
+        );
+        assert!(!closeout_refusal_retains_captured_response(&unreachable));
+        assert!(!closeout_refusal_retains_captured_response(
+            &anyhow::anyhow!("session-check INTERRUPTED")
+        ));
     }
 
     #[test]

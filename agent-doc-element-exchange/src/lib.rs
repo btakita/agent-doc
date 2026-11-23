@@ -1103,6 +1103,162 @@ pub fn dedupe_adjacent_prompt_prefix_duplicates_in_exchange(exchange: &str) -> O
     )
 }
 
+/// Normalized identity of a `### Re:` response heading line, ignoring the
+/// working-tree-only ` (HEAD)` annotation. `None` for any other line.
+fn response_heading_identity(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    let rest = trimmed.strip_prefix("### ")?;
+    if !rest.trim_start().starts_with("Re:") {
+        return None;
+    }
+    Some(trimmed.trim_end_matches(" (HEAD)").trim_end().to_string())
+}
+
+/// Any ATX heading line (`#` .. `######` followed by a space).
+fn is_atx_heading_line(trimmed: &str) -> bool {
+    let hashes = trimmed.bytes().take_while(|byte| *byte == b'#').count();
+    (1..=6).contains(&hashes) && trimmed.as_bytes().get(hashes) == Some(&b' ')
+}
+
+/// A prompt record blockquote line (`> **Chat prompt (#chatprompt:…):** …`,
+/// `> **Queue prompt:** …`), the record a response quotes above its heading.
+fn is_prompt_record_line(trimmed: &str) -> bool {
+    let Some(label) = trimmed.strip_prefix("> **") else {
+        return false;
+    };
+    label
+        .split("**")
+        .next()
+        .is_some_and(|label| label.to_ascii_lowercase().contains("prompt"))
+}
+
+/// Response headings (outside fenced code) in `exchange`, as
+/// `(segment index, identity)`, with the segments split inclusively by line.
+fn exchange_response_heading_lines(segments: &[&str]) -> Vec<(usize, String)> {
+    let mut in_fence = false;
+    let mut headings = Vec::new();
+    for (index, segment) in segments.iter().enumerate() {
+        let trimmed = segment.trim();
+        if is_code_fence_delimiter(trimmed) {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        if let Some(identity) = response_heading_identity(segment) {
+            headings.push((index, identity));
+        }
+    }
+    headings
+}
+
+/// `#respondfalsefail`: remove a `### Re:` heading an editor-side patch
+/// application duplicated WITHOUT a body.
+///
+/// Observed 2026-11-23 on agent-doc-bugs.md (patch `48c34928`): the JetBrains
+/// visible write of a response that re-quoted an earlier chat prompt inserted
+/// a second copy of the PREVIOUS response's heading above that response's
+/// prompt record, leaving
+/// `### Re: X` / `> **Chat prompt …**` / `### Re: X` / body. The
+/// `#ipcfullprompt` detector logged `response_duplicated(### Re: X:1->2)`, but
+/// nothing repaired it, so the bodiless heading was adopted and committed.
+///
+/// A heading occurrence is removed only when all hold:
+/// - its identity occurs more often in `current`'s exchange than in
+///   `before`'s (the excess is the duplicate; at most that many are removed);
+/// - its own section, up to the next heading, holds nothing but blank lines
+///   and prompt-record blockquotes (no response body);
+/// - the next heading in the exchange is the same response heading, so the
+///   body it was copied from still follows.
+///
+/// The heading line and one following blank line are removed; the prompt
+/// record stays. Returns `None` when nothing qualifies.
+pub fn remove_bodiless_duplicate_response_headings(before: &str, current: &str) -> Option<String> {
+    let before_counts = exchange_content(before)
+        .map(|exchange| {
+            let segments = exchange.split_inclusive('\n').collect::<Vec<_>>();
+            let mut counts: HashMap<String, usize> = HashMap::new();
+            for (_, identity) in exchange_response_heading_lines(&segments) {
+                *counts.entry(identity).or_default() += 1;
+            }
+            counts
+        })
+        .unwrap_or_default();
+    let exchange = exchange_component(current)?;
+    let content = exchange.content(current);
+    let segments = content.split_inclusive('\n').collect::<Vec<_>>();
+    let headings = exchange_response_heading_lines(&segments);
+    let mut current_counts: HashMap<String, usize> = HashMap::new();
+    for (_, identity) in &headings {
+        *current_counts.entry(identity.clone()).or_default() += 1;
+    }
+    let mut excess: HashMap<String, usize> = current_counts
+        .into_iter()
+        .filter_map(|(identity, count)| {
+            let prior = before_counts.get(&identity).copied().unwrap_or(0);
+            (count > prior).then(|| (identity, count - prior))
+        })
+        .collect();
+    if excess.is_empty() {
+        return None;
+    }
+
+    let mut remove: HashSet<usize> = HashSet::new();
+    for (position, (index, identity)) in headings.iter().enumerate() {
+        let Some((next_index, next_identity)) = headings.get(position + 1) else {
+            continue;
+        };
+        if next_identity != identity {
+            continue;
+        }
+        let Some(remaining) = excess.get_mut(identity) else {
+            continue;
+        };
+        if *remaining == 0 {
+            continue;
+        }
+        let section = &segments[index + 1..*next_index];
+        let mut in_record = false;
+        let bodiless = section.iter().all(|segment| {
+            let trimmed = segment.trim();
+            if trimmed.is_empty() {
+                in_record = false;
+                return true;
+            }
+            if is_atx_heading_line(trimmed) {
+                return false;
+            }
+            if is_prompt_record_line(trimmed) {
+                in_record = true;
+                return true;
+            }
+            in_record && trimmed.starts_with('>')
+        });
+        if !bodiless {
+            continue;
+        }
+        remove.insert(*index);
+        if segments
+            .get(index + 1)
+            .is_some_and(|segment| segment.trim().is_empty())
+        {
+            remove.insert(index + 1);
+        }
+        *remaining -= 1;
+    }
+    if remove.is_empty() {
+        return None;
+    }
+    let repaired = segments
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !remove.contains(index))
+        .map(|(_, segment)| *segment)
+        .collect::<String>();
+    Some(exchange.replace_content(current, &repaired))
+}
+
 pub fn dedupe_adjacent_prompt_prefix_duplicates_in_doc(content: &str) -> Option<String> {
     let exchange = exchange_component(content)?;
     let repaired_exchange =
@@ -2039,6 +2195,67 @@ pub fn verify_visible_normalization(visible: &str, normalize_prefix_lines: &[Str
 
 #[cfg(test)]
 mod tests {
+    const BODILESS_BEFORE: &str = "<!-- agent:exchange -->\n- **Dispatched:** gsync2.\n> **Chat prompt (#chatprompt:4e7d3b234a59):** prune completed subagents\n\n### Re: prune completed subagents\n\n- **Pruned:** ctlmaint.\n<!-- agent:boundary:ef1863ea -->\n<!-- /agent:exchange -->\n";
+
+    /// The live 2026-11-23 editor candidate for patch `48c34928`: the prior
+    /// heading was copied above its own prompt record, without a body.
+    const BODILESS_CANDIDATE: &str = "<!-- agent:exchange -->\n- **Dispatched:** gsync2.\n### Re: prune completed subagents\n\n> **Chat prompt (#chatprompt:4e7d3b234a59):** prune completed subagents\n\n### Re: prune completed subagents\n\n- **Pruned:** ctlmaint.\n> **Chat prompt (#chatprompt:4e7d3b234a59):** prune completed subagents\n\n> **Chat prompt (#chatprompt:146ddda38227):** steering\n\n### Re: prune completed subagents · #gh-fix GH #436–#439 (HEAD)\n\n**Pruned:** again.\n<!-- agent:boundary:485c8b0c -->\n<!-- /agent:exchange -->\n";
+
+    #[test]
+    fn bodiless_duplicate_response_heading_is_removed() {
+        let repaired =
+            remove_bodiless_duplicate_response_headings(BODILESS_BEFORE, BODILESS_CANDIDATE)
+                .expect("the bodiless duplicate heading is repaired");
+        assert_eq!(
+            repaired
+                .matches("### Re: prune completed subagents\n")
+                .count(),
+            1,
+            "{repaired}"
+        );
+        assert!(
+            repaired.contains(
+                "- **Dispatched:** gsync2.\n> **Chat prompt (#chatprompt:4e7d3b234a59):** prune completed subagents\n\n### Re: prune completed subagents\n\n- **Pruned:** ctlmaint.\n"
+            ),
+            "{repaired}"
+        );
+        assert!(repaired.contains("### Re: prune completed subagents · #gh-fix"));
+        assert_eq!(
+            remove_bodiless_duplicate_response_headings(BODILESS_BEFORE, &repaired),
+            None,
+            "idempotent"
+        );
+    }
+
+    #[test]
+    fn a_repeated_heading_that_has_a_body_is_kept() {
+        let before =
+            "<!-- agent:exchange -->\n### Re: status\n\nFirst.\n<!-- /agent:exchange -->\n";
+        let current = "<!-- agent:exchange -->\n### Re: status\n\nFirst.\n\n### Re: status\n\nSecond.\n<!-- /agent:exchange -->\n";
+        assert_eq!(
+            remove_bodiless_duplicate_response_headings(before, current),
+            None
+        );
+    }
+
+    #[test]
+    fn a_heading_already_duplicated_before_is_not_counted_as_new() {
+        assert_eq!(
+            remove_bodiless_duplicate_response_headings(BODILESS_CANDIDATE, BODILESS_CANDIDATE),
+            None
+        );
+    }
+
+    #[test]
+    fn a_heading_in_a_code_fence_is_not_a_response_heading() {
+        let before = "<!-- agent:exchange -->\n### Re: x\n\nbody\n<!-- /agent:exchange -->\n";
+        let current = "<!-- agent:exchange -->\n```\n### Re: x\n```\n### Re: x\n\nbody\n<!-- /agent:exchange -->\n";
+        assert_eq!(
+            remove_bodiless_duplicate_response_headings(before, current),
+            None
+        );
+    }
+
     use super::*;
 
     #[test]

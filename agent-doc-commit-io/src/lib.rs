@@ -1017,17 +1017,66 @@ fn settle_in_progress_recap_for_commit(
     snapshot_content: &mut Option<String>,
     file_content: &mut String,
 ) -> Result<()> {
-    use agent_doc_git_io::pre_stage_repair::CommitPreStageRepairEffects;
+    settle_in_progress_recap_for_commit_with(
+        &COMMIT_PRE_STAGE_REPAIR_EFFECTS,
+        &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
+        agent_doc_write_converge_io::retained_cli_write::configured_retained_cli_write_wait(),
+        file,
+        snapshot_content,
+        file_content,
+    )
+}
 
-    let effects = &COMMIT_PRE_STAGE_REPAIR_EFFECTS;
+/// The source label a retained recap-settle write reports.
+const COMMIT_SETTLE_RECAP_SOURCE: &str = "commit_settle_recap";
+
+/// [`settle_in_progress_recap_for_commit`] with its effects injected.
+///
+/// `#respondfalsefail`: the worktree write goes through the editor authority.
+/// When a live replica has not acknowledged it yet, the authority retains it
+/// and refuses with the narrow `retained=delivery_projection_pending` deferral
+/// even though the write is durable. That refusal used to fail the whole
+/// closeout (`failed to drop the previous turn recap before commit`) after the
+/// response had already landed, so `respond` exited 1 and a coordinator that
+/// trusted the exit code re-sent the response. The retention is now settled on
+/// the delivery-convergence edge: converged with the settled recap visible →
+/// the commit continues; still retained when the bound expires → the typed
+/// retained-write deferral (exit 75), never a failure. Every other refusal
+/// still fails, with the original context.
+fn settle_in_progress_recap_for_commit_with(
+    effects: &dyn agent_doc_git_io::pre_stage_repair::CommitPreStageRepairEffects,
+    convergence: &dyn agent_doc_write_converge_io::EditorConvergenceEffects,
+    retained_wait: std::time::Duration,
+    file: &Path,
+    snapshot_content: &mut Option<String>,
+    file_content: &mut String,
+) -> Result<()> {
     let settled_file = agent_doc_element::recap::settle_recap_in_document(file_content)?;
     if settled_file != *file_content {
-        effects.atomic_write(file, &settled_file).with_context(|| {
-            format!(
-                "failed to drop the previous turn recap before commit for {}",
-                file.display()
+        if let Err(refusal) = effects.atomic_write(file, &settled_file) {
+            let deferred = agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(
+                &format!("{refusal:#}"),
+            );
+            agent_doc_write_converge_io::retained_cli_write::settle_retained_write_within(
+                convergence,
+                file,
+                file_content,
+                &settled_file,
+                COMMIT_SETTLE_RECAP_SOURCE,
+                retained_wait,
+                refusal,
             )
-        })?;
+            .map_err(|error| {
+                if deferred {
+                    error
+                } else {
+                    error.context(format!(
+                        "failed to drop the previous turn recap before commit for {}",
+                        file.display()
+                    ))
+                }
+            })?;
+        }
         effects.log_op(
             file,
             &format!(
@@ -5225,6 +5274,220 @@ fn pace_commit_transaction(
         CommitTransactionError::IgnoredPath { .. } | CommitTransactionError::Fatal(_) => {}
     }
     std::thread::sleep(commit_retry_backoff(retry));
+}
+
+#[cfg(test)]
+mod retained_recap_settle_tests {
+    use super::*;
+    use agent_doc_write_converge_io::retained_cli_write::{
+        RetainedDeliveryAwait, retained_cli_write_deferral,
+    };
+    use std::cell::RefCell;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    /// A pre-stage write the editor authority retained: the replica has not
+    /// acknowledged it, exactly as `serialized_atomic_write` refuses.
+    struct RetainingWrite {
+        refusal: fn() -> anyhow::Error,
+        writes: RefCell<Vec<String>>,
+        snapshots: RefCell<Vec<String>>,
+    }
+
+    impl agent_doc_git_io::pre_stage_repair::CommitPreStageRepairEffects for RetainingWrite {
+        fn atomic_write(&self, _file: &Path, content: &str) -> Result<()> {
+            self.writes.borrow_mut().push(content.to_string());
+            Err((self.refusal)())
+        }
+
+        fn save_snapshot(&self, _file: &Path, content: &str) -> Result<()> {
+            self.snapshots.borrow_mut().push(content.to_string());
+            Ok(())
+        }
+
+        fn log_op(&self, _file: &Path, _message: &str) {}
+    }
+
+    fn pending_refusal() -> anyhow::Error {
+        anyhow::anyhow!(
+            "serialized_atomic_write: binary-owned write for doc.md remains retained while the \
+             editor projection converges (content_hash=abc). Do NOT re-send the response [{}] [{}]",
+            agent_doc_turn::write_ownership::RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN,
+            agent_doc_turn::write_ownership::AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN,
+        )
+    }
+
+    fn unrelated_refusal() -> anyhow::Error {
+        anyhow::anyhow!("serialized_atomic_write: editor bridge connect failed")
+    }
+
+    struct ScriptedConvergence {
+        outcome: RefCell<Option<RetainedDeliveryAwait>>,
+        awaits: AtomicUsize,
+    }
+
+    impl agent_doc_write_converge_io::EditorConvergenceEffects for ScriptedConvergence {
+        fn atomic_write(&self, _file: &Path, _content: &str) -> Result<()> {
+            panic!("settling a retained write never writes disk")
+        }
+
+        fn await_retained_delivery_projection(
+            &self,
+            _file: &Path,
+            _source: &str,
+            _wait: Duration,
+        ) -> Result<RetainedDeliveryAwait> {
+            self.awaits.fetch_add(1, Ordering::SeqCst);
+            Ok(self
+                .outcome
+                .borrow_mut()
+                .take()
+                .unwrap_or(RetainedDeliveryAwait::StillRetained))
+        }
+
+        fn guard_visible_write_expected_current(
+            &self,
+            _file: &Path,
+            _source: &str,
+            _expected_current: &str,
+        ) -> Result<()> {
+            panic!("not reached")
+        }
+
+        fn atomic_write_if_current(
+            &self,
+            _file: &Path,
+            _content: &str,
+            _expected_current: &str,
+            _source: &str,
+        ) -> Result<()> {
+            panic!("settling a retained write never writes disk")
+        }
+    }
+
+    fn in_progress_doc() -> String {
+        let committed = "<!-- agent:recap -->\n**Recap:** previous turn.\n<!-- /agent:recap -->\n\n<!-- agent:exchange -->\n### Re: prune completed subagents\n\n- Pruned two workers.\n<!-- /agent:exchange -->\n";
+        let doc =
+            agent_doc_element::recap::replace_recap_in_document(committed, "**Recap:** this turn.")
+                .unwrap();
+        assert!(doc.contains("previous turn"), "{doc}");
+        assert!(doc.contains("this turn"), "{doc}");
+        doc
+    }
+
+    fn doc_path() -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let file = dir.path().join("doc.md");
+        (dir, file)
+    }
+
+    /// `#respondfalsefail`: the live 2026-11-23 closeout. The response had
+    /// landed; only the commit's recap-settle write was retained while the
+    /// replica converged, and the closeout exited 1 with `failed to drop the
+    /// previous turn recap before commit`. A converged retention continues the
+    /// commit with the settled recap.
+    #[test]
+    fn a_retained_recap_settle_that_converges_continues_the_commit() {
+        let (_dir, file) = doc_path();
+        let mut file_content = in_progress_doc();
+        let settled = agent_doc_element::recap::settle_recap_in_document(&file_content).unwrap();
+        assert_ne!(settled, file_content);
+        let mut snapshot = Some(file_content.clone());
+        let effects = RetainingWrite {
+            refusal: pending_refusal,
+            writes: RefCell::default(),
+            snapshots: RefCell::default(),
+        };
+        let convergence = ScriptedConvergence {
+            outcome: RefCell::new(Some(RetainedDeliveryAwait::Converged {
+                observed_text: Some(settled.clone()),
+            })),
+            awaits: AtomicUsize::new(0),
+        };
+        settle_in_progress_recap_for_commit_with(
+            &effects,
+            &convergence,
+            Duration::from_secs(5),
+            &file,
+            &mut snapshot,
+            &mut file_content,
+        )
+        .expect("a converged retained settle is not a closeout failure");
+        assert_eq!(convergence.awaits.load(Ordering::SeqCst), 1);
+        assert_eq!(file_content, settled);
+        assert_eq!(snapshot.as_deref(), Some(settled.as_str()));
+        assert!(!file_content.contains("previous turn"));
+    }
+
+    /// Still retained when the bound expires: the typed retained-write
+    /// deferral (exit 75, no dogfood fix prompt), never the generic failure.
+    #[test]
+    fn a_retained_recap_settle_that_does_not_converge_is_a_typed_deferral() {
+        let (_dir, file) = doc_path();
+        let mut file_content = in_progress_doc();
+        let before = file_content.clone();
+        let mut snapshot = Some(file_content.clone());
+        let effects = RetainingWrite {
+            refusal: pending_refusal,
+            writes: RefCell::default(),
+            snapshots: RefCell::default(),
+        };
+        let convergence = ScriptedConvergence {
+            outcome: RefCell::new(Some(RetainedDeliveryAwait::StillRetained)),
+            awaits: AtomicUsize::new(0),
+        };
+        let err = settle_in_progress_recap_for_commit_with(
+            &effects,
+            &convergence,
+            Duration::ZERO,
+            &file,
+            &mut snapshot,
+            &mut file_content,
+        )
+        .unwrap_err();
+        let deferral = retained_cli_write_deferral(&err).expect("typed deferral");
+        assert_eq!(deferral.source, COMMIT_SETTLE_RECAP_SOURCE);
+        assert!(
+            !format!("{err:#}").contains("failed to drop the previous turn recap"),
+            "{err:#}"
+        );
+        assert_eq!(file_content, before, "nothing is staged past a deferral");
+        assert!(effects.snapshots.borrow().is_empty());
+    }
+
+    /// A refusal that is not the converging-projection deferral still fails,
+    /// with the original context, and never waits.
+    #[test]
+    fn an_unrelated_recap_settle_failure_still_fails() {
+        let (_dir, file) = doc_path();
+        let mut file_content = in_progress_doc();
+        let mut snapshot = None;
+        let effects = RetainingWrite {
+            refusal: unrelated_refusal,
+            writes: RefCell::default(),
+            snapshots: RefCell::default(),
+        };
+        let convergence = ScriptedConvergence {
+            outcome: RefCell::new(None),
+            awaits: AtomicUsize::new(0),
+        };
+        let err = settle_in_progress_recap_for_commit_with(
+            &effects,
+            &convergence,
+            Duration::from_secs(5),
+            &file,
+            &mut snapshot,
+            &mut file_content,
+        )
+        .unwrap_err();
+        assert!(retained_cli_write_deferral(&err).is_none());
+        assert!(
+            format!("{err:#}").contains("failed to drop the previous turn recap before commit"),
+            "{err:#}"
+        );
+        assert_eq!(convergence.awaits.load(Ordering::SeqCst), 0);
+    }
 }
 
 #[cfg(test)]

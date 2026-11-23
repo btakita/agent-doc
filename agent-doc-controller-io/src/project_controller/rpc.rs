@@ -14629,9 +14629,10 @@ fn handle_editor_route_rpc_with_layout_delegate(
         agent_doc_ops_log_io::log_op(
             &canonical,
             &format!(
-                "controller_editor_route_layout_not_synced file={} cause={} reason=flat_evidence_has_no_column_geometry outcome=dispatched (GH #434)",
+                "controller_editor_route_layout_not_synced file={} cause={} reason={} outcome=dispatched (GH #434)",
                 canonical.display(),
                 cause.cause(),
+                cause.reason(),
             ),
         );
         if !output.is_empty() && !output.ends_with('\n') {
@@ -58057,10 +58058,12 @@ mod tests {
         );
         // GH #434: this success left the tmux layout as it was. The route
         // output says so, with the reason, so the editor's `[route] SUCCESS`
-        // line is never the only record.
+        // line is never the only record. The route named `beta` with an
+        // unknown column order, which a local single-split editor sends too, so
+        // the reason names that evidence, never flat Remote Dev evidence.
         assert!(
             routed.output.lines().any(|line| line.starts_with(
-                "[route] layout-not-synced: beta.md reason=flat_evidence_has_no_column_geometry cause=incomplete_frontend_layout_no_authoritative_snapshot:"
+                "[route] layout-not-synced: beta.md reason=route_column_order_unknown cause=incomplete_frontend_layout_no_authoritative_snapshot:"
             )),
             "{}",
             routed.output
@@ -58070,7 +58073,7 @@ mod tests {
                 "controller_editor_route_layout_not_synced file="
             ) && fixture
                 .ops_log()
-                .contains("cause=incomplete_frontend_layout_no_authoritative_snapshot reason=flat_evidence_has_no_column_geometry outcome=dispatched"),
+                .contains("cause=incomplete_frontend_layout_no_authoritative_snapshot reason=route_column_order_unknown outcome=dispatched"),
             "{}",
             fixture.ops_log()
         );

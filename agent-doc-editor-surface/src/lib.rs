@@ -104,7 +104,8 @@ pub use replica_registration::{
     derive_registration_projection,
 };
 pub use route_layout_not_synced::{
-    ROUTE_LAYOUT_DEFERRED_FOCUS_ONLY_REASON, ROUTE_LAYOUT_NOT_SYNCED_MARKER, RouteLayoutNotSynced,
+    ROUTE_LAYOUT_COLUMN_ORDER_UNKNOWN_REASON, ROUTE_LAYOUT_DEFERRED_FOCUS_ONLY_REASON,
+    ROUTE_LAYOUT_FLAT_EVIDENCE_REASON, ROUTE_LAYOUT_NOT_SYNCED_MARKER, RouteLayoutNotSynced,
     route_layout_not_synced_notice,
 };
 pub use route_outcome::{

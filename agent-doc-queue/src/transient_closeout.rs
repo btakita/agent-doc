@@ -135,6 +135,11 @@ pub struct TransientCloseoutDebt {
     /// in that state is recoverable now, so it holds the turn through a
     /// recursive Stop like `⚠️🚧`.
     pub recoverable_attempt: bool,
+    /// `#pendingdispatchstop`: this `📥` row is routed to subagent dispatch.
+    /// Every refusal names the exact queue item (the row text alone can match
+    /// several sibling rows, such as each pull request's `#adversarial-pr`)
+    /// and the claim that dispatches it.
+    pub pending_dispatch: Option<PendingDispatch>,
 }
 
 /// The continue a worker that ended on an interim note is owed
@@ -150,6 +155,17 @@ pub struct ContinueWorker {
     /// `queue lineage --verbose` for this generation: the prior worktree,
     /// branch, and head a restart continues from.
     pub lineage_command: String,
+}
+
+/// A `📥` row a subagent queue dispatches (`#pendingdispatchstop`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingDispatch {
+    /// The dispatch item the work pool lists for this row: the row text, or
+    /// its `parent: leaf` lineage when the same leaf sits under several
+    /// parents.
+    pub item: String,
+    /// The `agent-doc queue claim` that dispatches the row.
+    pub claim_command: String,
 }
 
 /// A refused claim admission that holds a `📥` row from subagent dispatch
@@ -199,6 +215,18 @@ impl TransientCloseoutDebt {
                 worker.refresh_command,
                 worker.release_command,
                 worker.lineage_command,
+            );
+        }
+        if let Some(dispatch) = &self.pending_dispatch {
+            let bare = queue_projection::strip_in_progress_marker(&self.row);
+            let item = if dispatch.item.trim() == bare.trim() {
+                String::new()
+            } else {
+                format!(" (queue item `{}`)", dispatch.item)
+            };
+            return format!(
+                "- row {}{item}: {} Claim it with `{}`.",
+                self.row, self.owed, dispatch.claim_command
             );
         }
         match &self.close_command {
@@ -352,6 +380,11 @@ pub struct CloseoutEvidence {
     /// Subagent dispatch holds those rows, so a `📥` row among them owes the
     /// blocker's fix and an explicit re-admission, not a dispatch.
     pub dispatch_held: HashMap<QueueItemIdentity, String>,
+    /// `#pendingdispatchstop`: work identities of live rows routed to subagent
+    /// dispatch, with the dispatch item the work pool lists for each. A `📥`
+    /// row among them owes its own worker, and every refusal names that exact
+    /// item and its claim instead of the bare, possibly ambiguous row text.
+    pub subagent_dispatch: HashMap<QueueItemIdentity, String>,
 }
 
 /// `#finishedheadrefill`: a current-generation attempt whose worker finished and
@@ -639,6 +672,14 @@ const OWED_REPORTED_RESPONSE_ORIGIN: &str = "the operator answered this reported
 
 /// `#dispatchheldstop`: what a `📥` row owes while a refused claim admission
 /// holds it from subagent dispatch.
+/// `#pendingdispatchstop`: what a `📥` row in a subagent queue owes. haiven-dev
+/// `tasks/sdk/sdk-dev.md` (2026-11-23): the coordinator briefed one worker for
+/// both rows of a pull request but bound it only to `#rebase`, because
+/// `queue start` binds one worker to one row. The `#adversarial-pr` row stayed
+/// `📥` for two hours while every Stop said "leave pending" about a bare
+/// `#adversarial-pr` that matched five rows.
+pub const OWED_PENDING_SUBAGENT_DISPATCH: &str = "dispatch this row to its own background worker in this turn: claim it, spawn one worker with its `agent-doc queue brief` preamble, then bind that worker with `agent-doc queue start`. One worker binds to one row, so a worker already running a sibling row (such as the same pull request's `#rebase`) does not cover this one, and the row stays pending until its own worker starts; a head that is still pending means the turn is not over.";
+
 pub const OWED_DISPATCH_HELD: &str = "subagent dispatch holds this row: its last claim admission was refused, so the pool will not offer it again. Fix the blocker";
 
 /// `#finishactionable`: what a pending agent-owned `follow up on an action
@@ -764,6 +805,7 @@ pub fn assess_transient_closeout(
                 dispatch_held: None,
                 continue_worker: None,
                 recoverable_attempt: false,
+                pending_dispatch: None,
             };
             let identity = crate::queue_claim::claim_identity_at(&entries, index)
                 .unwrap_or_else(|| crate::queue_claim::claim_identity(&prompt.text));
@@ -989,8 +1031,12 @@ pub fn assess_transient_closeout(
                                 .clone()
                                 .unwrap_or_else(|| "<FILE>".to_string()),
                             "--item".to_string(),
-                            crate::queue_claim::claim_item_handle(
-                                &queue_projection::strip_in_progress_marker(&prompt.text),
+                            dispatch_item_handle(
+                                evidence,
+                                &entries,
+                                index,
+                                &identity,
+                                &prompt.text,
                             ),
                             "--owner".to_string(),
                             "subagent:<label>".to_string(),
@@ -1004,6 +1050,32 @@ pub fn assess_transient_closeout(
                     if crate::followup_owner::is_agent_followup_row(&prompt.text) =>
                 {
                     assessment.debts.push(debt(OWED_AGENT_ACTION_ITEM));
+                }
+                // `#pendingdispatchstop`: a row the work pool dispatches owes
+                // its own worker; name its exact item and claim.
+                QueueLifecycleMarker::Pending
+                    if evidence.subagent_dispatch.contains_key(&identity) =>
+                {
+                    let item =
+                        dispatch_item_handle(evidence, &entries, index, &identity, &prompt.text);
+                    let mut pending = debt(OWED_PENDING_SUBAGENT_DISPATCH);
+                    pending.pending_dispatch = Some(PendingDispatch {
+                        claim_command: crate::reported_closeout::shell_command(&[
+                            "agent-doc".to_string(),
+                            "queue".to_string(),
+                            "claim".to_string(),
+                            evidence
+                                .document
+                                .clone()
+                                .unwrap_or_else(|| "<FILE>".to_string()),
+                            "--item".to_string(),
+                            item.clone(),
+                            "--owner".to_string(),
+                            "subagent:<label>".to_string(),
+                        ]),
+                        item,
+                    });
+                    assessment.debts.push(pending);
                 }
                 _ => assessment.debts.push(debt(owed)),
             }
@@ -1031,6 +1103,25 @@ fn report_or_continue_debt(
         None => debt.close_command = Some(owed.report_command(document)),
     }
     debt
+}
+
+/// The `--item` handle that claims the row at `index` (`#pendingdispatchstop`):
+/// the item the work pool lists for it when the IO caller resolved one, else
+/// the row's lineage claim key. The bare row text is the last resort: a leaf
+/// such as `#adversarial-pr` under several parents names none of them.
+fn dispatch_item_handle(
+    evidence: &CloseoutEvidence,
+    entries: &[QueueEntry],
+    index: usize,
+    identity: &QueueItemIdentity,
+    text: &str,
+) -> String {
+    if let Some(item) = evidence.subagent_dispatch.get(identity) {
+        return crate::queue_claim::claim_item_handle(item);
+    }
+    let lineage = crate::document_queue::lineage_claim_text(entries, index)
+        .unwrap_or_else(|| queue_projection::strip_in_progress_marker(text));
+    crate::queue_claim::claim_item_handle(&lineage)
 }
 
 /// `#personrowselect`: a `🟡`/`🚧` that an in-session selection painted on a
@@ -2915,6 +3006,111 @@ EXCHANGE<!-- /agent:exchange -->
             failure
                 .contains("agent-doc queue report-complete '<FILE>' --item '#work' --generation 2"),
             "{failure}"
+        );
+    }
+
+    /// `#pendingdispatchstop` (haiven-dev `tasks/sdk/sdk-dev.md`, 2026-11-23):
+    /// a `📥 #adversarial-pr` leaf under two pull requests. Each refusal names
+    /// that row's own `parent: leaf` item and claim, so the agent can tell
+    /// which row owes a worker. Without the subagent evidence (an inline
+    /// queue) the row keeps the ordinary pending text, and a dispatch-held
+    /// row's re-admission claims the lineage item, not the bare leaf.
+    #[test]
+    fn a_pending_subagent_leaf_under_two_parents_names_its_own_item_and_claim() {
+        let content = "<!-- agent:queue -->\n- https://github.com/o/r/pull/384\n  - 🚧 [#subagent:rebase384#1] #rebase\n  - 📥 #adversarial-pr\n- https://github.com/o/r/pull/386\n  - 📥 #adversarial-pr\n<!-- /agent:queue -->\n";
+        let entries = parse_queue_body(
+            agent_doc_element::element::parse(content).unwrap()[0].content(content),
+        )
+        .unwrap();
+        let pending: Vec<(QueueItemIdentity, String)> = entries
+            .iter()
+            .enumerate()
+            .filter_map(|(index, entry)| {
+                let QueueEntry::Prompt(prompt) = entry else {
+                    return None;
+                };
+                if !prompt.text.contains("📥") {
+                    return None;
+                }
+                let lineage = crate::document_queue::lineage_claim_text(&entries, index).unwrap();
+                Some((crate::queue_claim::claim_identity(&lineage), lineage))
+            })
+            .collect();
+        assert_eq!(
+            pending
+                .iter()
+                .map(|(_, item)| item.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "https://github.com/o/r/pull/384: #adversarial-pr",
+                "https://github.com/o/r/pull/386: #adversarial-pr"
+            ]
+        );
+        let evidence = CloseoutEvidence {
+            document: Some("/tmp/sdk-dev.md".to_string()),
+            subagent_dispatch: pending.iter().cloned().collect(),
+            ..CloseoutEvidence::default()
+        };
+        let assessment = assess_transient_closeout(content, &evidence).unwrap();
+        let rendered = assessment
+            .debts
+            .iter()
+            .filter(|debt| debt.marker == QueueLifecycleMarker::Pending)
+            .map(TransientCloseoutDebt::render)
+            .collect::<Vec<_>>();
+        assert_eq!(rendered.len(), 2, "{assessment:#?}");
+        for ((_, item), line) in pending.iter().zip(&rendered) {
+            assert!(
+                line.starts_with(&format!("- row 📥 #adversarial-pr (queue item `{item}`): ")),
+                "{line}"
+            );
+            assert!(line.contains(OWED_PENDING_SUBAGENT_DISPATCH), "{line}");
+            assert!(
+                line.ends_with(&format!(
+                    "Claim it with `agent-doc queue claim /tmp/sdk-dev.md --item '{item}' --owner 'subagent:<label>'`."
+                )),
+                "{line}"
+            );
+        }
+        assert!(
+            assessment
+                .debts
+                .iter()
+                .filter(|debt| debt.pending_dispatch.is_some())
+                .all(TransientCloseoutDebt::holds_turn_through_recursive_stop)
+        );
+
+        // An inline queue's pending row keeps the ordinary refusal.
+        let inline = assess_transient_closeout(content, &CloseoutEvidence::default()).unwrap();
+        assert!(
+            inline
+                .debts
+                .iter()
+                .filter(|debt| debt.marker == QueueLifecycleMarker::Pending)
+                .all(|debt| debt.pending_dispatch.is_none()
+                    && debt.render().contains("leave pending before the turn ends")),
+            "{inline:#?}"
+        );
+
+        // A dispatch-held leaf re-admits by its lineage item.
+        let held = CloseoutEvidence {
+            document: Some("/tmp/sdk-dev.md".to_string()),
+            dispatch_held: [(
+                pending[1].0.clone(),
+                "claim_projection_unrepresentable".to_string(),
+            )]
+            .into(),
+            ..CloseoutEvidence::default()
+        };
+        let assessment = assess_transient_closeout(content, &held).unwrap();
+        let hold = assessment
+            .debts
+            .iter()
+            .find_map(|debt| debt.dispatch_held.as_ref())
+            .expect("the 386 leaf is dispatch-held");
+        assert_eq!(
+            hold.claim_command,
+            "agent-doc queue claim /tmp/sdk-dev.md --item 'https://github.com/o/r/pull/386: #adversarial-pr' --owner 'subagent:<label>'"
         );
     }
 

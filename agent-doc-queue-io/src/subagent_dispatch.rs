@@ -231,6 +231,31 @@ pub(crate) fn observe_subagent_dispatch_candidates_for_content(
         .collect())
 }
 
+/// `#pendingdispatchstop`: every live row `content` routes to subagent
+/// dispatch, keyed by work identity, with the dispatch item the work pool
+/// lists for it. Read-only: the file's prompt presets and the document text,
+/// with no claim-ledger or lineage read, so the Stop gate can name each
+/// pending row's exact item whether or not a pool slot is free for it.
+pub fn subagent_routed_dispatch_items_for_content(
+    file: &Path,
+    content: &str,
+) -> Result<std::collections::HashMap<agent_doc_element_queue::QueueItemIdentity, String>> {
+    let prompt_presets =
+        agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(content, file)?;
+    let keys = executable_row_keys(content);
+    Ok(
+        core::subagent_dispatch_heads_with_presets(content, None, &prompt_presets)
+            .into_iter()
+            .map(|head| {
+                (
+                    agent_doc_queue::queue_claim::claim_identity(&head),
+                    visible_dispatch_head(&keys, &head),
+                )
+            })
+            .collect(),
+    )
+}
+
 /// Identities held from subagent dispatch by a refused claim admission.
 struct AdmissionRefusedHolds(Vec<(agent_doc_element_queue::QueueItemIdentity, String)>);
 

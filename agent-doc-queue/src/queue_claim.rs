@@ -1466,7 +1466,7 @@ impl std::fmt::Display for QueueClaimStartRefused {
                 generation,
             } => write!(
                 f,
-                "worker {worker_id:?} is already bound to queue item {item_text:?} generation {generation}"
+                "worker {worker_id:?} is already bound to queue item {item_text:?} generation {generation}. One worker binds to one queue row, so that worker does not cover this row: spawn a separate worker for it and run `agent-doc queue start` with the new worker's id; until then this row stays claimed and owes its own worker (#pendingdispatchstop)"
             ),
         }
     }

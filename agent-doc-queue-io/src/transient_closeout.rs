@@ -107,6 +107,20 @@ pub fn closeout_evidence_at(file: &Path, content: &str, now_secs: u64) -> Closeo
             HashMap::new()
         }
     };
+    // `#pendingdispatchstop`: the rows subagent dispatch owns, so a pending
+    // row's refusal names its exact item and claim. Unreadable presets name
+    // nothing; those rows keep the generic pending refusal.
+    let subagent_dispatch =
+        match crate::subagent_dispatch::subagent_routed_dispatch_items_for_content(file, content) {
+            Ok(items) => items,
+            Err(err) => {
+                eprintln!(
+                    "[agent-doc] could not resolve subagent dispatch rows for {}; pending rows keep the generic refusal: {err:#}",
+                    file.display()
+                );
+                HashMap::new()
+            }
+        };
     CloseoutEvidence {
         fresh_claims,
         codex_coordinator_claims,
@@ -121,6 +135,7 @@ pub fn closeout_evidence_at(file: &Path, content: &str, now_secs: u64) -> Closeo
         ),
         integrations_in_flight,
         dispatch_held,
+        subagent_dispatch,
     }
 }
 
@@ -473,6 +488,111 @@ mod tests {
         .unwrap();
         assert!(assessment.debts.is_empty(), "{assessment:#?}");
         assert_eq!(assessment.quiescent.len(), 1, "{assessment:#?}");
+    }
+
+    /// `#pendingdispatchstop` (haiven-dev `tasks/sdk/sdk-dev.md`, 2026-11-23):
+    /// the coordinator briefed one worker for both rows of a pull request and
+    /// bound it to `#rebase`. `queue start` refuses that worker for the
+    /// `#adversarial-pr` row, so the row stayed `📥` for two hours while every
+    /// Stop named only a bare `📥 #adversarial-pr` that matched five rows. The
+    /// refusal now says one worker binds to one row, and the Stop gate names
+    /// each pending row's exact item and the claim that dispatches it.
+    #[test]
+    fn pendingdispatchstop_a_pending_sibling_of_a_running_row_names_its_exact_item() {
+        const PR384: &str = "https://github.com/o/r/pull/384";
+        const PR386: &str = "https://github.com/o/r/pull/386";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("sdk-dev.md");
+        let queue = |rebase: &str| {
+            format!(
+                "---\nsession: sid\nagent_doc_format: template\n---\n\n## Queue\n\n<!-- agent:queue subagents=8 go -->\n- {PR384}\n  - {rebase}#rebase\n  - 📥 #adversarial-pr\n- {PR386}\n  - 📥 #adversarial-pr\n<!-- /agent:queue -->\n"
+            )
+        };
+        let content = queue("📥 ");
+        std::fs::write(&doc, &content).unwrap();
+        let clock = crate::queue_claim::claim_clock_now_secs();
+        let _pin = crate::queue_claim::pin_claim_clock_for_current_thread(clock);
+
+        let rebase = format!("{PR384}: #rebase");
+        let adversarial = format!("{PR384}: #adversarial-pr");
+        let (_, claim) =
+            crate::queue_claim::claim(&doc, &rebase, "subagent:rebase384", 7200).unwrap();
+        crate::queue_claim::start_attempt(
+            &doc,
+            &rebase,
+            "subagent:rebase384",
+            "worker:both-rows",
+            7200,
+            claim.generation,
+        )
+        .unwrap();
+        let content = queue("🚧 [#subagent:rebase384#1] ");
+        std::fs::write(&doc, &content).unwrap();
+
+        // The bundled worker cannot be bound to the sibling row too, and the
+        // refusal says what to do instead.
+        let (_, sibling) =
+            crate::queue_claim::claim(&doc, &adversarial, "subagent:adv384", 7200).unwrap();
+        let refused = crate::queue_claim::start_attempt(
+            &doc,
+            &adversarial,
+            "subagent:adv384",
+            "worker:both-rows",
+            7200,
+            sibling.generation,
+        )
+        .unwrap_err();
+        let refused = format!("{refused:#}");
+        assert!(
+            refused.contains("One worker binds to one queue row")
+                && refused.contains("spawn a separate worker for it"),
+            "{refused}"
+        );
+        crate::queue_claim::release_attempt(&doc, &adversarial, Some(sibling.generation)).unwrap();
+
+        let evidence = closeout_evidence(&doc, &content);
+        assert!(
+            evidence
+                .subagent_dispatch
+                .values()
+                .any(|item| item == &adversarial),
+            "{evidence:#?}"
+        );
+        let failure =
+            agent_doc_queue::transient_closeout::normal_closeout_failure_with(&content, &evidence)
+                .unwrap()
+                .expect("both pending review rows owe a worker");
+        let document = doc.display().to_string();
+        for pr in [PR384, PR386] {
+            let item = format!("{pr}: #adversarial-pr");
+            assert!(
+                failure.contains(&format!(
+                    "- row 📥 #adversarial-pr (queue item `{item}`): dispatch this row to its own background worker"
+                )),
+                "{failure}"
+            );
+            assert!(
+                failure.contains(&format!(
+                    "Claim it with `agent-doc queue claim {document} --item '{item}' --owner 'subagent:<label>'`."
+                )),
+                "{failure}"
+            );
+        }
+        assert!(failure.contains("does not cover this one"), "{failure}");
+        assert!(
+            !failure.contains("- row 📥 #adversarial-pr: leave pending"),
+            "the bare, ambiguous refusal is gone: {failure}"
+        );
+        let assessment = assess_transient_closeout(&content, &evidence).unwrap();
+        assert!(
+            assessment
+                .debts
+                .iter()
+                .filter(|debt| debt.pending_dispatch.is_some())
+                .all(|debt| debt.holds_turn_through_recursive_stop()),
+            "{assessment:#?}"
+        );
     }
 
     /// `#dispatchheldstop`: the Stop gate reads the same refused-admission hold

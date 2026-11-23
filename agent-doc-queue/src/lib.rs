@@ -20,6 +20,7 @@ pub mod coordinator_drain;
 pub mod cross_harness_handoff;
 pub mod dispatch_item;
 pub mod document_queue;
+pub mod duplicate_head_report;
 pub mod free_text_admission;
 pub mod goal_preset_terminal;
 pub mod idle_drain;

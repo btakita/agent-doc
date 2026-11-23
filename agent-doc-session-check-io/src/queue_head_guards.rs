@@ -191,3 +191,55 @@ pub fn check_reaped_queue_head_without_response(
         ),
     )
 }
+
+/// Report, never rewrite, the top-level queue rows that repeat more often
+/// than the committed document holds them
+/// ([`agent_doc_queue::duplicate_head_report`]). A retained rebase repeated
+/// whole PR heads of a tracking queue with children that later diverged; no
+/// writer provenance survives per row, so the operator deletes each copy in
+/// the editor. ops.log records `queue_duplicate_head_suspected` with each
+/// copy's line and its first occurrence's line.
+pub fn check_duplicate_queue_heads_guard(file: &Path, rc: &CycleContext) -> Result<GuardResult> {
+    const SHOWN: usize = 12;
+    let Some(committed) = rc.head_content() else {
+        return Ok(GuardResult::None);
+    };
+    let content = rc.doc_content();
+    let suspected = agent_doc_queue::duplicate_head_report::suspected_duplicate_queue_heads(
+        &content, &committed,
+    );
+    if suspected.is_empty() {
+        return Ok(GuardResult::None);
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_duplicate_head_suspected file={} count={} lines=[{}]",
+            file.display(),
+            suspected.len(),
+            suspected
+                .iter()
+                .map(|head| format!("{}<-{}", head.line, head.first_line))
+                .collect::<Vec<_>>()
+                .join(","),
+        ),
+    );
+    let mut lines = vec![format!(
+        "{} top-level queue row(s) in {} repeat more often than the committed document holds them; they may be copies agent-doc wrote. Delete each copy in the editor once you have moved anything it alone holds:",
+        suspected.len(),
+        file.display(),
+    )];
+    lines.extend(suspected.iter().take(SHOWN).map(|head| {
+        format!(
+            "  line {}: `{}` (first at line {}; {} live, {} committed)",
+            head.line, head.head, head.first_line, head.live_copies, head.committed_copies,
+        )
+    }));
+    if suspected.len() > SHOWN {
+        lines.push(format!(
+            "  … and {} more (ops.log `queue_duplicate_head_suspected`)",
+            suspected.len() - SHOWN
+        ));
+    }
+    Ok(GuardResult::Warn(lines))
+}

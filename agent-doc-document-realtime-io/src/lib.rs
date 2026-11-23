@@ -18293,6 +18293,32 @@ mod tests {
             "the three strikes land and every operator row stays singular"
         );
         assert_eq!(projected.matches(claimed).count(), 1, "{projected}");
+
+        // The operator then deletes by hand rows they typed after the chain's
+        // first cut (the `📥 #rebase` row and the license PR's `#rebase`).
+        // Those rows are base text, so the deletion wins: the projection
+        // never restores them.
+        let hand_cleaned = doc(
+            "  - squash and merge\n  - squash and merge after CI\n",
+            &format!("  - #adversarial-pr\n{claimed}"),
+            "  - #adversarial-pr\n",
+        );
+        let projected =
+            agent_doc_document_realtime::write_policy::rebase_retained_target_over_editor_cut(
+                base,
+                &pending.target_content,
+                &hand_cleaned,
+            )
+            .unwrap();
+        assert_eq!(
+            projected,
+            doc(
+                "  - ~~squash and merge~~\n  - squash and merge after CI\n",
+                &format!("  - ~~#adversarial-pr~~\n{claimed}"),
+                "  - ~~#adversarial-pr~~\n",
+            ),
+            "the operator's hand deletions win over the retained strikes"
+        );
     }
 
     #[test]

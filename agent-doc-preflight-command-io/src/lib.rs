@@ -1108,6 +1108,27 @@ fn run_queue_maintenance_worker(
             }
             park_worker_for_test(file)?;
             effect_fence.fence_effect(file)?;
+            // `#q-e9483473162d`: the reconcile passes preflight admission no
+            // longer runs inline, applied to the admitted cut before pending
+            // and queue maintenance read it.
+            let reconcile_cut = agent_doc_document_realtime_io::peek_current_document_content(
+                file,
+                "background_admission_reconcile_cut",
+            )?;
+            effect_fence.fence_effect(file)?;
+            agent_doc_ops_log_io::log_op(
+                file,
+                &agent_doc_markdown_lossless::shadow_audit_ops_log_line(
+                    &reconcile_cut,
+                    "preflight_initial",
+                ),
+            );
+            agent_doc_preflight_io::admission_reconcile::run_deferred_admission_reconcile(
+                file,
+                &reconcile_cut,
+                &effect_fence,
+            )?;
+            effect_fence.fence_effect(file)?;
             // The worker must derive its admitted cut without publishing an
             // authority observation. A human edit can land while a routed
             // resolver is inside controller recovery; its later fence would

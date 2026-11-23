@@ -1366,9 +1366,10 @@ head only asks a question about a decision todo, answer it and leave the todo
 open; do not pass `--done` for it. A todo's own id is its leading `[#id]` or
 bare `#id`; `--todo-edit` keeps either spelling.
 
-**Id-less todo rows get ids at preflight (`#todoidbackfill`).** A row the
+**Id-less todo rows get ids after preflight (`#todoidbackfill`).** A row the
 operator typed by hand, or one an older write left without an id, gets an own
-id at the next preflight (`[preflight] todo: assigned own id ...`). A row citing
+id from the background reconcile the next preflight dispatches (ops.log
+`todo_id_assigned`), or at the next strict closeout. A row citing
 exactly one open review/backlog/icebox id reuses that id. When the operator reports
 the action done, close the row by that id (`--todo-done <id>`); never append a
 checked copy.

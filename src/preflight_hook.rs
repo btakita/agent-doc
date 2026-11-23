@@ -928,6 +928,7 @@ where
             // Join only on the path where the worker already finished, so a
             // slow preflight can never block past the budget.
             worker.join().ok();
+            report_admitted_phases(file, budget, &progress.snapshot());
             Ok(value)
         }
         Ok(Err(err)) => {
@@ -1022,6 +1023,30 @@ fn report_overrun_phases(
         budget.as_millis(),
         snapshot.elapsed.as_millis(),
         running,
+        if snapshot.completed.is_empty() {
+            "-".to_string()
+        } else {
+            snapshot.breakdown()
+        },
+    );
+    eprintln!("[perf] {line}");
+    agent_doc_ops_log_io::log_op(file, &line);
+}
+
+/// `#q-e9483473162d`: record where an ADMITTED preflight spent its time, in the
+/// same shape as [`report_overrun_phases`]. Only overruns used to leave a
+/// breakdown, so a hook that took 40s of a 90s budget left no evidence of which
+/// phase to move off the admission path.
+fn report_admitted_phases(
+    file: &Path,
+    budget: std::time::Duration,
+    snapshot: &agent_doc_preflight_command_io::progress::ProgressSnapshot,
+) {
+    let line = format!(
+        "preflight_admission_phases file={} budget_ms={} elapsed_ms={} completed={} (#q-e9483473162d)",
+        file.display(),
+        budget.as_millis(),
+        snapshot.elapsed.as_millis(),
         if snapshot.completed.is_empty() {
             "-".to_string()
         } else {

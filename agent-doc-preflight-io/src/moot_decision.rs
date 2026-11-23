@@ -23,15 +23,37 @@ pub fn run_moot_decision_maintenance_force_disk(
     run_moot_decision_maintenance_with_options(file, true, Some(write_effects))
 }
 
+/// `#q-e9483473162d`: the moot-decision pass as one step of the detached
+/// admission reconcile, fenced to the admitted cut `content`. Returns the
+/// persisted document when a decision was removed.
+pub fn run_moot_decision_maintenance_on_admitted_cut(
+    file: &Path,
+    content: &str,
+    fence: &dyn super::PendingMaintenanceEffectFence,
+) -> Result<Option<String>> {
+    run_moot_decision_maintenance_on_content(file, content.to_string(), false, None, Some(fence))
+}
+
 fn run_moot_decision_maintenance_with_options(
     file: &Path,
     force_disk: bool,
     write_effects: Option<&dyn super::PreflightMaintenanceWriteEffects>,
 ) -> Result<()> {
-    let source = "preflight_moot_decision";
     let Some(content) = read_authoritative(file, force_disk)? else {
         return Ok(());
     };
+    run_moot_decision_maintenance_on_content(file, content, force_disk, write_effects, None)
+        .map(|_| ())
+}
+
+fn run_moot_decision_maintenance_on_content(
+    file: &Path,
+    content: String,
+    force_disk: bool,
+    write_effects: Option<&dyn super::PreflightMaintenanceWriteEffects>,
+    fence: Option<&dyn super::PendingMaintenanceEffectFence>,
+) -> Result<Option<String>> {
+    let source = "preflight_moot_decision";
     let live =
         match agent_doc_queue_io::queue_claim::live_reported_closeout_operator_request_ids(file) {
             Ok(live) => live,
@@ -39,13 +61,13 @@ fn run_moot_decision_maintenance_with_options(
                 eprintln!(
                     "[preflight] moot decision: not applied (claim state unreadable): {err:#}"
                 );
-                return Ok(());
+                return Ok(None);
             }
         };
     let Some(target) =
         agent_doc_queue::moot_decision::prune_moot_reported_closeout_decisions(&content, &live)
     else {
-        return Ok(());
+        return Ok(None);
     };
     let persisted = if force_disk {
         let effects = write_effects.ok_or_else(|| {
@@ -55,7 +77,17 @@ fn run_moot_decision_maintenance_with_options(
         target
     } else {
         let root = agent_doc_project_root_io::project_root_containing(file);
-        super::persist_queue_maintenance_doc(file, &target, &content, root.as_deref(), source)?
+        let admitted = fence.map(|_| agent_doc_hash::content_hash(&content));
+        super::persist_queue_maintenance_doc_with_admitted_authority(
+            file,
+            &target,
+            &content,
+            root.as_deref(),
+            source,
+            admitted.as_deref(),
+            fence,
+            None,
+        )?
     };
     if let Ok(Some(snapshot)) = agent_doc_snapshot_io::load_document_baseline(file)
         && let Some(new_snapshot) = carry_prune_into_snapshot(&snapshot, &content, &persisted)
@@ -75,7 +107,7 @@ fn run_moot_decision_maintenance_with_options(
             file.display()
         ),
     );
-    Ok(())
+    Ok(Some(persisted))
 }
 
 fn read_authoritative(file: &Path, force_disk: bool) -> Result<Option<String>> {

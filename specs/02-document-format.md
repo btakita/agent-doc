@@ -890,7 +890,9 @@ holds a row still being edited. Preflight emits a
 and stderr/ops.log record whether migration landed or was held for a later pass.
 
 **Id backfill (`#todoidbackfill`, `#todoidcloseout`).** Every preflight (except
-`--probe`) gives each id-less todo row an own id, the way queue maintenance
+`--probe`) gives each id-less todo row an own id, through the detached
+admission reconcile it dispatches with the contract (`#q-e9483473162d`: the
+admission hook itself never writes the document for it), the way queue maintenance
 coins finished free-text queue lines into backlog ids. A strict closeout runs
 that same maintenance after response and tracked-work projection and before
 commit, so a `patch:todo` addition is addressable in the commit that introduces

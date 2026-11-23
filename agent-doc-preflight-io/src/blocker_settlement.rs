@@ -30,17 +30,53 @@ pub fn run_blocker_settlement_maintenance(file: &Path) -> Result<bool> {
         }
         Some(_) => return Ok(false),
     };
-    let observations = observe(&content, &[]);
+    settle_blockers_in_content(file, &content, None).map(|persisted| persisted.is_some())
+}
+
+/// `#q-e9483473162d`: blocker settlement as one step of the detached admission
+/// reconcile, fenced to the admitted cut `content`. Each unsettled upstream
+/// costs a `gh` lookup of up to 15s, so it never runs on the admission hook.
+/// Returns the persisted document when a settlement marker was written.
+pub fn run_blocker_settlement_maintenance_on_admitted_cut(
+    file: &Path,
+    content: &str,
+    fence: &dyn super::PendingMaintenanceEffectFence,
+) -> Result<Option<String>> {
+    settle_blockers_in_content(file, content, Some(fence))
+}
+
+fn settle_blockers_in_content(
+    file: &Path,
+    content: &str,
+    fence: Option<&dyn super::PendingMaintenanceEffectFence>,
+) -> Result<Option<String>> {
+    let source = "preflight_blocker_settlement";
+    let observations = observe(content, &[]);
     let mut graph = DecisionGraph::default();
-    graph.link_external_blockers(&observations, &content);
+    graph.link_external_blockers(&observations, content);
     let upstreams = graph.blocker_upstreams();
     let root = agent_doc_project_root_io::project_root_containing(file);
     let closed = closed_upstreams(root.as_deref(), &upstreams);
     let settled = graph.settled_external_blocker_ids(&closed);
-    let Some(next) = merge_settlement_marker(&content, &settled) else {
-        return Ok(false);
+    let Some(next) = merge_settlement_marker(content, &settled) else {
+        return Ok(None);
     };
-    super::persist_queue_maintenance_doc(file, &next, &content, root.as_deref(), source)?;
+    if let Some(fence) = fence {
+        // The lookups above can take seconds; prove the cut is still current
+        // before the write rather than only at the compare-and-swap.
+        fence.check(file)?;
+    }
+    let admitted = fence.map(|_| agent_doc_hash::content_hash(content));
+    let persisted = super::persist_queue_maintenance_doc_with_admitted_authority(
+        file,
+        &next,
+        content,
+        root.as_deref(),
+        source,
+        admitted.as_deref(),
+        fence,
+        None,
+    )?;
     let listed = settled.into_iter().collect::<Vec<_>>().join(" ");
     eprintln!("[preflight] blocker settlement: {listed} (#blockergraph)");
     agent_doc_ops_log_io::log_op(
@@ -50,7 +86,7 @@ pub fn run_blocker_settlement_maintenance(file: &Path) -> Result<bool> {
             file.display()
         ),
     );
-    Ok(true)
+    Ok(Some(persisted))
 }
 
 fn closed_upstreams(root: Option<&Path>, upstreams: &[GithubUpstream]) -> Vec<GithubUpstream> {

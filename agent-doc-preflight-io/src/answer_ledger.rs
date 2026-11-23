@@ -814,16 +814,127 @@ pub fn probe_answer_ledger(file: &Path) -> Result<AnswerLedgerReport> {
     ))
 }
 
+/// `#q-e9483473162d`: the cycle-contract facts of the answer-ledger pass over
+/// `content`, without performing it. The closures and decision stamps the
+/// pass would write are simulated exactly as [`run_answer_ledger_maintenance`]
+/// applies them, so the admitted contract carries the same answered facts and
+/// tsift recall notes it did when the pass ran inline. Nothing is written:
+/// not the document, not the snapshot, not the index (beyond its one-time
+/// history seed), and no derivation reviews. The detached admission reconcile
+/// ([`run_answer_ledger_maintenance_on_admitted_cut`]) performs the writes.
+pub fn inspect_answer_ledger_with_recall(file: &Path, content: &str) -> Result<AnswerLedgerReport> {
+    inspect_answer_ledger_with_recall_env(file, content, &RecallEnv::from_process())
+}
+
+/// [`inspect_answer_ledger_with_recall`] with an explicit environment.
+pub fn inspect_answer_ledger_with_recall_env(
+    file: &Path,
+    content: &str,
+    env: &RecallEnv,
+) -> Result<AnswerLedgerReport> {
+    let now = agent_doc_log_time::current_epoch_secs();
+    let keys = lookup_keys(file, content, &BTreeSet::new());
+    let prior = seed_index_from_history_once(file, content, load_prior(file, &keys), &keys, now);
+    let pass = plan_pass(file, content, &prior, now)?;
+    let closed = pass.closed;
+    let stale_closed = pass.stale_closed;
+    let (final_content, report_observations, mut report_ledger) = match pass.target {
+        Some(target) => {
+            let (observations, ledger) = build_with_prior(file, &target, &prior, now);
+            (target, observations, ledger)
+        }
+        None => (content.to_string(), pass.observations, pass.ledger),
+    };
+    let graph = graph_of(file, &report_ledger, &report_observations, &final_content);
+    report_ledger.recompute_liveness(&report_observations.open_item_ids, &named_edges(&graph));
+    let mut recalled = Vec::new();
+    if let Some(source) = TsiftRecall::discover(file, env) {
+        let root = source.root().to_path_buf();
+        let (ledger, notes) = recall_pass(
+            file,
+            &final_content,
+            &prior,
+            now,
+            report_ledger,
+            &source,
+            &root,
+        );
+        report_ledger = ledger;
+        report_ledger.recompute_liveness(&report_observations.open_item_ids, &named_edges(&graph));
+        recalled = notes;
+    }
+    let mut report = report_of(
+        &report_ledger,
+        &report_observations,
+        &graph,
+        closed,
+        stale_closed,
+    );
+    report.recalled = recalled;
+    for fact in &report.facts {
+        eprintln!(
+            "[preflight] answer ledger: already answered `{}` ({}): “{}”",
+            fact.decision_id,
+            fact.open_items.join(", "),
+            fact.answer
+        );
+    }
+    Ok(report)
+}
+
+/// `#q-e9483473162d`: the answer-ledger pass as one step of the detached
+/// admission reconcile. `content` is the admitted cut the fence expects; the
+/// document write is a compare-and-swap fenced to that cut, so an operator
+/// edit after admission supersedes it instead of being reinterpreted. Returns
+/// the persisted document when the pass changed it.
+pub fn run_answer_ledger_maintenance_on_admitted_cut(
+    file: &Path,
+    content: &str,
+    fence: &dyn super::PendingMaintenanceEffectFence,
+) -> Result<Option<String>> {
+    let mut persisted = None;
+    run_answer_ledger_maintenance_on_content(
+        file,
+        content.to_string(),
+        false,
+        None,
+        None,
+        Some(fence),
+        &mut persisted,
+    )?;
+    Ok(persisted)
+}
+
 fn run_answer_ledger_maintenance_with_options(
     file: &Path,
     force_disk: bool,
     write_effects: Option<&dyn super::PreflightMaintenanceWriteEffects>,
     recall: Option<&RecallEnv>,
 ) -> Result<AnswerLedgerReport> {
-    let source = "preflight_answer_ledger";
     let Some(content) = read_authoritative(file, force_disk)? else {
         return Ok(AnswerLedgerReport::default());
     };
+    run_answer_ledger_maintenance_on_content(
+        file,
+        content,
+        force_disk,
+        write_effects,
+        recall,
+        None,
+        &mut None,
+    )
+}
+
+fn run_answer_ledger_maintenance_on_content(
+    file: &Path,
+    content: String,
+    force_disk: bool,
+    write_effects: Option<&dyn super::PreflightMaintenanceWriteEffects>,
+    recall: Option<&RecallEnv>,
+    fence: Option<&dyn super::PendingMaintenanceEffectFence>,
+    persisted_out: &mut Option<String>,
+) -> Result<AnswerLedgerReport> {
+    let source = "preflight_answer_ledger";
     let now = agent_doc_log_time::current_epoch_secs();
     let keys = lookup_keys(file, &content, &BTreeSet::new());
     let prior = seed_index_from_history_once(file, &content, load_prior(file, &keys), &keys, now);
@@ -842,8 +953,19 @@ fn run_answer_ledger_maintenance_with_options(
             target.clone()
         } else {
             let root = agent_doc_project_root_io::project_root_containing(file);
-            super::persist_queue_maintenance_doc(file, &target, &content, root.as_deref(), source)?
+            let admitted = fence.map(|_| agent_doc_hash::content_hash(&content));
+            super::persist_queue_maintenance_doc_with_admitted_authority(
+                file,
+                &target,
+                &content,
+                root.as_deref(),
+                source,
+                admitted.as_deref(),
+                fence,
+                None,
+            )?
         };
+        *persisted_out = Some(persisted.clone());
         // Closures and stamps only touch `agent:todo`, so carrying the todo
         // body keeps the snapshot from reading them as operator edits.
         if let Ok(Some(snapshot)) = agent_doc_snapshot_io::load_document_baseline(file)
@@ -2417,6 +2539,38 @@ mod tests {
             agent_doc_answer_ledger::reask_refusal(&reasks)
                 .contains("Use the standard http ports.")
         );
+    }
+
+    /// `#q-e9483473162d`: admission's read-only inspection of the admitted cut
+    /// carries the same contract facts the real pass reports, and leaves the
+    /// document for the detached reconcile to write.
+    #[test]
+    fn admission_inspection_reports_the_real_pass_facts_without_writing_the_document() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, DECISION_DOC).unwrap();
+        let no_recall = RecallEnv {
+            disabled: true,
+            ..RecallEnv::default()
+        };
+        let inspected =
+            inspect_answer_ledger_with_recall_env(&doc, DECISION_DOC, &no_recall).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            DECISION_DOC,
+            "admission inspection leaves the document untouched"
+        );
+        let applied = run_answer_ledger_maintenance_force_disk(&doc, &NoEffects).unwrap();
+        assert_ne!(
+            std::fs::read_to_string(&doc).unwrap(),
+            DECISION_DOC,
+            "the real pass writes the simulated closure"
+        );
+        assert_eq!(inspected.closed, applied.closed);
+        assert_eq!(inspected.stale_closed, applied.stale_closed);
+        assert_eq!(inspected.facts, applied.facts);
+        assert_eq!(tdport_fact(&inspected).answer, "Use port 3000.");
     }
 
     /// `#decisionidstamp`: `preflight --probe` gets the same facts the real

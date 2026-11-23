@@ -226,8 +226,27 @@ fn a_derivation_is_stored_in_the_decision_graph_and_reviewed_by_the_operator() {
         &doc,
         &format!("- confirm [#{id}]\n- [#{other_id}]: reject — the JWS already expires\n"),
     );
+    let ops = dir.path().join(".agent-doc/logs/ops.log");
+    let before = fs::read_to_string(&ops).unwrap_or_default().len();
     let output = run_agent_doc(dir.path(), &["preflight", path]);
     assert_ok(&output, "preflight");
+    // `#q-e9483473162d`: the answer-ledger pass that records the reviews runs
+    // in the detached reconcile this admission dispatched.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        let current = fs::read_to_string(&ops).unwrap_or_default();
+        if current
+            .get(before..)
+            .is_some_and(|appended| appended.contains("queue_maintenance_background_exited"))
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "detached reconcile did not finish: {current}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
 
     // The rows are pruned; the store still remembers the reviews.
     set_run_rows(&doc, "");

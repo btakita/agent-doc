@@ -788,6 +788,7 @@ fn run_with_options_to_writer_in_pass(
     // Preflight stays fail-closed (it never normalizes structure into a new
     // baseline), but a nested/duplicated managed block has a binary-owned
     // repair, so the refusal names it instead of leaving a hand edit.
+    crate::progress::enter("integrity_status_sync")?;
     let status_sync = match agent_doc_document::status_projection::status_sync_directive(&content) {
         Ok(directive) => directive,
         Err(err)
@@ -831,6 +832,7 @@ fn run_with_options_to_writer_in_pass(
     // An `agent:place` contract is fail-closed before recovery or queue
     // maintenance can rewrite the document. A malformed `place:out` names
     // `place repair`; a bad id or mode does not.
+    crate::progress::enter("integrity_places_and_shadow_audit")?;
     if let Err(fault) = assess_document_places(file, &content) {
         return Err(place_fault(file, fault));
     }
@@ -839,12 +841,16 @@ fn run_with_options_to_writer_in_pass(
     // round-trips. Pure and non-blocking — the flat CRDT stays the authority and
     // this never influences any closeout decision. A `match=false` line is the
     // signal to investigate the adapter before later phases can trust the tree.
-    if !options.probe {
+    // `#q-e9483473162d`: rendering the whole tree is a second full pass over the
+    // document, so production admission leaves it to the detached reconcile,
+    // which audits the admitted cut.
+    if !options.probe && !DEFER_ADMISSION_RECONCILE {
         agent_doc_ops_log_io::log_op(
             file,
             &agent_doc_markdown_lossless::shadow_audit_ops_log_line(&content, "preflight_initial"),
         );
     }
+    crate::progress::enter("integrity_frontmatter_and_warnings")?;
     let (initial_frontmatter, _) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
         &content,
         file,
@@ -1493,8 +1499,11 @@ fn run_with_options_to_writer_in_pass(
 
     // External blocker ids settle when a linked pull request closes or a
     // decision names the id. Best-effort, same as disregard: a failure leaves
-    // the gate in place.
+    // the gate in place. `#q-e9483473162d`: each unsettled upstream is a `gh`
+    // lookup of up to 15s, so production admission leaves settlement to the
+    // detached reconcile.
     if !options.probe
+        && !DEFER_ADMISSION_RECONCILE
         && let Err(err) =
             agent_doc_preflight_io::blocker_settlement::run_blocker_settlement_maintenance(file)
     {
@@ -1581,41 +1590,67 @@ fn run_with_options_to_writer_in_pass(
             QueueState::default()
         })
     } else {
-        let coin_gate = operator_edit_evidence
-            .as_ref()
-            .map(agent_doc_preflight_io::debounce::OperatorEditEvidence::coin_gate)
-            .unwrap_or_default();
-        // `#todoidbackfill`: id-less todo rows get an own id before queue
-        // maintenance re-reads the authority. Best-effort: a failure assigns
-        // nothing and never blocks admission.
-        if let Err(err) = agent_doc_preflight_io::run_todo_id_maintenance(file, &coin_gate) {
-            eprintln!("[preflight] todo: id backfill not applied this pass: {err:#}");
-        }
-        // `#answerbyrequestid`: capture every operator answer, close duplicate
-        // todo copies of answered questions, and collect the "already
-        // answered" facts this cycle contract carries. Best-effort: a failure
-        // closes nothing and never blocks admission.
-        match agent_doc_preflight_io::answer_ledger::run_answer_ledger_maintenance_with_recall(file)
-        {
-            Ok(report) => answer_ledger_report = report,
-            Err(err) => eprintln!("[preflight] answer ledger: not applied this pass: {err:#}"),
-        }
-        // `#mootdecision`: a reported-closeout request whose attempt no longer
-        // needs the operator is removed before queue maintenance rebuilds the
-        // waiting tree from the remaining open todos. Best-effort.
-        if let Err(err) = agent_doc_preflight_io::moot_decision::run_moot_decision_maintenance(file)
-        {
-            eprintln!("[preflight] moot decision: not applied this pass: {err:#}");
-        }
-        // The best-effort maintenance immediately above can change the live
-        // projection after the diff cut, so take one final authoritative read.
-        // This read remains fail-closed for an attached editor without a current
-        // replica, but does not wait for a native save or disk convergence.
-        let queue_admission_content =
-            resolve_current_preflight_document(file, "preflight_queue_admission")?;
+        let queue_admission_content = if DEFER_ADMISSION_RECONCILE {
+            // `#q-e9483473162d`: the todo-id backfill, the answer-ledger closures
+            // and stamps, and the moot-decision prune are document reconcile
+            // passes; the detached reconcile this admission dispatches applies
+            // them to the admitted cut. Admission keeps only what the contract
+            // carries: the answered facts, simulated read-only over this cut.
+            crate::progress::enter("queue_admission_read")?;
+            let content = resolve_current_preflight_document(file, "preflight_queue_admission")?;
+            crate::progress::enter("queue_answer_ledger")?;
+            match agent_doc_preflight_io::answer_ledger::inspect_answer_ledger_with_recall(
+                file, &content,
+            ) {
+                Ok(report) => answer_ledger_report = report,
+                Err(err) => {
+                    eprintln!("[preflight] answer ledger: not inspected this pass: {err:#}")
+                }
+            }
+            content
+        } else {
+            let coin_gate = operator_edit_evidence
+                .as_ref()
+                .map(agent_doc_preflight_io::debounce::OperatorEditEvidence::coin_gate)
+                .unwrap_or_default();
+            // `#todoidbackfill`: id-less todo rows get an own id before queue
+            // maintenance re-reads the authority. Best-effort: a failure assigns
+            // nothing and never blocks admission.
+            crate::progress::enter("queue_todo_id_backfill")?;
+            if let Err(err) = agent_doc_preflight_io::run_todo_id_maintenance(file, &coin_gate) {
+                eprintln!("[preflight] todo: id backfill not applied this pass: {err:#}");
+            }
+            // `#answerbyrequestid`: capture every operator answer, close duplicate
+            // todo copies of answered questions, and collect the "already
+            // answered" facts this cycle contract carries. Best-effort: a failure
+            // closes nothing and never blocks admission.
+            crate::progress::enter("queue_answer_ledger")?;
+            match agent_doc_preflight_io::answer_ledger::run_answer_ledger_maintenance_with_recall(
+                file,
+            ) {
+                Ok(report) => answer_ledger_report = report,
+                Err(err) => eprintln!("[preflight] answer ledger: not applied this pass: {err:#}"),
+            }
+            // `#mootdecision`: a reported-closeout request whose attempt no longer
+            // needs the operator is removed before queue maintenance rebuilds the
+            // waiting tree from the remaining open todos. Best-effort.
+            crate::progress::enter("queue_moot_decision")?;
+            if let Err(err) =
+                agent_doc_preflight_io::moot_decision::run_moot_decision_maintenance(file)
+            {
+                eprintln!("[preflight] moot decision: not applied this pass: {err:#}");
+            }
+            // The best-effort maintenance immediately above can change the live
+            // projection after the diff cut, so take one final authoritative read.
+            // This read remains fail-closed for an attached editor without a current
+            // replica, but does not wait for a native save or disk convergence.
+            crate::progress::enter("queue_admission_read")?;
+            resolve_current_preflight_document(file, "preflight_queue_admission")?
+        };
         // Claim filtering and current candidate relevance remain synchronous;
         // backlog mirroring, lifecycle painting, auto-strike and editor-native
         // persistence are a detached Effect.
+        crate::progress::enter("queue_admission_inspect")?;
         inspect_queue_state_from_content_with_skipped(
             file,
             diff_result.as_deref(),
@@ -1629,6 +1664,7 @@ fn run_with_options_to_writer_in_pass(
             QueueState::default()
         })
     };
+    crate::progress::enter("queue_admission_payload")?;
     // Every downstream queue decision consumes the exact admitted queue cut;
     // comprehensive background maintenance publishes a later authority event
     // and never changes the facts of this already-opened turn.
@@ -2117,6 +2153,7 @@ fn run_with_options_to_writer_in_pass(
     // Step 4e: Resolve model tier sources and compose effective_tier.
     // Sources (highest precedence first): inline /model command, <!-- agent:model --> component,
     // agent_doc_model_tier frontmatter, diff heuristic.
+    crate::progress::enter("tier_model_sources")?;
     let (
         source_frontmatter,
         frontmatter_tier,
@@ -2210,6 +2247,7 @@ fn run_with_options_to_writer_in_pass(
             &exchange_prompt_presets,
         )?);
     }
+    crate::progress::enter("tier_staleness_warnings")?;
     for warning in agent_doc_preflight_io::warnings::content_and_staleness_warnings(
         file,
         &model_source_content,
@@ -2221,6 +2259,7 @@ fn run_with_options_to_writer_in_pass(
     // `#closeout-steering`: new subagent-intent queue lines the cycle must
     // dispatch (claimed ones excluded). Computed before the steering seed below
     // so it is judged against the previous cycle's steering seed.
+    crate::progress::enter("tier_capture_scope")?;
     let pending_queue_subagent_dispatch =
         agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_or_warn(
             file,
@@ -2823,6 +2862,7 @@ fn run_with_options_to_writer_in_pass(
             exchange_prompt_preempts_queue,
         )?;
     }
+    crate::progress::enter("owner_queue_dispatch_projection")?;
     let queue_subagent_dispatch = agent_doc_preflight_io::queue_subagent_dispatch_entries(
         file,
         queue_authoritative_content,
@@ -2902,6 +2942,7 @@ fn run_with_options_to_writer_in_pass(
     // self-invocation contract so Codex guidance can drive an in-pane response
     // cycle. Non-null only under a Codex owner-pane self-invocation with
     // unresolved exchange work (an unanswered prompt or a ready auto-queue head).
+    crate::progress::enter("owner_pane_self_invocation")?;
     let owned_pane_self_invocation = {
         // Derive the unresolved prompt from this cycle's diff (prompt-target
         // change) rather than the boundary-keyed exchange detector: preflight's
@@ -3678,6 +3719,15 @@ fn legacy_gated_in_backlog_message(
          the ones already satisfied, and migrate only what is genuinely blocked."
     )
 }
+
+/// `#q-e9483473162d`: production admission leaves the document reconcile passes
+/// (todo-id backfill, answer-ledger closures and stamps, moot-decision prune,
+/// external blocker settlement, the lossless shadow audit) to the detached
+/// maintenance worker it dispatches after the contract
+/// (`agent_doc_preflight_io::admission_reconcile`). Unit tests never launch
+/// that worker (the dispatch below is cfg-gated), so they keep the passes
+/// inline.
+const DEFER_ADMISSION_RECONCILE: bool = !cfg!(test);
 
 fn commit_previous_cycle_for_preflight(file: &Path) -> Result<bool> {
     match agent_doc_commit_io::commit(file) {

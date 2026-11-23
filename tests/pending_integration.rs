@@ -1767,8 +1767,20 @@ fn preflight_folds_only_identical_same_id_todo_items() {
         stderr
     };
 
-    let first = preflight();
-    assert!(first.contains("(#tododupefold)"), "{first}");
+    // `#q-e9483473162d`: the fold is the detached reconcile's write, evidenced
+    // by its durable ops line rather than hook stderr.
+    let appended_ops = |from: u64| {
+        fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default()
+            .get(from as usize..)
+            .unwrap_or_default()
+            .to_string()
+    };
+    let before = ops_log_len(&doc);
+    preflight();
+    wait_for_pending_maintenance(&doc, before);
+    let first = appended_ops(before);
+    assert!(first.contains("todo_duplicates_folded"), "{first}");
     let expected = concat!(
         "- [ ] [#rollout] Verify the release\n",
         "  - Observe the first rollout\n",
@@ -1781,8 +1793,11 @@ fn preflight_folds_only_identical_same_id_todo_items() {
     let after = fs::read_to_string(&doc).unwrap();
     assert_eq!(component_body(&after, "todo"), expected);
 
-    let second = preflight();
-    assert!(!second.contains("(#tododupefold)"), "{second}");
+    let before = ops_log_len(&doc);
+    preflight();
+    wait_for_pending_maintenance(&doc, before);
+    let second = appended_ops(before);
+    assert!(!second.contains("todo_duplicates_folded"), "{second}");
     assert_eq!(
         component_body(&fs::read_to_string(&doc).unwrap(), "todo"),
         expected
@@ -1829,8 +1844,21 @@ fn preflight_assigns_own_ids_to_id_less_todo_rows_and_closeout_completes_them() 
             .unwrap_or_else(|err| panic!("preflight JSON ({err}):\n{stdout}\n{stderr}"));
         stderr
     };
-    let stderr = preflight();
-    assert!(stderr.contains("(#todoidbackfill)"), "{stderr}");
+    // `#q-e9483473162d`: admission dispatches the backfill to the detached
+    // reconcile, so the evidence is its durable ops line, not hook stderr.
+    let ops_path = tmp.path().join(".agent-doc/logs/ops.log");
+    let appended_ops = |from: u64| {
+        fs::read_to_string(&ops_path)
+            .unwrap_or_default()
+            .get(from as usize..)
+            .unwrap_or_default()
+            .to_string()
+    };
+    let before = ops_log_len(&doc);
+    preflight();
+    wait_for_pending_maintenance(&doc, before);
+    let ops = appended_ops(before);
+    assert!(ops.contains("todo_id_assigned"), "{ops}");
     let content = fs::read_to_string(&doc).unwrap();
     let todo = component_body(&content, "todo").to_string();
     let lines: Vec<&str> = todo.lines().collect();
@@ -1865,8 +1893,11 @@ fn preflight_assigns_own_ids_to_id_less_todo_rows_and_closeout_completes_them() 
         .unwrap_or_else(|| panic!("minted own id expected: {}", lines[2]));
 
     // Idempotent: the next preflight assigns nothing.
-    let again = preflight();
-    assert!(!again.contains("(#todoidbackfill)"), "{again}");
+    let before = ops_log_len(&doc);
+    preflight();
+    wait_for_pending_maintenance(&doc, before);
+    let again = appended_ops(before);
+    assert!(!again.contains("todo_id_assigned"), "{again}");
     assert_eq!(
         component_body(&fs::read_to_string(&doc).unwrap(), "todo"),
         todo
@@ -1941,7 +1972,9 @@ fn preflight_audits_and_migrates_legacy_todo_source_qualification() {
         (parsed, stderr)
     };
 
-    let (first, stderr) = run();
+    let before = ops_log_len(&doc);
+    let (first, _) = run();
+    wait_for_pending_maintenance(&doc, before);
     let legacy: Vec<&serde_json::Value> = first["todo_signals"]
         .as_array()
         .unwrap()
@@ -1954,7 +1987,6 @@ fn preflight_audits_and_migrates_legacy_todo_source_qualification() {
             && legacy.iter().any(|signal| signal["todo"] == "custom"),
         "{first}"
     );
-    assert!(stderr.contains("#todocontextmigration"), "{stderr}");
 
     let migrated = fs::read_to_string(&doc).unwrap();
     let todo = component_body(&migrated, "todo");
@@ -1979,7 +2011,14 @@ fn preflight_audits_and_migrates_legacy_todo_source_qualification() {
         "{ops}"
     );
 
-    let (second, second_stderr) = run();
+    let before = ops_log_len(&doc);
+    let (second, _) = run();
+    wait_for_pending_maintenance(&doc, before);
+    let second_ops = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log"))
+        .unwrap()
+        .get(before as usize..)
+        .unwrap_or_default()
+        .to_string();
     assert!(
         second["todo_signals"]
             .as_array()
@@ -1989,8 +2028,8 @@ fn preflight_audits_and_migrates_legacy_todo_source_qualification() {
         "{second}"
     );
     assert!(
-        !second_stderr.contains("#todocontextmigration"),
-        "{second_stderr}"
+        !second_ops.contains("todo_source_qualification"),
+        "{second_ops}"
     );
     assert_eq!(fs::read_to_string(&doc).unwrap(), migrated);
 }
@@ -2159,6 +2198,7 @@ fn write_todo_add_with_nested_sub_items_renders_replays_and_completes_with_them(
 
     // Preflight sees two todo rows: it mints no id for a sub-item line and
     // leaves the component byte-for-byte.
+    let before = ops_log_len(&doc);
     let preflight = agent_doc()
         .current_dir(tmp.path())
         .env(
@@ -2172,7 +2212,13 @@ fn write_todo_add_with_nested_sub_items_renders_replays_and_completes_with_them(
     let pf_stderr = String::from_utf8_lossy(&preflight.stderr);
     let _: serde_json::Value = serde_json::from_str(&stdout)
         .unwrap_or_else(|err| panic!("preflight JSON ({err}):\n{stdout}\n{pf_stderr}"));
-    assert!(!pf_stderr.contains("(#todoidbackfill)"), "{pf_stderr}");
+    wait_for_pending_maintenance(&doc, before);
+    let pf_ops = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log"))
+        .unwrap()
+        .get(before as usize..)
+        .unwrap_or_default()
+        .to_string();
+    assert!(!pf_ops.contains("todo_id_assigned"), "{pf_ops}");
     let content = fs::read_to_string(&doc).unwrap();
     assert_eq!(
         component_body(&content, "todo"),

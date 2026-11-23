@@ -394,8 +394,11 @@ fn an_answered_question_closes_its_duplicate_and_a_reask_is_refused() {
         ),
     );
     let path = doc.to_str().unwrap();
+    let previous_ops_len = ops_log_len(&doc);
     let output = run_agent_doc(dir.path(), &["preflight", path]);
     assert_ok(&output, "preflight");
+    // `#q-e9483473162d`: the closure is the detached reconcile's write.
+    wait_for_queue_maintenance(&doc, previous_ops_len);
     let contract: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let answered = contract["answered_decisions"]
         .as_array()
@@ -797,8 +800,11 @@ fn a_probe_preflight_reports_answered_decisions_without_writing() {
         "probe wrote nothing"
     );
 
+    let previous_ops_len = ops_log_len(&doc);
     let output = run_agent_doc(dir.path(), &["preflight", path]);
     assert_ok(&output, "preflight");
+    // `#q-e9483473162d`: the stamp is the detached reconcile's write.
+    wait_for_queue_maintenance(&doc, previous_ops_len);
     let decision = fact["decision_id"].as_str().unwrap();
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
@@ -1021,8 +1027,11 @@ fn a_delivered_answer_closes_its_idle_todo_and_reports_the_rest() {
         ),
     );
     let path = doc.to_str().unwrap();
+    let previous_ops_len = ops_log_len(&doc);
     let output = run_agent_doc(dir.path(), &["preflight", path]);
     assert_ok(&output, "preflight");
+    // `#q-e9483473162d`: the closure is the detached reconcile's write.
+    wait_for_queue_maintenance(&doc, previous_ops_len);
     let content = fs::read_to_string(&doc).unwrap();
     assert!(content.contains("- [x] [#tdapprovers]"), "{content}");
     assert!(content.contains("already answered `dec-"), "{content}");

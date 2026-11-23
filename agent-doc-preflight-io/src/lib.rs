@@ -1,5 +1,6 @@
 //! Preflight maintenance I/O adapters.
 
+pub mod admission_reconcile;
 pub mod admission_replica_hold;
 pub mod answer_ledger;
 pub mod answer_recall;
@@ -517,6 +518,26 @@ pub fn run_todo_id_maintenance_force_disk(
     run_todo_id_maintenance_with_options(file, coin_gate, true, Some(write_effects))
 }
 
+/// `#q-e9483473162d`: the todo-id backfill as one step of the detached admission
+/// reconcile, fenced to the admitted cut `content`. Returns the persisted
+/// document when a row gained an id (or a duplicate was folded).
+pub fn run_todo_id_maintenance_on_admitted_cut(
+    file: &Path,
+    content: &str,
+    coin_gate: &FreeTextCoinGate,
+    fence: &dyn PendingMaintenanceEffectFence,
+) -> Result<Option<String>> {
+    run_todo_id_maintenance_on_content(
+        file,
+        content.to_string(),
+        coin_gate,
+        false,
+        None,
+        Some(fence),
+    )
+    .map(|(_, persisted)| persisted)
+}
+
 fn run_todo_id_maintenance_with_options(
     file: &Path,
     coin_gate: &FreeTextCoinGate,
@@ -541,12 +562,25 @@ fn run_todo_id_maintenance_with_options(
             Some(_) => return Ok(Vec::new()),
         }
     };
+    run_todo_id_maintenance_on_content(file, content, coin_gate, force_disk, write_effects, None)
+        .map(|(ids, _)| ids)
+}
+
+fn run_todo_id_maintenance_on_content(
+    file: &Path,
+    content: String,
+    coin_gate: &FreeTextCoinGate,
+    force_disk: bool,
+    write_effects: Option<&dyn PreflightMaintenanceWriteEffects>,
+    fence: Option<&dyn PendingMaintenanceEffectFence>,
+) -> Result<(Vec<String>, Option<String>)> {
+    let source = "preflight_todo_id_maintenance";
     if agent_doc_element::todo::find_todo_component(&content)
         .ok()
         .flatten()
         .is_none()
     {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), None));
     }
     let folded = if force_disk {
         None
@@ -571,7 +605,7 @@ fn run_todo_id_maintenance_with_options(
             eprintln!(
                 "[preflight] todo: tracked-work evidence unreadable ({err:#}); todo id backfill skipped"
             );
-            return Ok(Vec::new());
+            return Ok((Vec::new(), None));
         }
     };
     let reserved = agent_doc_element_backlog::backlog::document_reserved_identity_ids(todo_content);
@@ -601,7 +635,7 @@ fn run_todo_id_maintenance_with_options(
                 finding.selector, finding.component, finding.id
             );
         }
-        return Ok(Vec::new());
+        return Ok((Vec::new(), None));
     }
     let project_root = agent_doc_project_root_io::project_root_containing(file);
     let persisted = if force_disk {
@@ -618,8 +652,10 @@ fn run_todo_id_maintenance_with_options(
         // The fold proved identity in this exact authority cut. If an operator
         // edits a copy before the write, leave the row for the next observation
         // instead of rebasing the deletion by its now-ambiguous own id.
-        let admitted_hash =
-            (duplicates_removed > 0).then(|| agent_doc_hash::content_hash(&content));
+        // `#q-e9483473162d`: a fenced (detached) owner always proves the
+        // admitted cut at the write.
+        let admitted_hash = (duplicates_removed > 0 || fence.is_some())
+            .then(|| agent_doc_hash::content_hash(&content));
         persist_queue_maintenance_doc_with_admitted_authority(
             file,
             &source_outcome.content,
@@ -627,7 +663,7 @@ fn run_todo_id_maintenance_with_options(
             project_root.as_deref(),
             source,
             admitted_hash.as_deref(),
-            None,
+            fence,
             None,
         )?
     };
@@ -696,7 +732,7 @@ fn run_todo_id_maintenance_with_options(
             ),
         );
     }
-    Ok(ids)
+    Ok((ids, Some(persisted)))
 }
 
 /// `#todoids`: evaluate the document's `agent:todo` against its tracked work

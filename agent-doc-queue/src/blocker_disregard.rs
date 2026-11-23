@@ -477,8 +477,10 @@ fn dep_class(dep: &str, todos: &OwnedTodoIndex) -> DepClass {
     }
 }
 
+/// The shared tag detector: a tag quoted in inline code is not the row's
+/// own (`#ftquotedid`).
 fn is_operator_verify(text: &str) -> bool {
-    text.to_ascii_lowercase().contains("[operator-verify]")
+    backlog::item_operator_verify_required(text)
 }
 
 fn is_permission_request_text(text: &str) -> bool {

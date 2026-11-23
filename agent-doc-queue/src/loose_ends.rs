@@ -457,46 +457,90 @@ fn running_entry(node: &QueueTreeNode, raw: &str, handle: &str) -> String {
     }
 }
 
+/// The loose end the queue tree node `node` is, when it is one: a live
+/// operator decision or action, a blocked row, or a running row.
+///
+/// This is the one classifier behind the digest ([`loose_ends`]) and every
+/// top-level row's open-work count ([`crate::open_count`], `#looseends`), so
+/// the two never disagree. A row whose work a top-level row elsewhere
+/// carries, or that self-repair already did ([`crate::queue_tree::RowResolution`]),
+/// is not a loose end: it holds no work, exactly as the tree's 🗑️/📌
+/// indicator reads it (`#treefinish`).
+///
+/// An operator row the operator already answered with a reply row beneath it
+/// (`~~Restarted~~` under "restart the IDE") is not a loose end either: the
+/// next step is the agent's, picking the answer up, not the operator's.
+pub fn node_loose_end(document: &str, nodes: &[QueueTreeNode], index: usize) -> Option<LooseEnd> {
+    let node = nodes.get(index)?;
+    if node.closed || node.resolution.is_some() {
+        return None;
+    }
+    let raw = raw_row(document, node.line);
+    let id = row_handle(&node.full_text, raw);
+    let operator_row = node.state == QueueNodeState::WaitingOnYou
+        || (node.state == QueueNodeState::Open && carries_operator_owned_tag(raw));
+    let (group, text) = if operator_row {
+        let (owner, _) = row_body(&node.full_text);
+        if owner == Some(ActionItemOwner::Agent) || operator_replied(nodes, index) {
+            return None;
+        }
+        let (imperative, decision) = operator_imperative(&node.full_text, &id);
+        let group = if decision {
+            LooseEndGroup::Decide
+        } else {
+            LooseEndGroup::Do
+        };
+        (group, imperative)
+    } else {
+        match node.state {
+            QueueNodeState::Blocked => (
+                LooseEndGroup::Blocked,
+                blocked_entry(document, nodes, node, raw, &id),
+            ),
+            QueueNodeState::Running => (LooseEndGroup::Running, running_entry(node, raw, &id)),
+            _ => return None,
+        }
+    };
+    Some(LooseEnd { group, id, text })
+}
+
+/// Whether a direct child of the operator row at `index` is the operator's
+/// reply to it: a plain row (struck or not) with no lifecycle projection,
+/// that is neither a follow-up row nor binary-owned response structure. A
+/// follow-up row or a worker attempt nested under the row is new work, not
+/// an answer.
+fn operator_replied(nodes: &[QueueTreeNode], index: usize) -> bool {
+    let node = &nodes[index];
+    nodes[index + 1..]
+        .iter()
+        .take_while(|child| {
+            child.queue == node.queue && child.line <= node.end_line && child.depth > node.depth
+        })
+        .filter(|child| child.depth == node.depth + 1)
+        .any(|child| {
+            let text = child.full_text.trim();
+            matches!(child.state, QueueNodeState::Open | QueueNodeState::Done)
+                && !child.waiting_item
+                && !text.is_empty()
+                && !text.starts_with("**")
+                && followup_row_action_item(without_provenance(text)).is_none()
+        })
+}
+
 /// Every unresolved row of `document`, grouped, in document order.
 pub fn loose_ends(document: &str) -> Result<Vec<LooseEnd>> {
     let tree = queue_tree(document, &QueueTreeOptions::default())?;
     let nodes = &tree.nodes;
     let mut seen: HashSet<(LooseEndGroup, String)> = HashSet::new();
     let mut ends = Vec::new();
-    for node in nodes {
-        if node.closed {
+    for index in 0..nodes.len() {
+        let Some(end) = node_loose_end(document, nodes, index) else {
             continue;
-        }
-        let raw = raw_row(document, node.line);
-        let id = row_handle(&node.full_text, raw);
-        let operator_row = node.state == QueueNodeState::WaitingOnYou
-            || (node.state == QueueNodeState::Open && carries_operator_owned_tag(raw));
-        let (group, text) = if operator_row {
-            let (owner, _) = row_body(&node.full_text);
-            if owner == Some(ActionItemOwner::Agent) {
-                continue;
-            }
-            let (imperative, decision) = operator_imperative(&node.full_text, &id);
-            let group = if decision {
-                LooseEndGroup::Decide
-            } else {
-                LooseEndGroup::Do
-            };
-            (group, imperative)
-        } else {
-            match node.state {
-                QueueNodeState::Blocked => (
-                    LooseEndGroup::Blocked,
-                    blocked_entry(document, nodes, node, raw, &id),
-                ),
-                QueueNodeState::Running => (LooseEndGroup::Running, running_entry(node, raw, &id)),
-                _ => continue,
-            }
         };
-        if !seen.insert((group, id.clone())) {
+        if !seen.insert((end.group, end.id.clone())) {
             continue;
         }
-        ends.push(LooseEnd { group, id, text });
+        ends.push(end);
     }
     // Group order, document order within a group.
     ends.sort_by_key(|end| end.group);

@@ -9575,6 +9575,15 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         mutated = true;
         eprintln!("[preflight] active: reconciled after queue lifecycle projection");
     }
+    // `#looseends`: every top-level row's open-work count, from the same
+    // queue tree and classifier as the digest below, after the lifecycle
+    // paint (which re-renders row prefixes) so it never drifts.
+    if let Some(reconciled) = agent_doc_queue::open_count::reconcile_open_counts(&current_content)?
+    {
+        current_content = reconciled;
+        mutated = true;
+        eprintln!("[preflight] open counts: top-level row counts re-rendered (#looseends)");
+    }
     // `#looseends`: the digest of every unresolved row, from the queue tree
     // as this pass leaves it (after the lifecycle paint, so Running agrees
     // with `agent:active`).
@@ -9788,6 +9797,9 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         if let Some(reconciled) =
             agent_doc_work_projection::reconcile_managed_active_items_for(file, &new_snap)?
         {
+            new_snap = reconciled;
+        }
+        if let Some(reconciled) = agent_doc_queue::open_count::reconcile_open_counts(&new_snap)? {
             new_snap = reconciled;
         }
         if let Some(reconciled) = agent_doc_queue::loose_ends::reconcile_loose_ends_ensuring(

@@ -40,6 +40,8 @@ pub mod queue_auto_clear;
 pub mod queue_blocked;
 pub mod queue_claim;
 pub use agent_doc_element_queue::QueueReportState;
+#[cfg(test)]
+mod codespan_tag_tests;
 pub mod finished_tree;
 pub mod followup_moved_state;
 pub mod followup_owner;
@@ -50,6 +52,7 @@ pub mod linked_todo_queue;
 pub mod loose_ends;
 #[cfg(test)]
 mod nest_leaf_select_tests;
+pub mod open_count;
 pub mod queue_closeout_guard;
 pub mod queue_command;
 pub mod queue_consume;

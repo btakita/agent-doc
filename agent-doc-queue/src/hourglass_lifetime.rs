@@ -455,7 +455,10 @@ fn strip_inline_verdict(text: &str) -> String {
 
 fn inline_verdict_colon(text: &str) -> Option<usize> {
     let tag = followup_owner::OPERATOR_OWNED_TAG;
-    let lower = text.to_ascii_lowercase();
+    // `#ftquotedid`: a tag quoted in inline code is not the row's own; the
+    // mask keeps byte offsets.
+    let lower =
+        agent_doc_element_backlog::backlog::mask_inline_code_spans(text).to_ascii_lowercase();
     if let Some(tag_at) = lower.rfind(tag) {
         let after = &text[tag_at + tag.len()..];
         let trimmed = after.trim_start();

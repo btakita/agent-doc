@@ -791,7 +791,9 @@ fn running_item_changed_since_previous_turn(
 
 fn classify_lifecycle(item: &str, claim: Option<&QueueClaim>) -> QueueSyncLifecycle {
     if !agent_doc_document::queue_projection::operator_action_ids(item).is_empty()
-        || item.to_ascii_lowercase().contains("[operator-verify]")
+        // `#ftquotedid`: the shared tag detector, so a row quoting the tag in
+        // inline code is not gated.
+        || agent_doc_element_backlog::backlog::item_operator_verify_required(item)
     {
         return QueueSyncLifecycle::OperatorGated;
     }

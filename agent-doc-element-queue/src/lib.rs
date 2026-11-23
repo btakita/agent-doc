@@ -684,6 +684,7 @@ fn strip_projection_token(trimmed: &str) -> Option<&str> {
         .or_else(|| strip_blocked_annotation_token(trimmed))
         .or_else(|| strip_owner_annotation_token(trimmed))
         .or_else(|| strip_waiting_status_token(trimmed))
+        .or_else(|| strip_open_count_token(trimmed))
         // `#lifecyclewordfusion`: a state word fused to its glyph
         // (`running🚧`) is one torn lifecycle token, never work identity.
         .or_else(|| {
@@ -732,6 +733,74 @@ pub fn strip_waiting_status_token(trimmed: &str) -> Option<&str> {
         .iter()
         .all(|count| !count.is_empty() && count.chars().all(|ch| ch.is_ascii_digit()))
         .then(|| &rest[close + '⟧'.len_utf8()..])
+}
+
+/// `#looseends`: the groups of the binary-owned open-work count a top-level
+/// queue row carries, in render order, as `(singular, plural)` labels. They
+/// are the Loose ends digest groups (Decide, Do, Blocked, Running).
+pub const OPEN_COUNT_LABELS: [(&str, &str); 4] = [
+    ("decision", "decisions"),
+    ("action", "actions"),
+    ("blocked", "blocked"),
+    ("running", "running"),
+];
+
+/// Render the open-work count token of a top-level row,
+/// `(1 decision, 2 actions, 1 blocked, 1 running)`, from counts in
+/// [`OPEN_COUNT_LABELS`] order. Zero groups are left out; `None` when every
+/// count is zero (the row then carries no token).
+pub fn render_open_count_token(counts: [usize; 4]) -> Option<String> {
+    let parts = counts
+        .iter()
+        .zip(OPEN_COUNT_LABELS)
+        .filter(|(count, _)| **count > 0)
+        .map(|(count, (one, many))| format!("{count} {}", if *count == 1 { one } else { many }))
+        .collect::<Vec<_>>();
+    (!parts.is_empty()).then(|| format!("({})", parts.join(", ")))
+}
+
+/// Parse ONE leading open-work count token (`(1 decision, 1 running)`) from
+/// `trimmed`: its counts in [`OPEN_COUNT_LABELS`] order and the text after it.
+///
+/// The token is projection the binary re-renders on every sync, never work
+/// text and never identity, so every parser strips it with the rest of the
+/// leading projection prefix ([`strip_attempt_projection_prefix`],
+/// [`strip_priority_markers`]). Recognition is exact so no operator
+/// parenthetical is mistaken for it: one or more `<N> <label>` parts, each
+/// count a positive number without a leading zero, each label one of
+/// [`OPEN_COUNT_LABELS`] in the right number, in that fixed order without
+/// repeats, joined by `, `, and followed by whitespace or the end of the text.
+pub fn open_count_token(trimmed: &str) -> Option<([usize; 4], &str)> {
+    let rest = trimmed.strip_prefix('(')?;
+    let close = rest.find(')')?;
+    let after = &rest[close + 1..];
+    if !(after.is_empty() || after.starts_with(char::is_whitespace)) {
+        return None;
+    }
+    let mut counts = [0usize; 4];
+    let mut next = 0;
+    for part in rest[..close].split(", ") {
+        let (count, label) = part.split_once(' ')?;
+        if count.is_empty()
+            || count.starts_with('0')
+            || !count.chars().all(|ch| ch.is_ascii_digit())
+        {
+            return None;
+        }
+        let count = count.parse::<usize>().ok()?;
+        let group = (next..OPEN_COUNT_LABELS.len()).find(|&group| {
+            let (one, many) = OPEN_COUNT_LABELS[group];
+            label == if count == 1 { one } else { many }
+        })?;
+        counts[group] = count;
+        next = group + 1;
+    }
+    Some((counts, after))
+}
+
+/// Strip ONE leading open-work count token (see [`open_count_token`]).
+pub fn strip_open_count_token(trimmed: &str) -> Option<&str> {
+    open_count_token(trimmed).map(|(_, after)| after)
 }
 
 /// A leading `⟦blocked by ...⟧` annotation, the blocker list that follows `⛔`.
@@ -1210,6 +1279,87 @@ pub fn strip_intent_tags(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// `#looseends`: the open-work count token renders zero-free in its fixed
+    /// order and parses back exactly; nothing else parses as one.
+    #[test]
+    fn open_count_token_round_trips_and_rejects_prose() {
+        assert_eq!(render_open_count_token([0, 0, 0, 0]), None);
+        assert_eq!(
+            render_open_count_token([1, 0, 0, 1]).as_deref(),
+            Some("(1 decision, 1 running)")
+        );
+        assert_eq!(
+            render_open_count_token([2, 3, 1, 4]).as_deref(),
+            Some("(2 decisions, 3 actions, 1 blocked, 4 running)")
+        );
+        for counts in [[1, 0, 0, 1], [2, 3, 1, 4], [0, 1, 0, 0], [0, 0, 12, 0]] {
+            let token = render_open_count_token(counts).unwrap();
+            let text = format!("{token} work");
+            assert_eq!(open_count_token(&text), Some((counts, " work")), "{text}");
+            assert_eq!(open_count_token(&token), Some((counts, "")));
+        }
+        for prose in [
+            "(see above) work",
+            "(1 decisions) work",
+            "(2 decision) work",
+            "(0 running) work",
+            "(01 running) work",
+            "(1 running, 1 decision) work",
+            "(1 running, 1 running) work",
+            "(1 running,1 blocked) work",
+            "(1 running)work",
+            "( 1 running) work",
+            "() work",
+            "(1 running",
+        ] {
+            assert_eq!(open_count_token(prose), None, "{prose}");
+        }
+    }
+
+    /// The token is leading projection: identity, claim and dedupe keys read
+    /// past it exactly like an owner label, wherever it sits in the prefix.
+    #[test]
+    fn open_count_token_is_stripped_with_the_projection_prefix() {
+        for (counted, bare) in [
+            (
+                "🙋 (1 decision, 1 running) [from:chat key=x] work [#q-0123456789ab]",
+                "🙋 [from:chat key=x] work [#q-0123456789ab]",
+            ),
+            (
+                "🚧 [#subagent:x#1] (2 actions) do [#foo]",
+                "🚧 [#subagent:x#1] do [#foo]",
+            ),
+            ("(1 blocked) do [#foo]: note", "do [#foo]: note"),
+        ] {
+            assert_eq!(
+                strip_attempt_projection_prefix(counted),
+                strip_attempt_projection_prefix(bare)
+            );
+            assert_eq!(
+                strip_priority_markers(counted),
+                strip_priority_markers(bare)
+            );
+            assert_eq!(queue_head_identity(counted), queue_head_identity(bare));
+            assert_eq!(
+                queue_prompt_stable_identity(counted),
+                queue_prompt_stable_identity(bare)
+            );
+            assert_eq!(
+                queue_prompt_stable_id(counted),
+                queue_prompt_stable_id(bare)
+            );
+            assert_eq!(
+                render_struck_row_body(counted),
+                render_struck_row_body(bare)
+            );
+        }
+        // Prose that only looks similar stays work text.
+        assert_eq!(
+            strip_attempt_projection_prefix("🙋 (see above) work"),
+            "(see above) work"
+        );
+    }
     /// `#followupshorttitle`: `[#origin] follow-up: <item>` names the row it
     /// follows up. It is never the row's own identity, under any projection,
     /// and the `🙋` glyph does not read it as a legacy request-id prefix.

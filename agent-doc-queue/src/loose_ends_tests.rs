@@ -5,16 +5,18 @@ use super::*;
 /// a Waiting-on-you item, struck rows, and three running workers.
 const SESSION: &str = include_str!("../tests/fixtures/loose_ends_session.md");
 
+/// `#looseends`: the three operator cleanup rows asking to tidy agent-doc's
+/// own artifacts (`q-8eeadf7937c8`, `q-dade5157fe53`, `q-e107b04c1cd5`) are
+/// self-repaired, so they hold no work for the tree's 🗑️/📌 indicator and
+/// are not loose ends either: the digest, the top-level counts and the keep
+/// indicator read one classifier.
 const SESSION_DIGEST: &str = concat!(
-    "- **Decide** (5)\n",
+    "- **Decide** (4)\n",
     "  - `[#q-0e29d5fdf1c4]` Decide whether to retain separate 262 and 263 modular ZIPs or authorize the combined `262` through…\n",
     "  - `[#q-cb3ac1276fd3]` decide whether to refresh the VS Code package\n",
-    "  - `[#q-8eeadf7937c8]` decide whether to clean those up by hand\n",
     "  - `[#q-5d1c0f2e9a77]` decide whether to revoke the PyPI API token named **`publish 2026-11-13`**\n",
     "  - `[#ghrecvpolicypark]` Decide whether backlog #ghrecvpolicy stays open in the backlog or moves to the icebox\n",
-    "- **Do** (3)\n",
-    "  - `[#q-dade5157fe53]` apply edits 1–3 above in the editor if you want the old titles cleaned\n",
-    "  - `[#q-e107b04c1cd5]` in the live `tasks/agent-doc/sample-bugs.md` queue, delete the extra struck copies of…\n",
+    "- **Do** (1)\n",
     "  - `[#q-a1b2c3d4e5f6]` unlock the `login` keyring once by running `gnome-keyring-unlock-login` in a terminal\n",
     "- **Blocked** (3)\n",
     "  - `[#jbfrontendswap]` blocked by `[#prompt-blocker-b0ddfbae2f94]`: Use chromium-bridge to perform the steps\n",
@@ -103,7 +105,7 @@ fn a_stale_digest_is_re_rendered_and_nothing_open_when_all_resolved() {
     );
     let resynced = reconcile_loose_ends(&struck).unwrap().unwrap();
     let body = digest_body(&resynced);
-    assert!(body.contains("- **Do** (2)\n"), "{body}");
+    assert!(!body.contains("- **Do**"), "{body}");
     assert!(!body.contains("q-a1b2c3d4e5f6"), "{body}");
 
     let empty = concat!(

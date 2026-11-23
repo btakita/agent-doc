@@ -214,7 +214,9 @@ pub fn is_queue_subagents_attr(key: &str) -> bool {
 /// True when a queue line carries a tag that keeps it out of the queue-level
 /// subagents attribute (`[inline]`, `[operator-verify]`).
 pub fn opts_out_of_queue_subagents(line: &str) -> bool {
-    let line = line.to_ascii_lowercase();
+    // `#ftquotedid`: a tag quoted in inline code is part of the quote.
+    let line =
+        agent_doc_element_backlog::backlog::mask_inline_code_spans(line).to_ascii_lowercase();
     QUEUE_SUBAGENTS_OPT_OUT_TAGS
         .iter()
         .any(|tag| line.contains(tag))

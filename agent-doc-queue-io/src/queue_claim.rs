@@ -4015,6 +4015,17 @@ mod tests {
     use super::*;
     use agent_doc_queue::queue_continuation::live_queue_head_rows;
 
+    /// `#ftquotedid`: a row quoting the `[operator-verify]` tag inside inline
+    /// code is not refused as an operator-owned row; one carrying it is.
+    #[test]
+    fn a_row_quoting_the_operator_verify_tag_in_code_is_claimable() {
+        let quoting = "fix: a row that quotes a `[operator-verify]` token inside a code span is misread. #spec-test-build-install-commit-push";
+        refuse_operator_owned_row(quoting).expect("a quoted tag is not the row's own");
+        let tagged = format!("{quoting} [operator-verify]");
+        let refused = refuse_operator_owned_row(&tagged).unwrap_err().to_string();
+        assert!(refused.contains("no operator verdict"), "{refused}");
+    }
+
     #[test]
     fn an_abandoned_lost_running_claim_expects_the_lost_running_glyph() {
         use agent_doc_queue::queue_claim::{

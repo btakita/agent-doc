@@ -1489,6 +1489,13 @@ pub fn strip_priority_markers(text: &str) -> String {
             t = rest.trim_start();
             continue;
         }
+        // `#looseends`: a top-level row's open-work count
+        // (`(1 decision, 1 running)`) is binary-owned projection too.
+        if let Some(rest) = agent_doc_element_queue::strip_open_count_token(trimmed) {
+            stripped_projection = true;
+            t = rest.trim_start();
+            continue;
+        }
         if stripped_projection && let Some(rest) = strip_repeated_projection_heading_prefix(trimmed)
         {
             t = rest;

@@ -2629,9 +2629,13 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
         project_all_queue_runtime_state_under_apply_guard(effects, file, &queue_edit_guard)?;
     // `#looseends`: re-render the digest of every unresolved row after the
     // lifecycle paint, so its Running group agrees with `agent:active`.
+    // `#looseends`: every top-level row's open-work count comes from the same
+    // tree and classifier, in the same write.
     let loose_ends_changed = {
         let content = effects.current_document_content(file, "queue_sync_loose_ends")?;
-        match agent_doc_queue::loose_ends::reconcile_loose_ends(&content)? {
+        let counted = agent_doc_queue::open_count::reconcile_open_counts(&content)?;
+        let base = counted.as_deref().unwrap_or(&content);
+        match agent_doc_queue::loose_ends::reconcile_loose_ends(base)?.or(counted) {
             Some(digest) => {
                 effects.converge_document_or_disk(
                     file,

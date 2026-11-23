@@ -3398,23 +3398,82 @@ pub fn item_execution_context(text: &str) -> ExecutionContext {
     }
 }
 
+/// `text` with the contents of every balanced inline code span (backtick
+/// run to the matching run) blanked byte for byte, so byte offsets still
+/// index the original text. An unbalanced backtick is ordinary prose.
+///
+/// `#ftquotedid`: a row that QUOTES another row (``the row `… [operator-verify]
+/// [#q-…]` should have a count``) is about that row, not tagged like it. Every
+/// row-marker detector reads the masked text, the same rule `1a497b2fc0`
+/// applied to a quoted `[#id]`.
+pub fn mask_inline_code_spans(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut copied = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'`' {
+            i += 1;
+            continue;
+        }
+        let fence = bytes[i..].iter().take_while(|b| **b == b'`').count();
+        let mut j = i + fence;
+        let mut close = None;
+        while j < bytes.len() {
+            if bytes[j] == b'`' {
+                let run = bytes[j..].iter().take_while(|b| **b == b'`').count();
+                if run == fence {
+                    close = Some(j);
+                    break;
+                }
+                j += run;
+                continue;
+            }
+            j += 1;
+        }
+        match close {
+            Some(end) => {
+                out.push_str(&text[copied..i]);
+                out.extend(std::iter::repeat_n(' ', end + fence - i));
+                i = end + fence;
+                copied = i;
+            }
+            None => i += fence,
+        }
+    }
+    out.push_str(&text[copied..]);
+    out
+}
+
+/// Whether `text` carries `[tag]` as a whitespace-delimited token outside
+/// inline code (`#ftquotedid`).
 fn text_has_bracket_tag(text: &str, tag: &str) -> bool {
-    text.split_whitespace().any(|token| {
-        let trimmed = token.trim_matches(|c: char| matches!(c, '(' | ')' | ',' | '.' | ';' | ':'));
-        trimmed.len() == tag.len() + 2
-            && trimmed.starts_with('[')
-            && trimmed.ends_with(']')
-            && trimmed[1..trimmed.len() - 1].eq_ignore_ascii_case(tag)
-    })
+    mask_inline_code_spans(text)
+        .split_whitespace()
+        .any(|token| {
+            let trimmed =
+                token.trim_matches(|c: char| matches!(c, '(' | ')' | ',' | '.' | ';' | ':'));
+            trimmed.len() == tag.len() + 2
+                && trimmed.starts_with('[')
+                && trimmed.ends_with(']')
+                && trimmed[1..trimmed.len() - 1].eq_ignore_ascii_case(tag)
+        })
 }
 
 /// Remove the `[clean-session]` / `[operator-verify]` execution-context tags
 /// from display text (`#goqueuestall`), collapsing the whitespace they leave
 /// behind. Mirrors how machine-only markers are kept out of rendered prose.
 pub fn strip_execution_context_tags(text: &str) -> String {
+    // A tag quoted inside inline code is part of the quote, not a tag
+    // (`#ftquotedid`): it stays.
+    let masked = mask_inline_code_spans(text);
     let kept: Vec<&str> = text
         .split_whitespace()
         .filter(|token| {
+            let at = token.as_ptr() as usize - text.as_ptr() as usize;
+            if masked[at..at + token.len()].trim().is_empty() {
+                return true;
+            }
             let trimmed =
                 token.trim_matches(|c: char| matches!(c, '(' | ')' | ',' | '.' | ';' | ':'));
             !(trimmed.eq_ignore_ascii_case(CLEAN_SESSION_TAG)
@@ -5471,6 +5530,52 @@ mod tests {
         assert_eq!(
             strip_execution_context_tags("[recommended] [focused-cycle] rework the merge seam"),
             "[recommended] rework the merge seam"
+        );
+    }
+
+    /// `#ftquotedid`: a tag quoted inside inline code is part of the quote.
+    /// The operator's request quoted a whole operator-verify row; the request
+    /// itself is agent work, never an `[operator-verify]` row.
+    #[test]
+    fn execution_context_tags_inside_inline_code_are_quotes() {
+        // The operator's request, verbatim: the quoted row holds code spans of
+        // its own, so the backticks pair up around them, and the quoted
+        // `[operator-verify] [#q-…]` tail still lands inside the last span,
+        // exactly as a Markdown renderer shows it.
+        let quoting = "The top-level item should have a summary count of what needs to be worked on in the subtrees. So `- ### 🙋 [from:recovery key=q-0e29d5fdf1c4-restore] follow up on an action item from `jbdocdrift`: operator: Decide whether to retain separate 262 and 263 modular ZIPs or authorize the combined `262` through `263.*` ZIP. [operator-verify] [#q-0e29d5fdf1c4]` should have `(1 desicion, 1 running)`. This status must be kept in sync and not drift from the actual state.";
+        let single = "a row that quotes `[operator-verify]` inside a code span";
+        let double = "quote ``a `b` [operator-verify]`` here";
+        for text in [quoting, single, double] {
+            assert!(!item_operator_verify_required(text), "{text}");
+            assert!(!item_execution_context(text).is_deferred(), "{text}");
+        }
+        for tag in ["clean-session", "focused-cycle"] {
+            let text = format!("quote `[{tag}]` only");
+            assert!(!text_has_bracket_tag(&text, tag), "{text}");
+        }
+        // The row's own tag, outside code, still counts, and a quoted one
+        // beside it does not hide it.
+        let tagged = "operator: approve `[operator-verify]` rows by hand [operator-verify] [#q-1]";
+        assert!(item_operator_verify_required(tagged));
+        // An unbalanced backtick is prose.
+        assert!(item_operator_verify_required(
+            "a ` stray tick [operator-verify]"
+        ));
+        // Display stripping keeps the quote.
+        assert_eq!(
+            strip_execution_context_tags("keep `[operator-verify]` quoted [operator-verify]"),
+            "keep `[operator-verify]` quoted"
+        );
+        assert_eq!(
+            strip_execution_context_tags("keep `a [operator-verify] b` quoted"),
+            "keep `a [operator-verify] b` quoted"
+        );
+        // Byte offsets survive multibyte text inside and outside a span.
+        let masked = mask_inline_code_spans("é `🙋 x` ü");
+        assert_eq!(masked.len(), "é `🙋 x` ü".len());
+        assert!(
+            masked.starts_with("é ") && masked.ends_with(" ü"),
+            "{masked:?}"
         );
     }
 

@@ -4998,6 +4998,31 @@ fn apply_ops_lazily(t: &mut TextCrdt, ops: &[EditOp]) {
 mod tests {
     use super::*;
 
+    /// `#looseends`: a top-level row's binary-owned open-work count
+    /// (`(1 decision, 1 running)`) is projection. The merge keyer gives the
+    /// counted row and the bare row one key, so a count re-render and an
+    /// operator edit of the same row stay one cell.
+    #[test]
+    fn open_count_token_is_not_part_of_a_merge_key() {
+        for (bare, counted) in [
+            (
+                "- ### 🙋 [from:recovery key=q-0e29d5fdf1c4-restore] follow up: operator: Decide whether to keep it. [operator-verify] [#q-0e29d5fdf1c4]",
+                "- ### 🙋 (1 decision, 1 running) [from:recovery key=q-0e29d5fdf1c4-restore] follow up: operator: Decide whether to keep it. [operator-verify] [#q-0e29d5fdf1c4]",
+            ),
+            (
+                "- ### free text work",
+                "- ### (2 actions, 1 blocked) free text work",
+            ),
+            (
+                "- 🚧 [#subagent:x#1] do [#foo]",
+                "- 🚧 [#subagent:x#1] (1 running) do [#foo]",
+            ),
+        ] {
+            assert_eq!(normalize_item_text(counted), normalize_item_text(bare));
+            assert_eq!(list_item_key(counted), list_item_key(bare), "{counted}");
+        }
+    }
+
     /// Deleting a word from a typed row: tasks/agent-doc/agent-doc-bugs.md, 2026-11-21. The
     /// operator typed a nested queue row, deleted a word, and typed a
     /// different one while `queue consume --ack-text` struck a sibling leaf.

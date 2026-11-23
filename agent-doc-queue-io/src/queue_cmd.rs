@@ -2695,20 +2695,16 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
         },
     )?;
 
-    // `#dupdone`: the `🙋` glyph is recomputed from each row's current
-    // classification (a glyph a since-fixed misclassification painted is
-    // removed, as preflight does), and a live row whose work is already
+    // `#dupdone`: a `🙋` glyph the row's current classification no longer
+    // gives it (one a since-fixed misclassification painted) is removed, as
+    // preflight's projection removes it; only removals, so sync stays narrow.
+    // And a live row whose work is already
     // finished is resolved: an operator-verify row the operator answered
     // `done` beneath, and a re-queued duplicate of finished work. Stability
     // is judged against the baseline this sync started from.
     let finished_rows_changed = {
         let current = effects.current_document_content(file, "queue_sync_finished_rows")?;
-        let open_todo_ids = agent_doc_element::todo::open_todo_ids(&current);
-        let glyphs = agent_doc_queue::document_queue::project_all_prompt_operator_actions(
-            &current,
-            &[],
-            &open_todo_ids,
-        )?;
+        let glyphs = agent_doc_queue::finished_duplicate::clear_stale_operator_glyphs(&current)?;
         let base = glyphs.clone().unwrap_or_else(|| current.clone());
         let in_flight = crate::queue_claim::in_flight_claimed_items_for_content(file, &base);
         let resolved = agent_doc_queue::finished_duplicate::reconcile_finished_rows(

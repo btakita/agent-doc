@@ -659,6 +659,41 @@ fn row_indent(line: &str) -> usize {
     line.len() - line.trim_start_matches(' ').len()
 }
 
+/// `#dupdone`: remove each `🙋` glyph the operator-action projection no
+/// longer gives its row: one an earlier misclassification painted (a tag
+/// quoted inside inline code read as the row's own). Only removals are kept;
+/// every other projection change is left to preflight, so `queue sync` stays
+/// a narrow repair. `None` when no glyph is stale.
+pub fn clear_stale_operator_glyphs(document: &str) -> Result<Option<String>> {
+    let marker = agent_doc_document::queue_projection::operator_action_marker();
+    if !document.contains(marker) {
+        return Ok(None);
+    }
+    let open_todo_ids = agent_doc_element::todo::open_todo_ids(document);
+    let Some(projected) =
+        crate::document_queue::project_all_prompt_operator_actions(document, &[], &open_todo_ids)?
+    else {
+        return Ok(None);
+    };
+    let before: Vec<&str> = document.split_inclusive('\n').collect();
+    let after: Vec<&str> = projected.split_inclusive('\n').collect();
+    if before.len() != after.len() {
+        return Ok(None);
+    }
+    let with_space = format!("{marker} ");
+    let mut out = String::with_capacity(document.len());
+    let mut changed = false;
+    for (old, new) in before.iter().zip(&after) {
+        if old != new && old.contains(&with_space) && old.replacen(&with_space, "", 1) == *new {
+            out.push_str(new);
+            changed = true;
+        } else {
+            out.push_str(old);
+        }
+    }
+    Ok(changed.then_some(out))
+}
+
 /// Resolve every live row whose work is finished (see the module docs):
 /// operator completion replies, then duplicates of finished work. `baseline`
 /// is the committed document; a row absent from it is still being typed and

@@ -69,3 +69,23 @@ fn a_glyph_painted_by_the_old_misreading_is_removed() {
         None
     );
 }
+
+/// `queue sync` keeps only the removal: the stale glyph goes, every other
+/// projection (the tagged row's own glyph) is left to preflight.
+#[test]
+fn sync_clears_only_the_stale_glyph() {
+    let document = format!(
+        "<!-- agent:queue -->\n- ### 🙋 {SHORT} [#q-04fe97a25402]\n- operator: approve it. [operator-verify] [#q-0123456789ab]\n<!-- /agent:queue -->\n"
+    );
+    let cleared = crate::finished_duplicate::clear_stale_operator_glyphs(&document)
+        .unwrap()
+        .expect("the stale glyph is removed");
+    assert_eq!(
+        cleared,
+        document.replacen("- ### 🙋 [from:chat", "- ### [from:chat", 1)
+    );
+    assert_eq!(
+        crate::finished_duplicate::clear_stale_operator_glyphs(&cleared).unwrap(),
+        None
+    );
+}

@@ -9040,8 +9040,9 @@ mod tests {
         assert!(repaired.contains("This sentence is a prefix variant in assistant prose\n"));
     }
     /// `#respondfalsefail`: the 2026-11-23 socket visible write (patch
-    /// `48c34928`) copied the previous response's heading above its own chat
-    /// prompt record without a body. The IPC snapshot dedupe must repair it
+    /// `48c34928`) carried the previous response's heading above its own chat
+    /// prompt record without a body (stranded by the retained response-cell
+    /// replay, `#jbdupheading`). The IPC snapshot dedupe must repair it
     /// before adoption, so no bodiless heading reaches canonical or a commit.
     #[test]
     fn ipc_snapshot_removes_bodiless_duplicate_response_heading() {

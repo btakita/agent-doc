@@ -24,6 +24,12 @@ pub fn first_response_heading_line(response: &str) -> Option<&str> {
 
 fn normalize_replay_topic(text: &str) -> String {
     let trimmed = text.trim();
+    // `#jbdupheading`: a heading without a ` — model` suffix keeps the
+    // transient ` (HEAD)` projection to its end; it is not part of the topic.
+    let trimmed = trimmed
+        .strip_suffix(" (HEAD)")
+        .unwrap_or(trimmed)
+        .trim_end();
     let trimmed = trimmed
         .strip_prefix("❯ ")
         .unwrap_or(trimmed)
@@ -762,10 +768,16 @@ fn response_fragment_lines(content: &str) -> Vec<ResponseFragmentLine> {
         if trimmed.is_empty() || (trimmed.starts_with("<!--") && trimmed.ends_with("-->")) {
             continue;
         }
+        // `#jbdupheading`: the editor projects the newest heading with a
+        // transient ` (HEAD)` (and possibly a response id) that the captured
+        // response never carries. Comparing it raw split the heading off an
+        // orphaned response run, and the replay stranded it above the
+        // re-appended cell.
+        let unprefixed = strip_exchange_prompt_prefix(trimmed.to_string());
         lines.push(ResponseFragmentLine {
             start,
             end: offset,
-            normalized: strip_exchange_prompt_prefix(trimmed.to_string())
+            normalized: strip_response_heading_projection_metadata(unprefixed.trim())
                 .trim()
                 .to_string(),
         });
@@ -1975,6 +1987,87 @@ mod tests {
         );
         assert!(repaired.contains("**Verification:** make check passed."));
         assert!(response_materialized_in_content(&response, &repaired));
+    }
+
+    #[test]
+    fn materialize_response_moves_orphaned_head_heading_with_its_body() {
+        // #jbdupheading, agent-doc-bugs.md 2026-11-23 17:04:51Z: the retained
+        // captured-response replay ran over a canonical that had lost only the
+        // chat-prompt record. The editor-projected heading carried the
+        // transient ` (HEAD)` and no ` — model` suffix, so the orphan run
+        // stopped at the bullets and the replay stranded
+        // `### Re: prune completed subagents (HEAD)` above the re-appended
+        // record (canonical 4a49eb1d = commit 150312ea8a + that heading).
+        let bullets = concat!(
+            "- **Pruned:** ctlmaint (\"Controller-owned incremental background reconcile\") and claimduring (\"Make pool claim 📥 rows during turn\"). Both were integrated hours ago.\n",
+            "- **Already gone:** tornsplice and rel587 no longer appear in the agent list.\n",
+            "- **Kept:** the gsync/gsync2 worker. The list shows it as \"completed\", but it is waiting on its own background checks, and its queue row `[from:dogfood key=gsync2]` is still 🚧 running.\n",
+        );
+        let record = "> **Chat prompt (#chatprompt:4e7d3b234a59):** prune completed subagents\n";
+        let current = format!(
+            "<!-- agent:exchange -->\n### Re: earlier\n\n- **Dispatched:** the earlier response body.\n### Re: prune completed subagents (HEAD)\n\n{bullets}<!-- agent:boundary:ef1863ea -->\n<!-- /agent:exchange -->\n"
+        );
+        let response = format!("{record}\n### Re: prune completed subagents\n\n{bullets}");
+
+        let repaired = materialize_response_in_current_exchange(&current, &response)
+            .expect("exchange should be repairable");
+
+        assert_eq!(
+            repaired
+                .matches("### Re: prune completed subagents")
+                .count(),
+            1,
+            "{repaired}"
+        );
+        assert_eq!(repaired.matches("- **Pruned:**").count(), 1, "{repaired}");
+        let after_previous = repaired
+            .split_once("- **Dispatched:** the earlier response body.\n")
+            .expect("previous response survives")
+            .1;
+        let next_visible_line = after_previous
+            .lines()
+            .find(|line| !response_fragment_gap_is_transient(line))
+            .expect("the replayed response follows the previous response");
+        assert_eq!(next_visible_line, record.trim_end(), "{repaired}");
+        assert!(response_materialized_in_content(&response, &repaired));
+    }
+
+    #[test]
+    fn heading_after_body_repair_matches_a_modelless_head_heading() {
+        // #jbdupheading: without a ` — model` suffix the transient ` (HEAD)`
+        // ends the heading, and the topic compare must still see one topic.
+        let current = concat!(
+            "<!-- agent:exchange -->\n",
+            "prune completed subagents\n\n",
+            "- **Pruned:** ctlmaint and claimduring.\n",
+            "- **Kept:** gsync2, still running.\n",
+            "### Re: prune completed subagents (HEAD)\n",
+            "<!-- agent:boundary:ef1863ea -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = concat!(
+            "### Re: prune completed subagents\n\n",
+            "- **Pruned:** ctlmaint and claimduring.\n",
+            "- **Kept:** gsync2, still running.\n",
+        );
+
+        let repaired = materialize_response_in_current_exchange(current, response)
+            .expect("exchange should be repairable");
+
+        assert_eq!(
+            repaired
+                .matches("### Re: prune completed subagents")
+                .count(),
+            1,
+            "{repaired}"
+        );
+        assert_eq!(repaired.matches("- **Pruned:**").count(), 1, "{repaired}");
+        assert!(
+            repaired.contains(
+                "### Re: prune completed subagents (HEAD)\n\n- **Pruned:** ctlmaint and claimduring.\n"
+            ),
+            "{repaired}"
+        );
     }
 
     #[test]

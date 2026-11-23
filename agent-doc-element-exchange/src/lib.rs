@@ -1156,11 +1156,12 @@ fn exchange_response_heading_lines(segments: &[&str]) -> Vec<(usize, String)> {
 /// `#respondfalsefail`: remove a `### Re:` heading an editor-side patch
 /// application duplicated WITHOUT a body.
 ///
-/// Observed 2026-11-23 on agent-doc-bugs.md (patch `48c34928`): the JetBrains
-/// visible write of a response that re-quoted an earlier chat prompt inserted
-/// a second copy of the PREVIOUS response's heading above that response's
-/// prompt record, leaving
-/// `### Re: X` / `> **Chat prompt …**` / `### Re: X` / body. The
+/// Observed 2026-11-23 on agent-doc-bugs.md: a retained captured-response
+/// cell replay (`#jbdupheading`, fixed in `agent-doc-turn` `response_replay`)
+/// stranded the response's own ` (HEAD)` heading above its re-appended prompt
+/// record, leaving
+/// `### Re: X` / `> **Chat prompt …**` / `### Re: X` / body. The next JetBrains
+/// visible write (patch `48c34928`) applied exactly against that buffer, so the
 /// `#ipcfullprompt` detector logged `response_duplicated(### Re: X:1->2)`, but
 /// nothing repaired it, so the bodiless heading was adopted and committed.
 ///
@@ -2198,7 +2199,8 @@ mod tests {
     const BODILESS_BEFORE: &str = "<!-- agent:exchange -->\n- **Dispatched:** gsync2.\n> **Chat prompt (#chatprompt:4e7d3b234a59):** prune completed subagents\n\n### Re: prune completed subagents\n\n- **Pruned:** ctlmaint.\n<!-- agent:boundary:ef1863ea -->\n<!-- /agent:exchange -->\n";
 
     /// The live 2026-11-23 editor candidate for patch `48c34928`: the prior
-    /// heading was copied above its own prompt record, without a body.
+    /// heading sits above its own prompt record, without a body (stranded
+    /// there earlier by the retained response-cell replay, `#jbdupheading`).
     const BODILESS_CANDIDATE: &str = "<!-- agent:exchange -->\n- **Dispatched:** gsync2.\n### Re: prune completed subagents\n\n> **Chat prompt (#chatprompt:4e7d3b234a59):** prune completed subagents\n\n### Re: prune completed subagents\n\n- **Pruned:** ctlmaint.\n> **Chat prompt (#chatprompt:4e7d3b234a59):** prune completed subagents\n\n> **Chat prompt (#chatprompt:146ddda38227):** steering\n\n### Re: prune completed subagents · #gh-fix GH #436–#439 (HEAD)\n\n**Pruned:** again.\n<!-- agent:boundary:485c8b0c -->\n<!-- /agent:exchange -->\n";
 
     #[test]

@@ -103,7 +103,10 @@ surfaces render it:
   New documents from the Claim Session File template start with it. An
   existing document gets it on its next status write. Every status write
   replaces the line rather than adding another, so a document has at most one,
-  and it follows your palette. To hide it, set `queue-legend=off` on the status
+  and it follows your palette. When agent-doc adds a marker, the next preflight
+  or `agent-doc queue sync` rewrites an older generated line to the current
+  set in place; a `Queue markers:` line you wrote yourself (one that does not
+  link this page) is never touched. To hide it, set `queue-legend=off` on the status
   marker: `<!-- agent:status patch=replace queue-legend=off -->`.
 - **This page.**
 

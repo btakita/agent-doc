@@ -160,6 +160,73 @@ pub fn apply_queue_marker_legend(status_body: &str, wanted: bool) -> String {
     }
 }
 
+/// `#queuemarkerlegend`: rewrite every stale binary-owned legend line in a status
+/// body to the current one, in place.
+///
+/// Unlike [`apply_queue_marker_legend`], this never adds, removes, or moves a
+/// line: it only replaces the text of a line that is already the generated
+/// legend (outside fenced code) but no longer matches the current marker set,
+/// keeping its leading and trailing whitespace and every other byte of the
+/// body. `None` when nothing is stale.
+pub fn refresh_stale_queue_marker_legend_body(status_body: &str) -> Option<String> {
+    let legend = agent_doc_frontmatter::frontmatter::queue_marker_legend_line();
+    let mut out = String::with_capacity(status_body.len() + legend.len());
+    let mut changed = false;
+    let mut fence: Option<(char, usize)> = None;
+    for segment in status_body.split_inclusive('\n') {
+        let line = segment.strip_suffix('\n').unwrap_or(segment);
+        match fence {
+            Some(open) => {
+                if closes_fence(line, open) {
+                    fence = None;
+                }
+                out.push_str(segment);
+            }
+            None => {
+                if let Some(open) = fence_opener(line) {
+                    fence = Some(open);
+                    out.push_str(segment);
+                } else if agent_doc_frontmatter::frontmatter::is_queue_marker_legend_line(line)
+                    && line.trim() != legend
+                {
+                    let lead = &line[..line.len() - line.trim_start().len()];
+                    let tail = &line[line.trim_end().len()..];
+                    out.push_str(lead);
+                    out.push_str(&legend);
+                    out.push_str(tail);
+                    out.push_str(&segment[line.len()..]);
+                    changed = true;
+                } else {
+                    out.push_str(segment);
+                }
+            }
+        }
+    }
+    changed.then_some(out)
+}
+
+/// `#queuemarkerlegend`: bring a stale generated `Queue markers:` legend line in
+/// `agent:status` up to the current marker set. Every sync that owns the queue
+/// component (preflight queue maintenance and `agent-doc queue sync`) runs
+/// this, so a document whose status is never rewritten still picks up a new
+/// marker. It only rewrites a line that is already the binary-owned legend
+/// (it starts with `Queue markers:` and links the legend anchor), so operator
+/// prose about markers is never touched; it never adds a missing legend or
+/// removes one (status writes own that), and it does nothing when the
+/// document does not want a legend (`queue-legend=off`, or no runnable-work
+/// component). `None` when nothing changes, so a current legend is a no-op.
+pub fn refresh_stale_queue_marker_legend(content: &str) -> Option<String> {
+    let components = element::parse(content).ok()?;
+    let status = components
+        .iter()
+        .find(|component| component.name == "status")?;
+    if !status_queue_legend_wanted(content, status) {
+        return None;
+    }
+    let body = refresh_stale_queue_marker_legend_body(status.content(content))?;
+    Some(status.replace_content(content, &body))
+}
+
 fn collapse_trailing_blank_lines(body: &str) -> String {
     let trimmed = body.trim_end_matches(['\n', ' ', '\t']);
     if trimmed.trim().is_empty() {
@@ -1489,6 +1556,74 @@ mod tests {
         assert!(!queue_legend_attr_disables(Some("on")));
         assert!(is_valid_queue_legend_attr_value(Some("no")));
         assert!(!is_valid_queue_legend_attr_value(Some("maybe")));
+    }
+
+    /// The pre-`#treetopglyph` legend: no `🗑️`/`🔒` entries. agent-loop
+    /// `src/haiven-dev/tasks/sdk/sdk-dev.md` (2026-11-22) carried exactly this
+    /// line while its rows already showed `~~🗑️ …~~`.
+    const OLD_LEGEND: &str = "Queue markers: 👀 seen · 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ keep: worker done · ⚠️ lost · ⚠️🟡 lost + claimed · ⚠️🚧 lost + running · ⚠️☑️ lost + worker done · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin · ▫️ generated row · ~~done~~ safe to delete ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))";
+
+    /// `#queuemarkerlegend`: a sync upgrades an old generated legend in place,
+    /// keeps every byte around it, and a second sync is a no-op.
+    #[test]
+    fn stale_generated_legend_is_upgraded_in_place_and_idempotent() {
+        let doc = queue_doc(
+            "<!-- agent:status patch=replace -->",
+            &format!(
+                "\nOperator prose before.\n\n{OLD_LEGEND}\n\nQueue markers: my own note, not generated.\n"
+            ),
+        );
+        let upgraded = refresh_stale_queue_marker_legend(&doc).expect("old legend is stale");
+        assert_eq!(
+            status_body(&upgraded),
+            format!(
+                "\nOperator prose before.\n\n{}\n\nQueue markers: my own note, not generated.\n",
+                legend()
+            )
+        );
+        assert!(legend().contains("🗑\u{fe0f} delete this subtree"));
+        assert!(legend().contains("🔒 keep (cut at 🗑\u{fe0f})"));
+        // Only the status body changed.
+        assert_eq!(
+            upgraded.replace(&legend(), OLD_LEGEND),
+            doc,
+            "nothing outside the legend line moves"
+        );
+        assert_eq!(refresh_stale_queue_marker_legend(&upgraded), None);
+    }
+
+    /// `#queuemarkerlegend`: a current legend, a hand-written marker line, a
+    /// fenced legend, an opted-out status, and a document without a queue are
+    /// all left byte-identical.
+    #[test]
+    fn current_or_unowned_legend_is_left_byte_identical() {
+        let current = queue_doc(
+            "<!-- agent:status patch=replace -->",
+            &format!("\nWorking.\n\n{}\n", legend()),
+        );
+        assert_eq!(refresh_stale_queue_marker_legend(&current), None);
+
+        // Hand-written: no link to the legend anchor, so not binary-owned.
+        let hand = queue_doc(
+            "<!-- agent:status -->",
+            "\nQueue markers: 📥 pending · 🚧 running\n",
+        );
+        assert_eq!(refresh_stale_queue_marker_legend(&hand), None);
+
+        let fenced = queue_doc(
+            "<!-- agent:status -->",
+            &format!("\n```\n{OLD_LEGEND}\n```\n"),
+        );
+        assert_eq!(refresh_stale_queue_marker_legend(&fenced), None);
+
+        let opted_out = queue_doc(
+            "<!-- agent:status queue-legend=off -->",
+            &format!("\n{OLD_LEGEND}\n"),
+        );
+        assert_eq!(refresh_stale_queue_marker_legend(&opted_out), None);
+
+        let no_queue = format!("<!-- agent:status -->\n{OLD_LEGEND}\n<!-- /agent:status -->\n");
+        assert_eq!(refresh_stale_queue_marker_legend(&no_queue), None);
     }
 
     #[test]

@@ -5511,6 +5511,66 @@ fn test_queue_sync_materializes_priority_go_backlog_and_session_check_enforces_t
     }
 }
 
+/// `#queuemarkerlegend`: `queue sync` upgrades a stale generated `Queue markers:`
+/// line (here the pre-`#treetopglyph` legend with no `🗑️`/`🔒`) in place,
+/// keeps the prose around it, and a second sync leaves the file unchanged.
+#[test]
+fn test_queue_sync_upgrades_stale_queue_marker_legend_in_place() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let doc = root.join("session.md");
+    let old_legend = "Queue markers: 👀 seen · 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ keep: worker done · ⚠️ lost · ⚠️🟡 lost + claimed · ⚠️🚧 lost + running · ⚠️☑️ lost + worker done · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin · ▫️ generated row · ~~done~~ safe to delete ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))";
+    let content = format!(
+        concat!(
+            "---\n",
+            "agent_doc_session: legend-session\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "## Status <!-- agent:status patch=replace -->\n",
+            "Operator prose stays.\n\n",
+            "{old}\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Run <!-- agent:run -->\n",
+            "<!-- /agent:run -->\n",
+        ),
+        old = old_legend,
+    );
+    fs::write(&doc, &content).unwrap();
+    init_git_repo(root, &doc);
+    seed_snapshot(root, &doc, &content);
+
+    let mut sync = agent_doc_cmd();
+    sync.current_dir(root);
+    sync.args(["queue", "sync", "session.md"]);
+    sync.assert().success();
+    let synced = fs::read_to_string(&doc).unwrap();
+    let current = agent_doc_frontmatter::frontmatter::queue_marker_legend_line();
+    assert!(current.contains("🗑\u{fe0f} delete this subtree"));
+    assert!(current.contains("🔒 keep (cut at 🗑\u{fe0f})"));
+    assert!(
+        synced.contains(&format!(
+            "Operator prose stays.\n\n{current}\n<!-- /agent:status -->"
+        )),
+        "the stale legend is upgraded in place:\n{synced}"
+    );
+    assert!(!synced.contains(old_legend), "{synced}");
+    assert_eq!(synced.matches("Queue markers:").count(), 1, "{synced}");
+
+    let mut again = agent_doc_cmd();
+    again.current_dir(root);
+    again.args(["queue", "sync", "session.md"]);
+    again.assert().success();
+    assert_eq!(
+        fs::read_to_string(&doc).unwrap(),
+        synced,
+        "a second sync is a no-op"
+    );
+}
+
 #[test]
 fn test_cli_controller_status_reports_inactive_without_launching() {
     let tmp = tempfile::TempDir::new().unwrap();

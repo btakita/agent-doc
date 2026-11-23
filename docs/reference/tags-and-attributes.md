@@ -268,7 +268,8 @@ or unknown `sync-mode` value fails closed and leaves the status body unchanged.
 In a document with an `agent:run`, `agent:loop`, or `agent:queue` section,
 every status write keeps one binary-owned `Queue markers: …` legend line as the
 last paragraph of the status body (see
-[Queue Markers](../guide/queue-markers.md#queue-markers)). `queue-legend=off`
+[Queue Markers](../guide/queue-markers.md#queue-markers)), and preflight and
+`queue sync` upgrade an older generated line in place. `queue-legend=off`
 on the status marker hides it; `queue-legend` also accepts `on`, `true`/`false`,
 `yes`/`no`, and `1`/`0`.
 

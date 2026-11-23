@@ -7734,6 +7734,23 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         ));
     }
 
+    // `#queuemarkerlegend`: a document whose status is never rewritten still gets
+    // the current marker set in its generated `Queue markers:` line. Only an
+    // existing binary-owned legend line is rewritten, in place.
+    if let Some(refreshed) =
+        agent_doc_document::status_projection::refresh_stale_queue_marker_legend(&current_content)
+    {
+        current_content = refreshed;
+        mutated = true;
+        eprintln!(
+            "[preflight] queue: refreshed the stale queue marker legend (#queuemarkerlegend)"
+        );
+        effect_phase.log_op(format!(
+            "queue_marker_legend_refreshed file={} source=preflight (#queuemarkerlegend)",
+            file.display()
+        ));
+    }
+
     // Consume start fence if needed
     if activation.consumed_start_fence {
         let new_body = agent_doc_queue::document_queue::render(&activation.entries_after);

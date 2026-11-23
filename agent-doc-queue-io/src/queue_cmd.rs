@@ -2592,6 +2592,23 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
         }
         None => normalized_responses,
     };
+    // `#queuemarkerlegend`: upgrade a stale generated `Queue markers:` line.
+    let normalized_responses =
+        match agent_doc_document::status_projection::refresh_stale_queue_marker_legend(
+            &normalized_responses,
+        ) {
+            Some(refreshed) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_marker_legend_refreshed file={} source=queue_sync (#queuemarkerlegend)",
+                        file.display()
+                    ),
+                );
+                refreshed
+            }
+            None => normalized_responses,
+        };
     let response_metadata_repaired = normalized_responses != content;
     if response_metadata_repaired {
         effects.converge_document_or_disk(

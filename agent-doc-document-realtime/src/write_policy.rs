@@ -178,10 +178,20 @@ struct ReconciledRebase {
 /// operator cut keeps both versions of the line.
 ///
 /// For each top-level component the chain left unchanged (`chain_target` body
-/// equals `chain_base` body) the returned base takes `current_cut`'s body. A
-/// component the chain wrote keeps `chain_base`'s body, so a chain response a
-/// reconnecting editor never received still reads as agent text. The framing
-/// is `current_cut`'s, since the chain did not write it.
+/// equals `chain_base` body) the returned base takes `current_cut`'s body.
+///
+/// So does a component the chain wrote whose change `current_cut`
+/// does not show yet (no line the chain added is in the cut beyond the base's
+/// copies, and every line the chain removed is still there). The cut then holds
+/// no agent op in that component, so everything it changed over `chain_base`
+/// is the operator's. Keeping `chain_base` there made each successor claim the
+/// operator's rows, typed into the very queue an ack struck, as agent text,
+/// and the next composition or retained rebase kept them twice.
+///
+/// A component the chain wrote and the cut already shows keeps `chain_base`'s
+/// body, so a chain response a reconnecting editor never received still reads
+/// as agent text. The framing is `current_cut`'s, since the chain did not
+/// write it.
 ///
 /// `None` when the chain's change is not component-scoped (it changed framing
 /// or the component layout), or `current_cut` holds a different component
@@ -191,13 +201,61 @@ pub fn advance_retained_base_over_untouched_components(
     chain_target: &str,
     current_cut: &str,
 ) -> Option<String> {
-    let footprint =
-        agent_doc_element::component_scope::changed_component_scope(chain_base, chain_target)?;
-    agent_doc_element::component_scope::replace_component_bodies(
-        current_cut,
-        chain_base,
-        &footprint,
-    )
+    use agent_doc_element::component_scope::{
+        ComponentWriteScope, changed_component_scope, replace_component_bodies,
+        top_level_component_bodies,
+    };
+    let footprint = changed_component_scope(chain_base, chain_target)?;
+    let base_bodies = top_level_component_bodies(chain_base)?;
+    let target_bodies = top_level_component_bodies(chain_target)?;
+    let cut_bodies = top_level_component_bodies(current_cut)?;
+    let body_of =
+        |doc: &str,
+         bodies: &[agent_doc_element::component_scope::TopLevelComponentBody],
+         component: &agent_doc_element::component_scope::ScopedComponent| {
+            bodies
+                .iter()
+                .find(|candidate| &candidate.component == component)
+                .map(|candidate| doc[candidate.body.clone()].to_string())
+        };
+    let mut kept = Vec::new();
+    for component in footprint.components() {
+        let base = body_of(chain_base, &base_bodies, component)?;
+        let target = body_of(chain_target, &target_bodies, component)?;
+        let cut = body_of(current_cut, &cut_bodies, component)?;
+        if chain_change_visible_in_cut(&base, &target, &cut) {
+            kept.push(component.clone());
+        }
+    }
+    replace_component_bodies(current_cut, chain_base, &ComponentWriteScope::new(kept))
+}
+
+/// Whether `cut` shows any of the line-level change `base` ->
+/// `target` (counted with multiplicity; blank lines ignored). A line the
+/// change added that the cut holds more often than the base, or a line it
+/// removed that the cut holds less often, is visible.
+fn chain_change_visible_in_cut(base: &str, target: &str, cut: &str) -> bool {
+    fn counts(body: &str) -> std::collections::HashMap<&str, usize> {
+        let mut counts = std::collections::HashMap::new();
+        for line in body.lines().filter(|line| !line.trim().is_empty()) {
+            *counts.entry(line).or_insert(0) += 1;
+        }
+        counts
+    }
+    if cut == base {
+        return false;
+    }
+    let (base, target, cut) = (counts(base), counts(target), counts(cut));
+    let count = |counts: &std::collections::HashMap<&str, usize>, line: &str| {
+        counts.get(line).copied().unwrap_or(0)
+    };
+    let added_visible = target.iter().any(|(line, &copies)| {
+        copies > count(&base, line) && count(&cut, line) > count(&base, line)
+    });
+    let removed_visible = base
+        .iter()
+        .any(|(line, &copies)| copies > count(&target, line) && count(&cut, line) < copies);
+    added_visible || removed_visible
 }
 
 /// `typingdupe` (2): drop, from an agent target, every component whose whole
@@ -4873,6 +4931,31 @@ mod tests {
             ),
             Some(typingdupe_doc(TYPINGDUPE_LIVE, TYPINGDUPE_SNAPSHOT)),
             "Todo takes the current cut; the queue the chain wrote keeps the original base"
+        );
+        // The cut does not show the chain's strike yet, and the
+        // operator typed a row into the queue the chain wrote. The cut's queue
+        // holds no agent op, so the whole base takes the cut.
+        let typed_queue = format!("{TYPINGDUPE_LIVE}- 📥 #rebase\n");
+        let unapplied_cut = typingdupe_doc(&typed_queue, TYPINGDUPE_SNAPSHOT);
+        assert_eq!(
+            advance_retained_base_over_untouched_components(
+                &chain_base,
+                &chain_target,
+                &unapplied_cut
+            ),
+            Some(unapplied_cut.clone()),
+            "an unapplied chain component takes the cut, so the operator's row is base text"
+        );
+        // The chain removed a row the cut no longer holds: that half of the
+        // change is visible, so the queue keeps the original base.
+        let removed_cut = typingdupe_doc("- 📥 #rebase\n", TYPINGDUPE_SNAPSHOT);
+        assert_eq!(
+            advance_retained_base_over_untouched_components(
+                &chain_base,
+                &chain_target,
+                &removed_cut
+            ),
+            Some(typingdupe_doc(TYPINGDUPE_LIVE, TYPINGDUPE_SNAPSHOT)),
         );
         // A chain that rewrote the framing is not component-scoped: no advance.
         let reframed = chain_target.replace("agent_doc_format: template", "agent_doc_format: x");

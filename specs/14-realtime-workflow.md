@@ -2144,6 +2144,24 @@ The rules:
   `{source}_deferred_write_base_advanced … components=[…]`). When the chain's
   change is not component-scoped, or the cut has a different component layout,
   the original base is kept.
+- **A chain-written component the cut does not show yet advances too.**
+  Measured on a PR-tracking session document 2026-11-23T04:16:40Z-04:22:29Z
+  (build 0.35.586, controller generation 3703).
+  Five `queue consume --ack-text` strikes, each retained while the editor's
+  native save stayed deferred, composed over one another. The operator was
+  typing rows into the same queue component the strikes wrote, so the old
+  rule kept that component's original base. Each composed pair claimed every
+  row typed since then as agent text. Composition then merged successive
+  snapshots of those rows as concurrent additions, and the controller's
+  retained rebase (`retained_transition_projection_effect`, +12486 bytes)
+  kept them again beside the operator's newer copy. The claim projection
+  marked each copy, so `🚧 [#subagent:rebase380#1] #rebase` read five times.
+  A component the chain wrote takes the cut's body too when the cut shows
+  none of the chain's line-level change: no line the chain added is in the
+  cut beyond the base's copies, and every line it removed is still there.
+  The cut then holds no agent op in that component, so the pair is exactly
+  the chain's strikes. A component whose chain change the cut already shows
+  keeps the original base, as above.
 - **A stale typing snapshot is not an agent op.** Before any agent target is
   rebased over an editor cut (`rebase_agent_candidate_over_editor_cut`, and
   so the controller's retained transition too), each component the target
@@ -2159,8 +2177,12 @@ The regression
 (`agent-doc-document-realtime-io`) drives the real retained-intent journal
 through the composition and then the controller's rebase. It asserts that the
 composed pair does not scope the Todo, and that the projection holds exactly
-one copy of the operator's finished line. The `write_policy` tests pin each
-rule on its own.
+one copy of the operator's finished line.
+`dupsdk_composed_ack_keeps_one_copy_of_rows_typed_into_the_queue_it_strikes`
+drives three composed strikes over a queue the operator types into, and
+asserts that the composed target holds each operator row once, that the
+operator's rows are base text, and that the projection keeps one claim row.
+The `write_policy` tests pin each rule on its own.
 
 The exhausted state is durable, not just a log line (`#splicesessionack`, GH
 #273 remainder): `session-check` kept reporting "the exact editor delivery

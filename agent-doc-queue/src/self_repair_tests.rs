@@ -784,3 +784,134 @@ fn struck_row_trailing_text_that_is_not_the_same_id_is_kept() {
         "{repaired}"
     );
 }
+
+/// `#selfrepaircleanup`: the PR-tracking queue a retained rebase corrupted on
+/// 2026-11-23. The claim projection marked every copy of the operator's
+/// `#rebase` row, so one attempt's row read several times, back to back and
+/// under a copied PR heading, beside doubled operator rows. Exact copies
+/// collapse to one; the copy holding a response stays; every row whose text
+/// differs, and the operator's own repeated headings, stay.
+#[test]
+fn dupsdk_duplicate_claim_and_sibling_rows_collapse_keeping_the_copy_with_children() {
+    const CLAIM_380: &str = "  - 🚧 [#subagent:rebase380#1] #rebase\n";
+    const CLAIM_377: &str = "  - 🚧 [#subagent:rebase377#1] #rebase\n";
+    const RESPONSE: &str = concat!(
+        "    - **Response [#r-0a1b2c3d4e5f]**\n",
+        "      - **Summary:** Rebased onto sdk-dev.\n",
+    );
+    let damaged = doc(&format!(
+        concat!(
+            "- ### https://github.com/acme/widget-sdk/pull/377\n",
+            "  - %% docs(sdk): add quickstarts to every README %%\n",
+            "{claim377}",
+            "{claim377}",
+            "  - 📥 squash and merge\n",
+            "  - 📥 squash and me\n",
+            "- ### https://github.com/acme/widget-sdk/pull/378\n",
+            "  - %% feat(sdk): port the credential lifecycle %%\n",
+            "- ### 🔒 https://github.com/acme/widget-sdk/pull/379\n",
+            "  - 📥 squash and merge\n",
+            "  - 📥 squash and merge\n",
+            "- ### https://github.com/acme/widget-sdk/pull/380\n",
+            "  - %% test(conformance): prove the credential lifecycle %%\n",
+            "{claim380}",
+            "{claim380}",
+            "  - squash and merge\n",
+            "- ### https://github.com/acme/widget-sdk/pull/378\n",
+            "  - %% feat(sdk): port the credential lifecycle %%\n",
+            "- ### https://github.com/acme/widget-sdk/pull/380\n",
+            "  - %% test(conformance): prove the credential lifecycle %%\n",
+            "{claim380}",
+            "{response}",
+            "  - 📥 #rebase\n",
+            "- ### https://github.com/acme/widget-sdk/pull/383\n",
+            "  - %% chore(license): ship the license %%\n",
+            "  - 📥 #adversarial-pr\n",
+            "  - 📥 #rebase\n",
+            "  - 📥 #adversarial-pr\n",
+        ),
+        claim377 = CLAIM_377,
+        claim380 = CLAIM_380,
+        response = RESPONSE,
+    ));
+    let (repaired, repairs) =
+        self_repair_document(&damaged, &retired, &unproven).expect("the copies collapse");
+    assert_eq!(
+        repaired,
+        doc(&format!(
+            concat!(
+                "- ### https://github.com/acme/widget-sdk/pull/377\n",
+                "  - %% docs(sdk): add quickstarts to every README %%\n",
+                "{claim377}",
+                "  - 📥 squash and merge\n",
+                "  - 📥 squash and me\n",
+                "- ### https://github.com/acme/widget-sdk/pull/378\n",
+                "  - %% feat(sdk): port the credential lifecycle %%\n",
+                "- ### 🔒 https://github.com/acme/widget-sdk/pull/379\n",
+                "  - 📥 squash and merge\n",
+                "- ### https://github.com/acme/widget-sdk/pull/380\n",
+                "  - %% test(conformance): prove the credential lifecycle %%\n",
+                "  - squash and merge\n",
+                "- ### https://github.com/acme/widget-sdk/pull/378\n",
+                "  - %% feat(sdk): port the credential lifecycle %%\n",
+                "- ### https://github.com/acme/widget-sdk/pull/380\n",
+                "  - %% test(conformance): prove the credential lifecycle %%\n",
+                "{claim380}",
+                "{response}",
+                "  - 📥 #rebase\n",
+                "- ### https://github.com/acme/widget-sdk/pull/383\n",
+                "  - %% chore(license): ship the license %%\n",
+                "  - 📥 #adversarial-pr\n",
+                "  - 📥 #rebase\n",
+            ),
+            claim377 = CLAIM_377,
+            claim380 = CLAIM_380,
+            response = RESPONSE,
+        )),
+    );
+    let kinds = |kind: SelfRepairKind| repairs.iter().filter(|r| r.kind == kind).count();
+    assert_eq!(kinds(SelfRepairKind::DuplicateClaimRow), 3, "{repairs:?}");
+    assert_eq!(kinds(SelfRepairKind::DuplicateSiblingRow), 2, "{repairs:?}");
+    assert_eq!(repairs.len(), 5, "{repairs:?}");
+    assert!(repairs.iter().any(|repair| repair.log_fields()
+        == "kind=duplicate_claim_row detail=\"🚧 [#subagent:rebase380#1] #rebase\""));
+    assert!(
+        self_repair_document(&repaired, &retired, &unproven).is_none(),
+        "a second run is a no-op"
+    );
+    assert!(self_repair_artifacts_absent(
+        &repaired,
+        "operator: delete the duplicate `[#subagent:rebase380#1]` row"
+    ));
+    assert!(!self_repair_artifacts_absent(
+        &damaged,
+        "operator: delete the duplicate `[#subagent:rebase380#1]` row"
+    ));
+}
+
+/// `#selfrepaircleanup`: copies whose subtrees differ are both operator text, and a
+/// claim row with a different attempt or text is a different row.
+#[test]
+fn dupsdk_rows_that_differ_or_hold_different_children_are_kept() {
+    let queue = concat!(
+        "- ### https://github.com/acme/widget-sdk/pull/380\n",
+        "  - 🚧 [#subagent:rebase380#1] #rebase\n",
+        "    - keep the history linear\n",
+        "  - 🚧 [#subagent:rebase380#1] #rebase\n",
+        "    - squash first\n",
+        "  - 🚧 [#subagent:rebase380#2] #rebase\n",
+        "  - 🟡 [#subagent:rebase380#1] #rebase\n",
+        "  - squash and merge\n",
+        "    - after CI\n",
+        "  - squash and merge\n",
+        "    - before CI\n",
+        "  - squash and merge \n",
+        "- squash and merge\n",
+        "- squash and merge\n",
+    );
+    let document = doc(queue);
+    let (repaired, repairs) = dedupe_live_rows(&document);
+    assert!(repairs.is_empty(), "{repairs:?}");
+    assert_eq!(repaired, document);
+    assert!(self_repair_document(&document, &retired, &unproven).is_none());
+}

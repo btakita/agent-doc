@@ -6933,8 +6933,9 @@ fn ensure_deferred_document_write_intent_with_mode(
                 // marker cleanup, compaction). Re-basing on the prior target would
                 // make a reconnecting pre-force editor look like it deleted the
                 // response introduced by that target. `typingdupe`: only for the
-                // components that chain wrote; every other component's base is
-                // the cut this successor was derived over.
+                // components that chain wrote and the cut already shows; every
+                // other component's base is the cut this successor was derived
+                // over.
                 expected_content = advance_retained_chain_base(
                     file,
                     source,
@@ -7023,8 +7024,10 @@ fn ensure_deferred_document_write_intent_with_mode(
 
 /// `typingdupe`: the base a successor of `pending` keeps. A chain of retained
 /// writes keeps its original editor cut as the base of every component the
-/// chain wrote, so a reconnecting editor that never received the chain's
-/// response still sees it as agent text. Every other component takes
+/// chain wrote and `current_cut` already shows, so a reconnecting editor that
+/// never received the chain's response still sees it as agent text. A
+/// component the chain wrote but the cut does not show yet, and
+/// every component the chain never wrote, takes
 /// `current_cut`'s body, the cut the successor was derived over: keeping the
 /// original body there pairs an older snapshot of the operator's typing (base)
 /// with a newer one (target), which the next rebase over the operator's cut
@@ -7060,7 +7063,7 @@ fn advance_retained_chain_base(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "{source}_deferred_write_base_advanced file={} prior_intent_id={} components=[{components}] reason=chain_untouched_components_take_current_cut (typingdupe)",
+            "{source}_deferred_write_base_advanced file={} prior_intent_id={} components=[{components}] reason=chain_untouched_or_unapplied_components_take_current_cut (typingdupe)",
             file.display(),
             pending.intent_id,
         ),
@@ -18154,6 +18157,142 @@ mod tests {
                 "{rebased}"
             );
         }
+    }
+
+    /// `typingdupe`: a PR-tracking queue, 2026-11-23T04:16:40Z-04:22:29Z (build
+    /// 0.35.586, controller generation 3703). `queue consume --ack-text`
+    /// struck rows under repeated PR headings while the operator typed new rows
+    /// into the SAME queue. Every ack was retained (the editor's native save
+    /// stayed deferred), and five successors composed over one another. Each
+    /// composition merged a target derived over the newest cut but kept the
+    /// chain's ORIGINAL base for the queue, because the chain had written the
+    /// queue. The pair then claimed every operator row typed since that base as
+    /// agent text, so the controller's retained rebase over the still newer cut
+    /// (`retained_transition_projection_effect`, +12486 bytes) kept the
+    /// operator's rows twice, and the claim projection then marked each copy:
+    /// `  - 🚧 [#subagent:rebase380#1] #rebase` appeared five times.
+    ///
+    /// A chain-written component whose chain change the cut does not show yet
+    /// carries no agent op in the cut, so the successor's base takes the cut's
+    /// body for it; the retained pair is then exactly the agent's strikes.
+    #[test]
+    fn dupsdk_composed_ack_keeps_one_copy_of_rows_typed_into_the_queue_it_strikes() {
+        let doc = |r377: &str, r380: &str, r383: &str| {
+            format!(
+                concat!(
+                    "---\nagent_doc_format: template\n---\n\n",
+                    "<!-- agent:exchange patch=append -->\n",
+                    "❯ Track the PRs.\n",
+                    "<!-- /agent:exchange -->\n\n",
+                    "<!-- agent:queue go -->\n",
+                    "- ### https://github.com/acme/widget-sdk/pull/377\n",
+                    "  - %% docs(sdk): add quickstarts to every README %%\n",
+                    "{}",
+                    "- ### https://github.com/acme/widget-sdk/pull/378\n",
+                    "  - %% feat(sdk): port the credential lifecycle %%\n",
+                    "- ### https://github.com/acme/widget-sdk/pull/380\n",
+                    "  - %% test(conformance): prove the credential lifecycle %%\n",
+                    "{}",
+                    "- ### https://github.com/acme/widget-sdk/pull/378\n",
+                    "  - %% feat(sdk): port the credential lifecycle %%\n",
+                    "- ### https://github.com/acme/widget-sdk/pull/383\n",
+                    "  - %% chore(license): ship the license %%\n",
+                    "{}",
+                    "<!-- /agent:queue -->\n",
+                ),
+                r377, r380, r383,
+            )
+        };
+        let claimed = "  - 🚧 [#subagent:rebase380#1] #rebase\n";
+        // Each ack strikes one row over the cut it read. Every strike stays
+        // retained (never visible) while the operator types into the same
+        // queue, so each successor composes over the previous intent.
+        let relay1 = doc(
+            "  - squash and merge\n",
+            "  - #adversarial-pr\n",
+            "  - #adversarial-pr\n",
+        );
+        let target1 = doc(
+            "  - ~~squash and merge~~\n",
+            "  - #adversarial-pr\n",
+            "  - #adversarial-pr\n",
+        );
+        let relay2 = doc(
+            "  - squash and merge\n  - 📥 #rebase\n  - squash and me\n",
+            "  - #adversarial-pr\n  - #rebase\n",
+            "  - #adversarial-pr\n",
+        );
+        let target2 = doc(
+            "  - squash and merge\n  - 📥 #rebase\n  - squash and me\n",
+            "  - ~~#adversarial-pr~~\n  - #rebase\n",
+            "  - #adversarial-pr\n",
+        );
+        let relay3 = doc(
+            "  - squash and merge\n  - 📥 #rebase\n  - squash and merge after CI\n",
+            &format!("  - #adversarial-pr\n{claimed}"),
+            "  - #adversarial-pr\n  - #rebase\n",
+        );
+        let target3 = doc(
+            "  - squash and merge\n  - 📥 #rebase\n  - squash and merge after CI\n",
+            &format!("  - #adversarial-pr\n{claimed}"),
+            "  - ~~#adversarial-pr~~\n  - #rebase\n",
+        );
+        let (_dir, file, _canonical) = temp_doc(&relay1);
+        for (expected, target) in [
+            (&relay1, &target1),
+            (&relay2, &target2),
+            (&relay3, &target3),
+        ] {
+            ensure_deferred_document_write_intent(
+                &file,
+                expected,
+                target,
+                "queue_consume_ack_text",
+                DocumentWriteDeferredReason::EditorProjectionPending,
+            )
+            .unwrap();
+        }
+        let pending = pending_document_write(&file).expect("composed ack retained");
+        let base = pending
+            .expected_content
+            .as_deref()
+            .expect("composed intent keeps its base");
+        // The retained pair is exactly the agent's three strikes: every row
+        // the operator typed is base text, never agent text.
+        assert_eq!(
+            pending.target_content,
+            doc(
+                "  - ~~squash and merge~~\n  - 📥 #rebase\n  - squash and merge after CI\n",
+                &format!("  - ~~#adversarial-pr~~\n{claimed}"),
+                "  - ~~#adversarial-pr~~\n  - #rebase\n",
+            ),
+            "the composed target holds each operator row once"
+        );
+        assert_eq!(base, relay3, "the operator's rows are base text");
+
+        // The operator keeps typing before the controller projects it.
+        let delivery = doc(
+            "  - squash and merge\n  - 📥 #rebase\n  - squash and merge after CI\n  - 📥 #adversarial-pr\n",
+            &format!("  - #adversarial-pr\n{claimed}"),
+            "  - #adversarial-pr\n  - #rebase\n",
+        );
+        let projected =
+            agent_doc_document_realtime::write_policy::rebase_retained_target_over_editor_cut(
+                base,
+                &pending.target_content,
+                &delivery,
+            )
+            .unwrap();
+        assert_eq!(
+            projected,
+            doc(
+                "  - ~~squash and merge~~\n  - 📥 #rebase\n  - squash and merge after CI\n  - 📥 #adversarial-pr\n",
+                &format!("  - ~~#adversarial-pr~~\n{claimed}"),
+                "  - ~~#adversarial-pr~~\n  - #rebase\n",
+            ),
+            "the three strikes land and every operator row stays singular"
+        );
+        assert_eq!(projected.matches(claimed).count(), 1, "{projected}");
     }
 
     #[test]

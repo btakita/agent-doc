@@ -71,6 +71,23 @@
 //!   re-offered finished work. Only an exact repeat of the id inside the
 //!   strike is folded; a different id or any other trailing text stays.
 //!
+//! - **Duplicate live rows**. A retained rebase that paired the
+//!   operator's rows with an older base kept them twice, and the claim
+//!   projection then marked every copy, so one `🚧 [#subagent:x#1] #rebase`
+//!   row read five times. Two kinds of copy collapse, with the struck-row
+//!   rule (the first copy holding each distinct subtree stays, else the first
+//!   copy; a copy is removed only when its subtree is empty or byte-identical
+//!   to a kept copy's):
+//!   - live claim rows (an exact-attempt owner projection leads the row)
+//!     with byte-identical text at the same indent anywhere in the queue: one
+//!     attempt claims one row;
+//!   - other live child rows with byte-identical text under the same parent
+//!     at the same indent.
+//!
+//!   A row whose text differs by a byte, a top-level row (the operator's own
+//!   repeated headings), a struck row (the struck pass owns it), and
+//!   generated response structure are never removed.
+//!
 //! Generated response structure (`**Label:**` rows and response-detail rows)
 //! is never rewritten by the label pass. Every repair is returned so the
 //! caller logs it in ops.log.
@@ -86,7 +103,7 @@ use agent_doc_element::element;
 use agent_doc_markdown_ast::overlay::RESPONSE_DETAIL_MARKER;
 
 /// What a repair did.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SelfRepairKind {
     /// Removed an extra struck copy of a row.
     DuplicateStruckRow,
@@ -114,6 +131,12 @@ pub enum SelfRepairKind {
     /// Moved a row that sat more than one level below its parent row up to
     /// sit exactly one level below it, with its subtree (`#selfrepaircleanup`).
     MisnestedChildRow,
+    /// Removed an extra byte-identical copy of a live claim row
+    /// (`🚧 [#subagent:x#1] work`) anywhere in the queue.
+    DuplicateClaimRow,
+    /// Removed an extra byte-identical copy of a live child row under the
+    /// same parent.
+    DuplicateSiblingRow,
 }
 
 impl SelfRepairKind {
@@ -128,6 +151,8 @@ impl SelfRepairKind {
             Self::RowInsideResponseTree => "row_inside_response_tree",
             Self::StruckRowTrailingId => "struck_row_trailing_id",
             Self::MisnestedChildRow => "misnested_child_row",
+            Self::DuplicateClaimRow => "duplicate_claim_row",
+            Self::DuplicateSiblingRow => "duplicate_sibling_row",
         }
     }
 }
@@ -253,19 +278,74 @@ fn edit_queue_bodies(
 }
 
 fn dedupe_struck_rows_in_body(body: &str, repairs: &mut Vec<SelfRepair>) -> String {
+    dedupe_rows_in_body(body, repairs, |item, parent| {
+        is_struck_row(item).then_some((SelfRepairKind::DuplicateStruckRow, parent))
+    })
+}
+
+/// a live row whose leading projection names an exact attempt.
+fn is_live_claim_row(item: &str) -> bool {
+    let heading = item.strip_prefix("### ").unwrap_or(item);
+    !is_struck_row(item)
+        && agent_doc_document::queue_projection::owner_projection(heading).is_some()
+}
+
+/// Generated response structure: a `**Label:**` row or a response-detail row.
+fn is_generated_response_structure(item: &str) -> bool {
+    item.starts_with("**") || item.contains(RESPONSE_DETAIL_MARKER)
+}
+
+fn dedupe_live_rows_in_body(body: &str, repairs: &mut Vec<SelfRepair>) -> String {
+    dedupe_rows_in_body(body, repairs, |item, parent| {
+        if item.trim().is_empty() || is_struck_row(item) || is_generated_response_structure(item) {
+            None
+        } else if is_live_claim_row(item) {
+            // One attempt claims one row: copies under any parent collapse.
+            Some((SelfRepairKind::DuplicateClaimRow, None))
+        } else {
+            parent.map(|parent| (SelfRepairKind::DuplicateSiblingRow, Some(parent)))
+        }
+    })
+}
+
+/// remove extra byte-identical copies of live claim rows and of
+/// live child rows under one parent (see the module docs).
+pub fn dedupe_live_rows(document: &str) -> (String, Vec<SelfRepair>) {
+    edit_queue_bodies(document, dedupe_live_rows_in_body)
+}
+
+/// Collapse rows `classify` groups: it returns the repair kind and the scope
+/// (`Some(parent)` for siblings, `None` for the whole body) of a row that may
+/// collapse, or `None` for a row that never does. Copies share the kind, the
+/// scope, the indent and the exact row text.
+fn dedupe_rows_in_body(
+    body: &str,
+    repairs: &mut Vec<SelfRepair>,
+    classify: impl Fn(&str, Option<usize>) -> Option<(SelfRepairKind, Option<usize>)>,
+) -> String {
     let lines = lines_of(body);
     let parents = parents(&lines);
-    // (parent, indent, exact row text) -> copies in document order.
-    let mut groups: HashMap<(Option<usize>, usize, &str), Vec<usize>> = HashMap::new();
-    let mut order: Vec<(Option<usize>, usize, &str)> = Vec::new();
+    type Key<'a> = (SelfRepairKind, Option<usize>, usize, &'a str);
+    // (kind, scope, indent, exact row text) -> copies in document order.
+    let mut groups: HashMap<Key<'_>, Vec<usize>> = HashMap::new();
+    let mut order: Vec<Key<'_>> = Vec::new();
     for (index, line) in lines.iter().enumerate() {
         let Some(item) = line.item else {
             continue;
         };
-        if !is_struck_row(item) {
+        let Some((kind, scope)) = classify(item, parents[index]) else {
             continue;
-        }
-        let key = (parents[index], line.indent, item);
+        };
+        // A live copy must match byte for byte, trailing whitespace included:
+        // a row the operator is still typing is not a copy of a finished one.
+        let text = if kind == SelfRepairKind::DuplicateStruckRow {
+            item
+        } else {
+            let raw = body[line.start..line.end].trim_end_matches(['\n', '\r']);
+            // After the indent and the two-byte bullet (`- `, `* `, `+ `).
+            raw.get(line.indent + 2..).unwrap_or(item)
+        };
+        let key = (kind, scope, line.indent, text);
         let copies = groups.entry(key).or_default();
         if copies.is_empty() {
             order.push(key);
@@ -320,8 +400,8 @@ fn dedupe_struck_rows_in_body(body: &str, repairs: &mut Vec<SelfRepair>) -> Stri
             }
             removed.push((start, end));
             repairs.push(SelfRepair {
-                kind: SelfRepairKind::DuplicateStruckRow,
-                detail: key.2.to_string(),
+                kind: key.0,
+                detail: key.3.trim_end().to_string(),
                 rewritten: None,
             });
         }
@@ -979,8 +1059,9 @@ pub fn renest_closed_by_rows(document: &str) -> (String, Vec<SelfRepair>) {
 /// backlink rows nested too deep, rows that skip indentation levels under
 /// their parent, stale claim labels, claim-label residue,
 /// struck rows' trailing id copies, then duplicate struck rows (a label
-/// removal, residue restore or id fold can make two struck copies identical). `None` when nothing changed; a second run is a
-/// no-op.
+/// removal, residue restore or id fold can make two struck copies
+/// identical), then duplicate live claim and child rows. `None`
+/// when nothing changed; a second run is a no-op.
 pub fn self_repair_document(
     document: &str,
     is_live: &dyn Fn(&str, u64) -> bool,
@@ -1030,6 +1111,9 @@ pub fn self_repair_document(
     let (deduped, dedupe_repairs) = dedupe_struck_rows(&current);
     current = deduped;
     repairs.extend(dedupe_repairs);
+    let (deduped, live_repairs) = dedupe_live_rows(&current);
+    current = deduped;
+    repairs.extend(live_repairs);
     (current != document).then_some((current, repairs))
 }
 
@@ -1109,7 +1193,9 @@ pub fn is_self_repair_cleanup_item(item: &str) -> bool {
 ///   subtrees (self-repair keeps copies whose subtrees differ, and those
 ///   still need a person);
 /// - when the item is about a claim label, no row carries one the label
-///   repair would remove once its claim retires.
+///   repair would remove once its claim retires;
+/// - no live claim row or live child row has a copy the duplicate pass
+///   would remove.
 pub fn self_repair_artifacts_absent(document: &str, item: &str) -> bool {
     let Ok((_, misplaced)) =
         crate::queue_consume::retire_misplaced_queue_response_projections(document, &|_| true)
@@ -1164,6 +1250,7 @@ pub fn self_repair_artifacts_absent(document: &str, item: &str) -> bool {
         return false;
     }
     queues.iter().all(|body| !struck_duplicate_siblings(body))
+        && dedupe_live_rows(document).1.is_empty()
 }
 
 /// `r-…` ids an item names (`[#r-abc123]`, `#r-abc123`), lowercase.

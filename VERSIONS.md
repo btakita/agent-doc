@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.589
+
+- **`respond` reports a delivered response as success or deferral, not failure** (`dc9c164137`). When the response has landed but the live editor replica is still converging, the recap-settle write now waits on that convergence: a converged write lets the commit continue (exit 0), and one still retained exits 75 as a deferral. An editor receipt that diverges from the retained canonical is treated the same way. A coordinator trusting the exit code no longer re-sends and duplicates the response. A `### Re:` heading duplicated without a body is removed before the IPC snapshot is adopted.
+- **Response-cell replay no longer leaves a duplicated `### Re:` heading** (`07f3cd4b07`). Replaying a retained captured response over an orphaned run of its lines now ignores the editor's transient ` (HEAD)` heading projection, so the heading moves with the run instead of staying above the re-appended record.
+- **A status write is no longer lost to a concurrent retained write** (`94fea7019b`). A deferred write now records the pending intent it was composed over, and the controller refuses a successor composed over a superseded intent (`deferred_write_basis_advanced`) under the same document fence as the append. The writer recomposes over the new pending intent and appends again, so neither change is dropped.
+- **`session stop-agent` and `session clear` answer before publishing the lifecycle (GH #438)** (`c3c2f4331a`). The supervisor writes the receipt for the local effect, releases its IPC handoff, then publishes the lifecycle transitions to the controller in FIFO order. A slow controller no longer holds the receipt past the client's 10s deadline, and `state`/`pid` queries never wait behind an effect.
+- **JetBrains upgrades reach the Remote Dev Client (GH #439, GH #437)** (`fd7003e66b`, `32e9dd1b4b`). `agent-doc upgrade` finds a thin Client's `<IDE data dir>/plugins/frontend`, installs the modular ZIP there, and adds the release's frontend signing key to the Client trust file. Plugin resolution accepts the pinned release even while GitHub flags it a prerelease, and a ZIP whose `<idea-version>` excludes the IDE build is refused before anything is touched. The printed Client steps name the exact ZIP, directory, and trust file.
+- **JetBrains logs every drawn turn banner (GH #436)** (`e74d8d5099`). The banner logs `[turn-state] banner shown` the first time each label is drawn for a document, so an `input required` banner always has a matching idea.log line.
+- **Queue response trees settle in one sync** (`443fc92f52`, `65b900c8bc`, `fd5a2a4a1b`). A nested Remaining re-render is never spliced at moved offsets, and self-repair drops torn tails. One answer resolves every copy of a Remaining entry. Only the tally pass rewrites a tally.
+- **Main CI compiles the Windows release target on every push** (`cf163eb84f`), and the FlowCore guard budget, Lazily CAS callsite ledger scanner, and supervisor facade check accept the GH #438 and respond test code (`cbbc34ff52`, `2587ed710d`, `9053397243`, `a7cfd92b5e`).
+- JetBrains classic `0.2.1044` and the modular 262–263.* ZIP `0.2.1046`; `pluginReleaseVersion` moves to `0.35.589`. VS Code stays `0.2.104`. Zed stays `0.1.8`.
+
 ## 0.35.588
 
 - **Publishes everything listed under 0.35.587.** Tag `v0.35.587` was pushed, but its Windows build failed, so it stays an incomplete prerelease and was never published to PyPI. 0.35.588 carries all of the 0.35.587 changes below.

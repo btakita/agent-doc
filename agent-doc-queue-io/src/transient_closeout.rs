@@ -92,6 +92,21 @@ pub fn closeout_evidence_at(file: &Path, content: &str, now_secs: u64) -> Closeo
     let schedule_held_heads = crate::queue_schedule::schedule_held_heads(file, content)
         .into_iter()
         .collect();
+    // `#dispatchheldstop`: the same hold subagent dispatch reads
+    // (`#waitingitemclaimmarker`). An unreadable lineage ledger holds nothing,
+    // so those rows keep the generic pending refusal.
+    let dispatch_held = match crate::queue_lineage::load_read_only(file) {
+        Ok(lineage) => crate::queue_lineage::admission_refused_identities(&lineage)
+            .into_iter()
+            .collect(),
+        Err(err) => {
+            eprintln!(
+                "[agent-doc] could not read queue lineage for {} to name dispatch-held rows; they keep the generic pending refusal: {err:#}",
+                file.display()
+            );
+            HashMap::new()
+        }
+    };
     CloseoutEvidence {
         fresh_claims,
         codex_coordinator_claims,
@@ -105,6 +120,7 @@ pub fn closeout_evidence_at(file: &Path, content: &str, now_secs: u64) -> Closeo
             file, content,
         ),
         integrations_in_flight,
+        dispatch_held,
     }
 }
 
@@ -373,5 +389,43 @@ mod tests {
             !failure.contains("no bound running worker claim backs this row"),
             "{failure}"
         );
+    }
+
+    /// `#dispatchheldstop`: the Stop gate reads the same refused-admission hold
+    /// subagent dispatch reads (`#waitingitemclaimmarker`), so a held `📥` row
+    /// names its blocker and re-admission instead of "leave pending".
+    #[test]
+    fn dispatchheldstop_the_stop_gate_names_a_refused_admission_hold() {
+        const HELD: &str = "do [#pushreadmechanges]";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let content = write_doc(&doc, &format!("📥 {HELD}"));
+        let (_, claim) = crate::queue_claim::claim(&doc, HELD, "subagent:pushreadme", 600).unwrap();
+        crate::queue_lineage::record_admission_refused(
+            &doc,
+            &claim,
+            crate::queue_cmd::CLAIM_PROJECTION_UNREPRESENTABLE,
+        )
+        .unwrap();
+
+        let evidence = closeout_evidence(&doc, &content);
+        assert_eq!(evidence.dispatch_held.len(), 1, "{evidence:#?}");
+        let assessment = assess_transient_closeout(&content, &evidence).unwrap();
+        assert_eq!(assessment.debts.len(), 1, "{assessment:#?}");
+        let debt = &assessment.debts[0];
+        let hold = debt
+            .dispatch_held
+            .as_ref()
+            .expect("the row is dispatch-held");
+        assert_eq!(hold.blocker, "claim_projection_unrepresentable");
+        assert!(
+            hold.claim_command.starts_with(&format!(
+                "agent-doc queue claim {} --item '#pushreadmechanges'",
+                doc.display()
+            )),
+            "{hold:#?}"
+        );
+        assert!(!debt.holds_turn_through_recursive_stop());
     }
 }

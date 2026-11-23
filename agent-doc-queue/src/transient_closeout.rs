@@ -120,11 +120,51 @@ pub struct TransientCloseoutDebt {
     /// refusal renders it beside the owed text, so the agent runs it rather
     /// than asking the operator to delete the row.
     pub close_command: Option<String>,
+    /// `#dispatchheldstop`: subagent dispatch holds this `📥` row because its
+    /// newest claim admission was refused for a deterministic blocker
+    /// (`#waitingitemclaimmarker`). Dispatch never re-offers it, so it does
+    /// not hold the turn through a recursive Stop; every refusal names the
+    /// blocker and the exact re-admission command instead.
+    pub dispatch_held: Option<DispatchHold>,
+}
+
+/// A refused claim admission that holds a `📥` row from subagent dispatch
+/// (`#dispatchheldstop`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DispatchHold {
+    /// The recorded blocker, e.g. `claim_projection_unrepresentable`.
+    pub blocker: String,
+    /// The explicit `agent-doc queue claim` that re-admits the row once the
+    /// blocker is fixed; a newer generation lifts the hold.
+    pub claim_command: String,
+}
+
+impl DispatchHold {
+    /// What the blocker means and how to fix it, for the blockers the binary
+    /// records today.
+    fn remedy(&self) -> &'static str {
+        match self.blocker.as_str() {
+            "claim_projection_unrepresentable" => {
+                "the claim marker could not be shown on the row, usually because the same row appears more than once in the document; remove the extra copy so one row carries this item"
+            }
+            _ => "fix what the blocker names",
+        }
+    }
 }
 
 impl TransientCloseoutDebt {
     /// `- row <row>: <owed>`, plus the exact close command when one exists.
     pub fn render(&self) -> String {
+        if let Some(hold) = &self.dispatch_held {
+            return format!(
+                "- row {}: {} (blocker `{}`: {}). Then re-admit it with `{}`, or answer the row inline.",
+                self.row,
+                self.owed,
+                hold.blocker,
+                hold.remedy(),
+                hold.claim_command
+            );
+        }
         match &self.close_command {
             Some(command) => format!(
                 "- row {}: {} Close it now with `{command}`.",
@@ -132,6 +172,14 @@ impl TransientCloseoutDebt {
             ),
             None => format!("- row {}: {}", self.row, self.owed),
         }
+    }
+
+    /// Whether this debt keeps refusing a recursive Stop over an unchanged
+    /// debt set (`#transientcloseout`). A dispatch-held `📥` row does not:
+    /// nothing in this turn re-offers it until its blocker is fixed, and the
+    /// refusal already named the fix (`#dispatchheldstop`).
+    pub fn holds_turn_through_recursive_stop(&self) -> bool {
+        self.dispatch_held.is_none() && marker_holds_turn_through_recursive_stop(self.marker)
     }
 }
 
@@ -262,6 +310,11 @@ pub struct CloseoutEvidence {
     /// `integrating` receipt. Only [`IntegrationInFlightStatus::Live`] holds a
     /// `☑️` row quiescent.
     pub integrations_in_flight: HashMap<QueueItemIdentity, IntegrationInFlight>,
+    /// `#dispatchheldstop`: work identities whose newest claim admission was
+    /// refused, with the recorded blocker (`#waitingitemclaimmarker`).
+    /// Subagent dispatch holds those rows, so a `📥` row among them owes the
+    /// blocker's fix and an explicit re-admission, not a dispatch.
+    pub dispatch_held: HashMap<QueueItemIdentity, String>,
 }
 
 /// `#finishedheadrefill`: a current-generation attempt whose worker finished and
@@ -479,6 +532,10 @@ const OWED_RUNNING_RECORDED_HANDBACK: &str = "report the hand-back its ended wor
 /// tree's operator request is answered (or when it names none).
 const OWED_REPORTED_RESPONSE_ORIGIN: &str = "the operator answered this reported row's request: act on the answer, then strike the row yourself with `agent-doc queue consume` (by its generated `--ack-id <q-…>`, fenced with `--ack-owner`); its kept response tree makes it a context parent, not an executable leaf, and no worker remains to dispatch. The agent closes this row: never ask the operator to delete it by hand.";
 
+/// `#dispatchheldstop`: what a `📥` row owes while a refused claim admission
+/// holds it from subagent dispatch.
+pub const OWED_DISPATCH_HELD: &str = "subagent dispatch holds this row: its last claim admission was refused, so the pool will not offer it again. Fix the blocker";
+
 /// `#finishactionable`: what a pending agent-owned `follow up on an action
 /// item` row owes. The worker's hand-back listed it as agent work, so it is
 /// done in this turn under the originating item's authorization; only a
@@ -599,6 +656,7 @@ pub fn assess_transient_closeout(
                 marker,
                 owed,
                 close_command: None,
+                dispatch_held: None,
             };
             let identity = crate::queue_claim::claim_identity_at(&entries, index)
                 .unwrap_or_else(|| crate::queue_claim::claim_identity(&prompt.text));
@@ -787,6 +845,32 @@ pub fn assess_transient_closeout(
                     assessment
                         .quiescent
                         .push(quiescent(QuiescentReason::ScheduleNotDue));
+                }
+                // `#dispatchheldstop`: a refused claim admission holds this
+                // row from dispatch; "leave pending" would only repeat a
+                // dispatch that refuses again. Name the blocker and the fix.
+                QueueLifecycleMarker::Pending if evidence.dispatch_held.contains_key(&identity) => {
+                    let blocker = evidence.dispatch_held[&identity].clone();
+                    let mut held = debt(OWED_DISPATCH_HELD);
+                    held.dispatch_held = Some(DispatchHold {
+                        blocker,
+                        claim_command: crate::reported_closeout::shell_command(&[
+                            "agent-doc".to_string(),
+                            "queue".to_string(),
+                            "claim".to_string(),
+                            evidence
+                                .document
+                                .clone()
+                                .unwrap_or_else(|| "<FILE>".to_string()),
+                            "--item".to_string(),
+                            crate::queue_claim::claim_item_handle(
+                                &queue_projection::strip_in_progress_marker(&prompt.text),
+                            ),
+                            "--owner".to_string(),
+                            "subagent:<label>".to_string(),
+                        ]),
+                    });
+                    assessment.debts.push(held);
                 }
                 // `#finishactionable`: an agent-owned action item a worker
                 // hand-back reported is this turn's work, not a later drain.
@@ -2594,5 +2678,58 @@ EXCHANGE<!-- /agent:exchange -->
                 .contains("agent-doc queue report-complete '<FILE>' --item '#work' --generation 2"),
             "{failure}"
         );
+    }
+
+    /// `#dispatchheldstop` (haiven-dev `tasks/sdk/sdk-dev.md`, 2026-11-23):
+    /// `do [#pushreadmechanges]` appeared twice, so its claim admission was
+    /// refused (`claim_projection_unrepresentable`) and dispatch held it for
+    /// three hours. Every Stop said only "leave pending before the turn ends".
+    /// The refusal now names the blocker, its fix, and the exact re-admission,
+    /// and the held row alone does not keep refusing a recursive Stop.
+    #[test]
+    fn a_dispatch_held_pending_row_names_its_blocker_and_does_not_hold_a_recursive_stop() {
+        let content = "<!-- agent:queue -->\n- 📥 do [#pushreadmechanges]\n- 📥 do [#drainablehead]\n<!-- /agent:queue -->\n";
+        let evidence = CloseoutEvidence {
+            document: Some("/tmp/sdk-dev.md".to_string()),
+            dispatch_held: [(
+                identity_of(content, "pushreadmechanges"),
+                "claim_projection_unrepresentable".to_string(),
+            )]
+            .into(),
+            ..CloseoutEvidence::default()
+        };
+        let assessment = assess_transient_closeout(content, &evidence).unwrap();
+        assert_eq!(assessment.debts.len(), 2, "{assessment:#?}");
+        let held = &assessment.debts[0];
+        assert_eq!(held.row, "📥 do [#pushreadmechanges]");
+        let rendered = held.render();
+        assert!(rendered.contains(OWED_DISPATCH_HELD), "{rendered}");
+        assert!(
+            rendered.contains("blocker `claim_projection_unrepresentable`"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("remove the extra copy"), "{rendered}");
+        assert!(
+            rendered.contains(
+                "`agent-doc queue claim /tmp/sdk-dev.md --item '#pushreadmechanges' --owner 'subagent:<label>'`"
+            ),
+            "{rendered}"
+        );
+        assert!(!held.holds_turn_through_recursive_stop(), "{held:#?}");
+
+        // The drainable head beside it is unchanged: it still holds the turn.
+        let drainable = &assessment.debts[1];
+        assert!(drainable.dispatch_held.is_none(), "{drainable:#?}");
+        assert!(
+            drainable
+                .render()
+                .contains("leave pending before the turn ends")
+        );
+        assert!(drainable.holds_turn_through_recursive_stop());
+
+        // With no hold recorded, the same row owes the ordinary pending text.
+        let plain = assess_transient_closeout(content, &CloseoutEvidence::default()).unwrap();
+        assert!(plain.debts.iter().all(|debt| debt.dispatch_held.is_none()));
+        assert!(plain.debts[0].holds_turn_through_recursive_stop());
     }
 }

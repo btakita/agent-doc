@@ -623,9 +623,274 @@ pub fn handle_stop() -> Result<Option<SubagentQuotaBlockApplied>> {
 pub fn handle_claude_stop() -> Result<Option<SubagentQuotaBlockApplied>> {
     // Read stdin exactly once; `claude_stop_response` owns every decision made
     // from it, so the tests exercise the same function the hook does.
-    let (response, quota) = claude_stop_response_with_quota(read_stdin_payload().as_deref().ok())?;
-    println!("{}", serde_json::to_string(&response)?);
-    Ok(quota)
+    let payload = read_stdin_payload().ok();
+    let stop_hook_active = claude_stop_payload_active(payload.as_deref());
+    let run =
+        run_claude_stop_within_budget(claude_stop_hook_deadline(), stop_hook_active, move || {
+            claude_stop_response_with_quota(payload.as_deref())
+        })?;
+    println!("{}", serde_json::to_string(&run.response)?);
+    if run.timed_out {
+        // `#claudestopbudget`: as in `handle_stop`, the still-running worker
+        // cannot be cancelled. Flush the answer and end the process so
+        // Claude Code reads it instead of cancelling a hook that is still alive.
+        use std::io::Write as _;
+        std::io::stdout()
+            .flush()
+            .context("flush timed-out Claude Stop response")?;
+        std::process::exit(0);
+    }
+    Ok(run.quota)
+}
+
+/// `#claudestopbudget`: inner wall-clock budget for one Claude/Grok Stop hook.
+///
+/// The installed entry gives the hook `CLAUDE_STOP_HOOK_TIMEOUT_SECS` (15s).
+/// On expiry Claude Code cancels the hook and DISCARDS its output, so the turn
+/// ends with no refusal and no notice at all. On haiven-dev
+/// `tasks/sdk/sdk-dev.md` (2026-11-23, a project controller answering nothing
+/// inside 5s) six of twelve turn ends were such cancellations, each leaving up
+/// to 22 `📥` rows live without a word. The binary answers first, from what it
+/// can still prove, and leaves the harness the rest of its timeout.
+pub const CLAUDE_STOP_HOOK_BUDGET_SECS: u64 = 11;
+const CLAUDE_STOP_HOOK_BUDGET_ENV: &str = "AGENT_DOC_CLAUDE_STOP_HOOK_BUDGET_SECS";
+/// How many `📥` rows a budget answer names before summarising the rest.
+const CLAUDE_STOP_BUDGET_ROW_LIMIT: usize = 25;
+/// How much of one row a budget answer quotes.
+const CLAUDE_STOP_BUDGET_ROW_CHARS: usize = 160;
+
+/// `None` when the Stop tests select `worker_completion` (the same opt-in as
+/// the Codex Stop hook, `#stophookdeadlineflake`); otherwise the budget.
+fn claude_stop_hook_deadline() -> Option<std::time::Duration> {
+    let mode = std::env::var(STOP_HOOK_DEADLINE_ENV).ok();
+    if mode.as_deref().map(str::trim) == Some(STOP_HOOK_DEADLINE_WORKER_COMPLETION) {
+        return None;
+    }
+    Some(resolve_claude_stop_hook_budget(
+        std::env::var(CLAUDE_STOP_HOOK_BUDGET_ENV).ok().as_deref(),
+    ))
+}
+
+fn resolve_claude_stop_hook_budget(raw: Option<&str>) -> std::time::Duration {
+    let secs = raw
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .filter(|secs| *secs > 0)
+        .unwrap_or(CLAUDE_STOP_HOOK_BUDGET_SECS);
+    std::time::Duration::from_secs(secs)
+}
+
+/// `stop_hook_active` from a raw Claude Stop payload; `false` when the payload
+/// is missing or not JSON (the inner function allows those anyway).
+fn claude_stop_payload_active(payload: Option<&str>) -> bool {
+    payload
+        .and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok())
+        .and_then(|envelope| envelope.get("stop_hook_active")?.as_bool())
+        .unwrap_or(false)
+}
+
+struct ClaudeStopHookRun {
+    response: serde_json::Value,
+    quota: Option<SubagentQuotaBlockApplied>,
+    timed_out: bool,
+}
+
+/// What the Claude Stop worker had established when its budget ran out.
+#[derive(Clone, Default)]
+struct ClaudeStopProgress(std::sync::Arc<std::sync::Mutex<Option<PathBuf>>>);
+
+impl ClaudeStopProgress {
+    fn document(&self) -> Option<PathBuf> {
+        self.0.lock().unwrap_or_else(|err| err.into_inner()).clone()
+    }
+}
+
+thread_local! {
+    static CLAUDE_STOP_PROGRESS: std::cell::RefCell<Option<ClaudeStopProgress>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Record the session document this Stop resolved, so a budget answer can
+/// name its pending rows. A no-op outside the budgeted worker thread.
+fn note_claude_stop_document(file: &Path) {
+    CLAUDE_STOP_PROGRESS.with(|progress| {
+        if let Some(progress) = progress.borrow().as_ref() {
+            *progress.0.lock().unwrap_or_else(|err| err.into_inner()) = Some(file.to_path_buf());
+        }
+    });
+}
+
+/// Run one Claude Stop decision under `budget` (`#claudestopbudget`).
+///
+/// `None` waits for the decision. On expiry the answer comes from
+/// [`claude_stop_budget_answer`] instead, so the turn never ends on a
+/// cancelled hook with no output.
+fn run_claude_stop_within_budget<F>(
+    budget: Option<std::time::Duration>,
+    stop_hook_active: bool,
+    task: F,
+) -> Result<ClaudeStopHookRun>
+where
+    F: FnOnce() -> Result<(serde_json::Value, Option<SubagentQuotaBlockApplied>)> + Send + 'static,
+{
+    let Some(budget) = budget else {
+        let (response, quota) = task()?;
+        return Ok(ClaudeStopHookRun {
+            response,
+            quota,
+            timed_out: false,
+        });
+    };
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let ledger = StopPhaseLedger::default();
+    let progress = ClaudeStopProgress::default();
+    let (worker_ledger, worker_progress) = (ledger.clone(), progress.clone());
+    std::thread::Builder::new()
+        .name("agent-doc-claude-stop".to_string())
+        .spawn(move || {
+            STOP_PHASE_LEDGER.with(|slot| *slot.borrow_mut() = Some(worker_ledger));
+            CLAUDE_STOP_PROGRESS.with(|slot| *slot.borrow_mut() = Some(worker_progress));
+            let _ = sender.send(task());
+        })
+        .context("spawn Claude Stop hook worker")?;
+    match receiver.recv_timeout(budget) {
+        Ok(result) => {
+            let (response, quota) = result?;
+            Ok(ClaudeStopHookRun {
+                response,
+                quota,
+                timed_out: false,
+            })
+        }
+        Err(err) => {
+            let why = match err {
+                std::sync::mpsc::RecvTimeoutError::Timeout => format!(
+                    "it ran past its {}s budget (phases: {})",
+                    budget.as_secs(),
+                    ledger.render()
+                ),
+                std::sync::mpsc::RecvTimeoutError::Disconnected => {
+                    "its worker ended without an answer".to_string()
+                }
+            };
+            let answer =
+                claude_stop_budget_answer(stop_hook_active, progress.document().as_deref(), &why);
+            Ok(ClaudeStopHookRun {
+                response: answer.to_hook_output(),
+                quota: None,
+                timed_out: true,
+            })
+        }
+    }
+}
+
+/// The live `📥` rows the on-disk copy of `file` still lists, read without the
+/// project controller (`#claudestopbudget`). Gated rows (operator-owned,
+/// blocked, schedule-held, queue-held) are left out, as the full gate leaves
+/// them out.
+fn pending_rows_on_disk(file: &Path) -> Result<Vec<String>> {
+    // A pure observation: no authority record, no controller round trip.
+    let content =
+        agent_doc_document_realtime_io::peek_disk_document_content(file, "claude_stop_budget")?;
+    let evidence = agent_doc_queue::transient_closeout::CloseoutEvidence {
+        document: Some(file.display().to_string()),
+        ..Default::default()
+    };
+    Ok(
+        agent_doc_queue::transient_closeout::assess_transient_closeout(&content, &evidence)?
+            .debts
+            .into_iter()
+            .filter(|debt| {
+                debt.marker == agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+            })
+            .map(|debt| debt.row)
+            .collect(),
+    )
+}
+
+/// One bullet per row, each quoted to a bounded length, capped in count.
+fn render_pending_rows(rows: &[String]) -> String {
+    let mut out = String::new();
+    for row in rows.iter().take(CLAUDE_STOP_BUDGET_ROW_LIMIT) {
+        let quoted: String = row.chars().take(CLAUDE_STOP_BUDGET_ROW_CHARS).collect();
+        let ellipsis = if row.chars().count() > CLAUDE_STOP_BUDGET_ROW_CHARS {
+            "…"
+        } else {
+            ""
+        };
+        out.push_str(&format!("\n- {quoted}{ellipsis}"));
+    }
+    if rows.len() > CLAUDE_STOP_BUDGET_ROW_LIMIT {
+        out.push_str(&format!(
+            "\n- …and {} more",
+            rows.len() - CLAUDE_STOP_BUDGET_ROW_LIMIT
+        ));
+    }
+    out
+}
+
+/// `#claudestopbudget`: the answer when the Stop check could not finish.
+///
+/// A turn-first Stop whose document still lists `📥` rows keeps the turn going
+/// once, naming the rows, so the agent dispatches them instead of ending over
+/// them. A recursive Stop (or no pending row) ends the turn with a
+/// `systemMessage` naming each row left and why, never in silence.
+fn claude_stop_budget_answer(
+    stop_hook_active: bool,
+    document: Option<&Path>,
+    why: &str,
+) -> ClaudeStopAnswer {
+    let Some(file) = document else {
+        return ClaudeStopAnswer::Allow {
+            system_message: Some(format!(
+                "agent-doc ended this turn without finishing its Stop-hook queue check: {why}, before it resolved this session's document, so pending rows could not be named (#claudestopbudget). Run `agent-doc session-check <FILE>` once the project controller answers."
+            )),
+        };
+    };
+    let rows = pending_rows_on_disk(file);
+    let action = match &rows {
+        Ok(rows) if !rows.is_empty() && !stop_hook_active => "continue_turn",
+        _ => "allow_final_answer",
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "claude_stop_budget_exceeded why={:?} pending_rows={} stop_hook_active={stop_hook_active} action={action} (#claudestopbudget)",
+            why,
+            rows.as_ref().map_or_else(
+                |err| format!("unreadable:{err:#}"),
+                |rows| rows.len().to_string()
+            ),
+        ),
+    );
+    let display = file.display();
+    match rows {
+        Ok(rows) if !rows.is_empty() && !stop_hook_active => {
+            ClaudeStopAnswer::Continue(ClaudeStopContinuation {
+                reason: format!(
+                    "agent-doc's Stop check did not finish: {why} (#claudestopbudget). It cannot prove this turn may end. The on-disk copy of {display} still lists {} pending 📥 row(s):{}\nDispatch each drainable row now: `agent-doc queue pool {display}` prints the refill with each row's claim, brief, and start commands; answer a row inline when it needs no worker. If a row cannot move in this turn, name it and why in the final answer. Do not send the final answer yet.",
+                    rows.len(),
+                    render_pending_rows(&rows),
+                ),
+            })
+        }
+        Ok(rows) if !rows.is_empty() => ClaudeStopAnswer::Allow {
+            system_message: Some(format!(
+                "agent-doc ended this turn with {} pending 📥 row(s) in {display} still live, because its Stop check did not finish again: {why} (#claudestopbudget). The rows stay live for the next turn; the route supervisor's idle-queue watch continues the queue, and `agent-doc queue pool {display}` prints the refill:{}",
+                rows.len(),
+                render_pending_rows(&rows),
+            )),
+        },
+        Ok(_) => ClaudeStopAnswer::Allow {
+            system_message: Some(format!(
+                "agent-doc ended this turn without finishing its Stop-hook queue check: {why} (#claudestopbudget). The on-disk copy of {display} lists no pending 📥 row. If this turn owed a queue transition, run `agent-doc session-check {display}` once the project controller answers."
+            )),
+        },
+        Err(err) => ClaudeStopAnswer::Allow {
+            system_message: Some(format!(
+                "agent-doc ended this turn without finishing its Stop-hook queue check: {why}, and could not read {display} to name its pending rows: {err:#} (#claudestopbudget). Run `agent-doc session-check {display}` once the project controller answers."
+            )),
+        },
+    }
 }
 
 /// The JSON the Claude Stop hook prints for `payload`.
@@ -748,10 +1013,30 @@ fn claude_stop_error_is_controller_busy(err: &anyhow::Error) -> bool {
 /// no `decision`, so the turn ends, plus a `systemMessage` so the skipped
 /// check is visible to the operator instead of silent.
 fn claude_stop_controller_busy_message(err: &anyhow::Error) -> String {
-    format!(
+    let mut message = format!(
         "agent-doc skipped the Stop-hook queue-continuation check: the project controller was too busy to answer ({}). The final answer was allowed instead of blocked; the route supervisor's idle-queue watch still continues the queue. If this turn owed a queue transition, run `agent-doc session-check <FILE>` once the controller answers.",
         format!("{err:#}").replace('\n', " ")
-    )
+    );
+    // `#claudestopbudget`: name the rows this turn ended over, from disk,
+    // rather than only "a queue transition" the operator has to go find.
+    let noted = CLAUDE_STOP_PROGRESS.with(|progress| {
+        progress
+            .borrow()
+            .as_ref()
+            .and_then(ClaudeStopProgress::document)
+    });
+    if let Some(file) = noted
+        && let Ok(rows) = pending_rows_on_disk(&file)
+        && !rows.is_empty()
+    {
+        message.push_str(&format!(
+            " The on-disk copy of {} still lists {} pending 📥 row(s), left live:{}",
+            file.display(),
+            rows.len(),
+            render_pending_rows(&rows)
+        ));
+    }
+    message
 }
 
 fn claude_stop_controller_busy_output(err: &anyhow::Error) -> serde_json::Value {
@@ -1669,6 +1954,7 @@ fn claude_stop_answer_with_drain_readiness(
     input: &ClaudeStopInput,
     drain_readiness: impl Fn(&Path) -> agent_doc_controller::status::SupervisorDrainReadiness,
 ) -> Result<ClaudeStopAnswer> {
+    stop_phase("claude_stop_load_bound_session");
     let cwd = PathBuf::from(&input.cwd);
     let Some((_loaded_root, state)) = load_bound_session_for_stop(&cwd, &input.session_id)? else {
         return Ok(ClaudeStopAnswer::allow());
@@ -1677,6 +1963,8 @@ fn claude_stop_answer_with_drain_readiness(
     if !file.exists() {
         return Ok(ClaudeStopAnswer::allow());
     }
+    note_claude_stop_document(&file);
+    stop_phase("claude_stop_cycle_gates");
     // `#stophookactiveguard`: the transient-closeout refusal record is
     // turn-scoped. `stop_hook_active = false` marks this turn's first Stop, and
     // any gate below may answer it (a queue or steering continuation, a
@@ -1854,6 +2142,7 @@ fn transient_turn_end_continuation(
     file: &Path,
     drain_readiness: impl FnOnce(&Path) -> agent_doc_controller::status::SupervisorDrainReadiness,
 ) -> Result<ClaudeStopAnswer> {
+    stop_phase("claude_stop_transient_closeout_read");
     let content = match current_document_content(file, "claude_stop_transient_closeout") {
         Ok(content) => content,
         // `#stophookactiveguard`: an unreadable document is bounded the way
@@ -1902,6 +2191,7 @@ fn transient_turn_end_continuation(
     // worker claim cannot move however long the turn stays open. They stay
     // live for the operator's answer or the worker's report; only the rows
     // that are agent-actionable now hold the turn.
+    stop_phase("claude_stop_transient_closeout_assess");
     let assessment = agent_doc_queue_io::transient_closeout::assess(file, &content)?;
     if assessment.debts.is_empty() {
         if let Some(state) = assessment.quiescent_state() {
@@ -1932,9 +2222,13 @@ fn transient_turn_end_continuation(
     // The unchanged-debt allow is only for debts the agent may be unable to move.
     // `state=inbox_or_running` stays the token when any inbox or running row is
     // in the set. A checkmark-only hold uses `state=reported_open`.
-    let holds_turn = assessment.debts.iter().any(|debt| {
-        agent_doc_queue::transient_closeout::marker_holds_turn_through_recursive_stop(debt.marker)
-    });
+    // `#dispatchheldstop`: a `📥` row a refused claim admission holds from
+    // dispatch was named with its fix on the first refusal; it does not keep
+    // refusing a recursive Stop that nothing in this turn can change.
+    let holds_turn = assessment
+        .debts
+        .iter()
+        .any(agent_doc_queue::transient_closeout::TransientCloseoutDebt::holds_turn_through_recursive_stop);
     let holds_inbox_or_running = assessment.debts.iter().any(|debt| {
         matches!(
             debt.marker,
@@ -2609,11 +2903,42 @@ pub fn load_bound_session_for_stop(
     cwd: &Path,
     session_id: &str,
 ) -> Result<Option<(PathBuf, SessionState)>> {
-    let roots = project_roots_for(cwd);
+    let roots = stop_binding_roots(cwd);
     if roots.is_empty() {
         return Ok(None);
     }
     load_state_any_with_timeout(&roots, session_id, STOP_HOOK_STATE_DB_BUSY_TIMEOUT)
+}
+
+/// The roots whose hook state may hold this exact session's binding
+/// (`#stopnestedcwd`): the cwd's own roots, then every enclosing agent-doc
+/// project that already has a state database.
+///
+/// Claude Code reports the Bash tool's CURRENT directory as the Stop payload's
+/// `cwd`, so one `cd src/haiven-sdk` moves it into a nested project with its
+/// own `.agent-doc`. The binding lives in the enclosing project that admitted
+/// the turn, so the nearest-root lookup missed it and the hook allowed the
+/// turn in 54ms with 22 `📥` rows live (haiven-dev `tasks/sdk/sdk-dev.md`,
+/// 2026-11-23T05:43:27Z). The lookup stays exact-session scoped: an enclosing
+/// root answers only for this session id, so no ownership is inferred, and a
+/// root with no state database is never created by the probe.
+fn stop_binding_roots(cwd: &Path) -> Vec<PathBuf> {
+    let mut roots = project_roots_for(cwd);
+    let mut next = roots
+        .first()
+        .and_then(|root| root.parent())
+        .map(Path::to_path_buf);
+    while let Some(dir) = next {
+        let Some(root) = agent_doc_project_root_io::project_root_containing(&dir) else {
+            break;
+        };
+        // `agent_doc_sqlite::state_store::state_db_path`, without opening it.
+        if root.join(".agent-doc").join("state.db").is_file() {
+            agent_doc_codex_hook_io::push_unique_root(&mut roots, root.clone());
+        }
+        next = root.parent().map(Path::to_path_buf);
+    }
+    roots
 }
 
 /// Whether this Stop event may act on the turn stored in the session binding.
@@ -15894,6 +16219,263 @@ Waiting on the reported row.\n\
                 && ops.contains("codex_stop_steering_continuation_auto_closed"),
             "{ops}"
         );
+    }
+
+    /// A Claude Stop worker that resolves `doc`, then stalls past any budget
+    /// the way a controller read stalled on haiven-dev (2026-11-23).
+    fn stalled_claude_stop(
+        doc: PathBuf,
+    ) -> impl FnOnce() -> Result<(serde_json::Value, Option<SubagentQuotaBlockApplied>)> + Send + 'static
+    {
+        move || {
+            note_claude_stop_document(&doc);
+            stop_phase("claude_stop_transient_closeout_assess");
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            Ok((serde_json::json!({ "late": true }), None))
+        }
+    }
+
+    /// `#claudestopbudget` (haiven-dev `tasks/sdk/sdk-dev.md`, 2026-11-23):
+    /// six of twelve Stops ran past Claude Code's 15s hook timeout, were
+    /// cancelled with no output, and ended the turn silently over up to 22
+    /// `📥` rows. The binary now answers inside its own budget: a turn-first
+    /// Stop continues the turn naming each pending row and the dispatch
+    /// command; a recursive Stop ends it with a `systemMessage` naming them.
+    #[test]
+    fn claudestopbudget_a_stalled_stop_names_its_pending_rows_instead_of_timing_out() {
+        let dir = setup_project();
+        let doc = dir.path().join("sdk-dev.md");
+        fs::write(
+            &doc,
+            "<!-- agent:queue -->\n\
+- ### https://github.com/haiven-dev/haiven-api/pull/926\n\
+  - 📥 #adversarial-pr\n\
+- 📥 do [#pushreadmechanges]\n\
+- ~~struck done row~~\n\
+<!-- /agent:queue -->\n",
+        )
+        .unwrap();
+        let budget = Some(std::time::Duration::from_millis(100));
+
+        let first =
+            run_claude_stop_within_budget(budget, false, stalled_claude_stop(doc.clone())).unwrap();
+        assert!(first.timed_out);
+        let context = first.response["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap_or_else(|| panic!("a turn-first budget stop continues: {}", first.response));
+        for needle in [
+            "📥 #adversarial-pr",
+            "📥 do [#pushreadmechanges]",
+            "2 pending 📥 row(s)",
+            "#claudestopbudget",
+            "claude_stop_transient_closeout_assess=RUNNING_",
+            &format!("agent-doc queue pool {}", doc.display()),
+            "Do not send the final answer yet",
+        ] {
+            assert!(context.contains(needle), "missing {needle:?}: {context}");
+        }
+        assert!(!context.contains("struck done row"), "{context}");
+
+        let again =
+            run_claude_stop_within_budget(budget, true, stalled_claude_stop(doc.clone())).unwrap();
+        assert!(again.timed_out);
+        assert!(
+            again.response.get("hookSpecificOutput").is_none(),
+            "{}",
+            again.response
+        );
+        let notice = again.response["systemMessage"].as_str().unwrap_or_else(|| {
+            panic!("a recursive budget stop names the rows: {}", again.response)
+        });
+        assert!(notice.contains("📥 #adversarial-pr"), "{notice}");
+        assert!(notice.contains("2 pending 📥 row(s)"), "{notice}");
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("claude_stop_budget_exceeded")
+                && log.contains("action=continue_turn")
+                && log.contains("action=allow_final_answer"),
+            "{log}"
+        );
+    }
+
+    /// `#claudestopbudget`: a Stop that finishes inside its budget answers
+    /// exactly as before, and one that stalls before resolving the document
+    /// still tells the operator the check did not finish.
+    #[test]
+    fn claudestopbudget_a_prompt_answer_passes_through_and_an_unresolved_stall_is_still_visible() {
+        let fast =
+            run_claude_stop_within_budget(Some(std::time::Duration::from_secs(30)), false, || {
+                Ok((serde_json::json!({ "decided": true }), None))
+            })
+            .unwrap();
+        assert!(!fast.timed_out);
+        assert_eq!(fast.response, serde_json::json!({ "decided": true }));
+
+        let unresolved = run_claude_stop_within_budget(
+            Some(std::time::Duration::from_millis(50)),
+            false,
+            || {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                Ok((serde_json::json!({}), None))
+            },
+        )
+        .unwrap();
+        assert!(unresolved.timed_out);
+        let notice = unresolved.response["systemMessage"].as_str().unwrap();
+        assert!(
+            notice.contains("pending rows could not be named"),
+            "{notice}"
+        );
+        assert_eq!(
+            resolve_claude_stop_hook_budget(None),
+            std::time::Duration::from_secs(CLAUDE_STOP_HOOK_BUDGET_SECS)
+        );
+        assert_eq!(
+            resolve_claude_stop_hook_budget(Some("0")),
+            std::time::Duration::from_secs(CLAUDE_STOP_HOOK_BUDGET_SECS)
+        );
+        assert_eq!(
+            resolve_claude_stop_hook_budget(Some("4")),
+            std::time::Duration::from_secs(4)
+        );
+    }
+
+    /// `#stopnestedcwd` (haiven-dev, 2026-11-23T05:43:27Z): after `cd
+    /// src/haiven-sdk` the Stop payload's cwd was a nested project with its own
+    /// `.agent-doc` and `.git`. The binding lives in the enclosing project, so
+    /// the hook found none and allowed the turn in 54ms over 22 `📥` rows.
+    #[test]
+    fn claude_stop_finds_the_session_binding_from_a_nested_project_cwd() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        fs::write(
+            &doc,
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n## Queue\n\n\
+<!-- agent:queue -->\n\
+- 📥 still pending\n\
+<!-- /agent:queue -->\n",
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        complete_run(&doc);
+        let nested = dir.path().join("src/haiven-sdk");
+        fs::create_dir_all(nested.join(".agent-doc/logs")).unwrap();
+        fs::write(
+            nested.join(".git"),
+            "gitdir: ../../.git/modules/haiven-sdk\n",
+        )
+        .unwrap();
+        assert_eq!(
+            project_roots_for(&nested),
+            vec![nested.canonicalize().unwrap()],
+            "the fixture reproduces the nested project the hook resolved"
+        );
+
+        let roots = stop_binding_roots(&nested);
+        assert_eq!(
+            roots,
+            vec![
+                nested.canonicalize().unwrap(),
+                dir.path().canonicalize().unwrap()
+            ]
+        );
+        let continuation = apply_claude_stop(&ClaudeStopInput {
+            session_id: "codex-session".to_string(),
+            cwd: nested.display().to_string(),
+            stop_hook_active: false,
+            transcript_path: None,
+            reason: None,
+            subagent_type: None,
+        })
+        .unwrap()
+        .expect("the enclosing project's binding still refuses the pending row");
+        assert!(
+            continuation.reason.contains("📥 still pending"),
+            "{}",
+            continuation.reason
+        );
+        // An unrelated session is still not bound anywhere.
+        assert!(
+            load_bound_session_for_stop(&nested, "other-session")
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    /// `#dispatchheldstop`: a recursive Stop whose only debt is a `📥` row a
+    /// refused claim admission holds from dispatch ends the turn, naming the
+    /// blocker and re-admission command to the operator, instead of refusing
+    /// a row nothing in this turn will offer again.
+    #[test]
+    fn claude_stop_names_and_releases_a_dispatch_held_row_on_a_recursive_stop() {
+        const HELD: &str = "do [#pushreadmechanges]";
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        fs::write(
+            &doc,
+            format!(
+                "---\nsession: sid\nagent_doc_format: template\n---\n\n## Queue\n\n\
+<!-- agent:queue -->\n\
+- 📥 {HELD}\n\
+<!-- /agent:queue -->\n"
+            ),
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        complete_run(&doc);
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&doc, HELD, "subagent:pushreadme", 600).unwrap();
+        agent_doc_queue_io::queue_lineage::record_admission_refused(
+            &doc,
+            &claim,
+            agent_doc_queue_io::queue_cmd::CLAIM_PROJECTION_UNREPRESENTABLE,
+        )
+        .unwrap();
+        invalidate_stop_document_cache();
+        let answer = |stop_hook_active: bool| {
+            claude_stop_answer_with_drain_readiness(
+                &ClaudeStopInput {
+                    session_id: "codex-session".to_string(),
+                    cwd: dir.path().display().to_string(),
+                    stop_hook_active,
+                    transcript_path: None,
+                    reason: None,
+                    subagent_type: None,
+                },
+                |_: &Path| agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor,
+            )
+            .unwrap()
+        };
+        let first = answer(false)
+            .into_continuation()
+            .expect("the first stop names the held row");
+        assert!(
+            first
+                .reason
+                .contains("blocker `claim_projection_unrepresentable`"),
+            "{}",
+            first.reason
+        );
+        assert!(
+            first.reason.contains("agent-doc queue claim"),
+            "{}",
+            first.reason
+        );
+        let released = answer(true);
+        let ClaudeStopAnswer::Allow {
+            system_message: Some(notice),
+        } = &released
+        else {
+            panic!(
+                "an unchanged refusal over only a dispatch-held row ends the turn: {released:?}"
+            );
+        };
+        assert!(notice.contains("do [#pushreadmechanges]"), "{notice}");
+        assert!(notice.contains("agent-doc queue claim"), "{notice}");
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("state=unchanged_debts"), "{log}");
     }
 }
 

@@ -1779,6 +1779,13 @@ const _: () = assert!(
     CODEX_STOP_HOOK_TIMEOUT_SECS > agent_doc_codex_stop_io::STOP_HOOK_BUDGET_SECS,
     "the installed Codex Stop timeout must exceed the binary's Stop budget"
 );
+// `#claudestopbudget`: Claude Code cancels a Stop hook at this timeout and
+// discards its output, so the binary must answer first with margin for
+// process start and exit.
+const _: () = assert!(
+    CLAUDE_STOP_HOOK_TIMEOUT_SECS >= agent_doc_codex_stop_io::CLAUDE_STOP_HOOK_BUDGET_SECS + 3,
+    "the installed Claude Stop timeout must exceed the binary's Claude Stop budget with margin"
+);
 
 /// Claude Code's deadline for a `UserPromptSubmit` hook entry that carries no
 /// explicit `timeout`. On expiry Claude **discards the hook's output**, so an

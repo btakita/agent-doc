@@ -13,6 +13,7 @@
 //! - VS Code installs also reach every workspace extension host on the machine (`#vscoderemoteparity`): `code-server` on `PATH` (otherwise `~/.local/bin/code-server` or Coder's default `/tmp/code-server/bin/code-server`, labelled `code-server:<path>`, `#vscodecodersmoke`), Coder's `vscode-web` module (the Microsoft VS Code Server web build, default `/tmp/vscode-web/bin/code-server`, otherwise `~/.vscode-web/bin/code-server`, labelled `vscode-web:<path>`, installing with no `--extensions-dir` so the server CLI picks the same `$VSCODE_AGENT_FOLDER`-or-`~/.vscode-server/extensions` default its `serve-local` loads, `#vscodewebprefix`; each of this user's running `serve-local` servers is also a target, at the prefix and the extensions directory that server loads (`--extensions-dir`, else `<--server-data-dir>/extensions`, else that process's own `$VSCODE_AGENT_FOLDER/extensions`, else the CLI default), labelled `vscode-web:<path> --extensions-dir <dir>` when one is set, `#vscodewebextdir` `#vscodewebdatadir`), and the newest Remote-SSH server install under `~/.vscode-server` (or `$VSCODE_AGENT_FOLDER`), `~/.vscode-server-insiders`, `~/.vscodium-server` or `~/.cursor-server`, through that server's own CLI with `--extensions-dir <root>/extensions`. Both server layouts are probed (`bin/<commit>/bin/<cli>` and `cli/servers/<id>/server/bin/<cli>`). `install`, `update`, `update_all_installed` and `list` use the same targets; an install attempts every target before reporting failures, and fails before downloading only when no desktop CLI and no workspace host exists.
 //! - Asset selection matches complete versioned package shapes and prefers a signed variant. JetBrains targets prove their platform build from the versioned IDE data root: 242-261 select `agent-doc-jetbrains-<version>.zip`, 262 through 263.* select the one modular `agent-doc-jetbrains-262-<version>.zip` (`#jbdocdrift`), and an unprovable/unsupported target fails before replacement. Local installs read the selected package's own `gradle.properties`; VS Code installs require the VSIX version to match `package.json` exactly.
 //! - Downloaded editor packages are verified before installation against the release's `EDITOR-PACKAGES.sha256` manifest, falling back to GitHub's per-asset `digest`. A declared digest that disagrees with the bytes fails closed.
+//! - GH #437: `agent-doc upgrade` pins plugin resolution to the release it installed, and that pinned release is accepted even when GitHub still flags its tag `prerelease` (the checksummed stable channel can promote such a tag); every release below the pin must be stable and drafts never qualify. A downloaded JetBrains release ZIP whose root descriptor `<idea-version>` excludes the target IDE's platform build is refused before anything in the target is replaced; a ZIP without a readable descriptor is left to the IDE's loader.
 //!
 //! ## Agentic Contracts
 //! - `install(editor)` — returns `Err` on network failure, missing asset, or CLI install failure.
@@ -47,6 +48,8 @@
 //! - find_local_vscode_vsix_requires_manifest_version: stale VSIX files are ignored and a missing current build fails closed
 //! - jetbrains_discovery_excludes_config_and_service_roots: only versioned IDE data roots are candidates
 //! - release_search_skips_prereleases_and_drafts: the fallback walk matches `/releases/latest` stable-release semantics
+//! - pinned_release_search_accepts_the_pinned_release_even_when_marked_prerelease: pin v0.35.587 (prerelease on GitHub) → v0.35.587, not v0.35.586; a prerelease below the pin and a draft at the pin are skipped
+//! - release_zip_outside_the_target_build_range_is_refused_before_install: a 262-only (`until-build="262.*"`) ZIP is refused for build 263; the combined 262-263.* ZIP is accepted for both
 //! - github_rate_limit_error_reports_reset_and_auth_guidance: exhausted API limits produce an actionable diagnostic
 
 use crate::plugin_vscode_web::{VsCodeWebServe, running_vscode_web_serves};
@@ -225,7 +228,7 @@ fn find_release_with_asset(
     ext: &str,
     fetch_page: impl FnMut(usize) -> Result<Vec<Value>>,
 ) -> Result<Value> {
-    find_release_where(prefix, ext, |_| true, fetch_page).map_err(|miss| match miss {
+    find_release_where(prefix, ext, is_stable_release, fetch_page).map_err(|miss| match miss {
         ReleaseSearchMiss::Fetch(error) => error,
         ReleaseSearchMiss::NotFound(scanned) => anyhow::anyhow!(
             "No {prefix}*.{ext} asset found in the {scanned} most recent GitHub releases"
@@ -237,6 +240,13 @@ fn find_release_with_asset(
 /// than `ceiling`, so `agent-doc upgrade` reconciles plugins to the release it
 /// just installed instead of whatever "latest" says by the time the plugin
 /// phase runs.
+///
+/// GH #437: the release AT the ceiling is accepted even when GitHub marks it a
+/// prerelease. The checksummed stable channel can promote a tag GitHub still
+/// flags `prerelease` (v0.35.587); the binary was upgraded to exactly that
+/// release, so its editor packages are the plugin's pair. Skipping it fell back
+/// to v0.35.586 and installed that release's 262-only ZIP into a 263 IDE. Every
+/// release below the ceiling must still be stable, and drafts never qualify.
 fn find_release_with_asset_at_or_below(
     prefix: &str,
     ext: &str,
@@ -249,8 +259,15 @@ fn find_release_with_asset_at_or_below(
         prefix,
         ext,
         |release| {
-            numeric_dot_version(release_version(release).trim_start_matches('v'))
-                .is_some_and(|key| key <= ceiling_key)
+            let Some(key) = numeric_dot_version(release_version(release).trim_start_matches('v'))
+            else {
+                return false;
+            };
+            match key.cmp(&ceiling_key) {
+                CmpOrdering::Greater => false,
+                CmpOrdering::Equal => !release["draft"].as_bool().unwrap_or(false),
+                CmpOrdering::Less => is_stable_release(release),
+            }
         },
         fetch_page,
     )
@@ -271,7 +288,8 @@ enum ReleaseSearchMiss {
     NotFound(usize),
 }
 
-/// Shared newest-first page walk behind the asset searches.
+/// Shared newest-first page walk behind the asset searches. `accept` owns the
+/// whole release filter, including the stable-release check.
 fn find_release_where(
     prefix: &str,
     ext: &str,
@@ -286,7 +304,7 @@ fn find_release_where(
         let is_final_page = releases.len() < RELEASES_PER_PAGE;
         scanned += releases.len();
         for release in releases {
-            if is_stable_release(&release) && accept(&release) && has_asset(&release, prefix, ext) {
+            if accept(&release) && has_asset(&release, prefix, ext) {
                 return Ok(release);
             }
         }
@@ -930,6 +948,17 @@ fn install_jetbrains_into(release: &Value, target_dir: &Path) -> Result<Jetbrain
 
     let tmp = download_to_temp(&asset)?;
     verify_editor_package(release, &asset, tmp.path())?;
+    // GH #437: the line-level selector above only knows 242-261 vs 262-263; a
+    // release's own descriptor may be narrower (the retired 262-only ZIP), so
+    // the downloaded package must declare the target's build before install.
+    if let Some(build) = jetbrains_platform_build(target_dir) {
+        ensure_jetbrains_zip_covers_build(
+            tmp.path(),
+            asset.name,
+            build,
+            &jetbrains_target_label(target_dir),
+        )?;
+    }
 
     if package_range == JetbrainsPackageRange::Modular262To263 {
         let signature_name = format!("{}.sig", asset.name);
@@ -3179,6 +3208,87 @@ fn try_hot_upgrade_jetbrains(
     _expected_version: &str,
 ) -> Result<Option<JetbrainsHotUpgrade>> {
     Ok(None)
+}
+
+/// GH #437: the platform-build majors a plugin descriptor's `<idea-version>`
+/// declares, as `(since, until)`; `until` is `None` when the range is open.
+/// `262.*` and `263.8311.30` both name their major line.
+fn jetbrains_idea_version_range(plugin_xml: &str) -> Option<(u32, Option<u32>)> {
+    let start = plugin_xml.find("<idea-version")?;
+    let element = &plugin_xml[start..];
+    let element = &element[..element.find('>')?];
+    let major = |attribute: &str| -> Option<Option<u32>> {
+        let needle = format!("{attribute}=\"");
+        let Some(offset) = element.find(&needle) else {
+            return Some(None);
+        };
+        let value = &element[offset + needle.len()..];
+        let value = &value[..value.find('"')?];
+        value.split('.').next()?.trim().parse().ok().map(Some)
+    };
+    Some((major("since-build")??, major("until-build")?))
+}
+
+/// The `<idea-version>` range a JetBrains package's root plugin jar declares,
+/// or `None` when the package carries no readable descriptor.
+fn jetbrains_zip_build_range(zip_path: &Path) -> Result<Option<(u32, Option<u32>)>> {
+    let file = fs::File::open(zip_path).context("Failed to open JetBrains package")?;
+    let mut archive = zip::ZipArchive::new(file).context("Failed to read JetBrains package")?;
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index)?;
+        let Some(name) = entry.enclosed_name() else {
+            continue;
+        };
+        let is_root_jar = name
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|file_name| jetbrains_plugin_jar_version(file_name).is_some());
+        if !is_root_jar {
+            continue;
+        }
+        let mut jar = Vec::new();
+        entry
+            .read_to_end(&mut jar)
+            .context("Failed to read JetBrains plugin jar")?;
+        let Ok(mut jar) = zip::ZipArchive::new(std::io::Cursor::new(jar)) else {
+            return Ok(None);
+        };
+        let Ok(mut descriptor) = jar.by_name("META-INF/plugin.xml") else {
+            return Ok(None);
+        };
+        let mut plugin_xml = String::new();
+        descriptor
+            .read_to_string(&mut plugin_xml)
+            .context("Failed to read JetBrains plugin descriptor")?;
+        return Ok(jetbrains_idea_version_range(&plugin_xml));
+    }
+    Ok(None)
+}
+
+/// GH #437: refuse a release package whose own `<idea-version>` excludes the
+/// target IDE's platform build. The IDE refuses such a plugin at startup, so
+/// installing it only replaces a working plugin with one that will not load
+/// (v0.35.586's 262-only 0.2.1028 in a 263 IDE). A package without a readable
+/// descriptor is not proven incompatible and is left to the IDE's loader.
+fn ensure_jetbrains_zip_covers_build(
+    zip_path: &Path,
+    package: &str,
+    build: u32,
+    label: &str,
+) -> Result<()> {
+    let Some((since, until)) = jetbrains_zip_build_range(zip_path)? else {
+        return Ok(());
+    };
+    if since <= build && until.is_none_or(|until| build <= until) {
+        return Ok(());
+    }
+    let declared = match until {
+        Some(until) => format!("{since}-{until}.*"),
+        None => format!("{since}+"),
+    };
+    bail!(
+        "JetBrains package {package} declares platform builds {declared}, which excludes build {build} of {label}; refusing to install a plugin that IDE would not load. The plugin already installed there was left in place"
+    )
 }
 
 fn jetbrains_zip_plugin_version(zip_path: &Path) -> Result<String> {
@@ -5463,6 +5573,193 @@ mod tests {
             ))
             .is_err()
         );
+    }
+
+    /// GH #437: the stable channel promoted v0.35.587 while GitHub still marked
+    /// that tag a prerelease. The pinned walk skipped it as non-stable and fell
+    /// back to v0.35.586, installing that release's 262-only 0.2.1028 ZIP into a
+    /// 263 IDE instead of the 0.2.1043 ZIP v0.35.587 publishes. The release the
+    /// binary was upgraded to is the plugin's pair whatever its GitHub flag;
+    /// every OTHER release below the pin must still be stable.
+    #[test]
+    fn pinned_release_search_accepts_the_pinned_release_even_when_marked_prerelease() {
+        let newer = plugin_release("v0.35.588");
+        let pinned = nonstable_plugin_release("v0.35.587", "prerelease");
+        let older = plugin_release("v0.35.586");
+        let found =
+            find_release_with_asset_at_or_below("agent-doc-jetbrains", "zip", "0.35.587", |_| {
+                Ok(vec![newer.clone(), pinned.clone(), older.clone()])
+            })
+            .unwrap();
+        assert_eq!(release_version(&found), "v0.35.587");
+
+        // A prerelease BELOW the pin is not the pinned release; skip it.
+        let older_prerelease = nonstable_plugin_release("v0.35.586", "prerelease");
+        let stable = plugin_release("v0.35.585");
+        let found =
+            find_release_with_asset_at_or_below("agent-doc-jetbrains", "zip", "0.35.587", |_| {
+                Ok(vec![
+                    newer.clone(),
+                    bare_release("v0.35.587"),
+                    older_prerelease.clone(),
+                    stable.clone(),
+                ])
+            })
+            .unwrap();
+        assert_eq!(release_version(&found), "v0.35.585");
+
+        // A draft is never installable, pinned or not.
+        let draft = nonstable_plugin_release("v0.35.587", "draft");
+        let found =
+            find_release_with_asset_at_or_below("agent-doc-jetbrains", "zip", "0.35.587", |_| {
+                Ok(vec![draft.clone(), older.clone()])
+            })
+            .unwrap();
+        assert_eq!(release_version(&found), "v0.35.586");
+    }
+
+    fn write_test_jetbrains_zip_declaring(
+        path: &Path,
+        root: &str,
+        jar_name: &str,
+        idea_version: &str,
+    ) {
+        let mut jar = std::io::Cursor::new(Vec::new());
+        {
+            let mut archive = zip::ZipWriter::new(&mut jar);
+            archive
+                .start_file(
+                    "META-INF/plugin.xml",
+                    zip::write::SimpleFileOptions::default(),
+                )
+                .unwrap();
+            write!(
+                archive,
+                "<idea-plugin>\n  {idea_version}\n  <id>com.github.btakita.agent-doc</id>\n</idea-plugin>\n"
+            )
+            .unwrap();
+            archive.finish().unwrap();
+        }
+        let mut archive = zip::ZipWriter::new(fs::File::create(path).unwrap());
+        archive
+            .start_file(
+                format!("{root}/lib/{jar_name}"),
+                zip::write::SimpleFileOptions::default(),
+            )
+            .unwrap();
+        archive.write_all(&jar.into_inner()).unwrap();
+        archive.finish().unwrap();
+    }
+
+    /// GH #437: the published descriptors, verbatim.
+    #[test]
+    fn jetbrains_idea_version_range_reads_since_and_until_majors() {
+        assert_eq!(
+            super::jetbrains_idea_version_range(
+                r#"<idea-version since-build="262" until-build="262.*" />"#
+            ),
+            Some((262, Some(262)))
+        );
+        assert_eq!(
+            super::jetbrains_idea_version_range(
+                r#"<idea-version since-build="262" until-build="263.*" />"#
+            ),
+            Some((262, Some(263)))
+        );
+        assert_eq!(
+            super::jetbrains_idea_version_range(r#"<idea-version since-build="242.1"/>"#),
+            Some((242, None))
+        );
+        assert_eq!(
+            super::jetbrains_idea_version_range("<idea-plugin></idea-plugin>"),
+            None
+        );
+    }
+
+    /// GH #437: a release ZIP is installed only into an IDE build its own
+    /// `<idea-version>` covers. v0.35.586's 262-only modular ZIP (until 262.*)
+    /// must never land in a 263 IDE; the combined 262-263.* ZIP may.
+    #[test]
+    fn release_zip_outside_the_target_build_range_is_refused_before_install() {
+        let temporary = TempDir::new().unwrap();
+        let only_262_name = "agent-doc-jetbrains-262-0.2.1028.zip";
+        let only_262 = temporary.path().join("only-262.zip");
+        write_test_jetbrains_zip_declaring(
+            &only_262,
+            "agent-doc-jetbrains-262",
+            "agent.doc-0.2.1028.jar",
+            r#"<idea-version since-build="262" until-build="262.*" />"#,
+        );
+        let combined_name = "agent-doc-jetbrains-262-0.2.1043.zip";
+        let combined = temporary.path().join("combined.zip");
+        write_test_jetbrains_zip_declaring(
+            &combined,
+            "agent-doc-jetbrains-262",
+            "agent.doc-0.2.1043.jar",
+            r#"<idea-version since-build="262" until-build="263.*" />"#,
+        );
+        let classic_name = "agent-doc-jetbrains-0.2.1042.zip";
+        let classic = temporary.path().join("classic.zip");
+        write_test_jetbrains_zip_declaring(
+            &classic,
+            "agent-doc-jetbrains",
+            "agent-doc-jetbrains-0.2.1042.jar",
+            r#"<idea-version since-build="242" until-build="261.*" />"#,
+        );
+
+        let error = super::ensure_jetbrains_zip_covers_build(
+            &only_262,
+            only_262_name,
+            263,
+            "IntelliJIdea2026.3",
+        )
+        .unwrap_err();
+        let message = format!("{error:#}");
+        assert!(message.contains("0.2.1028"), "{message}");
+        assert!(message.contains("262-262.*"), "{message}");
+        assert!(message.contains("263"), "{message}");
+        assert!(message.contains("IntelliJIdea2026.3"), "{message}");
+
+        super::ensure_jetbrains_zip_covers_build(
+            &only_262,
+            only_262_name,
+            262,
+            "IntelliJIdea2026.2",
+        )
+        .unwrap();
+        super::ensure_jetbrains_zip_covers_build(
+            &combined,
+            combined_name,
+            262,
+            "IntelliJIdea2026.2",
+        )
+        .unwrap();
+        super::ensure_jetbrains_zip_covers_build(
+            &combined,
+            combined_name,
+            263,
+            "IntelliJIdea2026.3",
+        )
+        .unwrap();
+        super::ensure_jetbrains_zip_covers_build(&classic, classic_name, 261, "IntelliJIdea2026.1")
+            .unwrap();
+        assert!(
+            super::ensure_jetbrains_zip_covers_build(
+                &classic,
+                classic_name,
+                262,
+                "IntelliJIdea2026.2"
+            )
+            .is_err()
+        );
+
+        // A package whose descriptor cannot be read is not proven incompatible;
+        // the IDE's own loader stays the judge (test fixtures carry fake jars).
+        let opaque_name = "agent-doc-jetbrains-262-0.2.1043.zip";
+        let opaque = temporary.path().join("opaque.zip");
+        write_test_modular_jetbrains_zip(&opaque, "0.2.1043", b"plugin");
+        super::ensure_jetbrains_zip_covers_build(&opaque, opaque_name, 263, "IntelliJIdea2026.3")
+            .unwrap();
     }
 
     #[test]

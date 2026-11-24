@@ -236,9 +236,12 @@ fn origin_subtree_ends(body: &str, matches_row: impl Fn(&str) -> bool) -> Vec<Fo
     for (index, (line_end, line)) in lines.iter().enumerate() {
         let line_text = line.trim_end_matches(['\r', '\n']);
         let indent = line_indent(line_text);
-        let Some(prompt) = line_text
-            .trim_start()
+        // `#orderedsteps`: a numbered step is an origin too.
+        let dedented = line_text.trim_start();
+        let ordered = agent_doc_element_queue::ordered_list_marker_len(dedented);
+        let Some(prompt) = dedented
             .strip_prefix("- ")
+            .or_else(|| ordered.map(|len| &dedented[len + 1..]))
             .filter(|text| !text.trim_start().starts_with("~~"))
         else {
             continue;
@@ -277,9 +280,16 @@ fn origin_subtree_ends(body: &str, matches_row: impl Fn(&str) -> bool) -> Vec<Fo
             break;
         }
         let prefix_len = line_text.len() - line_text.trim_start_matches([' ', '\t']).len();
+        // `#orderedsteps`: a numbered step's follow-ups nest under it, at the
+        // step's content column, so they belong to the step instead of
+        // becoming unnumbered siblings that would run beside the sequence.
+        let prefix = match ordered {
+            Some(len) => format!("{}{}", &line_text[..prefix_len], " ".repeat(len + 1)),
+            None => line_text[..prefix_len].to_string(),
+        };
         matches.push(FollowupSlot {
             end: subtree_end,
-            prefix: line_text[..prefix_len].to_string(),
+            prefix,
         });
     }
     matches
@@ -294,11 +304,7 @@ fn is_dash_or_ordered_item(text: &str) -> bool {
     if rest.starts_with("- ") {
         return true;
     }
-    let digits = rest
-        .bytes()
-        .take_while(|byte| byte.is_ascii_digit())
-        .count();
-    digits > 0 && rest[digits..].starts_with(". ")
+    agent_doc_element_queue::ordered_list_marker_len(rest).is_some()
 }
 
 /// CommonMark ATX heading: one to six `#` at column 0–3, then a space or end.

@@ -1196,3 +1196,48 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod ordered_step_tests {
+    use super::*;
+
+    fn doc(queue: &str) -> String {
+        format!(
+            "---\nagent_doc_session: s\nagent_doc_format: template\n---\n\n\
+             <!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n\
+             <!-- agent:queue id=main -->\n{queue}<!-- /agent:queue -->\n"
+        )
+    }
+
+    /// `#orderedsteps`: a numbered step's action items become follow-up rows
+    /// right after that step, and the step keeps its number.
+    #[test]
+    fn a_numbered_step_gets_its_followups_after_it() {
+        for marker in ["-", "1."] {
+            let two = if marker == "-" { "-" } else { "2." };
+            let content = doc(&format!(
+                "- release notes\n  - steps\n    {marker} ☑️ [#subagent:d#1] draft the release notes\n    {two} review the release notes\n"
+            ));
+            let (updated, outcome) = plan_handback_followups(
+                &content,
+                "release notes: steps: draft the release notes",
+                "**Summary:** drafted.\n**Action items:**\n- agent: spell-check the draft\n",
+            );
+            assert_eq!(outcome.inserted.len(), 1, "{marker}: {outcome:?}");
+            let expected = if marker == "-" {
+                "    - [#q-"
+            } else {
+                // Nested under the step, at its content column; the step
+                // keeps its number and step 2 stays step 2.
+                "    1. ☑️ [#subagent:d#1] draft the release notes [#q-"
+            };
+            assert!(updated.contains(expected), "{updated}");
+            if marker == "1." {
+                assert!(
+                    updated.contains("]\n       - [#q-") && updated.contains("\n    2. review"),
+                    "{updated}"
+                );
+            }
+        }
+    }
+}

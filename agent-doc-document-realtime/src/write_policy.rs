@@ -732,11 +732,8 @@ fn queue_list_row_body(line: &str) -> Option<&str> {
     if let Some(rest) = trimmed.strip_prefix("- ") {
         return Some(rest);
     }
-    let marker_end = trimmed.find(". ")?;
-    trimmed[..marker_end]
-        .chars()
-        .all(|character| character.is_ascii_digit())
-        .then_some(&trimmed[marker_end + 2..])
+    let marker = agent_doc_element_queue::ordered_list_marker_len(trimmed)?;
+    Some(&trimmed[marker + 1..])
 }
 
 fn explicit_queue_row_identity(body: &str) -> Option<String> {

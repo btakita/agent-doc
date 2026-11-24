@@ -372,13 +372,10 @@ pub(crate) fn split_list_item(line: &str) -> Option<(usize, Option<String>, &str
         return Some((indent, None, rest));
     }
 
-    let marker_end = dedented.find(". ")?;
-    let digits = &dedented[..marker_end];
-    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    let rest = &dedented[marker_end + 2..];
-    Some((indent, Some(dedented[..=marker_end].to_string()), rest))
+    // `#orderedsteps`: `N.` and `N)` are both numbered rows.
+    let marker_len = agent_doc_element_queue::ordered_list_marker_len(dedented)?;
+    let rest = &dedented[marker_len + 1..];
+    Some((indent, Some(dedented[..marker_len].to_string()), rest))
 }
 
 /// Strip the canonical navigation heading from a top-level queue row.
@@ -6715,6 +6712,198 @@ pub fn ordered_list_after_deps(
     deps
 }
 
+/// `#orderedsteps`: why a step of a nested numbered list may not run yet.
+///
+/// A numbered list under a row (`- PR\n  - steps\n    1. #rebase\n    2.
+/// #address`) is a sequence: only its first unfinished step runs. Every later
+/// step, with its whole subtree, waits on that step.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrderedStepWait {
+    /// Entry index of the earliest unfinished earlier step.
+    pub step_entry: usize,
+    /// That step's number as the operator wrote it (`1` for `1.` / `1)`).
+    pub step_number: String,
+}
+
+impl OrderedStepWait {
+    /// The blocker citation painted after `⛔` (`⟦blocked by step-1⟧`). The
+    /// annotation keeps only `[a-z0-9_-]`, so the step is `step-N`.
+    pub fn citation(&self) -> String {
+        format!("step-{}", self.step_number)
+    }
+
+    /// Operator-facing hold reason.
+    pub fn reason(&self) -> String {
+        format!("waits on step {}", self.step_number)
+    }
+}
+
+/// Blocker citations for a `⛔` row, plus the ordered step it waits on
+/// (`⛔ ⟦blocked by step-1⟧ #address`).
+pub fn with_step_wait_citation(
+    mut citations: Vec<String>,
+    wait: Option<&OrderedStepWait>,
+) -> Vec<String> {
+    if let Some(wait) = wait {
+        let citation = wait.citation();
+        if !citations.contains(&citation) {
+            citations.push(citation);
+        }
+    }
+    citations
+}
+
+/// `#orderedsteps`: the ordered-step hold of every entry, indexed like
+/// `entries`.
+///
+/// Ordered siblings under a non-root row form one sequence, in document
+/// order; unordered siblings beside them are not part of it. A step is
+/// finished when it is struck and no live agent row (a follow-up nested under
+/// it) remains in its subtree, or when it is an authored group label with no
+/// attempt of its own whose subtree holds no live executable row. A row under
+/// a step that waits on the operator (`[operator-verify]`, `🙋`) does not hold
+/// the sequence. The first unfinished step runs; every later step and
+/// everything nested under it is held with an [`OrderedStepWait`] naming that
+/// step. Top-level numbered rows are not a sequence, matching
+/// [`ordered_list_after_deps`]. Struck rows never need a hold, but a held
+/// struck row is still reported so callers can treat a subtree uniformly.
+pub fn ordered_step_waits(entries: &[QueueEntry]) -> Vec<Option<OrderedStepWait>> {
+    let mut waits: Vec<Option<OrderedStepWait>> = vec![None; entries.len()];
+    // Item-shaped entries in document order: (entry index, indent).
+    let items: Vec<(usize, usize)> = entries
+        .iter()
+        .enumerate()
+        .filter_map(|(index, entry)| entry_indent(entry).map(|indent| (index, indent)))
+        .collect();
+    if !items
+        .iter()
+        .any(|(index, _)| prompt_of(&entries[*index]).is_some_and(QueuePrompt::is_ordered))
+    {
+        return waits;
+    }
+    // Exclusive entry end of each item's subtree, and each item's parent.
+    let mut subtree_end = vec![entries.len(); items.len()];
+    let mut parent: Vec<Option<usize>> = vec![None; items.len()];
+    let mut stack: Vec<usize> = Vec::new();
+    for (position, &(entry_index, indent)) in items.iter().enumerate() {
+        while let Some(&open) = stack.last() {
+            if items[open].1 >= indent {
+                subtree_end[open] = entry_index;
+                stack.pop();
+            } else {
+                break;
+            }
+        }
+        parent[position] = stack.last().copied();
+        stack.push(position);
+    }
+    let executable: std::collections::HashSet<usize> =
+        executable_prompt_indexes(entries).into_iter().collect();
+    // Live agent work under a step belongs to that step (its follow-ups nest
+    // under it). A row that waits on the operator does not hold the sequence.
+    let agent_work = |index: usize| -> bool {
+        executable.contains(&index)
+            && prompt_of(&entries[index]).is_some_and(|prompt| {
+                !crate::queue_continuation::head_awaits_operator_inline(&prompt.text)
+                    && agent_doc_document::queue_projection::operator_action_ids(&prompt.text)
+                        .is_empty()
+            })
+    };
+    let finished = |position: usize| -> bool {
+        let (entry_index, _) = items[position];
+        let subtree = entry_index + 1..subtree_end[position];
+        let live_agent_work = subtree.clone().any(agent_work);
+        match &entries[entry_index] {
+            QueueEntry::Completed(_) => !live_agent_work,
+            QueueEntry::Prompt(_) if executable.contains(&entry_index) => false,
+            QueueEntry::Prompt(prompt) => {
+                // A step a worker holds or reported is open, even once its
+                // follow-ups nest under it and make it a parent.
+                let attempt = agent_doc_document::queue_projection::owner_projection(&prompt.text)
+                    .is_some()
+                    || agent_doc_document::queue_projection::lifecycle_marker(&prompt.text)
+                        .is_some_and(|marker| {
+                            !matches!(
+                                marker,
+                                agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+                                    | agent_doc_document::queue_projection::QueueLifecycleMarker::Seen
+                                    | agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
+                                    | agent_doc_document::queue_projection::QueueLifecycleMarker::Skipped
+                            )
+                        });
+                let has_items = entries[subtree.clone()]
+                    .iter()
+                    .any(|e| prompt_of(e).is_some());
+                !attempt && has_items && !subtree.clone().any(|index| executable.contains(&index))
+            }
+            _ => true,
+        }
+    };
+    // Children of each non-root item, in document order.
+    let mut children: Vec<Vec<usize>> = vec![Vec::new(); items.len()];
+    for (position, parent) in parent.iter().enumerate() {
+        if let Some(parent) = parent {
+            children[*parent].push(position);
+        }
+    }
+    // Parents precede their children, so an outer hold is set first and an
+    // inner sequence never overrides it.
+    for siblings in &children {
+        let steps: Vec<usize> = siblings
+            .iter()
+            .copied()
+            .filter(|&position| {
+                prompt_of(&entries[items[position].0]).is_some_and(QueuePrompt::is_ordered)
+            })
+            .collect();
+        let Some(first_open) = steps.iter().position(|&position| !finished(position)) else {
+            continue;
+        };
+        let waited = steps[first_open];
+        let Some(number) = prompt_of(&entries[items[waited].0])
+            .and_then(|prompt| prompt.ordered_marker.as_deref())
+            .map(|marker| marker.trim_end_matches(['.', ')']).to_string())
+        else {
+            continue;
+        };
+        let wait = OrderedStepWait {
+            step_entry: items[waited].0,
+            step_number: number,
+        };
+        // Two tracked steps (`1. do [#a]`, `2. do [#b]`) are already ordered by
+        // the compiled `after=` edge, which also knows when `#a` closes in its
+        // backlog; this structural hold covers every pair that edge cannot.
+        let waited_tracked = prompt_of(&entries[items[waited].0])
+            .is_some_and(|prompt| tracked_step_text(&prompt.text));
+        for &held in &steps[first_open + 1..] {
+            let (entry_index, _) = items[held];
+            if waited_tracked
+                && prompt_of(&entries[entry_index])
+                    .is_some_and(|prompt| tracked_step_text(&prompt.text))
+            {
+                continue;
+            }
+            for slot in &mut waits[entry_index..subtree_end[held]] {
+                if slot.is_none() {
+                    *slot = Some(wait.clone());
+                }
+            }
+        }
+    }
+    waits
+}
+
+/// Whether a step names tracked work by a bracketed id (`do [#a]`), as
+/// opposed to free text or a preset (`#rebase`) or a generated `[#q-…]`.
+fn tracked_step_text(text: &str) -> bool {
+    match agent_doc_element_queue::queue_head_identity(text) {
+        agent_doc_element_queue::QueueItemIdentity::Id(id) => {
+            !id.starts_with("q-") && text.contains(&format!("[#{id}"))
+        }
+        _ => false,
+    }
+}
+
 /// Structured list shape is operator-authored grouping and must not be flattened
 /// by the legacy prompt-slot priority sort.
 pub fn has_nested_or_ordered_list(entries: &[QueueEntry]) -> bool {
@@ -9222,6 +9411,64 @@ mod tests {
             )
         );
         assert!(normalize_top_level_navigation_headings(&normalized).is_none());
+    }
+
+    /// `#orderedsteps`: the live 2026-11-23 shape. A claimed step 2 takes
+    /// its claim label after the number, and step 3 its `⛔ step-2` hold,
+    /// matched by the step's nest vector; numbers and the struck step 1 stay.
+    #[test]
+    fn runtime_projection_labels_a_numbered_step_after_its_number() {
+        use agent_doc_document::queue_projection::{QueueLifecycleMarker, QueueOwnerProjection};
+
+        let body = concat!(
+            "- https://github.com/o/r/pull/389\n",
+            "  - %% feat(release): name every download as source or binary %%\n",
+            "  - steps\n",
+            "    1. ~~#rebase~~\n",
+            "    2. 📥 #address\n",
+            "    3. 📥 #adversarial-pr\n",
+            "- https://github.com/o/r/pull/390\n",
+            "  - #adversarial-pr\n",
+        );
+        let targets = [
+            QueueRowProjection {
+                identity: Some("https://github.com/o/r/pull/389: steps: #address".to_string()),
+                text: "#address".to_string(),
+                marker: QueueLifecycleMarker::Claimed,
+                owner: Some(QueueOwnerProjection {
+                    owner: "subagent:s389address".to_string(),
+                    generation: 3,
+                }),
+                blockers: Vec::new(),
+            },
+            QueueRowProjection {
+                identity: Some(
+                    "https://github.com/o/r/pull/389: steps: #adversarial-pr".to_string(),
+                ),
+                text: "#adversarial-pr".to_string(),
+                marker: QueueLifecycleMarker::Blocked,
+                owner: None,
+                blockers: vec!["step-2".to_string()],
+            },
+        ];
+        let (projected, _) = project_prompt_runtime_projections(body, &targets)
+            .unwrap()
+            .expect("the claim label projects onto the numbered step");
+        assert!(
+            projected.contains(
+                "    1. ~~#rebase~~\n    2. 🟡 [#subagent:s389address#3] #address\n    3. ⛔ ⟦blocked by step-2⟧ #adversarial-pr\n"
+            ),
+            "{projected}"
+        );
+        assert!(projected.ends_with("  - #adversarial-pr\n"), "{projected}");
+        assert_eq!(
+            ordered_step_waits(&parse(&projected).unwrap())
+                .iter()
+                .filter(|wait| wait.is_some())
+                .count(),
+            1,
+            "only step 3 waits while step 2 is claimed"
+        );
     }
 
     #[test]
@@ -14744,6 +14991,180 @@ mod tests {
                 .all(|id| id != "group-a" && id != "group-b"),
             "group labels must never become executable dependency identities"
         );
+    }
+
+    fn held_texts(body: &str) -> Vec<(String, String)> {
+        let entries = parse(body).unwrap();
+        let waits = ordered_step_waits(&entries);
+        entries
+            .iter()
+            .zip(waits)
+            .filter_map(|(entry, wait)| match (entry, wait) {
+                (QueueEntry::Prompt(prompt), Some(wait)) => {
+                    Some((prompt.text.clone(), wait.reason()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    const PR_STEPS: &str = "- ### https://github.com/o/r/pull/389\n\
+         \x20 - %% feat: thing %%\n\
+         \x20 - steps\n\
+         \x20   1. 📥 #rebase\n\
+         \x20   2. 📥 #address\n\
+         \x20   3. 📥 #adversarial-pr\n\
+         - ### https://github.com/o/r/pull/390\n\
+         \x20 - #adversarial-pr\n";
+
+    /// `#orderedsteps`: only the first unfinished step of a numbered list
+    /// runs; the rest wait on it, without ids.
+    #[test]
+    fn ordered_steps_hold_every_step_after_the_first_open_one() {
+        assert_eq!(
+            held_texts(PR_STEPS),
+            vec![
+                ("📥 #address".to_string(), "waits on step 1".to_string()),
+                (
+                    "📥 #adversarial-pr".to_string(),
+                    "waits on step 1".to_string()
+                ),
+            ]
+        );
+    }
+
+    /// A claimed or running step is not finished; striking it releases the next.
+    #[test]
+    fn ordered_steps_advance_only_when_the_earlier_step_is_struck() {
+        let running = PR_STEPS.replace("1. 📥 #rebase", "1. 🚧 [#subagent:rebase#1] #rebase");
+        assert_eq!(held_texts(&running).len(), 2);
+
+        let struck = PR_STEPS.replace("1. 📥 #rebase", "1. ~~#rebase~~");
+        assert_eq!(
+            held_texts(&struck),
+            vec![(
+                "📥 #adversarial-pr".to_string(),
+                "waits on step 2".to_string()
+            )]
+        );
+        let both = struck.replace("2. 📥 #address", "2. ~~#address~~");
+        assert!(held_texts(&both).is_empty());
+    }
+
+    /// A later step's subtree waits with it, and a group step is finished once
+    /// nothing live remains under it.
+    #[test]
+    fn ordered_steps_hold_subtrees_and_finish_group_steps() {
+        let body = "- epic\n\
+                    \x20 1. build\n\
+                    \x20   - a\n\
+                    \x20   - b\n\
+                    \x20 2. ship\n\
+                    \x20   - c\n";
+        assert_eq!(
+            held_texts(body),
+            vec![
+                ("ship".to_string(), "waits on step 1".to_string()),
+                ("c".to_string(), "waits on step 1".to_string()),
+            ]
+        );
+        let done = body
+            .replace("  - a\n", "  - ~~a~~\n")
+            .replace("  - b\n", "  - ~~b~~\n");
+        assert!(held_texts(&done).is_empty());
+    }
+
+    /// A step's follow-ups nest under it. A reported step with a live agent
+    /// follow-up, or a struck step whose follow-up is still open, keeps the
+    /// next step waiting; an operator-owned follow-up does not.
+    #[test]
+    fn ordered_steps_wait_for_agent_followups_nested_under_a_step() {
+        let reported = "- epic\n  1. ☑️ [#subagent:d#1] draft [#q-0f202f4a3354]\n     - [#q-0f202f4a3354] follow-up: agent: spell-check\n  2. review\n";
+        assert_eq!(
+            held_texts(reported),
+            vec![("review".to_string(), "waits on step 1".to_string())]
+        );
+        let struck = "- epic\n  1. ~~draft~~\n     - follow-up: agent: spell-check\n  2. review\n";
+        assert_eq!(held_texts(struck).len(), 1);
+        let operator = "- epic\n  1. ~~draft~~\n     - follow-up: human: approve the PR [operator-verify]\n  2. review\n";
+        assert!(
+            held_texts(operator).is_empty(),
+            "{:?}",
+            held_texts(operator)
+        );
+        let done =
+            "- epic\n  1. ~~draft~~\n     - ~~follow-up: agent: spell-check~~\n  2. review\n";
+        assert!(held_texts(done).is_empty());
+    }
+
+    /// Two tracked steps are ordered by their compiled `after=` edge, which
+    /// knows the backlog; a free-text step after a tracked one is held here.
+    #[test]
+    fn tracked_step_pairs_defer_to_the_after_edge() {
+        assert!(held_texts("- epic\n  1. do [#a]\n  2. do [#b]\n").is_empty());
+        assert_eq!(
+            held_texts("- epic\n  1. do [#a]\n  2. ship it\n"),
+            vec![("ship it".to_string(), "waits on step 1".to_string())]
+        );
+    }
+
+    /// `N)` is the same numbered list as `N.`: parsed, held and rendered
+    /// byte for byte.
+    #[test]
+    fn parenthesis_numbered_steps_are_ordered_steps() {
+        let body = "- epic\n  1) a\n  2) b\n  10) c\n";
+        let entries = parse(body).unwrap();
+        let markers: Vec<Option<&str>> = entries
+            .iter()
+            .filter_map(|entry| prompt_of(entry).map(|p| p.ordered_marker.as_deref()))
+            .collect();
+        assert_eq!(markers, vec![None, Some("1)"), Some("2)"), Some("10)")]);
+        assert_eq!(render(&entries), body);
+        assert_eq!(
+            held_texts(body),
+            vec![
+                ("b".to_string(), "waits on step 1".to_string()),
+                ("c".to_string(), "waits on step 1".to_string()),
+            ]
+        );
+        // Not a marker without the space, or without digits.
+        assert!(agent_doc_element_queue::ordered_list_marker_len("1)x").is_none());
+        assert!(agent_doc_element_queue::ordered_list_marker_len(") x").is_none());
+    }
+
+    /// Unordered siblings and top-level numbered rows are not sequences.
+    #[test]
+    fn ordered_steps_ignore_bullets_and_top_level_numbers() {
+        assert!(held_texts("- epic\n  - a\n  - b\n").is_empty());
+        assert!(held_texts("1. a\n2. b\n").is_empty());
+        assert_eq!(
+            held_texts("- epic\n  - note\n  1. a\n  2. b\n"),
+            vec![("b".to_string(), "waits on step 1".to_string())]
+        );
+    }
+
+    /// The glyph, claim tag and strike live after the number; parse/render
+    /// keeps every numbered step byte for byte (`#orderedsteps`).
+    #[test]
+    fn ordered_steps_round_trip_with_lifecycle_projection() {
+        // The `### ` navigation heading is presentation the projection
+        // re-derives, so the byte round-trip is over the heading-free body.
+        let plain = PR_STEPS.replace("- ### ", "- ");
+        for body in [
+            plain.clone(),
+            plain.replace("1. 📥 #rebase", "1. 🟡 [#subagent:rebase389#1] #rebase"),
+            plain.replace("1. 📥 #rebase", "1. ~~#rebase~~"),
+            plain.replace("2. 📥 #address", "2. ⛔ ⟦blocked by step-1⟧ #address"),
+        ] {
+            let entries = parse(&body).unwrap();
+            assert_eq!(render(&entries), body);
+            let markers: Vec<Option<&str>> = entries
+                .iter()
+                .filter_map(|entry| prompt_of(entry).map(|p| p.ordered_marker.as_deref()))
+                .collect();
+            assert!(markers.contains(&Some("1.")), "{body}");
+            assert!(markers.contains(&Some("3.")), "{body}");
+        }
     }
 
     #[test]

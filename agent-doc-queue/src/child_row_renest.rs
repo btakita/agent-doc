@@ -41,6 +41,9 @@ pub(crate) struct Row<'a> {
     pub(crate) start: usize,
     pub(crate) indent: usize,
     pub(crate) item: Option<&'a str>,
+    /// `#orderedsteps`: width of the row's list marker with its space (`- `
+    /// is 2, `1. ` is 3); a child sits at `indent + marker`.
+    pub(crate) marker: usize,
     pub(crate) blank: bool,
     pub(crate) tabbed: bool,
     pub(crate) fenced: bool,
@@ -61,12 +64,20 @@ pub(crate) fn rows_of(body: &str) -> Vec<Row<'_>> {
         if fence {
             in_fence = !in_fence;
         }
+        let marker = (!fenced)
+            .then(|| {
+                if trimmed.starts_with("- ") {
+                    Some(2)
+                } else {
+                    agent_doc_element_queue::ordered_list_marker_len(trimmed).map(|len| len + 1)
+                }
+            })
+            .flatten();
         out.push(Row {
             start,
             indent: lead.len(),
-            item: (!fenced)
-                .then(|| trimmed.strip_prefix("- ").map(str::trim_end))
-                .flatten(),
+            item: marker.map(|width| trimmed[width..].trim_end()),
+            marker: marker.unwrap_or(0),
             blank: trimmed.is_empty(),
             tabbed: lead.contains('\t'),
             fenced,
@@ -139,6 +150,10 @@ pub(crate) fn may_be_torn_off_the_tree_above(
 /// indent plus its own step below its parent (2 spaces when unknown, as for
 /// a column-0 parent).
 pub(crate) fn child_indent(rows: &[Row<'_>], parents: &[Option<usize>], parent: usize) -> usize {
+    // `#orderedsteps`: a numbered row's children sit at its content column.
+    if rows[parent].marker > 2 {
+        return rows[parent].indent + rows[parent].marker;
+    }
     let step = parents[parent]
         .map(|grand| rows[parent].indent.saturating_sub(rows[grand].indent))
         .filter(|step| (2..=4).contains(step))

@@ -343,15 +343,8 @@ pub(crate) fn strip_bullet(line: &str) -> Option<&str> {
     if let Some(rest) = t.strip_prefix("- ").or_else(|| t.strip_prefix("* ")) {
         return Some(rest);
     }
-    // ordered list: `12. text`
-    let digits: String = t.chars().take_while(|c| c.is_ascii_digit()).collect();
-    if !digits.is_empty() {
-        let after = &t[digits.len()..];
-        if let Some(rest) = after.strip_prefix(". ") {
-            return Some(rest);
-        }
-    }
-    None
+    // ordered list: `12. text` / `12) text` (`#orderedsteps`)
+    agent_doc_element_queue::ordered_list_marker_len(t).map(|len| &t[len + 1..])
 }
 
 /// Whether a list item's complete payload is an operator-authored comment.
@@ -1218,9 +1211,12 @@ fn queue_prompt_content_line(line: &str) -> bool {
         || strip_bullet(trimmed.trim_start_matches('`')).is_some()
         || trimmed.starts_with("+ ")
         || matches!(trimmed, "-" | "*" | "+")
-        || trimmed.strip_suffix('.').is_some_and(|digits| {
-            !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
-        })
+        || trimmed
+            .strip_suffix('.')
+            .or_else(|| trimmed.strip_suffix(')'))
+            .is_some_and(|digits| {
+                !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
+            })
     {
         return false;
     }

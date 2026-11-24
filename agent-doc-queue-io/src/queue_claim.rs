@@ -727,6 +727,26 @@ fn claim_next_shared_leaf(
     owner_session: Option<ClaimOwnerSession>,
     worker_harness: Option<&str>,
 ) -> Result<(ClaimOutcome, QueueClaim)> {
+    // `#orderedsteps`: a shared leaf that is a held numbered step under one
+    // parent is not that parent's turn yet. Bind an unheld parent; refuse when
+    // every candidate waits on an earlier step.
+    let view_text = claim_view_text(file)?;
+    let held = agent_doc_queue::queue_continuation::ordered_step_held_lineages(&view_text)
+        .into_keys()
+        .map(|lineage| claim_identity(&lineage))
+        .collect::<std::collections::HashSet<_>>();
+    let candidates = match candidates
+        .iter()
+        .filter(|target| !held.contains(&claim_identity(target)))
+        .cloned()
+        .collect::<Vec<_>>()
+    {
+        unheld if !unheld.is_empty() => unheld,
+        _ => {
+            refuse_ordered_step_wait(&view_text, &candidates[0])?;
+            candidates
+        }
+    };
     let mut prepared = Vec::with_capacity(candidates.len());
     for target in &candidates {
         let identity = claim_identity(target);
@@ -889,6 +909,22 @@ fn refuse_external_blocker(file: &Path, target: &str) -> Result<()> {
 /// no drain runs it and no dispatch list offers it, so a claim on it can only
 /// be a worker started on work no agent can finish. Its `🚧` then outlives the
 /// worker and holds `#transientcloseout` open. Refuse before the ledger write.
+/// `#orderedsteps`: a numbered step after an earlier open step waits on it.
+/// Steps never run in parallel, so the claim is refused before the ledger
+/// write, naming the step it waits on.
+fn refuse_ordered_step_wait(content: &str, target: &str) -> Result<()> {
+    if let Some(wait) =
+        agent_doc_queue::queue_continuation::ordered_step_wait_for_item(content, target)
+    {
+        bail!(
+            "queue claim refused: {target:?} {}. Steps of a numbered list run one at a time: claim it after step {} is struck (#orderedsteps).",
+            wait.reason(),
+            wait.step_number
+        );
+    }
+    Ok(())
+}
+
 fn refuse_operator_owned_row(target: &str) -> Result<()> {
     if agent_doc_queue::queue_continuation::head_awaits_operator_inline(target) {
         bail!(
@@ -1338,6 +1374,7 @@ pub fn claim_with_session_for_worker_harness(
         refuse_open_prompt_review(&target, &blocker)?;
     }
     refuse_operator_owned_row(&target)?;
+    refuse_ordered_step_wait(&review_text, &target)?;
     if visible_kept_reported_row(file, &target)?
         && let Some(restored) =
             reattach_kept_completion(file, &target, &heads, ttl_secs, owner_session.clone())?

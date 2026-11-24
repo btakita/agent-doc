@@ -50,12 +50,9 @@ fn bare_trigger_line(text: &str) -> Option<String> {
             line = rest;
             continue;
         }
-        if let Some(dot) = trimmed.find(". ") {
-            let digits = &trimmed[..dot];
-            if !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit()) {
-                line = &trimmed[dot + 2..];
-                continue;
-            }
+        if let Some(marker) = agent_doc_element_queue::ordered_list_marker_len(trimmed) {
+            line = &trimmed[marker + 1..];
+            continue;
         }
         let without_heading = crate::document_queue::strip_top_level_queue_heading(trimmed);
         if without_heading != trimmed {

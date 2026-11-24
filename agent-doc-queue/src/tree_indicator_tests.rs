@@ -389,3 +389,28 @@ fn the_keep_glyph_and_the_open_count_settle_together() {
             .is_none()
     );
 }
+
+/// `#orderedsteps`: a struck numbered step is a deletable subtree like a
+/// bulleted one; its 🗑️ goes inside the strike, after the number.
+#[test]
+fn a_struck_numbered_step_carries_the_delete_glyph_after_its_number() {
+    let steps = "\
+- ### 📥 https://github.com/o/r/pull/389
+  - steps
+    1. ~~#rebase~~
+    2. 📥 #address
+    3) ⛔ ⟦blocked by step-2⟧ #adversarial-pr
+";
+    let synced = sync(&doc(steps));
+    let queue = queue_of(&synced);
+    assert!(
+        queue.contains("    1. ~~🗑\u{fe0f} #rebase~~\n"),
+        "the glyph sits inside the strike, after the number:\n{queue}"
+    );
+    assert!(queue.starts_with("- ### 📥 🔒 https://"), "{queue}");
+    assert!(
+        queue.contains("    2. 📥 #address\n    3) ⛔ ⟦blocked by step-2⟧ #adversarial-pr\n"),
+        "later steps keep their numbers:\n{queue}"
+    );
+    assert_eq!(without_glyphs(&synced), without_glyphs(&doc(steps)));
+}

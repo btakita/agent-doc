@@ -216,7 +216,9 @@ fn list_entry(text: &str) -> Option<&str> {
     }
     let digits = text.chars().take_while(char::is_ascii_digit).count();
     if digits > 0 {
-        return text[digits..].strip_prefix(". ");
+        return text[digits..]
+            .strip_prefix(". ")
+            .or_else(|| text[digits..].strip_prefix(") "));
     }
     None
 }

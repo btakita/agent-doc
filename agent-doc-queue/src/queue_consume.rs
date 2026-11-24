@@ -3536,11 +3536,8 @@ fn strip_list_bullet_prefix(line: &str) -> &str {
             return rest.trim_start();
         }
     }
-    if let Some(dot) = t.find(". ")
-        && t[..dot].chars().all(|c| c.is_ascii_digit())
-        && !t[..dot].is_empty()
-    {
-        return t[dot + 2..].trim_start();
+    if let Some(marker) = agent_doc_element_queue::ordered_list_marker_len(t) {
+        return t[marker + 1..].trim_start();
     }
     t
 }
@@ -4295,6 +4292,9 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
         };
         let raw = &after[node.item.start_byte..node.item.end_byte];
         let indent = raw.len() - raw.trim_start_matches([' ', '\t']).len();
+        // `#orderedsteps`: children sit at the row's content column, after
+        // `1. ` as well as after `- `.
+        let child_column = row_child_column(&after, node.item.start_byte, node.item.end_byte);
         let descendant_end = descendant_region_end(&after, node.item.end_byte, indent);
         let owned_scope_end = descendant_end.max(node.item.end_byte);
         let child_insert_at = response_child_insert_at(&after, node.item.end_byte, owned_scope_end);
@@ -4305,7 +4305,7 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
         // Compare the complete rendered subtree with only generated timestamp
         // and tree-scoped guidance lines normalized so choices, summaries,
         // details, and response ids must still match exactly.
-        let child_indent = " ".repeat(indent + 2);
+        let child_indent = " ".repeat(child_column);
         let response_mode = queue_response_ranges
             .iter()
             .find(|&&(start, end, _)| node.item.start_byte >= start && node.item.start_byte < end)
@@ -4389,7 +4389,7 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
                 node.item.start_byte,
                 node.item.end_byte,
                 child_insert_at,
-                indent,
+                child_column,
                 has_inline_id,
                 response_id.clone(),
                 missing_children,
@@ -4398,7 +4398,7 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
     }
 
     let mut replacements = Vec::new();
-    for (start, end, child_insert_at, indent, has_inline_id, response_id, children) in edits {
+    for (start, end, child_insert_at, child_column, has_inline_id, response_id, children) in edits {
         let parent_replacement = if has_inline_id {
             remove_inline_response_id(&after[start..end], &response_id)
         } else {
@@ -4412,7 +4412,7 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
         }
 
         let mut child_block = String::new();
-        let child_indent = " ".repeat(indent + 2);
+        let child_indent = " ".repeat(child_column);
         for child in children {
             child_block.push_str(&render_response_lookup_child(&child, &child_indent));
         }
@@ -5767,9 +5767,8 @@ fn descendant_region_end(document: &str, item_end: usize, parent_indent: usize) 
     for line in document[item_end..].split_inclusive('\n') {
         let trimmed = line.trim_start_matches([' ', '\t']);
         let indent = line.len() - trimmed.len();
-        if (trimmed.starts_with("- ")
-            || trimmed.starts_with("* ")
-            || trimmed.starts_with("+ ")
+        // `#orderedsteps`: a numbered sibling ends the subtree too.
+        if (agent_doc_element_queue::list_item_marker_width(trimmed).is_some()
             || trimmed.starts_with("<!-- /agent:"))
             && indent <= parent_indent
         {
@@ -5778,6 +5777,16 @@ fn descendant_region_end(document: &str, item_end: usize, parent_indent: usize) 
         cursor += line.len();
     }
     document.len()
+}
+
+/// `#orderedsteps`: the content column of the queue row at `start..end`, where
+/// its generated children go: two past a `- ` row's indent, and past the
+/// number of a `1. ` step.
+fn row_child_column(document: &str, start: usize, end: usize) -> usize {
+    let raw = document.get(start..end).unwrap_or("");
+    let trimmed = raw.trim_start_matches([' ', '\t']);
+    (raw.len() - trimmed.len())
+        + agent_doc_element_queue::list_item_marker_width(trimmed).unwrap_or(2)
 }
 
 /// Place generated response children after real descendant content but before
@@ -7211,7 +7220,7 @@ pub fn attach_ack_summary_response(
         }
         newly.push((node, indent, scope_end));
     }
-    let Some(&(node, indent, scope_end)) = newly.first() else {
+    let Some(&(node, _, scope_end)) = newly.first() else {
         return Ok(unchanged(Vec::new()));
     };
     let summary = summary.map(str::trim).filter(|summary| !summary.is_empty());
@@ -7257,7 +7266,8 @@ pub fn attach_ack_summary_response(
     child.push_str(RESPONSE_STATE_COMPLETE);
     child.push_str("\n- **Guidance:** ");
     child.push_str(&completed_row_deletion_guidance(closure.as_ref()));
-    let rendered = render_response_lookup_child(&child, &" ".repeat(indent + 2));
+    let column = row_child_column(after, node.item.start_byte, node.item.end_byte);
+    let rendered = render_response_lookup_child(&child, &" ".repeat(column));
     let insert_at = response_child_insert_at(after, node.item.end_byte, scope_end);
     let mut out = after.to_string();
     let mut block = String::new();
@@ -7395,7 +7405,11 @@ pub fn attach_stopped_row_responses(
             ) else {
                 continue;
             };
-            let child_indent = " ".repeat(indent + 2);
+            let child_indent = " ".repeat(row_child_column(
+                after,
+                node.item.start_byte,
+                node.item.end_byte,
+            ));
             let rendered = render_response_lookup_child(&child, &child_indent);
             let insert_at = response_child_insert_at(after, node.item.end_byte, scope_end);
             inserts.push((insert_at, rendered));
@@ -7425,7 +7439,11 @@ pub fn attach_stopped_row_responses(
         ) else {
             continue;
         };
-        let child_indent = " ".repeat(indent + 2);
+        let child_indent = " ".repeat(row_child_column(
+            after,
+            node.item.start_byte,
+            node.item.end_byte,
+        ));
         let rendered = render_response_lookup_child(&child, &child_indent);
         let insert_at = response_child_insert_at(after, node.item.end_byte, scope_end);
         inserts.push((insert_at, rendered));
@@ -16064,6 +16082,53 @@ Old.
             "the deferred sibling stays live:\n{}",
             projection.target_content
         );
+    }
+
+    /// `#orderedsteps`: striking a numbered step keeps its number, nests its
+    /// response under that step, and leaves the later steps where they are.
+    #[test]
+    fn answered_numbered_step_strikes_in_place_with_its_response_under_it() {
+        let document = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- ### release notes\n",
+            "  - steps\n",
+            "    1. ☑️ [#subagent:d#1] draft the release notes\n",
+            "    2. ⛔ ⟦blocked by step-1⟧ review the release notes\n",
+            "    3. ⛔ ⟦blocked by step-1⟧ publish the release notes\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: draft\n\n",
+            "> **Queue prompt:** release notes: steps: draft the release notes\n\n",
+            "Drafted the notes.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let projection =
+            project_answered_free_text_strike_with_claims(document, response, Some(document), &[])
+                .unwrap()
+                .expect("the echoed step is struck");
+        let out = &projection.target_content;
+        let struck = out
+            .find("    1. ~~draft the release notes~~")
+            .unwrap_or_else(|| panic!("step 1 struck in place, numbered:\n{out}"));
+        let step_two = out
+            .find("    2. ")
+            .unwrap_or_else(|| panic!("step 2 keeps its number:\n{out}"));
+        assert!(out.contains("    3. "), "{out}");
+        if let Some(response) = out.find("**Response [#r-") {
+            assert!(
+                struck < response && response < step_two,
+                "the response nests under step 1, before step 2:\n{out}"
+            );
+            assert!(
+                out[..response].ends_with("       - "),
+                "the response sits at step 1's content column:\n{out}"
+            );
+        }
     }
 
     #[test]

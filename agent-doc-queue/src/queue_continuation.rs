@@ -1391,9 +1391,11 @@ pub fn drainable_head_count_for_owner(
     let preset_only = preset_only_identity_ids_with_presets(content, presets);
     let review_blocked = crate::prompt_pressure::review_blocked_prompts(content);
     let entries = &activation.entries_after;
+    let step_waits = document_queue::ordered_step_waits(entries);
     document_queue::executable_prompt_indexes(entries)
         .into_iter()
         .filter(|index| !suppressed.claims_at(entries, *index))
+        .filter(|index| step_waits[*index].is_none())
         .filter_map(|index| match &entries[index] {
             QueueEntry::Prompt(prompt) => Some(prompt),
             _ => None,
@@ -1446,15 +1448,33 @@ fn entries_without_claimed_prompts(
     entries: Vec<QueueEntry>,
     claimed: &ClaimedQueueItems,
 ) -> Vec<QueueEntry> {
-    if claimed.is_empty() {
+    // `#orderedsteps`: a later numbered step waits while an earlier step is
+    // open, claimed rows included, so the hold is derived before the claimed
+    // rows are dropped. Dropping step 1 first would promote step 2. A held
+    // step stays in the tree as a list comment: never executable, and its
+    // parent stays a label instead of turning into a runnable leaf.
+    let step_waits = document_queue::ordered_step_waits(&entries);
+    if claimed.is_empty() && step_waits.iter().all(Option::is_none) {
         return entries;
     }
-    let claimed_at = claimed_prompt_indexes(&entries, claimed);
+    let claimed_at = if claimed.is_empty() {
+        vec![false; entries.len()]
+    } else {
+        claimed_prompt_indexes(&entries, claimed)
+    };
     entries
         .into_iter()
+        .zip(step_waits)
         .enumerate()
         .filter(|(index, _)| !claimed_at[*index])
-        .map(|(_, entry)| entry)
+        .map(|(_, (entry, wait))| match (entry, wait) {
+            (QueueEntry::Prompt(prompt), Some(wait)) => QueueEntry::Freeform(format!(
+                "{}- %% {} %%",
+                " ".repeat(prompt.indent),
+                wait.reason()
+            )),
+            (entry, _) => entry,
+        })
         .collect()
 }
 
@@ -1588,6 +1608,49 @@ pub fn all_executable_row_keys(content: &str) -> Option<Vec<(String, String)>> {
         }
     }
     Some(keys)
+}
+
+/// `#orderedsteps`: every live executable row of every queue that waits on an
+/// earlier unfinished numbered step, keyed by its claim lineage.
+///
+/// Dispatch, claim and drain read this one derivation, so a later step is
+/// never offered, claimed or drained while an earlier step is still open.
+pub fn ordered_step_held_lineages(
+    content: &str,
+) -> HashMap<String, document_queue::OrderedStepWait> {
+    let mut held = HashMap::new();
+    let Ok(components) = element::parse(content) else {
+        return held;
+    };
+    let Ok(queue_set) = crate::queue_set::QueueSet::parse(content, &components) else {
+        return held;
+    };
+    for block in queue_set.blocks() {
+        let entries = crate::nested_claim_steer::expand_slice_if_installed(&block.entries);
+        let waits = document_queue::ordered_step_waits(entries.as_ref());
+        for index in document_queue::executable_prompt_indexes(entries.as_ref()) {
+            let Some(wait) = waits.get(index).cloned().flatten() else {
+                continue;
+            };
+            if let Some(lineage) = document_queue::lineage_claim_text(entries.as_ref(), index) {
+                held.insert(lineage, wait);
+            }
+        }
+    }
+    held
+}
+
+/// [`ordered_step_held_lineages`] entry for one claim target, matched on
+/// claim identity.
+pub fn ordered_step_wait_for_item(
+    content: &str,
+    item: &str,
+) -> Option<document_queue::OrderedStepWait> {
+    let identity = crate::queue_claim::claim_identity(item);
+    ordered_step_held_lineages(content)
+        .into_iter()
+        .find(|(lineage, _)| crate::queue_claim::claim_identity(lineage) == identity)
+        .map(|(_, wait)| wait)
 }
 
 /// Claim keys of every queue, in document order.
@@ -1790,7 +1853,15 @@ fn first_drainable_head<'a>(
     scope: DrainScope,
     review_blocked: &crate::prompt_pressure::ReviewBlockedPrompts,
 ) -> Option<&'a QueuePrompt> {
-    let prompts = document_queue::prompts(entries_after);
+    // `#orderedsteps`: a numbered step after an open earlier step is held.
+    let step_waits = document_queue::ordered_step_waits(entries_after);
+    let prompts = document_queue::executable_prompt_indexes(entries_after)
+        .into_iter()
+        .filter(|index| step_waits[*index].is_none())
+        .filter_map(|index| match &entries_after[index] {
+            QueueEntry::Prompt(prompt) => Some(prompt),
+            _ => None,
+        });
     let mut session_trigger = None;
     for prompt in prompts {
         if !head_is_drainable(
@@ -4080,6 +4151,45 @@ mod tests {
             drainable_head_count(&done),
             1,
             "a met prerequisite must unblock the dependent"
+        );
+    }
+
+    /// `#orderedsteps`: id-less numbered steps drain inline one at a time. A
+    /// claimed step 1 still holds step 2; dropping claimed rows first would
+    /// have promoted step 2 to the head.
+    #[test]
+    fn numbered_free_text_steps_drain_in_order_even_while_step_one_is_claimed() {
+        let doc = |steps: &str| {
+            format!(
+                "---\nsession: sid\nagent_doc_format: template\n---\n\n<!-- agent:queue go -->\n- epic\n{steps}<!-- /agent:queue -->\n"
+            )
+        };
+        let open = doc("  1. first step\n  2. second step\n  3) third step\n");
+        assert_eq!(drainable_head_count(&open), 1);
+        assert_eq!(
+            pending_head_prompt_text(&open, DrainScope::InSessionLoop).as_deref(),
+            Some("first step")
+        );
+
+        let heads = live_queue_head_texts(&open).unwrap_or_default();
+        let first = heads
+            .iter()
+            .find(|head| head.contains("first step"))
+            .expect("step 1 is a live head")
+            .clone();
+        let claimed = ClaimedQueueItems::none().with_heads([&first]);
+        assert_eq!(
+            pending_head_prompt_text_excluding_claimed(&open, DrainScope::InSessionLoop, &claimed),
+            None,
+            "step 2 waits on the claimed step 1"
+        );
+        assert_eq!(drainable_head_count_excluding_claimed(&open, &claimed), 0);
+
+        let advanced = doc("  1. ~~first step~~\n  2. second step\n  3) third step\n");
+        assert_eq!(drainable_head_count(&advanced), 1);
+        assert_eq!(
+            pending_head_prompt_text(&advanced, DrainScope::InSessionLoop).as_deref(),
+            Some("second step")
         );
     }
 

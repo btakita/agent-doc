@@ -208,6 +208,9 @@ pub struct QueueTreeNode {
     /// waiting head (`waiting on you · you 1 · agent 0 · done 2`). Editors show
     /// it verbatim so every plugin words a node the same way.
     pub tooltip: String,
+    /// `#orderedsteps`: why a numbered step is held (`waits on step 1`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hold: Option<String>,
 }
 
 /// One state and how many nodes carry it.
@@ -523,6 +526,7 @@ fn queue_tree_nodes(document: &str) -> anyhow::Result<Vec<QueueTreeNode>> {
             .iter()
             .map(|(entry, _)| entry.clone())
             .collect::<Vec<_>>();
+        let step_waits = document_queue::ordered_step_waits(&entries);
         let mut stack: Vec<usize> = Vec::new();
         for (index, (entry, span)) in spanned.iter().enumerate() {
             let Some(indent) = waiting_packet::entry_list_indent(entry) else {
@@ -531,7 +535,25 @@ fn queue_tree_nodes(document: &str) -> anyhow::Result<Vec<QueueTreeNode>> {
             let Some(node) = node_for_entry(&entries, index, entry, &open_todo_ids) else {
                 continue;
             };
-            let (state, marker, text, rollup) = node;
+            let (mut state, mut marker, text, rollup) = node;
+            // `#orderedsteps`: a numbered step after an open earlier step is
+            // held whatever stale projection its row still shows.
+            let hold = match (entry, step_waits[index].as_ref()) {
+                (QueueEntry::Prompt(_), Some(wait))
+                    if matches!(
+                        state,
+                        QueueNodeState::Open
+                            | QueueNodeState::Pending
+                            | QueueNodeState::Seen
+                            | QueueNodeState::Blocked
+                    ) =>
+                {
+                    state = QueueNodeState::Blocked;
+                    marker = Some(QueueLifecycleMarker::Blocked);
+                    Some(wait.reason())
+                }
+                _ => None,
+            };
             let end_index = waiting_packet::subtree_end(&entries, index).max(index + 1);
             let end_offset = spanned[end_index - 1].1.end;
             let start = component.open_end + span.start;
@@ -579,7 +601,11 @@ fn queue_tree_nodes(document: &str) -> anyhow::Result<Vec<QueueTreeNode>> {
                 response_open: false,
                 answer_pending: false,
                 rollup,
-                tooltip: node_tooltip(state, rollup),
+                tooltip: match &hold {
+                    Some(reason) => format!("{} · {reason}", state.label()),
+                    None => node_tooltip(state, rollup),
+                },
+                hold,
             });
             raws.push(raw.lines().next().unwrap_or_default().to_string());
         }
@@ -1177,6 +1203,10 @@ pub fn render_text(tree: &QueueTree) -> String {
                 )
             })
             .unwrap_or_default();
+        let rollup = match &node.hold {
+            Some(reason) => format!("{rollup}  ({reason})"),
+            None => rollup,
+        };
         out.push_str(&format!(
             "{:>5} {indent}{} {} · {}{rollup}\n",
             format!("L{}", node.line),

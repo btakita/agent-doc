@@ -1402,6 +1402,8 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
     let targets_for = |block: agent_doc_queue::queue_mirror_projection::QueueProjectionBlock<
         '_,
     >| {
+        // `#orderedsteps`: a numbered step after an open earlier step rests `⛔`.
+        let step_waits = agent_doc_queue::document_queue::ordered_step_waits(block.entries);
         // `#strikeisterminal`, per queue: a struck row whose identity is also live in this
         // queue is an earlier attempt's record, never the claim's row.
         block
@@ -1458,7 +1460,10 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                         )
                     }) {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling
-                    } else if review_hold.is_some() || blockers.blocks_row(&prompt.text) {
+                    } else if review_hold.is_some()
+                        || blockers.blocks_row(&prompt.text)
+                        || step_waits[index].is_some()
+                    {
                         // `#queueblocked`: outranks a stale `⏭️`/`⏳`.
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
                     } else if matches!(
@@ -1492,9 +1497,12 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                         blockers: if marker
                             == agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
                         {
-                            agent_doc_queue::prompt_pressure::blocked_row_citations(
-                                blockers.blockers_for_row(&prompt.text).unwrap_or_default(),
-                                review_hold,
+                            agent_doc_queue::document_queue::with_step_wait_citation(
+                                agent_doc_queue::prompt_pressure::blocked_row_citations(
+                                    blockers.blockers_for_row(&prompt.text).unwrap_or_default(),
+                                    review_hold,
+                                ),
+                                step_waits[index].as_ref(),
                             )
                         } else {
                             Vec::new()

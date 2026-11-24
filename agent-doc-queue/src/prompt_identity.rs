@@ -695,9 +695,8 @@ fn list_item(line: &str) -> Option<(usize, &str)> {
     if let Some(body) = rest.strip_prefix("- ") {
         return Some((indent, body));
     }
-    let marker = rest.find(". ")?;
-    (!rest[..marker].is_empty() && rest[..marker].bytes().all(|byte| byte.is_ascii_digit()))
-        .then_some((indent, &rest[marker + 2..]))
+    let marker = agent_doc_element_queue::ordered_list_marker_len(rest)?;
+    Some((indent, &rest[marker + 1..]))
 }
 
 fn valid_id(id: &str) -> bool {

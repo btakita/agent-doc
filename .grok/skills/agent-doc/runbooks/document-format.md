@@ -85,6 +85,35 @@ established components; valid documents in the previous order are not silently r
 - `<!-- agent:status -->`, `<!-- agent:log -->`, `<!-- agent:architecture -->`, ... — agent-managed via targeted patch blocks.
 - `<!-- agent:recap -->` — this turn's recap. While the turn is in progress the previous turn's recap stays beside it, and until this turn's recap is written the current section shows the turn's status. Committing the turn removes the previous one; a status-only current section restores the previous recap. See [recap.md](recap.md).
 
+
+#### Numbered steps under a row (`#orderedsteps`)
+
+A numbered list under a run row is an ordered sequence. Steps run one at a
+time, in order; they inherit the row's lineage and presets like bulleted
+children:
+
+```markdown
+- ### https://github.com/org/repo/pull/389
+  - steps
+    1. #rebase
+    2. #address
+    3. #adversarial-pr
+```
+
+- Only the first unfinished step is drained, offered to the subagent pool, or
+  claimable. Later steps rest `⛔ ⟦blocked by step-N⟧` and `queue tree` shows
+  `(waits on step N)`; `queue claim` refuses them.
+- A step is finished when it is struck and no live agent follow-up remains
+  under it. Claimed, running and reported (`☑️`) steps are not finished.
+  Operator-owned rows under a step (`[operator-verify]`, `🙋`) do not hold it.
+- `N.` and `N)` both work. Numbers are kept exactly; glyphs, claim labels and
+  strikes go after the number (`1. ~~#rebase~~`).
+- A step's follow-ups and response tree nest under it at its content column
+  (7 spaces under `    1. `). Close a step by its nest vector, for example
+  `queue consume --ack-text 'https://github.com/org/repo/pull/389: steps: #address'`.
+- Bulleted siblings (`- note`) beside numbered rows are not steps, and a
+  numbered list at column 0 is not a sequence.
+
 Built-in element semantics live in the `agent-doc-element-*` crate family and
 are composed by `agent-doc-element-registry`. An unregistered `agent:*`
 component uses the `agent-doc-element-unknown` fallback: preserve

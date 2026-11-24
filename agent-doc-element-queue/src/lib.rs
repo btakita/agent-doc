@@ -948,6 +948,35 @@ pub fn open_count_token(trimmed: &str) -> Option<([usize; 4], &str)> {
     Some((counts, after))
 }
 
+/// `#orderedsteps`: byte length of a leading ordered-list marker (`1.`,
+/// `12)`) that a space follows, without that space. Every queue list parser
+/// reads numbered rows through this one rule, so `N.` and `N)` are the same
+/// list shape everywhere.
+pub fn ordered_list_marker_len(text: &str) -> Option<usize> {
+    let digits = text.bytes().take_while(u8::is_ascii_digit).count();
+    if digits == 0 {
+        return None;
+    }
+    match text.as_bytes().get(digits..digits + 2) {
+        Some([b'.' | b')', b' ']) => Some(digits + 1),
+        _ => None,
+    }
+}
+
+/// `#orderedsteps`: byte width of a leading list marker together with the
+/// space after it (`- ` and `* ` and `+ ` are 2, `1. ` is 3, `12) ` is 4),
+/// or `None` when `trimmed` does not open a list item. A row's children sit
+/// at its indent plus this width, the item's content column.
+pub fn list_item_marker_width(trimmed: &str) -> Option<usize> {
+    if ["- ", "* ", "+ "]
+        .iter()
+        .any(|marker| trimmed.starts_with(marker))
+    {
+        return Some(2);
+    }
+    ordered_list_marker_len(trimmed).map(|len| len + 1)
+}
+
 /// Strip ONE leading open-work count token (see [`open_count_token`]).
 pub fn strip_open_count_token(trimmed: &str) -> Option<&str> {
     open_count_token(trimmed).map(|(_, after)| after)

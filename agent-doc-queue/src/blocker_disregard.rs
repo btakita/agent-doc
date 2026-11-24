@@ -1169,13 +1169,34 @@ fn repaint_line(line: &str, blockers: &crate::queue_blocked::QueueBlockers) -> S
     {
         return line.to_string();
     }
+    // `#orderedsteps`: a `step-N` citation is the row's position in a
+    // numbered list, not a tracked edge this repaint derives. Keep it.
+    let steps = blocked_marker_ids(rest)
+        .into_iter()
+        .filter(|id| {
+            id.strip_prefix("step-")
+                .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+        })
+        .collect::<Vec<_>>();
     if let Some(live) = blockers.blockers_for_row(rest) {
+        let mut live = live.to_vec();
+        live.extend(steps);
         if blocked_marker_ids(rest) == live {
             return line.to_string();
         }
         return format!(
             "{prefix}{}",
-            apply_lifecycle_marker_with_blockers(rest, QueueLifecycleMarker::Blocked, live)
+            apply_lifecycle_marker_with_blockers(rest, QueueLifecycleMarker::Blocked, &live)
+        );
+    }
+    if !steps.is_empty() {
+        let current = blocked_marker_ids(rest);
+        if current == steps {
+            return line.to_string();
+        }
+        return format!(
+            "{prefix}{}",
+            apply_lifecycle_marker_with_blockers(rest, QueueLifecycleMarker::Blocked, &steps)
         );
     }
     format!(

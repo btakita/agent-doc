@@ -165,6 +165,12 @@ pub enum SelfRepairKind {
     /// under a Remaining entry, moving the rows under it up to be the
     /// entry's answers (`#tornsplice`).
     DuplicateEntryGuidance,
+    /// Closed a strike that lost its last tilde (`~~X~` → `~~X~~`,
+    /// `#orderedsteps`).
+    HalfClosedStrike,
+    /// Moved a struck numbered step's response tree from under a later step
+    /// back under that step (`#orderedsteps`).
+    NumberedStepResponse,
 }
 
 impl SelfRepairKind {
@@ -186,6 +192,8 @@ impl SelfRepairKind {
             Self::GluedGuidanceRow => "glued_guidance_row",
             Self::TornResponseTail => "torn_response_tail",
             Self::DuplicateEntryGuidance => "duplicate_entry_guidance",
+            Self::HalfClosedStrike => "half_closed_strike",
+            Self::NumberedStepResponse => "numbered_step_response",
         }
     }
 }
@@ -1160,6 +1168,11 @@ pub fn self_repair_document(
     let (current, torn_repairs) = crate::torn_response_tail::drop_torn_response_tails(document);
     let mut current = current;
     repairs.extend(torn_repairs);
+    // `#orderedsteps`: before any pass reads a half-closed step strike or a
+    // step response under the wrong step.
+    let (stepped, step_repairs) = crate::ordered_step_repair::repair_numbered_steps(&current);
+    current = stepped;
+    repairs.extend(step_repairs);
     if let Ok((retired, ids)) =
         crate::queue_consume::retire_misplaced_queue_response_projections(&current, response_proven)
         && !ids.is_empty()

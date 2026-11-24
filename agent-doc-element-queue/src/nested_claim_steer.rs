@@ -222,13 +222,9 @@ fn split_space_list_item(line: &str) -> Option<(usize, Option<String>, &str)> {
     if let Some(rest) = dedented.strip_prefix("- ") {
         return Some((indent, None, rest));
     }
-    let marker_end = dedented.find(". ")?;
-    let digits = &dedented[..marker_end];
-    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    let rest = &dedented[marker_end + 2..];
-    Some((indent, Some(dedented[..=marker_end].to_string()), rest))
+    let marker_len = crate::ordered_list_marker_len(dedented)?;
+    let rest = &dedented[marker_len + 1..];
+    Some((indent, Some(dedented[..marker_len].to_string()), rest))
 }
 
 #[cfg(test)]

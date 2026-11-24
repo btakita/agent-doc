@@ -146,10 +146,15 @@ pub fn desired_tree_indicators(
 pub fn line_with_tree_indicator(line: &str, indicator: Option<TreeIndicator>) -> Option<String> {
     let indent = line.len() - line.trim_start().len();
     let after_indent = &line[indent..];
-    let marker = ["- ", "* ", "+ "]
+    // `#orderedsteps`: a numbered step carries its glyph after the number.
+    let marker_len = ["- ", "* ", "+ "]
         .into_iter()
-        .find(|marker| after_indent.starts_with(marker))?;
-    let body_start = indent + marker.len();
+        .find(|marker| after_indent.starts_with(marker))
+        .map(str::len)
+        .or_else(|| {
+            agent_doc_element_queue::ordered_list_marker_len(after_indent).map(|len| len + 1)
+        })?;
+    let body_start = indent + marker_len;
     let body = &line[body_start..];
     let heading = body
         .strip_prefix("###")

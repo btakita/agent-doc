@@ -462,13 +462,13 @@ pub fn trimmed_line_looks_like_markdown_list_item(trimmed: &str) -> bool {
     if trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") {
         return true;
     }
-    if let Some(dot) = trimmed.find(". ") {
-        let head = &trimmed[..dot];
-        if !head.is_empty() && head.chars().all(|c| c.is_ascii_digit()) {
-            return true;
-        }
-    }
-    false
+    // `N.` and `N)` (`#orderedsteps`).
+    let digits = trimmed.bytes().take_while(u8::is_ascii_digit).count();
+    digits > 0
+        && matches!(
+            trimmed.as_bytes().get(digits..digits + 2),
+            Some([b'.' | b')', b' '])
+        )
 }
 
 fn strip_prompt_prefix(line: &str) -> &str {

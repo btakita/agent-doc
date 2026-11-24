@@ -2947,6 +2947,8 @@ struct QueueDispatchRow {
     /// Claim key. A nested non-tracked leaf is its nest vector when that
     /// identity differs from the visible line (`#nestlistlineage`).
     head: String,
+    /// `#orderedsteps`: a later numbered step waits on an earlier open one.
+    step_held: bool,
 }
 
 /// Executable rows of one queue block with the head `queue claim` resolves.
@@ -2958,6 +2960,7 @@ fn queue_component_dispatch_rows(
         return Vec::new();
     };
     let entries = agent_doc_queue::nested_claim_steer::expand_if_installed(entries);
+    let step_waits = agent_doc_queue::document_queue::ordered_step_waits(&entries);
     agent_doc_queue::document_queue::executable_prompt_indexes(&entries)
         .into_iter()
         .filter_map(|index| {
@@ -2980,7 +2983,12 @@ fn queue_component_dispatch_rows(
             } else {
                 lineage
             };
-            Some(QueueDispatchRow { raw, norm, head })
+            Some(QueueDispatchRow {
+                raw,
+                norm,
+                head,
+                step_held: step_waits[index].is_some(),
+            })
         })
         .collect()
 }
@@ -3117,6 +3125,9 @@ pub fn queue_component_subagent_heads_with_facts(
             agent_doc_document::queue_projection::operator_action_ids(&item.raw).is_empty()
         })
         .filter(|item| !facts.blockers.blocks_row(&item.norm))
+        // `#orderedsteps`: only the first unfinished numbered step is a
+        // worker head; later steps wait on it and never run in parallel.
+        .filter(|item| !item.step_held)
         // `#promptpressure`: a free-text head held by an open review item is
         // not a worker head until the operator resolves that review.
         .filter(|item| {
@@ -3271,6 +3282,10 @@ pub fn subagent_dispatch_heads_with_presets(
     let blockers = agent_doc_queue::queue_blocked::queue_blockers(content);
     let review_blockers = agent_doc_queue::prompt_pressure::review_blocked_prompts(content);
     let answer_rows = agent_doc_queue::queue_continuation::AnswerRowRouting::for_content(content);
+    let step_held = agent_doc_queue::queue_continuation::ordered_step_held_lineages(content)
+        .into_keys()
+        .map(|lineage| normalize_queue_text(&lineage))
+        .collect::<std::collections::HashSet<_>>();
     executable_queue_items(content)
         .into_iter()
         .filter(|item| {
@@ -3278,6 +3293,7 @@ pub fn subagent_dispatch_heads_with_presets(
         })
         .filter(|item| !head_awaits_operator(&item.norm, &awaiting_operator))
         .filter(|item| !blockers.blocks_row(&item.norm))
+        .filter(|item| !step_held.contains(&item.norm))
         .filter(|item| {
             !review_blockers.holds_legacy(&item.raw)
                 && !review_blockers.holds_external(&item.norm)
@@ -5037,6 +5053,45 @@ mod tests {
         assert_eq!(
             live,
             vec!["organize B".to_string(), "publish B [inline]".to_string()]
+        );
+    }
+
+    /// `#orderedsteps`: a numbered list under a row is a sequence. Only its
+    /// first unfinished step is a worker head; later steps stay live but are
+    /// never offered in parallel. Striking a step releases the next one.
+    #[test]
+    fn numbered_steps_dispatch_one_at_a_time() {
+        let queue = |steps: &str| {
+            format!(
+                "{FM}# Session\n\n<!-- agent:run id=\"prs\" subagents keep -->\n- https://github.com/o/r/pull/389\n  - %% feat: thing %%\n  - steps\n{steps}- https://github.com/o/r/pull/390\n  - #adversarial-pr\n<!-- /agent:run -->\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n"
+            )
+        };
+        let open = queue("    1. 📥 #rebase\n    2. 📥 #address\n    3) 📥 #adversarial-pr\n");
+        let (_, eligible, live) = queue_attr_subagent_heads(&open).unwrap();
+        assert_eq!(
+            eligible,
+            vec![
+                "https://github.com/o/r/pull/389: steps: #rebase".to_string(),
+                "https://github.com/o/r/pull/390: #adversarial-pr".to_string()
+            ],
+            "later steps wait on step 1: {live:?}"
+        );
+        assert_eq!(live.len(), 4, "held steps stay live: {live:?}");
+        assert!(
+            !subagent_dispatch_heads(&open, None)
+                .iter()
+                .any(|head| head.contains("#address")),
+            "a held step is never new dispatch work"
+        );
+
+        let advanced = queue("    1. ~~#rebase~~\n    2. 📥 #address\n    3) 📥 #adversarial-pr\n");
+        let (_, eligible, _) = queue_attr_subagent_heads(&advanced).unwrap();
+        assert_eq!(
+            eligible,
+            vec![
+                "https://github.com/o/r/pull/389: steps: #address".to_string(),
+                "https://github.com/o/r/pull/390: #adversarial-pr".to_string()
+            ]
         );
     }
 

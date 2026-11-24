@@ -4207,6 +4207,13 @@ mod tests {
         std::fs::write(&file, &baseline).unwrap();
         let editor = LiveEditorFixture::new(&file, "nested-queue-editor", &baseline);
         agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline)).unwrap();
+        // Preflight admitted the baseline after its own quiescence wait.
+        agent_doc_queue_io::subagent_pool::pool_refill_for_admitted_content(
+            &file,
+            &baseline,
+            agent_doc_queue::subagent_pool::PoolRefillTrigger::Plan,
+        )
+        .unwrap();
         let original = subagent_pool_checkpoint(&file, 1_000)
             .unwrap()
             .expect("the original top-level prompt was offered");
@@ -4224,9 +4231,22 @@ mod tests {
 
         // The first checkpoint sees the new executable frontier even if the
         // edit has not been saved and the steering debounce has not elapsed.
+        // `#typingrow`: free-text leaves wait out the dispatch settle window
+        // (a live editor may still be typing them), never the far longer
+        // steering debounce, and never a save.
+        assert!(
+            subagent_pool_checkpoint(&file, 1_001)
+                .unwrap()
+                .is_none_or(|held| !held.contains(first)),
+            "a just-typed leaf is held"
+        );
+        let _settled = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(
+            agent_doc_queue_io::queue_claim::claim_clock_now_secs()
+                + agent_doc_debounce::edit_settle::DISPATCH_SETTLE_MS / 1_000,
+        );
         let offered = subagent_pool_checkpoint(&file, 1_001)
             .unwrap()
-            .expect("the first checkpoint offers the new leaf prompts");
+            .expect("the checkpoint after the settle window offers the new leaf prompts");
         assert!(offered.contains(first), "{offered}");
         assert!(offered.contains(second), "{offered}");
         assert!(
@@ -4235,6 +4255,108 @@ mod tests {
         );
         assert!(!offered.contains("operator note"), "{offered}");
         assert_eq!(subagent_pool_checkpoint(&file, 1_002).unwrap(), None);
+    }
+
+    /// `#typingrow` (agent-doc-bugs.md, 2026-11-24): the PostToolUse pool
+    /// refill offered `I want to have a way to express structured prompts. W`,
+    /// then a longer partial after every typing batch (6+ refills, each with
+    /// claim / brief / start commands), until the operator submitted. A
+    /// free-text row in a live editor is offered only once it has stayed
+    /// unchanged for the dispatch settle window, and then exactly as settled.
+    /// A row with a generated id is offered at once.
+    #[test]
+    fn pool_checkpoint_holds_a_free_text_row_the_operator_is_still_typing() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let baseline = "---\nsession: sid\nagent_doc_format: template\n---\n\n<!-- agent:queue subagents=3 go -->\n- do [#a]\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, baseline).unwrap();
+        let editor = LiveEditorFixture::new(&file, "typingrow-editor", baseline);
+        agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline)).unwrap();
+        let clock = agent_doc_queue_io::queue_claim::claim_clock_now_secs();
+        let at = |offset_secs: u64| {
+            agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(clock + offset_secs)
+        };
+
+        let _pin = at(0);
+        let first = subagent_pool_checkpoint(&file, 1_000)
+            .unwrap()
+            .expect("the id row is offered");
+        assert!(first.contains("queue item \"do [#a]\""), "{first}");
+
+        let typed = |row: &str| baseline.replace("- do [#a]\n", &format!("- do [#a]\n- {row}\n"));
+        let batches = [
+            (1, "I want to have a way to express structured prompts. W"),
+            (
+                3,
+                "I want to have a way to express structured prompts. We currently only",
+            ),
+            (
+                5,
+                "I want to have a way to express structured prompts. We currently only have free text.",
+            ),
+        ];
+        for (offset, row) in batches {
+            editor.publish(&typed(row));
+            let _pin = at(offset);
+            let surfaced = subagent_pool_checkpoint(&file, 1_000 + offset * 1_000)
+                .unwrap()
+                .unwrap_or_default();
+            assert!(
+                !surfaced.contains("structured prompts"),
+                "a row the operator is still typing is never offered: {surfaced}"
+            );
+        }
+        let settled = batches[2].1;
+        {
+            let _pin = at(8);
+            let quiet = subagent_pool_checkpoint(&file, 8_000)
+                .unwrap()
+                .unwrap_or_default();
+            assert!(
+                !quiet.contains("structured prompts"),
+                "three quiet seconds are inside the settle window: {quiet}"
+            );
+        }
+        let _pin = at(11);
+        let offered = subagent_pool_checkpoint(&file, 11_000)
+            .unwrap()
+            .expect("the settled row is re-offered once it settles");
+        assert!(
+            offered.contains(&format!("--item '{settled}'")),
+            "{offered}"
+        );
+        assert!(
+            !offered.contains("prompts. W'") && !offered.contains("currently only'"),
+            "only the settled text is offered: {offered}"
+        );
+    }
+
+    /// `#typingrow`: an explicit send is the operator saying "this is final",
+    /// so the settle window does not apply to the row it covers.
+    #[test]
+    fn pool_checkpoint_offers_a_free_text_row_at_once_after_an_explicit_send() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let baseline = "---\nsession: sid\nagent_doc_format: template\n---\n\n<!-- agent:queue subagents=3 go -->\n- do [#a]\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, baseline).unwrap();
+        let editor = LiveEditorFixture::new(&file, "typingrow-send-editor", baseline);
+        agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline)).unwrap();
+        let clock = agent_doc_queue_io::queue_claim::claim_clock_now_secs();
+        let _pin = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(clock);
+        let row = "Summarize the open review threads";
+        editor.publish(&baseline.replace("- do [#a]\n", &format!("- do [#a]\n- {row}\n")));
+        let held = subagent_pool_checkpoint(&file, 1_000)
+            .unwrap()
+            .unwrap_or_default();
+        assert!(!held.contains(row), "{held}");
+
+        record_explicit_send(&file).unwrap();
+        let sent = subagent_pool_checkpoint(&file, 1_001)
+            .unwrap()
+            .expect("the sent row is offered");
+        assert!(sent.contains(row), "{sent}");
     }
 
     #[test]

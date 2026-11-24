@@ -278,6 +278,16 @@ fn nested_vector(item: &QueueItem) -> Option<String> {
     (normalize_queue_text(&item.raw) != item.norm).then(|| item.norm.clone())
 }
 
+/// `#typingrow`: an added or edited free-text queue row this observation
+/// would hand to a new worker. Rows naming a `[#id]` are binary-written or
+/// name finished work, and every other route keeps the steering window.
+fn dispatches_free_text_row(item: &SteeringItem) -> bool {
+    item.source == SteeringSource::Queue
+        && item.dispatch == SteeringDispatch::Subagent
+        && item.change != SteeringChange::Deleted
+        && !agent_doc_debounce::edit_settle::contains_id_reference(&item.verbatim)
+}
+
 /// The prompt tree a fresh cycle would submit for `item` in `current`
 /// (`#nestleafselect`); `None` for a top-level row, which has no tree.
 fn nested_prompt_tree(current: &str, item: &QueueItem) -> Option<String> {
@@ -645,6 +655,22 @@ pub fn observe_with_claimed_tracked_edits(
         } else {
             completion_signal(&candidate.item.verbatim)
         };
+        // `#typingrow`: a free-text queue row routed to a new worker settles
+        // on the dispatch window, the same one the pool refill reads, and a
+        // finished-looking sentence does not halve it. A zero window (the
+        // forced turn boundary) keeps its meaning.
+        let dispatch_row = ctx.debounce_ms > 0 && dispatches_free_text_row(&candidate.item);
+        let debounce_ms = if dispatch_row {
+            ctx.debounce_ms
+                .max(agent_doc_debounce::edit_settle::DISPATCH_SETTLE_MS)
+        } else {
+            ctx.debounce_ms
+        };
+        let signal = if dispatch_row && signal == CompletionSignal::Complete {
+            CompletionSignal::Inconclusive
+        } else {
+            signal
+        };
         let chars = candidate.item.verbatim.chars().count() as u64;
         let (item_started_ms, item_started_chars) = match prior {
             Some(prior) => (
@@ -673,7 +699,7 @@ pub fn observe_with_claimed_tracked_edits(
             ),
             item_age_ms: ctx.now_ms.saturating_sub(item_started_ms),
             component: candidate.item.source.gate_component(),
-            debounce_ms: ctx.debounce_ms,
+            debounce_ms,
             max_hold_ms: ctx.max_hold_ms,
         };
         // `#steergateperceptron`: the classifier sees the same features the
@@ -683,7 +709,7 @@ pub fn observe_with_claimed_tracked_edits(
             quiet_for_ms,
             stable_for_ms,
             held_for_ms: stable_for_ms.unwrap_or(0),
-            debounce_ms: ctx.debounce_ms,
+            debounce_ms,
             max_hold_ms: ctx.max_hold_ms,
             signal,
             unbalanced_delimiters,
@@ -3661,6 +3687,66 @@ mod tests {
         assert!(rendered.contains("NEW background subagent"));
     }
 
+    /// `#typingrow`: a free-text row routed to a new worker settles on the
+    /// dispatch window, not the 2.5 s steering window, even when the typed
+    /// text ends a sentence. The same row routed inline, and a `[#id]` row
+    /// routed to a worker, keep the steering window.
+    #[test]
+    fn subagent_free_text_steering_waits_for_the_dispatch_settle_window() {
+        use agent_doc_debounce::edit_settle::DISPATCH_SETTLE_MS;
+        let owned = BTreeSet::new();
+        let baseline = doc("- current task\n", EX);
+        let row = "#subagents I want to have a way to express structured prompts.";
+        let current = doc(&format!("- current task\n- {row}\n"), EX);
+        let ctx_at = |now_ms| ObserveContext {
+            now_ms,
+            document_changed_ms: None,
+            ..quiet_ctx(&owned)
+        };
+        let first = observe(
+            &seeded(&baseline, Some("current task")),
+            &current,
+            &ctx_at(0),
+        );
+        assert!(first.ready.is_empty());
+        let steering_window = observe(&first.next, &current, &ctx_at(DEFAULT_STEERING_DEBOUNCE_MS));
+        assert!(
+            steering_window.ready.is_empty(),
+            "a worker is not offered a row after a 2.5 s pause"
+        );
+        let settled = observe(&first.next, &current, &ctx_at(DISPATCH_SETTLE_MS));
+        assert_eq!(settled.ready.len(), 1);
+        assert_eq!(settled.ready[0].dispatch, SteeringDispatch::Subagent);
+
+        let inline = doc("- current task\n- express structured prompts.\n", EX);
+        let first = observe(
+            &seeded(&baseline, Some("current task")),
+            &inline,
+            &ctx_at(0),
+        );
+        let ready = observe(
+            &first.next,
+            &inline,
+            &ctx_at(DEFAULT_STEERING_DEBOUNCE_MS / 2),
+        );
+        assert_eq!(ready.ready.len(), 1);
+        assert_eq!(ready.ready[0].dispatch, SteeringDispatch::DrainAfterCurrent);
+
+        let id_row = doc("- current task\n- #subagents do [#structured]\n", EX);
+        let first = observe(
+            &seeded(&baseline, Some("current task")),
+            &id_row,
+            &ctx_at(0),
+        );
+        let ready = observe(
+            &first.next,
+            &id_row,
+            &ctx_at(DEFAULT_STEERING_DEBOUNCE_MS / 2),
+        );
+        assert_eq!(ready.ready.len(), 1);
+        assert_eq!(ready.ready[0].dispatch, SteeringDispatch::Subagent);
+    }
+
     #[test]
     fn cycle_and_queue_scoped_subagent_presets_apply_to_untagged_additions() {
         let owned = BTreeSet::new();
@@ -4429,7 +4515,8 @@ mod tests {
     /// learned gate makes exactly the deterministic gate's deliveries: the
     /// tsift fragment is held (until max-hold delivers it flagged), a bare
     /// `do [#id]` is delivered half a window after its last keystroke, and an
-    /// issue URL is delivered the same way.
+    /// issue URL routed to a worker is delivered a full dispatch settle window
+    /// after its last keystroke (`#typingrow`).
     #[test]
     fn recorded_edit_stream_seeded_learned_gate_matches_deterministic() {
         let stream: &[(u64, &str)] = &[
@@ -4464,8 +4551,14 @@ mod tests {
         let id = find("do [#abc]");
         assert!(!id.possibly_partial);
         assert!((11_400..=11_750).contains(&id.at_ms), "{id:?}");
+        // `#typingrow`: the URL is a free-text row routed to a new worker, so
+        // it waits the full dispatch settle window, not half the steering one.
         let url = find("#subagent: https://github.com/btakita/agent-doc/issues/118");
-        assert!((21_000..=21_250).contains(&url.at_ms), "{url:?}");
+        let window = agent_doc_debounce::edit_settle::DISPATCH_SETTLE_MS;
+        assert!(
+            (20_000 + window..=20_250 + window).contains(&url.at_ms),
+            "{url:?}"
+        );
         // The fragment is never delivered as settled: only the max-hold
         // (45s after it was first seen in this version) releases it, flagged.
         let fragment = find("Should we release + publish the");

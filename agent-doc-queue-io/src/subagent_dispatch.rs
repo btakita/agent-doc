@@ -121,6 +121,17 @@ fn lineage_hold_for_head(keys: &[(String, String)], head: &str) -> String {
     }
 }
 
+/// The claim lineage of each dispatch head in `content`, in `heads` order
+/// (`#typingrow`): the identity the steering seed's `acknowledged_queue`
+/// records, whatever spelling the refill listed.
+pub(crate) fn dispatch_head_lineages(content: &str, heads: &[String]) -> Vec<String> {
+    let keys = executable_row_keys(content);
+    heads
+        .iter()
+        .map(|head| lineage_hold_for_head(&keys, head))
+        .collect()
+}
+
 /// Live, unclaimed queue lines with subagent intent that are new since the
 /// previous cycle's seed, in queue order.
 fn subagent_dispatch_candidates_for_content(file: &Path, content: &str) -> Result<Vec<String>> {

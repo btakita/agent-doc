@@ -675,9 +675,119 @@ pub fn typing_chars_per_min(chars_added: u64, elapsed_ms: u64) -> Option<u32> {
         .then(|| (chars_added.saturating_mul(60_000) / elapsed_ms).min(u64::from(u32::MAX)) as u32)
 }
 
+// ---------------------------------------------------------------------------
+// Worker dispatch of free-text rows (`#typingrow`).
+// ---------------------------------------------------------------------------
+
+/// `#typingrow`: how long a free-text queue row must stay unchanged in a live
+/// editor before it is offered for worker dispatch (a pool refill head or a
+/// `subagent` steering item).
+///
+/// 6 s, not the 2.5 s steering default: the incident document
+/// (agent-doc-bugs.md, 2026-11-24 16:37–16:39Z) shows the operator composing
+/// one row in bursts whose gaps ran 1–4 s, so 2.5 s fires inside an ordinary
+/// mid-sentence pause while 6 s clears the longest observed gap with margin.
+/// A dispatched worker cannot be taken back, so the cost of offering a
+/// half-written row is a whole wasted attempt; the cost of the longer window
+/// is at most six seconds of latency on a finished row, and none at all when
+/// the operator submits explicitly.
+pub const DISPATCH_SETTLE_MS: u64 = 6_000;
+
+/// Whether `text` names a `[#id]` reference. A row with an id was written by
+/// the binary (a mirrored backlog item, a `do [#id]` head) or names finished
+/// work, so it is never gated as in-flight typing (`#typingrow`).
+pub fn contains_id_reference(text: &str) -> bool {
+    let mut rest = text;
+    while let Some(start) = rest.find("[#") {
+        let after = &rest[start + 2..];
+        let Some(end) = after.find(']') else {
+            return false;
+        };
+        let id = &after[..end];
+        if !id.is_empty()
+            && id
+                .chars()
+                .all(|ch| ch.is_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':' | '/'))
+        {
+            return true;
+        }
+        rest = &after[end..];
+    }
+    false
+}
+
+/// The settle decision for offering one free-text row to a worker
+/// (`#typingrow`), given how long its exact text has been observed unchanged.
+///
+/// The shared gate with two dispatch-specific choices: the quiet window is
+/// [`DISPATCH_SETTLE_MS`], and terminal punctuation does not halve it. A
+/// sentence boundary is exactly where a multi-sentence prompt pauses
+/// (`… structured prompts.` then ` We currently only …`). An unfinished text
+/// still waits for max-hold, past which it is offered so a row is never
+/// swallowed.
+pub fn dispatch_settle_decision(
+    text: &str,
+    stable_for_ms: u64,
+    max_hold_ms: u64,
+) -> SettleDecision {
+    let signal = match completion_signal(text) {
+        CompletionSignal::Complete => CompletionSignal::Inconclusive,
+        other => other,
+    };
+    settle_decision(SettleInputs {
+        quiet_for_ms: None,
+        stable_for_ms: Some(stable_for_ms),
+        held_for_ms: stable_for_ms,
+        debounce_ms: DISPATCH_SETTLE_MS,
+        max_hold_ms,
+        signal,
+        unbalanced_delimiters: has_unbalanced_delimiters(text),
+        verdict: None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#typingrow`: the incident row is held through every typing batch,
+    /// a finished sentence still waits the full window, and an unfinished
+    /// one is offered only at max-hold.
+    #[test]
+    fn dispatch_settle_holds_until_the_full_window() {
+        let max = DEFAULT_MAX_HOLD_MS;
+        for text in [
+            "I want to have a way to express structured prompts. W",
+            "I want to have a way to express structured prompts.",
+        ] {
+            assert!(!dispatch_settle_decision(text, 0, max).deliver(), "{text}");
+            assert!(
+                !dispatch_settle_decision(text, DISPATCH_SETTLE_MS - 1, max).deliver(),
+                "{text}"
+            );
+            assert_eq!(
+                dispatch_settle_decision(text, DISPATCH_SETTLE_MS, max),
+                SettleDecision::Settled,
+                "{text}"
+            );
+        }
+        let unfinished = "express structured prompts with the";
+        assert!(!dispatch_settle_decision(unfinished, DISPATCH_SETTLE_MS * 2, max).deliver());
+        assert_eq!(
+            dispatch_settle_decision(unfinished, max, max),
+            SettleDecision::MaxHoldExpired
+        );
+    }
+
+    #[test]
+    fn id_references_are_recognized_anywhere_in_a_row() {
+        assert!(contains_id_reference("do [#subagentworkpool-8ac1]"));
+        assert!(contains_id_reference("re [#a.b]: follow up"));
+        assert!(!contains_id_reference("see [#abc"));
+        assert!(!contains_id_reference("[#] empty"));
+        assert!(!contains_id_reference("plain free text"));
+        assert!(!contains_id_reference("[# spaced id]"));
+    }
 
     /// The real case (tasks/software/tsift.md, 2026-10-03): the deterministic
     /// path must not call this fragment finished.

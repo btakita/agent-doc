@@ -84,7 +84,35 @@ pub fn pool_refill_for_content_at(
     now_secs: u64,
 ) -> Result<PoolRefill> {
     let harness = pool_refill_session_harness();
-    pool_refill_for_content_at_for_harness(file, content, trigger, now_secs, harness.as_deref())
+    pool_refill_for_content_at_for_harness(
+        file,
+        content,
+        trigger,
+        now_secs,
+        harness.as_deref(),
+        TypingEvidence::Observe,
+    )
+}
+
+/// [`pool_refill_for_content`] for the text preflight just admitted
+/// (`#typingrow`). Preflight's own operator-edit quiescence wait
+/// (`#qheadcomposing`) already decided the operator finished these rows, so
+/// every free-text head is recorded as settled instead of starting the
+/// dispatch settle window over.
+pub fn pool_refill_for_admitted_content(
+    file: &Path,
+    content: &str,
+    trigger: PoolRefillTrigger,
+) -> Result<PoolRefill> {
+    let harness = pool_refill_session_harness();
+    pool_refill_for_content_at_for_harness(
+        file,
+        content,
+        trigger,
+        crate::queue_claim::claim_clock_now_secs(),
+        harness.as_deref(),
+        TypingEvidence::Admitted,
+    )
 }
 
 /// Refill to paste into a turn that is already running on `harness`.
@@ -102,6 +130,7 @@ pub fn pool_running_turn_refill_for_content(
         PoolRefillTrigger::RunningTurn,
         crate::queue_claim::claim_clock_now_secs(),
         harness,
+        TypingEvidence::Observe,
     )?;
     Ok(refill.running_turn_refill())
 }
@@ -119,6 +148,7 @@ fn pool_refill_for_content_at_for_harness(
     trigger: PoolRefillTrigger,
     now_secs: u64,
     harness: Option<&str>,
+    typing: TypingEvidence,
 ) -> Result<PoolRefill> {
     // `#lostrunningcontinue`: continue before this refill classifies the slot.
     // A failed continue is what frees the row for retry. The flag records a
@@ -132,7 +162,7 @@ fn pool_refill_for_content_at_for_harness(
             &format!("lost_running_recovery_skipped error={error:#} (#lostrunningcontinue)"),
         );
     }
-    observe_pool_refill(file, content, trigger, now_secs, harness)
+    observe_pool_refill(file, content, trigger, now_secs, harness, typing)
 }
 
 /// A connected client can inspect and revalidate action IDs without triggering
@@ -145,6 +175,7 @@ pub fn observe_pool_refill_for_content(file: &Path, content: &str) -> Result<Poo
         PoolRefillTrigger::Plan,
         crate::queue_claim::claim_clock_now_secs(),
         harness.as_deref(),
+        TypingEvidence::Observe,
     )
 }
 
@@ -154,6 +185,7 @@ fn observe_pool_refill(
     trigger: PoolRefillTrigger,
     now_secs: u64,
     harness: Option<&str>,
+    typing: TypingEvidence,
 ) -> Result<PoolRefill> {
     let document = file.display().to_string();
     let (plan, pools) =
@@ -319,7 +351,13 @@ fn observe_pool_refill(
     let next_heads = if quota_refill_block.is_some() {
         Vec::new()
     } else {
-        crate::subagent_dispatch::observe_subagent_dispatch_candidates_for_content(file, content)?
+        let candidates =
+            crate::subagent_dispatch::observe_subagent_dispatch_candidates_for_content(
+                file, content,
+            )?;
+        // `#typingrow`: a free-text row the operator is still typing is held,
+        // never dropped; the refill after it settles offers it.
+        settled_dispatch_heads(file, content, candidates, now_secs, typing)
             .into_iter()
             .map(|item| RefillHead {
                 claim_command: crate::subagent_dispatch::claim_command(&document, &item),
@@ -341,6 +379,197 @@ fn observe_pool_refill(
         quota_refill_block,
         waiting_for_slot,
     })
+}
+
+/// What a refill may assume about free-text heads the operator could still be
+/// typing (`#typingrow`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TypingEvidence {
+    /// Observe the live text: a free-text head is offered once it settles.
+    Observe,
+    /// Preflight admitted this text after its own quiescence wait.
+    Admitted,
+}
+
+/// `project_runtime_state` key prefix of the free-text settle record.
+const TYPING_SETTLE_KEY_PREFIX: &str = "subagent_pool_typing";
+
+/// Recorded first-observed time meaning "admitted": settled for good.
+const ADMITTED_AT_MS: u64 = 0;
+
+/// The durable settle evidence for one document's free-text heads: each exact
+/// head text (by hash) and when the gate first observed it in that form.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct TypingSettleRecord {
+    #[serde(default)]
+    first_seen_ms: std::collections::BTreeMap<String, u64>,
+}
+
+fn typing_settle_key(file: &Path) -> String {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    format!(
+        "{TYPING_SETTLE_KEY_PREFIX}:{}",
+        agent_doc_hash::content_hash(&canonical.display().to_string())
+    )
+}
+
+/// Whether the operator's explicit send (`Run Agent Doc`, `agent-doc route`)
+/// covers exactly `content`. The record is the one mid-turn steering writes
+/// (`#claimedsteerwake`); with a live editor only an exact content match
+/// counts, since an edit after the send is new typing.
+fn explicit_send_covers(
+    conn: &agent_doc_sqlite::state_store::Connection,
+    file: &Path,
+    content: &str,
+) -> bool {
+    #[derive(serde::Deserialize)]
+    struct ExplicitSend {
+        #[serde(default)]
+        content_hash: Option<String>,
+    }
+    agent_doc_sqlite::state_store::load_project_runtime_state_from_db(
+        conn,
+        &crate::subagent_dispatch::midturn_steering_state_key("explicit_send", file),
+    )
+    .ok()
+    .flatten()
+    .and_then(|raw| serde_json::from_str::<ExplicitSend>(&raw).ok())
+    .and_then(|send| send.content_hash)
+    .is_some_and(|hash| {
+        hash == agent_doc_document_realtime::midturn_steering::content_hash(content)
+    })
+}
+
+/// `#typingrow`: the dispatch heads a refill may offer now.
+///
+/// A free-text row in a document with a live editor can be a row the operator
+/// is still typing: the editor delivers it one burst at a time, and each burst
+/// used to come back as a new refill head (`… structured prompts. W`, then
+/// `… We currently only`, …). Such a head is offered only once it has settled:
+/// - preflight admitted it (its quiescence wait already ran), or the
+///   current cycle's steering seed holds it;
+/// - the operator explicitly sent exactly this text; or
+/// - its exact text has been observed unchanged for
+///   [`agent_doc_debounce::edit_settle::DISPATCH_SETTLE_MS`] (an unfinished
+///   text waits for max-hold).
+///
+/// Rows naming a `[#id]` and documents without a live editor are not gated:
+/// there is no keystroke stream to be in the middle of. A held head is kept
+/// out of this refill only; it stays out of the inline drain and the next
+/// refill after it settles offers it. Evidence that cannot be read or
+/// recorded fails open, so the gate can delay a row but never lose one.
+fn settled_dispatch_heads(
+    file: &Path,
+    content: &str,
+    candidates: Vec<String>,
+    now_secs: u64,
+    typing: TypingEvidence,
+) -> Vec<String> {
+    let free_text = |head: &String| !agent_doc_debounce::edit_settle::contains_id_reference(head);
+    if !candidates.iter().any(free_text)
+        || !agent_doc_crdt_relay_io::crdt_authority_for_file(file).editor_attached()
+    {
+        return candidates;
+    }
+    match gate_free_text_heads(file, content, &candidates, now_secs, typing) {
+        Ok(offered) => offered,
+        Err(error) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "subagent_pool_typing_gate_unavailable error={error:#} action=offer (#typingrow)"
+                ),
+            );
+            candidates
+        }
+    }
+}
+
+fn gate_free_text_heads(
+    file: &Path,
+    content: &str,
+    candidates: &[String],
+    now_secs: u64,
+    typing: TypingEvidence,
+) -> Result<Vec<String>> {
+    use agent_doc_debounce::edit_settle::{
+        DEFAULT_MAX_HOLD_MS, contains_id_reference, dispatch_settle_decision,
+    };
+    let Some(root) = agent_doc_fs::find_project_root(file) else {
+        return Ok(candidates.to_vec());
+    };
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    let key = typing_settle_key(file);
+    let previous: TypingSettleRecord =
+        agent_doc_sqlite::state_store::load_project_runtime_state_from_db(&conn, &key)?
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_default();
+    let admitted = typing == TypingEvidence::Admitted || explicit_send_covers(&conn, file, content);
+    let seeded: std::collections::BTreeSet<String> =
+        crate::subagent_dispatch::load_midturn_base(file)
+            .ok()
+            .flatten()
+            .map(|base| base.acknowledged_queue.into_iter().collect())
+            .unwrap_or_default();
+    let lineages = crate::subagent_dispatch::dispatch_head_lineages(content, candidates);
+    let now_ms = now_secs.saturating_mul(1_000);
+    let mut next = TypingSettleRecord::default();
+    let mut offered = Vec::with_capacity(candidates.len());
+    let mut held = 0usize;
+    for (head, lineage) in candidates.iter().zip(&lineages) {
+        if contains_id_reference(head) {
+            offered.push(head.clone());
+            continue;
+        }
+        let text_key = agent_doc_hash::content_hash(head);
+        let in_seed = seeded.contains(
+            &agent_doc_document_realtime::midturn_steering::normalize_queue_text(lineage),
+        );
+        let first_seen_ms = if admitted || in_seed {
+            ADMITTED_AT_MS
+        } else {
+            previous
+                .first_seen_ms
+                .get(&text_key)
+                .copied()
+                .unwrap_or(now_ms)
+        };
+        next.first_seen_ms.insert(text_key, first_seen_ms);
+        let settled = first_seen_ms == ADMITTED_AT_MS
+            || dispatch_settle_decision(
+                head,
+                now_ms.saturating_sub(first_seen_ms),
+                DEFAULT_MAX_HOLD_MS,
+            )
+            .deliver();
+        if settled {
+            offered.push(head.clone());
+        } else {
+            held += 1;
+        }
+    }
+    // Only the current free-text heads are kept: a superseded burst is gone
+    // from the document, and its record would only grow.
+    if next != previous {
+        agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
+            &conn,
+            &key,
+            &serde_json::to_string(&next)?,
+            now_ms,
+        )?;
+        if held > 0 {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "subagent_pool_typing_held file={} held={held} offered={} window_ms={} (#typingrow)",
+                    file.display(),
+                    offered.len(),
+                    agent_doc_debounce::edit_settle::DISPATCH_SETTLE_MS,
+                ),
+            );
+        }
+    }
+    Ok(offered)
 }
 
 /// The heartbeat wake `content` calls for (`#poolidleheartbeat`), by the same
@@ -1330,6 +1559,7 @@ mod tests {
             PoolRefillTrigger::ReportComplete,
             crate::queue_claim::claim_clock_now_secs(),
             harness,
+            TypingEvidence::Observe,
         )
         .unwrap()
     }

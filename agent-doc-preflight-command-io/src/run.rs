@@ -2907,7 +2907,9 @@ fn run_with_options_to_writer_in_pass(
         )
         .unwrap_or(false)
         .then(|| {
-            agent_doc_queue_io::subagent_pool::pool_refill_for_content(
+            // `#typingrow`: this text passed preflight's operator-edit
+            // quiescence wait, so its free-text heads are already settled.
+            agent_doc_queue_io::subagent_pool::pool_refill_for_admitted_content(
                 file,
                 queue_authoritative_content,
                 agent_doc_queue::subagent_pool::PoolRefillTrigger::Plan,

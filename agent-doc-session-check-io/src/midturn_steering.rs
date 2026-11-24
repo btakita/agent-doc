@@ -59,6 +59,13 @@ pub use agent_doc_controller_io::live_turn_follow_up::STEERING_SURROGATE_TTL_MS;
 
 const STEERING_SURROGATE_KEY_PREFIX: &str = "steering-surrogate:";
 
+/// Stable prefix for steering delivered from a compact token whose session
+/// cycle was superseded before it was consumed (`#steeringstale`). The text is
+/// still operator intent, so it is delivered once with this framing instead
+/// of being rejected and lost.
+pub const STALE_CYCLE_STEERING_MARKER: &str =
+    "[agent-doc] steering from a superseded session cycle (#steeringstale)";
+
 #[cfg(test)]
 struct ClaimCancellationLockOrderHook {
     file: PathBuf,
@@ -195,20 +202,40 @@ fn take_steering_surrogate_at(file: &Path, token: &str, observed_at_ms: u64) -> 
     let current_cycle =
         load_watermark(&conn, &state_key("base", file))?.map(|watermark| watermark.cycle_id);
     anyhow::ensure!(
-        current_cycle.as_deref() == Some(record.cycle_id.as_str()),
-        "steering token belongs to a stale session cycle"
-    );
-    anyhow::ensure!(
         agent_doc_sqlite::state_store::clear_project_runtime_state_if_payload_in_db(
             &conn, &key, &raw,
         )?,
         "steering token was already consumed"
     );
-    Ok(record.payload)
+    if current_cycle.as_deref() == Some(record.cycle_id.as_str()) {
+        return Ok(record.payload);
+    }
+    // `#steeringstale`: the hook advanced its watermark when it issued this
+    // token, so the payload is the only remaining copy of that operator
+    // steering. Rejecting it would drop it for good; deliver it once, framed
+    // so the agent re-checks it against the current document.
+    let current = current_cycle.as_deref().unwrap_or("none");
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "steering_token_superseded_cycle_delivered file={} token={token} token_cycle={} current_cycle={current} bytes={} (#steeringstale)",
+            file.display(),
+            record.cycle_id,
+            record.payload.len(),
+        ),
+    );
+    Ok(format!(
+        "{STALE_CYCLE_STEERING_MARKER}: token `{token}` was issued for session cycle `{}`, \
+         and the current cycle is `{current}`. The operator steering it carried is delivered \
+         below instead of being dropped. Re-check each item against the current document \
+         before acting on it: work a later cycle already handled needs no second pass.\n\n{}",
+        record.cycle_id, record.payload,
+    ))
 }
 
 /// Resolve and consume a compact steering reference. Tokens are one-shot,
-/// document-bound, cycle-bound, and wall-clock bounded.
+/// document-bound, and wall-clock bounded. A token bound to a superseded
+/// session cycle is still delivered once, framed as such (`#steeringstale`).
 pub fn take_steering_surrogate(file: &Path, token: &str) -> Result<String> {
     take_steering_surrogate_at(file, token, now_ms())
 }
@@ -1360,6 +1387,11 @@ pub struct PreparedObservation {
     next: Option<SteeringWatermark>,
     /// The report, `None` when there is nothing to say.
     pub report: Option<SteeringReport>,
+    /// The seeded base's cycle id, which `--token` consumption compares with
+    /// (`#steeringstale`). A consumer watermark can carry a committed-baseline
+    /// fallback id (`committed:<hash>`) instead; a compact token bound to that
+    /// id was stale the moment it was printed.
+    token_cycle_id: Option<String>,
     /// The observation happened at/after the turn boundary.
     pub boundary: bool,
     /// Authoritative cut used to derive this observation. The PostToolUse
@@ -1560,6 +1592,7 @@ fn prepare_with_gate_at(
             .is_none_or(|cycle| cycle.cycle_id == base.cycle_id)
     };
     let stored_identity = stored_base.as_ref().map(SteeringWatermark::identity);
+    let token_cycle_id = stored_base.as_ref().map(|base| base.cycle_id.clone());
     let base = match stored_base {
         Some(base) if policy == ClosedCyclePolicy::Hook || base_describes_cycle(&base) => base,
         // No seed for the latest cycle (or none at all): compare with the
@@ -1627,6 +1660,7 @@ fn prepare_with_gate_at(
             root: root.clone(),
             next,
             report,
+            token_cycle_id: token_cycle_id.clone(),
             boundary,
             observed_content,
             gate,
@@ -3402,10 +3436,17 @@ fn post_tool_use_document_response(
             .as_ref()
             .and_then(SteeringReport::render)
             .map(|payload| {
+                // `#steeringstale`: bind the token to the cycle `--token`
+                // checks, never to a fallback watermark's `committed:` id.
                 let cycle_id = prepared
-                    .report
-                    .as_ref()
-                    .map(|report| report.cycle_id.as_str())
+                    .token_cycle_id
+                    .as_deref()
+                    .or_else(|| {
+                        prepared
+                            .report
+                            .as_ref()
+                            .map(|report| report.cycle_id.as_str())
+                    })
                     .unwrap_or_default();
                 issue_steering_surrogate_at(file, cycle_id, &payload, observed_at_ms)
             })
@@ -4517,7 +4558,7 @@ mod tests {
     }
 
     #[test]
-    fn compact_steering_tokens_fail_closed_for_wrong_document_ttl_and_cycle() {
+    fn compact_steering_tokens_bind_document_and_ttl_and_frame_stale_cycles() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("plan.md");
@@ -4554,13 +4595,91 @@ mod tests {
             .contains("expired")
         );
 
+        // `#steeringstale`: a token whose cycle was superseded still carries
+        // operator intent. It is delivered once, framed as superseded-cycle
+        // steering, instead of being rejected and silently dropped.
         let stale = issue_steering_surrogate_at(&file, "cycle-1", "old cycle", 300).unwrap();
         seed_for_cycle(&file, "cycle-2", baseline, None, Vec::new()).unwrap();
+        let delivered = take_steering_surrogate_at(&file, compact_token(&stale), 301)
+            .expect("superseded-cycle steering must still be deliverable");
         assert!(
-            take_steering_surrogate_at(&file, compact_token(&stale), 301)
+            delivered.contains(STALE_CYCLE_STEERING_MARKER),
+            "{delivered}"
+        );
+        assert!(delivered.contains("cycle-1"), "{delivered}");
+        assert!(delivered.contains("cycle-2"), "{delivered}");
+        assert!(delivered.ends_with("old cycle"), "{delivered}");
+        assert!(
+            take_steering_surrogate_at(&file, compact_token(&stale), 302)
                 .unwrap_err()
                 .to_string()
-                .contains("stale session cycle")
+                .contains("already consumed"),
+            "a superseded-cycle token is still one use"
+        );
+    }
+
+    /// `#steeringstale` (agent-doc-bugs.md 2026-11-23): once a turn-boundary
+    /// report wrote a committed-baseline fallback into the hook consumer, the
+    /// hook bound every compact token to that fallback's `committed:<hash>`
+    /// id while `--token` compared it with the seeded base's cycle id. Every
+    /// token was rejected as "stale session cycle" seconds after it was
+    /// printed, and the hook kept re-offering the same unusable token.
+    #[test]
+    fn hook_token_after_a_closeout_fallback_is_consumable_in_the_same_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let doc = |rows: &str| {
+            format!(
+                "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:queue -->\n{rows}<!-- /agent:queue -->\n"
+            )
+        };
+        let baseline = doc("");
+        std::fs::write(&file, &baseline).unwrap();
+        let cycle_a =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
+                .unwrap();
+        seed_for_cycle(&file, &cycle_a.cycle_id, &baseline, None, Vec::new()).unwrap();
+        close_cycle(&file, &baseline);
+        // A cycle that opened without re-seeding the steering base (the
+        // auto-reopen / captured-finalize paths): the base stays on cycle A.
+        agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline)).unwrap();
+        let with_x = doc("- fix the flaky test\n");
+        std::fs::write(&file, &with_x).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            &with_x,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        close_cycle(&file, &with_x);
+        let closeout = prepare_closeout(&file).unwrap().expect("closeout report");
+        closeout.acknowledge(&file).unwrap();
+        let root = project_root(&file).unwrap();
+        let conn = agent_doc_sqlite::state_store::open_state_db(&root).unwrap();
+        let hook = load_watermark(&conn, &state_key(CONSUMER_HOOK, &file))
+            .unwrap()
+            .unwrap();
+        assert!(
+            hook.cycle_id.starts_with("committed:"),
+            "fixture must reproduce the fallback hook watermark: {hook:?}"
+        );
+
+        std::fs::write(&file, doc("- fix the flaky test\n- and bump the version\n")).unwrap();
+        let output =
+            post_tool_use_document_response(&file, 10_000, |_, _, _, _| Ok(None), &mut || false)
+                .unwrap()
+                .expect("the hook offers the new steering");
+        let context = output["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap();
+        let token = compact_token(context).to_string();
+        let payload = take_steering_surrogate_at(&file, &token, 10_001)
+            .expect("a token the hook just printed must be usable in the same turn");
+        assert!(payload.contains("and bump the version"), "{payload}");
+        assert!(
+            !payload.contains(STALE_CYCLE_STEERING_MARKER),
+            "a same-turn token is not superseded: {payload}"
         );
     }
 

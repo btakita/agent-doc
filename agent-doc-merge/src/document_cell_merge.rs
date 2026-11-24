@@ -1001,14 +1001,6 @@ fn merge_component_item_slots_with_sources(
     };
     let ours_rows = rows(ours_comp, ours_source);
     let theirs_rows = rows(Some(theirs_comp), theirs_source);
-    let ours_keys = ours_rows
-        .iter()
-        .map(|(key, _)| key.as_str())
-        .collect::<std::collections::HashSet<_>>();
-    let theirs_keys = theirs_rows
-        .iter()
-        .map(|(key, _)| key.as_str())
-        .collect::<std::collections::HashSet<_>>();
     let ours_borrowed = ours_rows
         .iter()
         .map(|(key, text)| (key.as_str(), text.as_str()))
@@ -1018,12 +1010,18 @@ fn merge_component_item_slots_with_sources(
         .map(|(key, text)| (key.as_str(), text.as_str()))
         .collect::<Vec<_>>();
     let ours_parents_required = if name == "queue" {
-        crate::crdt::queue_parent_anchors_for_surviving_descendants(&ours_borrowed, &theirs_keys)
+        crate::crdt::queue_parent_anchors_for_surviving_descendants(
+            &ours_borrowed,
+            &theirs_borrowed,
+        )
     } else {
         Default::default()
     };
     let theirs_parents_required = if name == "queue" {
-        crate::crdt::queue_parent_anchors_for_surviving_descendants(&theirs_borrowed, &ours_keys)
+        crate::crdt::queue_parent_anchors_for_surviving_descendants(
+            &theirs_borrowed,
+            &ours_borrowed,
+        )
     } else {
         Default::default()
     };

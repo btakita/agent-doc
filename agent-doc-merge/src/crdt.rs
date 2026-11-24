@@ -2621,14 +2621,6 @@ fn reconcile_component_body(
 
     let ours_keys: Vec<&str> = ours_children.iter().map(|c| c.key.as_str()).collect();
     let theirs_keys: Vec<&str> = theirs_children.iter().map(|c| c.key.as_str()).collect();
-    let ours_key_set = ours_keys
-        .iter()
-        .copied()
-        .collect::<std::collections::HashSet<_>>();
-    let theirs_key_set = theirs_keys
-        .iter()
-        .copied()
-        .collect::<std::collections::HashSet<_>>();
     let ours_rows = ours_children
         .iter()
         .map(|child| (child.key.as_str(), child.text.as_str()))
@@ -2638,12 +2630,12 @@ fn reconcile_component_body(
         .map(|child| (child.key.as_str(), child.text.as_str()))
         .collect::<Vec<_>>();
     let ours_parents_required = if name == "queue" {
-        queue_parent_anchors_for_surviving_descendants(&ours_rows, &theirs_key_set)
+        queue_parent_anchors_for_surviving_descendants(&ours_rows, &theirs_rows)
     } else {
         Default::default()
     };
     let theirs_parents_required = if name == "queue" {
-        queue_parent_anchors_for_surviving_descendants(&theirs_rows, &ours_key_set)
+        queue_parent_anchors_for_surviving_descendants(&theirs_rows, &ours_rows)
     } else {
         Default::default()
     };
@@ -3981,22 +3973,42 @@ pub(crate) fn order_list_children(spine: &[(&str, &str)], weave: &[(&str, &str)]
     result
 }
 
-/// Queue parents in `reference` whose omission from `surviving_keys` would
-/// leave at least one of their descendants behind.
+/// Queue parents in `reference` whose omission from `other` (the other merge
+/// side's rows) would leave at least one of their descendants behind.
 ///
 /// Queue rows are merged as independently keyed cells, but Markdown nesting is
 /// structural: removing a parent without removing its entire descendant span
 /// promotes those indented rows into an orphaned component prefix. Treat a
 /// subtree as the deletion unit. A parent omission is accepted only when none
 /// of the rows beneath it survive on the other side.
+///
+/// `#dupwrite2`: a parent the other side REWROTE is not omitted. When the
+/// surviving descendant sits, on the other side, under a parent row at the
+/// same depth that `reference` does not hold (the operator typed on a row
+/// that has children), the descendant has its parent there; requiring the old
+/// parent kept both copies of the row.
 pub(crate) fn queue_parent_anchors_for_surviving_descendants(
     reference: &[(&str, &str)],
-    surviving_keys: &std::collections::HashSet<&str>,
+    other: &[(&str, &str)],
 ) -> std::collections::HashMap<String, String> {
     let indent = |text: &str| {
         let first = text.lines().next()?.trim_end();
         let body = first.trim_start_matches([' ', '\t']);
         (body.starts_with("- ") || body == "-").then(|| first.len().saturating_sub(body.len()))
+    };
+    let surviving_keys: std::collections::HashSet<&str> =
+        other.iter().map(|(key, _)| *key).collect();
+    let reference_keys: std::collections::HashSet<&str> =
+        reference.iter().map(|(key, _)| *key).collect();
+    // The other side's parent of its row `at`, at depth `depth`: the nearest
+    // row above it at that depth, when every row between is deeper.
+    let other_parent_at = |at: usize, depth: usize| {
+        other[..at]
+            .iter()
+            .rev()
+            .find(|(_, text)| indent(text).is_none_or(|value| value <= depth))
+            .filter(|(_, text)| indent(text) == Some(depth))
+            .map(|(key, _)| *key)
     };
     let mut required = std::collections::HashMap::new();
     for (index, (key, text)) in reference.iter().enumerate() {
@@ -4010,7 +4022,15 @@ pub(crate) fn queue_parent_anchors_for_surviving_descendants(
             .iter()
             .take_while(|(_, child)| indent(child).is_some_and(|value| value > parent_indent))
             .find(|(child_key, _)| surviving_keys.contains(child_key));
-        if let Some((child_key, _)) = surviving_descendant {
+        let Some((child_key, _)) = surviving_descendant else {
+            continue;
+        };
+        let rewritten = other
+            .iter()
+            .position(|(other_key, _)| other_key == child_key)
+            .and_then(|at| other_parent_at(at, parent_indent))
+            .is_some_and(|parent| !reference_keys.contains(parent));
+        if !rewritten {
             required.insert((*key).to_string(), (*child_key).to_string());
         }
     }

@@ -5164,6 +5164,69 @@ mod tests {
         assert!(rebased.contains(DUPWRITE_CLAIM_REPORTED), "{rebased}");
     }
 
+    /// `#dupwrite2` (reported by `#pipeprompt`): the FULL editor rebase, not
+    /// only the neutralizer, keeps one copy of a nested row when the agent
+    /// target repaints its glyph while the operator edits its text.
+    #[test]
+    fn dupwrite2_full_rebase_keeps_one_copy_of_a_nested_row_repainted_while_typed() {
+        let statement = |child: &str| {
+            dupwrite_doc(&format!(
+                "- ### 🚧 [#subagent:pipe#1] Collect the issues | [#q-0123456789ab]\n  - {child}\n    - draft a summary\n"
+            ))
+        };
+        let base = statement("group them by |");
+        let typed = statement("group them by component |");
+        for glyph in ["📥", "▶️", "✅"] {
+            let repainted = statement(&format!("{glyph} group them by |"));
+            let rebased = rebase_agent_candidate_over_editor_cut(&base, &repainted, &typed)
+                .unwrap_or_else(|error| panic!("{glyph}: {error}"));
+            assert_eq!(
+                rebased.matches("group them by").count(),
+                1,
+                "{glyph}: one copy of the typed row:\n{rebased}"
+            );
+            assert!(
+                rebased.contains("group them by component |"),
+                "{glyph}: the operator's text wins:\n{rebased}"
+            );
+        }
+        // The same race while the agent also re-marks another row of the
+        // same component (a claim marker): that op lands, the typed row is
+        // kept once.
+        let with_claim = |claim: &str, child: &str| {
+            dupwrite_doc(&format!(
+                "- ### {claim}do [#poolrow-8ac1]\n- ### 🚧 [#subagent:pipe#1] Collect the issues | [#q-0123456789ab]\n  - {child}\n    - draft a summary\n"
+            ))
+        };
+        let rebased = rebase_agent_candidate_over_editor_cut(
+            &with_claim("", "group them by |"),
+            &with_claim("🚧 [#subagent:poolrow#1] ", "📥 group them by |"),
+            &with_claim("", "group them by component |"),
+        )
+        .unwrap();
+        assert_eq!(rebased.matches("group them by").count(), 1, "{rebased}");
+        assert!(rebased.contains("group them by component |"), "{rebased}");
+        assert!(
+            rebased.contains("🚧 [#subagent:poolrow#1] do [#poolrow-8ac1]"),
+            "{rebased}"
+        );
+        // The same race on a top-level row.
+        let top = |row: &str| dupwrite_doc(&format!("- ### {row}\n"));
+        for glyph in ["📥", "👀"] {
+            let rebased = rebase_agent_candidate_over_editor_cut(
+                &top("group the issues by"),
+                &top(&format!("{glyph} group the issues by")),
+                &top("group the issues by component"),
+            )
+            .unwrap_or_else(|error| panic!("{glyph}: {error}"));
+            assert_eq!(
+                rebased.matches("group the issues by").count(),
+                1,
+                "{glyph}:\n{rebased}"
+            );
+        }
+    }
+
     /// `#pipeprompt` stage indicator: a `▶️` / `✅` repaint of a statement row
     /// is binary bookkeeping, the same class as a lifecycle marker. When the
     /// older target repainted a stage glyph on a row the operator kept typing,

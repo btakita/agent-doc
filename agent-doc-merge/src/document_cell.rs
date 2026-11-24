@@ -2052,21 +2052,13 @@ fn compose_aligned(
         .iter()
         .map(|(key, value)| (node_key_identity(key), value.as_str()))
         .collect::<Vec<_>>();
-    let ours_keys = ours_rows
-        .iter()
-        .map(|(key, _)| *key)
-        .collect::<std::collections::HashSet<_>>();
-    let theirs_keys = theirs_rows
-        .iter()
-        .map(|(key, _)| *key)
-        .collect::<std::collections::HashSet<_>>();
     let ours_parents_required = if ours.component == "queue" {
-        crate::crdt::queue_parent_anchors_for_surviving_descendants(&ours_rows, &theirs_keys)
+        crate::crdt::queue_parent_anchors_for_surviving_descendants(&ours_rows, &theirs_rows)
     } else {
         Default::default()
     };
     let theirs_parents_required = if ours.component == "queue" {
-        crate::crdt::queue_parent_anchors_for_surviving_descendants(&theirs_rows, &ours_keys)
+        crate::crdt::queue_parent_anchors_for_surviving_descendants(&theirs_rows, &ours_rows)
     } else {
         Default::default()
     };
@@ -4696,6 +4688,50 @@ agent_doc_format: template
     /// `<!-- agent:boundary:base1234 -->` marker that ours replaced. The
     /// splittability-mismatch guard must run the legacy whole-component leaf merge
     /// locally, without falling unrelated operator-owned cells back to a flat CRDT.
+    /// `#dupwrite2` (reported by `#pipeprompt`): the operator rewrites a
+    /// nested row that has children while the agent left it alone, or only
+    /// re-marked another row. One copy of the row, under its parent, with its
+    /// child; the agent's marker lands.
+    #[test]
+    fn dupwrite2_operator_rewrite_of_a_nested_parent_keeps_one_copy() {
+        let doc = |first: &str, row: &str| {
+            format!(
+                "<!-- agent:exchange patch=append -->\nQ.\n<!-- /agent:exchange -->\n\n## Run <!-- agent:run id=\"main\" go -->\n- ### {first}\n  - {row}\n    - draft a summary\n<!-- /agent:run -->\n"
+            )
+        };
+        let base = doc("do [#poolrow-8ac1]", "group them by");
+        let typed = doc("do [#poolrow-8ac1]", "group them by component");
+        // The agent left the component at base.
+        let merged = merge_3way(&base, &base, &typed);
+        assert!(!merged.fell_back);
+        assert_eq!(merged.merged_text, typed);
+        // ... and symmetrically.
+        assert_eq!(merge_3way(&base, &typed, &base).merged_text, typed);
+        // The agent re-marked the other row.
+        let claimed = doc(
+            "🚧 [#subagent:poolrow#1] do [#poolrow-8ac1]",
+            "group them by",
+        );
+        let merged = merge_3way(&base, &claimed, &typed);
+        assert!(!merged.fell_back);
+        assert_eq!(
+            merged.merged_text,
+            doc(
+                "🚧 [#subagent:poolrow#1] do [#poolrow-8ac1]",
+                "group them by component"
+            )
+        );
+        // An operator who DELETED the parent (no replacement) while the agent
+        // still has its child keeps the parent as the child's anchor.
+        let deleted = "<!-- agent:exchange patch=append -->\nQ.\n<!-- /agent:exchange -->\n\n## Run <!-- agent:run id=\"main\" go -->\n- ### do [#poolrow-8ac1]\n    - draft a summary\n<!-- /agent:run -->\n";
+        let merged = merge_3way(&base, &claimed, deleted);
+        assert!(
+            merged.fell_back || merged.merged_text.contains("  - group them by\n"),
+            "{}",
+            merged.merged_text
+        );
+    }
+
     #[test]
     fn keyed_exchange_vs_body_only_with_content_uses_isolated_leaf_merge() {
         let base = "<!-- agent:exchange -->\n\

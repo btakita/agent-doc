@@ -2288,6 +2288,19 @@ The rules:
   - Copies no recorded version proves stay for the operator, who can name
     the row to keep: `agent-doc queue prune-duplicates <FILE> --keep-row
     <q-id> --apply` (`#pruneduplicates`).
+  - A nested parent the operator rewrote is not an omitted parent
+    (reported by `#pipeprompt`): when the agent target re-marks a nested row
+    that has children (a `📥` or stage glyph) while the operator edits its
+    text, the rebase neutralizes the repaint, and the per-cell queue merge
+    used to keep the old row anyway: `queue_parent_anchors_for_surviving_descendants`
+    required it as the anchor of its surviving child. A parent is now
+    required only when the other side's copy of that child has no parent row
+    of its own at that depth that this side lacks; a rewritten parent is the
+    child's anchor there. Regressions:
+    `dupwrite2_full_rebase_keeps_one_copy_of_a_nested_row_repainted_while_typed`
+    (`agent-doc-document-realtime`) and
+    `dupwrite2_operator_rewrite_of_a_nested_parent_keeps_one_copy`
+    (`agent-doc-merge`).
 
 The regression
 `typingdupe_composed_retained_write_never_reinserts_a_stale_typing_snapshot`

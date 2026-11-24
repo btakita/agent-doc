@@ -740,6 +740,36 @@ impl QueueEditGuard {
         Self::try_acquire_with_hook(file, || {})
     }
 
+    /// Acquire the apply capability for short controller background work
+    /// (`#q-9f8f5f60c2c3`, the lifecycle-projection worker).
+    ///
+    /// The guard holds a `background-queue-maintenance:` lease, so a foreground
+    /// mutation that arrives meanwhile waits behind it (up to its own
+    /// background wait) instead of failing closed the way it does behind a
+    /// direct holder. This waits up to `wait` for any current holder, then
+    /// reports the usual deferral.
+    pub fn acquire_background(file: &Path, label: &str, wait: Duration) -> Result<Self> {
+        let file_text = file.to_string_lossy().to_string();
+        let pid = std::process::id();
+        let token = format!(
+            "{BACKGROUND_QUEUE_EDIT_OWNER_PREFIX}{label}:{}",
+            new_direct_queue_edit_holder(pid).trim_start_matches(DIRECT_QUEUE_EDIT_OWNER_PREFIX)
+        );
+        let deadline = std::time::Instant::now() + wait;
+        loop {
+            if try_reserve_queue_edit_owner(&file_text, &token, pid)? {
+                if let Some(guard) = Self::adopt_reserved(file, &token)? {
+                    return Ok(guard);
+                }
+                clear_queue_edit_owner_lease_if_holder(&file_text, &token);
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(queue_mutation_deferred_error(file));
+            }
+            std::thread::sleep(FOREGROUND_BACKGROUND_POLL);
+        }
+    }
+
     fn try_acquire_with_hook(
         file: &Path,
         after_lock_before_lease: impl FnOnce(),

@@ -1112,6 +1112,30 @@ pub fn project_claim_item_runtime_state_with_effects(
     project_claim_item_runtime_state_under_apply_guard(effects, file, item, cleared, &apply_guard)
 }
 
+/// `#q-9f8f5f60c2c3`: [`project_claim_item_runtime_state_with_effects`] for each
+/// of `items` under one apply guard the caller already holds (the controller's
+/// lifecycle-projection worker). Returns how many items changed the document.
+pub(crate) fn project_claim_items_runtime_state_under_apply_guard(
+    effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
+    file: &Path,
+    items: &[String],
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<usize> {
+    let mut changed = 0;
+    for item in items {
+        if project_claim_item_runtime_state_under_apply_guard(
+            effects,
+            file,
+            item,
+            false,
+            apply_guard,
+        )? {
+            changed += 1;
+        }
+    }
+    Ok(changed)
+}
+
 fn project_claim_item_runtime_state_under_apply_guard(
     effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
     file: &Path,

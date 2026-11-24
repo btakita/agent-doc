@@ -3760,6 +3760,33 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
         )
     }
 
+    /// `#q-9f8f5f60c2c3`: whether this binary wires the lifecycle-projection
+    /// port below. A controller that answers `false` refuses
+    /// `queue_lifecycle_projection_enqueue`, and the transitioning process
+    /// falls back to its own policy (inline, or the next cycle).
+    fn lifecycle_projection_supported(&self) -> bool {
+        false
+    }
+
+    /// The generation of `file`'s pending queue lifecycle projection, or
+    /// `None` when none is pending. The projection lives in
+    /// `agent-doc-queue-io`, which depends on this crate, hence the port.
+    fn pending_lifecycle_projection(&self, file: &Path) -> Result<Option<String>> {
+        anyhow::bail!(
+            "lifecycle projection is not wired in this binary ({})",
+            file.display()
+        )
+    }
+
+    /// Project `file`'s pending lifecycle transitions onto their rows on the
+    /// calling controller thread and consume the generation it ran for.
+    fn run_lifecycle_projection(&self, file: &Path) -> Result<()> {
+        anyhow::bail!(
+            "lifecycle projection is not wired in this binary ({})",
+            file.display()
+        )
+    }
+
     /// `#queueschedule`: put a completed `loop` pass's items back into the
     /// document's `agent:queue` through the binary-owned queue write path
     /// (live CRDT replica while an editor holds the document). The writer lives

@@ -19,6 +19,7 @@ pub mod drain_owner;
 pub mod followup_owner_ledger;
 pub mod followup_provenance_ledger;
 pub mod goal_loop_handoff;
+pub mod lifecycle_projection;
 pub mod lost_running;
 pub mod nested_reply_followup;
 pub mod one_shot_sync;

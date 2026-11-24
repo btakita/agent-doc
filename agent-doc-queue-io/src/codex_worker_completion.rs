@@ -149,12 +149,19 @@ fn preserve_from_sessions(file: &Path, sessions: &Path, coordinator: &str) -> Re
             continue;
         };
         if let Some(reason) = terminal_freeze_reason(&response) {
-            crate::queue_claim::freeze_bound_attempt(
+            let frozen = crate::queue_claim::freeze_bound_attempt(
                 file,
                 &claim.item_text,
                 Some(claim.generation),
                 &reason,
             )?;
+            // `#q-9f8f5f60c2c3`: repaint the frozen row through the controller.
+            crate::lifecycle_projection::project_after_transition(
+                file,
+                &frozen.item_text,
+                "codex_worker_completion_freeze",
+                crate::lifecycle_projection::LifecycleProjectionFallback::NextCycle,
+            );
         }
     }
     Ok(())

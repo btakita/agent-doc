@@ -487,6 +487,55 @@ pub fn continuation_reconcile() -> &'static Arc<DocumentMaintenanceScheduler> {
     })
 }
 
+/// `#q-9f8f5f60c2c3` (preflightlag goal 4): a queue lifecycle transition that
+/// changes only the claim ledger (a freeze, worker proof of life) leaves no
+/// document edge, so before this nothing repainted its glyph until the next
+/// cycle. The transitioning process publishes a pending lifecycle projection
+/// (the exact claim items) and notifies; `reserve` answers its generation and
+/// `run` projects those items through the binary's lifecycle-projection port.
+/// Like the continuation reconcile, the fact is consumed by generation.
+struct LifecycleProjectionRunner;
+
+impl DocumentMaintenanceRunner for LifecycleProjectionRunner {
+    fn reserve(&self, file: &Path) -> Result<Option<String>> {
+        crate::project_controller::runtime_effects()?.pending_lifecycle_projection(file)
+    }
+
+    fn run(&self, file: &Path, _token: &str) -> Result<()> {
+        crate::project_controller::runtime_effects()?.run_lifecycle_projection(file)
+    }
+
+    fn release(&self, _file: &Path, _token: &str) {}
+
+    fn label(&self) -> &'static str {
+        "lifecycle_projection"
+    }
+}
+
+/// A glyph transition is visible state the operator is watching, so it starts
+/// at once; transitions of a burst (a freeze and a refill claim) fold into one
+/// run.
+const LIFECYCLE_PROJECTION_TIMING: DocumentMaintenanceTiming = DocumentMaintenanceTiming {
+    debounce: Duration::from_millis(10),
+    max_delay: Duration::from_millis(100),
+    idle_exit: Duration::from_secs(600),
+    retry_base: Duration::from_millis(500),
+    max_retries: 3,
+};
+
+static LIFECYCLE_PROJECTION_SCHEDULER: OnceLock<Arc<DocumentMaintenanceScheduler>> =
+    OnceLock::new();
+
+/// This controller process's lifecycle-projection scheduler (`#q-9f8f5f60c2c3`).
+pub fn lifecycle_projection() -> &'static Arc<DocumentMaintenanceScheduler> {
+    LIFECYCLE_PROJECTION_SCHEDULER.get_or_init(|| {
+        DocumentMaintenanceScheduler::new(
+            Arc::new(LifecycleProjectionRunner),
+            LIFECYCLE_PROJECTION_TIMING,
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -745,6 +745,29 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         agent_doc_queue_io::continuation_reconcile::run_pending(file, "controller").map(|_| ())
     }
 
+    fn lifecycle_projection_supported(&self) -> bool {
+        true
+    }
+
+    fn pending_lifecycle_projection(&self, file: &Path) -> anyhow::Result<Option<String>> {
+        Ok(
+            agent_doc_queue_io::lifecycle_projection::load_pending(file)?
+                .map(|pending| pending.generation),
+        )
+    }
+
+    fn run_lifecycle_projection(&self, file: &Path) -> anyhow::Result<()> {
+        // `#q-9f8f5f60c2c3`: repaint the rows of ledger-only lifecycle
+        // transitions (freeze, worker proof of life) as soon as they happen.
+        agent_doc_queue_io::lifecycle_projection::run_pending(
+            &CliQueueCommandEffects,
+            file,
+            "controller",
+            agent_doc_queue_io::lifecycle_projection::ApplyOwner::Background,
+        )
+        .map(|_| ())
+    }
+
     fn restore_queue_loop_items(
         &self,
         file: &Path,
@@ -11412,6 +11435,16 @@ fn try_main() -> anyhow::Result<()> {
                 let claim = agent_doc_queue_io::queue_claim::freeze_attempt(
                     &file, &item, generation, &reason,
                 )?;
+                // `#q-9f8f5f60c2c3`: the frozen row's glyph changes now, not at
+                // the next cycle.
+                agent_doc_queue_io::lifecycle_projection::project_after_transition(
+                    &file,
+                    &claim.item_text,
+                    "queue_freeze",
+                    agent_doc_queue_io::lifecycle_projection::LifecycleProjectionFallback::Inline(
+                        &CliQueueCommandEffects,
+                    ),
+                );
                 eprintln!(
                     "[queue] froze {:?} (owner {}, generation {}); its work-pool slot is free. The authoritative refill below runs failed-continue recovery: if it offers this item, use its exact claim / brief / start commands for a fresh generation; do not reuse the frozen generation's start command.",
                     claim.item_text, claim.owner, claim.generation,

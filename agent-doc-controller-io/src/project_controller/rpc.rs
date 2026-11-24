@@ -5820,6 +5820,42 @@ pub fn enqueue_queue_continuation_reconcile(
     )
 }
 
+/// Bound on the lifecycle-projection notify. The handler only reserves the
+/// document and schedules its run.
+const QUEUE_LIFECYCLE_PROJECTION_ENQUEUE_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// `#q-9f8f5f60c2c3`: hand `file`'s published queue lifecycle projection to the
+/// running project controller. Never launches a controller: with none running
+/// (or one that refuses, such as an older binary or a generation that is
+/// handing off) this returns an error and the caller applies its fallback.
+pub fn enqueue_queue_lifecycle_projection(
+    file: &Path,
+    caller: &str,
+) -> Result<DocumentMaintenanceEnqueueReceipt> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    request_existing_controller_with_timeout(
+        &project_root,
+        ControllerRequest {
+            command: "queue_lifecycle_projection_enqueue".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some(caller.to_string()),
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+            sequence: None,
+        },
+        QUEUE_LIFECYCLE_PROJECTION_ENQUEUE_TIMEOUT,
+    )
+}
+
 /// Publish an edge on the idle supervisor's existing maintenance channel.
 ///
 /// A durable repair request is recorded by the caller before this wake. If no
@@ -25890,6 +25926,9 @@ pub(crate) fn handle_request_locked(
         "queue_continuation_reconcile_enqueue" => controller_envelope(
             handle_queue_continuation_reconcile_enqueue(&bootstrap_snapshot, request),
         ),
+        "queue_lifecycle_projection_enqueue" => controller_envelope(
+            handle_queue_lifecycle_projection_enqueue(&bootstrap_snapshot, request),
+        ),
         "reliable_sync" => controller_envelope(handle_reliable_sync(
             &bootstrap_snapshot.project_root,
             request,
@@ -45696,6 +45735,37 @@ fn handle_queue_continuation_reconcile_enqueue(
         "continuation reconcile is not wired in this controller binary"
     );
     let outcome = crate::document_maintenance::continuation_reconcile().enqueue(&file)?;
+    Ok(DocumentMaintenanceEnqueueReceipt {
+        controller_pid: std::process::id(),
+        controller_generation: bootstrap.controller_generation,
+        outcome,
+    })
+}
+
+/// `#q-9f8f5f60c2c3`: accept one document's queue lifecycle projection for the
+/// controller's own background worker
+/// ([`crate::document_maintenance::lifecycle_projection`]). The transitioning
+/// process already published the pending items; this only schedules the run.
+fn handle_queue_lifecycle_projection_enqueue(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<DocumentMaintenanceEnqueueReceipt> {
+    let file = request_file(&request)?;
+    let file = canonical_controller_request_file(bootstrap, &file);
+    anyhow::ensure!(
+        matches!(
+            bootstrap.handoff_state,
+            ControllerHandoffState::Stable | ControllerHandoffState::Promoted
+        ),
+        "controller generation {} is {} and does not accept lifecycle projections",
+        bootstrap.controller_generation,
+        bootstrap.handoff_state.as_str(),
+    );
+    anyhow::ensure!(
+        runtime_effects()?.lifecycle_projection_supported(),
+        "lifecycle projection is not wired in this controller binary"
+    );
+    let outcome = crate::document_maintenance::lifecycle_projection().enqueue(&file)?;
     Ok(DocumentMaintenanceEnqueueReceipt {
         controller_pid: std::process::id(),
         controller_generation: bootstrap.controller_generation,

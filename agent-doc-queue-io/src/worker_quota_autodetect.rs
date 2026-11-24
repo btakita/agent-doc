@@ -185,6 +185,16 @@ pub fn apply_subagent_liveness_autodetect(
         Some(hit.generation),
         worker_id.trim(),
     )?;
+    if cleared_freeze {
+        // `#q-9f8f5f60c2c3`: proof of life clears the freeze, so the row is
+        // running again; repaint it now rather than at the next cycle.
+        crate::lifecycle_projection::project_after_transition(
+            &hit.file,
+            &claim.item_text,
+            "subagent_proof_of_life",
+            crate::lifecycle_projection::LifecycleProjectionFallback::NextCycle,
+        );
+    }
     Ok(SubagentLivenessAutodetect::Applied(Box::new(
         SubagentLivenessApplied {
             file: hit.file,
@@ -240,6 +250,16 @@ fn freeze_candidates(hits: impl Iterator<Item = Hit>) -> Vec<Hit> {
 fn apply_freeze_hit(hit: &Hit, reason: &str) -> Result<SubagentFreezeAutodetect> {
     let announce = !hit.prior_frozen;
     let claim = freeze_bound_attempt(&hit.file, &hit.item_text, Some(hit.generation), reason)?;
+    if announce {
+        // `#q-9f8f5f60c2c3`: the stopped worker's row turns lost now, through
+        // the controller; the hook itself only publishes and notifies.
+        crate::lifecycle_projection::project_after_transition(
+            &hit.file,
+            &claim.item_text,
+            "subagent_stop_freeze",
+            crate::lifecycle_projection::LifecycleProjectionFallback::NextCycle,
+        );
+    }
     Ok(SubagentFreezeAutodetect::Applied(Box::new(
         SubagentFreezeApplied {
             file: hit.file.clone(),

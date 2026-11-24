@@ -217,6 +217,23 @@ claim. Use generation-matched `queue release` only for that attempt; add
 `⚠️` lost state. Orphaned completion evidence is `🔄` and must be reconciled,
 not redispatched.
 
+A row that cannot settle is resolved by an agent, never by asking the operator
+to delete or edit it (`#noopaddress`, `#queuefail`):
+
+1. Resolve it first. Land the written fix, or prove there is nothing to do: a
+   no-op `#address` settles with `NO-WRITTEN-FIX head=<sha>` once the current
+   head shows no unresolved review thread, no changes-requested review, and no
+   failing or unfinished required check (`gh pr checks <number> --repo
+   <owner>/<repo> --required --watch` waits for the checks). A state that
+   waits on someone else is the prompt-blocker structure with **Evidence:**.
+2. Only when resolution fails, end it as terminal ❌:
+   `agent-doc queue fail <FILE> --item <row> --reason '<why>' --attempted
+   '<resolution tried>' ...`. The row becomes `~~❌ …~~` with a Response that
+   records the reason and each attempt. It is never re-dispatched or requeued,
+   owes nothing at closeout or Stop, and needs no operator action; the operator
+   re-queues it by removing the strike and the ❌. `queue fail` refuses a row
+   whose worker may still be running: let it report or `queue freeze` it first.
+
 Claimed heads do not count toward continuation and must not be redispatched. If
 all remaining heads are claimed or operator-gated, end quietly and wait for the
 workers. The full dispatch, authorization-preamble, worktree, report, and

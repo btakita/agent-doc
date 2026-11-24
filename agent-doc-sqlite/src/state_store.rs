@@ -5318,6 +5318,49 @@ pub fn load_starting_actor_timeout_events_from_db(
     Ok(events)
 }
 
+/// Load one document's events of the named fact types, in durable append order.
+///
+/// (`#q-e9483473162d`, dogfood key preflightlag) A reader whose
+/// projection field is written by a known, closed set of facts (the
+/// superseding checkpoint/clear pairs) folds exactly those rows. Replaying the
+/// whole document ledger for them parsed every `payload_json` the document ever
+/// accumulated: live `haiven-dev` `sdk-dev.md` carried 34,988 cycle-projection
+/// rows / 137MB, so one `load_document_baseline` cost ~330ms, and preflight +
+/// commit call it dozens of times per turn.
+///
+/// The query uses the `(document_hash, fact_type, id)` index; an empty
+/// `fact_types` returns no rows.
+pub fn load_state_events_by_fact_types_for_document_from_db(
+    conn: &Connection,
+    document_hash: &str,
+    fact_types: &[&str],
+) -> Result<Vec<StateEventStatus>> {
+    if fact_types.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = (0..fact_types.len())
+        .map(|index| format!("?{}", index + 2))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "SELECT id, event_id, document_hash, document_version, domain, fact_type, payload_json, timestamp \
+         FROM state_events INDEXED BY state_events_document_hash_fact_type_id \
+         WHERE document_hash = ?1 AND fact_type IN ({placeholders}) \
+         ORDER BY id"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let mut values: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(fact_types.len() + 1);
+    values.push(&document_hash);
+    for fact_type in fact_types {
+        values.push(fact_type);
+    }
+    let mut events = Vec::new();
+    for row in stmt.query_map(values.as_slice(), state_event_status_from_row)? {
+        events.push(row?);
+    }
+    Ok(events)
+}
+
 /// Load a bounded newest-first window of one durable fact type for a document.
 ///
 /// This is intentionally narrower than projection replay: history-aware
@@ -10475,6 +10518,53 @@ mod tests {
         let projected = load_state_events_for_cycle_projection_from_db(&conn, "doc-hash")?;
         assert_eq!(projected.len(), 1);
         assert_eq!(projected[0].event_id, "closeout-1");
+        Ok(())
+    }
+
+    /// The family-scoped read returns exactly the named
+    /// fact types for exactly the named document, in append order.
+    #[test]
+    fn fact_type_scoped_document_read_returns_only_named_facts_in_order() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+        for (event_id, document_hash, fact_type) in [
+            ("b1", "doc-hash", "document_baseline_checkpointed"),
+            ("x1", "doc-hash", "visible_write_commit_candidate_observed"),
+            ("o1", "other-doc", "document_baseline_checkpointed"),
+            ("c1", "doc-hash", "document_baseline_cleared"),
+            ("x2", "doc-hash", "commit_observed"),
+            ("b2", "doc-hash", "document_baseline_checkpointed"),
+        ] {
+            insert_state_event_in_db(
+                &conn,
+                &StateEventInsert {
+                    event_id,
+                    document_hash,
+                    domain: "document",
+                    fact_type,
+                    payload_json: "{}",
+                },
+            )?;
+        }
+        let scoped = load_state_events_by_fact_types_for_document_from_db(
+            &conn,
+            "doc-hash",
+            &[
+                "document_baseline_checkpointed",
+                "document_baseline_cleared",
+            ],
+        )?;
+        assert_eq!(
+            scoped
+                .iter()
+                .map(|event| event.event_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["b1", "c1", "b2"]
+        );
+        assert!(
+            load_state_events_by_fact_types_for_document_from_db(&conn, "doc-hash", &[])?
+                .is_empty()
+        );
         Ok(())
     }
 

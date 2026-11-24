@@ -172,13 +172,31 @@ fn decode_captures(
     ))
 }
 
-fn load_cold_projected_captures(
-    project_root: &Path,
+/// The facts that write `DocumentProjection::editor_op_capture{,_generation}`
+/// and `last_editor_op_capture`: the checkpoint/clear pair, plus
+/// `cycle_abandoned`, whose reducer arm clears the captured frontier.
+const OP_CAPTURE_FACTS: &[&str] = &[
+    "editor_op_capture_checkpointed",
+    "editor_op_capture_cleared",
+    "cycle_abandoned",
+];
+
+/// Fold only the facts that write the op-capture fields.
+///
+/// Every cold reader here projects one document's op-capture fields, and no
+/// other fact writes them, so this family yields the same fields as the
+/// whole-document replay. Three of the readers hold the IMMEDIATE write lock
+/// while they replay; on live `sdk-dev.md` the whole replay parsed ~137MB of
+/// payloads per call, blocking every other `state.db` writer meanwhile.
+fn load_op_capture_ledger(
+    conn: &agent_doc_sqlite::state_store::Connection,
     document_hash: &str,
-) -> Result<(u64, Option<OpCaptureState>, Option<OpCaptureState>)> {
-    let conn = agent_doc_sqlite::state_store::open_state_db(project_root)?;
-    let rows =
-        agent_doc_sqlite::state_store::load_state_events_from_db(&conn, Some(document_hash))?;
+) -> Result<agent_doc_state_backbone::EventLedger> {
+    let rows = agent_doc_sqlite::state_store::load_state_events_by_fact_types_for_document_from_db(
+        conn,
+        document_hash,
+        OP_CAPTURE_FACTS,
+    )?;
     let mut ledger = agent_doc_state_backbone::EventLedger::new();
     for row in rows {
         let event: agent_doc_state_backbone::StateEvent =
@@ -186,6 +204,15 @@ fn load_cold_projected_captures(
                 .with_context(|| format!("decode state event {}", row.event_id))?;
         ledger.append(event);
     }
+    Ok(ledger)
+}
+
+fn load_cold_projected_captures(
+    project_root: &Path,
+    document_hash: &str,
+) -> Result<(u64, Option<OpCaptureState>, Option<OpCaptureState>)> {
+    let conn = agent_doc_sqlite::state_store::open_state_db(project_root)?;
+    let ledger = load_op_capture_ledger(&conn, document_hash)?;
     let projection = ledger.project();
     captures_from_document_projection(projection.document(document_hash))
 }
@@ -369,11 +396,7 @@ pub fn refresh_op_capture_activity(doc: &Path) -> Result<bool> {
     // `#sqlitebusyupgrade`: this transaction projects the ledger and then
     // appends, so it must hold the write lock before its first read.
     let tx = agent_doc_sqlite::immediate_transaction(&mut conn)?;
-    let rows = agent_doc_sqlite::state_store::load_state_events_from_db(&tx, Some(&document_hash))?;
-    let mut ledger = agent_doc_state_backbone::EventLedger::new();
-    for row in rows {
-        ledger.append(serde_json::from_str(&row.payload_json)?);
-    }
+    let ledger = load_op_capture_ledger(&tx, &document_hash)?;
     let projection = ledger.project();
     let Some(active) = projection
         .document(&document_hash)
@@ -567,12 +590,7 @@ fn append_editor_ops_batch_cold(
     let (generation, existing) = match local_current {
         Some((generation, active, _)) => (generation, active),
         None => {
-            let rows =
-                agent_doc_sqlite::state_store::load_state_events_from_db(&tx, Some(document_hash))?;
-            let mut ledger = agent_doc_state_backbone::EventLedger::new();
-            for row in rows {
-                ledger.append(serde_json::from_str(&row.payload_json)?);
-            }
+            let ledger = load_op_capture_ledger(&tx, document_hash)?;
             let projection = ledger.project();
             let (generation, active, _) =
                 captures_from_document_projection(projection.document(document_hash))?;
@@ -1482,14 +1500,7 @@ fn clear_op_capture_with_timeout(doc: &Path, timeout: Duration) -> Result<()> {
     let generation = match local_generation {
         Some(generation) => generation,
         None => {
-            let rows = agent_doc_sqlite::state_store::load_state_events_from_db(
-                &tx,
-                Some(&document_hash),
-            )?;
-            let mut ledger = agent_doc_state_backbone::EventLedger::new();
-            for row in rows {
-                ledger.append(serde_json::from_str(&row.payload_json)?);
-            }
+            let ledger = load_op_capture_ledger(&tx, &document_hash)?;
             ledger
                 .project()
                 .document(&document_hash)

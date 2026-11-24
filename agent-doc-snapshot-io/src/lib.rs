@@ -18,7 +18,7 @@ pub use status_sync_synced::{load_status_sync_synced_payload, record_status_sync
 
 /// Load the content-bearing merge baseline from the durable state ledger.
 pub fn load_document_baseline(doc: &Path) -> Result<Option<String>> {
-    Ok(load_document_state_projection(doc)?
+    Ok(load_document_state_projection(doc, BASELINE_FACTS)?
         .and_then(|projection| projection.document.merge_baseline)
         .map(|baseline| baseline.content))
 }
@@ -30,7 +30,7 @@ pub fn load_document_baseline(doc: &Path) -> Result<Option<String>> {
 /// the baseline; it is deliberately separate from the generation counter, which
 /// also advances on `DocumentBaselineCleared`.
 pub fn load_document_baseline_generation(doc: &Path) -> Result<Option<u64>> {
-    Ok(load_document_state_projection(doc)?
+    Ok(load_document_state_projection(doc, BASELINE_FACTS)?
         .and_then(|projection| projection.document.merge_baseline)
         .map(|baseline| baseline.generation))
 }
@@ -44,7 +44,7 @@ pub fn checkpoint_document_baseline(
     let mut logger = logger;
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let document_hash = agent_doc_hash::content_hash(&canonical.display().to_string());
-    let projection = load_document_state_projection(doc)?;
+    let projection = load_document_state_projection(doc, BASELINE_FACTS)?;
     let content_hash = agent_doc_hash::content_hash(content);
     // `#baselinecommitblocked`: the baseline is the common ancestor of disk and
     // the live authority, and it is content-addressed — so re-asserting the SAME
@@ -155,8 +155,31 @@ pub fn attribute_agent_write_to_document_baseline(
     Ok(label)
 }
 
+/// The facts that write `DocumentProjection::merge_baseline{,_generation}`.
+const BASELINE_FACTS: &[&str] = &[
+    "document_baseline_checkpointed",
+    "document_baseline_cleared",
+];
+/// The facts that write `DocumentProjection::crdt_recovery_projection{,_generation}`.
+const CRDT_RECOVERY_FACTS: &[&str] = &[
+    "crdt_recovery_projection_checkpointed",
+    "crdt_recovery_projection_cleared",
+];
+/// The facts that write `DocumentProjection::undo_checkpoint{,_generation}`.
+const UNDO_FACTS: &[&str] = &["undo_checkpointed", "undo_checkpoint_cleared"];
+
+/// Project one document's state from only the `facts` family.
+///
+/// Every reader in this module reads one superseding
+/// checkpoint/clear pair, and `DocumentStateProjection::apply_fact` writes each
+/// pair's fields from those two facts alone (no other fact touches them, and
+/// neither arm reads other state), so folding the family in append order yields
+/// exactly the fields the whole-ledger replay produced. The whole-ledger replay
+/// cost ~330ms per call on live `sdk-dev.md` (137MB of payloads), paid on every
+/// baseline read in preflight and commit.
 fn load_document_state_projection(
     doc: &Path,
+    facts: &[&str],
 ) -> Result<Option<agent_doc_state_backbone::DocumentStateProjection>> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
@@ -165,10 +188,12 @@ fn load_document_state_projection(
     }
     let document_hash = agent_doc_hash::content_hash(&canonical.display().to_string());
     let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
-    let events = agent_doc_sqlite::state_store::load_state_events_for_cycle_projection_from_db(
-        &conn,
-        &document_hash,
-    )?;
+    let events =
+        agent_doc_sqlite::state_store::load_state_events_by_fact_types_for_document_from_db(
+            &conn,
+            &document_hash,
+            facts,
+        )?;
     let mut projection = agent_doc_state_backbone::DocumentStateProjection::new(&document_hash);
     for status in events {
         let event: agent_doc_state_backbone::StateEvent =
@@ -206,7 +231,7 @@ fn append_document_fact(
 pub fn clear_document_baseline(doc: &Path) -> Result<()> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let document_hash = agent_doc_hash::content_hash(&canonical.display().to_string());
-    let generation = load_document_state_projection(doc)?
+    let generation = load_document_state_projection(doc, BASELINE_FACTS)?
         .map(|projection| projection.document.merge_baseline_generation)
         .unwrap_or(0)
         .saturating_add(1);
@@ -228,7 +253,7 @@ pub struct CrdtRecoveryProjection {
 
 /// Load the cold CRDT restart projection from the durable state ledger.
 pub fn load_crdt_recovery_projection(doc: &Path) -> Result<Option<CrdtRecoveryProjection>> {
-    let Some(projected) = load_document_state_projection(doc)?
+    let Some(projected) = load_document_state_projection(doc, CRDT_RECOVERY_FACTS)?
         .and_then(|projection| projection.document.crdt_recovery_projection)
     else {
         return Ok(None);
@@ -254,7 +279,7 @@ pub fn checkpoint_crdt_recovery_projection(
 ) -> Result<bool> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let document_hash = agent_doc_hash::content_hash(&canonical.display().to_string());
-    let document_projection = load_document_state_projection(doc)?
+    let document_projection = load_document_state_projection(doc, CRDT_RECOVERY_FACTS)?
         .map(|projection| projection.document)
         .unwrap_or_default();
     let prior_generation = document_projection.crdt_recovery_projection_generation;
@@ -284,7 +309,7 @@ pub fn checkpoint_crdt_recovery_projection(
 pub fn clear_crdt_recovery_projection(doc: &Path) -> Result<()> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let document_hash = agent_doc_hash::content_hash(&canonical.display().to_string());
-    let generation = load_document_state_projection(doc)?
+    let generation = load_document_state_projection(doc, CRDT_RECOVERY_FACTS)?
         .map(|projection| projection.document.crdt_recovery_projection_generation)
         .unwrap_or(0)
         .saturating_add(1);
@@ -556,7 +581,7 @@ pub fn detect_document_path_transition(
 pub fn checkpoint_undo_content(doc: &Path, content: &str) -> Result<()> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let document_hash = agent_doc_hash::content_hash(&canonical.display().to_string());
-    let generation = load_document_state_projection(doc)?
+    let generation = load_document_state_projection(doc, UNDO_FACTS)?
         .map(|projection| projection.document.undo_checkpoint_generation)
         .unwrap_or(0)
         .saturating_add(1);
@@ -576,7 +601,7 @@ pub fn checkpoint_undo_content(doc: &Path, content: &str) -> Result<()> {
 
 /// Load the active pre-write undo checkpoint from the durable ledger.
 pub fn load_undo_content(doc: &Path) -> Result<Option<String>> {
-    Ok(load_document_state_projection(doc)?
+    Ok(load_document_state_projection(doc, UNDO_FACTS)?
         .and_then(|projection| projection.document.undo_checkpoint)
         .map(|checkpoint| checkpoint.content))
 }
@@ -585,7 +610,7 @@ pub fn load_undo_content(doc: &Path) -> Result<Option<String>> {
 pub fn clear_undo_content(doc: &Path) -> Result<()> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let document_hash = agent_doc_hash::content_hash(&canonical.display().to_string());
-    let generation = load_document_state_projection(doc)?
+    let generation = load_document_state_projection(doc, UNDO_FACTS)?
         .map(|projection| projection.document.undo_checkpoint_generation)
         .unwrap_or(0)
         .saturating_add(1);
@@ -630,6 +655,107 @@ mod tests {
         git(root, &["init"]);
         git(root, &["config", "user.email", "test@test.com"]);
         git(root, &["config", "user.name", "Test"]);
+    }
+
+    /// Whole-ledger replay of `doc`'s events, the oracle the family-scoped reads must match.
+    fn whole_ledger_projection(doc: &Path) -> agent_doc_state_backbone::DocumentStateProjection {
+        let canonical = doc.canonicalize().unwrap();
+        let project_root =
+            agent_doc_project_root_io::project_root_or_file_parent(&canonical).unwrap();
+        let document_hash = agent_doc_hash::content_hash(&canonical.display().to_string());
+        let conn = agent_doc_sqlite::state_store::open_state_db(&project_root).unwrap();
+        let mut projection = agent_doc_state_backbone::DocumentStateProjection::new(&document_hash);
+        for status in
+            agent_doc_sqlite::state_store::load_state_events_from_db(&conn, Some(&document_hash))
+                .unwrap()
+        {
+            let event: agent_doc_state_backbone::StateEvent =
+                serde_json::from_str(&status.payload_json).unwrap();
+            projection.apply_fact(&event.fact);
+        }
+        projection
+    }
+
+    /// Each family-scoped read returns exactly the fields
+    /// the whole-ledger replay produces, with unrelated facts (including a
+    /// content-bearing one) interleaved between the family's checkpoints and
+    /// clears.
+    #[test]
+    fn family_scoped_reads_match_whole_ledger_replay() {
+        let (_dir, doc) = setup();
+        let canonical = doc.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::content_hash(&canonical.display().to_string());
+        let unrelated = |n: u64| {
+            append_document_fact(
+                &doc,
+                format!("unrelated-steering:{document_hash}:{n}"),
+                agent_doc_state_backbone::StateFact::BaselineSaved {
+                    document_hash: document_hash.clone(),
+                    cycle_id: format!("cycle-{n}"),
+                    baseline_hash: format!("hash-{n}"),
+                    baseline_path: Some(format!("/unrelated/{n}")),
+                },
+            )
+            .unwrap();
+        };
+        let assert_matches = || {
+            let whole = whole_ledger_projection(&doc).document;
+            let baseline = load_document_state_projection(&doc, BASELINE_FACTS)
+                .unwrap()
+                .unwrap()
+                .document;
+            assert_eq!(baseline.merge_baseline, whole.merge_baseline);
+            assert_eq!(
+                baseline.merge_baseline_generation,
+                whole.merge_baseline_generation
+            );
+            let undo = load_document_state_projection(&doc, UNDO_FACTS)
+                .unwrap()
+                .unwrap()
+                .document;
+            assert_eq!(undo.undo_checkpoint, whole.undo_checkpoint);
+            assert_eq!(
+                undo.undo_checkpoint_generation,
+                whole.undo_checkpoint_generation
+            );
+            let recovery = load_document_state_projection(&doc, CRDT_RECOVERY_FACTS)
+                .unwrap()
+                .unwrap()
+                .document;
+            assert_eq!(
+                recovery.crdt_recovery_projection,
+                whole.crdt_recovery_projection
+            );
+            assert_eq!(
+                recovery.crdt_recovery_projection_generation,
+                whole.crdt_recovery_projection_generation
+            );
+        };
+
+        checkpoint_document_baseline(&doc, "first", |_, _| {}).unwrap();
+        unrelated(1);
+        checkpoint_undo_content(&doc, "undo one").unwrap();
+        checkpoint_crdt_recovery_projection(&doc, b"crdt-one", "lineage-a").unwrap();
+        assert_matches();
+        unrelated(2);
+        clear_document_baseline(&doc).unwrap();
+        clear_undo_content(&doc).unwrap();
+        assert_matches();
+        checkpoint_document_baseline(&doc, "second", |_, _| {}).unwrap();
+        unrelated(3);
+        clear_crdt_recovery_projection(&doc).unwrap();
+        checkpoint_undo_content(&doc, "undo two").unwrap();
+        assert_matches();
+        assert_eq!(
+            load_document_baseline(&doc).unwrap().as_deref(),
+            Some("second")
+        );
+        assert_eq!(load_document_baseline_generation(&doc).unwrap(), Some(3));
+        assert_eq!(
+            load_undo_content(&doc).unwrap().as_deref(),
+            Some("undo two")
+        );
+        assert!(load_crdt_recovery_projection(&doc).unwrap().is_none());
     }
 
     #[test]

@@ -1598,6 +1598,14 @@ fn run_with_options_to_writer_in_pass(
     // `queue_active: true` advance without requiring a fresh document edit.
     let mut answer_ledger_report =
         agent_doc_preflight_io::answer_ledger::AnswerLedgerReport::default();
+    // `#q-1c3d8ce047cd`: admission inspection, the queue sync payload, the
+    // tier capture scope and the owner dispatch projection all derive the
+    // claim holds, worker ownership, dispatch candidates and reported
+    // releases of the same admitted cut. One read scope derives each once
+    // per (text, claim-steer view, this thread's ledger write epoch) instead
+    // of once per phase; a write this pass makes still invalidates it. It
+    // ends after the owner dispatch projection.
+    let admission_read_scope = agent_doc_queue_io::state_read_scope::enter_state_read_scope();
     let queue_state = if options.probe {
         // `#decisionidstamp`: a probe reports the same answered facts the
         // real pass would, from a read-only simulation (no document write, no
@@ -2916,6 +2924,7 @@ fn run_with_options_to_writer_in_pass(
             .ok()
         })
         .flatten();
+    drop(admission_read_scope);
     let exchange_subagent_dispatch = if exchange_prompt_attrs.subagents {
         agent_doc_preflight_io::exchange_subagent_dispatch_entries(&active_exchange_prompt_targets)
     } else {

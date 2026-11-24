@@ -127,7 +127,9 @@ fn bench_reconcile_marker_phases() {
 /// an existing project document `AGENT_DOC_ADMISSION_BENCH_FILE` names (a
 /// private, re-keyed copy whose state database carries the live claim, receipt
 /// and lineage ledgers), so ledger reads cost what they cost live. Without the
-/// variable nothing is measured.
+/// variable nothing is measured. `AGENT_DOC_ADMISSION_BENCH_SCOPED` runs each
+/// round inside one queue state read scope, as preflight's admission does
+/// (`#q-1c3d8ce047cd`).
 #[test]
 #[ignore]
 fn bench_admission_phases_in_place() {
@@ -141,42 +143,51 @@ fn bench_admission_phases_in_place() {
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or(2);
+    let scoped = std::env::var_os("AGENT_DOC_ADMISSION_BENCH_SCOPED").is_some();
     for round in 0..rounds {
-        eprintln!("--- round {round}");
-        let state = time("queue_admission_inspect", || {
-            agent_doc_preflight_io::inspect_queue_state_from_content_with_skipped(
-                &file,
-                None,
-                content.clone(),
-                &Default::default(),
-            )
-            .unwrap()
-        });
-        let admitted = state
-            .authoritative_content
-            .clone()
-            .unwrap_or_else(|| content.clone());
-        time("queue_admission_payload", || {
-            let _ = agent_doc_queue::prompt_identity::project(
-                &admitted,
-                &agent_doc_hash::document_id_for_path(&file),
-            );
-            agent_doc_queue_io::sync_payload::build_project_queue_sync_payload(
-                &file,
-                &admitted,
-                Some(&content),
-            )
-            .unwrap()
-        });
-        let pending = agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_or_warn(
-            &file, &admitted,
-        );
-        time("owner_queue_dispatch_projection", || {
-            let _ =
-                agent_doc_preflight_io::queue_subagent_dispatch_entries(&file, &admitted, &pending);
-            let _ = agent_doc_queue_io::subagent_pool::observe_pool_refill_for_content(
+        let run = || {
+            eprintln!("--- round {round}");
+            let state = time("queue_admission_inspect", || {
+                agent_doc_preflight_io::inspect_queue_state_from_content_with_skipped(
+                    &file,
+                    None,
+                    content.clone(),
+                    &Default::default(),
+                )
+                .unwrap()
+            });
+            let admitted = state
+                .authoritative_content
+                .clone()
+                .unwrap_or_else(|| content.clone());
+            time("queue_admission_payload", || {
+                let _ = agent_doc_queue::prompt_identity::project(
+                    &admitted,
+                    &agent_doc_hash::document_id_for_path(&file),
+                );
+                agent_doc_queue_io::sync_payload::build_project_queue_sync_payload(
+                    &file,
+                    &admitted,
+                    Some(&content),
+                )
+                .unwrap()
+            });
+            let pending = agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_or_warn(
                 &file, &admitted,
             );
-        });
+            time("owner_queue_dispatch_projection", || {
+                let _ = agent_doc_preflight_io::queue_subagent_dispatch_entries(
+                    &file, &admitted, &pending,
+                );
+                let _ = agent_doc_queue_io::subagent_pool::observe_pool_refill_for_content(
+                    &file, &admitted,
+                );
+            });
+        };
+        if scoped {
+            agent_doc_queue_io::state_read_scope::with_state_read_scope(run);
+        } else {
+            run();
+        }
     }
 }

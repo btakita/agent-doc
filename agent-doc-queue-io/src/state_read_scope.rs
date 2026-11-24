@@ -70,19 +70,15 @@ thread_local! {
 /// A nested call joins the enclosing scope; the snapshot ends when the
 /// outermost call returns, panics included.
 pub fn with_state_read_scope<T>(f: impl FnOnce() -> T) -> T {
-    struct Exit;
-    impl Drop for Exit {
-        fn drop(&mut self) {
-            let depth = DEPTH.with(|depth| {
-                let next = depth.get().saturating_sub(1);
-                depth.set(next);
-                next
-            });
-            if depth == 0 {
-                SCOPE.with(|scope| scope.borrow_mut().take());
-            }
-        }
-    }
+    let _scope = enter_state_read_scope();
+    f()
+}
+
+/// An open [`with_state_read_scope`] for a pass that is not one closure:
+/// the scope lasts until the returned guard drops (panics included). Like the
+/// closure form, a nested guard joins the enclosing scope. The guard is bound
+/// to this thread.
+pub fn enter_state_read_scope() -> StateReadScope {
     let outermost = DEPTH.with(|depth| {
         let current = depth.get();
         depth.set(current + 1);
@@ -91,8 +87,28 @@ pub fn with_state_read_scope<T>(f: impl FnOnce() -> T) -> T {
     if outermost {
         SCOPE.with(|scope| *scope.borrow_mut() = Some(ScopeMemo::default()));
     }
-    let _exit = Exit;
-    f()
+    StateReadScope {
+        _thread_bound: std::marker::PhantomData,
+    }
+}
+
+/// Guard for [`enter_state_read_scope`].
+#[must_use = "the read scope ends when this guard drops"]
+pub struct StateReadScope {
+    _thread_bound: std::marker::PhantomData<*const ()>,
+}
+
+impl Drop for StateReadScope {
+    fn drop(&mut self) {
+        let depth = DEPTH.with(|depth| {
+            let next = depth.get().saturating_sub(1);
+            depth.set(next);
+            next
+        });
+        if depth == 0 {
+            SCOPE.with(|scope| scope.borrow_mut().take());
+        }
+    }
 }
 
 /// True while a [`with_state_read_scope`] is active on this thread.
@@ -274,6 +290,34 @@ mod tests {
         read("abc");
         assert_eq!(computed.get(), 6, "the snapshot ends with the scope");
         assert_eq!(evaluations("unit"), 6);
+    }
+
+    #[test]
+    fn a_guard_scope_lasts_until_it_drops_and_nests_like_the_closure() {
+        let file = Path::new("/tmp/state-read-scope-unit-guard.md");
+        let computed = Cell::new(0);
+        let read = || {
+            memoized("unit-guard", file, "abc", "", || {
+                computed.set(computed.get() + 1);
+            })
+        };
+        let outer = enter_state_read_scope();
+        read();
+        with_state_read_scope(read);
+        {
+            let _inner = enter_state_read_scope();
+            read();
+        }
+        assert!(
+            in_state_read_scope(),
+            "an inner guard joins, never ends, the outer scope"
+        );
+        read();
+        assert_eq!(computed.get(), 1, "one computation for the guarded pass");
+        drop(outer);
+        assert!(!in_state_read_scope());
+        read();
+        assert_eq!(computed.get(), 2, "the snapshot ends when the guard drops");
     }
 
     #[test]

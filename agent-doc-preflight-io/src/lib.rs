@@ -4807,14 +4807,25 @@ pub fn inspect_queue_state_from_content_with_skipped(
     } else {
         Vec::new()
     };
-    let mut skipped_queue_head_ids: std::collections::HashSet<String> =
-        agent_doc_cycle_state_io::load(file)
-            .ok()
-            .flatten()
-            .map(|state| state.skipped_queue_head_ids.into_iter().collect())
-            .unwrap_or_default();
+    // One cycle-state read serves both facts admission takes from it. Each
+    // read is a controller projection round trip (a ~180 ms state.db replay
+    // without a controller), and these two used to read it back to back.
+    let cycle_state = agent_doc_cycle_state_io::load(file).ok().flatten();
+    let (mut skipped_queue_head_ids, projected_in_progress_queue_heads): (
+        std::collections::HashSet<String>,
+        std::collections::HashSet<String>,
+    ) = cycle_state
+        .map(|state| {
+            (
+                state.skipped_queue_head_ids.into_iter().collect(),
+                state
+                    .projected_in_progress_queue_heads
+                    .into_iter()
+                    .collect(),
+            )
+        })
+        .unwrap_or_default();
     skipped_queue_head_ids.extend(retry_skipped_queue_head_ids.iter().cloned());
-    let projected_in_progress_queue_heads = load_projected_in_progress_queue_heads(file);
     let projection_entries = entries_without_out_of_loop_heads(
         &activation.entries_after,
         &in_flight_queue_items,

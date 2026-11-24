@@ -402,7 +402,7 @@ fn fold_and_reserved_operator_lints() {
         vec![
             PipeLintKind::FoldWithoutChildren,
             PipeLintKind::ReservedEdgeOperator,
-            PipeLintKind::ReservedEdgeOperator,
+            PipeLintKind::HandOffWithoutChildren,
             PipeLintKind::PipeWithoutChildren,
         ]
     );
@@ -416,7 +416,7 @@ fn fold_and_reserved_operator_lints() {
             .message
             .contains("did you mean ` |+` (deep pipe)?")
     );
-    assert!(findings[2].message.contains("hand-off pipe"));
+    assert!(findings[2].message.contains("no stage to hand off to"));
     assert!(pipe_statement_lints(&queue_doc(FOLD)).is_empty());
     // A ` >` stage inside a statement folds its own list.
     assert!(
@@ -691,21 +691,27 @@ fn a_fold_wins_over_ordered_steps_and_keeps_the_numbering() {
     );
 }
 
-/// ` |>` (phase 2) is reserved: until its hand-off ships, its children keep
-/// today's shape, which is already the staged order the hand-off will use.
+/// ` |>` (phase 2): the head is stage 1 and its children are later stages,
+/// each its own row. Ordered stages run one at a time and bulleted stages in
+/// parallel, all only after the head finished (`hand_off` module tests).
 #[test]
 fn a_hand_off_pipe_keeps_its_children_in_staged_order() {
-    // Ordered children: sequential, one step at a time in number order.
+    // Ordered children: separate rows, held behind stage 1, then in order.
     let entries = parsed("- release |>\n  1. build\n  2. publish\n");
     assert_eq!(entries.len(), 3);
+    assert_eq!(executable_prompt_indexes(&entries), vec![0, 1, 2]);
+    let waits = ordered_step_waits(&entries);
+    assert!(waits[0].is_none());
+    assert!(waits[1].as_ref().is_some_and(|wait| wait.hand_off));
+    let entries = parsed("- ✅ release |>\n  1. build\n  2. publish\n");
     let waits = ordered_step_waits(&entries);
     assert!(waits[1].is_none());
     assert_eq!(
         waits[2].as_ref().map(|wait| wait.step_number.as_str()),
         Some("1")
     );
-    // Unordered children: parallel leaves.
-    let entries = parsed("- release |>\n  - build\n  - publish\n");
+    // Unordered children: parallel once the head finished.
+    let entries = parsed("- ✅ release |>\n  - build\n  - publish\n");
     assert_eq!(entries.len(), 3);
     assert_eq!(executable_prompt_indexes(&entries), vec![1, 2]);
     assert!(ordered_step_waits(&entries).iter().all(Option::is_none));

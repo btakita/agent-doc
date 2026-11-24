@@ -365,7 +365,7 @@ pub fn parse_fragment_spans(text: &str) -> Result<Vec<(QueueEntry, std::ops::Ran
 /// The operator-facing recommendation remains repeated `1.` markers because
 /// insertions do not renumber siblings, but accepting and retaining every
 /// decimal spelling keeps existing documents byte-preserving.
-pub(crate) fn split_list_item(line: &str) -> Option<(usize, Option<String>, &str)> {
+pub fn split_list_item(line: &str) -> Option<(usize, Option<String>, &str)> {
     let indent = line.len() - line.trim_start_matches(' ').len();
     let dedented = &line[indent..];
     if let Some(rest) = dedented.strip_prefix("- ") {
@@ -2410,18 +2410,29 @@ pub fn set_prompt_runtime_projections_with(
                 // `#treetopglyph`: the label's tree glyph is re-derived by the
                 // response-tree sync, not by this projection; keep it so the
                 // two passes never undo each other.
+                // `#keepunstrike`: the top-level row is the container the
+                // operator marked `keep`. Completing its children does not
+                // strike it. A nested group still closes.
+                let close_parent = all_leaves_struck
+                    && !(policy.keep_top_level_unstruck && entry_indent(entry).unwrap_or(0) == 0);
                 let work = struck_work_text(&parent.text);
+                // `#pipeprompt` ` |>`: a hand-off row that is a container has
+                // finished its own stage 1; while a stage under it is open it
+                // shows `✅`, never the open (runnable) form.
+                let done;
+                let work = if !close_parent && agent_doc_element_queue::pipe::ends_with_hand_off(work)
+                {
+                    done = format!("{} {work}", agent_doc_element_queue::pipe::STAGE_DONE_GLYPH);
+                    done.as_str()
+                } else {
+                    work
+                };
                 let carried = agent_doc_element_queue::tree_indicator_in_prefix(&parent.text)
                     .map(|indicator| format!("{} {work}", indicator.glyph()));
                 parent.text = render_queue_effect_report_state_annotation(
                     carried.as_deref().unwrap_or(work),
                     None,
                 );
-                // `#keepunstrike`: the top-level row is the container the
-                // operator marked `keep`. Completing its children does not
-                // strike it. A nested group still closes.
-                let close_parent = all_leaves_struck
-                    && !(policy.keep_top_level_unstruck && entry_indent(entry).unwrap_or(0) == 0);
                 let derived = if close_parent {
                     QueueEntry::Completed(parent)
                 } else {
@@ -4736,6 +4747,80 @@ fn waiting_item_has_operator_reply(entries: &[QueueEntry], item_idx: usize) -> b
     crate::waiting_packet::is_selected(entries, item_idx)
 }
 
+/// `#pipeprompt` ` |>`: whether the row at `idx` is a live hand-off row whose
+/// own stage (stage 1) has not finished: it ends in ` |>`, is not struck and
+/// does not carry the binary `✅`.
+///
+/// Such a row is a runnable leaf: its children are later stages, held until
+/// it finishes ([`ordered_step_waits`]), never its group members.
+pub fn entry_is_open_hand_off_head(entries: &[QueueEntry], idx: usize) -> bool {
+    let Some(QueueEntry::Prompt(prompt)) = entries.get(idx) else {
+        return false;
+    };
+    prompt_is_open_hand_off_head(prompt)
+}
+
+fn prompt_is_open_hand_off_head(prompt: &QueuePrompt) -> bool {
+    let first = prompt.text.lines().next().unwrap_or("");
+    first.contains("|>")
+        && agent_doc_element_queue::pipe::ends_with_hand_off(first)
+        && !agent_doc_element_queue::pipe::hand_off_stage_done(&strip_in_progress_marker(
+            first.trim(),
+        ))
+}
+
+/// Whether the row at `idx` is a ` |>` row whose stage 1 finished
+/// (`✅ row |>`): a container of its open later stages.
+pub fn entry_is_finished_hand_off_head(entries: &[QueueEntry], idx: usize) -> bool {
+    matches!(
+        entries.get(idx),
+        Some(QueueEntry::Prompt(prompt))
+            if agent_doc_element_queue::pipe::hand_off_stage_done(prompt.text.lines().next().unwrap_or(""))
+    )
+}
+
+/// The entries after `idx`, in order, as the structural scans of the row at
+/// `idx` read them.
+///
+/// For an open ` |>` row ([`entry_is_open_hand_off_head`]) its stage rows and
+/// their subtrees are left out: they are later stages, not the row's
+/// children, so the row stays a leaf. Its own response tree (generated rows
+/// at its child depth) is kept. Every other row reads every later entry.
+fn later_entries(entries: &[QueueEntry], idx: usize) -> impl Iterator<Item = &QueueEntry> {
+    let head_indent = entry_is_open_hand_off_head(entries, idx)
+        .then(|| entries.get(idx).and_then(entry_indent))
+        .flatten();
+    let mut stage_indent: Option<usize> = None;
+    let mut past_subtree = false;
+    entries.iter().skip(idx + 1).filter(move |entry| {
+        let Some(own) = head_indent else {
+            return true;
+        };
+        if past_subtree {
+            return true;
+        }
+        match entry_indent(entry) {
+            Some(indent) if indent <= own => {
+                past_subtree = true;
+                true
+            }
+            Some(indent) => {
+                if stage_indent.is_some_and(|stage| indent > stage) {
+                    return false;
+                }
+                if matches!(entry, QueueEntry::Prompt(_) | QueueEntry::Completed(_)) {
+                    stage_indent = Some(indent);
+                    false
+                } else {
+                    stage_indent = None;
+                    true
+                }
+            }
+            None => stage_indent.is_none(),
+        }
+    })
+}
+
 /// `true` when the entry at `idx` is a nesting PARENT — it has at least one
 /// more-deeply-indented item beneath it before the list returns to its own depth
 /// (`#queuenest` / `#f1s3`).
@@ -4759,7 +4844,7 @@ pub fn entry_is_group_parent(entries: &[QueueEntry], idx: usize) -> bool {
     let Some(own_indent) = entries.get(idx).and_then(entry_indent) else {
         return false;
     };
-    for later in entries.iter().skip(idx + 1) {
+    for later in later_entries(entries, idx) {
         // A deeper list comment or reference row is annotation, not an
         // executable descendant. Keep scanning through it so a real child
         // below it still makes this prompt row a group parent. Comment-only
@@ -4852,7 +4937,7 @@ pub fn entry_has_nested_parked_comment(entries: &[QueueEntry], idx: usize) -> bo
     let Some(own_indent) = entries.get(idx).and_then(entry_indent) else {
         return false;
     };
-    for later in entries.iter().skip(idx + 1) {
+    for later in later_entries(entries, idx) {
         match later {
             QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
                 if prompt.indent <= own_indent {
@@ -4888,7 +4973,7 @@ fn subtree_has_blocker_response(entries: &[QueueEntry], idx: usize) -> bool {
         return false;
     };
     let own_indent = prompt.indent;
-    for later in entries.iter().skip(idx + 1) {
+    for later in later_entries(entries, idx) {
         if let Some(indent) = entry_indent(later)
             && indent <= own_indent
         {
@@ -4932,7 +5017,7 @@ pub fn entry_has_only_comment_children(entries: &[QueueEntry], idx: usize) -> bo
         return false;
     }
     let mut saw_comment = false;
-    for later in entries.iter().skip(idx + 1) {
+    for later in later_entries(entries, idx) {
         if let Some((indent, _)) = list_comment_context_row(later) {
             if indent <= own_indent {
                 break;
@@ -5016,7 +5101,7 @@ pub fn reported_response_origin(
     }
     let own_indent = prompt.indent;
     let mut request_ids = operator_request_annotation_ids(&prompt.text);
-    for later in entries.iter().skip(idx + 1) {
+    for later in later_entries(entries, idx) {
         match later {
             QueueEntry::Prompt(child) => {
                 if child.indent <= own_indent {
@@ -5074,7 +5159,7 @@ pub fn closed_subtree_parent(entries: &[QueueEntry], idx: usize) -> bool {
         return false;
     }
     let own_indent = prompt.indent;
-    for later in entries.iter().skip(idx + 1) {
+    for later in later_entries(entries, idx) {
         match later {
             QueueEntry::Prompt(child) => {
                 if child.indent <= own_indent {
@@ -5274,6 +5359,9 @@ fn nest_row_work_text(text: &str) -> String {
 fn nest_row_work_text_uncached(text: &str) -> String {
     let unstruck = unwrap_nest_strike(text.trim());
     let projected = agent_doc_element_queue::strip_attempt_projection_prefix(unstruck);
+    // `#pipeprompt` ` |>`: a finished stage 1's `✅` is bookkeeping.
+    let projected =
+        agent_doc_element_queue::pipe::strip_hand_off_done_glyph(projected).unwrap_or(projected);
     strip_queue_effect_annotation(&strip_priority_markers(unwrap_nest_strike(
         projected.trim(),
     )))
@@ -5949,6 +6037,11 @@ pub fn lineage_claim_text(entries: &[QueueEntry], index: usize) -> Option<String
 fn lineage_claim_text_uncached(entries: &[QueueEntry], index: usize) -> Option<String> {
     let prompt = prompt_of(entries.get(index)?)?;
     let bare = strip_in_progress_marker(prompt.text.trim());
+    // `#pipeprompt` ` |>`: a finished stage 1's `✅` is bookkeeping.
+    let bare = match agent_doc_element_queue::pipe::strip_hand_off_done_glyph(&bare) {
+        Some(work) => work.to_string(),
+        None => bare,
+    };
     if bare.trim().is_empty() {
         return None;
     }
@@ -5959,7 +6052,10 @@ fn lineage_claim_text_uncached(entries: &[QueueEntry], index: usize) -> Option<S
     // durable claim repair to restore a duplicate row under the same parent.
     let authored_for_directive_classification =
         agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(&bare);
-    if entry_is_group_parent(entries, index)
+    // `#pipeprompt` ` |>`: a finished stage 1 becomes the container of its
+    // stages, but it is still the work its worker ran; it keeps the leaf
+    // identity it was claimed under.
+    if (entry_is_group_parent(entries, index) && !entry_is_finished_hand_off_head(entries, index))
         || row_is_tracked_directive(&authored_for_directive_classification)
     {
         return Some(bare);
@@ -6335,10 +6431,109 @@ pub fn submitted_prompt_at(entries: &[QueueEntry], index: usize) -> Option<Strin
     if let Some(op) = edge_block_op(&identity) {
         return Some(submitted_edge_block(entries, index, &identity, op));
     }
-    Some(match nest_vector_at(entries, index, &identity) {
+    let submitted = match nest_vector_at(entries, index, &identity) {
         Some(lineage) => with_prompt_tree(entries, index, &without_binary_markers(&lineage)),
         None => identity,
+    };
+    Some(match hand_off_submission_note(entries, index) {
+        Some(note) => format!("{submitted}\n{note}"),
+        None => submitted,
     })
+}
+
+/// Line that follows a submitted ` |>` row while its stage 1 runs
+/// (`#pipeprompt` hand-off pipe).
+pub const HAND_OFF_PROMPT_HEADER: &str = "Hand-off pipe (`#pipeprompt`, ` |>`): this task is stage 1, the row above only. Do that stage and hand back; do not start the stages nested under it. Each later stage runs as its own queue row in a NEW worker whose input is your hand-back, so put everything the next stage needs into it. Its stages:";
+
+/// Line that follows a submitted stage of a ` |>` row (`#pipeprompt`).
+pub const HAND_OFF_STAGE_HEADER: &str = "Hand-off stage (`#pipeprompt`, ` |>`): this task is one later stage of a hand-off pipe, run in a new worker. Its input is the previous stage's hand-back, quoted in the brief under \"Hand-off input\"; do only this stage and hand back. Its pipeline:";
+
+/// The nearest ` |>` row above the row at `index` (its stage parent or an
+/// outer hand-off row), with the path from that row down to `index`.
+pub fn hand_off_ancestor(entries: &[QueueEntry], index: usize) -> Option<(usize, Vec<usize>)> {
+    let mut depth = entries.get(index).and_then(entry_indent)?;
+    let mut path = vec![index];
+    for earlier in (0..index).rev() {
+        let Some(indent) = entry_indent(&entries[earlier]) else {
+            continue;
+        };
+        if indent >= depth {
+            continue;
+        }
+        if response_metadata_row_indent(&entries[earlier]).is_some() {
+            continue;
+        }
+        let Some(prompt) = prompt_of(&entries[earlier]) else {
+            depth = indent;
+            if depth == 0 {
+                return None;
+            }
+            continue;
+        };
+        if agent_doc_element_queue::pipe::ends_with_hand_off(
+            prompt.text.lines().next().unwrap_or(""),
+        ) {
+            path.reverse();
+            return Some((earlier, path));
+        }
+        path.push(earlier);
+        depth = indent;
+        if depth == 0 {
+            return None;
+        }
+    }
+    None
+}
+
+/// The hand-off note for the submitted row at `index`: the stage-1 header and
+/// its stages for an open ` |>` row, the stage header and its pipeline for a
+/// row under a ` |>` row, else `None`.
+fn hand_off_submission_note(entries: &[QueueEntry], index: usize) -> Option<String> {
+    use agent_doc_element_queue::pipe::{HAND_OFF_PATH_JOIN, row_work_text};
+    let work = |at: usize| prompt_of(&entries[at]).map(|prompt| row_work_text(&prompt.text));
+    if entry_is_open_hand_off_head(entries, index) {
+        let head = work(index)?;
+        let own = entries.get(index).and_then(entry_indent)?;
+        let mut stage_depth = None;
+        let mut stages = Vec::new();
+        for later in &entries[index + 1..] {
+            let Some(indent) = entry_indent(later) else {
+                continue;
+            };
+            if indent <= own {
+                break;
+            }
+            let QueueEntry::Prompt(stage) = later else {
+                continue;
+            };
+            if *stage_depth.get_or_insert(indent) == indent {
+                let marker = stage
+                    .ordered_marker
+                    .as_ref()
+                    .map(|marker| format!("{marker} "))
+                    .unwrap_or_default();
+                stages.push(format!(
+                    "- {head}{HAND_OFF_PATH_JOIN}{marker}{}",
+                    row_work_text(&stage.text)
+                ));
+            }
+        }
+        if stages.is_empty() {
+            return None;
+        }
+        return Some(format!("{HAND_OFF_PROMPT_HEADER}\n{}", stages.join("\n")));
+    }
+    let (head, path) = hand_off_ancestor(entries, index)?;
+    let mut pipeline = work(head)?;
+    for (position, at) in path.iter().enumerate() {
+        pipeline.push_str(if position == 0 {
+            HAND_OFF_PATH_JOIN
+        } else {
+            ": "
+        });
+        pipeline.push_str(&work(*at)?);
+    }
+    Some(format!("{HAND_OFF_STAGE_HEADER}\n- {pipeline}"))
 }
 
 /// [`submitted_prompt_at`] with the general prompt ancestry packet attached.
@@ -6401,7 +6596,7 @@ pub fn edge_block_op(text: &str) -> Option<agent_doc_element_queue::pipe::EdgeOp
     use agent_doc_element_queue::pipe::EdgeOp;
     let (head, block) = agent_doc_element_queue::subprompts::split_subprompt_block(text);
     block?;
-    Some(EdgeOp::of_row(head)).filter(|op| *op != EdgeOp::Context)
+    Some(EdgeOp::of_row(head)).filter(|op| op.folds())
 }
 
 /// Whether `text` (marker-stripped) is a folded ` |` statement.
@@ -6892,19 +7087,50 @@ pub struct OrderedStepWait {
     /// Entry index of the earliest unfinished earlier step.
     pub step_entry: usize,
     /// That step's number as the operator wrote it (`1` for `1.` / `1)`).
+    /// For a hand-off hold, the waited stage's number (`1`, the ` |>` row).
     pub step_number: String,
+    /// `#pipeprompt` ` |>`: the row waits on the hand-back of the ` |>` row
+    /// above it (stage 1), not on an earlier numbered sibling.
+    pub hand_off: bool,
 }
 
 impl OrderedStepWait {
     /// The blocker citation painted after `⛔` (`⟦blocked by step-1⟧`). The
-    /// annotation keeps only `[a-z0-9_-]`, so the step is `step-N`.
+    /// annotation keeps only `[a-z0-9_-]`, so the step is `step-N`; a
+    /// hand-off stage waits on `stage-N`.
     pub fn citation(&self) -> String {
-        format!("step-{}", self.step_number)
+        if self.hand_off {
+            format!("stage-{}", self.step_number)
+        } else {
+            format!("step-{}", self.step_number)
+        }
     }
 
     /// Operator-facing hold reason.
     pub fn reason(&self) -> String {
-        format!("waits on step {}", self.step_number)
+        if self.hand_off {
+            format!(
+                "waits on the hand-back of stage {} (the ` |>` row above it)",
+                self.step_number
+            )
+        } else {
+            format!("waits on step {}", self.step_number)
+        }
+    }
+
+    /// When the held row may run, for a refusal message.
+    pub fn release_condition(&self) -> String {
+        if self.hand_off {
+            format!(
+                "a ` |>` stage runs after the previous stage reports: claim it once stage {} shows ✅ (#pipeprompt)",
+                self.step_number
+            )
+        } else {
+            format!(
+                "Steps of a numbered list run one at a time: claim it after step {} is struck (#orderedsteps)",
+                self.step_number
+            )
+        }
     }
 }
 
@@ -6939,6 +7165,9 @@ pub fn with_step_wait_citation(
 /// struck row is still reported so callers can treat a subtree uniformly.
 pub fn ordered_step_waits(entries: &[QueueEntry]) -> Vec<Option<OrderedStepWait>> {
     let mut waits: Vec<Option<OrderedStepWait>> = vec![None; entries.len()];
+    // `#pipeprompt` ` |>`: every stage under an open hand-off row waits on
+    // it, whatever its list type. Set first: an outer hold wins.
+    hand_off_stage_waits(entries, &mut waits);
     // Item-shaped entries in document order: (entry index, indent).
     let items: Vec<(usize, usize)> = entries
         .iter()
@@ -7039,6 +7268,7 @@ pub fn ordered_step_waits(entries: &[QueueEntry]) -> Vec<Option<OrderedStepWait>
         let wait = OrderedStepWait {
             step_entry: items[waited].0,
             step_number: number,
+            hand_off: false,
         };
         // Two tracked steps (`1. do [#a]`, `2. do [#b]`) are already ordered by
         // the compiled `after=` edge, which also knows when `#a` closes in its
@@ -7061,6 +7291,39 @@ pub fn ordered_step_waits(entries: &[QueueEntry]) -> Vec<Option<OrderedStepWait>
         }
     }
     waits
+}
+
+/// `#pipeprompt` ` |>`: hold every row under an open hand-off row on that
+/// row's stage (stage 1). Numbered stages under a finished (`✅`) row are
+/// then ordered by the ordinary `#orderedsteps` sequence, and bulleted
+/// stages run in parallel.
+fn hand_off_stage_waits(entries: &[QueueEntry], waits: &mut [Option<OrderedStepWait>]) {
+    for (index, entry) in entries.iter().enumerate() {
+        let QueueEntry::Prompt(prompt) = entry else {
+            continue;
+        };
+        if !prompt_is_open_hand_off_head(prompt) {
+            continue;
+        }
+        let own = prompt.indent;
+        let wait = OrderedStepWait {
+            step_entry: index,
+            step_number: "1".to_string(),
+            hand_off: true,
+        };
+        for (later, slot) in entries.iter().zip(waits.iter_mut()).skip(index + 1) {
+            match entry_indent(later) {
+                Some(indent) if indent <= own => break,
+                Some(_)
+                    if matches!(later, QueueEntry::Prompt(_) | QueueEntry::Completed(_))
+                        && slot.is_none() =>
+                {
+                    *slot = Some(wait.clone());
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 /// Whether a step names tracked work by a bracketed id (`do [#a]`), as

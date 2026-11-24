@@ -149,11 +149,39 @@ pub trait QueueConsumeWriteEffects {
 /// The boolean is significant for callers that would otherwise apply queue-only
 /// structural operations: an Active change crosses that component boundary and
 /// therefore requires their full-text convergence path.
+///
+/// `#pipeprompt` ` |>`: a strike of a hand-off row whose later stages are
+/// still open is stage 1 finishing, so it becomes the row's `✅` form, and a
+/// `✅` row whose last stage just closed is struck
+/// ([`agent_doc_queue::hand_off::settle_hand_off_heads`]). That edit is not a
+/// plain node strike, so it too requires full-text convergence.
 fn reconcile_terminal_lifecycle_projection(file: &Path, content: String) -> Result<(String, bool)> {
+    let (content, settled) =
+        match agent_doc_queue::hand_off::settle_hand_off_heads_with_report(&content) {
+            Some((settled, report)) => {
+                for row in &report {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "queue_hand_off_settle file={} row_hash={} transition={} (#pipeprompt)",
+                            file.display(),
+                            agent_doc_hash::content_hash(row.row.trim()),
+                            if row.stage_done {
+                                "stage_done"
+                            } else {
+                                "last_stage_struck"
+                            },
+                        ),
+                    );
+                }
+                (settled, true)
+            }
+            None => (content, false),
+        };
     let reconciled = crate::active_lifecycle::reconcile_summaries(file, &content)?;
     Ok(match reconciled {
         Some(reconciled) => (reconciled, true),
-        None => (content, false),
+        None => (content, settled),
     })
 }
 

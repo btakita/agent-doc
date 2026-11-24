@@ -13,6 +13,11 @@
 //!   whole subtree flattens in document order into one pipeline.
 //! * **` >` fold**: the row and its whole child list are ONE task; the list
 //!   is the row's context.
+//! * **` |>` hand-off pipe** (joined ` |> `): the stage boundary is a task
+//!   boundary. The row is stage 1; each child is a later stage that runs as
+//!   its own queue row, in a NEW worker, with the previous stage's hand-back
+//!   as its input. Numbered children hand off in order; bulleted children
+//!   each take the same hand-back, in parallel. The row is never folded.
 //!
 //! ```text
 //! - Collect the open agent-doc GitHub issues |
@@ -59,6 +64,13 @@ pub const FOLD_MARKER: &str = " >";
 /// The authored deep-pipe operator: every descendant edge pipes too.
 pub const DEEP_PIPE_MARKER: &str = " |+";
 
+/// The authored hand-off operator: the row's children are later stages,
+/// each run by a new worker with the previous stage's hand-back as input.
+pub const HAND_OFF_MARKER: &str = " |>";
+
+/// Join between a ` |>` row and its stage child in a rendered path.
+pub const HAND_OFF_PATH_JOIN: &str = " |> ";
+
 /// Join between a statement row and its child in a rendered path. Above the
 /// statement, the ordinary nest-vector join `: ` still applies.
 pub const PIPE_PATH_JOIN: &str = " | ";
@@ -82,11 +94,20 @@ pub enum EdgeOp {
     /// Explicit ` >`: the row and its whole child list are one task. Children
     /// are not addressable, so the join only labels lint paths.
     Fold,
+    /// Explicit ` |>`: a hand-off pipe. The row is stage 1 and every child is
+    /// a later stage with its own queue row, claim and response; a stage
+    /// runs in a new worker once the previous stage reports. Never folded.
+    HandOff,
 }
 
 impl EdgeOp {
     /// Every explicit operator, in parse order.
-    pub const EXPLICIT: [EdgeOp; 3] = [EdgeOp::Pipe, EdgeOp::DeepPipe, EdgeOp::Fold];
+    pub const EXPLICIT: [EdgeOp; 4] = [
+        EdgeOp::Pipe,
+        EdgeOp::DeepPipe,
+        EdgeOp::Fold,
+        EdgeOp::HandOff,
+    ];
 
     /// The operator a row's suffix gives the edges to its children.
     pub fn of_row(row: &str) -> Self {
@@ -100,6 +121,7 @@ impl EdgeOp {
             Self::Pipe => Some(PIPE_MARKER),
             Self::DeepPipe => Some(DEEP_PIPE_MARKER),
             Self::Fold => Some(FOLD_MARKER),
+            Self::HandOff => Some(HAND_OFF_MARKER),
         }
     }
 
@@ -109,7 +131,15 @@ impl EdgeOp {
             Self::Context => ": ",
             Self::Pipe | Self::DeepPipe => PIPE_PATH_JOIN,
             Self::Fold => " > ",
+            Self::HandOff => HAND_OFF_PATH_JOIN,
         }
+    }
+
+    /// Whether the operator folds the row and its block into ONE task with
+    /// one queue head (` |`, ` |+`, ` >`). A ` |>` row keeps its children as
+    /// separate stage rows.
+    pub fn folds(self) -> bool {
+        matches!(self, Self::Pipe | Self::DeepPipe | Self::Fold)
     }
 
     /// Whether the operator pipes (` |` or ` |+`).
@@ -125,19 +155,15 @@ impl EdgeOp {
 }
 
 /// Row-final suffixes reserved for future edge operators: ` ||` (probably a
-/// shell-style fallback) and ` |>` (the hand-off pipe, whose next stage runs
-/// as a fresh worker), plus the near-miss ` |*`. None is implemented yet.
+/// shell-style fallback), plus the near-miss ` |*`. Neither is implemented.
 /// They are neither prose nor an operator; the lint reports them as reserved
 /// ([`reserved_edge_hint`]).
-pub const RESERVED_EDGE_SUFFIXES: [&str; 3] = [" ||", " |*", " |>"];
+pub const RESERVED_EDGE_SUFFIXES: [&str; 2] = [" ||", " |*"];
 
 /// What the lint says about a reserved suffix ([`RESERVED_EDGE_SUFFIXES`]).
 pub fn reserved_edge_hint(suffix: &str) -> &'static str {
     match suffix {
         " |*" => "reserved; did you mean ` |+` (deep pipe)?",
-        " |>" => {
-            "reserved for the hand-off pipe, which is not implemented yet; use ` |` to pipe within one task"
-        }
         _ => "reserved for a future edge operator",
     }
 }
@@ -462,6 +488,34 @@ pub const STAGE_RUNNING_GLYPH: &str = "▶️";
 /// Binary-owned stage glyph on a statement row whose stage finished.
 pub const STAGE_DONE_GLYPH: &str = "✅";
 
+/// Whether `row` ends in the ` |>` hand-off operator.
+pub fn ends_with_hand_off(row: &str) -> bool {
+    EdgeOp::of_row(row) == EdgeOp::HandOff
+}
+
+/// `row` without the leading `✅` a ` |>` row carries once its own stage
+/// (stage 1) finished, or `None` when `row` is not that shape.
+///
+/// The glyph is binary-owned: the close transition writes it instead of a
+/// strike while later stages are still open, and the row is struck together
+/// with its last stage.
+///
+/// A leading attempt projection or tree glyph (`🔒 ✅ row |>`) is read past.
+pub fn strip_hand_off_done_glyph(row: &str) -> Option<&str> {
+    let trimmed = crate::strip_attempt_projection_prefix(row.trim_start());
+    let rest = trimmed.strip_prefix(STAGE_DONE_GLYPH)?;
+    if !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let rest = rest.trim_start();
+    ends_with_hand_off(rest).then_some(rest)
+}
+
+/// Whether `row` is a ` |>` row whose stage 1 finished (`✅ row |>`).
+pub fn hand_off_stage_done(row: &str) -> bool {
+    strip_hand_off_done_glyph(row).is_some()
+}
+
 /// `row` (one row's content after its list marker) without a leading stage
 /// glyph. Stage glyphs are bookkeeping, never work text.
 pub fn strip_stage_glyph(row: &str) -> &str {
@@ -711,14 +765,63 @@ mod tests {
             reserved_edge_suffix("Collect |* [#q-0123456789ab]"),
             Some(" |*")
         );
-        assert_eq!(reserved_edge_suffix("Collect |>"), Some(" |>"));
+        assert_eq!(reserved_edge_suffix("Collect |>"), None);
+        assert_eq!(EdgeOp::of_row("#review |>"), EdgeOp::HandOff);
+        assert_eq!(
+            EdgeOp::of_row("#review |> [#q-0123456789ab]"),
+            EdgeOp::HandOff
+        );
+        assert_eq!(EdgeOp::of_row("~~#review |>~~"), EdgeOp::HandOff);
+        assert_eq!(EdgeOp::of_row("a |> b"), EdgeOp::Context);
+        assert_eq!(EdgeOp::of_row("run `a |>`"), EdgeOp::Context);
+        assert_eq!(EdgeOp::HandOff.join(), " |> ");
+        assert!(!EdgeOp::HandOff.folds() && !EdgeOp::HandOff.pipes());
+        assert!(EdgeOp::Pipe.folds() && EdgeOp::Fold.folds() && EdgeOp::DeepPipe.folds());
+        assert_eq!(
+            strip_edge_marker("#review |> [#q-0123456789ab]"),
+            "#review [#q-0123456789ab]"
+        );
         assert_eq!(reserved_edge_suffix("Collect |"), None);
         assert_eq!(reserved_edge_suffix("Collect >"), None);
         assert_eq!(reserved_edge_suffix("a -> b"), None);
         assert_eq!(reserved_edge_suffix("run `a ||`"), None);
         assert!(reserved_edge_hint(" |*").contains("` |+`"));
-        assert!(reserved_edge_hint(" |>").contains("hand-off pipe"));
         assert!(!reserved_edge_hint(" ||").contains("did you mean"));
+    }
+
+    #[test]
+    fn a_finished_hand_off_head_carries_a_binary_done_glyph() {
+        assert!(hand_off_stage_done("✅ #review |> [#q-0123456789ab]"));
+        assert_eq!(
+            strip_hand_off_done_glyph("✅ #review |>"),
+            Some("#review |>")
+        );
+        // Only on a ` |>` row, and only as its own token.
+        assert!(!hand_off_stage_done("✅ #review |"));
+        assert!(!hand_off_stage_done("✅ done"));
+        assert!(!hand_off_stage_done("✅#review |>"));
+        assert!(!hand_off_stage_done("#review |>"));
+        assert_eq!(
+            strip_hand_off_done_glyph("🔒 ✅ #review |>"),
+            Some("#review |>")
+        );
+        // A strike wraps only the work text; the glyph is not an attempt
+        // projection, so claim projection never repaints it away.
+        assert_eq!(crate::struck_work_text("✅ #review |>"), "#review |>");
+        assert_eq!(
+            crate::strip_attempt_projection_prefix("✅ #review |>"),
+            "✅ #review |>"
+        );
+        assert_eq!(crate::struck_work_text("✅ done"), "✅ done");
+        assert_eq!(row_work_text("✅ #review |> [#q-0123456789ab]"), "#review");
+        assert_eq!(
+            crate::queue_head_identity("✅ #review |> [#q-0123456789ab]"),
+            crate::queue_head_identity("#review |> [#q-0123456789ab]")
+        );
+        assert_eq!(
+            crate::queue_head_identity("✅ collect the issues |>"),
+            crate::queue_head_identity("collect the issues")
+        );
     }
 
     #[test]

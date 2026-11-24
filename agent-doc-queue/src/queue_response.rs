@@ -310,6 +310,9 @@ pub fn queue_prompt_preset_expansions_from<'a>(
     text: &str,
     presets: impl Iterator<Item = (&'a String, &'a String)> + Clone,
 ) -> Vec<(String, String)> {
+    // `#pipeprompt` ` |>`: a stage's presets are its own, never the earlier
+    // stages' its nest vector runs through.
+    let text = crate::hand_off::stage_scope(text);
     let text = strip_priority_markers(text);
     let text = crate::queue_continuation::mask_directive_scan(&text);
     let referenced = text

@@ -127,6 +127,10 @@ pub struct SubagentAuthorization {
     /// requeued after. Its hand-back is also appended to the preamble as data.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prior_goal_attempt: Option<crate::goal_preset_terminal::GoalLoopHandoff>,
+    /// `#pipeprompt` ` |>`: the previous stage's hand-back this stage takes as
+    /// its input. Its data-framed section is part of the preamble.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hand_off_input: Option<crate::hand_off::HandOffInput>,
 }
 
 impl SubagentAuthorization {
@@ -475,6 +479,7 @@ pub fn subagent_authorization_with_presets(
         prompt_context: None,
         subagent_prompt_preamble: String::new(),
         prior_goal_attempt: None,
+        hand_off_input: None,
     };
     let computed;
     let attached;
@@ -500,6 +505,17 @@ pub fn subagent_authorization_with_presets(
     authorization.prompt_context = agent_doc_prompt_context::lineage::split(submitted).0;
     authorization.subagent_prompt_preamble =
         render_preamble(document, content, &authorization, submitted, preset_scope);
+    // `#pipeprompt` ` |>`: a later stage runs in a new worker, so the previous
+    // stage's hand-back is carried here, read from the current document.
+    if let Some(input) = crate::hand_off::hand_off_input_for_item(content, item) {
+        if !authorization.subagent_prompt_preamble.ends_with('\n') {
+            authorization.subagent_prompt_preamble.push('\n');
+        }
+        authorization
+            .subagent_prompt_preamble
+            .push_str(&crate::hand_off::hand_off_input_brief_section(&input));
+        authorization.hand_off_input = Some(input);
+    }
     authorization
 }
 

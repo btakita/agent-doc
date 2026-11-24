@@ -917,9 +917,9 @@ fn refuse_ordered_step_wait(content: &str, target: &str) -> Result<()> {
         agent_doc_queue::queue_continuation::ordered_step_wait_for_item(content, target)
     {
         bail!(
-            "queue claim refused: {target:?} {}. Steps of a numbered list run one at a time: claim it after step {} is struck (#orderedsteps).",
+            "queue claim refused: {target:?} {}. {}.",
             wait.reason(),
-            wait.step_number
+            wait.release_condition()
         );
     }
     Ok(())

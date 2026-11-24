@@ -1455,6 +1455,8 @@ pub fn tracked_do_context_block_end(
 ///   one flattened pipeline and descendants need no operator.
 /// * ` >` (`#foldprompt`): the row and its whole child list are one task.
 ///
+/// A ` |>` hand-off row never folds: each child is its own stage row.
+///
 /// The block is every following line deeper than `parent` (blank lines between
 /// children included). It ends at a line at or above the parent's depth, at a
 /// generated response row (the head's own response tree sits after its
@@ -1466,7 +1468,7 @@ pub fn edge_block_end(lines: &[&str], parent: usize, item_content: &str) -> Opti
     use agent_doc_element_queue::subprompts::{line_indent_width, list_item_content};
 
     let op = EdgeOp::of_row(item_content);
-    if op == EdgeOp::Context || item_content.contains("<!-- agent-doc:") {
+    if !op.folds() || item_content.contains("<!-- agent-doc:") {
         return None;
     }
     let work = agent_doc_element_queue::strip_attempt_projection_prefix(item_content).trim();
@@ -1553,6 +1555,11 @@ pub enum PipeLintKind {
     /// A row inside a ` |` statement or ` >` fold holds its own claim, so the
     /// block does not fold until that claim settles.
     ClaimedRowInStatement,
+    /// A row ends in ` |>` but has no stage nested under it to hand off to.
+    HandOffWithoutChildren,
+    /// A ` |>` row sits inside a ` |` statement, ` |+` deep pipe or ` >`
+    /// fold: the whole block is one task, so nothing is handed off.
+    HandOffInsideBlock,
 }
 
 impl PipeLintKind {
@@ -1565,6 +1572,8 @@ impl PipeLintKind {
             Self::PipeInCodeSpan => "agent-doc/pipe-in-code-span",
             Self::ReservedEdgeOperator => "agent-doc/reserved-edge-operator",
             Self::ClaimedRowInStatement => "agent-doc/pipe-toggle-while-claimed",
+            Self::HandOffWithoutChildren => "agent-doc/hand-off-without-stages",
+            Self::HandOffInsideBlock => "agent-doc/hand-off-inside-block",
         }
     }
 }
@@ -1674,7 +1683,23 @@ pub fn pipe_statement_lints(content: &str) -> Vec<PipeLint> {
                     ),
                 );
             }
-            if parent_op.is_some_and(|op| op != EdgeOp::Context) {
+            if op == EdgeOp::HandOff && !has_children {
+                push(
+                    PipeLintKind::HandOffWithoutChildren,
+                    format!(
+                        "`{path}` ends in ` |>` but has no stage to hand off to; nest the next stage under it or remove ` |>`"
+                    ),
+                );
+            }
+            if op == EdgeOp::HandOff && parent_op.is_some_and(EdgeOp::folds) {
+                push(
+                    PipeLintKind::HandOffInsideBlock,
+                    format!(
+                        "`{path}` ends in ` |>` inside a block that runs as one task, so nothing is handed off; put the hand-off on the block's top row"
+                    ),
+                );
+            }
+            if parent_op.is_some_and(EdgeOp::folds) {
                 if parent_op == Some(EdgeOp::Pipe) && has_children && op == EdgeOp::Context {
                     push(
                         PipeLintKind::UnpipedStageParent,

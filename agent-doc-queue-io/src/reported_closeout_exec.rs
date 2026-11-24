@@ -734,4 +734,153 @@ mod tests {
         assert!(updated.contains("land the feature"), "{updated}");
         assert!(!updated.contains("~~"), "{updated}");
     }
+
+    /// One ` |>` stage through the real worker lifecycle: claim, start,
+    /// capture the hand-back, report, and the mechanical reported closeout.
+    fn run_stage(doc: &Path, item: &str, owner: &str, hand_back: &str) {
+        let (_, claimed) =
+            claim(doc, item, owner, 600).unwrap_or_else(|err| panic!("claim {item:?}: {err:#}"));
+        let started =
+            start_attempt(doc, item, owner, "worker:stage", 600, claimed.generation).unwrap();
+        record_prose_only(doc, &started, "prose result").unwrap();
+        capture(doc, item, started.generation, hand_back);
+        report_attempt(doc, item, Some(started.generation)).unwrap();
+        project_reported(doc);
+        let pass = close_mechanical_reported_attempts(&DiskEffects, doc).unwrap();
+        assert_eq!(pass.outcomes.len(), 1, "{item}: {pass:#?}");
+        assert!(pass.outcomes[0].closed(), "{item}: {pass:#?}");
+        // The next preflight's claim projection repaints the released holds.
+        project_reported(doc);
+    }
+
+    fn queue_body(doc: &Path) -> String {
+        let content = fs::read_to_string(doc).unwrap();
+        let start = content.find("<!-- agent:queue go -->\n").unwrap() + 24;
+        let end = content.find("<!-- /agent:queue -->").unwrap();
+        content[start..end].to_string()
+    }
+
+    fn runnable_rows(doc: &Path) -> Vec<String> {
+        let entries = agent_doc_queue::document_queue::parse(&queue_body(doc)).unwrap();
+        let waits = agent_doc_queue::document_queue::ordered_step_waits(&entries);
+        agent_doc_queue::document_queue::executable_prompt_indexes(&entries)
+            .into_iter()
+            .filter(|index| waits[*index].is_none())
+            .filter_map(|index| match &entries[index] {
+                agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
+                    Some(agent_doc_element_queue::pipe::row_work_text(&prompt.text))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// `#pipeprompt` ` |>` end to end: stage 1, two sequential stages, then a
+    /// nested ` |>` whose bulleted stages fan out in parallel. Each stage is
+    /// claimed by its own worker only once the previous one closed, its brief
+    /// carries the previous hand-back, every closeout is the automatic
+    /// reported closeout, and each ` |>` row is struck with its last stage.
+    #[test]
+    fn hand_off_pipe_runs_sequential_stages_then_a_parallel_fan_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(
+            dir.path(),
+            "review the PR |>\n  1. address the findings\n  2. summarize the changes |>\n     - post to the tracker\n     - post to the channel",
+        );
+        assert_eq!(runnable_rows(&doc), vec!["review the PR"]);
+        // A held stage refuses its claim before stage 1 closed.
+        let refused = claim(&doc, "address the findings", "subagent:early", 600)
+            .expect_err("stage 2 waits on stage 1");
+        assert!(
+            format!("{refused:#}").contains("hand-back of stage 1"),
+            "{refused:#}"
+        );
+
+        run_stage(
+            &doc,
+            "review the PR |>",
+            "subagent:review",
+            "Two findings: the parser drops `N)` rows; the lint misses ` |>`.",
+        );
+        let body = queue_body(&doc);
+        assert!(body.contains("✅ review the PR |>"), "{body}");
+        assert!(!body.contains("~~review the PR"), "{body}");
+        assert!(!body.contains("☑️"), "{body}");
+        assert_eq!(runnable_rows(&doc), vec!["address the findings"]);
+        let ledger = crate::queue_claim::load_ledger(&doc).unwrap();
+        assert!(
+            ledger
+                .claims
+                .iter()
+                .all(|claim| claim.state != QueueClaimState::Reported),
+            "the head's claim settles at the close transition: {ledger:?}"
+        );
+
+        // Stage 2's brief carries stage 1's hand-back.
+        let content = fs::read_to_string(&doc).unwrap();
+        let brief = agent_doc_queue::subagent_brief::subagent_authorization(
+            "task.md",
+            &content,
+            "address the findings",
+        );
+        assert!(
+            brief
+                .subagent_prompt_preamble
+                .contains("the parser drops `N)` rows"),
+            "{}",
+            brief.subagent_prompt_preamble
+        );
+
+        run_stage(
+            &doc,
+            "address the findings",
+            "subagent:address",
+            "Fixed both findings in commit abc123.",
+        );
+        assert_eq!(runnable_rows(&doc), vec!["summarize the changes"]);
+        let content = fs::read_to_string(&doc).unwrap();
+        let input = agent_doc_queue::hand_off::hand_off_input_for_item(
+            &content,
+            "summarize the changes |>",
+        )
+        .expect("stage 3 input");
+        assert_eq!(input.from_stage, "address the findings");
+        assert!(
+            input.hand_backs[0].text.contains("abc123"),
+            "{:?}",
+            input.hand_backs
+        );
+
+        run_stage(
+            &doc,
+            "summarize the changes |>",
+            "subagent:summary",
+            "Summary: parser and lint fixed.",
+        );
+        let body = queue_body(&doc);
+        assert!(body.contains("✅ summarize the changes |>"), "{body}");
+        assert!(body.contains("✅ review the PR |>"), "{body}");
+        // The fan-out: both posts run at once, each with the summary.
+        assert_eq!(
+            runnable_rows(&doc),
+            vec!["post to the tracker", "post to the channel"]
+        );
+        let content = fs::read_to_string(&doc).unwrap();
+        for post in ["post to the tracker", "post to the channel"] {
+            let input = agent_doc_queue::hand_off::hand_off_input_for_item(&content, post)
+                .unwrap_or_else(|| panic!("{post} input"));
+            assert_eq!(input.from_stage, "summarize the changes");
+            assert!(input.hand_backs[0].text.contains("parser and lint fixed"));
+        }
+
+        run_stage(&doc, "post to the tracker", "subagent:tracker", "Posted.");
+        let body = queue_body(&doc);
+        assert!(body.contains("✅ summarize the changes |>"), "{body}");
+        run_stage(&doc, "post to the channel", "subagent:channel", "Posted.");
+        let body = queue_body(&doc);
+        assert!(body.contains("~~summarize the changes |>~~"), "{body}");
+        assert!(body.contains("~~review the PR |>~~"), "{body}");
+        assert!(!body.contains('✅'), "{body}");
+        assert!(runnable_rows(&doc).is_empty(), "{body}");
+    }
 }

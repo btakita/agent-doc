@@ -179,6 +179,10 @@ pub enum SelfRepairKind {
     /// row (another follow-up or an `[operator-verify]` row) up to be that
     /// row's sibling (`#parentstrike`).
     MisplacedFollowupRow,
+    /// `#pipeprompt` ` |>`: turned a struck hand-off row whose later stages
+    /// are still open into its `✅` form, or struck a `✅` hand-off row whose
+    /// last stage closed ([`crate::hand_off::settle_hand_off_heads`]).
+    HandOffStage,
 }
 
 impl SelfRepairKind {
@@ -204,6 +208,7 @@ impl SelfRepairKind {
             Self::NumberedStepResponse => "numbered_step_response",
             Self::StaleTypingCopy => "stale_typing_copy",
             Self::MisplacedFollowupRow => "misplaced_followup_row",
+            Self::HandOffStage => "hand_off_stage",
         }
     }
 }
@@ -1257,6 +1262,15 @@ pub fn self_repair_document(
     let (deduped, live_repairs) = dedupe_live_rows(&current);
     current = deduped;
     repairs.extend(live_repairs);
+    // `#pipeprompt` ` |>`: last, so the transition reads the final rows.
+    if let Some((settled, report)) = crate::hand_off::settle_hand_off_heads_with_report(&current) {
+        current = settled;
+        repairs.extend(report.into_iter().map(|row| SelfRepair {
+            kind: SelfRepairKind::HandOffStage,
+            detail: row.row,
+            rewritten: None,
+        }));
+    }
     (current != document).then_some((current, repairs))
 }
 

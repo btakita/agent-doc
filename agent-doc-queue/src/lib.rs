@@ -54,6 +54,7 @@ pub mod followup_lift;
 pub mod followup_moved_state;
 pub mod followup_owner;
 pub mod followup_provenance;
+pub mod hand_off;
 pub mod handback_followups;
 pub mod hourglass_lifetime;
 #[cfg(test)]

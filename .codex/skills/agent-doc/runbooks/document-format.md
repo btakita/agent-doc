@@ -162,9 +162,50 @@ head:
   `▶️` and earlier rows `✅`; the head keeps its own lifecycle glyph. The
   glyphs are binary bookkeeping and leave when the claim does.
 - The lint reports a ` |`, ` |+` or ` >` row with no children, a missing
-  inner ` |`, a code span ending in ` |`, and the reserved suffixes ` ||`
-  and ` |>` (hand-off pipe, not implemented yet), plus ` |*` (did you mean
-  ` |+`?).
+  inner ` |`, a code span ending in ` |`, a ` |>` row with no stage or inside
+  a ` |` / ` |+` / ` >` block, and the reserved suffix ` ||`, plus ` |*` (did
+  you mean ` |+`?).
+
+#### Hand-off pipe: ` |>` (`#pipeprompt`)
+
+A row ending in ` |>` is stage 1 of a hand-off. Each row nested under it is a
+later stage that runs as its own queue row, in a NEW worker, with the
+previous stage's hand-back as its input:
+
+```markdown
+- #review |>
+  1. #address
+  2. summarize the changes |>
+     - post to the tracker
+     - post to the channel
+```
+
+- Nothing folds: the ` |>` row has one `[#q-…]`, and every stage keeps its
+  own claim, generation and response, nested in order.
+- Stage 1 (the ` |>` row) runs first. Every stage under it waits
+  `⛔ ⟦blocked by stage-1⟧` and `queue claim` refuses it.
+- When stage 1 closes (`--ack-text`, `--ack-id`, or the automatic reported
+  closeout), the row is not struck: it shows `✅` and keeps its response
+  tree. Its stages are released. Numbered stages then run one at a time
+  (`#orderedsteps`, `⛔ ⟦blocked by step-N⟧`), and bulleted stages run in
+  parallel.
+- A stage's brief carries `Hand-off input`: the hand-back of the stage before
+  it, quoted from the document. A bulleted stage or the first numbered stage
+  takes stage 1's hand-back; a later numbered stage takes the numbered stage
+  before it. The hand-back is the `agent:exchange` entry that carries the
+  stage's `[#r-…]` id, else its response tree or completion cell. It is read
+  when the brief is built, so editing a future stage changes what runs.
+- The ` |>` row is struck in the same write as its last open stage. A nested
+  ` |>` stage works the same way and closes the row above it when it is the
+  last one.
+- Each stage's presets are its own (`#presetorder`): `- #address |>` over
+  `- #adversarial-pr` is `#address then #adversarial-pr` as two workers. A
+  `NO-WRITTEN-FIX` stage 1 settles only stage 1; the review stage still runs.
+- `✅` on a ` |>` row is binary-owned and never part of its identity. Do not
+  type it; to skip stage 1, strike the row and its stages instead.
+- The state is all in the document: after a crash nothing reruns, a lost
+  stage worker retries only that stage, and self-repair finishes a strike
+  an older writer left without its `✅`.
 
 Built-in element semantics live in the `agent-doc-element-*` crate family and
 are composed by `agent-doc-element-registry`. An unregistered `agent:*`

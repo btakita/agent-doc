@@ -2979,6 +2979,191 @@ mod tests {
         }
     }
 
+    /// `#presetorder` + `#pipeprompt` ` |>`: `- #address |>` over
+    /// `- #adversarial-pr` is the same temporal order run as two stages. A
+    /// `NO-WRITTEN-FIX` stage-1 hand-back settles stage 1 only: the head stays
+    /// open as `✅` (never struck), and the `#adversarial-pr` stage runs next
+    /// in a new worker with the hand-back as its input. That stage is an
+    /// adversarial review, not a second address run, and closes the head.
+    #[test]
+    fn no_written_fix_on_a_hand_off_stage_runs_the_next_stage() {
+        use agent_doc_queue_io::queue_consume::QueueConsumeWriteEffects;
+        struct Disk;
+        impl QueueConsumeWriteEffects for Disk {
+            fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+                Ok(fs::read_to_string(file)?)
+            }
+            fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+                agent_doc_fs::write_atomic(file, content.as_bytes())
+            }
+            fn converge_document_or_disk(
+                &self,
+                file: &Path,
+                target_content: &str,
+                _source_content: &str,
+                _reason: &str,
+            ) -> Result<()> {
+                self.atomic_write(file, target_content)
+            }
+        }
+        fn close(doc: &Path, item: &str, owner: &str, generation: u64) {
+            let guard = agent_doc_queue_io::queue_edit_owner::QueueEditGuard::acquire(doc).unwrap();
+            let selector = agent_doc_queue_io::queue_consume::AckTextSelector::Owner(
+                agent_doc_document::queue_projection::QueueOwnerProjection {
+                    owner: owner.to_string(),
+                    generation,
+                },
+            );
+            agent_doc_queue_io::queue_consume::acknowledge_paused_free_text_queue_head_under_apply_guard(
+                doc,
+                item,
+                Some(&selector),
+                &Disk,
+                &guard,
+            )
+            .unwrap_or_else(|err| panic!("close {item}: {err:#}"))
+            .unwrap_or_else(|| panic!("close {item}: nothing struck"));
+        }
+        fn queue_body(doc: &Path) -> String {
+            let content = fs::read_to_string(doc).unwrap();
+            let start = content.find("<!-- agent:queue subagents -->").unwrap();
+            content[start..].to_string()
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            concat!(
+                "---\npresets:\n",
+                "  '#address': 'Address every actionable review item on the exact current head.'\n",
+                "  '#adversarial-pr': 'Post one independent COMMENTED review on the current head.'\n",
+                "---\n",
+            ),
+        )
+        .unwrap();
+        let doc = dir.path().join("sdk-dev.md");
+        const HEAD: &str = "fa3a3f449986d565f21aeb6e0f792323bc8d1d58";
+        const STAGE_ONE: &str = "https://github.com/sample-org/sample-repo/pull/12: #address |>";
+        fs::write(
+            &doc,
+            format!(
+                "---\nagent_doc_session: sample-sdk\nagent_doc_format: template\n---\n\n\
+                 <!-- agent:exchange patch=append -->\n\
+                 ### Re: prior — gpt-5\n\nDone.\n\
+                 <!-- agent:boundary:keep -->\n\
+                 <!-- /agent:exchange -->\n\n\
+                 <!-- agent:queue subagents -->\n\
+                 - {STAGE_ONE}\n  - #adversarial-pr\n\
+                 <!-- /agent:queue -->\n"
+            ),
+        )
+        .unwrap();
+        assert!(
+            agent_doc_queue_io::queue_claim::claim(&doc, "#adversarial-pr", "subagent:early", 600)
+                .is_err(),
+            "the review stage waits on stage 1"
+        );
+        agent_doc_queue_io::queue_claim::claim(&doc, STAGE_ONE, "subagent:pr12-address", 600)
+            .unwrap();
+        let started = agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            STAGE_ONE,
+            "subagent:pr12-address",
+            "worker:pr12-address",
+            600,
+            1,
+        )
+        .unwrap();
+        let _proof = proved_address_reply();
+        let prose = format!(
+            "**Summary**\n\n\
+             The approval states no code change, so nothing was committed.\n\
+             NO-WRITTEN-FIX head={HEAD}\n\
+             INLINE-THREADS-LOADED 0 head={HEAD}\n"
+        );
+        // Stage 1 is settled: the later preset is its own stage row, not a
+        // requeue of this one.
+        assert!(
+            requeue_nonterminal_goal_hand_back(&doc, STAGE_ONE, Some(1), &prose)
+                .unwrap()
+                .is_none(),
+            "a settled stage 1 is reported, never requeued for the next stage"
+        );
+        agent_doc_queue_io::queue_lineage::record_prose_only(&doc, &started, "no change").unwrap();
+        report_complete(&doc, STAGE_ONE, Some(1), None, None, &prose).unwrap();
+        close(&doc, STAGE_ONE, "subagent:pr12-address", 1);
+        let body = queue_body(&doc);
+        assert!(body.contains(&format!("✅ {STAGE_ONE}")), "{body}");
+        assert!(!body.contains("~~https://github.com"), "{body}");
+
+        // The review stage: its own preset only, and stage 1's hand-back.
+        let brief = agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_item(
+            &doc,
+            "#adversarial-pr",
+        )
+        .unwrap();
+        let preamble = &brief.subagent_prompt_preamble;
+        assert!(preamble.contains("Hand-off input"), "{preamble}");
+        assert!(preamble.contains("NO-WRITTEN-FIX"), "{preamble}");
+        assert!(
+            brief.presets.iter().all(|preset| preset.name != "#address"),
+            "{:?}",
+            brief.presets
+        );
+        let (_, review) = agent_doc_queue_io::queue_claim::claim(
+            &doc,
+            "#adversarial-pr",
+            "subagent:pr12-review",
+            600,
+        )
+        .expect("the review stage runs once stage 1 shows ✅");
+        let started = agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "#adversarial-pr",
+            "subagent:pr12-review",
+            "worker:pr12-review",
+            600,
+            review.generation,
+        )
+        .unwrap();
+        let done = format!(
+            "**Summary**\n\nPosted the review.\nINLINE-THREADS-LOADED 0 head={HEAD}\nPRESET-DONE #adversarial-pr\n"
+        );
+        let done = done.as_str();
+        assert!(
+            requeue_nonterminal_goal_hand_back(
+                &doc,
+                "#adversarial-pr",
+                Some(started.generation),
+                done
+            )
+            .unwrap()
+            .is_none(),
+            "the review stage is not an address run"
+        );
+        agent_doc_queue_io::queue_lineage::record_prose_only(&doc, &started, "review posted")
+            .unwrap();
+        report_complete(
+            &doc,
+            "#adversarial-pr",
+            Some(started.generation),
+            None,
+            None,
+            done,
+        )
+        .unwrap();
+        close(
+            &doc,
+            &started.item_text,
+            "subagent:pr12-review",
+            started.generation,
+        );
+        let body = queue_body(&doc);
+        assert!(body.contains(&format!("~~{STAGE_ONE}~~")), "{body}");
+        assert!(body.contains("~~#adversarial-pr~~"), "{body}");
+    }
+
     fn no_written_fix_keeps_the_later_preset_open(row: &str) {
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();

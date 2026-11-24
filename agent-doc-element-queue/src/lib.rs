@@ -1196,8 +1196,12 @@ pub fn strip_attempt_projection_prefix(text: &str) -> &str {
 /// row is completed work, so none of that projection survives inside the
 /// strike. A row that is nothing but projection keeps its trimmed text, so a
 /// strike never wraps an empty body.
+///
+/// The `✅` of a finished ` |>` stage 1 ([`pipe::strip_hand_off_done_glyph`])
+/// is bookkeeping too: a strike of that row wraps only its work text.
 pub fn struck_work_text(text: &str) -> &str {
     let work = strip_attempt_projection_prefix(text).trim();
+    let work = pipe::strip_hand_off_done_glyph(work).unwrap_or(work).trim();
     if work.is_empty() { text.trim() } else { work }
 }
 
@@ -1430,7 +1434,11 @@ pub fn strip_generated_queue_prompt_id_annotation(text: &str) -> String {
 /// A trailing edge operator (` |` `#pipeprompt`, ` >` `#foldprompt`) is
 /// stripped the same way: adding or removing it never changes which work the
 /// row names.
+///
+/// The `✅` a ` |>` row carries once its stage 1 finished is bookkeeping and
+/// is stripped too ([`pipe::strip_hand_off_done_glyph`]).
 pub fn strip_intent_tags(text: &str) -> String {
+    let text = pipe::strip_hand_off_done_glyph(text).unwrap_or(text);
     let unpiped = pipe::strip_edge_marker(text);
     let mut current = strip_priority_markers(&unpiped);
     loop {

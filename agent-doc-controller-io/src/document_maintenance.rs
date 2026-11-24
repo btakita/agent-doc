@@ -74,6 +74,10 @@ pub trait DocumentMaintenanceRunner: Send + Sync + 'static {
     fn log(&self, file: &Path, line: &str) {
         agent_doc_ops_log_io::log_op(file, line);
     }
+    /// The prefix of this runner's scheduler log lines and worker thread name.
+    fn label(&self) -> &'static str {
+        "document_maintenance"
+    }
 }
 
 /// Scheduling knobs.
@@ -214,7 +218,10 @@ impl DocumentMaintenanceScheduler {
             let scheduler = Arc::clone(self);
             let worker_slot = Arc::clone(&slot);
             match std::thread::Builder::new()
-                .name("agent-doc-document-maintenance".to_string())
+                .name(format!(
+                    "agent-doc-{}",
+                    self.runner.label().replace('_', "-")
+                ))
                 .spawn(move || scheduler.run_worker(&worker_slot))
             {
                 Ok(_) => state.worker_alive = true,
@@ -304,7 +311,8 @@ impl DocumentMaintenanceScheduler {
                     self.runner.log(
                         &slot.file,
                         &format!(
-                            "document_maintenance_retry_scheduled file={} attempt={} delay_ms={} (#q-e9483473162d)",
+                            "{}_retry_scheduled file={} attempt={} delay_ms={} (#q-e9483473162d)",
+                            self.runner.label(),
                             slot.file.display(),
                             state.failures,
                             delay.as_millis(),
@@ -328,7 +336,8 @@ impl DocumentMaintenanceScheduler {
                     self.runner.log(
                         file,
                         &format!(
-                            "document_maintenance_run_skipped file={} reason=no_reservation (#q-e9483473162d)",
+                            "{}_run_skipped file={} reason=no_reservation (#q-e9483473162d)",
+                            self.runner.label(),
                             file.display(),
                         ),
                     );
@@ -338,7 +347,8 @@ impl DocumentMaintenanceScheduler {
                     self.runner.log(
                         file,
                         &format!(
-                            "document_maintenance_reserve_failed file={} error={} (#q-e9483473162d)",
+                            "{}_reserve_failed file={} error={} (#q-e9483473162d)",
+                            self.runner.label(),
                             file.display(),
                             format!("{error:#}").replace('\n', " | "),
                         ),
@@ -379,7 +389,8 @@ impl DocumentMaintenanceScheduler {
         self.runner.log(
             file,
             &format!(
-                "document_maintenance_run_finished file={} elapsed_ms={} {detail} (#q-e9483473162d)",
+                "{}_run_finished file={} elapsed_ms={} {detail} (#q-e9483473162d)",
+                self.runner.label(),
                 file.display(),
                 started.elapsed().as_millis(),
             ),
@@ -426,6 +437,52 @@ pub fn global() -> &'static Arc<DocumentMaintenanceScheduler> {
         DocumentMaintenanceScheduler::new(
             Arc::new(RuntimeEffectsRunner),
             DocumentMaintenanceTiming::default(),
+        )
+    })
+}
+
+/// `#q-c71d106debc4`: the closeout-time queue-continuation reconcile, run on the same
+/// per-document worker machinery. The committing process publishes a pending
+/// reconcile fact and notifies; `reserve` answers its generation and `run`
+/// consumes it through the binary's continuation-reconcile port. There is no
+/// lease to release: the fact is consumed by generation.
+struct ContinuationReconcileRunner;
+
+impl DocumentMaintenanceRunner for ContinuationReconcileRunner {
+    fn reserve(&self, file: &Path) -> Result<Option<String>> {
+        crate::project_controller::runtime_effects()?.pending_continuation_reconcile(file)
+    }
+
+    fn run(&self, file: &Path, _token: &str) -> Result<()> {
+        crate::project_controller::runtime_effects()?.run_continuation_reconcile(file)
+    }
+
+    fn release(&self, _file: &Path, _token: &str) {}
+
+    fn label(&self) -> &'static str {
+        "continuation_reconcile"
+    }
+}
+
+/// Continuation reconciles answer a Stop hook that may be waiting on them, so
+/// they start almost at once; a burst of closeouts still folds into one run.
+const CONTINUATION_RECONCILE_TIMING: DocumentMaintenanceTiming = DocumentMaintenanceTiming {
+    debounce: Duration::from_millis(10),
+    max_delay: Duration::from_millis(100),
+    idle_exit: Duration::from_secs(600),
+    retry_base: Duration::from_millis(500),
+    max_retries: 2,
+};
+
+static CONTINUATION_RECONCILE_SCHEDULER: OnceLock<Arc<DocumentMaintenanceScheduler>> =
+    OnceLock::new();
+
+/// This controller process's continuation-reconcile scheduler (`#q-c71d106debc4`).
+pub fn continuation_reconcile() -> &'static Arc<DocumentMaintenanceScheduler> {
+    CONTINUATION_RECONCILE_SCHEDULER.get_or_init(|| {
+        DocumentMaintenanceScheduler::new(
+            Arc::new(ContinuationReconcileRunner),
+            CONTINUATION_RECONCILE_TIMING,
         )
     })
 }

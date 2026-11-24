@@ -80,3 +80,45 @@ fn bench_admission_phases() {
         });
     }
 }
+
+/// `#q-c71d106debc4` measurement of the closeout-time continuation reconcile against
+/// an existing project document `AGENT_DOC_RECONCILE_BENCH_FILE` names (a
+/// private, re-keyed copy whose state database carries the live claim, receipt
+/// and lineage ledgers). It times the inline reconcile the closeout used to
+/// run, then what the closeout pays now (publish the pending fact and notify
+/// the controller; the notify is stubbed) and the background run that
+/// consumes it. Without the variable nothing is measured. It mutates that
+/// copy's ledgers, so restore it between runs.
+#[test]
+#[ignore]
+fn bench_reconcile_marker_phases() {
+    let Ok(file) = std::env::var("AGENT_DOC_RECONCILE_BENCH_FILE") else {
+        eprintln!("AGENT_DOC_RECONCILE_BENCH_FILE unset; nothing measured");
+        return;
+    };
+    let file = std::path::PathBuf::from(file);
+    let rounds: usize = std::env::var("AGENT_DOC_ADMISSION_BENCH_ROUNDS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(2);
+    use agent_doc_queue_io::continuation_reconcile as reconcile;
+    for round in 0..rounds {
+        eprintln!("--- round {round}");
+        time("inline reconcile_marker", || {
+            agent_doc_queue_io::queue_continuation::reconcile_marker(&file, "bench")
+        });
+        let deferred = time("closeout publish+notify", || {
+            reconcile::reconcile_after_closeout_with(&file, "bench", |_| Ok("scheduled".into()))
+        });
+        assert!(matches!(
+            deferred,
+            reconcile::CloseoutReconcile::Deferred { .. }
+        ));
+        time("background run_pending", || {
+            reconcile::run_pending(&file, "bench").unwrap()
+        });
+        time("stop settle (nothing pending)", || {
+            reconcile::settle_pending(&file, reconcile::STOP_SETTLE_WAIT, "bench")
+        });
+    }
+}

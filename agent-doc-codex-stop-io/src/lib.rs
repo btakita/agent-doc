@@ -1982,6 +1982,16 @@ fn claude_stop_answer_in_read_scope(
         return Ok(ClaudeStopAnswer::allow());
     }
     note_claude_stop_document(&file);
+    // `#q-c71d106debc4`: the closeout hands its queue-continuation reconcile to the
+    // project controller. The gates below read its results (the continuation
+    // marker, pruned claims and release receipts) right after closeout, so a
+    // reconcile still pending is waited for, then run here.
+    stop_phase("claude_stop_settle_continuation_reconcile");
+    agent_doc_queue_io::continuation_reconcile::settle_pending(
+        &file,
+        agent_doc_queue_io::continuation_reconcile::STOP_SETTLE_WAIT,
+        "claude_stop",
+    );
     stop_phase("claude_stop_cycle_gates");
     // `#stophookactiveguard`: the transient-closeout refusal record is
     // turn-scoped. `stop_hook_active = false` marks this turn's first Stop, and

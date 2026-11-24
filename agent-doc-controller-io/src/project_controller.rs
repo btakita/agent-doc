@@ -3733,6 +3733,33 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
     /// Release `token` if it is still `file`'s maintenance reservation.
     fn release_document_maintenance(&self, _file: &Path, _token: &str) {}
 
+    /// `#q-c71d106debc4`: whether this binary wires the continuation-reconcile port
+    /// below. A controller that answers `false` refuses
+    /// `queue_continuation_reconcile_enqueue`, and the closeout reconciles
+    /// inline.
+    fn continuation_reconcile_supported(&self) -> bool {
+        false
+    }
+
+    /// The generation of `file`'s pending closeout continuation reconcile, or
+    /// `None` when none is pending. The reconcile lives in
+    /// `agent-doc-queue-io`, which depends on this crate, hence the port.
+    fn pending_continuation_reconcile(&self, file: &Path) -> Result<Option<String>> {
+        anyhow::bail!(
+            "continuation reconcile is not wired in this binary ({})",
+            file.display()
+        )
+    }
+
+    /// Run `file`'s pending continuation reconcile on the calling controller
+    /// thread and consume the generation it ran for.
+    fn run_continuation_reconcile(&self, file: &Path) -> Result<()> {
+        anyhow::bail!(
+            "continuation reconcile is not wired in this binary ({})",
+            file.display()
+        )
+    }
+
     /// `#queueschedule`: put a completed `loop` pass's items back into the
     /// document's `agent:queue` through the binary-owned queue write path
     /// (live CRDT replica while an editor holds the document). The writer lives

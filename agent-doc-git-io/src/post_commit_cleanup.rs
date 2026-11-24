@@ -11,6 +11,16 @@ pub struct QueueContinuationProof {
     pub head_id: Option<String>,
 }
 
+/// What the closeout's queue-continuation reconcile did (`#q-c71d106debc4`).
+pub enum QueueContinuationReconcile {
+    /// The reconcile was handed to the project controller's background
+    /// worker; the marker reflects this closeout once that run (or the Stop
+    /// hook's settle) consumes it.
+    Deferred,
+    /// The reconcile ran in this process.
+    Reconciled(Option<QueueContinuationProof>),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlreadyCurrentLocalDriftDisposition {
     ContinueCloseout,
@@ -43,11 +53,7 @@ pub trait PostCommitCleanupEffects {
         file_content: Option<&str>,
     ) -> Result<()>;
     fn mark_capture_committed(&self, file: &Path, current_content: &str) -> Result<()>;
-    fn reconcile_queue_continuation(
-        &self,
-        file: &Path,
-        phase: &str,
-    ) -> Option<QueueContinuationProof>;
+    fn reconcile_queue_continuation(&self, file: &Path, phase: &str) -> QueueContinuationReconcile;
     fn read_session_id(&self, file: &Path) -> String;
     fn fire_post_commit(&self, file: &Path, session_id: &str);
     fn fire_doc_event(&self, file: &Path, event: &str);
@@ -161,7 +167,11 @@ pub fn finalize_successful_commit(
     let capture_ms = capture_started.elapsed().as_millis();
     let state_ms = state_started.elapsed().as_millis();
     let queue_started = std::time::Instant::now();
-    if let Some(continuation) = effects.reconcile_queue_continuation(file, "commit") {
+    let reconciled = match effects.reconcile_queue_continuation(file, "commit") {
+        QueueContinuationReconcile::Deferred => None,
+        QueueContinuationReconcile::Reconciled(continuation) => continuation,
+    };
+    if let Some(continuation) = reconciled {
         effects.log_op(
             file,
             &format!(
@@ -377,8 +387,8 @@ mod tests {
             &self,
             _file: &Path,
             _phase: &str,
-        ) -> Option<QueueContinuationProof> {
-            None
+        ) -> QueueContinuationReconcile {
+            QueueContinuationReconcile::Reconciled(None)
         }
 
         fn read_session_id(&self, _file: &Path) -> String {

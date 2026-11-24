@@ -1589,13 +1589,25 @@ impl agent_doc_git_io::post_commit_cleanup::PostCommitCleanupEffects
         &self,
         file: &Path,
         phase: &str,
-    ) -> Option<agent_doc_git_io::post_commit_cleanup::QueueContinuationProof> {
-        agent_doc_queue_io::queue_continuation::reconcile_marker(file, phase).map(|continuation| {
-            agent_doc_git_io::post_commit_cleanup::QueueContinuationProof {
-                head_prompt: continuation.head_prompt,
-                head_id: continuation.head_id,
+    ) -> agent_doc_git_io::post_commit_cleanup::QueueContinuationReconcile {
+        use agent_doc_git_io::post_commit_cleanup::{
+            QueueContinuationProof, QueueContinuationReconcile,
+        };
+        use agent_doc_queue_io::continuation_reconcile::CloseoutReconcile;
+        // `#q-c71d106debc4`: a running project controller reconciles in the
+        // background; the Claude Stop hook settles a pending reconcile before
+        // it reads the marker.
+        match agent_doc_queue_io::continuation_reconcile::reconcile_after_closeout(file, phase) {
+            CloseoutReconcile::Deferred { .. } => QueueContinuationReconcile::Deferred,
+            CloseoutReconcile::Inline(continuation) => {
+                QueueContinuationReconcile::Reconciled(continuation.map(|continuation| {
+                    QueueContinuationProof {
+                        head_prompt: continuation.head_prompt,
+                        head_id: continuation.head_id,
+                    }
+                }))
             }
-        })
+        }
     }
 
     fn read_session_id(&self, file: &Path) -> String {

@@ -11,6 +11,7 @@ pub mod completion_cell_restore;
 pub mod completion_feedback_lock;
 pub mod continuation_detect;
 pub mod continuation_marker;
+pub mod continuation_reconcile;
 pub mod continuation_request;
 pub mod controller_pause;
 pub mod cross_harness_handoff;

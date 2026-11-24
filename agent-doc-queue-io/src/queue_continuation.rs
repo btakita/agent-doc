@@ -94,17 +94,24 @@ pub fn reconcile_marker(
     file: &Path,
     source_command: &str,
 ) -> Option<queue_policy::QueueContinuation> {
+    let started = std::time::Instant::now();
+    let mut phases = ReconcilePhases::default();
     // `#queueclaim`: closeout is where a consumed head ends its claim. Prune
     // claims on items no longer in the queue (and expired ones) before
     // deciding continuation. Never fatal to closeout, but never silent.
-    match std::fs::read_to_string(file) {
+    let read = std::fs::read_to_string(file);
+    phases.read_ms = started.elapsed().as_millis();
+    match read {
         Ok(content) => {
+            let prune_started = std::time::Instant::now();
             if let Err(err) = crate::queue_claim::prune_closed_claims(file, &content) {
                 eprintln!(
                     "[queue-continuation] WARNING: failed to prune closed queue claims for {}: {err:#}",
                     file.display()
                 );
             }
+            phases.prune_claims_ms = prune_started.elapsed().as_millis();
+            let receipts_started = std::time::Instant::now();
             // `#reportedrelease`: a struck line ends its release receipt too.
             if let Err(err) = crate::claim_release_receipt::prune_closed(file, &content) {
                 eprintln!(
@@ -112,6 +119,7 @@ pub fn reconcile_marker(
                     file.display()
                 );
             }
+            phases.prune_receipts_ms = receipts_started.elapsed().as_millis();
         }
         // A missing document has no queue and no claims to prune; `detect`
         // below reports no continuation for it.
@@ -121,7 +129,23 @@ pub fn reconcile_marker(
             file.display()
         ),
     }
-    match detect(file) {
+    // [`detect`], with its controller round trip timed apart from the queue
+    // projections.
+    let yield_started = std::time::Instant::now();
+    let recycle_yield_pending =
+        agent_doc_controller_io::project_controller::supervisor_recycle_yield_pending_for_file(
+            file,
+        );
+    phases.recycle_yield_ms = yield_started.elapsed().as_millis();
+    let detect_started = std::time::Instant::now();
+    let detected = crate::continuation_detect::detect_required_continuation_with(
+        file,
+        agent_doc_snapshot_io::load_document_baseline,
+        |_| recycle_yield_pending,
+    );
+    phases.detect_ms = detect_started.elapsed().as_millis();
+    let marker_started = std::time::Instant::now();
+    let result = match detected {
         Ok(Some(continuation)) => {
             if let Err(err) = write_continuation_marker(file, &continuation, source_command) {
                 eprintln!(
@@ -156,7 +180,35 @@ pub fn reconcile_marker(
             );
             None
         }
-    }
+    };
+    phases.marker_ms = marker_started.elapsed().as_millis();
+    // `#q-c71d106debc4`: name where a reconcile's time goes, wherever it runs.
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_continuation_reconcile_latency file={} source={source_command} total_ms={} phases=read:{}ms,prune_claims:{}ms,prune_receipts:{}ms,recycle_yield:{}ms,detect:{}ms,marker:{}ms continuation={}",
+            file.display(),
+            started.elapsed().as_millis(),
+            phases.read_ms,
+            phases.prune_claims_ms,
+            phases.prune_receipts_ms,
+            phases.recycle_yield_ms,
+            phases.detect_ms,
+            phases.marker_ms,
+            result.is_some(),
+        ),
+    );
+    result
+}
+
+#[derive(Default)]
+struct ReconcilePhases {
+    read_ms: u128,
+    prune_claims_ms: u128,
+    prune_receipts_ms: u128,
+    recycle_yield_ms: u128,
+    detect_ms: u128,
+    marker_ms: u128,
 }
 
 /// Scan every project root for a durable continuation marker whose document

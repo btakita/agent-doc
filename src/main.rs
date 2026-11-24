@@ -728,6 +728,23 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         agent_doc_preflight_command_io::release_controller_queue_maintenance(file, token);
     }
 
+    fn continuation_reconcile_supported(&self) -> bool {
+        true
+    }
+
+    fn pending_continuation_reconcile(&self, file: &Path) -> anyhow::Result<Option<String>> {
+        Ok(
+            agent_doc_queue_io::continuation_reconcile::load_pending(file)?
+                .map(|pending| pending.generation),
+        )
+    }
+
+    fn run_continuation_reconcile(&self, file: &Path) -> anyhow::Result<()> {
+        // `#q-c71d106debc4`: the controller-hosted form of the closeout's inline
+        // `queue_continuation::reconcile_marker`.
+        agent_doc_queue_io::continuation_reconcile::run_pending(file, "controller").map(|_| ())
+    }
+
     fn restore_queue_loop_items(
         &self,
         file: &Path,

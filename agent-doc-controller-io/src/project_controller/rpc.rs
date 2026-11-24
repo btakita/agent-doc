@@ -5784,6 +5784,42 @@ pub fn enqueue_document_maintenance(file: &Path) -> Result<DocumentMaintenanceEn
     )
 }
 
+/// Bound on the continuation-reconcile notify. The handler only reserves the
+/// document and schedules its run; a controller that cannot answer in this
+/// window is treated as unavailable and the closeout reconciles inline.
+const QUEUE_CONTINUATION_RECONCILE_ENQUEUE_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// `#q-c71d106debc4`: hand `file`'s published closeout continuation reconcile to the
+/// running project controller. Never launches a controller: with none running
+/// (or one that refuses, such as an older binary or a generation that is
+/// handing off) this returns an error and the caller reconciles inline.
+pub fn enqueue_queue_continuation_reconcile(
+    file: &Path,
+) -> Result<DocumentMaintenanceEnqueueReceipt> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    request_existing_controller_with_timeout(
+        &project_root,
+        ControllerRequest {
+            command: "queue_continuation_reconcile_enqueue".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("closeout".to_string()),
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+            sequence: None,
+        },
+        QUEUE_CONTINUATION_RECONCILE_ENQUEUE_TIMEOUT,
+    )
+}
+
 /// Publish an edge on the idle supervisor's existing maintenance channel.
 ///
 /// A durable repair request is recorded by the caller before this wake. If no
@@ -25851,6 +25887,9 @@ pub(crate) fn handle_request_locked(
             &bootstrap_snapshot,
             request,
         )),
+        "queue_continuation_reconcile_enqueue" => controller_envelope(
+            handle_queue_continuation_reconcile_enqueue(&bootstrap_snapshot, request),
+        ),
         "reliable_sync" => controller_envelope(handle_reliable_sync(
             &bootstrap_snapshot.project_root,
             request,
@@ -45626,6 +45665,37 @@ fn handle_document_maintenance_enqueue(
         "document maintenance is not wired in this controller binary"
     );
     let outcome = crate::document_maintenance::global().enqueue(&file)?;
+    Ok(DocumentMaintenanceEnqueueReceipt {
+        controller_pid: std::process::id(),
+        controller_generation: bootstrap.controller_generation,
+        outcome,
+    })
+}
+
+/// `#q-c71d106debc4`: accept one document's closeout continuation reconcile for the
+/// controller's own background worker
+/// ([`crate::document_maintenance::continuation_reconcile`]). The closeout
+/// already published the pending fact; this only schedules the run.
+fn handle_queue_continuation_reconcile_enqueue(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<DocumentMaintenanceEnqueueReceipt> {
+    let file = request_file(&request)?;
+    let file = canonical_controller_request_file(bootstrap, &file);
+    anyhow::ensure!(
+        matches!(
+            bootstrap.handoff_state,
+            ControllerHandoffState::Stable | ControllerHandoffState::Promoted
+        ),
+        "controller generation {} is {} and does not accept continuation reconciles",
+        bootstrap.controller_generation,
+        bootstrap.handoff_state.as_str(),
+    );
+    anyhow::ensure!(
+        runtime_effects()?.continuation_reconcile_supported(),
+        "continuation reconcile is not wired in this controller binary"
+    );
+    let outcome = crate::document_maintenance::continuation_reconcile().enqueue(&file)?;
     Ok(DocumentMaintenanceEnqueueReceipt {
         controller_pid: std::process::id(),
         controller_generation: bootstrap.controller_generation,

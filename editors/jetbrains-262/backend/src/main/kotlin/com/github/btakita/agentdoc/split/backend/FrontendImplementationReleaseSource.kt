@@ -17,11 +17,22 @@ internal object FrontendImplementationReleaseSource {
     private const val MAX_PACKAGE_BYTES = 128L * 1024 * 1024
     private const val MAX_SIGNATURE_BYTES = 16L * 1024
 
-    fun current(): FrontendImplementationRelease? {
+    fun current(): FrontendImplementationRelease? = manifestPath().takeIf(Files::isRegularFile)?.let(::read)
+
+    /**
+     * GH #440: the selected release's signed package URL, from the manifest alone (the package
+     * bytes stay unread), for the Client install remedy; null without a readable manifest.
+     */
+    fun packageUrl(): String? {
+        val manifest = manifestPath().takeIf(Files::isRegularFile) ?: return null
+        val values = Properties().apply { Files.newInputStream(manifest).use(::load) }
+        return values.getProperty("package_url")?.trim()?.takeIf(String::isNotEmpty)
+    }
+
+    private fun manifestPath(): Path {
         val configured = System.getProperty(MANIFEST_PROPERTY)?.trim()?.takeIf(String::isNotEmpty)
-        val manifest = configured?.let(Path::of)
+        return configured?.let(Path::of)
             ?: Path.of(PathManager.getPluginsPath()).resolve(HANDOFF_DIRECTORY).resolve(HANDOFF_MANIFEST)
-        return manifest.takeIf(Files::isRegularFile)?.let(::read)
     }
 
     internal fun read(manifest: Path): FrontendImplementationRelease {

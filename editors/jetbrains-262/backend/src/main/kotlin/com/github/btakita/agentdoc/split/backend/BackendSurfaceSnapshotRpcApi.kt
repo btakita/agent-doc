@@ -27,6 +27,9 @@ internal class BackendSurfaceSnapshotRpcApi(
             ?.moduleService(SurfaceIngressFactory::class.java)
             ?.currentFrontendRelease()
     },
+    /** GH #440: records which release RPC each Client uses, so the ingress can name an old Client. */
+    private val releasePolls: FrontendReleasePollLedger = FrontendReleasePollLedger.shared,
+    private val callerClientId: () -> String = { ClientId.current.value },
 ) : SurfaceSnapshotRpcApi {
     private val log = Logger.getInstance(BackendSurfaceSnapshotRpcApi::class.java)
 
@@ -97,12 +100,19 @@ internal class BackendSurfaceSnapshotRpcApi(
 
     override suspend fun supportedSnapshotSchemaVersion(): Int = SURFACE_SNAPSHOT_SCHEMA_VERSION
 
-    override suspend fun frontendImplementationRelease(): FrontendImplementationRelease? = frontendRelease()
+    /**
+     * GH #440: a Client that fetches the whole package without asking for its identity first
+     * predates 0.2.1052; the ledger lets the ingress say so instead of blaming the negotiation.
+     */
+    override suspend fun frontendImplementationRelease(): FrontendImplementationRelease? =
+        frontendRelease()?.also { releasePolls.packageFetched(callerClientId()) }
 
     /**
      * GH #435: the same discovery (and backend peer activation) as [frontendImplementationRelease],
      * answered without the package bytes, which stay on this host.
      */
-    override suspend fun frontendImplementationReleaseIdentity(): FrontendImplementationReleaseIdentity? =
-        frontendRelease()?.identity()
+    override suspend fun frontendImplementationReleaseIdentity(): FrontendImplementationReleaseIdentity? {
+        releasePolls.identityAsked(callerClientId())
+        return frontendRelease()?.identity()
+    }
 }

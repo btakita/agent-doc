@@ -69,11 +69,7 @@ private fun notifyFrontendPluginMismatch(project: Project, mismatch: FrontendPlu
     val notification = NotificationGroupManager.getInstance()
         .getNotificationGroup("Agent Doc")
         .createNotification(
-            if (mismatch.unansweredNegotiation) {
-                "Agent Doc: the JetBrains Client frontend publishes layout without geometry"
-            } else {
-                "Agent Doc: the JetBrains Client frontend is not the backend's plugin ${pluginVersion()}"
-            },
+            frontendPluginMismatchTitle(mismatch, runCatching { pluginVersion() }.getOrNull()),
             "${mismatch.detail}. " +
                 (if (mismatch.unansweredNegotiation) "Layout sync needs a lease that negotiated schema " +
                     "$SURFACE_SNAPSHOT_SCHEMA_VERSION: " else "Layout sync needs both halves of one ZIP: ") +
@@ -81,6 +77,30 @@ private fun notifyFrontendPluginMismatch(project: Project, mismatch: FrontendPlu
             NotificationType.WARNING,
         )
     AgentDocNotices.show(project, notification, "ControllerSurfaceIngress.frontendPluginMismatch")
+}
+
+/**
+ * GH #435/#440: the notification title. A Client that refuses this backend's release leads with
+ * the version comparison; a schema-1 lease on the same shell keeps the unanswered-negotiation one.
+ */
+internal fun frontendPluginMismatchTitle(mismatch: FrontendPluginMismatch, backendVersion: String?): String {
+    val backend = backendVersion?.takeIf { it.isNotBlank() && it != "unknown" }
+        ?: mismatch.shellRefusal?.backendPluginVersion
+    mismatch.shellRefusal?.let { refusal ->
+        val client = refusal.clientPluginVersion?.let { "JetBrains Client plugin $it" } ?: "the JetBrains Client plugin"
+        val order = refusal.clientVersionOrder(backend)
+        return when {
+            order == null || order == 0 ->
+                "Agent Doc: $client refuses the backend's ${backend ?: "plugin"}: different Agent Doc shell"
+            order < 0 -> "Agent Doc: $client is older than the backend's ${backend ?: "plugin"}: update the Client plugin"
+            else -> "Agent Doc: $client is newer than the backend's ${backend ?: "plugin"}: install one version on both"
+        }
+    }
+    return if (mismatch.unansweredNegotiation) {
+        "Agent Doc: the JetBrains Client frontend publishes layout without geometry"
+    } else {
+        "Agent Doc: the JetBrains Client frontend is not the backend's plugin ${backend ?: "build"}"
+    }
 }
 
 /** One project's ingress: the controller publisher and layout forwarder behind the lease state. */
@@ -91,6 +111,8 @@ private class ControllerSurfaceIngress(private val project: Project) : SurfaceIn
         layoutForwarder,
         backendActivationReceipt = ShellGenerationHost.getInstance().receipt(),
         backendActivationReceiptProvider = BackendFrontendReleaseActivation::receipt,
+        clientShellEvidence = FrontendReleasePollLedger.shared,
+        backendPluginVersion = { runCatching { pluginVersion() }.getOrNull() },
         onFrontendPluginMismatch = { clientId, generation, mismatch ->
             val line = frontendPluginMismatchLine(
                 clientId,
@@ -152,6 +174,11 @@ internal class AuthenticatedSurfaceIngressState(
         ActivationReceipt.shellOnly(ActivationReceipt.ROLE_BACKEND),
     /** R2 may advance the backend peer after this platform-held ingress was created. */
     private val backendActivationReceiptProvider: () -> ActivationReceipt = { backendActivationReceipt },
+    /**
+     * GH #440: what the shell's RPC layer learned about each Client's frontend build (its build
+     * report, or a whole-package release poll only Clients before 0.2.1052 make).
+     */
+    private val clientShellEvidence: FrontendClientShellEvidenceSource = FrontendClientShellEvidenceSource { null },
     /** GH #339 R1: called when a connection reports a new frontend activation receipt. */
     private val onFrontendReceipt: (clientId: String, connectionGeneration: Long, receipt: ActivationReceipt) -> Unit =
         ::logFrontendReceipt,
@@ -290,27 +317,40 @@ internal class AuthenticatedSurfaceIngressState(
         if (current == null || current.lease != lease || snapshot.frontendInstanceId != current.frontendInstanceId) {
             return@withLock rejected(SurfaceIngressStatus.STALE_LEASE, lease, "lease or frontend epoch is stale")
         }
-        publications[lease.leaseId]?.takeIf { !it.pluginChecked }?.let { publication ->
+        publications[lease.leaseId]?.takeIf { !it.shellRefusalReported }?.let { publication ->
+            // GH #440: a Client proven to refuse this backend's release shell is reported at once,
+            // and once more if that proof arrives after a first report (its first whole-package
+            // poll can land after its first snapshot): the shell refusal replaces the negotiation
+            // story. Everything else is reported once per lease, after GH #441's provisional hold.
             val mismatch = frontendPluginMismatch(
                 snapshot,
                 ActivationReceipt.decodeOrNull(snapshot.activationReceipt),
                 backendActivationReceiptProvider().shellDigest,
+                clientShellEvidence.evidence(authenticatedClientId),
+                backendPluginVersion(),
+                frontendLeasePluginVersion(current.frontendInstanceId),
             )
-            if (mismatch != null && provisionalSchemaOne(current, publication, mismatch)) {
-                if (!publication.provisionalDeferred) {
-                    publication.provisionalDeferred = true
-                    log(
-                        false,
-                        "[split-surface] provisional schema-1 snapshot client=$authenticatedClientId " +
-                            "generation=${lease.connectionGeneration} " +
-                            "frontend_plugin=${frontendLeasePluginVersion(current.frontendInstanceId)} " +
-                            "(the same plugin asks for the schema again after a refusal; a plugin mismatch " +
-                            "is reported only if its next snapshot is still schema 1)",
-                    )
-                }
-            } else {
+            if (mismatch?.shellRefusal != null) {
                 publication.pluginChecked = true
-                mismatch?.let { onFrontendPluginMismatch(authenticatedClientId, lease.connectionGeneration, it) }
+                publication.shellRefusalReported = true
+                onFrontendPluginMismatch(authenticatedClientId, lease.connectionGeneration, mismatch)
+            } else if (!publication.pluginChecked) {
+                if (mismatch != null && provisionalSchemaOne(current, publication, mismatch)) {
+                    if (!publication.provisionalDeferred) {
+                        publication.provisionalDeferred = true
+                        log(
+                            false,
+                            "[split-surface] provisional schema-1 snapshot client=$authenticatedClientId " +
+                                "generation=${lease.connectionGeneration} " +
+                                "frontend_plugin=${frontendLeasePluginVersion(current.frontendInstanceId)} " +
+                                "(the same plugin asks for the schema again after a refusal; a plugin mismatch " +
+                                "is reported only if its next snapshot is still schema 1)",
+                        )
+                    }
+                } else {
+                    publication.pluginChecked = true
+                    mismatch?.let { onFrontendPluginMismatch(authenticatedClientId, lease.connectionGeneration, it) }
+                }
             }
         }
         val validation = SurfaceSnapshotValidator.validate(snapshot)
@@ -379,8 +419,14 @@ internal class AuthenticatedSurfaceIngressState(
             // GH #441: only a refusal makes the frontend ask for the schema again, so an accepted
             // schema-1 snapshot stays schema 1 (no geometry) for the rest of this lease.
             publication.pluginChecked = true
-            frontendPluginMismatch(snapshot, null, backendActivationReceiptProvider().shellDigest)
-                ?.let { onFrontendPluginMismatch(authenticatedClientId, lease.connectionGeneration, it) }
+            frontendPluginMismatch(
+                snapshot,
+                null,
+                backendActivationReceiptProvider().shellDigest,
+                clientShellEvidence.evidence(authenticatedClientId),
+                backendPluginVersion(),
+                frontendLeasePluginVersion(current.frontendInstanceId),
+            )?.let { onFrontendPluginMismatch(authenticatedClientId, lease.connectionGeneration, it) }
         }
         publications[lease.leaseId]?.let { publication ->
             val firstAcceptance = publication.acceptedSequence == 0L
@@ -556,6 +602,8 @@ internal class AuthenticatedSurfaceIngressState(
         @Volatile var pluginChecked: Boolean = false
         /** GH #441: a provisional schema-1 snapshot was seen and its mismatch report deferred. */
         @Volatile var provisionalDeferred: Boolean = false
+        /** GH #440: this lease's shell refusal was reported; nothing more is reported for it. */
+        @Volatile var shellRefusalReported: Boolean = false
     }
 
     private data class ConnectionState(
@@ -608,11 +656,67 @@ internal class AuthenticatedSurfaceIngressState(
  * [unansweredNegotiation] marks a schema-1 snapshot: every frontend since schema negotiation
  * (2026-10-20) publishes schema 1 only when the backend gave no schema answer within its 5 s
  * window, so the remedy is a new lease (a Client reconnect), not a reinstall.
+ * [shellRefusal] (GH #440) marks a Client whose Agent Doc shell is not this backend's: it refuses
+ * this backend's frontend release on every poll, and only the backend's plugin in the Client helps.
  */
 internal data class FrontendPluginMismatch(
     val detail: String,
     val unansweredNegotiation: Boolean = false,
+    val shellRefusal: FrontendShellRefusal? = null,
 )
+
+/**
+ * GH #440: the proof that the JetBrains Client refuses this backend's frontend release. A Client
+ * checks the release's shell digest against its own and refuses a different one (the check
+ * stays: a generation built against another shell cannot load). [clientShell] is null when the
+ * Client never reported it, which is the case for every Client before 0.2.1052
+ * ([legacyReleasePoller]); those poll the whole package, and their shell predates this backend's.
+ */
+internal data class FrontendShellRefusal(
+    val clientShell: String?,
+    val backendShell: String,
+    val clientPluginVersion: String? = null,
+    val clientPluginPath: String? = null,
+    val backendPluginVersion: String? = null,
+    val legacyReleasePoller: Boolean = false,
+    val legacyPackagePolls: Int = 0,
+) {
+    /**
+     * Negative when the Client plugin is older than [backendVersion], positive when newer, zero
+     * when equal, null when unknown. A legacy poller is older than any backend from 0.2.1052 on.
+     */
+    fun clientVersionOrder(backendVersion: String? = backendPluginVersion): Int? {
+        compareAgentDocVersions(clientPluginVersion, backendVersion)?.let { return it }
+        if (!legacyReleasePoller) return null
+        val backendServesIdentity = compareAgentDocVersions(backendVersion, IDENTITY_POLL_FIRST_VERSION)
+        return if (backendServesIdentity != null && backendServesIdentity >= 0) -1 else null
+    }
+
+    /** `client_plugin=0.2.1046` facts, in the order an operator compares them. */
+    fun facts(): String =
+        "client_shell=${clientShell?.take(12) ?: "unreported"} backend_shell=${backendShell.take(12)} " +
+            "client_plugin=${clientPluginVersion ?: if (legacyReleasePoller) "before_$IDENTITY_POLL_FIRST_VERSION" else "unknown"} " +
+            "backend_plugin=${backendPluginVersion ?: "unknown"}"
+
+    companion object {
+        /** The first Agent Doc Client that asks for the release identity before the package. */
+        const val IDENTITY_POLL_FIRST_VERSION = "0.2.1052"
+    }
+}
+
+/** GH #440: dotted numeric order of two Agent Doc versions, or null when either is not one. */
+internal fun compareAgentDocVersions(left: String?, right: String?): Int? {
+    fun parts(value: String?): List<Long>? = value?.trim()?.removePrefix("v")?.split('.')
+        ?.map { it.toLongOrNull() ?: return null }
+        ?.takeIf { it.isNotEmpty() }
+    val l = parts(left) ?: return null
+    val r = parts(right) ?: return null
+    for (index in 0 until maxOf(l.size, r.size)) {
+        val order = l.getOrElse(index) { 0 }.compareTo(r.getOrElse(index) { 0 })
+        if (order != 0) return order
+    }
+    return 0
+}
 
 /**
  * GH #435: why the JetBrains Client's frontend is not this backend's Agent Doc build, or null when
@@ -622,12 +726,30 @@ internal data class FrontendPluginMismatch(
  * negotiation went unanswered, which on Coder (2026-11-24) was a 0.2.1046 frontend paired with a
  * 0.2.1046 backend. An upgrade run on a Remote Dev backend never updates the Client, so this is
  * the version check that names the stale side.
+ *
+ * GH #440: [clientEvidence] is what the shell's RPC layer learned about the same Client. A Client
+ * whose shell is proven different (its schema-5 receipt or its own build report), or that polls
+ * the whole release package the way only Clients before 0.2.1052 do, refuses this backend's
+ * release on every poll; that leads, because asking for the schema again cannot fix it. Matching
+ * shells keep the unanswered-negotiation story.
  */
 internal fun frontendPluginMismatch(
     snapshot: FrontendSurfaceSnapshot,
     frontendReceipt: ActivationReceipt?,
     backendShellDigest: String,
+    clientEvidence: FrontendClientShellEvidence? = null,
+    backendPluginVersion: String? = null,
+    leasePluginVersion: String? = null,
 ): FrontendPluginMismatch? {
+    frontendShellRefusal(snapshot, frontendReceipt, backendShellDigest, clientEvidence, backendPluginVersion, leasePluginVersion)
+        ?.let { refusal ->
+            return FrontendPluginMismatch(
+                // No `frontend_schema=` token: `agent-doc upgrade` (src/plugin.rs) reads
+                // `frontend_schema=1` as the reconnect case, and a shell refusal needs the ZIP.
+                "${refusal.facts()} (${frontendShellRefusalStory(refusal)})",
+                shellRefusal = refusal,
+            )
+        }
     if (snapshot.schemaVersion <= LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION) {
         return FrontendPluginMismatch(
             "frontend_schema=${snapshot.schemaVersion} backend_schema=$SURFACE_SNAPSHOT_SCHEMA_VERSION " +
@@ -643,16 +765,65 @@ internal fun frontendPluginMismatch(
                 "(the JetBrains Client runs an older Agent Doc frontend)",
         )
     }
-    val frontendShell = frontendReceipt?.shellDigest
-        ?: return FrontendPluginMismatch(
+    if (frontendReceipt?.shellDigest == null) {
+        return FrontendPluginMismatch(
             "frontend_receipt=unreadable (the JetBrains Client runs a different Agent Doc frontend)",
         )
-    if (frontendShell == ShellIdentity.UNKNOWN || backendShellDigest == ShellIdentity.UNKNOWN) return null
-    if (frontendShell == backendShellDigest) return null
-    return FrontendPluginMismatch(
-        "frontend_shell=${frontendShell.take(12)} backend_shell=${backendShellDigest.take(12)} " +
-            "(the JetBrains Client and the Remote Dev backend run different Agent Doc builds)",
+    }
+    return null
+}
+
+/**
+ * GH #440: the shell refusal [snapshot]'s Client is proven to make, or null. A proven client shell
+ * that equals the backend's (or an unbuilt `unknown` identity on either side) proves no refusal.
+ */
+internal fun frontendShellRefusal(
+    snapshot: FrontendSurfaceSnapshot,
+    frontendReceipt: ActivationReceipt?,
+    backendShellDigest: String,
+    clientEvidence: FrontendClientShellEvidence?,
+    backendPluginVersion: String?,
+    /** GH #441: the plugin version the Client named in its lease (0.2.1053 and later). */
+    leasePluginVersion: String? = null,
+): FrontendShellRefusal? {
+    if (backendShellDigest == ShellIdentity.UNKNOWN) return null
+    val receiptShell = frontendReceipt?.shellDigest
+        ?.takeIf { snapshot.schemaVersion >= ACTIVATION_RECEIPT_SURFACE_SNAPSHOT_SCHEMA_VERSION }
+    val clientShell = receiptShell ?: clientEvidence?.shellDigest
+    if (clientShell != null) {
+        if (clientShell == ShellIdentity.UNKNOWN || clientShell == backendShellDigest) return null
+        return FrontendShellRefusal(
+            clientShell = clientShell,
+            backendShell = backendShellDigest,
+            clientPluginVersion = clientEvidence?.pluginVersion ?: leasePluginVersion,
+            clientPluginPath = clientEvidence?.pluginPath,
+            backendPluginVersion = backendPluginVersion,
+        )
+    }
+    if (clientEvidence?.legacyReleasePoller != true) return null
+    return FrontendShellRefusal(
+        clientShell = null,
+        backendShell = backendShellDigest,
+        backendPluginVersion = backendPluginVersion,
+        legacyReleasePoller = true,
+        legacyPackagePolls = clientEvidence.legacyPackagePolls,
     )
+}
+
+private fun frontendShellRefusalStory(refusal: FrontendShellRefusal): String {
+    val clientLine = "`[frontend-impl] refused: release shell ${refusal.backendShell} does not match this client " +
+        "shell ${refusal.clientShell ?: "(its own)"}`"
+    val why = if (refusal.legacyReleasePoller) {
+        "the JetBrains Client fetched this backend's whole frontend release ${refusal.legacyPackagePolls} " +
+            "time(s) without asking for its identity, which only Agent Doc Clients before " +
+            "${FrontendShellRefusal.IDENTITY_POLL_FIRST_VERSION} do; their shell is older than this backend's, " +
+            "so the Client refuses the release on every poll"
+    } else {
+        "the JetBrains Client runs a different Agent Doc shell than this backend, so it refuses this " +
+            "backend's frontend release on every poll"
+    }
+    return "$why and logs $clientLine in its idea.log. Asking for the schema again or reconnecting cannot " +
+        "change the Client's shell; only this backend's plugin in the Client can"
 }
 
 /**
@@ -663,8 +834,10 @@ internal fun frontendPluginMismatchRemedy(
     mismatch: FrontendPluginMismatch,
     version: String?,
     ideDataDir: String?,
+    packageUrl: String? = null,
 ): String {
-    val install = frontendPluginMismatchRemedy(version, ideDataDir)
+    val install = frontendPluginMismatchRemedy(version, ideDataDir, packageUrl)
+    mismatch.shellRefusal?.let { refusal -> return frontendShellRefusalRemedy(refusal, version, ideDataDir, install) }
     if (!mismatch.unansweredNegotiation) return install
     val known = version?.takeIf { it.isNotBlank() && it != "unknown" }
     return "reconnect the JetBrains Client so it opens a new lease and asks this backend for its schema " +
@@ -683,10 +856,12 @@ internal fun frontendPluginMismatchRemedy(
  * `frontend` on Linux, whose plugins path has no `plugins` segment; not `JetBrainsClient<v>`.
  * The text carries no angle brackets because the notification body is HTML.
  */
-internal fun frontendPluginMismatchRemedy(version: String?, ideDataDir: String?): String {
-    val asset = version?.takeIf { it.isNotBlank() && it != "unknown" }
-        ?.let { "agent-doc-jetbrains-262-$it.zip" }
-        ?: "agent-doc-jetbrains-262 ZIP of this backend's version"
+internal fun frontendPluginMismatchRemedy(version: String?, ideDataDir: String?, packageUrl: String? = null): String {
+    val asset = (
+        version?.takeIf { it.isNotBlank() && it != "unknown" }
+            ?.let { "agent-doc-jetbrains-262-$it.zip" }
+            ?: "agent-doc-jetbrains-262 ZIP of this backend's version"
+        ) + (packageUrl?.takeIf { it.startsWith("https://") }?.let { " from $it" } ?: "")
     val ide = ideDataDir?.takeIf(String::isNotBlank) ?: "IntelliJIdea2026.3"
     return "install the same $asset in the JetBrains Client: quit the Client, delete every " +
         "agent-doc-jetbrains, agent-doc-jetbrains-262 and agent-doc-jetbrains-263 folder from its plugins " +
@@ -699,6 +874,40 @@ internal fun frontendPluginMismatchRemedy(version: String?, ideDataDir: String?)
         "machine it does all of this)"
 }
 
+/**
+ * GH #440: the remedy for a Client that refuses this backend's release. It leads with the version
+ * comparison and the exact folder to replace, then the full install ([install]), then how the
+ * Client log proves it worked. The text carries no angle brackets (the notification body is HTML).
+ */
+internal fun frontendShellRefusalRemedy(
+    refusal: FrontendShellRefusal,
+    version: String?,
+    ideDataDir: String?,
+    install: String,
+): String {
+    val backend = version?.takeIf { it.isNotBlank() && it != "unknown" } ?: refusal.backendPluginVersion
+    val backendName = backend?.let { "this backend's $it" } ?: "this backend's plugin"
+    val client = refusal.clientPluginVersion?.let { "Client plugin $it" }
+        ?: if (refusal.legacyReleasePoller) {
+            "the Client plugin (older than ${FrontendShellRefusal.IDENTITY_POLL_FIRST_VERSION})"
+        } else {
+            "the Client plugin"
+        }
+    val order = refusal.clientVersionOrder(backend)
+    val comparison = when {
+        order == null -> "$client is not $backendName"
+        order < 0 -> "$client is older than $backendName"
+        order == 0 -> "$client has the same version as $backendName but another shell"
+        else -> "$client is newer than $backendName"
+    }
+    val ide = ideDataDir?.takeIf(String::isNotBlank) ?: "IntelliJIdea2026.3"
+    val folder = refusal.clientPluginPath?.takeIf(String::isNotBlank)
+        ?: "plugins/frontend/agent-doc-jetbrains-262 (~/.local/share/JetBrains/$ide/frontend/agent-doc-jetbrains-262 on Linux)"
+    val verify = backend?.let { "`Loaded custom plugins: Agent Doc, $it` and " } ?: ""
+    return "update the JetBrains Client plugin: $comparison. Replace the Client's $folder with " +
+        "$backendName ZIP: $install. Afterwards the Client idea.log shows $verify`[frontend-impl] activated`"
+}
+
 /** GH #439: the backend IDE's data directory name (`IntelliJIdea2026.3`), from its config path. */
 internal fun backendIdeDataDirName(): String? =
     runCatching { Path.of(PathManager.getConfigPath()).fileName?.toString() }.getOrNull()
@@ -707,7 +916,12 @@ internal fun currentFrontendPluginMismatchRemedy(): String =
     frontendPluginMismatchRemedy(runCatching { pluginVersion() }.getOrNull(), backendIdeDataDirName())
 
 internal fun currentFrontendPluginMismatchRemedy(mismatch: FrontendPluginMismatch): String =
-    frontendPluginMismatchRemedy(mismatch, runCatching { pluginVersion() }.getOrNull(), backendIdeDataDirName())
+    frontendPluginMismatchRemedy(
+        mismatch,
+        runCatching { pluginVersion() }.getOrNull(),
+        backendIdeDataDirName(),
+        mismatch.shellRefusal?.let { runCatching { FrontendImplementationReleaseSource.packageUrl() }.getOrNull() },
+    )
 
 internal fun frontendPluginMismatchLine(
     clientId: String,

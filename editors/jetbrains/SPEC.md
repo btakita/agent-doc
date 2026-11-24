@@ -1806,7 +1806,15 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   carries no activation receipt, so a backend with an activated generation refused every snapshot
   (`frontend_authority_absent_or_generation_mismatched`) until the Client reconnected. The backend
   reports a schema-1 snapshot as `frontend/backend plugin mismatch frontend_schema=1 ...` with the
-  reconnect remedy, not as an older build. It holds that report for a provisional schema 1
+  reconnect remedy, not as an older build, unless the Client is proven to refuse the backend's
+  release shell (GH #440): its schema-5 receipt or its own build report names another shell, or
+  it fetched the whole release package without ever asking for its identity, which only Clients
+  before 0.2.1052 do (`FrontendReleasePollLedger`, recorded by the shell RPC and read by the
+  ingress). That lease is reported at once as `frontend/backend plugin mismatch client_shell=<12>
+  backend_shell=<12> client_plugin=<v> backend_plugin=<v> ...` (no `frontend_schema=` token),
+  titled with the version comparison, and its remedy is the backend's ZIP (its release URL) in
+  the Client's `plugins/frontend/agent-doc-jetbrains-262`; asking again cannot change a shell.
+  Otherwise it holds that report for a provisional schema 1
   (GH #441): the frontend names its plugin version in its lease's `frontendInstanceId`
   (`<uuid>;plugin=<version>`, an opaque string every backend only compares), and a schema-1
   snapshot from a frontend that names the backend's own version is reported only when the

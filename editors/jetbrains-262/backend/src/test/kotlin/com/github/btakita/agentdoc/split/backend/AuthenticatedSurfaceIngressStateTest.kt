@@ -398,7 +398,8 @@ class AuthenticatedSurfaceIngressStateTest {
             )
         }
         assertEquals(1, mismatches.size, mismatches.toString())
-        assertTrue(mismatches.single().contains("frontend_shell=dddddddddddd backend_shell=aaaaaaaaaaaa"), mismatches.toString())
+        assertTrue(mismatches.single().contains("client_shell=dddddddddddd backend_shell=aaaaaaaaaaaa"), mismatches.toString())
+        assertTrue(mismatches.single().contains("refuses this backend's frontend release"), mismatches.toString())
     }
 
     /**
@@ -532,6 +533,177 @@ class AuthenticatedSurfaceIngressStateTest {
         onFrontendPluginMismatch = { _, _, mismatch -> mismatches += mismatch },
         backendPluginVersion = { backendPlugin },
     )
+
+    /**
+     * GH #440 (Coder, 2026-11-24): a 0.2.1046 Client refused the 0.2.1052 backend's release shell
+     * 33 times and published schema 1. The backend blamed an unanswered negotiation and said the
+     * Client would ask again, which an older shell never can. The Client's whole-package polls
+     * (it never asks for the release identity) prove it predates 0.2.1052, so the shell refusal,
+     * the version comparison and the ZIP install lead instead.
+     */
+    @Test
+    fun aClientThatPollsTheWholeReleasePackageLeadsWithTheShellRefusal() = runBlocking {
+        val mismatches = mutableListOf<FrontendPluginMismatch>()
+        val evidence = mutableMapOf<String, FrontendClientShellEvidence>()
+        val state = AuthenticatedSurfaceIngressState(
+            RecordingPublisher(),
+            RecordingForwarder(),
+            backendActivationReceipt = backendActivation.copy(shellDigest = BACKEND_SHELL),
+            clientShellEvidence = FrontendClientShellEvidenceSource { evidence[it] },
+            backendPluginVersion = { "0.2.1052" },
+            scheduleDiagnostic = { _, _ -> },
+            log = { _, _ -> },
+            onFrontendPluginMismatch = { _, _, mismatch -> mismatches += mismatch },
+        )
+        val lease = state.open("client-a", "frontend-a")
+        // The Client's first snapshot can arrive before its first release poll.
+        state.publish("client-a", lease, snapshot("frontend-a", 1).forSchema(1))
+        assertTrue(mismatches.single().unansweredNegotiation, "no evidence yet: the negotiation story")
+
+        evidence["client-a"] = FrontendClientShellEvidence(legacyPackagePolls = 2)
+        state.publish("client-a", lease, snapshot("frontend-a", 2).forSchema(1))
+        state.publish("client-a", lease, snapshot("frontend-a", 3).forSchema(1))
+        assertEquals(2, mismatches.size, "the shell refusal is reported once, after the negotiation story")
+        val refusal = mismatches.last()
+        assertFalse(refusal.unansweredNegotiation)
+        assertTrue(
+            refusal.detail.startsWith(
+                "client_shell=unreported backend_shell=1265693a728a client_plugin=before_0.2.1052 backend_plugin=0.2.1052",
+            ),
+            refusal.detail,
+        )
+        assertTrue(refusal.detail.contains("release shell $BACKEND_SHELL does not match this client shell"), refusal.detail)
+        assertTrue(refusal.detail.contains("cannot change the Client's shell"), refusal.detail)
+        // `agent-doc upgrade` reads `frontend_schema=1` as the reconnect case.
+        assertFalse(refusal.detail.contains("frontend_schema="), refusal.detail)
+
+        val title = frontendPluginMismatchTitle(refusal, "0.2.1052")
+        assertEquals(
+            "Agent Doc: the JetBrains Client plugin is older than the backend's 0.2.1052: update the Client plugin",
+            title,
+        )
+        val remedy = frontendPluginMismatchRemedy(refusal, "0.2.1052", "IntelliJIdea2026.3", RELEASE_URL)
+        assertTrue(
+            remedy.startsWith(
+                "update the JetBrains Client plugin: the Client plugin (older than 0.2.1052) is older than " +
+                    "this backend's 0.2.1052. Replace the Client's plugins/frontend/agent-doc-jetbrains-262",
+            ),
+            remedy,
+        )
+        assertTrue(remedy.contains("agent-doc-jetbrains-262-0.2.1052.zip from $RELEASE_URL"), remedy)
+        assertTrue(remedy.contains("`Loaded custom plugins: Agent Doc, 0.2.1052`"), remedy)
+        assertFalse(remedy.contains("reconnect the JetBrains Client"), remedy)
+        assertFalse(remedy.contains('<') || remedy.contains('>'), remedy)
+    }
+
+    /** GH #440: a Client that reported its own build names its version and folder exactly. */
+    @Test
+    fun aReportedOlderClientBuildNamesBothVersionsAndItsPluginFolder() {
+        val clientPath = "C:\\Users\\dev\\AppData\\Roaming\\JetBrains\\IntelliJIdea2026.3\\plugins\\frontend\\agent-doc-jetbrains-262"
+        val mismatch = frontendPluginMismatch(
+            snapshot("frontend-a", 1).forSchema(1),
+            null,
+            BACKEND_SHELL,
+            FrontendClientShellEvidence(CLIENT_SHELL, "0.2.1046", clientPath),
+            "0.2.1052",
+        )!!
+        val refusal = mismatch.shellRefusal!!
+        assertEquals(CLIENT_SHELL, refusal.clientShell)
+        assertTrue(
+            mismatch.detail.startsWith(
+                "client_shell=b5741f110bfb backend_shell=1265693a728a client_plugin=0.2.1046 backend_plugin=0.2.1052",
+            ),
+            mismatch.detail,
+        )
+        assertTrue(
+            mismatch.detail.contains("release shell $BACKEND_SHELL does not match this client shell $CLIENT_SHELL"),
+            mismatch.detail,
+        )
+        assertEquals(
+            "Agent Doc: JetBrains Client plugin 0.2.1046 is older than the backend's 0.2.1052: update the Client plugin",
+            frontendPluginMismatchTitle(mismatch, "0.2.1052"),
+        )
+        val remedy = frontendPluginMismatchRemedy(mismatch, "0.2.1052", "IntelliJIdea2026.3", RELEASE_URL)
+        assertTrue(
+            remedy.startsWith(
+                "update the JetBrains Client plugin: Client plugin 0.2.1046 is older than this backend's 0.2.1052. " +
+                    "Replace the Client's $clientPath with",
+            ),
+            remedy,
+        )
+        assertTrue(remedy.contains(RELEASE_URL), remedy)
+        // A newer Client is named as such, not as stale.
+        val newer = frontendPluginMismatch(
+            snapshot("frontend-a", 1).forSchema(1),
+            null,
+            BACKEND_SHELL,
+            FrontendClientShellEvidence(CLIENT_SHELL, "0.2.1060", null),
+            "0.2.1052",
+        )!!
+        assertTrue(frontendPluginMismatchTitle(newer, "0.2.1052").contains("is newer than the backend's 0.2.1052"))
+    }
+
+    /**
+     * GH #440 with GH #441's lease metadata: a schema-5 Client on another shell names its plugin in
+     * its lease, so the report compares both versions even without a build report.
+     */
+    @Test
+    fun aReceiptShellMismatchNamesTheLeasePluginVersion() = runBlocking {
+        val mismatches = mutableListOf<FrontendPluginMismatch>()
+        val state = AuthenticatedSurfaceIngressState(
+            RecordingPublisher(),
+            RecordingForwarder(),
+            backendActivationReceipt = backendActivation.copy(shellDigest = BACKEND_SHELL),
+            scheduleDiagnostic = { _, _ -> },
+            log = { _, _ -> },
+            onFrontendPluginMismatch = { _, _, mismatch -> mismatches += mismatch },
+            backendPluginVersion = { "0.2.1054" },
+        )
+        val frontend = frontendLeaseInstanceId("frontend-a", "0.2.1053")
+        val lease = state.open("client-a", frontend)
+        val olderShell = frontendActivation.copy(shellDigest = CLIENT_SHELL)
+        repeat(2) { attempt ->
+            state.publish("client-a", lease, snapshot(frontend, attempt + 1L).copy(activationReceipt = olderShell.encode()))
+        }
+        val mismatch = mismatches.single()
+        assertTrue(
+            mismatch.detail.startsWith(
+                "client_shell=b5741f110bfb backend_shell=1265693a728a client_plugin=0.2.1053 backend_plugin=0.2.1054",
+            ),
+            mismatch.detail,
+        )
+        assertEquals(
+            "Agent Doc: JetBrains Client plugin 0.2.1053 is older than the backend's 0.2.1054: update the Client plugin",
+            frontendPluginMismatchTitle(mismatch, "0.2.1054"),
+        )
+    }
+
+    /**
+     * GH #440: matching shells keep the GH #435 story. A schema-1 lease from a Client on this
+     * backend's shell is an unanswered negotiation, repaired by asking again.
+     */
+    @Test
+    fun matchingShellsKeepTheUnansweredNegotiationStory() {
+        val schemaOne = snapshot("frontend-a", 1).forSchema(1)
+        val sameShell = frontendPluginMismatch(
+            schemaOne,
+            null,
+            BACKEND_SHELL,
+            FrontendClientShellEvidence(BACKEND_SHELL, "0.2.1052", null),
+            "0.2.1052",
+        )!!
+        assertTrue(sameShell.unansweredNegotiation)
+        assertEquals(null, sameShell.shellRefusal)
+        assertTrue(
+            frontendPluginMismatchRemedy(sameShell, "0.2.1052", "IntelliJIdea2026.3")
+                .startsWith("reconnect the JetBrains Client"),
+        )
+        // An unbuilt identity on either side proves no refusal.
+        val unknown = FrontendClientShellEvidence("unknown", "0.2.1046", null)
+        assertTrue(frontendPluginMismatch(schemaOne, null, BACKEND_SHELL, unknown, "0.2.1052")!!.unansweredNegotiation)
+        val legacy = FrontendClientShellEvidence(legacyPackagePolls = 1)
+        assertTrue(frontendPluginMismatch(schemaOne, null, "unknown", legacy, "0.2.1052")!!.unansweredNegotiation)
+    }
 
     @Test
     fun frontendPluginMismatchNamesTheStaleSide() {
@@ -670,6 +842,13 @@ class AuthenticatedSurfaceIngressStateTest {
         complete = true,
         surfaces = listOf(FrontendSurface("root", 1, SurfaceRole.MAIN, true, emptyList())),
     )
+
+    private companion object {
+        const val BACKEND_SHELL = "1265693a728a62b322ebd425fb86d314509817d66e541729731da946b798e85b"
+        const val CLIENT_SHELL = "b5741f110bfb37fe71dfec65ae64e7cfda754b53959f59a1039b76ed11e9dbf9"
+        const val RELEASE_URL =
+            "https://github.com/btakita/agent-doc/releases/download/v0.35.590/agent-doc-jetbrains-262-0.2.1052.zip"
+    }
 
     private val backendActivation = ActivationReceipt(
         role = ActivationReceipt.ROLE_BACKEND,

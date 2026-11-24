@@ -27,10 +27,20 @@ class BackendSurfaceSnapshotRpcApiTest {
             packageBytes = ByteArray(4 * 1024 * 1024),
             signatureBytes = ByteArray(64),
         )
-        val api = BackendSurfaceSnapshotRpcApi(frontendRelease = { discoveries++; release })
+        val api = BackendSurfaceSnapshotRpcApi(
+            frontendRelease = { discoveries++; release },
+            releasePolls = FrontendReleasePollLedger(),
+            callerClientId = { "client-a" },
+        )
 
         assertEquals(FrontendImplementationReleaseIdentity("e".repeat(64), 9), api.frontendImplementationReleaseIdentity())
         assertEquals(1, discoveries, "the identity uses the same discovery (and backend peer activation)")
-        assertNull(BackendSurfaceSnapshotRpcApi(frontendRelease = { null }).frontendImplementationReleaseIdentity())
+        assertNull(
+            BackendSurfaceSnapshotRpcApi(
+                frontendRelease = { null },
+                releasePolls = FrontendReleasePollLedger(),
+                callerClientId = { "client-a" },
+            ).frontendImplementationReleaseIdentity(),
+        )
     }
 }

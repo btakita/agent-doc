@@ -122,9 +122,13 @@ fn queue_reconcile_chain(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "queue_reconcile_chain file={} changed={changed} reused={} dirty={} slice_parses={} document_parses={} moved={} repairs={} response_trees={} legend={} open_counts={} loose_ends={} elapsed_us={}{} (#incrementalreconcile)",
+            "queue_reconcile_chain file={} changed={changed} reused={} mode={} chain_bytes={} exchange_bytes_indexed={} rebuilt={} dirty={} slice_parses={} document_parses={} moved={} repairs={} response_trees={} legend={} open_counts={} loose_ends={} elapsed_us={}{} (#incrementalreconcile)",
             file.display(),
             report.reused,
+            report.mode.as_str(),
+            report.chain_bytes,
+            report.exchange_bytes_indexed,
+            report.rebuilt.unwrap_or("-"),
             if report.dirty_components.is_empty() {
                 "-".to_string()
             } else {

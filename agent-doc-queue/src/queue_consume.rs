@@ -6582,12 +6582,13 @@ fn unique_strings(mut values: Vec<String>) -> Option<String> {
 }
 
 fn completion_stop_reasons(text: &str, row: RowRef<'_>) -> Vec<String> {
-    agent_doc_document::subagent_completion::completion_evidence(text)
-        .into_iter()
+    // Through the per-revision memo, which also serves a chain skeleton's
+    // exchange cells from the exchange index (`#incrementalreconcile`).
+    crate::derived_memo::completion_evidence(text)
+        .iter()
         .filter(|evidence| completion_cell_matches_row(&evidence.item, row))
         .filter_map(|evidence| {
-            let body =
-                agent_doc_document::subagent_completion::completion_response(text, &evidence.key)?;
+            let body = crate::derived_memo::completion_response(text, &evidence.key)?;
             stopped_row_reason(&body)
         })
         .collect()

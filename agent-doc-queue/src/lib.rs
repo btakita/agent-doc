@@ -22,6 +22,7 @@ pub mod derived_memo;
 pub mod dispatch_item;
 pub mod document_queue;
 pub mod duplicate_head_report;
+pub(crate) mod exchange_index;
 pub mod free_text_admission;
 pub mod goal_preset_terminal;
 pub mod idle_drain;

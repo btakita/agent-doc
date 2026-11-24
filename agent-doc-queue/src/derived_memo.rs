@@ -396,6 +396,11 @@ pub(crate) fn followup_rows(
 /// [`agent_doc_document::subagent_completion::completion_evidence`],
 /// memoized by the text's bytes.
 pub(crate) fn completion_evidence(text: &str) -> Evidence {
+    // `#incrementalreconcile`: a chain skeleton's exchange cells come from the
+    // exchange index, never from rescanning the exchange.
+    if let Some(evidence) = crate::exchange_index::skeleton_completion_evidence(text) {
+        return evidence;
+    }
     if bypassed() {
         return Arc::new(agent_doc_document::subagent_completion::completion_evidence(text));
     }
@@ -407,6 +412,9 @@ pub(crate) fn completion_evidence(text: &str) -> Evidence {
 /// [`agent_doc_document::subagent_completion::completion_response`],
 /// memoized per text revision and key.
 pub(crate) fn completion_response(text: &str, key: &str) -> Option<String> {
+    if let Some(response) = crate::exchange_index::skeleton_completion_response(text, key) {
+        return response;
+    }
     let lookup = || agent_doc_document::subagent_completion::completion_response(text, key);
     if bypassed() {
         return lookup();

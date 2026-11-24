@@ -167,7 +167,7 @@ fn followup_queue_rows_uncached(document: &str) -> Vec<String> {
 
 /// Whether an `agent:exchange` queue-prompt quote is a follow-up row in
 /// either form (`#followupshorttitle`).
-fn is_quoted_followup_row(quoted: &str) -> bool {
+pub(crate) fn is_quoted_followup_row(quoted: &str) -> bool {
     let work = agent_doc_element_queue::strip_attempt_projection_prefix(quoted);
     crate::followup_owner::followup_row_action_item(work).is_some()
 }

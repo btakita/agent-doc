@@ -849,6 +849,32 @@ fn code_spans(line: &str) -> Vec<&str> {
     spans
 }
 
+/// `#incrementalreconcile`: whether an `agent:exchange` line can be evidence
+/// [`exchange_label_evidence`] reads, whatever the claim ledger says: its
+/// hand-back bullet or one of its inline code spans holds an owner label.
+/// The exchange digest keeps exactly these lines (a superset of what the
+/// ledger-dependent evidence takes).
+pub(crate) fn exchange_label_candidate(line: &str) -> bool {
+    if !line.contains("[#") {
+        return false;
+    }
+    let mut text = line.trim();
+    while let Some(rest) = text.strip_prefix('>') {
+        text = rest.trim_start();
+    }
+    if let Some(bullet) = text
+        .strip_prefix("- ")
+        .or_else(|| text.strip_prefix("* "))
+        .map(str::trim_end)
+        && !owner_labels(bullet, 0, None).is_empty()
+    {
+        return true;
+    }
+    code_spans(line)
+        .into_iter()
+        .any(|span| !owner_labels(span, 0, None).is_empty())
+}
+
 /// Everything `agent:exchange` proves about retired claim labels: each
 /// hand-back bullet (`> - operator: …`) holding one becomes bullet
 /// evidence, and each inline code span quoting a labelled row

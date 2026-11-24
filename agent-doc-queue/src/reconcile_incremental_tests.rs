@@ -31,13 +31,19 @@ fn check_chain(name: &str, text: &str, seeds: u64, steps: usize) {
         let mut cache = ReconcileCache::new();
         let mut prev: Option<String> = None;
         let mut document = text.to_string();
+        // The last revision the chain ran on.
+        let mut ran: Option<String> = None;
         for step in 0..steps {
             let report = reconcile_incremental(prev.as_deref(), &document, &INPUTS, &mut cache);
-            let full = reconcile_full(&document, &INPUTS);
+            let full = expected(&report, ran.as_deref(), &document);
             assert_eq!(
                 report.reconciled, full,
-                "{name} seed={seed} step={step}\n--- document ---\n{document}"
+                "{name} seed={seed} step={step} mode={:?}\n--- document ---\n{document}",
+                report.mode
             );
+            if report.mode != ReconcileMode::ExchangeOnly {
+                ran = Some(document.clone());
+            }
             prev = Some(document.clone());
             document = if rng.below(3) == 0 {
                 report.reconciled.document
@@ -46,6 +52,35 @@ fn check_chain(name: &str, text: &str, seeds: u64, steps: usize) {
             };
         }
     }
+}
+
+/// The exchange body of `document` (its single `agent:exchange`).
+fn exchange_body(document: &str) -> std::ops::Range<usize> {
+    let components = agent_doc_element::element::parse(document).unwrap();
+    let exchange = components
+        .iter()
+        .find(|component| component.name == "exchange")
+        .unwrap();
+    exchange.open_end..exchange.close_start
+}
+
+/// What `report` must equal: [`reconcile_full`] of `document`, or for an
+/// exchange-only revision, [`reconcile_full`] of the revision the chain last
+/// ran on (`ran`, the same outside the exchange) with `document`'s exchange.
+fn expected(report: &ReconcileReport, ran: Option<&str>, document: &str) -> Reconciled {
+    if report.mode != ReconcileMode::ExchangeOnly {
+        return reconcile_full(document, &INPUTS);
+    }
+    let ran = ran.expect("an exchange-only revision follows a run");
+    let ran_body = exchange_body(ran);
+    let body = exchange_body(document);
+    assert_eq!(&ran[..ran_body.start], &document[..body.start]);
+    assert_eq!(&ran[ran_body.end..], &document[body.end..]);
+    let mut full = reconcile_full(ran, &INPUTS);
+    let out_body = exchange_body(&full.document);
+    full.document
+        .replace_range(out_body, &document[body.clone()]);
+    full
 }
 
 fn check_fixture_chain(name: &str) {
@@ -112,6 +147,117 @@ fn the_report_names_the_changed_components() {
     assert_eq!(second.dirty_components, vec!["exchange".to_string()]);
     assert_eq!(second.slice_parses, 0, "{second:?}");
     assert_eq!(second.reconciled, reconcile_full(&edited, &INPUTS));
+}
+
+/// A session-shaped document the chain has settled (a fixed point).
+fn settled_session() -> String {
+    let mut settled = reconcile_full(&session_shaped(1, 1500), &INPUTS).document;
+    for _ in 0..3 {
+        settled = reconcile_full(&settled, &INPUTS).document;
+    }
+    settled
+}
+
+/// `#incrementalreconcile`: compacting the exchange (most of it removed behind a
+/// summary) runs no pass and reads only the chunks the splice touched; the
+/// result is the settled result with the compacted exchange.
+#[test]
+fn an_exchange_compaction_runs_no_pass_and_reads_only_the_touched_chunks() {
+    let settled = settled_session();
+    let mut cache = ReconcileCache::new();
+    let first = reconcile_incremental(None, &settled, &INPUTS, &mut cache);
+    assert_eq!(first.mode, ReconcileMode::Skeleton, "{first:?}");
+    let compaction = compacted(&settled);
+    let report = reconcile_incremental(None, &compaction, &INPUTS, &mut cache);
+    assert_eq!(
+        report.mode,
+        ReconcileMode::ExchangeOnly,
+        "{:?}",
+        report.rebuilt
+    );
+    assert!(report.reused);
+    assert_eq!(report.rebuilt, None);
+    assert_eq!(report.dirty_components, vec!["exchange".to_string()]);
+    assert_eq!((report.slice_parses, report.document_parses), (0, 0));
+    assert!(
+        report.exchange_bytes_indexed < 1024,
+        "read {} exchange bytes; only the summary is new",
+        report.exchange_bytes_indexed,
+    );
+    assert_eq!(
+        report.reconciled,
+        expected(&report, Some(&settled), &compaction)
+    );
+    // Settled and compacted, the full chain agrees too: the removed cells
+    // were no evidence the settled queues still needed.
+    assert_eq!(report.reconciled, reconcile_full(&compaction, &INPUTS));
+}
+
+/// A revision that edits a queue and appends to the exchange (an agent
+/// turn) follows both splices: the chain runs on the skeleton, the exchange
+/// is read only where it grew, and the result equals the full chain.
+#[test]
+fn a_queue_edit_with_an_exchange_append_runs_on_the_skeleton() {
+    let settled = settled_session();
+    let mut cache = ReconcileCache::new();
+    reconcile_incremental(None, &settled, &INPUTS, &mut cache);
+    let close = settled.find("<!-- /agent:run -->").unwrap();
+    let mut edited = settled.clone();
+    edited.insert_str(close, "- one more operator row\n");
+    let exchange_close = edited.rfind("<!-- /agent:exchange -->").unwrap();
+    edited.insert_str(
+        exchange_close,
+        "### Re: one more cell\n> **Queue prompt:** one more operator row\nDone.\n",
+    );
+    let report = reconcile_incremental(None, &edited, &INPUTS, &mut cache);
+    assert_eq!(report.mode, ReconcileMode::Skeleton);
+    assert_eq!(report.rebuilt, None);
+    assert!(!report.reused);
+    let body = exchange_body(&edited);
+    assert!(
+        report.chain_bytes < edited.len() - body.len() / 2,
+        "the skeleton ({} bytes) must leave out most of the {}-byte exchange of the {}-byte document",
+        report.chain_bytes,
+        body.len(),
+        edited.len()
+    );
+    assert!(
+        report.exchange_bytes_indexed < 4096,
+        "read {} exchange bytes",
+        report.exchange_bytes_indexed
+    );
+    assert_eq!(
+        report.dirty_components.len(),
+        2,
+        "{:?}",
+        report.dirty_components
+    );
+    assert!(report.dirty_components.contains(&"exchange".to_string()));
+    assert_eq!(report.reconciled, reconcile_full(&edited, &INPUTS));
+}
+
+/// An exchange-only revision that adds evidence (a queue-prompt echo, a
+/// completion cell) runs the chain on the skeleton.
+#[test]
+fn an_exchange_append_with_new_evidence_runs_the_chain() {
+    let settled = settled_session();
+    let mut cache = ReconcileCache::new();
+    reconcile_incremental(None, &settled, &INPUTS, &mut cache);
+    let close = settled.rfind("<!-- /agent:exchange -->").unwrap();
+    let mut edited = settled.clone();
+    edited.insert_str(close, "### Re: appended cell\n> **Queue prompt:** probe\n");
+    let report = reconcile_incremental(None, &edited, &INPUTS, &mut cache);
+    assert_eq!(report.mode, ReconcileMode::Skeleton);
+    assert_eq!(report.dirty_components, vec!["exchange".to_string()]);
+    assert_eq!(report.reconciled, reconcile_full(&edited, &INPUTS));
+
+    // An appended note with no evidence runs nothing.
+    let mut noted = edited.clone();
+    let close = noted.rfind("<!-- /agent:exchange -->").unwrap();
+    noted.insert_str(close, "A plain note.\n");
+    let report = reconcile_incremental(None, &noted, &INPUTS, &mut cache);
+    assert_eq!(report.mode, ReconcileMode::ExchangeOnly);
+    assert_eq!(report.reconciled, reconcile_full(&noted, &INPUTS));
 }
 
 fn time<T>(mut f: impl FnMut() -> T) -> (T, std::time::Duration) {
@@ -293,4 +439,94 @@ fn bench_chain_stages() {
             }
         }
     });
+}
+
+/// An sdk-dev-scale session document (about 960 KB, mostly `agent:exchange`).
+fn sdk_scale_document() -> String {
+    let mut lines = 2000;
+    loop {
+        let document = session_shaped(1, lines);
+        if document.len() >= 960 * 1024 {
+            return document;
+        }
+        lines = lines * 960 * 1024 / document.len().max(1) + 100;
+    }
+}
+
+/// The exchange compacted: its body replaced by the last tenth of it behind
+/// a one-line summary, as `/agent-doc compact exchange` leaves it.
+fn compacted(document: &str) -> String {
+    let open = document.find("<!-- agent:exchange").unwrap();
+    let body_start = open + document[open..].find('\n').unwrap() + 1;
+    let close = document.rfind("<!-- /agent:exchange -->").unwrap();
+    let body = &document[body_start..close];
+    let mut keep = body.len() - body.len() / 10;
+    while !body.is_char_boundary(keep) {
+        keep += 1;
+    }
+    let keep = body[keep..]
+        .find("\n### ")
+        .map_or(body.len(), |at| keep + at + 1);
+    format!(
+        "{}### Compacted\n> Earlier exchange archived.\n{}{}",
+        &document[..body_start],
+        &body[keep..],
+        &document[close..]
+    )
+}
+
+/// `#incrementalreconcile` measurement (`--release --ignored --nocapture`): per
+/// revision chain time at sdk-dev scale for a one-line queue edit and an
+/// exchange compaction, full versus incremental (cache warm on the settled
+/// revision).
+#[test]
+#[ignore]
+fn bench_sdk_scale_revisions() {
+    let document = match std::env::var("AGENT_DOC_RECONCILE_BENCH_DOC") {
+        Ok(path) => std::fs::read_to_string(path).unwrap(),
+        Err(_) => sdk_scale_document(),
+    };
+    let mut settled = reconcile_full(&document, &INPUTS).document;
+    for _ in 0..3 {
+        settled = reconcile_full(&settled, &INPUTS).document;
+    }
+    eprintln!(
+        "document: {} lines, {} bytes",
+        settled.lines().count(),
+        settled.len()
+    );
+    let close = settled.find("<!-- /agent:run -->").unwrap();
+    let mut queue_edit = settled.clone();
+    queue_edit.insert_str(close, "- one more operator row\n");
+    let compaction = compacted(&settled);
+    eprintln!("compacted: {} bytes", compaction.len());
+    for (label, edited) in [
+        ("one-line queue edit", &queue_edit),
+        ("exchange compaction", &compaction),
+    ] {
+        let mut cache = ReconcileCache::new();
+        reconcile_incremental(None, &settled, &INPUTS, &mut cache);
+        // The pre-`#incrementalreconcile` incremental path: the chain on the whole
+        // text inside the component scope, its memos warm on `settled`.
+        crate::derived_memo::with_component_scope(|| run_chain(&settled, &INPUTS));
+        let (_, whole_time) =
+            time(|| crate::derived_memo::with_component_scope(|| run_chain(edited, &INPUTS)));
+        let (reference, full_time) = time(|| reconcile_full(edited, &INPUTS));
+        let (report, incremental_time) =
+            time(|| reconcile_incremental(Some(&settled), edited, &INPUTS, &mut cache));
+        assert_eq!(report.reconciled, reference, "{label}");
+        eprintln!(
+            "{label:>22}: full {full_time:>10.2?}  whole-text chain {whole_time:>10.2?}  \
+             incremental {incremental_time:>10.2?}  mode={:?} reused={} chain_bytes={} exchange_bytes_indexed={} rebuilt={:?} \
+             slice_parses={} document_parses={} dirty={:?}",
+            report.mode,
+            report.reused,
+            report.chain_bytes,
+            report.exchange_bytes_indexed,
+            report.rebuilt,
+            report.slice_parses,
+            report.document_parses,
+            report.dirty_components
+        );
+    }
 }

@@ -140,7 +140,6 @@ fn even_sample(len: usize, max: usize) -> Vec<usize> {
 /// skipped. A file outside git, or with no commits, yields nothing. The owning
 /// git root is narrowed to the submodule root, as in [`show_rev`].
 pub fn sampled_file_revisions(file: &Path, max_versions: usize) -> Result<Vec<FileRevision>> {
-    use std::io::{BufRead, BufReader, Read, Write};
     let Ok((super_root, resolved)) = resolve_to_git_root(file) else {
         return Ok(Vec::new());
     };
@@ -164,15 +163,65 @@ pub fn sampled_file_revisions(file: &Path, max_versions: usize) -> Result<Vec<Fi
             Some((sha, secs))
         })
         .collect();
-    let picked: Vec<&(String, u64)> = even_sample(commits.len(), max_versions)
+    let picked: Vec<(String, u64)> = even_sample(commits.len(), max_versions)
         .into_iter()
-        .map(|index| &commits[index])
+        .map(|index| commits[index].clone())
         .collect();
+    cat_file_revisions(&git_root, &rel, &picked)
+}
+
+/// The newest `limit` committed versions of `file`, oldest first (`#dupwrite2`:
+/// the recorded history a `queue sync` repair proves a stale copy from once
+/// the state ledger has pruned past it). One `git log` plus one
+/// `git cat-file --batch`. A commit where the path is absent, and a non-UTF-8
+/// blob, are skipped. A file outside git, or with no commits, yields nothing.
+pub fn recent_file_revisions(file: &Path, limit: usize) -> Result<Vec<FileRevision>> {
+    let Ok((super_root, resolved)) = resolve_to_git_root(file) else {
+        return Ok(Vec::new());
+    };
+    let (git_root, _) = narrow_to_submodule(&super_root, &resolved);
+    let rel = relative_path_for_git_show(&resolved, &git_root)
+        .to_string_lossy()
+        .to_string();
+    let output = Command::new("git")
+        .current_dir(&git_root)
+        .args([
+            "log",
+            &format!("-{}", limit.max(1)),
+            "--format=%H %ct",
+            "--",
+            rel.as_str(),
+        ])
+        .output()?;
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+    let mut commits: Vec<(String, u64)> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let sha = fields.next()?.to_string();
+            let secs = fields.next()?.parse().ok()?;
+            Some((sha, secs))
+        })
+        .collect();
+    commits.reverse();
+    cat_file_revisions(&git_root, &rel, &commits)
+}
+
+/// Read `rel` at each `(sha, committed_secs)` through one
+/// `git cat-file --batch`, in order.
+fn cat_file_revisions(
+    git_root: &Path,
+    rel: &str,
+    picked: &[(String, u64)],
+) -> Result<Vec<FileRevision>> {
+    use std::io::{BufRead, BufReader, Read, Write};
     if picked.is_empty() {
         return Ok(Vec::new());
     }
     let mut child = Command::new("git")
-        .current_dir(&git_root)
+        .current_dir(git_root)
         .args(["cat-file", "--batch"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -195,7 +244,7 @@ pub fn sampled_file_revisions(file: &Path, max_versions: usize) -> Result<Vec<Fi
         .ok_or_else(|| anyhow::anyhow!("git cat-file: no stdout"))?;
     let mut reader = BufReader::new(stdout);
     let mut revisions = Vec::with_capacity(picked.len());
-    for (sha, secs) in &picked {
+    for (sha, secs) in picked {
         let mut header = String::new();
         if reader.read_line(&mut header)? == 0 {
             break;
@@ -682,6 +731,37 @@ mod tests {
         let loose = outside.path().join("loose.md");
         fs::write(&loose, "x\n").unwrap();
         assert!(sampled_file_revisions(&loose, 3).unwrap().is_empty());
+    }
+
+    #[test]
+    fn recent_file_revisions_reads_the_newest_versions_oldest_first() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        init_repo(root);
+        let doc = root.join("doc.md");
+        let versions = ["one\n", "two\n", "three\n", "four\n", "five\n"];
+        for version in versions {
+            fs::write(&doc, version).unwrap();
+            for args in [vec!["add", "doc.md"], vec!["commit", "-m", version.trim()]] {
+                Command::new("git")
+                    .current_dir(root)
+                    .args(&args)
+                    .output()
+                    .unwrap();
+            }
+        }
+        let recent: Vec<String> = recent_file_revisions(&doc, 3)
+            .unwrap()
+            .into_iter()
+            .map(|revision| revision.content)
+            .collect();
+        assert_eq!(recent, vec!["three\n", "four\n", "five\n"]);
+        assert_eq!(recent_file_revisions(&doc, 10).unwrap().len(), 5);
+
+        let outside = tempfile::TempDir::new().unwrap();
+        let loose = outside.path().join("loose.md");
+        fs::write(&loose, "x\n").unwrap();
+        assert!(recent_file_revisions(&loose, 3).unwrap().is_empty());
     }
 
     #[test]

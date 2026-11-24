@@ -26,6 +26,9 @@ pub enum DuplicateDropReason {
     IdenticalLiveHead,
     /// The row's whole work text is a truncated prefix of one other live row.
     TruncatedPrefix,
+    /// A copy of a row the operator named with `--keep-row` (`#dupwrite2`):
+    /// the same work text, or a strict prefix of it, at the same place.
+    KeptRowCopy,
 }
 
 /// One live row the repair removes. The keeper stays byte for byte.
@@ -62,6 +65,11 @@ struct LiveRow {
     has_children: bool,
     /// One-based document line, used only by the explicit prefix selector.
     line: usize,
+    /// The row's generated `[#q-…]` id, used only by `--keep-row`.
+    prompt_id: Option<String>,
+    /// Another row of the queue refers to the row's generated id (a reply,
+    /// follow-up or relation): it is never removed (`#dupwrite2`).
+    referenced: bool,
 }
 
 impl DuplicateDrop {
@@ -79,6 +87,12 @@ impl DuplicateDrop {
             ),
             DuplicateDropReason::TruncatedPrefix => format!(
                 "  queue {}: drop truncated prefix {}; it is a strict prefix of {}",
+                self.queue_id,
+                preview(&self.work_text),
+                preview(&self.kept_work_text)
+            ),
+            DuplicateDropReason::KeptRowCopy => format!(
+                "  queue {}: drop copy {}; keep the named row {}",
                 self.queue_id,
                 preview(&self.work_text),
                 preview(&self.kept_work_text)
@@ -117,7 +131,7 @@ impl DuplicatePrunePlan {
 /// work text in two queues is not a duplicate. An unparsable document is an
 /// error and [`DuplicatePrunePlan::document`] is not a partial edit.
 pub fn plan(document: &str) -> Result<DuplicatePrunePlan> {
-    plan_selected(document, None)
+    plan_selected(document, None, &[])
 }
 
 /// Plan exact duplicate collapse plus one explicitly selected semantic prefix.
@@ -126,13 +140,46 @@ pub fn plan(document: &str) -> Result<DuplicatePrunePlan> {
 /// has identified as truncated. Prefix relationships on every other line fail
 /// closed and remain byte-for-byte intact.
 pub fn plan_with_truncated_prefix_line(document: &str, line: usize) -> Result<DuplicatePrunePlan> {
-    plan_selected(document, Some(line))
+    plan_selected(document, Some(line), &[])
+}
+
+/// `#dupwrite2`: [`plan`] plus every live copy of each row the operator names
+/// by its generated `[#q-…]` id: a row at the same place whose work text is
+/// the named row's, or a strict prefix of it (at least
+/// [`crate::stale_typing_copies::STALE_PREFIX_MIN_CHARS`] characters). The
+/// operator's naming is the authority; each removed text is contained in
+/// the row that stays, so nothing typed is lost. A copy a worker holds, or
+/// one with child rows, stays. Each id must name exactly one live row.
+pub fn plan_keeping(document: &str, keep_rows: &[String]) -> Result<DuplicatePrunePlan> {
+    plan_selected(document, None, keep_rows)
+}
+
+/// Both explicit selectors at once: `--truncated-prefix-line` and
+/// `--keep-row` (see [`plan_with_truncated_prefix_line`] and
+/// [`plan_keeping`]).
+pub fn plan_selection(
+    document: &str,
+    truncated_prefix_line: Option<usize>,
+    keep_rows: &[String],
+) -> Result<DuplicatePrunePlan> {
+    plan_selected(document, truncated_prefix_line, keep_rows)
+}
+
+fn normalize_keep_id(id: &str) -> String {
+    id.trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .trim_start_matches('#')
+        .to_ascii_lowercase()
 }
 
 fn plan_selected(
     document: &str,
     truncated_prefix_line: Option<usize>,
+    keep_rows: &[String],
 ) -> Result<DuplicatePrunePlan> {
+    let keep: Vec<String> = keep_rows.iter().map(|id| normalize_keep_id(id)).collect();
+    let mut kept_found: Vec<usize> = vec![0; keep.len()];
     let components = agent_doc_element::element::parse(document)?;
     let mut drops = Vec::new();
     let mut replacements = Vec::new();
@@ -156,12 +203,23 @@ fn plan_selected(
             component.open_end,
             body,
             &spans,
-            truncated_prefix_line,
+            Selection {
+                truncated_prefix_line,
+                keep: &keep,
+            },
+            &mut kept_found,
         );
         if new_body != body {
             replacements.push((component.open_end, component.close_start, new_body));
         }
         drops.extend(body_drops);
+    }
+    for (id, found) in keep.iter().zip(&kept_found) {
+        anyhow::ensure!(
+            *found == 1,
+            "--keep-row {id}: {} live queue rows carry [#{id}]; it must name exactly one",
+            found
+        );
     }
     let mut rewritten = document.to_string();
     for (start, end, new_body) in replacements.into_iter().rev() {
@@ -173,21 +231,80 @@ fn plan_selected(
     })
 }
 
+/// The operator's explicit selectors.
+#[derive(Clone, Copy)]
+struct Selection<'a> {
+    truncated_prefix_line: Option<usize>,
+    /// Normalized generated ids named with `--keep-row`.
+    keep: &'a [String],
+}
+
 fn plan_body(
     queue_id: &str,
     document: &str,
     body_start: usize,
     body: &str,
     spans: &[(QueueEntry, Range<usize>)],
-    truncated_prefix_line: Option<usize>,
+    selection: Selection<'_>,
+    kept_found: &mut [usize],
 ) -> (Vec<DuplicateDrop>, String) {
-    let live = live_rows(document, body_start, spans);
+    let Selection {
+        truncated_prefix_line,
+        keep,
+    } = selection;
+    let mut live = live_rows(document, body_start, spans);
+    for row in &mut live {
+        row.referenced = row.prompt_id.as_ref().is_some_and(|id| {
+            body.to_ascii_lowercase()
+                .match_indices(&format!("#{id}"))
+                .any(|(at, _)| !row.range.contains(&at))
+        });
+    }
     let mut dropped = HashSet::new();
     let mut conflicting_projection_rows = HashSet::new();
     let mut keyed: Vec<(usize, DuplicateDrop)> = Vec::new();
 
+    // `#dupwrite2`: copies of a row the operator named go first.
+    for (slot, id) in keep.iter().enumerate() {
+        let named: Vec<usize> = live
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.prompt_id.as_deref() == Some(id.as_str()))
+            .map(|(index, _)| index)
+            .collect();
+        kept_found[slot] += named.len();
+        let [named] = named[..] else {
+            continue;
+        };
+        let kept = &live[named];
+        for (index, row) in live.iter().enumerate() {
+            let copy = row.work == kept.work
+                || (row.work.chars().count() >= crate::stale_typing_copies::STALE_PREFIX_MIN_CHARS
+                    && kept.work.len() > row.work.len()
+                    && kept.work.starts_with(row.work.as_str()));
+            if index == named
+                || !copy
+                || row.parent_span != kept.parent_span
+                || row.has_children
+                || row.claim_score >= 2
+                || row.referenced
+                || dropped.contains(&row.span)
+            {
+                continue;
+            }
+            dropped.insert(row.span);
+            keyed.push((
+                row.range.start,
+                drop_of(queue_id, DuplicateDropReason::KeptRowCopy, row, kept),
+            ));
+        }
+    }
+
     let mut groups: Vec<Vec<usize>> = Vec::new();
     for (index, row) in live.iter().enumerate() {
+        if dropped.contains(&row.span) {
+            continue;
+        }
         if let Some(group) = groups.iter_mut().find(|group| {
             live[group[0]].parent_span == row.parent_span && live[group[0]].work == row.work
         }) {
@@ -213,6 +330,7 @@ fn plan_body(
                 let row = &live[**index];
                 (
                     std::cmp::Reverse(row.claim_score),
+                    std::cmp::Reverse(row.referenced),
                     std::cmp::Reverse(row.has_children),
                     row.span,
                 )
@@ -224,7 +342,7 @@ fn plan_body(
                 continue;
             }
             let row = &live[index];
-            if row.has_children {
+            if row.has_children || row.referenced {
                 continue;
             }
             dropped.insert(row.span);
@@ -318,6 +436,8 @@ fn live_rows(
             if work.is_empty() {
                 return None;
             }
+            let prompt_id = agent_doc_element_queue::queue_prompt_stable_id(&prompt.text)
+                .filter(|id| id.starts_with("q-"));
             Some(LiveRow {
                 span,
                 parent_span: parent_span(spans, span),
@@ -325,7 +445,9 @@ fn live_rows(
                 claim_score: claim_score(&prompt.text),
                 has_children: has_nested_children(spans, span),
                 projection: projection_prefix(&prompt.text).trim().to_string(),
-                work: work.to_string(),
+                work,
+                prompt_id,
+                referenced: false,
                 line: document[..body_start + range.start]
                     .bytes()
                     .filter(|byte| *byte == b'\n')
@@ -352,8 +474,16 @@ fn entry_indent(entry: &QueueEntry) -> Option<usize> {
     }
 }
 
-fn work_text(text: &str) -> &str {
-    strip_attempt_projection_prefix(text).trim()
+/// Work text with every binary-owned marker removed: the lifecycle/attempt
+/// prefix, and (`#dupwrite2`) a generated `[#q-…]` occurrence id and a
+/// `⟦effect:N⟧` duplicate ordinal, which a copy is minted on its own.
+fn work_text(text: &str) -> String {
+    let work = strip_attempt_projection_prefix(text).trim();
+    let work = agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(work);
+    let work = crate::document_queue::strip_queue_effect_annotation(&work);
+    agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(&work)
+        .trim()
+        .to_string()
 }
 
 fn projection_prefix(text: &str) -> &str {
@@ -915,5 +1045,155 @@ mod tests {
         let plan = plan(&source).unwrap();
         assert!(plan.drops.is_empty());
         assert_eq!(plan.document, source);
+    }
+
+    // ---- `#dupwrite2` -----------------------------------------------------
+
+    const PIPE: &str = "I do like the pipe operator for commands as well.";
+    const LINK: &str = "[Declare lang](https://example.invalid/declare/) looks interesting.";
+
+    /// The live `agent:run` tail of 2026-11-24 once preflight admitted the
+    /// copies a retained merge wrote (`#dupwrite`): generated `[#q-…]` ids,
+    /// `⟦effect:N⟧` ordinals, and two bare copies fenced in `---`.
+    fn admitted_live() -> String {
+        format!(
+            concat!(
+                "<!-- agent:run id=\"main\" -->\n",
+                "- ### 📥 {pipe} ⟦effect:1⟧ [#q-8536fadf0285]\n",
+                "---\n",
+                "📥 {link} [#q-217e769965d7]\n",
+                "---\n",
+                "- ### 📥 {link} Is this a potential way to declare ⟦effect:1⟧ [#q-0feb5aebf877]\n",
+                "- ### 📥 {pipe} ⟦effect:2⟧ [#q-c26e3ea230ac]\n",
+                "- ### ~~🗑️ do [#subagentworkpool-8ac1]~~\n",
+                "- ### 📥 {link} Is this a potential way to declare guis from agent-doc [#q-140c87b4f232]\n",
+                "- ### 📥 {pipe} ⟦effect:3⟧ [#q-158f900202b6]\n",
+                "---\n",
+                "📥 {link} [#q-12d6f4ea6884]\n",
+                "---\n",
+                "- ### 📥 {link} Is this a potential way to declare ⟦effect:2⟧ [#q-37cd908220ef]\n",
+                "- ### 📥 {pipe} ⟦effect:4⟧ [#q-9e92831a7369]\n",
+                "- ### 📥 {link} Is this a potential way to declare guis from agent-doc to present information? [#q-68b3244de244]\n",
+                "<!-- /agent:run -->\n",
+            ),
+            pipe = PIPE,
+            link = LINK,
+        )
+    }
+
+    /// A generated `[#q-…]` and a `⟦effect:N⟧` ordinal are binary-owned:
+    /// rows that differ only by them are identical live rows. Measured on the
+    /// live document: `prune-duplicates` reported "no duplicate live queue
+    /// rows" for four copies of one row.
+    #[test]
+    fn dupwrite2_rows_differing_only_in_generated_ids_and_ordinals_are_identical() {
+        let plan = plan(&admitted_live()).unwrap();
+        let pipes = plan
+            .drops
+            .iter()
+            .filter(|drop| drop.work_text == PIPE)
+            .count();
+        assert_eq!(pipes, 3, "{:?}", plan.drops);
+        assert_eq!(plan.document.matches(PIPE).count(), 1, "{}", plan.document);
+        // The two fenced bare copies are identical too; each goes with its
+        // fence, and the two `… declare` copies collapse.
+        assert_eq!(plan.document.matches("[#q-217e769965d7]").count(), 1);
+        assert_eq!(plan.document.matches("[#q-12d6f4ea6884]").count(), 0);
+        assert_eq!(
+            plan.document.matches("---\n").count(),
+            2,
+            "{}",
+            plan.document
+        );
+        assert_eq!(
+            plan.document.matches("potential way to declare ⟦").count(),
+            1
+        );
+        let again = super::plan(&plan.document).unwrap();
+        assert!(again.drops.is_empty(), "{:?}", again.drops);
+    }
+
+    /// `--keep-row <q-id>`: the operator names the row to keep; every other
+    /// live copy of it (identical work text, or a strict prefix of it, at
+    /// the same place) goes. Each removed text is contained in the kept row.
+    #[test]
+    fn dupwrite2_keep_row_removes_every_copy_of_the_named_row() {
+        let plan = plan_keeping(&admitted_live(), &["q-68b3244de244".to_string()]).unwrap();
+        let expected = format!(
+            concat!(
+                "<!-- agent:run id=\"main\" -->\n",
+                "- ### 📥 {pipe} ⟦effect:1⟧ [#q-8536fadf0285]\n",
+                "- ### ~~🗑️ do [#subagentworkpool-8ac1]~~\n",
+                "- ### 📥 {link} Is this a potential way to declare guis from agent-doc to present information? [#q-68b3244de244]\n",
+                "<!-- /agent:run -->\n",
+            ),
+            pipe = PIPE,
+            link = LINK,
+        );
+        assert_eq!(plan.document, expected, "{:?}", plan.drops);
+        assert_eq!(plan.drops.len(), 8, "{:?}", plan.drops);
+        assert_eq!(
+            plan.drops
+                .iter()
+                .filter(|drop| drop.reason == DuplicateDropReason::KeptRowCopy)
+                .count(),
+            5,
+            "{:?}",
+            plan.drops
+        );
+        let report = plan.report("session.md", false);
+        assert!(report.contains("keep the named row"), "{report}");
+        // Idempotent.
+        let again = plan_keeping(&plan.document, &["#q-68b3244de244".to_string()]).unwrap();
+        assert!(again.drops.is_empty(), "{:?}", again.drops);
+    }
+
+    #[test]
+    fn dupwrite2_a_copy_another_row_refers_to_stays_and_keeps() {
+        let source = format!(
+            concat!(
+                "<!-- agent:run id=\"main\" -->\n",
+                "- {pipe} [#q-0000000000b1]\n",
+                "- {pipe} ⟦effect:2⟧ [#q-0000000000b2]\n",
+                "- re [#q-0000000000b2]: yes\n",
+                "- {link} [#q-0000000000b3]\n",
+                "- re [#q-0000000000b3]: noted\n",
+                "- {link} Is this a way [#q-0000000000b4]\n",
+                "<!-- /agent:run -->\n",
+            ),
+            pipe = PIPE,
+            link = LINK,
+        );
+        let plan = plan_keeping(&source, &["q-0000000000b4".to_string()]).unwrap();
+        assert_eq!(
+            plan.document,
+            source.replace(&format!("- {PIPE} [#q-0000000000b1]\n"), ""),
+            "{:?}",
+            plan.drops
+        );
+    }
+
+    #[test]
+    fn dupwrite2_keep_row_needs_one_live_row_and_spares_workers_and_parents() {
+        assert!(plan_keeping(&admitted_live(), &["q-000000000000".to_string()]).is_err());
+        let source = format!(
+            concat!(
+                "<!-- agent:run id=\"main\" -->\n",
+                "- 🚧 [#subagent:a#1] {link} Is this\n",
+                "- {link} Is this a way\n",
+                "  - keep my note\n",
+                "- {link}\n",
+                "- {link} Is this a way to declare guis [#q-0000000000a1]\n",
+                "<!-- /agent:run -->\n",
+            ),
+            link = LINK,
+        );
+        let plan = plan_keeping(&source, &["q-0000000000a1".to_string()]).unwrap();
+        assert_eq!(
+            plan.document,
+            source.replace(&format!("- {LINK}\n"), ""),
+            "{:?}",
+            plan.drops
+        );
     }
 }

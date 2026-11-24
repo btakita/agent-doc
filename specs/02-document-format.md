@@ -1351,7 +1351,7 @@ One or more `agent:run` components hold batches of prompts consumed sequentially
 | Form | Example | Description |
 |------|---------|-------------|
 | Single-line | `- ### do #fix1` | Bare `- ` prefix at column 0 followed by a binary-owned `### ` navigation heading. Any top-level list item missing the heading self-heals on queue maintenance/sync. The heading is always the first item content, before lifecycle emoji, routing tags, or strike markup (`- ### 🚧 #subagents do …`, `- ### ~~done …~~`); it is presentation state and is excluded from prompt/work identity. A single stray leading backtick (`` `- text ``, a common code-span mistype) is normalized to the same canonical headed form instead of being silently skipped as inert text (`#queue-line-leading-backtick-drop`). |
-| Bare paragraph | Column-zero prose at an item boundary, optionally followed by more prose or a blockquote | Distinct free-text prompt; rewrites normalize it to a fenced multiline prompt (`#queuefreetextsplit`) |
+| Bare paragraph | Column-zero prose at an item boundary, optionally followed by more prose or a blockquote | Distinct free-text prompt (`#queuefreetextsplit`). Rewrites normalize a one-line head to a single-line list row (`- ### …`) and a multi-line paragraph to a fenced multiline prompt; a one-line `---` fence would render as a thematic break plus a setext heading (`#dupwrite2`) |
 | Multi-line (tilde) | `~~~prompt`...`~~~` | Fenced with `~~~prompt` opener |
 | Multi-line (dash) | `---`...`---` | Fenced with bare `---` |
 | Recovered evidence task | Explicit request before or after a balanced Markdown code fence | One exact-span multiline prompt; list-looking evidence inside the fence is never a separate prompt |

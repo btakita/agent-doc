@@ -1161,11 +1161,16 @@ fn parse_spans_uncached(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<u
             {
                 end_i += 1;
             }
+            // `#dupwrite2`: a one-line bare head is a row typed before its
+            // `- `; it renders as that list row. Only a multi-line paragraph
+            // (or one with a blockquote) needs the `---` prompt fence, which
+            // a one-line head would turn into a thematic break plus a setext
+            // heading.
             entries.push((
                 QueueEntry::Prompt(QueuePrompt {
                     note: None,
                     text: lines[i..end_i].join("\n"),
-                    multiline: true,
+                    multiline: end_i - i > 1,
                     indent: 0,
                     ordered_marker: None,
                 }),
@@ -16684,6 +16689,67 @@ mod tests {
         );
     }
 
+    /// `#dupwrite2`: a one-line bare head (a row typed before its `- `, or a
+    /// stale copy of one) renders as a list row (navigation headings are a
+    /// later normalization). Rendered as a `---` prompt
+    /// fence it read as a thematic break plus a setext H2 heading: measured on
+    /// a session document 2026-11-24, where preflight's q-id admission
+    /// rewrote two stale bare copies that way. Multi-line bare paragraphs, and
+    /// a prompt the operator fenced in `---` themselves, keep their fence.
+    #[test]
+    fn dupwrite2_a_one_line_bare_head_renders_as_a_list_row_not_a_setext_fence() {
+        let body = concat!(
+            "- first row\n",
+            "bare row typed before its list marker\n",
+            "- last row\n",
+        );
+        let entries = parse(body).unwrap();
+        assert_eq!(
+            render(&entries),
+            concat!(
+                "- first row\n",
+                "- bare row typed before its list marker\n",
+                "- last row\n",
+            )
+        );
+        let paragraph = concat!(
+            "- first row\n",
+            "The terminal windows closed because a scope was left behind.\n",
+            "> diagnostic detail\n",
+        );
+        assert!(render(&parse(paragraph).unwrap()).contains(concat!(
+            "---\n",
+            "The terminal windows closed because a scope was left behind.\n",
+            "> diagnostic detail\n",
+            "---\n",
+        )));
+        let fenced = "- first row\n---\noperator fenced prompt\n---\n";
+        assert_eq!(render(&parse(fenced).unwrap()), fenced);
+    }
+
+    /// `#dupwrite2`, the incident's path: duplicate-effect annotation
+    /// re-rendered the queue body that held a stale one-line bare copy
+    /// (agent-loop superproject commits df1dcf44c9 -> 313a3fa5c5). The copy
+    /// stays a list row; no `---` pair is written around it.
+    #[test]
+    fn dupwrite2_effect_annotation_never_fences_a_one_line_bare_copy() {
+        let body = concat!(
+            "- 📥 I do like the pipe operator for commands as well.\n",
+            "📥 [Declare lang](https://example.invalid/) looks interesting.\n",
+            "- 📥 I do like the pipe operator for commands as well.\n",
+        );
+        let entries = parse(body).unwrap();
+        let converged =
+            converge_queue_via_lifecycle(&entries, &entries, &std::collections::HashSet::new())
+                .expect("identical rows get effect ordinals");
+        let rendered = render(&converged);
+        assert!(!rendered.contains("---"), "{rendered}");
+        assert!(
+            rendered.contains("- 📥 [Declare lang](https://example.invalid/) looks interesting.\n"),
+            "{rendered}"
+        );
+    }
+
     /// A terminal row with one retained-projection byte welded before its list
     /// marker must not be promoted by `#queuefreetextsplit`.  The canonical
     /// Response child proves that the line is generated terminal structure,
@@ -16768,7 +16834,8 @@ mod tests {
             QueueEntry::Prompt(QueuePrompt {
                 note: None,
                 text: "separate work after a blank line".to_string(),
-                multiline: true,
+                // `#dupwrite2`: one line renders as a list row, not a fence.
+                multiline: false,
                 indent: 0,
                 ordered_marker: None,
             })

@@ -2453,11 +2453,18 @@ pub fn consume(effects: &impl QueueCommandEffects, file: &Path, count: usize) ->
 /// exact live document row before a strict semantic prefix can be removed.
 /// Struck history stays. The default is a dry report; `--apply` writes. The
 /// keeper's claim is not released.
+///
+/// `#dupwrite2`: generated `[#q-…]` ids and `⟦effect:N⟧` ordinals are
+/// binary-owned too, so copies that differ only by them are identical.
+/// `keep_rows` names rows by generated id; every other live copy of a named
+/// row (same work text, or a strict prefix of it, at the same place) is
+/// removed. The operator's naming is the authority for those removals.
 pub fn prune_duplicates(
     effects: &impl QueueCommandEffects,
     file: &Path,
     apply: bool,
     truncated_prefix_line: Option<usize>,
+    keep_rows: &[String],
 ) -> Result<()> {
     // Same single-writer lease as `prune-noise`: idle-watch and preflight
     // defer across the authoritative read, plan, and converged write. A failed
@@ -2466,13 +2473,12 @@ pub fn prune_duplicates(
         .then(|| crate::queue_edit_owner::QueueEditGuard::acquire(file))
         .transpose()?;
     let content = effects.current_document_content(file, "queue_prune_duplicates")?;
-    let plan = match truncated_prefix_line {
-        Some(line) => {
-            agent_doc_queue::prune_duplicates::plan_with_truncated_prefix_line(&content, line)
-        }
-        None => agent_doc_queue::prune_duplicates::plan(&content),
-    }
-    .with_context(|| format!("{}: queue duplicate prune refused to parse", file.display()))?;
+    let plan = agent_doc_queue::prune_duplicates::plan_selection(
+        &content,
+        truncated_prefix_line,
+        keep_rows,
+    )
+    .with_context(|| format!("{}: queue duplicate prune refused to plan", file.display()))?;
     if plan.drops.is_empty() || !apply {
         print!("{}", plan.report(&file.display().to_string(), false));
         return Ok(());
@@ -2484,18 +2490,29 @@ pub fn prune_duplicates(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "queue_prune_duplicates file={} removed={} base_hash={} source_component=queue operation=prune_duplicates proof={} truncated_prefix_line={}",
+            "queue_prune_duplicates file={} removed={} base_hash={} source_component=queue operation=prune_duplicates proof={} truncated_prefix_line={} keep_rows={} removed_rows={:?}",
             file.display(),
             plan.drops.len(),
             base_hash,
-            if truncated_prefix_line.is_some() {
-                "identical_live_head_or_explicit_truncated_prefix"
-            } else {
-                "identical_live_head"
+            match (truncated_prefix_line.is_some(), keep_rows.is_empty()) {
+                (false, true) => "identical_live_head",
+                (true, true) => "identical_live_head_or_explicit_truncated_prefix",
+                (false, false) => "identical_live_head_or_operator_named_keeper",
+                (true, false) =>
+                    "identical_live_head_or_explicit_truncated_prefix_or_operator_named_keeper",
             },
             truncated_prefix_line
                 .map(|line| line.to_string())
-                .unwrap_or_else(|| "none".to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            if keep_rows.is_empty() {
+                "none".to_string()
+            } else {
+                keep_rows.join(",")
+            },
+            plan.drops
+                .iter()
+                .map(|drop| drop.work_text.as_str())
+                .collect::<Vec<_>>()
         ),
     );
     print!("{}", plan.report(&file.display().to_string(), true));
@@ -8015,11 +8032,11 @@ mod prune_duplicates_cmd_tests {
             writes: Cell::new(0),
             expect_lease: Cell::new(false),
         };
-        prune_duplicates(&effects, &file, false, Some(3)).unwrap();
+        prune_duplicates(&effects, &file, false, Some(3), &[]).unwrap();
         assert_eq!(effects.writes.get(), 0);
         assert_eq!(effects.content.borrow().as_str(), source);
         effects.expect_lease.set(true);
-        prune_duplicates(&effects, &file, true, Some(3)).unwrap();
+        prune_duplicates(&effects, &file, true, Some(3), &[]).unwrap();
         assert!(
             crate::queue_edit_owner::read_queue_edit_owner_lease(&file.to_string_lossy()).is_none(),
             "apply must release the queue-edit lease after convergence"
@@ -8029,7 +8046,7 @@ mod prune_duplicates_cmd_tests {
         assert!(written.contains("[#subagent:shell#1]"));
         assert!(!written.contains("- If the claiming\n"));
         assert_eq!(written.matches("[#subagent:shell#1]").count(), 1);
-        prune_duplicates(&effects, &file, true, Some(3)).unwrap();
+        prune_duplicates(&effects, &file, true, Some(3), &[]).unwrap();
         assert_eq!(effects.writes.get(), 1, "a second apply is a no-op");
         assert_eq!(effects.content.borrow().as_str(), written);
     }
@@ -8057,8 +8074,8 @@ mod prune_duplicates_cmd_tests {
                 .expect("the other owner publishes its lease");
 
         // The dry run takes no lock, so it still reports under contention.
-        prune_duplicates(&effects, &file, false, None).unwrap();
-        let error = prune_duplicates(&effects, &file, true, None).unwrap_err();
+        prune_duplicates(&effects, &file, false, None, &[]).unwrap();
+        let error = prune_duplicates(&effects, &file, true, None, &[]).unwrap_err();
         assert!(
             error.to_string().contains("queue mutation deferred"),
             "{error:#}"
@@ -8074,7 +8091,7 @@ mod prune_duplicates_cmd_tests {
 
         drop(holder);
         effects.expect_lease.set(true);
-        prune_duplicates(&effects, &file, true, None).unwrap();
+        prune_duplicates(&effects, &file, true, None, &[]).unwrap();
         assert_eq!(effects.writes.get(), 1, "apply writes once the lock frees");
     }
 
@@ -8096,12 +8113,12 @@ mod prune_duplicates_cmd_tests {
             expect_lease: Cell::new(false),
         };
 
-        prune_duplicates(&effects, &file, false, None).unwrap();
+        prune_duplicates(&effects, &file, false, None, &[]).unwrap();
         assert_eq!(effects.writes.get(), 0);
         assert_eq!(effects.content.borrow().as_str(), source);
 
         effects.expect_lease.set(true);
-        prune_duplicates(&effects, &file, true, None).unwrap();
+        prune_duplicates(&effects, &file, true, None, &[]).unwrap();
         assert_eq!(effects.writes.get(), 0);
         assert_eq!(effects.content.borrow().as_str(), source);
         assert!(
@@ -8128,16 +8145,56 @@ mod prune_duplicates_cmd_tests {
             expect_lease: Cell::new(false),
         };
 
-        prune_duplicates(&effects, &file, false, None).unwrap();
-        prune_duplicates(&effects, &file, true, None).unwrap();
+        prune_duplicates(&effects, &file, false, None, &[]).unwrap();
+        prune_duplicates(&effects, &file, true, None, &[]).unwrap();
         assert_eq!(effects.writes.get(), 0);
         assert_eq!(effects.content.borrow().as_str(), source);
 
         effects.expect_lease.set(true);
-        prune_duplicates(&effects, &file, true, Some(2)).unwrap();
+        prune_duplicates(&effects, &file, true, Some(2), &[]).unwrap();
         assert_eq!(effects.writes.get(), 1);
         let written = effects.content.borrow();
         assert!(!written.contains("- 📥 Run queue tests\n"));
         assert!(written.contains("- Run queue tests before publishing the release\n"));
+    }
+
+    /// `#dupwrite2`: `--keep-row` removes every copy of the named row,
+    /// including a `---`-fenced bare copy, in one write; an unknown id
+    /// refuses and writes nothing.
+    #[test]
+    fn prune_duplicates_keep_row_removes_every_copy_of_the_named_row() {
+        let source = "\
+<!-- agent:run id=\"main\" -->
+- ### 📥 Declare lang looks interesting. [#q-0000000000c1]
+---
+📥 Declare lang looks interesting. [#q-0000000000c2]
+---
+- ### 📥 Declare lang looks interesting. Is this a way [#q-0000000000c3]
+- ### 📥 Declare lang looks interesting. Is this a way to declare guis? [#q-0000000000c4]
+<!-- /agent:run -->
+";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, source).unwrap();
+        let effects = Mem {
+            content: std::cell::RefCell::new(source.to_string()),
+            writes: Cell::new(0),
+            expect_lease: Cell::new(true),
+        };
+        assert!(
+            prune_duplicates(&effects, &file, true, None, &["q-0000000000ff".to_string()]).is_err()
+        );
+        assert_eq!(effects.writes.get(), 0);
+        prune_duplicates(&effects, &file, true, None, &["q-0000000000c4".to_string()]).unwrap();
+        assert_eq!(effects.writes.get(), 1);
+        assert_eq!(
+            effects.content.borrow().as_str(),
+            "\
+<!-- agent:run id=\"main\" -->
+- ### 📥 Declare lang looks interesting. Is this a way to declare guis? [#q-0000000000c4]
+<!-- /agent:run -->
+"
+        );
     }
 }

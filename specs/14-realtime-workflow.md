@@ -2255,6 +2255,39 @@ The rules:
   state ledger. The kept copy has children, else is the last without a
   `⟦effect:N⟧` ordinal, else the last. Without that proof nothing is removed,
   and a removed copy's text is always inside the row that stays.
+- **The proof outlives the state ledger's window (`#dupwrite2`).** Measured
+  on the same document an hour later: `queue sync` removed nothing. The state
+  ledger had pruned every content fact older than the damage, and git held no
+  commit between 12:03:43 -0500 (the operator mid-way through typing
+  `- I do like the pipe`) and 12:30:48 (every copy present). Now:
+  - `queue sync` also reads the newest 128 committed versions of the
+    document (one `git log` plus one `git cat-file --batch`; only versions
+    whose text holds a candidate's first 8 characters are parsed), ordered
+    with the ledger facts by time. Preflight reads only the committed HEAD
+    and the ledger, as before.
+  - An exact duplicate is proven when a version held the row once, as itself
+    or as one typing cut of it (at least 8 characters): the 12:03 commit
+    proves the pipe row was one row.
+  - A typing snapshot needs a witnessed replacement: a version held the
+    copy, and a LATER version held a longer cut on the way to the newer row
+    with the copy gone. A row the operator kept beside a longer row added
+    later (an hour or a day apart in the committed history) was never
+    replaced by it, so it stays.
+  - A bare copy a queue rewrite fenced as a `---` prompt is removed with
+    both fence lines. A copy any ledger claim holds is never removed; a
+    claimed copy is the keeper. A removed copy's generated `[#q-…]` and
+    `⟦effect:N⟧` go with its line; the keeper keeps its own ordinal
+    (`annotate_duplicate_queue_effects` never renames a lone survivor).
+  - Candidates without proof stay and are logged
+    `stale_typing_copy_unproven … count=N rows=[…] (#dupwrite2)`.
+  - The `---` fences themselves came from `#queuefreetextsplit`: preflight's
+    q-id admission re-rendered each one-line bare copy as a `---` prompt
+    fence, which Markdown reads as a thematic break plus a setext H2. A
+    one-line bare head now parses as a single-line prompt and renders as a
+    list row; only a multi-line bare paragraph keeps the fence.
+  - Copies no recorded version proves stay for the operator, who can name
+    the row to keep: `agent-doc queue prune-duplicates <FILE> --keep-row
+    <q-id> --apply` (`#pruneduplicates`).
 
 The regression
 `typingdupe_composed_retained_write_never_reinserts_a_stale_typing_snapshot`

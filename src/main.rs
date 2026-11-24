@@ -6638,7 +6638,9 @@ enum QueueAction {
     /// unless `--truncated-prefix-line` explicitly selects its exact document
     /// row; text-prefix shape alone is never deletion authority. Struck history
     /// stays. Identical directive heads that `prune-noise` keeps are in scope
-    /// here. Dry run unless `--apply`. Does not release a claim.
+    /// here. Generated `[#q-…]` ids and `⟦effect:N⟧` ordinals are binary-owned
+    /// too: copies differing only by them are identical (`#dupwrite2`). Dry run
+    /// unless `--apply`. Does not release a claim.
     #[command(name = "prune-duplicates")]
     PruneDuplicates {
         /// Path to the session document
@@ -6650,6 +6652,13 @@ enum QueueAction {
         /// truncated prefix. Only that row may be prefix-pruned.
         #[arg(long, value_name = "N")]
         truncated_prefix_line: Option<std::num::NonZeroUsize>,
+        /// Keep this row (its generated id, e.g. `q-68b3244de244`) and remove
+        /// every other live copy of it: the same work text, or a strict prefix
+        /// of it, at the same place. A worker's copy or a copy with child rows
+        /// stays. The id must name exactly one live row. Repeat for each row
+        /// (`#dupwrite2`).
+        #[arg(long = "keep-row", value_name = "ID")]
+        keep_rows: Vec<String>,
     },
 }
 
@@ -11915,6 +11924,7 @@ fn try_main() -> anyhow::Result<()> {
                 file,
                 apply,
                 truncated_prefix_line,
+                keep_rows,
             } => {
                 let queue_effects = CliQueueCommandEffects;
                 agent_doc_queue_io::queue_cmd::prune_duplicates(
@@ -11922,6 +11932,7 @@ fn try_main() -> anyhow::Result<()> {
                     &file,
                     apply,
                     truncated_prefix_line.map(std::num::NonZeroUsize::get),
+                    &keep_rows,
                 )
             }
         },
@@ -12552,6 +12563,7 @@ mod recycle_force_tests {
                         file,
                         apply,
                         truncated_prefix_line,
+                        keep_rows,
                     },
             } => {
                 assert_eq!(file, PathBuf::from("tasks/session.md"));
@@ -12560,6 +12572,32 @@ mod recycle_force_tests {
                     truncated_prefix_line.map(std::num::NonZeroUsize::get),
                     Some(17)
                 );
+                assert!(keep_rows.is_empty());
+            }
+            _ => panic!("expected queue prune-duplicates"),
+        }
+    }
+
+    #[test]
+    fn queue_prune_duplicates_parses_repeated_keep_rows() {
+        match parse(&[
+            "agent-doc",
+            "queue",
+            "prune-duplicates",
+            "tasks/session.md",
+            "--keep-row",
+            "q-68b3244de244",
+            "--keep-row",
+            "#q-9e92831a7369",
+        ]) {
+            Commands::Queue {
+                action:
+                    QueueAction::PruneDuplicates {
+                        apply, keep_rows, ..
+                    },
+            } => {
+                assert!(!apply);
+                assert_eq!(keep_rows, vec!["q-68b3244de244", "#q-9e92831a7369"]);
             }
             _ => panic!("expected queue prune-duplicates"),
         }

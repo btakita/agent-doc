@@ -9,7 +9,7 @@ use agent_doc_queue::reconcile_incremental::{
     reconcile_incremental,
 };
 use agent_doc_queue::self_repair::{SelfRepair, self_repair_document_with_claims};
-use agent_doc_queue::stale_typing_copies::drop_stale_typing_copies;
+use agent_doc_queue::stale_typing_copies::drop_stale_typing_copies_with;
 
 /// The external answers the queue reconcile passes read for one document
 /// revision (`#incrementalreconcile`): claim-ledger attempt liveness and row
@@ -202,8 +202,13 @@ pub fn self_repair_document_for(file: &Path, content: &str) -> Option<(String, V
         Some((document, repairs)) => (document, repairs),
         None => (content.to_string(), Vec::new()),
     };
-    let (document, stale) = drop_stale_typing_copies(&document, &mut || typing_history_for(file));
-    repairs.extend(stale);
+    let stale = drop_stale_typing_copies_with(
+        &document,
+        &mut |candidates| typing_history_for(file, candidates),
+        &|row| sources.is_claimed(row),
+    );
+    let document = stale.document;
+    repairs.extend(stale.repairs);
     carry_self_repair_rewrites(file, &repairs);
     (document != content).then_some((document, repairs))
 }
@@ -211,17 +216,51 @@ pub fn self_repair_document_for(file: &Path, content: &str) -> Option<(String, V
 /// Bound on each content-bearing fact stream [`typing_history_for`] reads.
 const TYPING_HISTORY_EVENTS: usize = 16;
 
+/// Bound on the committed versions [`typing_history_with_commits_for`] reads
+/// (`#dupwrite2`).
+const TYPING_HISTORY_COMMITS: usize = 128;
+
 /// `#dupwrite`: the recorded versions of `file` that prove a row was an older
 /// cut of another (oldest first): the committed copy, then the newest merge
 /// baselines and retained-write cuts and targets from the state ledger. An
 /// unreadable source contributes nothing, so a repair is only ever withheld.
-pub fn typing_history_for(file: &Path) -> agent_doc_queue::stale_typing_copies::TypingHistory {
-    let mut versions: Vec<String> = agent_doc_git_io::revision::show_head(file)
-        .ok()
-        .flatten()
-        .into_iter()
-        .collect();
-    let recorded = || -> anyhow::Result<Vec<(u64, String)>> {
+pub fn typing_history_for(
+    file: &Path,
+    candidates: &[String],
+) -> agent_doc_queue::stale_typing_copies::TypingHistory {
+    typing_history_from(file, 1, candidates)
+}
+
+/// `#dupwrite2`: [`typing_history_for`] plus the newest
+/// [`TYPING_HISTORY_COMMITS`] committed versions of `file`, for the explicit
+/// `queue sync` repair. The state ledger keeps only its newest content
+/// facts: measured 2026-11-24, an hour after the operator typed, every one of
+/// them held the already-damaged document, while the committed copy from
+/// mid-typing still proved a row was typed once.
+pub fn typing_history_with_commits_for(
+    file: &Path,
+    candidates: &[String],
+) -> agent_doc_queue::stale_typing_copies::TypingHistory {
+    typing_history_from(file, TYPING_HISTORY_COMMITS, candidates)
+}
+
+/// Committed versions (at most `commits`) and recorded state-ledger
+/// versions of `file`, ordered by time (oldest first), so "a later version"
+/// in the proof is later in fact. Only versions that can bear on
+/// `candidates` are parsed
+/// ([`agent_doc_queue::stale_typing_copies::TypingHistory::from_relevant_documents`]).
+fn typing_history_from(
+    file: &Path,
+    commits: usize,
+    candidates: &[String],
+) -> agent_doc_queue::stale_typing_copies::TypingHistory {
+    let mut versions: Vec<(u64, String)> =
+        agent_doc_git_io::revision::recent_file_revisions(file, commits)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|revision| (revision.committed_secs, revision.content))
+            .collect();
+    let recorded = || -> anyhow::Result<Vec<(u64, u64, String)>> {
         let Some(root) = agent_doc_fs::find_project_root(file) else {
             return Ok(Vec::new());
         };
@@ -252,21 +291,27 @@ pub fn typing_history_for(file: &Path) -> agent_doc_queue::stale_typing_copies::
                 };
                 for field in fields {
                     if let Some(content) = payload["fact"][*field].as_str() {
-                        recorded.push((event.sequence, content.to_string()));
+                        recorded.push((event.sequence, event.timestamp, content.to_string()));
                     }
                 }
             }
         }
-        recorded.sort_by_key(|(sequence, _)| *sequence);
+        recorded.sort_by_key(|(sequence, _, _)| *sequence);
         Ok(recorded)
     };
     versions.extend(
         recorded()
             .unwrap_or_default()
             .into_iter()
-            .map(|(_, content)| content),
+            .map(|(_, timestamp, content)| (timestamp, content)),
     );
-    agent_doc_queue::stale_typing_copies::TypingHistory::from_documents(&versions)
+    // Stable: committed copies before ledger facts of the same second, and
+    // ledger facts in sequence order.
+    versions.sort_by_key(|(timestamp, _)| *timestamp);
+    let contents: Vec<String> = versions.into_iter().map(|(_, content)| content).collect();
+    agent_doc_queue::stale_typing_copies::TypingHistory::from_relevant_documents(
+        &contents, candidates,
+    )
 }
 
 /// The response passes of `agent-doc queue sync`
@@ -281,11 +326,26 @@ pub fn queue_sync_response_chain_for(
     let mut chain = sources.with_inputs(|inputs| {
         agent_doc_queue::reconcile_incremental::queue_sync_response_chain(content, inputs)
     });
-    // `#dupwrite`: proven stale copies of the operator's typed rows.
-    let (document, stale) =
-        drop_stale_typing_copies(&chain.document, &mut || typing_history_for(file));
-    chain.document = document;
-    chain.repairs.extend(stale);
+    // `#dupwrite`: proven stale copies of the operator's typed rows, with
+    // the committed history as proof too (`#dupwrite2`).
+    let stale = drop_stale_typing_copies_with(
+        &chain.document,
+        &mut |candidates| typing_history_with_commits_for(file, candidates),
+        &|row| sources.is_claimed(row),
+    );
+    if !stale.unproven.is_empty() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "stale_typing_copy_unproven file={} source=queue_sync count={} rows={:?} (#dupwrite2): no recorded version shows these rows typed once or typed on from, so they stay",
+                file.display(),
+                stale.unproven.len(),
+                stale.unproven
+            ),
+        );
+    }
+    chain.document = stale.document;
+    chain.repairs.extend(stale.repairs);
     carry_self_repair_rewrites(file, &chain.repairs);
     chain
 }
@@ -344,4 +404,107 @@ pub fn reconcile_chain_full_for(file: &Path, content: &str) -> Reconciled {
 
 fn collapse(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::process::Command;
+
+    fn git(repo: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed");
+    }
+
+    fn doc(run: &str) -> String {
+        format!(
+            concat!(
+                "---\nagent_doc_format: template\n---\n\n",
+                "## Run <!-- agent:run id=\"main\" subagents go -->\n",
+                "{}",
+                "<!-- /agent:run -->\n\n",
+                "## Exchange <!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
+            ),
+            run
+        )
+    }
+
+    const PIPE: &str = "I do like the pipe operator for commands as well.";
+    const SNAP: &str = "[Declare lang](https://example.invalid/declare/) looks interesting.";
+    const FINISHED: &str = "[Declare lang](https://example.invalid/declare/) looks interesting. Is this a way to declare guis from agent-doc to present information?";
+
+    /// `#dupwrite2`: the state ledger no longer reaches the typing (no
+    /// project ledger here at all), but the document's committed history
+    /// does: `queue sync`'s chain removes the pipe copies that a commit from
+    /// mid-typing proves were one row, and keeps (and logs) the Declare-lang
+    /// snapshot that nothing recorded ever showed replaced.
+    #[test]
+    fn dupwrite2_queue_sync_proves_copies_from_the_committed_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+        git(repo, &["init", "-b", "main"]);
+        git(repo, &["config", "user.email", "dev@example.com"]);
+        git(repo, &["config", "user.name", "Dev"]);
+        let file = repo.join("session.md");
+        fs::write(&file, doc("- I do like the pipe\n")).unwrap();
+        git(repo, &["add", "session.md"]);
+        git(repo, &["commit", "-m", "typing"]);
+        let damaged = doc(&format!(
+            concat!(
+                "- ### 📥 {pipe} ⟦effect:1⟧ [#q-000000000001]\n",
+                "---\n",
+                "📥 {snap} [#q-000000000002]\n",
+                "---\n",
+                "- ### 📥 {pipe} ⟦effect:2⟧ [#q-000000000003]\n",
+                "- ### 📥 {finished} [#q-000000000004]\n",
+            ),
+            pipe = PIPE,
+            snap = SNAP,
+            finished = FINISHED,
+        ));
+        fs::write(&file, &damaged).unwrap();
+        git(repo, &["commit", "-am", "damaged"]);
+
+        let chain = queue_sync_response_chain_for(&file, &damaged);
+        assert_eq!(
+            chain.document,
+            doc(&format!(
+                concat!(
+                    "---\n",
+                    "📥 {snap} [#q-000000000002]\n",
+                    "---\n",
+                    "- ### 📥 {pipe} ⟦effect:2⟧ [#q-000000000003]\n",
+                    "- ### 📥 {finished} [#q-000000000004]\n",
+                ),
+                pipe = PIPE,
+                snap = SNAP,
+                finished = FINISHED,
+            )),
+            "{:?}",
+            chain.repairs
+        );
+        assert_eq!(
+            chain
+                .repairs
+                .iter()
+                .filter(|repair| repair.kind
+                    == agent_doc_queue::self_repair::SelfRepairKind::StaleTypingCopy)
+                .count(),
+            1
+        );
+        // Preflight's own pass reads only the committed HEAD and the ledger:
+        // HEAD is the damaged copy, so it proves nothing.
+        assert!(
+            self_repair_document_for(&file, &damaged)
+                .is_none_or(|(document, _)| document.contains("⟦effect:1⟧"))
+        );
+    }
 }

@@ -12,24 +12,38 @@
 //! a queue component with no claim projection, no authored `[#id]` (a
 //! generated `[#q-…]` occurrence id and `⟦…⟧` markers are the binary's and
 //! are ignored), no child rows and no generated response structure, or a
-//! bare line at column 0 (a row typed before its `- `). It is a copy of a **newer row** at the same depth under
-//! the same parent when, comparing work text (list marker, `###` heading and
-//! lifecycle/intake projection removed):
+//! bare line at column 0 (a row typed before its `- `). It is a copy of a
+//! **newer row** at the same depth under the same parent when, comparing
+//! work text (list marker, `###` heading and lifecycle/intake projection
+//! removed):
 //!
 //! - **exact duplicate**: the work texts are equal, and some recorded version
-//!   of the document held that row exactly once (the doubling came later).
-//!   Only prose rows (with a space) qualify; a repeated bare link or `#tag`
-//!   is list structure. A copy with child rows stays, else the last copy
-//!   without a `⟦effect:N⟧` duplicate ordinal, else the last copy;
+//!   of the document held that row exactly once, as itself or as one typing
+//!   cut of it (`#dupwrite2`: a committed copy from while the operator was
+//!   typing `- I do like the pipe` proves the finished row was one row): the
+//!   doubling came later. Only prose rows (with a space) qualify; a repeated
+//!   bare link or `#tag` is list structure. A claimed copy stays, else a copy
+//!   with child rows, else the last copy without a `⟦effect:N⟧` duplicate
+//!   ordinal, else the last copy;
 //! - **typing snapshot**: the copy's work text (at least
-//!   [`STALE_PREFIX_MIN_CHARS`]) is a strict prefix of the newer row's, and a
-//!   recorded version held the copy while the newer row did not exist yet:
-//!   the operator typed the newer row on from it.
+//!   [`STALE_PREFIX_MIN_CHARS`]) is a strict prefix of the newer row's, a
+//!   recorded version held the copy, and a LATER version held a longer cut on
+//!   the way to the newer row with the copy gone: the operator typed on from
+//!   it (`#dupwrite2`). Holding the copy before the newer row existed is not
+//!   enough: a row the operator kept beside a longer one added later was
+//!   never replaced by it.
+//!
+//! A bare copy that a queue rewrite fenced as a `---` prompt takes both
+//! fence lines with it. A copy a ledger claim holds is never removed (no
+//! claim may point at a removed row); the generated `[#q-…]` and
+//! `⟦effect:N⟧` a copy carries go with its line.
 //!
 //! The recorded versions are the document's content-bearing history (merge
-//! baselines, retained-write cuts and targets, the committed copy). Without
-//! that proof nothing is removed. A removed copy's text is always contained
-//! in the row that stays, so no operator text is lost.
+//! baselines, retained-write cuts and targets, the committed copy, and for
+//! `queue sync` the recent committed history). Without that proof nothing is
+//! removed, and the candidates are reported as unproven. A removed copy's
+//! text is always contained in the row that stays, so no operator text is
+//! lost.
 
 use std::collections::HashMap;
 
@@ -94,7 +108,7 @@ impl TypingHistory {
                 for queue in components.iter().filter(|c| c.name == "queue") {
                     for line in queue.content(document).lines() {
                         let work = queue_line_work(line);
-                        if !work.is_empty() {
+                        if !work.is_empty() && !is_dash_rule_line(line) {
                             *rows.entry(work).or_insert(0) += 1;
                         }
                     }
@@ -105,19 +119,88 @@ impl TypingHistory {
         Self { versions }
     }
 
-    /// Some version held `work` exactly once.
-    fn held_once(&self, work: &str) -> bool {
-        self.versions
+    /// [`Self::from_documents`] over only the versions that can bear on
+    /// `candidates` (work texts of candidate copies): a version none of
+    /// whose text starts a candidate's first [`STALE_PREFIX_MIN_CHARS`]
+    /// characters holds no row of any candidate's lineage, so skipping it
+    /// changes no proof; it only spares parsing it.
+    pub fn from_relevant_documents<S: AsRef<str>>(documents: &[S], candidates: &[String]) -> Self {
+        let keys: Vec<String> = candidates
             .iter()
-            .any(|rows| rows.get(work).copied() == Some(1))
+            .map(|work| {
+                work.chars()
+                    .take(STALE_PREFIX_MIN_CHARS)
+                    .collect::<String>()
+            })
+            .filter(|key| !key.is_empty())
+            .collect();
+        let relevant: Vec<&str> = documents
+            .iter()
+            .map(AsRef::as_ref)
+            .filter(|document| {
+                let collapsed = document.split_whitespace().collect::<Vec<_>>().join(" ");
+                keys.iter().any(|key| collapsed.contains(key.as_str()))
+            })
+            .collect();
+        Self::from_documents(&relevant)
     }
 
-    /// Some version held `copy` while no row read `newer` yet.
-    fn typed_before(&self, copy: &str, newer: &str) -> bool {
-        self.versions
-            .iter()
-            .any(|rows| rows.contains_key(copy) && !rows.contains_key(newer))
+    /// Number of recorded versions.
+    pub fn len(&self) -> usize {
+        self.versions.len()
     }
+
+    /// No version was recorded.
+    pub fn is_empty(&self) -> bool {
+        self.versions.is_empty()
+    }
+
+    /// Some version held `work` exactly once: as itself, or as one typing cut
+    /// of it (a strict prefix of at least [`STALE_PREFIX_MIN_CHARS`]) the
+    /// operator was still typing, and no other row of that lineage. The row
+    /// was one row; the doubling came later.
+    fn held_once(&self, work: &str) -> bool {
+        self.versions.iter().any(|rows| {
+            rows.iter()
+                .filter(|(row, _)| {
+                    row.as_str() == work
+                        || (row.chars().count() >= STALE_PREFIX_MIN_CHARS
+                            && work.len() > row.len()
+                            && work.starts_with(row.as_str()))
+                })
+                .map(|(_, count)| *count)
+                .sum::<usize>()
+                == 1
+        })
+    }
+
+    /// The operator typed on from `copy` toward `newer`: some version held
+    /// `copy`, and a later version held a longer cut on the way to `newer`
+    /// (`copy` ⊊ cut ⊑ `newer`) with `copy` gone. Holding `copy` before
+    /// `newer` existed is not enough: a row the operator kept beside a
+    /// longer one added later was never replaced by it.
+    fn typed_on(&self, copy: &str, newer: &str) -> bool {
+        let Some(first) = self
+            .versions
+            .iter()
+            .position(|rows| rows.contains_key(copy))
+        else {
+            return false;
+        };
+        self.versions[first + 1..].iter().any(|rows| {
+            !rows.contains_key(copy)
+                && rows.keys().any(|cut| {
+                    cut.len() > copy.len()
+                        && cut.starts_with(copy)
+                        && newer.starts_with(cut.as_str())
+                })
+        })
+    }
+}
+
+/// A bare `---` line: a thematic break or a prompt-fence line.
+fn is_dash_rule_line(line: &str) -> bool {
+    line.trim() == "---"
 }
 
 struct Row {
@@ -126,11 +209,18 @@ struct Row {
     indent: usize,
     parent: Option<usize>,
     work: String,
+    /// The row's queue item text (list marker and `### ` removed), for the
+    /// claim check.
+    item: String,
     /// A free-text row (see the module docs); only these are compared.
     free_text: bool,
     /// Carries a `⟦effect:N⟧` duplicate ordinal: a copy, not the original.
     effect_ordinal: bool,
     has_children: bool,
+    /// A bare `---` line.
+    dash_rule: bool,
+    /// A list row (`- `), not a bare line.
+    list: bool,
 }
 
 fn is_struck(work: &str) -> bool {
@@ -159,10 +249,12 @@ fn rows_of(body: &str) -> Vec<Row> {
         if !list && indent > 0 {
             continue;
         }
+        let dash_rule = !list && is_dash_rule_line(trimmed);
         let bare_markup = !list
-            && ["<!--", "%%", ">", "`", "#", "|"]
-                .iter()
-                .any(|prefix| trimmed.starts_with(prefix));
+            && (dash_rule
+                || ["<!--", "%%", ">", "`", "#", "|", "~~~"]
+                    .iter()
+                    .any(|prefix| trimmed.starts_with(prefix)));
         while stack.last().is_some_and(|&top| rows[top].indent >= indent) {
             stack.pop();
         }
@@ -172,10 +264,8 @@ fn rows_of(body: &str) -> Vec<Row> {
         }
         let work = queue_line_work(trimmed);
         let item = if list { &trimmed[2..] } else { trimmed };
-        let claim = agent_doc_document::queue_projection::owner_projection(
-            item.strip_prefix("### ").unwrap_or(item),
-        )
-        .is_some();
+        let item = item.strip_prefix("### ").unwrap_or(item);
+        let claim = agent_doc_document::queue_projection::owner_projection(item).is_some();
         let free_text = !work.is_empty()
             && !bare_markup
             && !is_struck(&work)
@@ -189,15 +279,65 @@ fn rows_of(body: &str) -> Vec<Row> {
             indent,
             parent,
             work,
+            item: item.to_string(),
             free_text,
             effect_ordinal: trimmed.contains(" ⟦effect:"),
             has_children: false,
+            dash_rule,
+            list,
         });
         if list {
             stack.push(rows.len() - 1);
         }
     }
     rows
+}
+
+/// The byte range a removed row takes with it: a bare row that a queue
+/// rewrite fenced as a `---` prompt (`---`, the row, `---`, adjacent) takes
+/// both fence lines, so no orphan `---` pair is left to parse as an empty
+/// prompt fence or a setext underline.
+fn removal_range(rows: &[Row], index: usize) -> (usize, usize) {
+    let row = &rows[index];
+    if !row.list
+        && index > 0
+        && index + 1 < rows.len()
+        && rows[index - 1].dash_rule
+        && rows[index - 1].end == row.start
+        && rows[index + 1].dash_rule
+        && rows[index + 1].start == row.end
+    {
+        return (rows[index - 1].start, rows[index + 1].end);
+    }
+    (row.start, row.end)
+}
+
+/// `item`'s generated `[#q-…]` id occurs in `body` outside `own` (the row's
+/// own bytes): another queue row refers to it.
+pub(crate) fn generated_id_referenced_elsewhere(
+    body: &str,
+    item: &str,
+    own: std::ops::Range<usize>,
+) -> bool {
+    let Some(id) = agent_doc_element_queue::generated_queue_prompt_id(item) else {
+        return false;
+    };
+    let lower = body.to_ascii_lowercase();
+    lower
+        .match_indices(&format!("#{id}"))
+        .any(|(at, _)| !own.contains(&at))
+}
+
+/// What [`drop_stale_typing_copies_with`] did.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StaleTypingOutcome {
+    /// The document with every proven copy removed.
+    pub document: String,
+    /// One [`SelfRepairKind::StaleTypingCopy`] per removed copy.
+    pub repairs: Vec<SelfRepair>,
+    /// Work text of every candidate copy kept for want of recorded proof
+    /// (one entry per row), so the caller can say why nothing was removed.
+    pub unproven: Vec<String>,
 }
 
 /// Remove proven stale copies of the operator's free-text rows from every
@@ -207,24 +347,66 @@ pub fn drop_stale_typing_copies(
     document: &str,
     history: &mut dyn FnMut() -> TypingHistory,
 ) -> (String, Vec<SelfRepair>) {
-    let Ok(components) = element::parse(document) else {
-        return (document.to_string(), Vec::new());
+    let outcome = drop_stale_typing_copies_with(document, &mut |_| history(), &|_| false);
+    (outcome.document, outcome.repairs)
+}
+
+/// One candidate copy: a row with an exact duplicate it is not the keeper
+/// of, or a newer row it is a prefix of.
+struct Candidate {
+    /// Byte offset of the queue body in the document.
+    base: usize,
+    start: usize,
+    end: usize,
+    work: String,
+    duplicate: bool,
+    newer: Vec<String>,
+}
+
+/// [`drop_stale_typing_copies`] that never removes a row `is_claimed` holds
+/// (its queue item text: a worker's row, which a ledger claim points at),
+/// and reports the candidates it kept without proof. `history` receives the
+/// candidates' work texts (see [`TypingHistory::from_relevant_documents`]);
+/// it is called at most once, and only when some row is a candidate.
+pub fn drop_stale_typing_copies_with(
+    document: &str,
+    history: &mut dyn FnMut(&[String]) -> TypingHistory,
+    is_claimed: &dyn Fn(&str) -> bool,
+) -> StaleTypingOutcome {
+    let unchanged = || StaleTypingOutcome {
+        document: document.to_string(),
+        ..StaleTypingOutcome::default()
     };
-    let mut loaded: Option<TypingHistory> = None;
-    let mut repairs = Vec::new();
-    let mut edits: Vec<(usize, usize)> = Vec::new();
+    let Ok(components) = element::parse(document) else {
+        return unchanged();
+    };
+    let mut candidates: Vec<Candidate> = Vec::new();
     for queue in components.iter().filter(|c| c.name == "queue") {
         let body = queue.content(document);
         let rows = rows_of(body);
         let parent_work = |row: &Row| row.parent.map(|parent| rows[parent].work.as_str());
         let same_place =
             |a: &Row, b: &Row| a.indent == b.indent && parent_work(a) == parent_work(b);
-        let mut removed = vec![false; rows.len()];
+        // A claimed copy, and one whose generated id another queue row points
+        // at (a reply, follow-up or relation), are never removed: nothing may
+        // point at a removed row. Either is the keeper of its duplicates.
+        let held: Vec<bool> = rows
+            .iter()
+            .enumerate()
+            .map(|(index, row)| {
+                let (start, end) = removal_range(&rows, index);
+                row.free_text
+                    && (is_claimed(&row.item)
+                        || generated_id_referenced_elsewhere(body, &row.item, start..end))
+            })
+            .collect();
         for (index, row) in rows.iter().enumerate() {
-            if !row.free_text || row.has_children {
+            if !row.free_text || row.has_children || held[index] {
                 continue;
             }
-            // Exact duplicates: keep the last copy, or a copy with children.
+            // Exact duplicates: keep a held copy, else a copy with
+            // children, else the last copy without a duplicate ordinal, else
+            // the last copy.
             let copies: Vec<usize> = rows
                 .iter()
                 .enumerate()
@@ -236,54 +418,88 @@ pub fn drop_stale_typing_copies(
             let keeper = copies
                 .iter()
                 .rev()
-                .find(|&&at| rows[at].has_children)
+                .find(|&&at| held[at])
+                .or_else(|| copies.iter().rev().find(|&&at| rows[at].has_children))
                 .or_else(|| copies.iter().rev().find(|&&at| !rows[at].effect_ordinal))
                 .or_else(|| copies.last())
                 .copied();
             // Only prose: a repeated bare link or `#tag` is the operator's
             // own list structure.
             let duplicate = copies.len() > 1 && keeper != Some(index) && row.work.contains(' ');
-            let newer_prefix_of = rows.iter().find(|other| {
-                other.free_text
-                    && same_place(row, other)
-                    && other.work.len() > row.work.len()
-                    && row.work.chars().count() >= STALE_PREFIX_MIN_CHARS
-                    && other.work.starts_with(row.work.as_str())
-            });
-            if !duplicate && newer_prefix_of.is_none() {
+            let newer: Vec<String> = rows
+                .iter()
+                .filter(|other| {
+                    other.free_text
+                        && same_place(row, other)
+                        && other.work.len() > row.work.len()
+                        && row.work.chars().count() >= STALE_PREFIX_MIN_CHARS
+                        && other.work.starts_with(row.work.as_str())
+                })
+                .map(|other| other.work.clone())
+                .collect();
+            if !duplicate && newer.is_empty() {
                 continue;
             }
-            let history = loaded.get_or_insert_with(&mut *history);
-            let proven = (duplicate && history.held_once(&row.work))
-                || newer_prefix_of
-                    .is_some_and(|newer| history.typed_before(&row.work, &newer.work));
-            if !proven {
-                continue;
-            }
-            removed[index] = true;
-            repairs.push(SelfRepair {
-                kind: SelfRepairKind::StaleTypingCopy,
-                detail: row.work.clone(),
-                rewritten: None,
+            let (start, end) = removal_range(&rows, index);
+            candidates.push(Candidate {
+                base: queue.open_end,
+                start,
+                end,
+                work: row.work.clone(),
+                duplicate,
+                newer,
             });
         }
-        let base = queue.open_end;
-        edits.extend(
-            rows.iter()
-                .zip(&removed)
-                .filter(|(_, removed)| **removed)
-                .map(|(row, _)| (base + row.start, base + row.end)),
-        );
     }
-    if edits.is_empty() {
-        return (document.to_string(), repairs);
+    if candidates.is_empty() {
+        return unchanged();
+    }
+    let works: Vec<String> = candidates
+        .iter()
+        .map(|candidate| candidate.work.clone())
+        .collect();
+    let history = history(&works);
+    let mut repairs = Vec::new();
+    let mut unproven = Vec::new();
+    let mut edits: Vec<(usize, usize)> = Vec::new();
+    for candidate in candidates {
+        let proven = (candidate.duplicate && history.held_once(&candidate.work))
+            || candidate
+                .newer
+                .iter()
+                .any(|newer| history.typed_on(&candidate.work, newer));
+        if !proven {
+            unproven.push(candidate.work);
+            continue;
+        }
+        edits.push((
+            candidate.base + candidate.start,
+            candidate.base + candidate.end,
+        ));
+        repairs.push(SelfRepair {
+            kind: SelfRepairKind::StaleTypingCopy,
+            detail: candidate.work,
+            rewritten: None,
+        });
+    }
+    // Two adjacent fenced copies can share a fence line: coalesce.
+    edits.sort_unstable();
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (start, end) in edits {
+        match merged.last_mut() {
+            Some(last) if start <= last.1 => last.1 = last.1.max(end),
+            _ => merged.push((start, end)),
+        }
     }
     let mut out = document.to_string();
-    edits.sort_unstable();
-    for (start, end) in edits.into_iter().rev() {
+    for (start, end) in merged.into_iter().rev() {
         out.replace_range(start..end, "");
     }
-    (out, repairs)
+    StaleTypingOutcome {
+        document: out,
+        repairs,
+        unproven,
+    }
 }
 
 #[cfg(test)]

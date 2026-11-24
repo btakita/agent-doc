@@ -2287,7 +2287,13 @@ The rules:
     list row; only a multi-line bare paragraph keeps the fence.
   - Copies no recorded version proves stay for the operator, who can name
     the row to keep: `agent-doc queue prune-duplicates <FILE> --keep-row
-    <q-id> --apply` (`#pruneduplicates`).
+    <q-id> --apply` (`#pruneduplicates`). The named row may be struck
+    (`#dupwrite3`).
+  - The newer row a typing snapshot was typed on toward may be struck
+    (`#dupwrite3`): a worker answered it after the copies appeared. Its free
+    work text inside the `~~` wrapper witnesses the snapshot like a live row,
+    with the same history proof. A struck row is never an exact-duplicate
+    keeper, because the operator may queue an answered prompt again.
   - A nested parent the operator rewrote is not an omitted parent
     (reported by `#pipeprompt`): when the agent target re-marks a nested row
     that has children (a `📥` or stage glyph) while the operator edits its

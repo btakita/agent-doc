@@ -6655,8 +6655,9 @@ enum QueueAction {
         /// Keep this row (its generated id, e.g. `q-68b3244de244`) and remove
         /// every other live copy of it: the same work text, or a strict prefix
         /// of it, at the same place. A worker's copy or a copy with child rows
-        /// stays. The id must name exactly one live row. Repeat for each row
-        /// (`#dupwrite2`).
+        /// stays. The id must name exactly one row, live or struck: an
+        /// answered (struck) row is still the canonical copy (`#dupwrite3`).
+        /// Repeat for each row (`#dupwrite2`).
         #[arg(long = "keep-row", value_name = "ID")]
         keep_rows: Vec<String>,
     },

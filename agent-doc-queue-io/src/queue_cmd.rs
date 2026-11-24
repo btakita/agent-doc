@@ -2458,7 +2458,8 @@ pub fn consume(effects: &impl QueueCommandEffects, file: &Path, count: usize) ->
 /// binary-owned too, so copies that differ only by them are identical.
 /// `keep_rows` names rows by generated id; every other live copy of a named
 /// row (same work text, or a strict prefix of it, at the same place) is
-/// removed. The operator's naming is the authority for those removals.
+/// removed. The operator's naming is the authority for those removals. A
+/// named row may be struck (`#dupwrite3`).
 pub fn prune_duplicates(
     effects: &impl QueueCommandEffects,
     file: &Path,

@@ -149,7 +149,9 @@ pub fn plan_with_truncated_prefix_line(document: &str, line: usize) -> Result<Du
 /// [`crate::stale_typing_copies::STALE_PREFIX_MIN_CHARS`] characters). The
 /// operator's naming is the authority; each removed text is contained in
 /// the row that stays, so nothing typed is lost. A copy a worker holds, or
-/// one with child rows, stays. Each id must name exactly one live row.
+/// one with child rows, stays. Each id must name exactly one row, live or
+/// struck: a row a worker answered and struck is still the canonical copy
+/// (`#dupwrite3`).
 pub fn plan_keeping(document: &str, keep_rows: &[String]) -> Result<DuplicatePrunePlan> {
     plan_selected(document, None, keep_rows)
 }
@@ -217,7 +219,7 @@ fn plan_selected(
     for (id, found) in keep.iter().zip(&kept_found) {
         anyhow::ensure!(
             *found == 1,
-            "--keep-row {id}: {} live queue rows carry [#{id}]; it must name exactly one",
+            "--keep-row {id}: {} queue rows (live or struck) carry [#{id}]; it must name exactly one",
             found
         );
     }
@@ -264,30 +266,35 @@ fn plan_body(
     let mut conflicting_projection_rows = HashSet::new();
     let mut keyed: Vec<(usize, DuplicateDrop)> = Vec::new();
 
-    // `#dupwrite2`: copies of a row the operator named go first.
+    // `#dupwrite2`: copies of a row the operator named go first. The named
+    // row may be struck (`#dupwrite3`): a worker answered it after the
+    // copies appeared, and it is still the canonical copy.
+    let struck = if keep.is_empty() {
+        Vec::new()
+    } else {
+        struck_rows(document, body_start, spans)
+    };
     for (slot, id) in keep.iter().enumerate() {
-        let named: Vec<usize> = live
+        let named: Vec<&LiveRow> = live
             .iter()
-            .enumerate()
-            .filter(|(_, row)| row.prompt_id.as_deref() == Some(id.as_str()))
-            .map(|(index, _)| index)
+            .chain(&struck)
+            .filter(|row| row.prompt_id.as_deref() == Some(id.as_str()))
             .collect();
         kept_found[slot] += named.len();
-        let [named] = named[..] else {
+        let [kept] = named[..] else {
             continue;
         };
-        let kept = &live[named];
-        for (index, row) in live.iter().enumerate() {
+        for row in &live {
             let copy = row.work == kept.work
                 || (row.work.chars().count() >= crate::stale_typing_copies::STALE_PREFIX_MIN_CHARS
                     && kept.work.len() > row.work.len()
                     && kept.work.starts_with(row.work.as_str()));
-            if index == named
+            if row.span == kept.span
                 || !copy
                 || row.parent_span != kept.parent_span
                 || row.has_children
                 || row.claim_score >= 2
-                || row.referenced
+                || (row.referenced && referenced_apart_from(body, spans, row, id))
                 || dropped.contains(&row.span)
             {
                 continue;
@@ -389,6 +396,53 @@ fn plan_body(
     (drops, excise(body, &ranges))
 }
 
+/// `#dupwrite3`: some reference to `row`'s generated id sits in a queue row
+/// tree that does not also name `kept_id`. A row tree naming the kept row
+/// and a copy together (the request to collapse them, or the kept row's own
+/// response) refers to the duplicate set, not to that one copy; a reply,
+/// follow-up or relation to the copy alone still holds it.
+fn referenced_apart_from(
+    body: &str,
+    spans: &[(QueueEntry, Range<usize>)],
+    row: &LiveRow,
+    kept_id: &str,
+) -> bool {
+    let Some(id) = row.prompt_id.as_deref() else {
+        return false;
+    };
+    let lower = body.to_ascii_lowercase();
+    let kept_marker = format!("#{kept_id}");
+    lower
+        .match_indices(&format!("#{id}"))
+        .filter(|(at, _)| !row.range.contains(at))
+        .any(|(at, _)| {
+            let tree = root_tree_range(spans, at).unwrap_or(at..at);
+            !lower[tree].contains(&kept_marker)
+        })
+}
+
+/// The byte range of the top-level queue row tree holding byte `at`: its
+/// root entry and the entries after it that nest beneath it.
+fn root_tree_range(spans: &[(QueueEntry, Range<usize>)], at: usize) -> Option<Range<usize>> {
+    let index = spans.iter().position(|(_, range)| range.contains(&at))?;
+    let root = root_span(spans, index);
+    let end = spans
+        .iter()
+        .enumerate()
+        .skip(root)
+        .take_while(|(span, _)| root_span(spans, *span) == root)
+        .map(|(_, (_, range))| range.end)
+        .max()?;
+    Some(spans[root].1.start..end)
+}
+
+fn root_span(spans: &[(QueueEntry, Range<usize>)], mut index: usize) -> usize {
+    while let Some(parent) = parent_span(spans, index) {
+        index = parent;
+    }
+    index
+}
+
 fn has_conflicting_projections(group: &[usize], live: &[LiveRow]) -> bool {
     let mut projection = None;
     for index in group {
@@ -444,6 +498,46 @@ fn live_rows(
                 range: range.clone(),
                 claim_score: claim_score(&prompt.text),
                 has_children: has_nested_children(spans, span),
+                projection: projection_prefix(&prompt.text).trim().to_string(),
+                work,
+                prompt_id,
+                referenced: false,
+                line: document[..body_start + range.start]
+                    .bytes()
+                    .filter(|byte| *byte == b'\n')
+                    .count()
+                    + 1,
+            })
+        })
+        .collect()
+}
+
+/// `#dupwrite3`: struck (completed) rows, as candidates for the row
+/// `--keep-row` names. They are never removed or compared otherwise.
+fn struck_rows(
+    document: &str,
+    body_start: usize,
+    spans: &[(QueueEntry, Range<usize>)],
+) -> Vec<LiveRow> {
+    spans
+        .iter()
+        .enumerate()
+        .filter_map(|(span, (entry, range))| {
+            let QueueEntry::Completed(prompt) = entry else {
+                return None;
+            };
+            let work = work_text(&prompt.text);
+            if work.is_empty() {
+                return None;
+            }
+            let prompt_id = agent_doc_element_queue::queue_prompt_stable_id(&prompt.text)
+                .filter(|id| id.starts_with("q-"));
+            Some(LiveRow {
+                span,
+                parent_span: parent_span(spans, span),
+                range: range.clone(),
+                claim_score: claim_score(&prompt.text),
+                has_children: true,
                 projection: projection_prefix(&prompt.text).trim().to_string(),
                 work,
                 prompt_id,
@@ -1195,5 +1289,112 @@ mod tests {
             "{:?}",
             plan.drops
         );
+    }
+
+    // ---- `#dupwrite3` -----------------------------------------------------
+
+    const FINISHED_ROW: &str = "Is this a potential way to declare guis from agent-doc to present information? [#q-68b3244de244]";
+
+    /// [`admitted_live`] once a worker answered the finished row: it is struck
+    /// with a response tree, a follow-up row names it, and the coordinator's
+    /// claimed row asking for this repair names it and every copy.
+    fn answered_live() -> String {
+        admitted_live().replace(
+            &format!("- ### 📥 {LINK} {FINISHED_ROW}\n"),
+            &format!(
+                concat!(
+                    "- ### ~~{link} {finished}~~\n",
+                    "  - **Response [#r-fda0ffecd016]**\n",
+                    "    - **Summary:** Declare can draw GUIs.\n",
+                    "    - **State:** Complete.\n",
+                    "- 🙋 [#q-68b3244de244] follow-up: operator: decide whether to run the experiment. [operator-verify] [#q-ac7ab7b7c892]\n",
+                    "- 🚧 [#subagent:dupwrite3#1] [from:coordinator key=dupwrite3] agent: #dupwrite3: `--keep-row q-68b3244de244` refuses once [#q-68b3244de244] is struck, so ([#q-217e769965d7], [#q-12d6f4ea6884], [#q-0feb5aebf877], [#q-37cd908220ef], [#q-140c87b4f232]) stay. Test first.\n",
+                ),
+                link = LINK,
+                finished = FINISHED_ROW,
+            ),
+        )
+    }
+
+    /// Measured 2026-11-24: once a worker answered and struck the row the
+    /// operator named, `--keep-row q-68b3244de244` refused ("0 live queue rows
+    /// carry") and the five Declare-lang copies stayed live, offered for
+    /// dispatch. A struck row is still the canonical copy: every live copy
+    /// whose text it contains goes, and the struck row, its response tree and
+    /// its follow-up stay byte for byte. A row that names the kept row and
+    /// the copies together (the request for this repair) refers to the
+    /// duplicate set, not to one copy, so it does not hold a copy.
+    #[test]
+    fn dupwrite3_keep_row_accepts_a_struck_answered_row() {
+        let source = answered_live();
+        let plan = plan_keeping(&source, &["q-68b3244de244".to_string()]).unwrap();
+        let kept: Vec<&DuplicateDrop> = plan
+            .drops
+            .iter()
+            .filter(|drop| drop.reason == DuplicateDropReason::KeptRowCopy)
+            .collect();
+        assert_eq!(kept.len(), 5, "{:?}", plan.drops);
+        for id in [
+            "q-217e769965d7",
+            "q-12d6f4ea6884",
+            "q-0feb5aebf877",
+            "q-37cd908220ef",
+            "q-140c87b4f232",
+        ] {
+            assert_eq!(
+                plan.document.matches(&format!("{id}]")).count(),
+                1,
+                "{id} must survive only in the coordinator row:\n{}",
+                plan.document
+            );
+        }
+        let after = &plan.document[plan.document.find("<!-- agent:run").unwrap()..];
+        let tail = &source[source.find("- ### ~~[Declare").unwrap()..];
+        assert!(after.ends_with(tail), "{after}");
+        assert!(!plan.document.contains("---\n"), "{}", plan.document);
+        // Idempotent.
+        let again = plan_keeping(&plan.document, &["q-68b3244de244".to_string()]).unwrap();
+        assert!(again.drops.is_empty(), "{:?}", again.drops);
+    }
+
+    /// A struck kept row keeps every guard: a copy another row refers to
+    /// (without naming the kept row) stays, and an id carried by a struck and
+    /// a live row at once names two rows.
+    #[test]
+    fn dupwrite3_struck_keep_row_keeps_referenced_copies_and_needs_one_row() {
+        let source = answered_live().replace(
+            "- 🙋 [#q-68b3244de244]",
+            "- re [#q-140c87b4f232]: why is this here?\n- 🙋 [#q-68b3244de244]",
+        );
+        let plan = plan_keeping(&source, &["q-68b3244de244".to_string()]).unwrap();
+        assert!(
+            plan.document.contains(&format!(
+                "{LINK} Is this a potential way to declare guis from agent-doc [#q-140c87b4f232]"
+            )),
+            "{}",
+            plan.document
+        );
+        assert_eq!(
+            plan.drops
+                .iter()
+                .filter(|drop| drop.reason == DuplicateDropReason::KeptRowCopy)
+                .count(),
+            4,
+            "{:?}",
+            plan.drops
+        );
+
+        let twice = format!(
+            concat!(
+                "<!-- agent:run id=\"main\" -->\n",
+                "- ### ~~{link} declare guis [#q-0000000000c1]~~\n",
+                "- {link} declare guis [#q-0000000000c1]\n",
+                "- {link} [#q-0000000000c2]\n",
+                "<!-- /agent:run -->\n",
+            ),
+            link = LINK,
+        );
+        let error = plan_keeping(&twice, &["q-0000000000c1".to_string()]).unwrap_err();
+        assert!(error.to_string().contains("2 queue rows"), "{error}");
     }
 }

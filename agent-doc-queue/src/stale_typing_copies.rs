@@ -31,7 +31,10 @@
 //!   the way to the newer row with the copy gone: the operator typed on from
 //!   it (`#dupwrite2`). Holding the copy before the newer row existed is not
 //!   enough: a row the operator kept beside a longer one added later was
-//!   never replaced by it.
+//!   never replaced by it. The newer row may be struck (`#dupwrite3`): a
+//!   worker answered it after the copies appeared. A struck row is never an
+//!   exact-duplicate keeper, since the operator may queue an answered
+//!   prompt again on purpose.
 //!
 //! A bare copy that a queue rewrite fenced as a `---` prompt takes both
 //! fence lines with it. A copy a ledger claim holds is never removed (no
@@ -214,6 +217,10 @@ struct Row {
     item: String,
     /// A free-text row (see the module docs); only these are compared.
     free_text: bool,
+    /// A struck (answered) row's work text inside its `~~` wrapper, when
+    /// that is free text (`#dupwrite3`): the longer row a typing snapshot
+    /// was typed on toward, never a removal candidate or a duplicate keeper.
+    struck_witness: Option<String>,
     /// Carries a `⟦effect:N⟧` duplicate ordinal: a copy, not the original.
     effect_ordinal: bool,
     has_children: bool,
@@ -225,6 +232,19 @@ struct Row {
 
 fn is_struck(work: &str) -> bool {
     work.starts_with("~~") && work.len() > 4 && work[2..].contains("~~")
+}
+
+/// `#dupwrite3`: the free work text inside a struck row's `~~` wrapper (its
+/// lifecycle projection, `### ` and generated `[#q-…]` removed), or `None`
+/// for a row that is not struck or whose text carries an authored id.
+fn struck_free_work(work: &str) -> Option<String> {
+    if !is_struck(work) {
+        return None;
+    }
+    let inner = &work[2..];
+    let inner = &inner[..inner.find("~~")?];
+    let inner = queue_line_work(inner);
+    (!inner.is_empty() && !inner.contains("[#")).then_some(inner)
 }
 
 fn rows_of(body: &str) -> Vec<Row> {
@@ -273,11 +293,15 @@ fn rows_of(body: &str) -> Vec<Row> {
             && !work.contains("[#")
             && !work.starts_with("**")
             && !trimmed.contains(agent_doc_markdown_ast::overlay::RESPONSE_DETAIL_MARKER);
+        let struck_witness = (list && !bare_markup)
+            .then(|| struck_free_work(&work))
+            .flatten();
         rows.push(Row {
             start,
             end: cursor,
             indent,
             parent,
+            struck_witness,
             work,
             item: item.to_string(),
             free_text,
@@ -426,16 +450,25 @@ pub fn drop_stale_typing_copies_with(
             // Only prose: a repeated bare link or `#tag` is the operator's
             // own list structure.
             let duplicate = copies.len() > 1 && keeper != Some(index) && row.work.contains(' ');
+            // The newer row may be live free text, or (`#dupwrite3`) struck
+            // once a worker answered it: the operator typed on toward it all
+            // the same, and the history proof below is unchanged.
             let newer: Vec<String> = rows
                 .iter()
-                .filter(|other| {
-                    other.free_text
-                        && same_place(row, other)
-                        && other.work.len() > row.work.len()
-                        && row.work.chars().count() >= STALE_PREFIX_MIN_CHARS
-                        && other.work.starts_with(row.work.as_str())
+                .filter(|other| same_place(row, other))
+                .filter_map(|other| {
+                    if other.free_text {
+                        Some(other.work.as_str())
+                    } else {
+                        other.struck_witness.as_deref()
+                    }
                 })
-                .map(|other| other.work.clone())
+                .filter(|newer| {
+                    newer.len() > row.work.len()
+                        && row.work.chars().count() >= STALE_PREFIX_MIN_CHARS
+                        && newer.starts_with(row.work.as_str())
+                })
+                .map(str::to_string)
                 .collect();
             if !duplicate && newer.is_empty() {
                 continue;

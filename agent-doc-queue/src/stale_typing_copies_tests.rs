@@ -369,3 +369,74 @@ fn dupwrite2_a_copy_another_row_refers_to_is_never_removed() {
     let outcome = drop_stale_typing_copies_with(&current, &mut |_| recorded(), &unclaimed);
     assert_eq!(outcome.document, doc(&rest), "{:?}", outcome.repairs);
 }
+
+// ---- `#dupwrite3` ---------------------------------------------------------
+
+/// [`admitted_live`] once a worker answered the finished row: struck, with a
+/// response tree.
+fn answered_live() -> String {
+    let finished = typed(" Is this a way to declare guis from agent-doc to present information?");
+    admitted_live().replace(
+        &format!("- ### 📥 {finished} [#q-68b3244de244]\n"),
+        &format!(
+            concat!(
+                "- ### ~~{finished} [#q-68b3244de244]~~\n",
+                "  - **Response [#r-fda0ffecd016]**\n",
+                "    - **Summary:** Declare can draw GUIs.\n",
+                "    - **State:** Complete.\n",
+            ),
+            finished = finished,
+        ),
+    )
+}
+
+/// The operator's typing, recorded, ending with the finished row live.
+fn declare_typing_recorded() -> TypingHistory {
+    let mut versions = vec![doc(&format!("- {PIPE_ROW}\n"))];
+    for tail in [
+        "",
+        " Is this a way to declare ",
+        " Is this a way to declare guis from agent-doc",
+        " Is this a way to declare guis from agent-doc to present information?",
+    ] {
+        versions.push(doc(&format!("- {PIPE_ROW}\n- {}\n", typed(tail))));
+    }
+    versions.push(admitted_live());
+    TypingHistory::from_documents(&versions)
+}
+
+/// A worker answering the finished row strikes it; the longer text the
+/// operator typed on toward is still present. The struck row is the
+/// typing-snapshot witness: its live prefix copies go, the struck row and
+/// its response tree stay.
+#[test]
+fn dupwrite3_a_struck_answered_row_witnesses_its_typing_snapshots() {
+    let current = answered_live();
+    let outcome =
+        drop_stale_typing_copies_with(&current, &mut |_| declare_typing_recorded(), &unclaimed);
+    let expected = doc(&format!(
+        concat!(
+            "- ### ~~🗑️ do [#poolrow-8ac1]~~\n",
+            "- ### 📥 {pipe} ⟦effect:4⟧ [#q-9e92831a7369]\n",
+            "- ### ~~{finished} [#q-68b3244de244]~~\n",
+            "  - **Response [#r-fda0ffecd016]**\n",
+            "    - **Summary:** Declare can draw GUIs.\n",
+            "    - **State:** Complete.\n",
+        ),
+        pipe = PIPE_ROW,
+        finished = typed(" Is this a way to declare guis from agent-doc to present information?"),
+    ));
+    assert_eq!(outcome.document, expected, "{:?}", outcome.repairs);
+    assert_eq!(outcome.repairs.len(), 8, "{:?}", outcome.repairs);
+    assert!(outcome.unproven.is_empty(), "{:?}", outcome.unproven);
+}
+
+/// A struck row is never an exact-duplicate keeper: the operator may queue
+/// an answered prompt again on purpose.
+#[test]
+fn dupwrite3_a_live_row_equal_to_a_struck_row_stays() {
+    let current = doc(&format!("- ~~{PIPE_ROW}~~\n- {PIPE_ROW}\n"));
+    let recorded = || TypingHistory::from_documents(&[doc(&format!("- {PIPE_ROW}\n"))]);
+    let outcome = drop_stale_typing_copies_with(&current, &mut |_| recorded(), &unclaimed);
+    assert_eq!(outcome.document, current, "{:?}", outcome.repairs);
+}

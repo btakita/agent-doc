@@ -1950,7 +1950,25 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for StopQueueCommandEffe
 }
 
 /// [`claude_stop_answer`] with the supervisor drain-readiness probe injected.
+///
+/// `#claudestopbudget`: the whole decision runs in one queue-state read scope.
+/// Every gate below derives the same subagent ownership plan, claim holds,
+/// and reported-release holds from the same document text; on a 265 KB
+/// document with large claim/lineage ledgers each derivation cost ~1 s, and
+/// re-deriving them per gate spent 9.6 s of the hook's 11 s budget before the
+/// transient-closeout assessment could run. Inside the scope each is computed
+/// once per text and state-write epoch
+/// ([`agent_doc_queue_io::state_read_scope`]).
 fn claude_stop_answer_with_drain_readiness(
+    input: &ClaudeStopInput,
+    drain_readiness: impl Fn(&Path) -> agent_doc_controller::status::SupervisorDrainReadiness,
+) -> Result<ClaudeStopAnswer> {
+    agent_doc_queue_io::state_read_scope::with_state_read_scope(|| {
+        claude_stop_answer_in_read_scope(input, drain_readiness)
+    })
+}
+
+fn claude_stop_answer_in_read_scope(
     input: &ClaudeStopInput,
     drain_readiness: impl Fn(&Path) -> agent_doc_controller::status::SupervisorDrainReadiness,
 ) -> Result<ClaudeStopAnswer> {
@@ -16560,6 +16578,159 @@ Waiting on the reported row.\n\
             resolve_claude_stop_hook_budget(Some("4")),
             std::time::Duration::from_secs(4)
         );
+    }
+
+    /// An sdk-dev-scale session document (`#claudestopbudget`): 30 `subagents`
+    /// run queues holding 60 live rows (some nested, some `📥`), a large
+    /// `agent:loose-ends` section, and an `agent:exchange` of 120+ response
+    /// cells, each echoing a queue prompt. Over 260 KB, like haiven-dev
+    /// `tasks/sdk/sdk-dev.md` when its Stop overran.
+    fn sdk_dev_scale_document() -> String {
+        let mut doc = String::from(
+            "---\nsession: sid\nagent_doc_format: template\nqueue: go\n---\n\n\
+## Status <!-- agent:status patch=replace -->\nworking\n<!-- /agent:status -->\n\n\
+## Loose ends <!-- agent:loose-ends -->\n",
+        );
+        for index in 0..300 {
+            doc.push_str(&format!(
+                "- loose end {index}: reconcile the release notes for repository {index} once \
+                 its preview tag lands and the promotion runbook names the new version.\n"
+            ));
+        }
+        doc.push_str("<!-- /agent:loose-ends -->\n\n");
+        for run in 0..30 {
+            doc.push_str(&format!(
+                "## run-{run} <!-- agent:run id=\"run-{run}\" subagents keep go -->\n"
+            ));
+            doc.push_str(&format!(
+                "- 📥 address the review threads on pull request {run} and push the fix\n"
+            ));
+            doc.push_str(&format!(
+                "- investigate why the nightly job for repository {run} skipped its \
+                 promotion step and report the cause\n"
+            ));
+            doc.push_str("<!-- /agent:run -->\n\n");
+        }
+        doc.push_str("## Exchange <!-- agent:exchange patch=append -->\n");
+        let mut cell = 0;
+        while doc.len() < 270 * 1024 {
+            let run = cell % 30;
+            doc.push_str(&format!(
+                "### Re: run-{run} cycle {cell} — claude\n\n\
+> **Queue prompt:** investigate why the nightly job for repository {run} skipped its \
+promotion step on cycle {cell}\n\n\
+**Summary:** The nightly job for repository {run} ran its build and tests, then skipped \
+promotion because the release branch had not advanced since the previous cycle. Nothing \
+was published, and the next run promotes once the branch moves.\n\n\
+**What changed:** none. **Verification:** read the workflow log for cycle {cell}; the \
+promotion step reported `skipped: no new commits`. **Notes:** the skip is expected. \
+**Next actions:** none.\n\n"
+            ));
+            cell += 1;
+        }
+        doc.push_str("<!-- /agent:exchange -->\n");
+        doc
+    }
+
+    /// `#claudestopbudget` (haiven-dev `tasks/sdk/sdk-dev.md`, 2026-11-24): the
+    /// Stop overran its 11s budget with `claude_stop_cycle_gates=9578ms`, and
+    /// the transient-closeout assessment was cut off, so the turn ended over a
+    /// live `📥` row with "its Stop check did not finish again". Profiling a
+    /// copy of the document with its real claim/receipt/lineage ledgers showed
+    /// why: every gate re-derived the same queue projections (the subagent
+    /// ownership plan alone ~1s, built more than four times), and every
+    /// residue check re-parsed every queue body and rescanned the exchange per
+    /// live row.
+    ///
+    /// The whole Stop decision now reads one snapshot: each projection is
+    /// derived at most once for the document's text, and the decision still
+    /// reaches the transient-closeout gate, which names the `📥` rows.
+    #[test]
+    fn claudestopbudget_cycle_gates_derive_each_queue_projection_once_at_sdk_dev_scale() {
+        use agent_doc_queue_io::state_read_scope;
+
+        let dir = setup_project();
+        let doc = dir.path().join("sdk-dev.md");
+        let content = sdk_dev_scale_document();
+        assert!(content.len() > 260 * 1024, "{}", content.len());
+        fs::write(&doc, &content).unwrap();
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        complete_run(&doc);
+        // A live worker claim installs the nested-claim steer, the read context
+        // that made every claim projection reparse the document.
+        agent_doc_queue_io::queue_claim::claim(
+            &doc,
+            "investigate why the nightly job for repository 3 skipped its promotion step and report the cause",
+            "subagent:w3",
+            3600,
+        )
+        .unwrap();
+        // A clean closeout's marker, so the queue-continuation gate runs its
+        // full detection as it did on sdk-dev.md.
+        agent_doc_queue_io::continuation_marker::write_continuation_marker(
+            &doc,
+            &agent_doc_queue::queue_continuation::QueueContinuation {
+                head_prompt: "📥 address the review threads on pull request 0 and push the fix"
+                    .to_string(),
+                head_id: None,
+                reason: "fixture".to_string(),
+            },
+            "session-check",
+        )
+        .unwrap();
+
+        state_read_scope::reset_evaluations();
+        let started = std::time::Instant::now();
+        let answer = claude_stop_answer_with_drain_readiness(
+            &ClaudeStopInput {
+                session_id: "codex-session".to_string(),
+                cwd: dir.path().display().to_string(),
+                stop_hook_active: false,
+                transcript_path: None,
+                reason: None,
+                subagent_type: None,
+            },
+            |_: &Path| agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor,
+        )
+        .unwrap();
+        let elapsed = started.elapsed();
+        // Projections that install the document's own claim view are derived
+        // once. Those that read the caller's view are derived at most once per
+        // view: inside and outside a claim projection's view.
+        for (projection, bound) in [
+            ("queue_attr_subagent_plan", 1),
+            ("ledger_claimed_items", 1),
+            ("claimed_items", 1),
+            ("in_flight_claimed_items", 1),
+            ("out_of_loop_items", 1),
+            ("subagent_dispatch_candidates", 1),
+            ("reported_items", 2),
+            ("worker_owned_items", 2),
+        ] {
+            let evaluations = state_read_scope::evaluations(projection);
+            assert!(
+                evaluations <= bound,
+                "{projection} was derived {evaluations} times in one Stop decision, more than {bound} (#claudestopbudget)"
+            );
+        }
+        assert_eq!(
+            state_read_scope::evaluations("queue_attr_subagent_plan"),
+            1,
+            "the gates must still consult the ownership plan"
+        );
+        // The decision reached the transient-closeout gate and named the rows.
+        let reason = answer
+            .into_continuation()
+            .unwrap_or_else(|| panic!("live 📥 rows refuse the first Stop"))
+            .reason;
+        assert!(reason.contains("#transientcloseout"), "{reason}");
+        assert!(
+            reason.contains("📥 address the review threads on pull request"),
+            "{reason}"
+        );
+        assert!(!state_read_scope::in_state_read_scope());
+        eprintln!("[claudestopbudget] sdk-dev-scale Stop decision took {elapsed:?}");
     }
 
     /// `#stopnestedcwd` (haiven-dev, 2026-11-23T05:43:27Z): after `cd

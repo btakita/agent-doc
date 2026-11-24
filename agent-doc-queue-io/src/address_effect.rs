@@ -670,6 +670,7 @@ fn insert_snapshot(
 ) -> Result<()> {
     // The first observation owns this exact attempt and phase. Another
     // process may resume the same attempt, but may not replace that evidence.
+    state_store::note_queue_document_state_write();
     conn.execute(
         "INSERT INTO queue_document_state
          (document_hash, state_kind, canonical_path, payload_json, updated_at_secs)

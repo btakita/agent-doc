@@ -1499,6 +1499,27 @@ fn entries_without_claimed_prompts(
 pub fn live_queue_head_identities(
     content: &str,
 ) -> Option<HashSet<agent_doc_element_queue::QueueItemIdentity>> {
+    // `#claudestopbudget`: read by every claim projection of one pass.
+    type Identities = Option<std::sync::Arc<HashSet<agent_doc_element_queue::QueueItemIdentity>>>;
+    thread_local! {
+        static MEMO: std::cell::RefCell<agent_doc_element::content_memo::ContentMemo<Identities>> =
+            const {
+                std::cell::RefCell::new(agent_doc_element::content_memo::ContentMemo::new(
+                    4 * 1024,
+                    4,
+                    8 * 1024 * 1024,
+                ))
+            };
+    }
+    crate::nested_claim_steer::memoized_under_steer(&MEMO, content, |content| {
+        live_queue_head_identities_uncached(content).map(std::sync::Arc::new)
+    })
+    .map(|identities| identities.as_ref().clone())
+}
+
+fn live_queue_head_identities_uncached(
+    content: &str,
+) -> Option<HashSet<agent_doc_element_queue::QueueItemIdentity>> {
     let components = element::parse(content).ok()?;
     let queue_set = crate::queue_set::QueueSet::parse(content, &components).ok()?;
     Some(

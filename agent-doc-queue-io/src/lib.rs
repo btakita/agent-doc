@@ -40,6 +40,7 @@ pub mod reported_writeback_reminder;
 pub mod restart_journal;
 pub mod self_repair;
 pub mod stale_completion_repair;
+pub mod state_read_scope;
 pub mod subagent_dispatch;
 pub mod subagent_pool;
 pub mod sync_payload;

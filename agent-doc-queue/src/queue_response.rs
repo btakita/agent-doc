@@ -15,11 +15,51 @@ use std::borrow::Cow;
 /// handoff awaiting coordinator integration, not the coordinator's answer.
 /// Keep those cells out of every response-evidence matcher while preserving
 /// heading-shaped prose that lacks the binary attestation.
+/// `#claudestopbudget`: memo budget for the per-exchange derivations a
+/// head-by-head residue or strike walk repeats. Each walk asks one question
+/// per live queue row about the same exchange text; deriving that text's
+/// direct response, echo blocks, and blockquote candidates once per revision
+/// instead of once per row took the sdk-dev.md (107 KB exchange, 61 rows)
+/// Stop-hook continuation check from ~0.5 s to a few milliseconds of scans.
+const EXCHANGE_MEMO_MIN_BYTES: usize = 4 * 1024;
+const EXCHANGE_MEMO_ENTRIES: usize = 4;
+const EXCHANGE_MEMO_KEY_BYTES: usize = 8 * 1024 * 1024;
+
+type ExchangeMemo<T> = std::cell::RefCell<agent_doc_element::content_memo::ContentMemo<T>>;
+
+const fn exchange_memo<T: Clone>() -> ExchangeMemo<T> {
+    std::cell::RefCell::new(agent_doc_element::content_memo::ContentMemo::new(
+        EXCHANGE_MEMO_MIN_BYTES,
+        EXCHANGE_MEMO_ENTRIES,
+        EXCHANGE_MEMO_KEY_BYTES,
+    ))
+}
+
+thread_local! {
+    static DIRECT_RESPONSE_TEXT: ExchangeMemo<Option<std::sync::Arc<str>>> = const { exchange_memo() };
+    static QUEUE_PROMPT_ECHO_BLOCKS: ExchangeMemo<std::sync::Arc<Vec<QueuePromptEchoBlock>>> =
+        const { exchange_memo() };
+    static BLOCKQUOTE_ENTRY_CANDIDATES: ExchangeMemo<std::sync::Arc<Vec<String>>> =
+        const { exchange_memo() };
+}
+
 fn direct_response_text(text: &str) -> Cow<'_, str> {
-    if agent_doc_document::subagent_completion::completion_cell_line_ranges(text).is_empty() {
-        Cow::Borrowed(text)
-    } else {
-        Cow::Owned(agent_doc_document::subagent_completion::strip_completion_cells(text))
+    // A pure function of `text`, asked once per queue row of a residue walk.
+    let Ok(stripped) =
+        agent_doc_element::content_memo::memoized(&DIRECT_RESPONSE_TEXT, text, |text| {
+            Ok::<_, std::convert::Infallible>(
+                (!agent_doc_document::subagent_completion::completion_cell_line_ranges(text)
+                    .is_empty())
+                .then(|| {
+                    std::sync::Arc::from(
+                        agent_doc_document::subagent_completion::strip_completion_cells(text),
+                    )
+                }),
+            )
+        });
+    match stripped {
+        None => Cow::Borrowed(text),
+        Some(stripped) => Cow::Owned(stripped.to_string()),
     }
 }
 
@@ -628,7 +668,20 @@ pub fn normalize_for_answer_match(s: &str) -> String {
 /// Each candidate is a blockquote block joined from one of its lines to the end,
 /// so a head spanning several quoted lines still matches at whatever entry
 /// position it occupies, while text buried mid-entry never does.
-fn response_blockquote_entry_candidates(response_body: &str) -> Vec<String> {
+fn response_blockquote_entry_candidates(response_body: &str) -> std::sync::Arc<Vec<String>> {
+    let Ok(candidates) = agent_doc_element::content_memo::memoized(
+        &BLOCKQUOTE_ENTRY_CANDIDATES,
+        response_body,
+        |text| {
+            Ok::<_, std::convert::Infallible>(std::sync::Arc::new(
+                response_blockquote_entry_candidates_uncached(text),
+            ))
+        },
+    );
+    candidates
+}
+
+fn response_blockquote_entry_candidates_uncached(response_body: &str) -> Vec<String> {
     let mut candidates = Vec::new();
     let mut block: Vec<String> = Vec::new();
     fn flush(block: &mut Vec<String>, candidates: &mut Vec<String>) {
@@ -773,21 +826,39 @@ fn queue_bodies_for_nest(content: &str) -> Vec<&str> {
     bodies
 }
 
+/// Every tree body [`located_prompt`] searches, parsed and steer-expanded.
+///
+/// `#claudestopbudget`: a pure function of `content` and the installed
+/// nested-claim steer, asked once per live row by every residue or strike
+/// walk. Parsing all of a 61-row document's queue and run bodies per row cost
+/// the sdk-dev.md Stop-hook continuation check ~0.9 s; it is parsed once per
+/// revision.
+fn nest_tree_bodies(content: &str) -> std::sync::Arc<Vec<Vec<crate::document_queue::QueueEntry>>> {
+    type Bodies = std::sync::Arc<Vec<Vec<crate::document_queue::QueueEntry>>>;
+    thread_local! {
+        static MEMO: ExchangeMemo<Bodies> = const { exchange_memo() };
+    }
+    crate::nested_claim_steer::memoized_under_steer(&MEMO, content, |content| {
+        let mut parsed = Vec::new();
+        for body in queue_bodies_for_nest(content) {
+            let Ok(entries) = crate::document_queue::parse(body) else {
+                continue;
+            };
+            parsed.push(crate::nested_claim_steer::expand_if_installed(entries));
+        }
+        std::sync::Arc::new(parsed)
+    })
+}
+
 /// The first tree body that contains `prompt_text`, with that row's index.
 fn located_prompt(
     content: &str,
     prompt_text: &str,
 ) -> Option<(Vec<crate::document_queue::QueueEntry>, usize)> {
-    let mut parsed = Vec::new();
-    for body in queue_bodies_for_nest(content) {
-        let Ok(entries) = crate::document_queue::parse(body) else {
-            continue;
-        };
-        parsed.push(crate::nested_claim_steer::expand_if_installed(entries));
-    }
+    let parsed = nest_tree_bodies(content);
     // A nest-vector head names the row in the queue that contains that parent,
     // not the first copy of the leaf (`#nestlistlineage`).
-    for entries in &parsed {
+    for entries in parsed.iter() {
         if let Some(index) = entries.iter().enumerate().find_map(|(index, entry)| {
             if !matches!(entry, crate::document_queue::QueueEntry::Prompt(_))
                 || crate::document_queue::entry_is_group_parent(entries, index)
@@ -805,7 +876,7 @@ fn located_prompt(
     // from the exact claim-lineage pass above: claim/receipt projection must
     // distinguish repeated `⟦effect:N⟧` rows, while authorization treats the
     // annotation as inert metadata.
-    for entries in &parsed {
+    for entries in parsed.iter() {
         if let Some(index) = entries.iter().enumerate().find_map(|(index, entry)| {
             if !matches!(entry, crate::document_queue::QueueEntry::Prompt(_))
                 || crate::document_queue::entry_is_group_parent(entries, index)
@@ -818,9 +889,9 @@ fn located_prompt(
             return Some((entries.clone(), index));
         }
     }
-    for entries in parsed {
-        if let Some(index) = crate::document_queue::prompt_index_for_text(&entries, prompt_text) {
-            return Some((entries, index));
+    for entries in parsed.iter() {
+        if let Some(index) = crate::document_queue::prompt_index_for_text(entries, prompt_text) {
+            return Some((entries.clone(), index));
         }
     }
     None
@@ -1813,7 +1884,20 @@ struct QueuePromptEchoBlock {
     id_backed: bool,
 }
 
-fn queue_prompt_echo_blocks(response_body: &str) -> Vec<QueuePromptEchoBlock> {
+fn queue_prompt_echo_blocks(response_body: &str) -> std::sync::Arc<Vec<QueuePromptEchoBlock>> {
+    let Ok(blocks) = agent_doc_element::content_memo::memoized(
+        &QUEUE_PROMPT_ECHO_BLOCKS,
+        response_body,
+        |text| {
+            Ok::<_, std::convert::Infallible>(std::sync::Arc::new(
+                queue_prompt_echo_blocks_uncached(text),
+            ))
+        },
+    );
+    blocks
+}
+
+fn queue_prompt_echo_blocks_uncached(response_body: &str) -> Vec<QueuePromptEchoBlock> {
     let lines: Vec<&str> = response_body.lines().collect();
     let echo_start = |line: &str| -> Option<(bool, String)> {
         let quoted = line.trim_start().strip_prefix('>')?.trim_start();

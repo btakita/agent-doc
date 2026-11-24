@@ -124,6 +124,17 @@ fn lineage_hold_for_head(keys: &[(String, String)], head: &str) -> String {
 /// Live, unclaimed queue lines with subagent intent that are new since the
 /// previous cycle's seed, in queue order.
 fn subagent_dispatch_candidates_for_content(file: &Path, content: &str) -> Result<Vec<String>> {
+    // `#claudestopbudget`: a recovery that wrote the ledger is not recorded,
+    // so the next read inside the scope recovers and observes again.
+    crate::state_read_scope::memoized_ok("subagent_dispatch_candidates", file, content, "", || {
+        subagent_dispatch_candidates_for_content_uncached(file, content)
+    })
+}
+
+fn subagent_dispatch_candidates_for_content_uncached(
+    file: &Path,
+    content: &str,
+) -> Result<Vec<String>> {
     // `#lostrunningcontinue`: continue a lost running claim before this read
     // decides what may be offered. A failed continue is what makes the row
     // dispatchable. The flag is unknown here; mid-turn and idle observation
@@ -457,6 +468,27 @@ fn queue_attr_subagent_plan_with_pools(
     file: &Path,
     content: &str,
     prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
+    pools: Option<&mut Vec<agent_doc_queue::subagent_pool::PoolStatus>>,
+) -> Result<Option<agent_doc_queue::subagent_intent::QueueSubagentPlan>> {
+    // `#claudestopbudget`: one plan per text inside a read scope. A caller
+    // that also wants the pool occupancy computes it, since only the plan is
+    // recorded.
+    let Some(pools) = pools else {
+        return crate::state_read_scope::memoized_self_steered(
+            "queue_attr_subagent_plan",
+            file,
+            content,
+            &format!("{prompt_presets:?}"),
+            || queue_attr_subagent_plan_with_pools_uncached(file, content, prompt_presets, None),
+        );
+    };
+    queue_attr_subagent_plan_with_pools_uncached(file, content, prompt_presets, Some(pools))
+}
+
+fn queue_attr_subagent_plan_with_pools_uncached(
+    file: &Path,
+    content: &str,
+    prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
     mut pools: Option<&mut Vec<agent_doc_queue::subagent_pool::PoolStatus>>,
 ) -> Result<Option<agent_doc_queue::subagent_intent::QueueSubagentPlan>> {
     // Keep nested-claim steering installed for every claim/pool read below.
@@ -739,6 +771,15 @@ fn subagent_dispatch_candidates_or_warn(file: &Path, content: &str) -> Vec<Strin
 /// or has a report-release receipt: the worker is finished and the coordinator
 /// must select the row for integration/writeback (`#reportedwritebackdebt`).
 pub fn out_of_loop_items_for_content(
+    file: &Path,
+    content: &str,
+) -> agent_doc_queue::queue_claim::ClaimedQueueItems {
+    crate::state_read_scope::memoized("out_of_loop_items", file, content, "", || {
+        out_of_loop_items_for_content_uncached(file, content)
+    })
+}
+
+fn out_of_loop_items_for_content_uncached(
     file: &Path,
     content: &str,
 ) -> agent_doc_queue::queue_claim::ClaimedQueueItems {

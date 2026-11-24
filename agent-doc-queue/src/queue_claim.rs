@@ -3867,6 +3867,26 @@ fn struck_beside_live_residue(identity: &QueueItemIdentity) -> QueueItemIdentity
 /// from stored claim text. A done backlog item does not link. The first open
 /// item wins when two items share a sentence.
 pub fn user_prompt_backlog_identity_classes(content: &str) -> Vec<HashSet<QueueItemIdentity>> {
+    // `#claudestopbudget`: read by every claim-hold projection of one pass.
+    type Classes = std::sync::Arc<Vec<HashSet<QueueItemIdentity>>>;
+    thread_local! {
+        static MEMO: std::cell::RefCell<agent_doc_element::content_memo::ContentMemo<Classes>> =
+            const {
+                std::cell::RefCell::new(agent_doc_element::content_memo::ContentMemo::new(
+                    4 * 1024,
+                    4,
+                    8 * 1024 * 1024,
+                ))
+            };
+    }
+    crate::nested_claim_steer::memoized_under_steer(&MEMO, content, |content| {
+        std::sync::Arc::new(user_prompt_backlog_identity_classes_uncached(content))
+    })
+    .as_ref()
+    .clone()
+}
+
+fn user_prompt_backlog_identity_classes_uncached(content: &str) -> Vec<HashSet<QueueItemIdentity>> {
     let Ok(components) = agent_doc_element::element::parse(content) else {
         return Vec::new();
     };

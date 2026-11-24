@@ -137,7 +137,9 @@ pub fn clear(file: &Path) -> Result<bool> {
         return Ok(false);
     };
     let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
-    agent_doc_sqlite::state_store::clear_queue_document_state_in_db(
+    // `#claudestopbudget`: only the Stop gate reads this row, so clearing it
+    // does not end the Stop decision's queue-projection read snapshot.
+    agent_doc_sqlite::state_store::clear_queue_document_bookkeeping_in_db(
         &conn,
         &document_hash,
         STATE_KIND,
@@ -165,7 +167,8 @@ pub fn record(file: &Path, session_id: &str, debts_fingerprint: &str, debts: usi
         refusals,
     };
     let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
-    agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
+    // `#claudestopbudget`: a bookkeeping row (see `clear`).
+    agent_doc_sqlite::state_store::upsert_queue_document_bookkeeping_in_db(
         &conn,
         &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
             document_hash,

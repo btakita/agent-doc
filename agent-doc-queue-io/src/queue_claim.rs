@@ -2971,6 +2971,13 @@ impl Drop for PlannedClaimLedgerOverlay {
     }
 }
 
+/// True while a [`PlannedClaimLedgerOverlay`] is installed on this thread: its
+/// staged writes change every ledger read, so no read-scope memo is used
+/// (`#claudestopbudget`).
+pub(crate) fn planned_claim_overlay_installed() -> bool {
+    PLANNED_CLAIM_OVERLAYS.with(|overlays| !overlays.borrow().is_empty())
+}
+
 fn apply_planned_claim_overlay(document_hash: &str, ledger: &mut QueueClaimLedger) -> Result<()> {
     let writes = PLANNED_CLAIM_OVERLAYS.with(|overlays| {
         overlays
@@ -3682,6 +3689,14 @@ pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<Claim
 /// failure direction is the pre-claim behaviour (the head stays drainable),
 /// never a stranded queue.
 pub fn claimed_items_for_content(file: &Path, content: &str) -> ClaimedQueueItems {
+    let Ok(items) =
+        crate::state_read_scope::memoized_self_steered("claimed_items", file, content, "", || {
+            Ok::<_, std::convert::Infallible>(claimed_items_for_content_uncached(file, content))
+        });
+    items
+}
+
+fn claimed_items_for_content_uncached(file: &Path, content: &str) -> ClaimedQueueItems {
     let _guard = steer_guard(nested_claim_steer_snapshots(file, content));
     claimed_items_with_non_ledger_holds(
         file,
@@ -3699,6 +3714,21 @@ pub fn claimed_items_for_content(file: &Path, content: &str) -> ClaimedQueueItem
 /// An unreadable ledger contributes no attempt claims (the queue head remains
 /// visible instead of becoming stranded).
 pub fn in_flight_claimed_items_for_content(file: &Path, content: &str) -> ClaimedQueueItems {
+    let Ok(items) = crate::state_read_scope::memoized_self_steered(
+        "in_flight_claimed_items",
+        file,
+        content,
+        "",
+        || {
+            Ok::<_, std::convert::Infallible>(in_flight_claimed_items_for_content_uncached(
+                file, content,
+            ))
+        },
+    );
+    items
+}
+
+fn in_flight_claimed_items_for_content_uncached(file: &Path, content: &str) -> ClaimedQueueItems {
     use agent_doc_queue::queue_claim::QueueClaimState;
 
     let _guard = steer_guard(nested_claim_steer_snapshots(file, content));
@@ -3790,6 +3820,12 @@ fn claimed_items_with_queue_holds(
 /// attempt, and a subagents-attribute hold are not worker ownership. An
 /// unreadable ledger contributes no claims (the gate this feeds stays armed).
 pub fn worker_owned_items_for_content(file: &Path, content: &str) -> ClaimedQueueItems {
+    crate::state_read_scope::memoized("worker_owned_items", file, content, "", || {
+        worker_owned_items_for_content_uncached(file, content)
+    })
+}
+
+fn worker_owned_items_for_content_uncached(file: &Path, content: &str) -> ClaimedQueueItems {
     use agent_doc_queue::queue_claim::QueueClaimState;
     // Preflight can hand a deterministic `[#q-…]` selector to a worker before
     // the background reconciler persists that annotation. Follow the claim on
@@ -3964,6 +4000,21 @@ pub fn claim_attempt_head_texts_for_content(file: &Path, content: &str) -> Vec<S
 /// Only the worker claims recorded in the ledger, without heads the queue
 /// subagents attribute holds back.
 pub fn ledger_claimed_items_for_content(file: &Path, content: &str) -> ClaimedQueueItems {
+    let Ok(items) = crate::state_read_scope::memoized_self_steered(
+        "ledger_claimed_items",
+        file,
+        content,
+        "",
+        || {
+            Ok::<_, std::convert::Infallible>(ledger_claimed_items_for_content_uncached(
+                file, content,
+            ))
+        },
+    );
+    items
+}
+
+fn ledger_claimed_items_for_content_uncached(file: &Path, content: &str) -> ClaimedQueueItems {
     match load_ledger_following(file, content) {
         Ok(ledger) if ledger.claims.is_empty() => ClaimedQueueItems::none(),
         Ok(ledger) => {

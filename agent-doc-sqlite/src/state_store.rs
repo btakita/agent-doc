@@ -3351,7 +3351,54 @@ pub struct QueueDocumentStateRecord {
     pub updated_at_secs: u64,
 }
 
+thread_local! {
+    /// This thread's count of `queue_document_state` writes (`#claudestopbudget`).
+    ///
+    /// A bounded read scope (the Claude Stop hook's gate pass) memoizes queue
+    /// projections derived from this table on the thread that runs it. Every
+    /// write on that thread bumps the epoch before it lands, so a memo entry
+    /// recorded under an older epoch is never served after the pass changed
+    /// the state it was derived from. Writes by other threads and processes
+    /// are outside the pass's snapshot by design; counting them here would
+    /// only let unrelated work (parallel tests, a co-hosted controller)
+    /// defeat the snapshot.
+    static QUEUE_DOCUMENT_STATE_WRITE_EPOCH: std::cell::Cell<u64> =
+        const { std::cell::Cell::new(0) };
+}
+
+/// The current thread's `queue_document_state` write epoch.
+pub fn queue_document_state_write_epoch() -> u64 {
+    QUEUE_DOCUMENT_STATE_WRITE_EPOCH.with(std::cell::Cell::get)
+}
+
+/// Record a `queue_document_state` write on this thread. Writers outside this
+/// module that issue their own SQL against the table call it too.
+pub fn note_queue_document_state_write() {
+    QUEUE_DOCUMENT_STATE_WRITE_EPOCH.with(|epoch| epoch.set(epoch.get().wrapping_add(1)));
+}
+
 pub fn upsert_queue_document_state_in_db(
+    conn: &Connection,
+    state: &QueueDocumentStateRecord,
+) -> Result<()> {
+    note_queue_document_state_write();
+    upsert_queue_document_state_row(conn, state)
+}
+
+/// [`upsert_queue_document_state_in_db`] for a bookkeeping row that no queue
+/// projection reads, such as the Stop hook's own refusal record: it does not
+/// advance [`queue_document_state_write_epoch`], so recording it does not make
+/// the Stop decision re-derive the projections it just read
+/// (`#claudestopbudget`). Only a kind whose sole reader is its own module may
+/// be written this way.
+pub fn upsert_queue_document_bookkeeping_in_db(
+    conn: &Connection,
+    state: &QueueDocumentStateRecord,
+) -> Result<()> {
+    upsert_queue_document_state_row(conn, state)
+}
+
+fn upsert_queue_document_state_row(
     conn: &Connection,
     state: &QueueDocumentStateRecord,
 ) -> Result<()> {
@@ -3449,6 +3496,25 @@ pub fn list_queue_document_state_family_from_db(
 }
 
 pub fn clear_queue_document_state_in_db(
+    conn: &Connection,
+    document_hash: &str,
+    state_kind: &str,
+) -> Result<bool> {
+    note_queue_document_state_write();
+    clear_queue_document_state_row(conn, document_hash, state_kind)
+}
+
+/// [`clear_queue_document_state_in_db`] for a bookkeeping row (see
+/// [`upsert_queue_document_bookkeeping_in_db`]).
+pub fn clear_queue_document_bookkeeping_in_db(
+    conn: &Connection,
+    document_hash: &str,
+    state_kind: &str,
+) -> Result<bool> {
+    clear_queue_document_state_row(conn, document_hash, state_kind)
+}
+
+fn clear_queue_document_state_row(
     conn: &Connection,
     document_hash: &str,
     state_kind: &str,

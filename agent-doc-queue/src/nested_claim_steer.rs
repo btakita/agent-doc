@@ -110,6 +110,28 @@ pub fn installed_fingerprint() -> String {
         .unwrap_or_default()
 }
 
+/// `eval(content)` for a pure function of `content` and the installed steer,
+/// memoized by both (`#claudestopbudget`). The steer snapshots are part of the
+/// key because they change how the same text expands into rows.
+pub fn memoized_under_steer<T: Clone + 'static>(
+    memo: &'static std::thread::LocalKey<
+        std::cell::RefCell<agent_doc_element::content_memo::ContentMemo<T>>,
+    >,
+    content: &str,
+    eval: impl FnOnce(&str) -> T,
+) -> T {
+    let steer = installed_fingerprint();
+    let key = if steer.is_empty() {
+        std::borrow::Cow::Borrowed(content)
+    } else {
+        std::borrow::Cow::Owned(format!("{steer}\u{0}{content}"))
+    };
+    let Ok(value) = agent_doc_element::content_memo::memoized(memo, &key, |_| {
+        Ok::<_, std::convert::Infallible>(eval(content))
+    });
+    value
+}
+
 /// Expand `entries` when a guard is installed. Otherwise return them as-is.
 pub fn expand_if_installed(entries: Vec<QueueEntry>) -> Vec<QueueEntry> {
     match installed_snapshots() {

@@ -88,6 +88,18 @@ pub fn effective_presets_for_content(content: &str) -> ResolvedPresets {
         .unwrap_or_default()
 }
 
+/// A key for the preset map an [`InheritedPresetsGuard`] installed on this
+/// thread; empty when none is installed. A memo of a derivation that reads
+/// [`effective_presets_for_content`] includes it (`#claudestopbudget`).
+pub fn installed_fingerprint() -> String {
+    INHERITED_PRESETS.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map(|presets| format!("{presets:?}"))
+            .unwrap_or_default()
+    })
+}
+
 /// Phrases that open a preset's final-state declaration, matched lowercase
 /// with whitespace collapsed.
 const FINAL_STATE_DECLARATIONS: &[&str] = &[

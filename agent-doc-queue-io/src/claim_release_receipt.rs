@@ -639,6 +639,12 @@ fn governing_in(
 
 /// Lines of `content` whose worker reported: never offered to a new worker.
 pub fn reported_items_for_content(file: &Path, content: &str) -> ClaimedQueueItems {
+    crate::state_read_scope::memoized("reported_items", file, content, "", || {
+        reported_items_for_content_uncached(file, content)
+    })
+}
+
+fn reported_items_for_content_uncached(file: &Path, content: &str) -> ClaimedQueueItems {
     let ledger = ledger_or_warn(file);
     if ledger.receipts.is_empty() {
         return ClaimedQueueItems::none();

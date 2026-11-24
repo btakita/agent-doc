@@ -102,6 +102,7 @@ pub mod route_dispatch;
 pub mod self_repair;
 pub mod session_trigger;
 pub mod stale_completion_evidence;
+pub mod stale_typing_copies;
 #[cfg(test)]
 mod stray_close_text_tests;
 pub mod struck_prompt_response;

@@ -171,6 +171,10 @@ pub enum SelfRepairKind {
     /// Moved a struck numbered step's response tree from under a later step
     /// back under that step (`#orderedsteps`).
     NumberedStepResponse,
+    /// Removed a proven stale copy of the operator's free-text row: an exact
+    /// duplicate, or an older typing snapshot, of a newer row
+    /// ([`crate::stale_typing_copies`], `#dupwrite`).
+    StaleTypingCopy,
 }
 
 impl SelfRepairKind {
@@ -194,6 +198,7 @@ impl SelfRepairKind {
             Self::DuplicateEntryGuidance => "duplicate_entry_guidance",
             Self::HalfClosedStrike => "half_closed_strike",
             Self::NumberedStepResponse => "numbered_step_response",
+            Self::StaleTypingCopy => "stale_typing_copy",
         }
     }
 }

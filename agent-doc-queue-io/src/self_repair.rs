@@ -9,6 +9,7 @@ use agent_doc_queue::reconcile_incremental::{
     reconcile_incremental,
 };
 use agent_doc_queue::self_repair::{SelfRepair, self_repair_document_with_provenance};
+use agent_doc_queue::stale_typing_copies::drop_stale_typing_copies;
 
 /// The external answers the queue reconcile passes read for one document
 /// revision (`#incrementalreconcile`): claim-ledger attempt liveness and row
@@ -195,9 +196,76 @@ pub fn self_repair_document_for(file: &Path, content: &str) -> Option<(String, V
         &|owner: &str, generation: u64| sources.is_live(owner, generation),
         &|id: &str| sources.response_proven(id),
         &|work: &str| sources.struck_provenance(work),
-    )?;
-    carry_self_repair_rewrites(file, &repaired.1);
-    Some(repaired)
+    );
+    let (document, mut repairs) = match repaired {
+        Some((document, repairs)) => (document, repairs),
+        None => (content.to_string(), Vec::new()),
+    };
+    let (document, stale) = drop_stale_typing_copies(&document, &mut || typing_history_for(file));
+    repairs.extend(stale);
+    carry_self_repair_rewrites(file, &repairs);
+    (document != content).then_some((document, repairs))
+}
+
+/// Bound on each content-bearing fact stream [`typing_history_for`] reads.
+const TYPING_HISTORY_EVENTS: usize = 16;
+
+/// `#dupwrite`: the recorded versions of `file` that prove a row was an older
+/// cut of another (oldest first): the committed copy, then the newest merge
+/// baselines and retained-write cuts and targets from the state ledger. An
+/// unreadable source contributes nothing, so a repair is only ever withheld.
+pub fn typing_history_for(file: &Path) -> agent_doc_queue::stale_typing_copies::TypingHistory {
+    let mut versions: Vec<String> = agent_doc_git_io::revision::show_head(file)
+        .ok()
+        .flatten()
+        .into_iter()
+        .collect();
+    let recorded = || -> anyhow::Result<Vec<(u64, String)>> {
+        let Some(root) = agent_doc_fs::find_project_root(file) else {
+            return Ok(Vec::new());
+        };
+        if !agent_doc_sqlite::state_store::state_db_path(&root).exists() {
+            return Ok(Vec::new());
+        }
+        let hash = agent_doc_hash::path_hash(file)?;
+        let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+        let mut recorded = Vec::new();
+        for (fact_type, fields) in [
+            ("document_baseline_checkpointed", &["content"][..]),
+            (
+                "document_write_deferred",
+                &["expected_content", "target_content"][..],
+            ),
+        ] {
+            for event in
+                agent_doc_sqlite::state_store::load_recent_state_events_by_fact_type_from_db(
+                    &conn,
+                    &hash,
+                    fact_type,
+                    TYPING_HISTORY_EVENTS,
+                )?
+            {
+                let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload_json)
+                else {
+                    continue;
+                };
+                for field in fields {
+                    if let Some(content) = payload["fact"][*field].as_str() {
+                        recorded.push((event.sequence, content.to_string()));
+                    }
+                }
+            }
+        }
+        recorded.sort_by_key(|(sequence, _)| *sequence);
+        Ok(recorded)
+    };
+    versions.extend(
+        recorded()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(_, content)| content),
+    );
+    agent_doc_queue::stale_typing_copies::TypingHistory::from_documents(&versions)
 }
 
 /// The response passes of `agent-doc queue sync`
@@ -209,9 +277,14 @@ pub fn queue_sync_response_chain_for(
     content: &str,
 ) -> agent_doc_queue::reconcile_incremental::QueueSyncResponses {
     let sources = ReconcileInputSources::load(file, content);
-    let chain = sources.with_inputs(|inputs| {
+    let mut chain = sources.with_inputs(|inputs| {
         agent_doc_queue::reconcile_incremental::queue_sync_response_chain(content, inputs)
     });
+    // `#dupwrite`: proven stale copies of the operator's typed rows.
+    let (document, stale) =
+        drop_stale_typing_copies(&chain.document, &mut || typing_history_for(file));
+    chain.document = document;
+    chain.repairs.extend(stale);
     carry_self_repair_rewrites(file, &chain.repairs);
     chain
 }

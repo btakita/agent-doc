@@ -2210,6 +2210,52 @@ The rules:
   so the rebase takes the operator's body unchanged. A component with a real
   agent edit, such as a checked box or an agent-added line, never qualifies.
 
+- **A stale queue row copy is not an agent op either, line by line
+  (`#dupwrite`).** Measured on `tasks/agent-doc/agent-doc-bugs.md`
+  2026-11-24T17:17:36Z-17:18:19Z (build 0.35.590+82c67d60a93255da). One
+  retained chain (three progressive editor-reconnect cuts, a
+  completion-feedback write, a mechanical closeout, a backlog strike) wrote a
+  claim row's lifecycle marker in `agent:run` while the operator typed two
+  rows below it. The marker is a real agent edit, so the rule above never
+  reset that component, and every merge kept each snapshot of the operator's
+  rows (one before its `- ` list marker, some with the `📥` intake
+  projection) beside the newer one, and the claim row once per marker
+  (`☑️`, `⚠️`, struck twice): one row read four times. Now, in each queue
+  component (`queue`, `run`, `loop`) both sides changed, every line the older
+  target added is reverted to the base row it replaced (or dropped) when
+  `neutralize_stale_queue_row_copies` finds it is not the agent's op:
+  - a differing cut of a row the newer side added at the same depth under
+    the same parent: the same work text (list marker, `###` heading,
+    lifecycle/intake projection ignored), or one a prefix of the other (at
+    least 8 characters; the operator typed on, or deleted the tail);
+  - a projection-only change of a base row the newer side also changed or
+    removed (a strike, a new marker, a deletion): markers are binary-owned
+    and repainted from the ledger.
+
+  A byte-identical line at the same place stays; the merge aligns it. A base
+  row the older target really changed (struck) while the newer side only
+  re-marked it takes the newer side's marker as base, so the merge keeps the
+  strike once. It runs in `rebase_agent_candidate_over_editor_cut` (and so in
+  progressive editor-reconnect supersession and the controller's retained
+  transition) against the editor cut, and before the composition of two
+  retained intents against the newer target (ops log
+  `{source}_deferred_write_stale_queue_rows_reverted … reverted=N advanced=N`).
+  An agent's marker on a row the newer side left alone, an agent-added row,
+  and a short row such as `do` are never reverted.
+- **Self-repair removes proven stale copies an older binary left
+  (`#dupwrite`).** `agent_doc_queue::stale_typing_copies` (run by `queue sync`
+  and preflight self-repair, logged `kind=stale_typing_copy`) removes a
+  free-text leaf row (live, no claim projection, no authored `[#id]`, no child
+  rows; a generated `[#q-…]` id and `⟦…⟧` markers are ignored; a bare column-0
+  line counts) that is an exact prose duplicate of a row at the same depth
+  under the same parent, when a recorded version held that row once, or whose
+  work text is a strict prefix of such a row, when a recorded version held it
+  before the longer row existed. The recorded versions are the committed copy
+  and the newest merge baselines and retained-write cuts and targets in the
+  state ledger. The kept copy has children, else is the last without a
+  `⟦effect:N⟧` ordinal, else the last. Without that proof nothing is removed,
+  and a removed copy's text is always inside the row that stays.
+
 The regression
 `typingdupe_composed_retained_write_never_reinserts_a_stale_typing_snapshot`
 (`agent-doc-document-realtime-io`) drives the real retained-intent journal

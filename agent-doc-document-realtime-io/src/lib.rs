@@ -7003,8 +7003,6 @@ fn ensure_deferred_document_write_intent_attempt(
                     );
                     return Ok(pending.intent_id);
                 };
-                let base_state =
-                    agent_doc_merge::crdt::CrdtDoc::from_text(&merge_base).encode_state();
                 let retained_target = retire_consumed_completion_feedback_before_composition(
                     file,
                     source,
@@ -7012,6 +7010,33 @@ fn ensure_deferred_document_write_intent_attempt(
                     &pending.target_content,
                     content,
                 );
+                // `#dupwrite`: the retained target's copies of queue rows the
+                // newer target holds at a later cut (the operator typed on)
+                // are not the chain's op, and neither is a marker the newer
+                // target's change of the row supersedes.
+                let stale_rows = write_policy::neutralize_stale_queue_row_copies(
+                    &merge_base,
+                    &retained_target,
+                    content,
+                );
+                if let Some(stale) = &stale_rows {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "{source}_deferred_write_stale_queue_rows_reverted file={} prior_intent_id={} reverted={} advanced={} (#dupwrite)",
+                            file.display(),
+                            pending.intent_id,
+                            stale.reverted,
+                            stale.advanced,
+                        ),
+                    );
+                }
+                let (composition_base, retained_target) = stale_rows.map_or_else(
+                    || (merge_base.clone(), retained_target),
+                    |stale| (stale.base, stale.target),
+                );
+                let base_state =
+                    agent_doc_merge::crdt::CrdtDoc::from_text(&composition_base).encode_state();
                 target_content = agent_doc_merge::crdt::merge_by_component_with_operator_rearmed(
                     Some(&base_state),
                     &retained_target,
@@ -18222,6 +18247,185 @@ mod tests {
             "retained intent claims operator Todo text as agent-authored: {:?}\nbase:\n{base}\ntarget:\n{}",
             scope.to_pairs(),
             pending.target_content,
+        );
+    }
+
+    /// `#dupwrite`: tasks/agent-doc/agent-doc-bugs.md, 2026-11-24T17:17:36Z-
+    /// 17:18:19Z (build 0.35.590+82c67d60a93255da). The operator typed two new
+    /// rows into the `agent:run` queue while a subagent's claim row there
+    /// changed lifecycle marker (`🚧` -> `⚠️` -> `☑️`) and was then struck.
+    /// Every write was retained (the editor's native save stayed deferred), so
+    /// one chain composed: three progressive editor-reconnect cuts, a
+    /// completion-feedback write, a mechanical closeout write and a backlog
+    /// strike. The chain wrote the run queue (the claim marker), so its base
+    /// for that component stayed the first cut. Each step then merged an older
+    /// snapshot of the operator's rows (some with a `📥` intake projection, one
+    /// before the operator typed its `- ` list marker) beside a newer one, and
+    /// the claim row once per marker. The live document held `- I do like the
+    /// pipe operator …` four times and four typing snapshots of one row.
+    ///
+    /// A queue line the retained target added is a stale snapshot of the
+    /// operator's row when, ignoring list marker and queue projection, it is
+    /// the same text as, or a strict prefix of, a line the newer side added;
+    /// and a pure marker change of a base row the newer side changed too is
+    /// superseded by that change. Neither is the agent's op.
+    #[test]
+    fn dupwrite_retained_chain_keeps_one_copy_of_rows_typed_into_the_run_queue() {
+        let doc = |status: &str, exchange_tail: &str, run: &str| {
+            format!(
+                concat!(
+                    "---\nagent_doc_format: template\n---\n\n",
+                    "<!-- agent:status -->\n",
+                    "- **Status:** {}\n",
+                    "<!-- /agent:status -->\n\n",
+                    "<!-- agent:exchange patch=append -->\n",
+                    "❯ Keep going.\n",
+                    "{}",
+                    "<!-- /agent:exchange -->\n\n",
+                    "## Run <!-- agent:run id=\"main\" subagents priority go -->\n",
+                    "- ### https://github.com/acme/widget/issues/7\n",
+                    "  - %% widget crashes on start %%\n",
+                    "{}",
+                    "<!-- /agent:run -->\n",
+                ),
+                status, exchange_tail, run,
+            )
+        };
+        let claim =
+            |marker: &str| format!("- ### {marker} [#subagent:poolrow#1] do [#poolrow-8ac1]\n");
+        let struck = "- ### ~~do [#poolrow-8ac1]~~\n";
+        let pipe_partial = "- I do like the pipe\n";
+        let pipe = "- I do like the pipe operator for commands as well.\n";
+        let link = "[Declare lang](https://example.invalid/declare/)";
+        // Successive cuts of the row the operator is typing below it.
+        let typed = [
+            "Declare lang\n".to_string(),
+            format!("{link} looks interesting.\n"),
+            format!("- {link} looks interesting. Is this a way to declare \n"),
+            format!("- {link} looks interesting. Is this a way to declare guis from agent-doc\n"),
+            format!(
+                "- {link} looks interesting. Is this a way to declare guis from agent-doc to present information?\n"
+            ),
+        ];
+        let rows = |claim_row: &str, pipe_row: &str, typing: &str| {
+            format!("{claim_row}{pipe_row}{typing}")
+        };
+        let response = "### Re: Subagent completed: `subagent:poolrow` — agent-doc\n\nDone.\n";
+
+        // The chain's first cut: the relay text the editor never acknowledged.
+        let base = doc("running", "", &rows(&claim("🚧"), pipe_partial, ""));
+        let (_dir, file, _canonical) = temp_doc(&base);
+        // Three progressive editor-reconnect cuts. The editor already shows
+        // the lifecycle projection `⚠️` and the status the controller wrote.
+        for typing in &typed[..3] {
+            ensure_deferred_document_write_intent(
+                &file,
+                &base,
+                &doc("lost", "", &rows(&claim("⚠️"), pipe, typing)),
+                "editor_reconnect",
+                DocumentWriteDeferredReason::MergeUnsavedEditorCutWithDeferredTarget,
+            )
+            .unwrap();
+        }
+        // The completion feedback derived over the third cut: `☑️`, the
+        // `📥` intake projection on the unclaimed rows, and its response.
+        let cut3 = doc("lost", "", &rows(&claim("⚠️"), pipe, &typed[2]));
+        let feedback = doc(
+            "reported",
+            response,
+            &rows(
+                &claim("☑️"),
+                &pipe.replacen("- ", "- 📥 ", 1),
+                &typed[2].replacen("- ", "- 📥 ", 1),
+            ),
+        );
+        ensure_deferred_document_write_intent(
+            &file,
+            &cut3,
+            &feedback,
+            "queue_subagent_completion_feedback",
+            DocumentWriteDeferredReason::EditorProjectionPending,
+        )
+        .unwrap();
+        // The mechanical closeout derived over the editor's newer cut, which
+        // never received `☑️`.
+        let cut4 = doc("lost", response, &rows(&claim("⚠️"), pipe, &typed[3]));
+        let closeout = doc(
+            "lost",
+            &format!("{response}\nClosed.\n"),
+            &rows(&claim("⚠️"), pipe, &typed[3]),
+        );
+        ensure_deferred_document_write_intent(
+            &file,
+            &cut4,
+            &closeout,
+            "mechanical_reported_closeout_write_response",
+            DocumentWriteDeferredReason::EditorProjectionPending,
+        )
+        .unwrap();
+        // The backlog strike derived over the operator's finished row.
+        let cut5 = doc(
+            "lost",
+            &format!("{response}\nClosed.\n"),
+            &rows(&claim("⚠️"), pipe, &typed[4]),
+        );
+        let strike = doc(
+            "lost",
+            &format!("{response}\nClosed.\n"),
+            &rows(struck, pipe, &typed[4]),
+        );
+        ensure_deferred_document_write_intent(
+            &file,
+            &cut5,
+            &strike,
+            "pending_write",
+            DocumentWriteDeferredReason::EditorProjectionPending,
+        )
+        .unwrap();
+
+        let pending = pending_document_write(&file).expect("composed chain retained");
+        let typing_rows = |text: &str| -> Vec<String> {
+            text.lines()
+                .filter(|line| line.contains("Declare lang") || line.contains("I do like the pipe"))
+                .map(str::to_string)
+                .collect()
+        };
+        let expected_rows = vec![pipe.trim_end().to_string(), typed[4].trim_end().to_string()];
+        assert_eq!(
+            typing_rows(&pending.target_content),
+            expected_rows,
+            "the composed target must hold each operator row once, at its newest text:\n{}",
+            pending.target_content
+        );
+        assert_eq!(
+            pending.target_content.matches("[#poolrow-8ac1]").count(),
+            1,
+            "{}",
+            pending.target_content
+        );
+
+        // The controller's retained projection over the operator's cut.
+        let projected =
+            agent_doc_document_realtime::write_policy::rebase_retained_target_over_editor_cut(
+                pending
+                    .expected_content
+                    .as_deref()
+                    .expect("composed intent keeps its base"),
+                &pending.target_content,
+                &cut5,
+            )
+            .unwrap();
+        assert_eq!(typing_rows(&projected), expected_rows, "{projected}");
+        assert_eq!(
+            projected.matches("[#poolrow-8ac1]").count(),
+            1,
+            "{projected}"
+        );
+        assert!(projected.contains(struck), "{projected}");
+        assert_eq!(
+            projected.matches("### Re: Subagent completed").count(),
+            1,
+            "{projected}"
         );
     }
 

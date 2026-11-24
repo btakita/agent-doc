@@ -164,6 +164,9 @@ pub fn rebase_agent_candidate_over_editor_cut(
 struct ReconciledRebase {
     rebased: String,
     editor_reconciled: String,
+    /// The merge base the rebase used: `#dupwrite` advances a binary-owned
+    /// projection the cut alone shows into it, so it is not operator text.
+    merge_base: String,
 }
 
 /// `typingdupe` (1): advance a retained intent's base over every component the
@@ -409,6 +412,296 @@ pub fn neutralize_stale_operator_typing_snapshots(
     Some((target, scope))
 }
 
+/// `#dupwrite`: the line-level result of
+/// [`neutralize_stale_queue_row_copies`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StaleQueueRowNeutralization {
+    /// The older target without its stale copies of rows the newer side holds.
+    pub target: String,
+    /// The merge base with each binary-owned projection the newer side shows on
+    /// a row the older target really changed taken as base text.
+    pub base: String,
+    /// Older-target lines reverted to base, or dropped.
+    pub reverted: usize,
+    /// Base rows advanced to the newer side's projection.
+    pub advanced: usize,
+}
+
+/// The work text of one queue-component line: list marker, `###` heading,
+/// lifecycle/intake projection and owner annotations removed, whitespace
+/// collapsed. A line typed before its `- ` list marker reads the same.
+fn queue_line_row(line: &str) -> String {
+    let trimmed = line.trim();
+    let body = queue_list_row_body(trimmed).unwrap_or(trimmed);
+    queue_row_work(body, None)
+}
+
+/// Shortest row text a typing-lineage prefix match accepts. Shorter rows
+/// (`do`, `go`) are too generic to prove one row was typed into the other.
+const STALE_ROW_PREFIX_MIN_CHARS: usize = 8;
+
+/// Whether `older` and `newer` are two cuts of one row the operator typed:
+/// the same work text, or one a prefix of the other (typed on, or its tail
+/// deleted).
+fn same_typed_row(older: &str, newer: &str) -> bool {
+    if older.is_empty() || newer.is_empty() {
+        return false;
+    }
+    if older == newer {
+        return true;
+    }
+    let (short, long) = if older.len() < newer.len() {
+        (older, newer)
+    } else {
+        (newer, older)
+    };
+    short.chars().count() >= STALE_ROW_PREFIX_MIN_CHARS && long.starts_with(short)
+}
+
+/// `#dupwrite`: drop, line by line, the older side's stale copies of queue
+/// rows before a 3-way merge with a newer side.
+///
+/// Measured on tasks/agent-doc/agent-doc-bugs.md 2026-11-24T17:17:36Z-
+/// 17:18:19Z: one retained chain (progressive editor-reconnect cuts, a
+/// completion-feedback write, a mechanical closeout and a backlog strike)
+/// wrote the claim marker of a row in `agent:run` while the operator typed two
+/// rows below it. [`neutralize_stale_operator_typing_snapshots`] resets only a
+/// whole component with no agent op, and the marker was one, so each merge
+/// kept every snapshot of the operator's rows (one before its `- ` list
+/// marker, some with a `📥` intake projection) beside the newer one, and the
+/// claim row once per marker (`☑️`, `⚠️`, struck twice).
+///
+/// In each queue component (`queue`, `run`, `loop`) both sides changed, every
+/// line the older target added over `merge_base` is reverted when it is not
+/// the agent's op:
+///
+/// - **A stale row copy**: it differs from a line the newer side added at the
+///   same depth under the same parent, but its work text
+///   ([`queue_line_row`]) is the same, or one is a prefix of the other (at
+///   least [`STALE_ROW_PREFIX_MIN_CHARS`]; the operator typed on, or deleted
+///   the tail). The newer side holds the row's latest text. A byte-identical
+///   line at the same place stays: the merge aligns it.
+/// - **A superseded projection**: its work text is a base row's, it replaced
+///   that row, and the newer side changed or removed the row too. A lifecycle
+///   or intake marker is binary-owned and repainted from the ledger; the newer
+///   side's change of the row wins.
+///
+/// A reverted line becomes the base row it replaced (one whose work text it
+/// extends), or is dropped when it replaced none.
+///
+/// Symmetrically, a base row the older target really changed (struck,
+/// retitled, deleted) while the newer side only re-projected its marker is
+/// advanced to the newer side's projection in the returned base, so the merge
+/// takes the older target's change instead of keeping both rows.
+///
+/// `None` when nothing changes or the texts do not share one component layout.
+pub fn neutralize_stale_queue_row_copies(
+    merge_base: &str,
+    older_target: &str,
+    newer: &str,
+) -> Option<StaleQueueRowNeutralization> {
+    use agent_doc_element::component_scope::top_level_component_bodies;
+    use std::collections::HashMap;
+
+    /// One body line with its queue identity: the work text, its list depth
+    /// and its parent row's work text (rows with the same text under two
+    /// different parents are two rows).
+    struct QueueLine<'a> {
+        text: &'a str,
+        row: String,
+        indent: usize,
+        parent: Option<String>,
+    }
+    fn queue_lines(body: &str) -> Vec<QueueLine<'_>> {
+        let mut lines: Vec<QueueLine<'_>> = Vec::new();
+        for text in body.split_inclusive('\n') {
+            let indent = text.len() - text.trim_start_matches(' ').len();
+            let parent = lines
+                .iter()
+                .rev()
+                .find(|line| line.indent < indent && !line.row.is_empty())
+                .map(|line| line.row.clone());
+            lines.push(QueueLine {
+                text,
+                row: queue_line_row(text),
+                indent,
+                parent,
+            });
+        }
+        lines
+    }
+    /// The same row at the same place: same depth, the same (or a typed-on)
+    /// parent, and `rows` relating the two work texts.
+    fn same_place(a: &QueueLine<'_>, b: &QueueLine<'_>) -> bool {
+        a.indent == b.indent
+            && match (&a.parent, &b.parent) {
+                (None, None) => true,
+                (Some(a), Some(b)) => same_typed_row(a, b),
+                _ => false,
+            }
+    }
+    fn added(before: &[QueueLine<'_>], after: &[QueueLine<'_>]) -> Vec<bool> {
+        let mut remaining: HashMap<&str, usize> = HashMap::new();
+        for line in before {
+            *remaining.entry(line.text.trim_end()).or_insert(0) += 1;
+        }
+        after
+            .iter()
+            .map(|line| match remaining.get_mut(line.text.trim_end()) {
+                Some(count) if *count > 0 => {
+                    *count -= 1;
+                    false
+                }
+                _ => !line.text.trim().is_empty(),
+            })
+            .collect()
+    }
+
+    let base_bodies = top_level_component_bodies(merge_base)?;
+    let target_bodies = top_level_component_bodies(older_target)?;
+    let newer_bodies = top_level_component_bodies(newer)?;
+    if base_bodies.len() != target_bodies.len()
+        || base_bodies.len() != newer_bodies.len()
+        || base_bodies
+            .iter()
+            .zip(&target_bodies)
+            .zip(&newer_bodies)
+            .any(|((base, target), newer)| {
+                base.component != target.component || base.component != newer.component
+            })
+    {
+        return None;
+    }
+
+    let mut target_edits = Vec::new();
+    let mut base_edits = Vec::new();
+    let (mut reverted, mut advanced) = (0, 0);
+    for ((base, target), newer_body) in base_bodies.iter().zip(&target_bodies).zip(&newer_bodies) {
+        if !matches!(base.component.name.as_str(), "queue" | "run" | "loop") {
+            continue;
+        }
+        let base_text = &merge_base[base.body.clone()];
+        let target_text = &older_target[target.body.clone()];
+        let newer_text = &newer[newer_body.body.clone()];
+        if base_text == target_text || base_text == newer_text {
+            continue;
+        }
+        let base_lines = queue_lines(base_text);
+        let target_lines = queue_lines(target_text);
+        let newer_lines = queue_lines(newer_text);
+        let target_added = added(&base_lines, &target_lines);
+        let newer_added = added(&base_lines, &newer_lines);
+        let target_removed = added(&target_lines, &base_lines);
+        let newer_removed = added(&newer_lines, &base_lines);
+        // Base rows the older target replaced, still available to restore.
+        let mut restorable: Vec<usize> = (0..base_lines.len())
+            .filter(|&index| target_removed[index])
+            .collect();
+
+        let mut new_target = String::with_capacity(target_text.len());
+        let mut changed = false;
+        for (line, is_added) in target_lines.iter().zip(&target_added) {
+            let stale =
+                *is_added
+                    && !line.row.is_empty()
+                    && (newer_lines.iter().zip(&newer_added).any(
+                        |(newer_line, newer_is_added)| {
+                            // A byte-identical line at the same place is one
+                            // insertion the merge aligns; only a differing cut of
+                            // the row is a second copy.
+                            *newer_is_added
+                                && newer_line.text.trim_end() != line.text.trim_end()
+                                && same_place(line, newer_line)
+                                && same_typed_row(&line.row, &newer_line.row)
+                        },
+                    ) || restorable.iter().any(|&index| {
+                        newer_removed[index]
+                            && base_lines[index].row == line.row
+                            && same_place(line, &base_lines[index])
+                    }));
+            if !stale {
+                new_target.push_str(line.text);
+                continue;
+            }
+            changed = true;
+            reverted += 1;
+            // The base row this line replaced: its work text is the line's,
+            // or a prefix of it. Restoring it leaves that row's fate to the
+            // newer side.
+            if let Some(position) = restorable.iter().position(|&index| {
+                let base_line = &base_lines[index];
+                !base_line.row.is_empty()
+                    && same_place(line, base_line)
+                    && (base_line.row == line.row || line.row.starts_with(base_line.row.as_str()))
+            }) {
+                let index = restorable.remove(position);
+                new_target.push_str(base_lines[index].text);
+            }
+        }
+        if changed {
+            target_edits.push((target.body.clone(), new_target.clone()));
+        }
+
+        // The newer side's projection-only change of a row the older target
+        // really changed is base text, not an edit to merge beside it.
+        let effective_target = queue_lines(&new_target);
+        let still_removed = added(&effective_target, &base_lines);
+        let mut new_base = String::with_capacity(base_text.len());
+        let mut base_changed = false;
+        let mut used_newer = vec![false; newer_lines.len()];
+        for (index, base_line) in base_lines.iter().enumerate() {
+            let target_holds_row = effective_target
+                .iter()
+                .any(|line| line.row == base_line.row && same_place(line, base_line));
+            let candidate = (still_removed[index]
+                && newer_removed[index]
+                && !base_line.row.is_empty()
+                && !target_holds_row)
+                .then(|| {
+                    newer_lines
+                        .iter()
+                        .enumerate()
+                        .position(|(newer_index, newer_line)| {
+                            newer_added[newer_index]
+                                && !used_newer[newer_index]
+                                && newer_line.row == base_line.row
+                                && same_place(newer_line, base_line)
+                        })
+                })
+                .flatten();
+            match candidate {
+                Some(newer_index) => {
+                    used_newer[newer_index] = true;
+                    new_base.push_str(newer_lines[newer_index].text);
+                    base_changed = true;
+                    advanced += 1;
+                }
+                None => new_base.push_str(base_line.text),
+            }
+        }
+        if base_changed {
+            base_edits.push((base.body.clone(), new_base));
+        }
+    }
+    if target_edits.is_empty() && base_edits.is_empty() {
+        return None;
+    }
+    fn splice(text: &str, mut edits: Vec<(std::ops::Range<usize>, String)>) -> String {
+        edits.sort_by_key(|(range, _)| std::cmp::Reverse(range.start));
+        let mut out = text.to_string();
+        for (range, replacement) in edits {
+            out.replace_range(range, &replacement);
+        }
+        out
+    }
+    Some(StaleQueueRowNeutralization {
+        target: splice(older_target, target_edits),
+        base: splice(merge_base, base_edits),
+        reverted,
+        advanced,
+    })
+}
+
 /// `#rebaseresponseafterboundary`: place the newest target's singleton
 /// `agent:boundary` at exchange end when a rebase left a protocol marker
 /// mid-exchange or repeated one. The drift shortcut appends a missing reply
@@ -589,6 +882,16 @@ fn rebase_agent_candidate_over_editor_cut_reconciled(
     let agent_target = queue_retarget_neutralized
         .as_deref()
         .unwrap_or(agent_target);
+    // `#dupwrite`: a queue line the agent target carries that is an older copy
+    // of a row the editor cut holds (the operator typed on), or a marker the
+    // cut's change of that row supersedes, is not the agent's op; and a marker
+    // the cut alone re-projected on a row the agent really changed is base.
+    let stale_rows = neutralize_stale_queue_row_copies(merge_base, agent_target, editor_cut);
+    let (merge_base, agent_target) = stale_rows
+        .as_ref()
+        .map_or((merge_base, agent_target), |stale| {
+            (stale.base.as_str(), stale.target.as_str())
+        });
     let editor_reconciled = agent_doc_merge::response_cell::reconcile_superseded_response_targets(
         editor_cut,
         merge_base,
@@ -614,7 +917,12 @@ fn rebase_agent_candidate_over_editor_cut_reconciled(
                 &editor_reconciled,
                 &rebased,
             );
-            return Ok(reconciled_rebase(rebased, editor_reconciled, agent_target));
+            return Ok(reconciled_rebase(
+                rebased,
+                editor_reconciled,
+                agent_target,
+                merge_base,
+            ));
         }
         if let Some(recovered) = live_prompt_drift_recovery_target(
             agent_target,
@@ -633,7 +941,12 @@ fn rebase_agent_candidate_over_editor_cut_reconciled(
                 &editor_reconciled,
                 &rebased,
             );
-            return Ok(reconciled_rebase(rebased, editor_reconciled, agent_target));
+            return Ok(reconciled_rebase(
+                rebased,
+                editor_reconciled,
+                agent_target,
+                merge_base,
+            ));
         }
     }
 
@@ -648,7 +961,12 @@ fn rebase_agent_candidate_over_editor_cut_reconciled(
     let (rebased, _) =
         agent_doc_merge::merge_contents_crdt(Some(&base_state), agent_target, &editor_reconciled)?;
     warn_dropped_agent_component_ops(merge_base, agent_target, &editor_reconciled, &rebased);
-    Ok(reconciled_rebase(rebased, editor_reconciled, agent_target))
+    Ok(reconciled_rebase(
+        rebased,
+        editor_reconciled,
+        agent_target,
+        merge_base,
+    ))
 }
 
 fn neutralize_agent_queue_retargets(merge_base: &str, agent_target: &str) -> Option<String> {
@@ -878,12 +1196,14 @@ fn reconciled_rebase(
     rebased: String,
     editor_reconciled: String,
     agent_target: &str,
+    merge_base: &str,
 ) -> ReconciledRebase {
     let rebased =
         restore_editor_queue_id_child_parentage(&editor_reconciled, &rebased).unwrap_or(rebased);
     ReconciledRebase {
         rebased: canonicalize_rebase_exchange_boundary(&rebased, agent_target),
         editor_reconciled,
+        merge_base: merge_base.to_string(),
     }
 }
 
@@ -1726,7 +2046,7 @@ pub fn rebase_retained_target_over_editor_cut(
         )?
         .unwrap_or(rebase.rebased);
     let lost = operator_lines_lost(
-        merge_base,
+        &rebase.merge_base,
         agent_target,
         &rebase.editor_reconciled,
         &rebased,
@@ -4776,6 +5096,160 @@ mod tests {
             rebased,
             cut.replace("claude: old-conversation", "claude: new-conversation"),
             "only the managed key moved; the typing and every quote survive:\n{rebased}"
+        );
+    }
+
+    fn dupwrite_doc(run: &str) -> String {
+        format!(
+            concat!(
+                "---\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ Keep going.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "## Run <!-- agent:run id=\"main\" go -->\n",
+                "- ### https://github.com/acme/widget/issues/7\n",
+                "{}",
+                "<!-- /agent:run -->\n",
+            ),
+            run
+        )
+    }
+
+    const DUPWRITE_CLAIM_RUNNING: &str = "- ### 🚧 [#subagent:poolrow#1] do [#poolrow-8ac1]\n";
+    const DUPWRITE_CLAIM_LOST: &str = "- ### ⚠️ [#subagent:poolrow#1] do [#poolrow-8ac1]\n";
+    const DUPWRITE_CLAIM_REPORTED: &str = "- ### ☑️ [#subagent:poolrow#1] do [#poolrow-8ac1]\n";
+    const DUPWRITE_STRUCK: &str = "- ### ~~do [#poolrow-8ac1]~~\n";
+
+    fn dupwrite_rows(text: &str) -> Vec<&str> {
+        text.lines()
+            .filter(|line| line.contains("Declare lang") || line.contains("pipe operator"))
+            .collect()
+    }
+
+    /// `#dupwrite`: an older target's copies of the rows the operator kept
+    /// typing (one before its `- ` list marker, one with the `📥` intake
+    /// projection) are reverted, while the agent's own marker op stays.
+    #[test]
+    fn dupwrite_stale_queue_row_copies_are_reverted_and_the_agent_marker_stays() {
+        let base = dupwrite_doc(&format!("{DUPWRITE_CLAIM_RUNNING}- I do like the pipe\n"));
+        let target = dupwrite_doc(&format!(
+            "{DUPWRITE_CLAIM_REPORTED}- 📥 I do like the pipe operator.\n📥 [Declare lang](https://example.invalid/d) looks interesting.\n"
+        ));
+        let finished = "- [Declare lang](https://example.invalid/d) looks interesting. Is this a way to declare guis?\n";
+        let cut = dupwrite_doc(&format!(
+            "{DUPWRITE_CLAIM_RUNNING}- I do like the pipe operator.\n{finished}"
+        ));
+
+        let stale = neutralize_stale_queue_row_copies(&base, &target, &cut)
+            .expect("the typed rows are stale copies");
+        assert_eq!(stale.reverted, 2);
+        assert_eq!(stale.advanced, 0);
+        assert_eq!(
+            stale.target,
+            dupwrite_doc(&format!("{DUPWRITE_CLAIM_REPORTED}- I do like the pipe\n")),
+            "the snapshot reverts to the base row it extended; the marker op stays"
+        );
+        let rebased = rebase_retained_target_over_editor_cut(&base, &target, &cut).unwrap();
+        assert_eq!(
+            dupwrite_rows(&rebased),
+            vec![
+                "- I do like the pipe operator.",
+                finished.trim_end_matches('\n')
+            ],
+            "{rebased}"
+        );
+        assert_eq!(rebased.matches("[#poolrow-8ac1]").count(), 1, "{rebased}");
+        assert!(rebased.contains(DUPWRITE_CLAIM_REPORTED), "{rebased}");
+    }
+
+    /// `#dupwrite`: a lifecycle marker is binary-owned. When the older target
+    /// only re-marks a row the newer side struck, the strike wins; when the
+    /// older target strikes a row the newer side only re-marked, the strike
+    /// still wins. Either way the row appears once.
+    #[test]
+    fn dupwrite_marker_only_change_never_keeps_a_second_copy_of_a_struck_row() {
+        let base = dupwrite_doc(DUPWRITE_CLAIM_RUNNING);
+        let marked = dupwrite_doc(DUPWRITE_CLAIM_REPORTED);
+        let struck = dupwrite_doc(DUPWRITE_STRUCK);
+        let lost = dupwrite_doc(DUPWRITE_CLAIM_LOST);
+
+        let stale = neutralize_stale_queue_row_copies(&base, &marked, &struck)
+            .expect("the newer strike supersedes the marker");
+        assert_eq!((stale.reverted, stale.advanced), (1, 0));
+        assert_eq!(stale.target, base);
+
+        let stale = neutralize_stale_queue_row_copies(&base, &struck, &lost)
+            .expect("the newer side's marker is base text");
+        assert_eq!((stale.reverted, stale.advanced), (0, 1));
+        assert_eq!(stale.base, lost);
+        assert_eq!(stale.target, struck);
+
+        for (target, cut) in [(&marked, &struck), (&struck, &lost), (&marked, &lost)] {
+            let rebased = rebase_retained_target_over_editor_cut(&base, target, cut).unwrap();
+            assert_eq!(
+                rebased.matches("[#poolrow-8ac1]").count(),
+                1,
+                "target:\n{target}\ncut:\n{cut}\nrebased:\n{rebased}"
+            );
+        }
+        let rebased = rebase_retained_target_over_editor_cut(&base, &struck, &lost).unwrap();
+        assert!(rebased.contains(DUPWRITE_STRUCK), "{rebased}");
+    }
+
+    /// `#dupwrite`: what stays the agent's op. A marker on a row the newer side
+    /// left alone, an agent-added row unrelated to the operator's typing, a
+    /// short row that only shares a generic prefix, and components outside the
+    /// queue are untouched.
+    #[test]
+    fn dupwrite_agent_queue_ops_are_not_mistaken_for_stale_row_copies() {
+        let base = dupwrite_doc(&format!("{DUPWRITE_CLAIM_RUNNING}- do\n"));
+        let cut = dupwrite_doc(&format!(
+            "{DUPWRITE_CLAIM_RUNNING}- do\n- do the release notes now\n"
+        ));
+        // The marker on a row the operator did not touch.
+        let marked = dupwrite_doc(&format!("{DUPWRITE_CLAIM_REPORTED}- do\n"));
+        assert_eq!(
+            neutralize_stale_queue_row_copies(&base, &marked, &cut),
+            None
+        );
+        // An agent follow-up row.
+        let follow_up = dupwrite_doc(&format!(
+            "{DUPWRITE_CLAIM_RUNNING}- do\n- ### 🙋 [#q-1] follow-up: operator: verify on Coder [operator-verify]\n"
+        ));
+        assert_eq!(
+            neutralize_stale_queue_row_copies(&base, &follow_up, &cut),
+            None
+        );
+        // `do` is too short to prove a typing lineage with `do the release notes now`.
+        let short = dupwrite_doc(&format!("{DUPWRITE_CLAIM_RUNNING}- do\n- do\n"));
+        assert_eq!(neutralize_stale_queue_row_copies(&base, &short, &cut), None);
+        let rebased = rebase_retained_target_over_editor_cut(&base, &follow_up, &cut).unwrap();
+        assert!(
+            rebased.contains("follow-up: operator: verify on Coder"),
+            "{rebased}"
+        );
+        assert!(
+            rebased.contains("- do the release notes now\n"),
+            "{rebased}"
+        );
+    }
+
+    /// `#dupwrite`: the operator deleting a row's tail is a newer cut of the
+    /// same row, so the older, longer copy is not resurrected beside it.
+    #[test]
+    fn dupwrite_a_deleted_tail_is_not_resurrected_from_an_older_copy() {
+        let base = dupwrite_doc(DUPWRITE_CLAIM_RUNNING);
+        let older = dupwrite_doc(&format!(
+            "{DUPWRITE_CLAIM_REPORTED}- 📥 I do like the pipe operator for commands as well.\n"
+        ));
+        let cut = dupwrite_doc(&format!(
+            "{DUPWRITE_CLAIM_RUNNING}- I do like the pipe operator.\n"
+        ));
+        let rebased = rebase_retained_target_over_editor_cut(&base, &older, &cut).unwrap();
+        assert_eq!(
+            dupwrite_rows(&rebased),
+            vec!["- I do like the pipe operator."],
+            "{rebased}"
         );
     }
 

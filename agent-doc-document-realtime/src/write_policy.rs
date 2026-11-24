@@ -892,6 +892,20 @@ fn rebase_agent_candidate_over_editor_cut_reconciled(
         .map_or((merge_base, agent_target), |stale| {
             (stale.base.as_str(), stale.target.as_str())
         });
+    // `#composefault`: the agent target and the editor cut each changed one
+    // queue row (an id admission with follow-ups, a strike with its response
+    // tree, an operator reply typed under the row): one row, and each
+    // inserted block under its own parent.
+    let concurrent = crate::concurrent_row_ops::reconcile_concurrent_queue_row_ops(
+        merge_base,
+        agent_target,
+        editor_cut,
+    );
+    let (merge_base, agent_target) = concurrent
+        .as_ref()
+        .map_or((merge_base, agent_target), |ops| {
+            (ops.base.as_str(), ops.older.as_str())
+        });
     let editor_reconciled = agent_doc_merge::response_cell::reconcile_superseded_response_targets(
         editor_cut,
         merge_base,
@@ -998,7 +1012,16 @@ fn neutralize_agent_queue_retargets(merge_base: &str, agent_target: &str) -> Opt
         let replacement =
             explicit_queue_row_identity_and_work(line).and_then(|(identity, work)| {
                 let (baseline_line, baseline_work) = baseline_rows.get(&identity)?.as_ref()?;
-                (work != *baseline_work).then_some(*baseline_line)
+                // `#composefault`: admitting the row's generated `[#q-…]`
+                // (report-complete before its follow-ups) is not a retarget.
+                let without_generated_id = |work: &str| {
+                    agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(work)
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                };
+                (without_generated_id(&work) != without_generated_id(baseline_work))
+                    .then_some(*baseline_line)
             });
         if let Some(baseline_line) = replacement {
             lines.push(baseline_line);

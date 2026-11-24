@@ -7035,6 +7035,31 @@ fn ensure_deferred_document_write_intent_attempt(
                     || (merge_base.clone(), retained_target),
                     |stale| (stale.base, stale.target),
                 );
+                // `#composefault`: the retained target and the newer target
+                // each changed one queue row (report-complete's id admission
+                // and follow-ups, the strike and its response tree): one row,
+                // and each inserted block under its own parent.
+                let concurrent = agent_doc_document_realtime::concurrent_row_ops::reconcile_concurrent_queue_row_ops(
+                    &composition_base,
+                    &retained_target,
+                    content,
+                );
+                if let Some(ops) = &concurrent {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "{source}_deferred_write_concurrent_queue_row_ops_reconciled file={} prior_intent_id={} folded={} ordered={} (#composefault)",
+                            file.display(),
+                            pending.intent_id,
+                            ops.folded,
+                            ops.ordered,
+                        ),
+                    );
+                }
+                let (composition_base, retained_target) = concurrent.map_or_else(
+                    || (composition_base, retained_target),
+                    |ops| (ops.base, ops.older),
+                );
                 let base_state =
                     agent_doc_merge::crdt::CrdtDoc::from_text(&composition_base).encode_state();
                 target_content = agent_doc_merge::crdt::merge_by_component_with_operator_rearmed(
@@ -22639,3 +22664,7 @@ scratch
         assert!(agent_projection_integrity_valid(&merged), "{merged}");
     }
 }
+
+#[cfg(test)]
+#[path = "composefault_tests.rs"]
+mod composefault_tests;

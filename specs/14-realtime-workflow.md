@@ -2307,6 +2307,44 @@ The rules:
     (`agent-doc-document-realtime`) and
     `dupwrite2_operator_rewrite_of_a_nested_parent_keeps_one_copy`
     (`agent-doc-merge`).
+- **Two writes to one queue row compose into one row (`#composefault`).**
+  Measured on haiven-dev `tasks/sdk/sdk-dev.md`. `queue report-complete`
+  admits the origin row's `[#q-…]` and inserts its follow-up rows after the
+  origin's subtree; the strike (or a response attach) changes the same row and
+  inserts the response tree under it. With one of them retained and the other
+  derived over an editor cut without it, the line-level merge:
+  - kept the row twice: `☑️ … [#q-b55e5bde5b7a]` with the follow-ups, then
+    `~~…~~` with the response tree (2026-11-24T21:45:07Z-21:45:43Z,
+    `stale_queue_rows_reverted` reverted=1/2/1, c5815096);
+  - ordered two blocks inserted after the same line by op order, so
+    `subagent:w1`'s response tree `[#r-1c7433c63076]` read as the last
+    follow-up's child (38373132), and an operator reply typed under the
+    origin landed under the last follow-up too;
+  - and the controller's projection reverted the id admission as a
+    `#queueretargetchild` retarget, so the follow-ups named an id no row
+    carried.
+
+  `concurrent_row_ops::reconcile_concurrent_queue_row_ops` now runs after
+  `neutralize_stale_queue_row_copies`, before the composition of two retained
+  intents (ops log `{source}_deferred_write_concurrent_queue_row_ops_reconciled
+  … folded=N ordered=N`) and in `rebase_agent_candidate_over_editor_cut`. It
+  rewrites only the merge base and the older side, in each queue component
+  both sides changed:
+  - **Same row, two edits** (one work text once the projection prefix, the
+    strike and the generated id are set aside): the newer line becomes base
+    and the older side carries the newer line, struck when the older line
+    struck it, with the older line's generated id when the newer line has
+    none. Two different ids, a different work text, or a strike one side
+    undid are left to the merge.
+  - **Same gap, two blocks of different depth:** the newer block becomes
+    base and is placed in the older side by depth, the deeper block first,
+    since it belongs to the line above the gap. Blocks of equal depth, or a
+    block the older side already holds, are left to the merge.
+
+  Admitting a generated `[#q-…]` is no longer a retarget. Regressions:
+  `composefault_tests` (`agent-doc-document-realtime-io`, through the retained
+  composition and the controller's projection) and `concurrent_row_ops::tests`
+  (`agent-doc-document-realtime`).
 
 The regression
 `typingdupe_composed_retained_write_never_reinserts_a_stale_typing_snapshot`

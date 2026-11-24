@@ -726,6 +726,204 @@ class AuthenticatedSurfaceIngressStateTest {
         assertEquals(LayoutPublicationReadiness.CONNECTED_BLOCKED, state.layoutPublicationReadiness.value)
     }
 
+    /**
+     * GH #435 review (cycle 4): the delivery gate keeps its negotiation per Client, not per lease.
+     * Two projects on one Client connection open their leases together. Project B's lease opens
+     * after the backend answered project A's schema ask and before A's first schema-5 snapshot
+     * reaches the backend, so that snapshot does not activate the still cold backend peer, and the
+     * shell-only fence accepts its shell-only receipt. B's first snapshot then activates the peer.
+     * A's next snapshot (before the Client activated) must wait for the paired receipt, not revoke
+     * A's lease: a shell-only receipt is no activation the fence could take back.
+     */
+    @Test
+    fun aShellOnlyReceiptAcceptedBeforeASecondProjectActivatesThePeerDoesNotRevokeTheLease() = runBlocking {
+        val cold = ColdBackend()
+        val lines = mutableListOf<String>()
+        val publisherA = RecordingPublisher()
+        val forwarderA = RecordingForwarder()
+        val stateA = cold.state(publisherA, forwarderA, lines)
+        val stateB = cold.state(RecordingPublisher(), RecordingForwarder(), mutableListOf())
+        val frontendA = frontendLeaseInstanceId("frontend-a", "0.2.1060")
+        val frontendB = frontendLeaseInstanceId("frontend-b", "0.2.1060")
+
+        cold.gate.leaseOpened(cold.clientId)
+        val leaseA = stateA.open(cold.clientId, frontendA)
+        assertEquals(5, cold.snapshotApi.supportedSnapshotSchemaVersion())
+        // Project B opens its lease while A's first snapshot is in flight.
+        cold.gate.leaseOpened(cold.clientId)
+        val leaseB = stateB.open(cold.clientId, frontendB)
+
+        assertEquals(SurfaceIngressStatus.ACCEPTED, cold.publish(stateA, leaseA, snapshot(frontendA, 1).shellOnly()).status)
+        assertEquals(0, cold.activations, "A's snapshot raced B's lease, so the peer stays shell-only")
+
+        assertEquals(5, cold.snapshotApi.supportedSnapshotSchemaVersion())
+        assertEquals(
+            SurfaceIngressStatus.DELIVERY_FAILED,
+            cold.publish(stateB, leaseB, snapshot(frontendB, 1).shellOnly()).status,
+        )
+        assertEquals(1, cold.activations, "B's negotiated schema-5 snapshot activates the peer")
+
+        // A focus event on project A before the Client activated: refused, not revoked.
+        val beforeActivation = cold.publish(stateA, leaseA, snapshot(frontendA, 2).shellOnly())
+        assertEquals(SurfaceIngressStatus.DELIVERY_FAILED, beforeActivation.status)
+        assertEquals(FRONTEND_AUTHORITY_UNAVAILABLE_READINESS, beforeActivation.diagnostic)
+        assertEquals(LayoutPublicationReadiness.CONNECTED_BLOCKED, stateA.layoutPublicationReadiness.value)
+        assertTrue(publisherA.retired.isEmpty(), "A's controller generation is not retired: ${publisherA.retired}")
+        assertTrue(forwarderA.held.isEmpty(), "A's layout is not held: ${forwarderA.held}")
+        assertEquals(1, lines.count { it.contains("snapshot awaits frontend activation client=${cold.clientId}") }, lines.toString())
+
+        assertTrue(cold.snapshotApi.frontendImplementationRelease() != null, "the Client fetches the release")
+        val activatedA = cold.publish(stateA, leaseA, snapshot(frontendA, 3).copy(activationReceipt = frontendActivation.encode()))
+        assertEquals(SurfaceIngressStatus.ACCEPTED, activatedA.status, activatedA.diagnostic)
+        assertEquals(LayoutPublicationReadiness.ACCEPTED, stateA.layoutPublicationReadiness.value)
+        assertEquals(mapOf(cold.clientId to frontendActivation), stateA.frontendActivationReceipts())
+        assertEquals(listOf(1L, 3L), publisherA.published.map { it.third })
+        assertTrue(publisherA.retired.isEmpty(), publisherA.retired.toString())
+        assertEquals(
+            SurfaceIngressStatus.ACCEPTED,
+            cold.publish(stateB, leaseB, snapshot(frontendB, 2).copy(activationReceipt = frontendActivation.encode())).status,
+        )
+    }
+
+    /**
+     * GH #435 review (cycle 4): the backend's first release discovery for a negotiated Client
+     * failed, so its schema-5 snapshot with a shell-only receipt was accepted by the still
+     * shell-only fence. The Client's next release offer activates the peer. The lease then waits
+     * for the paired receipt instead of being revoked; once that activated receipt is accepted, a
+     * mismatch still revokes the lease.
+     */
+    @Test
+    fun aShellOnlyReceiptAcceptedAfterAFailedFirstReleaseDiscoveryDoesNotRevokeTheLease() = runBlocking {
+        val cold = ColdBackend(failFirstDiscovery = true)
+        val lines = mutableListOf<String>()
+        val publisher = RecordingPublisher()
+        val forwarder = RecordingForwarder()
+        val state = cold.state(publisher, forwarder, lines)
+        val frontend = frontendLeaseInstanceId("frontend-a", "0.2.1060")
+
+        cold.gate.leaseOpened(cold.clientId)
+        val lease = state.open(cold.clientId, frontend)
+        assertEquals(5, cold.snapshotApi.supportedSnapshotSchemaVersion())
+        assertEquals(SurfaceIngressStatus.ACCEPTED, cold.publish(state, lease, snapshot(frontend, 1).shellOnly()).status)
+        assertEquals(0, cold.activations, "the first release discovery failed, so the peer stays shell-only")
+
+        val offer = cold.releaseApi.frontendReleaseOffer(
+            FrontendClientBuild("0.2.1060", "/client/plugins/frontend/agent-doc-jetbrains-262", backendActivation.shellDigest, 1),
+        )
+        assertTrue(offer.release != null, "a negotiated Client on this shell is offered the release")
+        assertEquals(1, cold.activations)
+
+        val beforeActivation = cold.publish(state, lease, snapshot(frontend, 2).shellOnly())
+        assertEquals(SurfaceIngressStatus.DELIVERY_FAILED, beforeActivation.status)
+        assertEquals(LayoutPublicationReadiness.CONNECTED_BLOCKED, state.layoutPublicationReadiness.value)
+        assertTrue(publisher.retired.isEmpty(), "the controller generation is not retired: ${publisher.retired}")
+        assertTrue(forwarder.held.isEmpty(), "the layout is not held: ${forwarder.held}")
+        assertEquals(1, lines.count { it.contains("snapshot awaits frontend activation client=${cold.clientId}") }, lines.toString())
+
+        assertTrue(cold.snapshotApi.frontendImplementationRelease() != null, "the Client fetches the release")
+        val activated = cold.publish(state, lease, snapshot(frontend, 3).copy(activationReceipt = frontendActivation.encode()))
+        assertEquals(SurfaceIngressStatus.ACCEPTED, activated.status, activated.diagnostic)
+        assertEquals(LayoutPublicationReadiness.ACCEPTED, state.layoutPublicationReadiness.value)
+        assertTrue(publisher.retired.isEmpty(), publisher.retired.toString())
+
+        // Once an activated receipt was accepted, a mismatch still revokes the lease.
+        val wrongJvm = frontendActivation.copy(jvmInstanceId = "replacement-client-jvm")
+        assertEquals(
+            SurfaceIngressStatus.DELIVERY_FAILED,
+            cold.publish(state, lease, snapshot(frontend, 4).copy(activationReceipt = wrongJvm.encode())).status,
+        )
+        assertEquals(listOf(cold.clientId to lease.connectionGeneration), publisher.retired)
+        assertEquals(
+            SurfaceIngressStatus.DELIVERY_FAILED,
+            cold.publish(state, lease, snapshot(frontend, 5).copy(activationReceipt = frontendActivation.encode())).status,
+        )
+    }
+
+    /**
+     * GH #435 review (cycle 4): a freshly restarted backend whose peer is not activated yet, with
+     * the real delivery gate and both RPC implementations; release discovery activates the peer.
+     */
+    private inner class ColdBackend(failFirstDiscovery: Boolean = false) {
+        val clientId = "client-a"
+        val gate = FrontendReleaseDeliveryGate(backendShell = { backendActivation.shellDigest }, clock = { 1_000L })
+        private val releasePolls = FrontendReleasePollLedger()
+        private var backend = ActivationReceipt.shellOnly(ActivationReceipt.ROLE_BACKEND).copy(
+            jvmInstanceId = backendActivation.jvmInstanceId,
+            shellDigest = backendActivation.shellDigest,
+            spiVersion = backendActivation.spiVersion,
+        )
+        var activations = 0
+            private set
+        private var discoveries = 0
+        private val release = FrontendImplementationRelease(
+            releaseVersion = "0.2.1060",
+            packageUrl = "https://example.invalid/agent-doc-jetbrains-262-0.2.1060.zip",
+            signatureUrl = "https://example.invalid/agent-doc-jetbrains-262-0.2.1060.zip.sig",
+            implEntry = "impl/agent-doc-frontend-impl-0.2.1060.jar",
+            implSha256 = backendActivation.implSha256!!,
+            shellDigest = backendActivation.shellDigest,
+            spiVersion = backendActivation.spiVersion,
+            epoch = backendActivation.epoch,
+            packageBytes = ByteArray(16),
+            signatureBytes = ByteArray(8),
+        )
+        private val activate = {
+            discoveries++
+            if (failFirstDiscovery && discoveries == 1) error("transient release discovery failure")
+            if (backend != backendActivation) activations++
+            backend = backendActivation
+            release
+        }
+        val snapshotApi = BackendSurfaceSnapshotRpcApi(
+            frontendRelease = activate,
+            gate = gate,
+            releasePolls = releasePolls,
+            releaseSelected = { true },
+            callerClientId = { clientId },
+            resolveProject = { null },
+        )
+        val releaseApi = BackendFrontendReleaseRpcApi(
+            currentRelease = activate,
+            selectedRelease = { release },
+            backend = { BackendPluginBuild("0.2.1060", "/backend/plugins/agent-doc-jetbrains-262", backendActivation.shellDigest) },
+            gate = gate,
+            releasePolls = releasePolls,
+            callerClientId = { clientId },
+        )
+
+        /** One project's ingress state; every project of the Client shares the gate. */
+        fun state(publisher: RecordingPublisher, forwarder: RecordingForwarder, lines: MutableList<String>) =
+            AuthenticatedSurfaceIngressState(
+                publisher,
+                forwarder,
+                backendActivationReceiptProvider = { backend },
+                clientShellEvidence = releasePolls,
+                scheduleDiagnostic = { _, _ -> },
+                log = { _, line -> lines += line },
+                onFrontendPluginMismatch = { _, _, _ -> },
+                backendPluginVersion = { "0.2.1060" },
+            )
+
+        /** The backend's half of one publish: the RPC observes the shell before the fence reads it. */
+        suspend fun publish(
+            state: AuthenticatedSurfaceIngressState,
+            lease: SurfaceIngressLease,
+            snapshot: FrontendSurfaceSnapshot,
+        ): SurfaceIngressAck {
+            assertEquals(SurfaceIngressStatus.PROJECT_MISMATCH, snapshotApi.publishSnapshot(lease, snapshot).status)
+            return state.publish(clientId, lease, snapshot)
+        }
+    }
+
+    /** A schema-5 snapshot from a Client that has not activated the release yet. */
+    private fun FrontendSurfaceSnapshot.shellOnly() = copy(
+        activationReceipt = ActivationReceipt.shellOnly(ActivationReceipt.ROLE_FRONTEND).copy(
+            jvmInstanceId = frontendActivation.jvmInstanceId,
+            shellDigest = frontendActivation.shellDigest,
+            spiVersion = frontendActivation.spiVersion,
+        ).encode(),
+    )
+
     private fun mismatchReportingState(
         mismatches: MutableList<FrontendPluginMismatch>,
         backendPlugin: String?,

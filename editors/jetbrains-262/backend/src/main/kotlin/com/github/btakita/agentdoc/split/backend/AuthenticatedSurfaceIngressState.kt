@@ -382,11 +382,12 @@ internal class AuthenticatedSurfaceIngressState(
             if (!current.activationRevoked && current.acceptedSequence > 0 &&
                 awaitsFrontendActivation(current, snapshot, receipt)
             ) {
-                // GH #435 review (cycle 1): this lease's accepted snapshots carried no activation
-                // receipt (a shell-only backend admitted them; on a cold backend that is a late
-                // first schema answer's provisional schema 1), so the fence never granted it an
-                // activation to revoke. Refuse like any not-yet-activated snapshot: the Client
-                // asks for the schema again after this refusal and its next snapshot carries the
+                // GH #435 review (cycles 1 and 4): this lease's accepted snapshots carried no
+                // activated receipt (a shell-only backend admitted them; on a cold backend that is
+                // a late first schema answer's provisional schema 1, or a schema 5 with a
+                // shell-only receipt), so the fence never granted it an activation to revoke.
+                // Refuse like any not-yet-activated snapshot: the Client asks for the schema again
+                // or fetches the release after this refusal, and its next snapshot carries the
                 // paired receipt, which this lease then admits.
                 if (!current.awaitingActivation) {
                     connections[authenticatedClientId] = current.copy(awaitingActivation = true)
@@ -396,8 +397,8 @@ internal class AuthenticatedSurfaceIngressState(
                         "[split-surface] snapshot awaits frontend activation client=$authenticatedClientId " +
                             "generation=${lease.connectionGeneration} sequence=${snapshot.sequence} " +
                             "schema=${snapshot.schemaVersion} accepted_sequence=${current.acceptedSequence} " +
-                            "(the backend peer activated after this lease's receipt-less snapshots were " +
-                            "accepted; the lease stays open for the Client's activated snapshot)",
+                            "(the backend peer activated after this lease's receipt-less or shell-only " +
+                            "snapshots were accepted; the lease stays open for the Client's activated snapshot)",
                     )
                 }
             } else if (!current.activationRevoked && current.acceptedSequence > 0) {
@@ -511,19 +512,26 @@ internal class AuthenticatedSurfaceIngressState(
     /**
      * GH #435 review (cycle 1): whether a fence refusal of [current], which already had a snapshot
      * accepted, waits for the Client's activation instead of revoking the lease. Only a lease whose
-     * accepted snapshots carried no activation receipt waits: the shell-only backend admitted them
-     * under the R1 rule, so the fence never granted this lease an activation it could now take
-     * back. A lease that had a receipt accepted (shell-only or activated) still revokes on the
-     * first mismatch, and so does a lease whose Client is proven unable to load this backend's
-     * release (GH #440): no snapshot of that Client can ever pass the fence, so its layout is
-     * held, not left on the last receipt-less snapshot.
+     * accepted snapshots carried no activated receipt waits: the shell-only backend admitted them
+     * under the R1 rule (receipt-less, or with a shell-only receipt), so the fence never granted
+     * this lease an activation it could now take back. A lease that had an activated receipt
+     * accepted still revokes on the first mismatch, and so does a lease whose Client is proven
+     * unable to load this backend's release (GH #440): no snapshot of that Client can ever pass
+     * the fence, so its layout is held, not left on the last shell-only snapshot.
+     *
+     * GH #435 review (cycle 4): a shell-only receipt counts as no receipt. The delivery gate keeps
+     * its negotiation and peer-activation claim per Client, not per lease, so a cold backend can
+     * accept a schema-5 snapshot with a shell-only receipt before its peer activates: a second
+     * project's lease opening while this one's first snapshot is in flight, or a failed first
+     * release discovery that the next release poll retries. Revoking such a lease would stop its
+     * layout sync until a reconnect, although the Client's paired receipt is still on its way.
      */
     private fun awaitsFrontendActivation(
         current: ConnectionState,
         snapshot: FrontendSurfaceSnapshot,
         receipt: ActivationReceipt?,
     ): Boolean {
-        if (current.activationReceipt != null) return false
+        if (current.activationReceipt?.activated() == true) return false
         return frontendShellRefusal(
             snapshot,
             receipt,
@@ -534,11 +542,14 @@ internal class AuthenticatedSurfaceIngressState(
         ) == null
     }
 
+    /** Whether this receipt reports an activated implementation, not a shell-only JVM. */
+    private fun ActivationReceipt.activated(): Boolean = implSha256 != null || epoch != 0L
+
     private fun admitsFrontendReceipt(current: ConnectionState, receipt: ActivationReceipt?): Boolean {
         val backend = backendActivationReceiptProvider()
-        if (backend.implSha256 == null && backend.epoch == 0L) {
+        if (!backend.activated()) {
             // Legacy snapshots and a shell-only frontend remain valid in R1.
-            return receipt == null || (receipt.implSha256 == null && receipt.epoch == 0L)
+            return receipt == null || !receipt.activated()
         }
         if (receipt == null || backend.role != ActivationReceipt.ROLE_BACKEND ||
             receipt.role != ActivationReceipt.ROLE_FRONTEND ||
@@ -673,8 +684,9 @@ internal class AuthenticatedSurfaceIngressState(
         val activationReceipt: ActivationReceipt? = null,
         val activationRevoked: Boolean = false,
         /**
-         * GH #435 review (cycle 1): the backend peer activated after this lease's receipt-less
-         * snapshots were accepted, and the fence refused the next one without revoking
+         * GH #435 review (cycles 1 and 4): the backend peer activated after this lease's
+         * receipt-less or shell-only snapshots were accepted, and the fence refused the next one
+         * without revoking
          * ([awaitsFrontendActivation]). Layout readiness is blocked until a snapshot is accepted.
          */
         val awaitingActivation: Boolean = false,

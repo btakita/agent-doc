@@ -183,8 +183,14 @@ creates one with the receipt's attach command.
     match the backend: install the matching ZIP in the Client. A few such
     refusals between `version=5 ... after_refusal=DELIVERY_FAILED` and
     `[frontend-impl] activated` are the Client fetching the release, not a
-    mismatch. After `version=1 backend_offered=none` it is the schema-1 lease
-    above.
+    mismatch. So are a few right after a backend IDE restart on a lease the
+    backend logged `snapshot awaits frontend activation` for (its peer
+    activated after it accepted that lease's shell-only snapshots, e.g. with a
+    second project open on the Client); `snapshot accepted` follows on the same
+    lease once the Client logs `[frontend-impl] activated`. Backends before
+    0.2.1061 ended such a lease instead, so its refusals repeated until a
+    reconnect (restart the Client or reopen the project). After `version=1
+    backend_offered=none` it is the schema-1 lease above.
   - Backend `idea.log`: `[split-surface] frontend/backend ingress accepted`
     (or `deferred`), `lease opened ... layout_authority=remote_measured`,
     `snapshot refused ... status=<STATUS> diagnostic=<why>`,

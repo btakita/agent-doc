@@ -842,12 +842,15 @@ internal fun frontendShellRefusalStory(refusal: FrontendShellRefusal): String {
         // GH #440 review (cycle 2): the backend logs one of its own lines for every such Client
         // (BackendSurfaceSnapshotRpcApi for a schema-5 receipt, BackendFrontendReleaseRpcApi for a
         // 0.2.1055+ build report); only Clients from 0.2.1055 on log a line of their own.
+        // GH #440 review (cycle 3): the quotes carry no `client=` token, so neither an
+        // `agent-doc upgrade` parser nor a grep for `client shell mismatch client=` /
+        // `client plugin mismatch client=` takes this line for the backend's own.
         val client = refusal.clientShell?.take(12) ?: "..."
         val backend = refusal.backendShell.take(12)
         "the JetBrains Client runs a different Agent Doc shell than this backend, so this backend " +
             "withholds its frontend release from that Client and the Client cannot load it (backend " +
-            "idea.log: `[frontend-impl] client shell mismatch client=... client_shell=$client ... " +
-            "backend_shell=$backend` or `[frontend-impl] client plugin mismatch client=... " +
+            "idea.log: `[frontend-impl] client shell mismatch ... client_shell=$client ... " +
+            "backend_shell=$backend` or `[frontend-impl] client plugin mismatch ... " +
             "client_shell=$client ... backend_shell=$backend`; a Client from 0.2.1055 on also logs " +
             "`[frontend-impl] client plugin mismatch compatibility=... backend_shell=$backend " +
             "client_shell=$client` in its idea.log)"

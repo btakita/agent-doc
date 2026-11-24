@@ -408,11 +408,14 @@ class AuthenticatedSurfaceIngressStateTest {
         // exists from 0.2.1055 on.
         assertTrue(
             mismatches.single().contains(
-                "(backend idea.log: `[frontend-impl] client shell mismatch client=... " +
+                "(backend idea.log: `[frontend-impl] client shell mismatch ... " +
                     "client_shell=dddddddddddd ... backend_shell=aaaaaaaaaaaa`",
             ),
             mismatches.toString(),
         )
+        // GH #440 review (cycle 3): the quoted backend lines carry no `client=` token, so
+        // `agent-doc upgrade` and a grep for `client shell mismatch client=` skip this line.
+        assertFalse(mismatches.single().contains("mismatch client=..."), mismatches.toString())
         assertTrue(
             mismatches.single().contains(
                 "a Client from 0.2.1055 on also logs `[frontend-impl] client plugin mismatch compatibility=... " +
@@ -654,9 +657,9 @@ class AuthenticatedSurfaceIngressStateTest {
         assertTrue(
             mismatch.detail.contains(
                 "this backend withholds its frontend release from that Client and the Client cannot load it " +
-                    "(backend idea.log: `[frontend-impl] client shell mismatch client=... " +
+                    "(backend idea.log: `[frontend-impl] client shell mismatch ... " +
                     "client_shell=b5741f110bfb ... backend_shell=1265693a728a` or " +
-                    "`[frontend-impl] client plugin mismatch client=... client_shell=b5741f110bfb ... " +
+                    "`[frontend-impl] client plugin mismatch ... client_shell=b5741f110bfb ... " +
                     "backend_shell=1265693a728a`; a Client from 0.2.1055 on also logs " +
                     "`[frontend-impl] client plugin mismatch compatibility=... " +
                     "backend_shell=1265693a728a client_shell=b5741f110bfb` in its idea.log). " +

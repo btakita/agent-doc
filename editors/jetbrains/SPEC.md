@@ -1826,7 +1826,16 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   `[frontend-impl] client plugin mismatch client=<id> ... client_shell=<12> ... backend_shell=<12>`
   (0.2.1055+ build report). A Client from 0.2.1055 on also logs `[frontend-impl] client plugin
   mismatch compatibility=... backend_shell=<12> client_shell=<12>` in its own idea.log; 0.2.1052
-  to 0.2.1054 Clients log no such line.
+  to 0.2.1054 Clients log no such line. The report quotes the two backend lines without their
+  `client=<id>` token (`[frontend-impl] client shell mismatch ... client_shell=<12> ...
+  backend_shell=<12>`; GH #440 review, cycle 3): a 0.2.1058 report quoted `client=...`, which
+  `agent-doc upgrade` parsed as the backend's own newer line. So in the backend idea.log
+  `client shell mismatch client=` and `client plugin mismatch client=` match only the backend's
+  own line, and `[frontend-impl] client shell mismatch` / `[frontend-impl] client plugin
+  mismatch` also match the `[split-surface]` report quoting it. `agent-doc upgrade` reads a
+  `[frontend-impl]` or `[split-surface]` event only where that marker opens the line's own
+  message (no backtick and no other `[lower-case-tag] ` before it), and an open lease's
+  mismatch facts end at the report's first ` (`.
   Otherwise it holds that report for a provisional schema 1
   (GH #441): the frontend names its plugin version in its lease's `frontendInstanceId`
   (`<uuid>;plugin=<version>`, an opaque string every backend only compares), and a schema-1

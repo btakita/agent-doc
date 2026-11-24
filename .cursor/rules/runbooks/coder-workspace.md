@@ -135,12 +135,18 @@ creates one with the receipt's attach command.
   ... client_plugin=before_0.2.1052` for the poll proof), with no
   `frontend_schema=` token, and a warning titled `JetBrains Client plugin ...
   is older than the backend's ...`. For a Client that reported another shell
-  the backend `idea.log` also has `[frontend-impl] client shell mismatch
-  client=... client_shell=... backend_shell=...` (its schema-5 snapshot) or
-  `[frontend-impl] client plugin mismatch client=... client_shell=...
-  backend_shell=...` (a 0.2.1055+ build report); a Client from 0.2.1055 on
-  also logs `[frontend-impl] client plugin mismatch compatibility=...` in its
-  own `idea.log`. Repair: replace the Client's
+  the backend `idea.log` also has its own `[frontend-impl] client shell
+  mismatch client=... client_shell=... backend_shell=...` (its schema-5
+  snapshot) or `[frontend-impl] client plugin mismatch client=...
+  client_shell=... backend_shell=...` (a 0.2.1055+ build report); a Client
+  from 0.2.1055 on also logs `[frontend-impl] client plugin mismatch
+  compatibility=...` in its own `idea.log`. The `[split-surface]` line quotes
+  those backend lines without their `client=` token, so in the backend
+  `idea.log` a grep for `client shell mismatch client=` or `client plugin
+  mismatch client=` finds only the backend's own line, while `[frontend-impl]
+  client shell mismatch` or `[frontend-impl] client plugin mismatch` also
+  finds the `[split-surface]` line that quotes it (a 0.2.1058 backend still
+  quoted `client=...`, so there both greps also find it). Repair: replace the Client's
   `plugins/frontend/agent-doc-jetbrains-262` with the backend's ZIP (the
   remedy names its release URL), keep the trust key, restart the Client.
 - JetBrains Gateway with the frontend installed (GH #435): once the Client's

@@ -1168,6 +1168,31 @@ struct OpenLeaseFrontendMismatch {
     detail: String,
 }
 
+/// GH #440 review (cycle 3): the event after `tag` when `tag` opens `line`'s
+/// own message, or None when `tag` appears only inside another line's message.
+/// A `[split-surface] ... plugin mismatch` story quotes `[frontend-impl] ...`
+/// lines in backticks; parsing that quote as the backend's own line replaced
+/// the real Client record. The logger prefix (`<time> [ thread] LEVEL -
+/// #category - `) holds no backtick and no `[lower-case-tag] ` marker.
+fn own_log_event<'a>(line: &'a str, tag: &str) -> Option<&'a str> {
+    let (prefix, event) = line.split_once(tag)?;
+    (!prefix.contains('`') && !has_agent_doc_log_tag(prefix)).then_some(event)
+}
+
+/// Whether `text` holds an agent-doc log marker such as `[split-surface] `:
+/// lower-case letters, digits and `-` in brackets, then a space. The idea.log
+/// thread column (`[   1] `) is not one.
+fn has_agent_doc_log_tag(text: &str) -> bool {
+    text.split('[').skip(1).any(|rest| {
+        rest.split_once("] ").is_some_and(|(tag, _)| {
+            tag.starts_with(|c: char| c.is_ascii_lowercase())
+                && tag
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        })
+    })
+}
+
 fn split_surface_field<'a>(line: &'a str, key: &str) -> Option<&'a str> {
     line.split_whitespace()
         .find_map(|token| token.strip_prefix(key)?.strip_prefix('='))
@@ -1188,7 +1213,7 @@ fn open_lease_frontend_mismatch(log: &str) -> Option<OpenLeaseFrontendMismatch> 
             newest = None;
             continue;
         }
-        let Some((_, event)) = line.split_once("[split-surface] ") else {
+        let Some(event) = own_log_event(line, "[split-surface] ") else {
             continue;
         };
         let lease = || {
@@ -1222,21 +1247,26 @@ fn open_lease_frontend_mismatch(log: &str) -> Option<OpenLeaseFrontendMismatch> 
             && let Some((client, generation)) = lease()
             && open.get(&client) == Some(&generation)
         {
+            // Only the `key=value` facts before the parenthetical story: a
+            // 0.2.1046 backend's parenthetical blamed "an older Agent Doc
+            // frontend" for schema 1 as well, and a GH #440 story quotes other lines'
+            // `key=value` tokens (GH #440 review, cycle 3).
             let facts = event
                 .trim_start_matches("frontend/backend plugin mismatch ")
                 .split(" remedy=")
                 .next()
+                .unwrap_or_default()
+                .split(" (")
+                .next()
                 .unwrap_or_default();
-            // Only the `key=value` facts: a 0.2.1046 backend's parenthetical
-            // blamed "an older Agent Doc frontend" for schema 1 as well.
             let detail = facts
                 .split_whitespace()
-                .filter(|token| token.contains('=') && !token.starts_with('('))
+                .filter(|token| token.contains('='))
                 .filter(|token| !token.starts_with("client=") && !token.starts_with("generation="))
                 .collect::<Vec<_>>()
                 .join(" ");
             let frontend_schema =
-                split_surface_field(event, "frontend_schema").and_then(|it| it.parse().ok());
+                split_surface_field(facts, "frontend_schema").and_then(|it| it.parse().ok());
             newest = Some(client.clone());
             stuck.insert(
                 client.clone(),
@@ -1371,7 +1401,7 @@ fn client_plugin_mismatch(log: &str) -> Option<ClientPluginMismatch> {
             newest = None;
             continue;
         }
-        let Some((_, event)) = line.split_once("[frontend-impl] ") else {
+        let Some(event) = own_log_event(line, "[frontend-impl] ") else {
             continue;
         };
         let named = event.starts_with("client plugin mismatch ");
@@ -8084,6 +8114,96 @@ x [split-surface] frontend/backend plugin mismatch client=c-9 generation=7 front
             super::open_lease_frontend_mismatch("no agent-doc lines\n"),
             None
         );
+    }
+
+    /// GH #440 review (cycle 3): a `[split-surface] ... plugin mismatch` line
+    /// built from the backend's other-shell story (`frontendShellRefusalStory`).
+    /// `quote` is the text the story quotes for the backend's own line: the
+    /// 0.2.1058 story wrote `client=...` into it, later ones do not.
+    fn other_shell_ingress_line(quote: &str) -> String {
+        format!(
+            "2026-11-24 10:09:01,001 [   1]   WARN - #c.g.b.a.s.b.ControllerSurfaceIngress - [split-surface] frontend/backend plugin mismatch client=c-2 generation=12 client_shell=cccccccccccc backend_shell=aaaaaaaaaaaa client_plugin=0.2.1060 backend_plugin=0.2.1058 (the JetBrains Client runs a different Agent Doc shell than this backend, so this backend withholds its frontend release from that Client and the Client cannot load it (backend idea.log: `[frontend-impl] client shell mismatch {quote}client_shell=cccccccccccc ... backend_shell=aaaaaaaaaaaa` or `[frontend-impl] client plugin mismatch {quote}client_shell=cccccccccccc ... backend_shell=aaaaaaaaaaaa`; a Client from 0.2.1055 on also logs `[frontend-impl] client plugin mismatch compatibility=... backend_shell=aaaaaaaaaaaa client_shell=cccccccccccc` in its idea.log). Asking for the schema again or reconnecting cannot change the Client's shell; only this backend's plugin in the Client can) remedy=update the JetBrains Client plugin: Client plugin 0.2.1060 is newer than this backend's 0.2.1058. Replace the Client's plugins/frontend/agent-doc-jetbrains-262 with this backend's 0.2.1058 ZIP: install. Afterwards the Client idea.log shows `Loaded custom plugins: Agent Doc, 0.2.1058` and `[frontend-impl] activated`"
+        )
+    }
+
+    /// GH #440 review (cycle 3): the 0.2.1058 other-shell story quoted
+    /// `[frontend-impl] client shell mismatch client=...` inside the ingress
+    /// line, which is logged after the backend's own offer line. The parser
+    /// took the quote for a newer backend line, so `agent-doc upgrade` lost
+    /// the versions and told the operator to update a newer Client instead of
+    /// the backend. Only a line whose own message is `[frontend-impl]` counts.
+    #[test]
+    fn upgrade_ignores_a_frontend_impl_line_quoted_in_an_ingress_story() {
+        let offer = "2026-11-24 10:09:00,001 [   1]   WARN - #c.g.b.a.s.b.BackendFrontendReleaseRpcApi - [frontend-impl] client plugin mismatch client=c-2 compatibility=client_newer client_plugin=0.2.1060 client_plugin_path=/Users/dev/Library/Application Support/JetBrains/IntelliJIdea2026.3/plugins/frontend/agent-doc-jetbrains-262 client_shell=cccccccccccc backend_plugin=0.2.1058 backend_plugin_path=/home/coder/.local/share/JetBrains/IntelliJIdea2026.3/agent-doc-jetbrains-262 backend_shell=aaaaaaaaaaaa";
+        for quote in ["client=... ", "... "] {
+            let log = format!("{offer}\n{}\n", other_shell_ingress_line(quote));
+            let mismatch = super::client_plugin_mismatch(&log).expect("the offer line");
+            assert_eq!(mismatch.client, "c-2", "{quote:?}");
+            assert_eq!(mismatch.compatibility.as_deref(), Some("client_newer"));
+            assert_eq!(mismatch.client_plugin.as_deref(), Some("0.2.1060"));
+            assert_eq!(mismatch.backend_plugin.as_deref(), Some("0.2.1058"));
+            assert_eq!(mismatch.client_shell.as_deref(), Some("cccccccccccc"));
+            assert_eq!(mismatch.backend_shell.as_deref(), Some("aaaaaaaaaaaa"));
+            let message = super::client_plugin_mismatch_message(&mismatch, Path::new("/l"), None);
+            assert!(
+                message.starts_with("JetBrains Client plugin 0.2.1060 (shell cccccccccccc) is newer than the backend 0.2.1058 (shell aaaaaaaaaaaa) (GH #435; /l client=c-2). Update the backend plugin"),
+                "{message}"
+            );
+            // The ingress line alone names no backend `[frontend-impl]` event.
+            assert_eq!(
+                super::client_plugin_mismatch(&other_shell_ingress_line(quote)),
+                None,
+                "{quote:?}"
+            );
+        }
+        // A quote that carries a real client id is still not the line's own event.
+        assert_eq!(
+            super::client_plugin_mismatch(
+                "x [split-surface] frontend/backend plugin mismatch client=c-3 generation=4 client_shell=unreported (backend idea.log: `[frontend-impl] client shell mismatch client=c-9 client_shell=dddddddddddd`)\n"
+            ),
+            None
+        );
+        // An unquoted backend line keeps parsing in every older shape.
+        assert_eq!(
+            super::client_plugin_mismatch(
+                "x [frontend-impl] client shell mismatch client=c-4 client_shell=dddddddddddd\n"
+            )
+            .map(|it| it.client)
+            .as_deref(),
+            Some("c-4")
+        );
+    }
+
+    /// GH #440 review (cycle 3): the open-lease detail is the line's own
+    /// `key=value` facts; the parenthetical story's quoted tokens
+    /// (`client_shell=... backend_shell=...`, `legacy_poll=true`) are not facts.
+    #[test]
+    fn upgrade_open_lease_detail_stops_at_the_story() {
+        let opened = "2026-11-24 10:08:59,001 [   1]   INFO - #c.g.b.a.s.b.AuthenticatedSurfaceIngressState - [split-surface] lease opened client=c-2 generation=12 layout_authority=remote_measured readiness=connected_blocked";
+        for quote in ["client=... ", "... "] {
+            let log = format!("{opened}\n{}\n", other_shell_ingress_line(quote));
+            let stuck = super::open_lease_frontend_mismatch(&log).expect("the open lease");
+            assert_eq!(stuck.client, "c-2");
+            assert_eq!(stuck.generation, 12);
+            assert_eq!(stuck.frontend_schema, None);
+            assert_eq!(
+                stuck.detail,
+                "client_shell=cccccccccccc backend_shell=aaaaaaaaaaaa client_plugin=0.2.1060 backend_plugin=0.2.1058"
+            );
+        }
+        let legacy = format!(
+            "{opened}\n2026-11-24 10:09:01,001 [   1]   WARN - #c - [split-surface] frontend/backend plugin mismatch client=c-2 generation=12 client_shell=unreported backend_shell=aaaaaaaaaaaa client_plugin=before_0.2.1052 backend_plugin=0.2.1058 (the JetBrains Client polled this backend's whole frontend release 3 time(s) without asking for its identity, which only Agent Doc Clients before 0.2.1052 do; their shell is older than this backend's, so this backend withholds the release from that Client (backend idea.log: `[frontend-impl] release withheld client=... legacy_poll=true`) and the Client cannot load it. Asking for the schema again or reconnecting cannot change the Client's shell; only this backend's plugin in the Client can) remedy=update\n"
+        );
+        let stuck = super::open_lease_frontend_mismatch(&legacy).expect("the legacy lease");
+        assert_eq!(
+            stuck.detail,
+            "client_shell=unreported backend_shell=aaaaaaaaaaaa client_plugin=before_0.2.1052 backend_plugin=0.2.1058"
+        );
+        // A `[split-surface]` event quoted inside another line is not that line's own.
+        let quoted = format!(
+            "{opened}\nx [frontend-impl] note (`[split-surface] frontend/backend plugin mismatch client=c-2 generation=12 frontend_schema=1`)\n"
+        );
+        assert_eq!(super::open_lease_frontend_mismatch(&quoted), None);
     }
 
     #[test]

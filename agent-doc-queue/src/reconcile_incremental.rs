@@ -20,9 +20,14 @@
 //!   the revision it reconciled last with its component layout and an index
 //!   of its `agent:exchange` ([`crate::exchange_index`]). A new revision is
 //!   matched against it as up to three splices (before the exchange, inside
-//!   its body, after it: each the common prefix/suffix of its region, a
-//!   `memcmp`; a caller holding the CRDT op deltas could hand the same
-//!   splices in). The dirty components are the ones those splices touch.
+//!   its body, after it). A caller holding the revision's changeset (the
+//!   controller's CRDT text journal) hands it in as [`TextSplice`]s
+//!   ([`reconcile_incremental_changeset`]): the splices are mapped to the
+//!   regions directly, reading only the inserted bytes, so no byte of the
+//!   exchange is compared ([`ChangesetSource::Splices`]). Without one, each
+//!   region's splice is the common prefix/suffix of its region, a `memcmp`
+//!   ([`ChangesetSource::ByteCompare`]). The dirty components are the ones
+//!   those splices touch.
 //!   Only the exchange chunks a splice touches are read; the layout outside
 //!   comes from parsing the skeleton, never the full text. A splice that may
 //!   move a component boundary in a way the cache cannot follow (an edited
@@ -145,10 +150,54 @@ impl ReconcileMode {
     }
 }
 
+/// One splice of a revision's changeset (`#incrementalreconcile`): replace
+/// `removed_len` bytes at byte `start` with `inserted`. A changeset is a
+/// sequence of splices, each addressing the text the splices before it
+/// produced (a CRDT text journal's order). Offsets are char boundaries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextSplice {
+    pub start: usize,
+    pub removed_len: usize,
+    pub inserted: String,
+}
+
+/// Where a revision's changeset came from (`#incrementalreconcile`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ChangesetSource {
+    /// The common prefix/suffix of each region against the cached revision.
+    #[default]
+    ByteCompare,
+    /// The caller's [`TextSplice`]s, mapped to the regions without comparing
+    /// the texts ([`reconcile_incremental_changeset`]).
+    Splices,
+}
+
+impl ChangesetSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ByteCompare => "byte_compare",
+            Self::Splices => "splices",
+        }
+    }
+}
+
 /// [`reconcile_incremental`]'s result and what it reused.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReconcileReport {
     pub reconciled: Reconciled,
+    /// `reconciled.document` differs from the revision (decided on the
+    /// skeleton, without comparing the exchange, whenever the chain ran or
+    /// replayed on one).
+    pub changed: bool,
+    /// Where the changeset came from.
+    pub changeset: ChangesetSource,
+    /// Why a caller's changeset was not used (the texts were compared
+    /// instead), if one was handed in and refused.
+    pub changeset_fallback: Option<&'static str>,
+    /// Bytes of the previous revision's `agent:exchange` body the changeset
+    /// discovery compared (0 for [`ChangesetSource::Splices`]; a rebuild
+    /// reads the whole body, counted in `exchange_bytes_indexed`).
+    pub exchange_bytes_compared: usize,
     /// Components (`name` or `name#id`, then `@n` for the n-th repeat) the
     /// revision's changeset touched, added or removed, in document order
     /// (removed ones last). Every component when there is no previous
@@ -326,11 +375,55 @@ pub fn reconcile_incremental(
     {
         cache.revision = Some(Revision::build(Arc::from(prev)).0);
     }
-    let advance = advance(cache.revision.take(), next);
+    reconcile_advanced(advance(cache.revision.take(), next, None), inputs, cache)
+}
+
+/// [`reconcile_incremental`] from the revision's changeset: `changeset`
+/// turns the revision the cache reconciled last into `next`
+/// (`#incrementalreconcile`). The splices are mapped to the regions before,
+/// inside and after `agent:exchange` without comparing the texts; only the
+/// inserted bytes and the exchange's opener and closer are read from
+/// `next`. A changeset that does not spell `next` (its inserted bytes or
+/// its length disagree, or it splits a char), or a cache holding no
+/// revision, falls back to comparing the texts
+/// ([`ReconcileReport::changeset_fallback`]). Byte-identical to
+/// [`reconcile_incremental`]`(None, next, ..)` whenever the changeset is
+/// that revision's.
+pub fn reconcile_incremental_changeset(
+    changeset: &[TextSplice],
+    next: &str,
+    inputs: &ReconcileInputs<'_>,
+    cache: &mut ReconcileCache,
+) -> ReconcileReport {
+    let prev = cache.revision.take();
+    let hunks = match &prev {
+        None => Err("no_cached_revision"),
+        Some(prev) => changeset_hunks(prev.text.len(), changeset, next),
+    };
+    let advance = match hunks {
+        Ok(hunks) => advance(prev, next, Some(&hunks)),
+        Err(reason) => {
+            let mut advance = advance(prev, next, None);
+            advance.changeset_fallback = Some(reason);
+            advance
+        }
+    };
+    reconcile_advanced(advance, inputs, cache)
+}
+
+/// Run the chain on an advanced revision and keep it in the cache.
+fn reconcile_advanced(
+    advance: Advance,
+    inputs: &ReconcileInputs<'_>,
+    cache: &mut ReconcileCache,
+) -> ReconcileReport {
     let revision = advance.revision;
     let report = ReconcileReport {
         dirty_components: advance.dirty,
         exchange_bytes_indexed: advance.indexed,
+        exchange_bytes_compared: advance.compared,
+        changeset: advance.source,
+        changeset_fallback: advance.changeset_fallback,
         rebuilt: advance.rebuilt,
         ..ReconcileReport::default()
     };
@@ -372,6 +465,7 @@ fn reconcile_revision(
                 && memo.trace.iter().all(|query| query.replays(inputs))
             {
                 report.reconciled = splice_body(&memo.output, span, body);
+                report.changed = changed_on_skeleton(&memo.output, &memo.input, &report, text);
                 report.reused = true;
                 report.mode = ReconcileMode::ExchangeOnly;
                 report.chain_bytes = 0;
@@ -391,6 +485,7 @@ fn reconcile_revision(
                 && memo.trace.iter().all(|query| query.replays(inputs))
             {
                 report.reconciled = splice_body(&memo.output, span, body);
+                report.changed = changed_on_skeleton(&memo.output, &memo.input, &report, text);
                 report.reused = true;
                 return report;
             }
@@ -402,6 +497,7 @@ fn reconcile_revision(
                 .flatten();
             if let Some(span) = span {
                 report.reconciled = splice_body(&output, &span, body);
+                report.changed = changed_on_skeleton(&output, &input, &report, text);
                 *memo = Some(ChainMemo {
                     input: Arc::from(input),
                     trace,
@@ -440,11 +536,13 @@ fn whole(
         && memo.trace.iter().all(|query| query.replays(inputs))
     {
         report.reconciled = memo.output.clone();
+        report.changed = report.reconciled.document != next;
         report.reused = true;
         return;
     }
     let (reconciled, trace) = run_traced(next, inputs);
     report.reconciled = reconciled.clone();
+    report.changed = report.reconciled.document != next;
     *cache = Some(ChainMemo {
         input: revision.text.clone(),
         trace,
@@ -452,6 +550,20 @@ fn whole(
         digest_span: None,
         cells_revision: 0,
     });
+}
+
+/// Whether a skeleton run's result differs from the revision `text`. The
+/// result is the chain's skeleton `output` with the revision's exchange body
+/// in place of the digest, and the revision is the chain's `input` skeleton
+/// the same way, so equal skeletons mean an unchanged revision without
+/// reading the exchange. Unequal ones compare the documents.
+fn changed_on_skeleton(
+    output: &Reconciled,
+    input: &str,
+    report: &ReconcileReport,
+    text: &str,
+) -> bool {
+    output.document != input && report.reconciled.document != text
 }
 
 /// `output` with the digest at `span` replaced by the exchange `body`.
@@ -671,6 +783,10 @@ struct Advance {
     revision: Revision,
     dirty: Vec<String>,
     indexed: usize,
+    /// Old exchange-body bytes the changeset discovery compared.
+    compared: usize,
+    source: ChangesetSource,
+    changeset_fallback: Option<&'static str>,
     rebuilt: Option<&'static str>,
     /// Only the exchange body changed, and the change added no evidence the
     /// chain reads.
@@ -775,13 +891,335 @@ fn dirty_between(
     out
 }
 
+/// One changed range of a changeset: `old` bytes of the previous revision
+/// became `new` bytes of the next one. Hunks are sorted and disjoint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Hunk {
+    old: std::ops::Range<usize>,
+    new: std::ops::Range<usize>,
+}
+
+/// A piece of the text a changeset builds: a range of the previous
+/// revision, or inserted text.
+enum Piece<'a> {
+    Old(std::ops::Range<usize>),
+    New(std::borrow::Cow<'a, str>),
+}
+
+impl Piece<'_> {
+    fn len(&self) -> usize {
+        match self {
+            Self::Old(range) => range.len(),
+            Self::New(text) => text.len(),
+        }
+    }
+}
+
+/// The hunks `changeset` makes of a previous revision of `old_len` bytes,
+/// checked against `next`: each inserted run must be `next`'s bytes there
+/// and the result must be `next`'s length. Reads only the inserted bytes of
+/// `next`. `Err` names why the changeset cannot stand for the revision.
+fn changeset_hunks(
+    old_len: usize,
+    changeset: &[TextSplice],
+    next: &str,
+) -> Result<Vec<Hunk>, &'static str> {
+    let mut pieces: Vec<Piece<'_>> = vec![Piece::Old(0..old_len)];
+    let mut len = old_len;
+    for splice in changeset {
+        let end = splice
+            .start
+            .checked_add(splice.removed_len)
+            .filter(|end| *end <= len)
+            .ok_or("splice_out_of_range")?;
+        // Cut the pieces at `start` and `end`, replacing what lies between.
+        let mut out: Vec<Piece<'_>> = Vec::with_capacity(pieces.len() + 2);
+        let mut at = 0usize;
+        let mut placed = false;
+        for piece in pieces {
+            let piece_len = piece.len();
+            let (piece_start, piece_end) = (at, at + piece_len);
+            at = piece_end;
+            let before = splice.start.clamp(piece_start, piece_end) - piece_start;
+            let after = end.clamp(piece_start, piece_end) - piece_start;
+            let place = !placed && piece_start <= splice.start && splice.start <= piece_end;
+            if !place && (before == piece_len || after == 0) {
+                // Wholly before the splice or wholly after it.
+                out.push(piece);
+                continue;
+            }
+            let (head, tail) = split_piece(piece, before, after)?;
+            out.extend(head);
+            if place {
+                if !splice.inserted.is_empty() {
+                    out.push(Piece::New(std::borrow::Cow::Borrowed(&splice.inserted)));
+                }
+                placed = true;
+            }
+            out.extend(tail);
+        }
+        pieces = out;
+        len = len - splice.removed_len + splice.inserted.len();
+    }
+    if len != next.len() {
+        return Err("length_mismatch");
+    }
+    let mut hunks = Vec::new();
+    let (mut old_at, mut new_at) = (0usize, 0usize);
+    let mut open: Option<(usize, usize)> = None;
+    for piece in &pieces {
+        match piece {
+            Piece::Old(range) if range.is_empty() => {}
+            Piece::Old(range) => {
+                if range.start != old_at && open.is_none() {
+                    open = Some((old_at, new_at));
+                }
+                if let Some((old_start, new_start)) = open.take() {
+                    hunks.push(Hunk {
+                        old: old_start..range.start,
+                        new: new_start..new_at,
+                    });
+                }
+                old_at = range.end;
+                new_at += range.len();
+            }
+            Piece::New(text) => {
+                if open.is_none() {
+                    open = Some((old_at, new_at));
+                }
+                let end = new_at + text.len();
+                if next.as_bytes().get(new_at..end) != Some(text.as_bytes()) {
+                    return Err("inserted_bytes_mismatch");
+                }
+                new_at = end;
+            }
+        }
+    }
+    if old_at != old_len && open.is_none() {
+        open = Some((old_at, new_at));
+    }
+    if let Some((old_start, new_start)) = open {
+        hunks.push(Hunk {
+            old: old_start..old_len,
+            new: new_start..new_at,
+        });
+    }
+    if hunks
+        .iter()
+        .any(|hunk| !next.is_char_boundary(hunk.new.start) || !next.is_char_boundary(hunk.new.end))
+    {
+        return Err("splice_splits_char");
+    }
+    Ok(hunks)
+}
+
+/// `piece`'s bytes before `before` and from `after` on (`before <= after`),
+/// moving the piece when one side is all of it.
+fn split_piece(
+    piece: Piece<'_>,
+    before: usize,
+    after: usize,
+) -> Result<(Option<Piece<'_>>, Option<Piece<'_>>), &'static str> {
+    let len = piece.len();
+    if before == len {
+        return Ok(((len > 0).then_some(piece), None));
+    }
+    if after == 0 {
+        return Ok((None, (len > 0).then_some(piece)));
+    }
+    Ok(match piece {
+        Piece::Old(range) => (
+            (before > 0).then(|| Piece::Old(range.start..range.start + before)),
+            (after < len).then(|| Piece::Old(range.start + after..range.end)),
+        ),
+        Piece::New(text) => {
+            let part = |from: usize, to: usize| -> Result<Option<Piece<'static>>, &'static str> {
+                if from >= to {
+                    return Ok(None);
+                }
+                let part = text.get(from..to).ok_or("splice_splits_char")?;
+                Ok(Some(Piece::New(std::borrow::Cow::Owned(part.to_string()))))
+            };
+            (part(0, before)?, part(after, len)?)
+        }
+    })
+}
+
+/// Bytes of `body` inside `range`.
+fn overlap(range: std::ops::Range<usize>, body: &std::ops::Range<usize>) -> usize {
+    range
+        .end
+        .min(body.end)
+        .saturating_sub(range.start.max(body.start))
+}
+
+/// Where the exchange sits in `next` and the changeset around it, relative
+/// to the previous revision's exchange (see [`advance`]).
+struct Regions {
+    line_start: usize,
+    body_start: usize,
+    body_end: usize,
+    close_end: usize,
+    /// Changed ranges before the exchange's opener line (absolute).
+    head: Vec<Hunk>,
+    /// The changed range of the body, relative to each revision's body.
+    body: Option<Hunk>,
+    /// Changed ranges after the exchange's closer (absolute).
+    tail: Vec<Hunk>,
+    compared: usize,
+}
+
+/// [`Regions`] from comparing `old` and `next`: the common prefix/suffix of
+/// the documents, then of each region. `Err` is a rebuild reason.
+fn regions_by_compare(
+    old: &str,
+    next: &str,
+    exchange: &ExchangeSpanAt,
+) -> Result<Regions, &'static str> {
+    let prefix = common_prefix(old, next, 0);
+    let suffix = common_suffix(old, next, old.len().min(next.len()) - prefix);
+    let mut compared = overlap(0..prefix + 1, &exchange.body)
+        + overlap(old.len() - suffix.min(old.len())..old.len(), &exchange.body);
+    let old_diff_end = old.len() - suffix;
+    let opener = &old[exchange.line_start..exchange.body.start];
+    let closer = &old[exchange.body.end..exchange.close_end];
+    // The opener and closer in `next`.
+    let line_start = if prefix >= exchange.body.start {
+        exchange.line_start
+    } else if prefix <= exchange.line_start {
+        match next[prefix..].find(opener) {
+            Some(at) => prefix + at,
+            None => return Err("opener_moved"),
+        }
+    } else {
+        return Err("opener_edited");
+    };
+    let body_start = line_start + opener.len();
+    let body_end = if old_diff_end <= exchange.body.end {
+        next.len() - (old.len() - exchange.body.end)
+    } else if old_diff_end >= exchange.close_end {
+        match next
+            .get(body_start..next.len() - suffix)
+            .and_then(|region| region.rfind(closer))
+        {
+            Some(at) => body_start + at,
+            None => return Err("closer_moved"),
+        }
+    } else {
+        return Err("closer_edited");
+    };
+    if body_end < body_start || next.get(body_end..body_end + closer.len()) != Some(closer) {
+        return Err("closer_moved");
+    }
+    let close_end = body_end + closer.len();
+    let hunk = |pair: Option<(std::ops::Range<usize>, std::ops::Range<usize>)>,
+                old_base: usize,
+                new_base: usize| {
+        pair.map(|(a, b)| Hunk {
+            old: a.start + old_base..a.end + old_base,
+            new: b.start + new_base..b.end + new_base,
+        })
+    };
+    let head = hunk(
+        splice(&old[..exchange.line_start], &next[..line_start]),
+        0,
+        0,
+    );
+    let tail = hunk(
+        splice(&old[exchange.close_end..], &next[close_end..]),
+        exchange.close_end,
+        close_end,
+    );
+    let old_body = &old[exchange.body.clone()];
+    let new_body = &next[body_start..body_end];
+    let body = hunk(splice(old_body, new_body), 0, 0);
+    compared += match &body {
+        Some(hunk) => old_body.len() - hunk.old.len(),
+        None => old_body.len(),
+    };
+    Ok(Regions {
+        line_start,
+        body_start,
+        body_end,
+        close_end,
+        head: head.into_iter().collect(),
+        body,
+        tail: tail.into_iter().collect(),
+        compared: compared.min(2 * old_body.len()),
+    })
+}
+
+/// [`Regions`] from a changeset's hunks, reading only the opener and closer
+/// of `next`. `Err(Ok(reason))` is a rebuild reason (the changeset edits the
+/// opener or closer); `Err(Err(reason))` means the hunks do not place the
+/// exchange in `next`, so the texts are compared instead.
+fn regions_by_hunks(
+    old: &str,
+    next: &str,
+    exchange: &ExchangeSpanAt,
+    hunks: &[Hunk],
+) -> Result<Regions, Result<&'static str, &'static str>> {
+    let (mut head, mut body, mut tail) = (Vec::new(), Vec::<&Hunk>::new(), Vec::new());
+    for hunk in hunks {
+        if hunk.old.end <= exchange.line_start {
+            head.push(hunk.clone());
+        } else if hunk.old.start >= exchange.body.start && hunk.old.end <= exchange.body.end {
+            body.push(hunk);
+        } else if hunk.old.start >= exchange.close_end {
+            tail.push(hunk.clone());
+        } else if hunk.old.start < exchange.body.start {
+            return Err(Ok("opener_edited"));
+        } else {
+            return Err(Ok("closer_edited"));
+        }
+    }
+    let delta = |hunk: &Hunk| hunk.new.len() as isize - hunk.old.len() as isize;
+    let head_delta: isize = head.iter().map(delta).sum();
+    let body_delta: isize = body.iter().map(|hunk| delta(hunk)).sum();
+    let opener = &old[exchange.line_start..exchange.body.start];
+    let closer = &old[exchange.body.end..exchange.close_end];
+    let line_start = (exchange.line_start as isize + head_delta) as usize;
+    let body_start = line_start + opener.len();
+    let body_end = (exchange.body.end as isize + head_delta + body_delta) as usize;
+    let close_end = body_end + closer.len();
+    if next.get(line_start..body_start) != Some(opener)
+        || next.get(body_end..close_end) != Some(closer)
+    {
+        return Err(Err("exchange_not_placed"));
+    }
+    let body = match (body.first(), body.last()) {
+        (Some(first), Some(last)) => Some(Hunk {
+            old: first.old.start - exchange.body.start..last.old.end - exchange.body.start,
+            new: first.new.start - body_start..last.new.end - body_start,
+        }),
+        _ => None,
+    };
+    Ok(Regions {
+        line_start,
+        body_start,
+        body_end,
+        close_end,
+        head,
+        body,
+        tail,
+        compared: 0,
+    })
+}
+
 /// Move `prev` to `next` from the changeset between them
-/// (`#incrementalreconcile`). The changeset is up to three splices: before the
-/// exchange, inside its body, after it (each the common prefix/suffix of
-/// its region). Only touched exchange chunks are read; the layout outside
-/// comes from parsing the skeleton. Anything that may move a component
-/// boundary in a way the cache cannot follow rebuilds from a full parse.
-fn advance(prev: Option<Revision>, next: &str) -> Advance {
+/// (`#incrementalreconcile`). The changeset is the caller's `hunks` when it
+/// has them, otherwise up to three splices found by comparing the texts:
+/// before the exchange, inside its body, after it (each the common
+/// prefix/suffix of its region). Only touched exchange chunks are read; the
+/// layout outside comes from parsing the skeleton. Anything that may move a
+/// component boundary in a way the cache cannot follow rebuilds from a full
+/// parse.
+fn advance(prev: Option<Revision>, next: &str, hunks: Option<&[Hunk]>) -> Advance {
+    let source = if hunks.is_some() {
+        ChangesetSource::Splices
+    } else {
+        ChangesetSource::ByteCompare
+    };
     let rebuild = |prev: Option<&Revision>, reason: &'static str| {
         let (revision, indexed) = Revision::build(Arc::from(next));
         let dirty = match prev {
@@ -790,15 +1228,24 @@ fn advance(prev: Option<Revision>, next: &str) -> Advance {
                 .iter()
                 .map(|(identity, _, _)| identity.clone())
                 .collect(),
-            Some(prev) => match splice(&prev.text, next) {
-                None => Vec::new(),
-                Some((a, b)) => dirty_between(&prev.layout, &revision.layout, &[a], &[b]),
-            },
+            Some(prev) => {
+                let (old_ranges, new_ranges): (Vec<_>, Vec<_>) = match hunks {
+                    Some(hunks) => hunks
+                        .iter()
+                        .map(|hunk| (hunk.old.clone(), hunk.new.clone()))
+                        .unzip(),
+                    None => splice(&prev.text, next).into_iter().unzip(),
+                };
+                dirty_between(&prev.layout, &revision.layout, &old_ranges, &new_ranges)
+            }
         };
         Advance {
             revision,
             dirty,
             indexed,
+            compared: 0,
+            source,
+            changeset_fallback: None,
             rebuilt: Some(reason),
             exchange_only_without_evidence: false,
         }
@@ -806,11 +1253,22 @@ fn advance(prev: Option<Revision>, next: &str) -> Advance {
     let Some(prev) = prev else {
         return rebuild(None, "first_revision");
     };
-    if *prev.text == *next {
+    let unchanged = match hunks {
+        Some(hunks) => hunks.is_empty(),
+        None => *prev.text == *next,
+    };
+    if unchanged {
+        let compared = match (hunks, &prev.exchange) {
+            (None, Some(exchange)) => exchange.body.len(),
+            _ => 0,
+        };
         return Advance {
             revision: prev,
             dirty: Vec::new(),
             indexed: 0,
+            compared,
+            source,
+            changeset_fallback: None,
             rebuilt: None,
             exchange_only_without_evidence: false,
         };
@@ -825,50 +1283,43 @@ fn advance(prev: Option<Revision>, next: &str) -> Advance {
         body: exchange.body.clone(),
         close_end: exchange.close_end,
     };
-    let prefix = common_prefix(old, next, 0);
-    let suffix = common_suffix(old, next, old.len().min(next.len()) - prefix);
-    let old_diff_end = old.len() - suffix;
-    let opener = &old[exchange.line_start..exchange.body.start];
-    let closer = &old[exchange.body.end..exchange.close_end];
-    // The opener and closer in `next`.
-    let line_start = if prefix >= exchange.body.start {
-        exchange.line_start
-    } else if prefix <= exchange.line_start {
-        match next[prefix..].find(opener) {
-            Some(at) => prefix + at,
-            None => return rebuild(Some(&prev), "opener_moved"),
-        }
-    } else {
-        return rebuild(Some(&prev), "opener_edited");
+    let regions = match hunks {
+        Some(hunks) => match regions_by_hunks(old, next, &exchange, hunks) {
+            Ok(regions) => regions,
+            Err(Ok(reason)) => return rebuild(Some(&prev), reason),
+            Err(Err(fallback)) => {
+                let mut advance = advance(Some(prev), next, None);
+                advance.changeset_fallback = Some(fallback);
+                return advance;
+            }
+        },
+        None => match regions_by_compare(old, next, &exchange) {
+            Ok(regions) => regions,
+            Err(reason) => return rebuild(Some(&prev), reason),
+        },
     };
-    let body_start = line_start + opener.len();
-    let body_end = if old_diff_end <= exchange.body.end {
-        next.len() - (old.len() - exchange.body.end)
-    } else if old_diff_end >= exchange.close_end {
-        match next
-            .get(body_start..next.len() - suffix)
-            .and_then(|region| region.rfind(closer))
-        {
-            Some(at) => body_start + at,
-            None => return rebuild(Some(&prev), "closer_moved"),
-        }
-    } else {
-        return rebuild(Some(&prev), "closer_edited");
-    };
-    if body_end < body_start || next.get(body_end..body_end + closer.len()) != Some(closer) {
-        return rebuild(Some(&prev), "closer_moved");
-    }
-    let close_end = body_end + closer.len();
-    let head = splice(&old[..exchange.line_start], &next[..line_start]);
-    let tail = splice(&old[exchange.close_end..], &next[close_end..]);
-    let body = splice(&old[exchange.body.clone()], &next[body_start..body_end]);
+    let Regions {
+        line_start,
+        body_start,
+        body_end,
+        close_end,
+        head,
+        body,
+        tail,
+        compared,
+    } = regions;
+    let closer_len = exchange.close_end - exchange.body.end;
 
     let mut prev = prev;
     let old_span = exchange;
     let mut exchange = prev.exchange.take().expect("checked above");
     let mut indexed = 0;
     let mut evidence = false;
-    if let Some((removed, inserted)) = &body {
+    if let Some(Hunk {
+        old: removed,
+        new: inserted,
+    }) = &body
+    {
         let delta =
             exchange
                 .index
@@ -876,7 +1327,9 @@ fn advance(prev: Option<Revision>, next: &str) -> Advance {
         indexed = delta.added_bytes();
         if delta.structural() {
             prev.exchange = Some(exchange);
-            return rebuild(Some(&prev), "exchange_structure");
+            let mut advance = rebuild(Some(&prev), "exchange_structure");
+            advance.compared = compared;
+            return advance;
         }
         evidence = delta.adds_evidence();
     }
@@ -887,27 +1340,24 @@ fn advance(prev: Option<Revision>, next: &str) -> Advance {
             at
         }
     };
-    let old_ranges: Vec<std::ops::Range<usize>> = [
-        head.as_ref().map(|(a, _)| a.clone()),
-        body.as_ref()
-            .map(|(a, _)| a.start + old_span.body.start..a.end + old_span.body.start),
-        tail.as_ref()
-            .map(|(a, _)| a.start + old_span.close_end..a.end + old_span.close_end),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    let new_ranges: Vec<std::ops::Range<usize>> = [
-        head.as_ref().map(|(_, b)| b.clone()),
-        body.as_ref()
-            .map(|(_, b)| b.start + body_start..b.end + body_start),
-        tail.as_ref()
-            .map(|(_, b)| b.start + close_end..b.end + close_end),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    let layout: Vec<(String, usize, usize)> = if head.is_none() && tail.is_none() {
+    let old_ranges: Vec<std::ops::Range<usize>> =
+        head.iter()
+            .map(|hunk| hunk.old.clone())
+            .chain(body.as_ref().map(|hunk| {
+                hunk.old.start + old_span.body.start..hunk.old.end + old_span.body.start
+            }))
+            .chain(tail.iter().map(|hunk| hunk.old.clone()))
+            .collect();
+    let new_ranges: Vec<std::ops::Range<usize>> = head
+        .iter()
+        .map(|hunk| hunk.new.clone())
+        .chain(
+            body.as_ref()
+                .map(|hunk| hunk.new.start + body_start..hunk.new.end + body_start),
+        )
+        .chain(tail.iter().map(|hunk| hunk.new.clone()))
+        .collect();
+    let layout: Vec<(String, usize, usize)> = if head.is_empty() && tail.is_empty() {
         // Only the body changed: every component keeps its bytes except
         // those holding the body, whose ends move.
         let delta = (body_end - body_start) as isize - old_span.body.len() as isize;
@@ -926,24 +1376,21 @@ fn advance(prev: Option<Revision>, next: &str) -> Advance {
         // digest), whose layout outside equals the document's.
         let digest = exchange.index.digest();
         let skeleton = format!("{}{digest}{}", &next[..body_start], &next[body_end..]);
-        let Ok(components) = agent_doc_element::element::parse(&skeleton) else {
+        let skeleton_layout = |prev: &mut Revision, exchange: ExchangeSpan| {
             prev.exchange = Some(exchange);
-            return rebuild(Some(&prev), "skeleton_layout");
+            let mut advance = rebuild(Some(prev), "skeleton_layout");
+            advance.compared = compared;
+            advance
+        };
+        let Ok(components) = agent_doc_element::element::parse(&skeleton) else {
+            return skeleton_layout(&mut prev, exchange);
         };
         let digest_end = body_start + digest.len();
         let Some(found) = opaque_exchange_span(&skeleton, &components) else {
-            prev.exchange = Some(exchange);
-            return rebuild(Some(&prev), "skeleton_layout");
+            return skeleton_layout(&mut prev, exchange);
         };
-        if found
-            != (
-                line_start,
-                body_start..digest_end,
-                digest_end + closer.len(),
-            )
-        {
-            prev.exchange = Some(exchange);
-            return rebuild(Some(&prev), "skeleton_layout");
+        if found != (line_start, body_start..digest_end, digest_end + closer_len) {
+            return skeleton_layout(&mut prev, exchange);
         }
         let delta = (body_end - body_start) as isize - digest.len() as isize;
         layout_of(&components)
@@ -962,7 +1409,7 @@ fn advance(prev: Option<Revision>, next: &str) -> Advance {
     exchange.body = body_start..body_end;
     exchange.close_end = close_end;
     Advance {
-        exchange_only_without_evidence: head.is_none() && tail.is_none() && !evidence,
+        exchange_only_without_evidence: head.is_empty() && tail.is_empty() && !evidence,
         revision: Revision {
             text: Arc::from(next),
             layout,
@@ -970,6 +1417,9 @@ fn advance(prev: Option<Revision>, next: &str) -> Advance {
         },
         dirty,
         indexed,
+        compared,
+        source,
+        changeset_fallback: None,
         rebuilt: None,
     }
 }

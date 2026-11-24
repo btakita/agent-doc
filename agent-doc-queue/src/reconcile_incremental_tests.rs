@@ -41,6 +41,7 @@ fn check_chain(name: &str, text: &str, seeds: u64, steps: usize) {
                 "{name} seed={seed} step={step} mode={:?}\n--- document ---\n{document}",
                 report.mode
             );
+            assert_eq!(report.changed, report.reconciled.document != document);
             if report.mode != ReconcileMode::ExchangeOnly {
                 ran = Some(document.clone());
             }
@@ -52,6 +53,234 @@ fn check_chain(name: &str, text: &str, seeds: u64, steps: usize) {
             };
         }
     }
+}
+
+/// The minimal splice turning `a` into `b` (the byte compare's own).
+fn minimal_splices(a: &str, b: &str) -> Vec<TextSplice> {
+    match splice(a, b) {
+        None => Vec::new(),
+        Some((removed, inserted)) => vec![TextSplice {
+            start: removed.start,
+            removed_len: removed.len(),
+            inserted: b[inserted].to_string(),
+        }],
+    }
+}
+
+/// A changeset turning `a` into `b` the way a CRDT journal may spell it:
+/// the minimal splice, sometimes widened over unchanged bytes to whole
+/// lines, sometimes split into a delete and one or two inserts.
+fn journal_splices(a: &str, b: &str, rng: &mut Rng) -> Vec<TextSplice> {
+    let Some((removed, inserted)) = splice(a, b) else {
+        return Vec::new();
+    };
+    let (mut start, mut old_end, mut new_end) = (removed.start, removed.end, inserted.end);
+    if rng.below(2) == 0 {
+        // Widen over the common prefix and suffix to line boundaries.
+        start = a[..start].rfind('\n').map_or(0, |at| at + 1);
+        let grow = a[old_end..]
+            .find('\n')
+            .map_or(a.len() - old_end, |at| at + 1)
+            .min(b.len() - new_end);
+        assert!(
+            a.is_char_boundary(old_end + grow) && b.is_char_boundary(new_end + grow),
+            "a common suffix grows on equal bytes"
+        );
+        old_end += grow;
+        new_end += grow;
+    }
+    let text = b[start..new_end].to_string();
+    let removed_len = old_end - start;
+    match rng.below(3) {
+        0 => vec![TextSplice {
+            start,
+            removed_len,
+            inserted: text,
+        }],
+        1 => {
+            let mut cut = rng.below(text.len() + 1);
+            while !text.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            vec![
+                TextSplice {
+                    start,
+                    removed_len,
+                    inserted: String::new(),
+                },
+                TextSplice {
+                    start,
+                    removed_len: 0,
+                    inserted: text[cut..].to_string(),
+                },
+                TextSplice {
+                    start,
+                    removed_len: 0,
+                    inserted: text[..cut].to_string(),
+                },
+            ]
+        }
+        _ => vec![
+            TextSplice {
+                start,
+                removed_len: 0,
+                inserted: text.clone(),
+            },
+            TextSplice {
+                start: start + text.len(),
+                removed_len,
+                inserted: String::new(),
+            },
+        ],
+    }
+}
+
+/// `#incrementalreconcile`: [`check_chain`] with every revision handed in as
+/// its changeset, as the controller hands in its CRDT journal. A revision is
+/// one to three random edits (or the reconciled document written back), each
+/// spelled as journal splices and concatenated. The chain stays
+/// byte-identical to the full chain and never falls back to comparing.
+fn check_changeset_chain(name: &str, text: &str, seeds: u64, steps: usize) {
+    for seed in 0..seeds {
+        let mut rng = Rng::new(seed.wrapping_add(name.len() as u64 * 57));
+        let mut cache = ReconcileCache::new();
+        let mut document = text.to_string();
+        let mut changeset: Vec<TextSplice> = Vec::new();
+        let mut ran: Option<String> = None;
+        for step in 0..steps {
+            let report =
+                reconcile_incremental_changeset(&changeset, &document, &INPUTS, &mut cache);
+            if step > 0 {
+                assert_eq!(
+                    report.changeset,
+                    ChangesetSource::Splices,
+                    "{name} seed={seed} step={step}"
+                );
+                assert_eq!(
+                    report.changeset_fallback, None,
+                    "{name} seed={seed} step={step}"
+                );
+                assert_eq!(
+                    report.exchange_bytes_compared, 0,
+                    "{name} seed={seed} step={step}"
+                );
+            }
+            let full = expected(&report, ran.as_deref(), &document);
+            assert_eq!(
+                report.reconciled, full,
+                "{name} seed={seed} step={step} mode={:?}\n--- document ---\n{document}",
+                report.mode
+            );
+            assert_eq!(report.changed, report.reconciled.document != document);
+            if report.mode != ReconcileMode::ExchangeOnly {
+                ran = Some(document.clone());
+            }
+            changeset.clear();
+            let mut next = document.clone();
+            if rng.below(3) == 0 {
+                let written = report.reconciled.document;
+                changeset.extend(journal_splices(&next, &written, &mut rng));
+                next = written;
+            } else {
+                for _ in 0..1 + rng.below(3) {
+                    let edited = random_edit(&next, &mut rng);
+                    changeset.extend(journal_splices(&next, &edited, &mut rng));
+                    next = edited;
+                }
+            }
+            document = next;
+        }
+    }
+}
+
+fn check_fixture_changeset_chain(name: &str) {
+    check_changeset_chain(name, fixture(name), 4, 6);
+}
+
+mod fixture_changeset_chains {
+    use super::check_fixture_changeset_chain;
+    crate::incremental_corpus::per_fixture_tests!(check_fixture_changeset_chain);
+}
+
+#[test]
+fn changeset_chain_equals_the_full_chain_on_a_session_shaped_document() {
+    check_changeset_chain("session_shaped", &session_shaped(1, 400), 2, 6);
+}
+
+/// A changeset's sequential splices become sorted hunks of the previous
+/// revision, read against the next one only where text was inserted.
+#[test]
+fn a_changeset_becomes_the_hunks_it_spells() {
+    let old = "abcdefghij";
+    let next = "aXcdefgYYj";
+    let changeset = [
+        // b -> X
+        TextSplice {
+            start: 1,
+            removed_len: 1,
+            inserted: "X".into(),
+        },
+        // hi -> YY, addressed after the first splice
+        TextSplice {
+            start: 7,
+            removed_len: 2,
+            inserted: "YY".into(),
+        },
+    ];
+    assert_eq!(
+        changeset_hunks(old.len(), &changeset, next),
+        Ok(vec![
+            Hunk {
+                old: 1..2,
+                new: 1..2
+            },
+            Hunk {
+                old: 7..9,
+                new: 7..9
+            },
+        ])
+    );
+    // A later splice inside an earlier insert stays one hunk.
+    let typed = [
+        TextSplice {
+            start: 3,
+            removed_len: 0,
+            inserted: "xyz".into(),
+        },
+        TextSplice {
+            start: 4,
+            removed_len: 1,
+            inserted: "Q".into(),
+        },
+    ];
+    assert_eq!(
+        changeset_hunks(old.len(), &typed, "abcxQzdefghij"),
+        Ok(vec![Hunk {
+            old: 3..3,
+            new: 3..6
+        }])
+    );
+    assert_eq!(changeset_hunks(old.len(), &[], old), Ok(Vec::new()));
+    assert_eq!(
+        changeset_hunks(old.len(), &changeset, "aZcdefgYYj"),
+        Err("inserted_bytes_mismatch")
+    );
+    assert_eq!(
+        changeset_hunks(old.len(), &changeset, "aXcdefgYYjk"),
+        Err("length_mismatch")
+    );
+    assert_eq!(
+        changeset_hunks(
+            old.len(),
+            &[TextSplice {
+                start: 9,
+                removed_len: 2,
+                inserted: String::new()
+            }],
+            "abcdefghi"
+        ),
+        Err("splice_out_of_range")
+    );
 }
 
 /// The exchange body of `document` (its single `agent:exchange`).
@@ -233,6 +462,84 @@ fn a_queue_edit_with_an_exchange_append_runs_on_the_skeleton() {
         report.dirty_components
     );
     assert!(report.dirty_components.contains(&"exchange".to_string()));
+    assert_eq!(report.reconciled, reconcile_full(&edited, &INPUTS));
+}
+
+/// `#incrementalreconcile`: the same queue edit and exchange append handed in
+/// as the controller's changeset compares no exchange byte (the byte compare
+/// reads through the exchange to find the queue edit), and indexes only the
+/// appended cell.
+#[test]
+fn a_queue_edit_with_an_exchange_append_from_the_changeset_compares_no_exchange_byte() {
+    let settled = settled_session();
+    let close = settled.find("<!-- /agent:run -->").unwrap();
+    let row = "- one more operator row\n";
+    let cell = "### Re: one more cell\n> **Queue prompt:** one more operator row\nDone.\n";
+    let mut edited = settled.clone();
+    edited.insert_str(close, row);
+    let exchange_close = edited.rfind("<!-- /agent:exchange -->").unwrap();
+    edited.insert_str(exchange_close, cell);
+    let changeset = [
+        TextSplice {
+            start: close,
+            removed_len: 0,
+            inserted: row.to_string(),
+        },
+        TextSplice {
+            start: exchange_close,
+            removed_len: 0,
+            inserted: cell.to_string(),
+        },
+    ];
+
+    let mut compared = ReconcileCache::new();
+    reconcile_incremental(None, &settled, &INPUTS, &mut compared);
+    let by_compare = reconcile_incremental(None, &edited, &INPUTS, &mut compared);
+    assert_eq!(by_compare.changeset, ChangesetSource::ByteCompare);
+    assert!(
+        by_compare.exchange_bytes_compared > exchange_body(&settled).len() / 2,
+        "{by_compare:?}"
+    );
+
+    let mut cache = ReconcileCache::new();
+    reconcile_incremental(None, &settled, &INPUTS, &mut cache);
+    let report = reconcile_incremental_changeset(&changeset, &edited, &INPUTS, &mut cache);
+    assert_eq!(report.changeset, ChangesetSource::Splices);
+    assert_eq!(report.changeset_fallback, None);
+    assert_eq!(report.exchange_bytes_compared, 0);
+    assert_eq!(report.exchange_bytes_indexed, cell.len());
+    assert_eq!(report.mode, ReconcileMode::Skeleton);
+    assert_eq!(report.rebuilt, None);
+    assert_eq!(report.dirty_components, by_compare.dirty_components);
+    assert_eq!(report.reconciled, reconcile_full(&edited, &INPUTS));
+    assert_eq!(report.reconciled, by_compare.reconciled);
+}
+
+/// A changeset that does not spell the next revision is not trusted: the
+/// texts are compared instead and the result is still exact.
+#[test]
+fn a_changeset_that_does_not_spell_the_revision_falls_back_to_comparing() {
+    let settled = settled_session();
+    let close = settled.rfind("<!-- /agent:exchange -->").unwrap();
+    let mut edited = settled.clone();
+    edited.insert_str(close, "### Re: appended cell\n> **Queue prompt:** probe\n");
+    let wrong = [TextSplice {
+        start: close,
+        removed_len: 0,
+        inserted: "### Re: appendXd cell\n> **Queue prompt:** probe\n".to_string(),
+    }];
+    let mut cache = ReconcileCache::new();
+    reconcile_incremental(None, &settled, &INPUTS, &mut cache);
+    let report = reconcile_incremental_changeset(&wrong, &edited, &INPUTS, &mut cache);
+    assert_eq!(report.changeset, ChangesetSource::ByteCompare);
+    assert_eq!(report.changeset_fallback, Some("inserted_bytes_mismatch"));
+    assert_eq!(report.reconciled, reconcile_full(&edited, &INPUTS));
+
+    // No cached revision: the first revision is a rebuild either way.
+    let mut empty = ReconcileCache::new();
+    let report = reconcile_incremental_changeset(&wrong, &edited, &INPUTS, &mut empty);
+    assert_eq!(report.changeset_fallback, Some("no_cached_revision"));
+    assert_eq!(report.rebuilt, Some("first_revision"));
     assert_eq!(report.reconciled, reconcile_full(&edited, &INPUTS));
 }
 
@@ -500,9 +807,39 @@ fn bench_sdk_scale_revisions() {
     queue_edit.insert_str(close, "- one more operator row\n");
     let compaction = compacted(&settled);
     eprintln!("compacted: {} bytes", compaction.len());
-    for (label, edited) in [
-        ("one-line queue edit", &queue_edit),
-        ("exchange compaction", &compaction),
+    let row = "- one more operator row\n";
+    let cell = "### Re: one more cell\n> **Queue prompt:** one more operator row\nDone.\n";
+    let mut queue_and_append = queue_edit.clone();
+    let exchange_close = queue_and_append.rfind("<!-- /agent:exchange -->").unwrap();
+    queue_and_append.insert_str(exchange_close, cell);
+    let append_changeset = vec![
+        TextSplice {
+            start: close,
+            removed_len: 0,
+            inserted: row.to_string(),
+        },
+        TextSplice {
+            start: exchange_close,
+            removed_len: 0,
+            inserted: cell.to_string(),
+        },
+    ];
+    for (label, edited, changeset) in [
+        (
+            "one-line queue edit",
+            &queue_edit,
+            minimal_splices(&settled, &queue_edit),
+        ),
+        (
+            "exchange compaction",
+            &compaction,
+            minimal_splices(&settled, &compaction),
+        ),
+        (
+            "queue edit + exchange append",
+            &queue_and_append,
+            append_changeset,
+        ),
     ] {
         let mut cache = ReconcileCache::new();
         reconcile_incremental(None, &settled, &INPUTS, &mut cache);
@@ -515,18 +852,36 @@ fn bench_sdk_scale_revisions() {
         let (report, incremental_time) =
             time(|| reconcile_incremental(Some(&settled), edited, &INPUTS, &mut cache));
         assert_eq!(report.reconciled, reference, "{label}");
-        eprintln!(
-            "{label:>22}: full {full_time:>10.2?}  whole-text chain {whole_time:>10.2?}  \
-             incremental {incremental_time:>10.2?}  mode={:?} reused={} chain_bytes={} exchange_bytes_indexed={} rebuilt={:?} \
-             slice_parses={} document_parses={} dirty={:?}",
-            report.mode,
-            report.reused,
-            report.chain_bytes,
-            report.exchange_bytes_indexed,
-            report.rebuilt,
-            report.slice_parses,
-            report.document_parses,
-            report.dirty_components
-        );
+        // The same revision from the changeset (the controller's CRDT
+        // journal), the cache warm on `settled` again.
+        let mut from_changeset = ReconcileCache::new();
+        reconcile_incremental(None, &settled, &INPUTS, &mut from_changeset);
+        let (spliced, changeset_time) = time(|| {
+            reconcile_incremental_changeset(&changeset, edited, &INPUTS, &mut from_changeset)
+        });
+        assert_eq!(spliced.reconciled, reference, "{label}");
+        assert_eq!(spliced.changeset, ChangesetSource::Splices, "{label}");
+        assert_eq!(spliced.exchange_bytes_compared, 0, "{label}");
+        for (path, report, elapsed) in [
+            ("byte compare", &report, incremental_time),
+            ("changeset", &spliced, changeset_time),
+        ] {
+            eprintln!(
+                "{label:>28} [{path:>12}]: full {full_time:>10.2?}  whole-text chain {whole_time:>10.2?}  \
+                 incremental {elapsed:>10.2?}  mode={:?} reused={} changed={} chain_bytes={} \
+                 exchange_bytes_compared={} exchange_bytes_indexed={} rebuilt={:?} \
+                 slice_parses={} document_parses={} dirty={:?}",
+                report.mode,
+                report.reused,
+                report.changed,
+                report.chain_bytes,
+                report.exchange_bytes_compared,
+                report.exchange_bytes_indexed,
+                report.rebuilt,
+                report.slice_parses,
+                report.document_parses,
+                report.dirty_components
+            );
+        }
     }
 }

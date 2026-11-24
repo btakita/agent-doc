@@ -52,10 +52,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use agent_doc_element::element::{self, Component};
-pub use agent_doc_merge::crdt_sync::TextSnapshot;
 use agent_doc_merge::crdt_sync::{
     ReplicaState, commit_barrier_ready, decode_update_ops, flush_to_commit_barrier,
 };
+pub use agent_doc_merge::crdt_sync::{TextSnapshot, TextSplice};
 use agent_doc_merge::document_cell::{ThreadSafeDocumentCellTree, project_document};
 
 use crate::crdt_authority::CrdtAuthority;
@@ -2062,6 +2062,15 @@ impl RelayHub {
     /// across a canonical rebuilt from text.
     pub fn canonical_text_revision(&self) -> u64 {
         self.canonical.text_revision()
+    }
+
+    /// The canonical's text changes since its text revision `revision`, as
+    /// sequential byte splices (`#incrementalreconcile`,
+    /// [`ReplicaState::text_changes_since`]). `None` when its journal does
+    /// not reach back that far, including a revision of a canonical this hub
+    /// has since replaced; the first call starts the journal.
+    pub fn canonical_text_changes_since(&self, revision: u64) -> Option<Vec<TextSplice>> {
+        self.canonical.text_changes_since(revision)
     }
 
     /// Whole-document text builds the current canonical replica performed. See

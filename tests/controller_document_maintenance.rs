@@ -253,4 +253,16 @@ fn the_controller_runs_document_maintenance_and_the_incremental_chain_equals_the
         settled.contains("Operator follow-up: check the counts."),
         "background maintenance must keep the operator's edit"
     );
+
+    // `#incrementalreconcile`: no editor is attached, so the document is
+    // git-authoritative and the controller hosts no CRDT canonical for it:
+    // the chain finds the changeset by comparing the texts (the attached
+    // case is `an_attached_document_reconciles_from_the_canonical_journal`).
+    assert!(
+        second
+            .lines()
+            .filter(|line| line.contains("queue_reconcile_chain file="))
+            .all(|line| line.contains(" crdt=no_hub ") && line.contains(" changeset=byte_compare ")),
+        "{second}"
+    );
 }

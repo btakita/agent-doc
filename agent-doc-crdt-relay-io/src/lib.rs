@@ -63,12 +63,12 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
-pub use agent_doc_document_realtime::crdt_relay::TextSnapshot;
 use agent_doc_document_realtime::crdt_relay::{
     AutomaticHistoryCompaction, AwarenessState, DiskChangeOutcome, DocumentOpDeltaOutcome,
     DocumentOpOriginFence, PendingReplicaUpdate, RelayHub, ReplicaDeliverySnapshot,
     RetainedCanonicalProjection, automatic_history_compaction_limit, mint_client_id,
 };
+pub use agent_doc_document_realtime::crdt_relay::{TextSnapshot, TextSplice};
 use agent_doc_document_realtime::watch_authority::{
     WatchAction, WatchDelivery, decide_watch_action,
 };
@@ -1820,6 +1820,39 @@ pub fn existing_hub_canonical_text_for_file(file: &Path) -> Option<String> {
     let handle = hub_handle(&hash)?;
     let text = handle.lock().canonical_text();
     Some(text)
+}
+
+/// What this process's live hub for a document says about its canonical
+/// text (`#incrementalreconcile`).
+pub struct CanonicalChangeset {
+    /// The canonical's current text, with its revision and memoized hash.
+    pub snapshot: TextSnapshot,
+    /// The canonical's changes from the revision asked about to `snapshot`,
+    /// when its journal reaches back that far.
+    pub splices: Option<Vec<TextSplice>>,
+}
+
+/// The canonical text of `file`'s live hub and its changes since text
+/// revision `since` (`#incrementalreconcile`), or `None` when this process
+/// hosts no hub for it. With no `since` (or one the journal no longer
+/// holds), `splices` is `None` and the journal is anchored at the current
+/// revision, so the next call from it answers.
+///
+/// Observational only, like [`existing_hub_canonical_text_for_file`]: it
+/// never allocates or seeds a hub and never writes the ops log.
+pub fn canonical_changeset_for_file(file: &Path, since: Option<u64>) -> Option<CanonicalChangeset> {
+    let hash = agent_doc_fs::document_state_hash(file).ok()?;
+    let handle = hub_handle(&hash)?;
+    let hub = handle.lock();
+    let snapshot = hub.canonical_text_snapshot();
+    let splices = match since {
+        Some(revision) => hub.canonical_text_changes_since(revision),
+        None => None,
+    };
+    if splices.is_none() {
+        hub.canonical_text_changes_since(snapshot.revision());
+    }
+    Some(CanonicalChangeset { snapshot, splices })
 }
 
 fn with_existing_hub<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Result<Option<T>> {

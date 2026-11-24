@@ -107,6 +107,12 @@ pub(super) struct RemoteEffect {
     /// Tombstone ids the batch replaced with a smaller concurrent delete. Such
     /// an id is no longer stored, so the version vector may have to shrink.
     pub(super) replaced_deletes: Vec<OpId>,
+    /// Whether each element whose visibility the batch may have changed was
+    /// visible before it: elements it inserted or placed (not visible
+    /// before) and visible elements it tombstoned. Every other element kept
+    /// its visibility, so this is the batch's whole text change
+    /// ([`OrderIndex::visible_text_with_splices`]).
+    pub(super) was_visible: HashMap<OpId, bool>,
 }
 
 /// Every element of the replica's operation graph, in lazily's projection
@@ -260,6 +266,96 @@ impl OrderIndex {
         }
         debug_assert_eq!(out.chars().count(), self.visible);
         out
+    }
+
+    /// [`Self::visible_text`] after a remote fold, with the fold's text change
+    /// as sequential byte splices of `old` (the visible text before the
+    /// fold), found from the elements whose visibility the fold changed
+    /// (`was_visible`, [`RemoteEffect::was_visible`]) instead of comparing
+    /// the texts. Only the chunks holding such an element are inspected
+    /// element by element. The splices are `None` when they do not spell
+    /// `old`: a removed run that is not `old`'s bytes where it lands, or a
+    /// length that differs.
+    pub(super) fn visible_text_with_splices(
+        &self,
+        was_visible: &HashMap<OpId, bool>,
+        old: &str,
+    ) -> (String, Option<Vec<super::TextSplice>>) {
+        struct Open {
+            old_start: usize,
+            new_start: usize,
+            removed: String,
+            inserted: String,
+        }
+        let flagged: HashSet<u32> = was_visible
+            .keys()
+            .filter_map(|id| self.home.get(id).copied())
+            .collect();
+        let mut out = String::with_capacity(old.len());
+        let mut splices = Vec::new();
+        let mut consistent = true;
+        let mut old_at = 0usize;
+        let mut open: Option<Open> = None;
+        let mut close = |open: &mut Option<Open>| {
+            if let Some(run) = open.take() {
+                let end = run.old_start + run.removed.len();
+                consistent &= old.get(run.old_start..end) == Some(run.removed.as_str());
+                splices.push(super::TextSplice {
+                    start: run.new_start,
+                    removed_len: run.removed.len(),
+                    inserted: run.inserted,
+                });
+            }
+        };
+        for chunk in &self.chunks {
+            if !flagged.contains(&chunk.key) {
+                if chunk.visible > 0 {
+                    close(&mut open);
+                    for elem in chunk.elems.iter().filter(|elem| elem.is_visible()) {
+                        out.push(elem.ch);
+                        old_at += elem.ch.len_utf8();
+                    }
+                }
+                continue;
+            }
+            for elem in &chunk.elems {
+                let now = elem.is_visible();
+                let was = was_visible.get(&elem.id).copied().unwrap_or(now);
+                let run = |open: &mut Option<Open>, old_at: usize, new_at: usize| {
+                    open.get_or_insert_with(|| Open {
+                        old_start: old_at,
+                        new_start: new_at,
+                        removed: String::new(),
+                        inserted: String::new(),
+                    });
+                };
+                match (was, now) {
+                    (true, true) => {
+                        close(&mut open);
+                        out.push(elem.ch);
+                        old_at += elem.ch.len_utf8();
+                    }
+                    (true, false) => {
+                        run(&mut open, old_at, out.len());
+                        if let Some(open) = open.as_mut() {
+                            open.removed.push(elem.ch);
+                        }
+                        old_at += elem.ch.len_utf8();
+                    }
+                    (false, true) => {
+                        run(&mut open, old_at, out.len());
+                        if let Some(open) = open.as_mut() {
+                            open.inserted.push(elem.ch);
+                        }
+                        out.push(elem.ch);
+                    }
+                    (false, false) => {}
+                }
+            }
+        }
+        close(&mut open);
+        consistent &= old_at == old.len();
+        (out, consistent.then_some(splices))
     }
 
     /// The position of visible element `index` (`index < len`).
@@ -508,6 +604,7 @@ impl OrderIndex {
                         None => {
                             chunk.visible -= 1;
                             self.visible -= 1;
+                            effect.was_visible.entry(op.id).or_insert(true);
                         }
                         Some(replaced) => effect.replaced_deletes.push(replaced),
                     }
@@ -518,6 +615,7 @@ impl OrderIndex {
                 elem.deleted = merge_deleted(elem.deleted, op.deleted);
             } else {
                 fresh.insert(op.id, OrderElem::from_op(op));
+                effect.was_visible.insert(op.id, false);
                 touched.push(op.id);
             }
         }
@@ -540,6 +638,8 @@ impl OrderIndex {
             }
             let mut pending = vec![elem];
             while let Some(next) = pending.pop() {
+                // A parked element placed now was not visible before.
+                effect.was_visible.entry(next.id).or_insert(false);
                 cursor = Some((next.id, self.place(next, cursor)));
                 if let Some(children) = self.waiting.remove(&next.id) {
                     pending.extend(

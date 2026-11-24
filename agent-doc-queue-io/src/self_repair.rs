@@ -243,6 +243,24 @@ pub fn reconcile_chain_for(
     sources.with_inputs(|inputs| reconcile_incremental(None, content, inputs, cache))
 }
 
+/// [`reconcile_chain_for`] from the revision's changeset: `changeset` turns
+/// the revision `cache` reconciled last into `content`
+/// ([`agent_doc_queue::reconcile_incremental::reconcile_incremental_changeset`]),
+/// so the chain never compares through `agent:exchange` to find what changed.
+pub fn reconcile_chain_changeset_for(
+    file: &Path,
+    changeset: &[agent_doc_queue::reconcile_incremental::TextSplice],
+    content: &str,
+    cache: &mut ReconcileCache,
+) -> ReconcileReport {
+    let sources = ReconcileInputSources::load(file, content);
+    sources.with_inputs(|inputs| {
+        agent_doc_queue::reconcile_incremental::reconcile_incremental_changeset(
+            changeset, content, inputs, cache,
+        )
+    })
+}
+
 /// The reference [`reconcile_chain_for`] equals: every pass on the whole
 /// document with no cache.
 pub fn reconcile_chain_full_for(file: &Path, content: &str) -> Reconciled {

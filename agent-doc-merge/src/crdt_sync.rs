@@ -27,10 +27,14 @@ use anyhow::{Context, Result};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use lazily::{OpId, TextCrdt, TextOp, TextVersionVector};
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
+mod change_journal;
 mod local_ops;
+use change_journal::ChangeJournal;
+pub use change_journal::TextSplice;
 use local_ops::{LocalJournal, OrderElem, OrderIndex};
 
 thread_local! {
@@ -225,6 +229,11 @@ pub struct ReplicaState {
     /// requests queued behind it and the freed buffers pinned glibc arenas at
     /// their high-water mark. Cleared by every mutation of `text`.
     cached_encoded_state: RefCell<Option<Vec<u8>>>,
+    /// The visible text's changes since a text revision, as byte splices
+    /// (`#incrementalreconcile`). Off (`None`) until the first
+    /// [`Self::text_changes_since`] asks, so only a replica whose changeset
+    /// a reader follows (the controller's canonical) pays for it.
+    change_journal: RefCell<Option<ChangeJournal>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -627,6 +636,7 @@ impl ReplicaState {
             visible_order: RefCell::new(Some(OrderIndex::empty())),
             local_fast_path_refused: Cell::new(false),
             cached_encoded_state: RefCell::new(None),
+            change_journal: RefCell::new(None),
         }
     }
 
@@ -653,6 +663,7 @@ impl ReplicaState {
             visible_order: RefCell::new(None),
             local_fast_path_refused: Cell::new(false),
             cached_encoded_state: RefCell::new(None),
+            change_journal: RefCell::new(None),
         }
     }
 
@@ -981,6 +992,41 @@ impl ReplicaState {
         self.text_revision.get()
     }
 
+    /// The visible text's changes from text revision `revision` to the
+    /// current one, as sequential byte splices (`#incrementalreconcile`):
+    /// applied in order to the text of `revision`, they spell
+    /// [`Self::text_snapshot`]. Local edits record their exact splice;
+    /// a folded remote batch records the runs whose visibility it changed,
+    /// found from the operation order rather than by comparing texts.
+    ///
+    /// `None` when the journal does not reach back to `revision`: the first
+    /// call (which starts the journal at the current revision), a revision
+    /// of another replica, a remote batch re-projected from the graph, or a
+    /// journal that outgrew its bound. Changes before `revision` are dropped:
+    /// a reader asks from the revision it last read.
+    pub fn text_changes_since(&self, revision: u64) -> Option<Vec<TextSplice>> {
+        let current = self.text_revision.get();
+        let mut journal = self.change_journal.borrow_mut();
+        match journal.as_mut() {
+            Some(journal) => journal.since(revision),
+            None => {
+                *journal = Some(ChangeJournal::new(current));
+                (revision == current).then(Vec::new)
+            }
+        }
+    }
+
+    /// Record one text change in the change journal, when it is on.
+    fn journal_text_change(&self, from: u64, splices: Option<Vec<TextSplice>>) {
+        if let Some(journal) = self.change_journal.borrow_mut().as_mut() {
+            let to = self.text_revision.get();
+            match splices {
+                Some(splices) => journal.record(from, to, splices),
+                None => journal.restart(to),
+            }
+        }
+    }
+
     /// Whole-document text builds this replica has performed. See the
     /// `text_materializations` field.
     pub fn text_materializations(&self) -> u64 {
@@ -1065,6 +1111,9 @@ impl ReplicaState {
         if actual_delete == 0 && insert.is_empty() {
             return;
         }
+        let from = self.text_revision.get();
+        let journaled = self.change_journal.borrow().is_some();
+        let splice;
         {
             let mut cached = self.cached_text.borrow_mut();
             let shared = cached
@@ -1077,6 +1126,11 @@ impl ReplicaState {
             }
             let current = Arc::make_mut(shared);
             if start_char == total_chars && actual_delete == 0 {
+                splice = journaled.then(|| TextSplice {
+                    start: current.len(),
+                    removed_len: 0,
+                    inserted: insert.to_owned(),
+                });
                 current.push_str(insert);
                 self.cached_edit_anchor
                     .set(Some((start_char + inserted_chars, current.len())));
@@ -1087,6 +1141,11 @@ impl ReplicaState {
                     .unwrap_or((total_chars, current.len()));
                 let start_byte = char_to_byte_index_near(current, start_char, anchor);
                 let end_byte = char_to_byte_index_near(current, end_char, anchor);
+                splice = journaled.then(|| TextSplice {
+                    start: start_byte,
+                    removed_len: end_byte - start_byte,
+                    inserted: insert.to_owned(),
+                });
                 current.replace_range(start_byte..end_byte, insert);
                 self.cached_edit_anchor.set(Some((
                     start_char + inserted_chars,
@@ -1097,6 +1156,9 @@ impl ReplicaState {
         self.cached_text_chars
             .set(Some(total_chars - actual_delete + inserted_chars));
         self.bump_text_revision();
+        if let Some(splice) = splice {
+            self.journal_text_change(from, Some(vec![splice]));
+        }
         self.queue_local_edit(PendingLocalEdit {
             offset: start_char,
             delete_len: actual_delete,
@@ -1277,15 +1339,18 @@ impl ReplicaState {
 
     fn apply_decoded_update(&self, update: &[u8], ops: &[TextOp]) {
         self.flush_pending_local_edits();
+        let from = self.text_revision.get();
         if self.text.borrow_mut().apply_delta_unprojected(ops) {
             *self.cached_encoded_state.borrow_mut() = None;
             self.bump_text_revision();
-            if self.fold_remote_ops(ops) {
-                self.retain_folded_projection();
-            } else {
-                *self.cached_text.borrow_mut() = None;
-                self.cached_text_chars.set(None);
-                self.cached_edit_anchor.set(None);
+            match self.fold_remote_ops(ops) {
+                Some(was_visible) => self.retain_folded_projection(from, &was_visible),
+                None => {
+                    *self.cached_text.borrow_mut() = None;
+                    self.cached_text_chars.set(None);
+                    self.cached_edit_anchor.set(None);
+                    self.journal_text_change(from, None);
+                }
             }
         }
         *self.last_applied_update.borrow_mut() = Some(update.to_vec());
@@ -1294,21 +1359,39 @@ impl ReplicaState {
     /// Replace the visible projection with the order a remote fold just
     /// updated. The fold is the same placement lazily uses, so this string is
     /// the document the editor should show, without `TextCrdt::ordered_ids`.
-    fn retain_folded_projection(&self) {
-        let (projected, chars) = {
+    /// With the change journal on, the same walk records the fold's splices
+    /// against the projection it replaces (`#incrementalreconcile`).
+    fn retain_folded_projection(&self, from: u64, was_visible: &HashMap<OpId, bool>) {
+        let journaled = self
+            .change_journal
+            .borrow()
+            .is_some()
+            .then(|| self.cached_text.borrow().clone())
+            .flatten();
+        let (projected, chars, splices) = {
             let order = self.visible_order.borrow();
             let Some(order) = order.as_ref() else {
                 *self.cached_text.borrow_mut() = None;
                 self.cached_text_chars.set(None);
                 self.cached_edit_anchor.set(None);
+                drop(order);
+                self.journal_text_change(from, None);
                 return;
             };
-            (order.visible_text(), order.len())
+            match &journaled {
+                Some(old) => {
+                    let (projected, splices) = order.visible_text_with_splices(was_visible, old);
+                    (projected, order.len(), splices)
+                }
+                None => (order.visible_text(), order.len(), None),
+            }
         };
+        drop(journaled);
         self.count_text_materialization();
         self.cached_text_chars.set(Some(chars));
         self.cached_edit_anchor.set(Some((chars, projected.len())));
         *self.cached_text.borrow_mut() = Some(Arc::new(projected));
+        self.journal_text_change(from, splices);
     }
 
     /// Fold a remote batch lazily just stored into the order, the version
@@ -1322,7 +1405,7 @@ impl ReplicaState {
     /// changed. The one way a stored id disappears is a tombstone replaced by
     /// a smaller concurrent delete; if that id may have been its peer's
     /// maximum, the frontier is re-derived instead.
-    fn fold_remote_ops(&self, ops: &[TextOp]) -> bool {
+    fn fold_remote_ops(&self, ops: &[TextOp]) -> Option<HashMap<OpId, bool>> {
         let effect = self
             .visible_order
             .borrow_mut()
@@ -1330,7 +1413,7 @@ impl ReplicaState {
             .and_then(|order| order.integrate_remote(ops));
         let Some(effect) = effect else {
             self.invalidate_local_indexes();
-            return false;
+            return None;
         };
         {
             let mut cached_vv = self.cached_version_vector.borrow_mut();
@@ -1359,7 +1442,7 @@ impl ReplicaState {
             }
         }
         self.rebase_local_journal_if_oversized();
-        true
+        Some(effect.was_visible)
     }
 
     /// Project a remote update against an isolated fork without mutating this
@@ -2580,5 +2663,153 @@ mod tests {
         let a = ReplicaState::from_text(1, "same\n");
         let b = ReplicaState::from_text(1, "same\n");
         assert_ne!(a.text_revision(), b.text_revision());
+    }
+
+    fn apply_splices(text: &str, splices: &[TextSplice]) -> String {
+        let mut text = text.to_string();
+        for splice in splices {
+            text.replace_range(
+                splice.start..splice.start + splice.removed_len,
+                &splice.inserted,
+            );
+        }
+        text
+    }
+
+    struct XorShift(u64);
+
+    impl XorShift {
+        fn below(&mut self, n: usize) -> usize {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 % n.max(1) as u64) as usize
+        }
+    }
+
+    /// `#incrementalreconcile`: the canonical's change journal spells every
+    /// change between two observed revisions, whether the canonical edited
+    /// locally or folded editor batches (concurrent, multibyte, interleaved).
+    #[test]
+    fn text_changes_since_spell_every_local_and_folded_change() {
+        const INSERTS: &[&str] = &["a", "é", "\n", "xyz", "🙂", "- row\n"];
+        for seed in 1..=24u64 {
+            let mut rng = XorShift(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+            let canonical = ReplicaState::from_text(1, "héllo wörld\nline two\n");
+            let state = canonical.encode_state();
+            let editors = [
+                ReplicaState::from_encoded(2, &state).unwrap(),
+                ReplicaState::from_encoded(3, &state).unwrap(),
+            ];
+            let mut seen_revision = canonical.text_revision();
+            let mut seen_text = canonical.text();
+            assert_eq!(
+                canonical.text_changes_since(seen_revision),
+                Some(Vec::new())
+            );
+            let (mut answered, mut unanswered) = (0, 0);
+            let edit = |replica: &ReplicaState, rng: &mut XorShift| {
+                let chars = replica.text().chars().count();
+                let offset = rng.below(chars + 1) as u32;
+                let delete = if rng.below(3) == 0 {
+                    rng.below(4) as u32
+                } else {
+                    0
+                };
+                let insert = if rng.below(4) == 0 {
+                    ""
+                } else {
+                    INSERTS[rng.below(INSERTS.len())]
+                };
+                replica.apply_local_edit(offset, delete, insert);
+            };
+            for _ in 0..240 {
+                let k = rng.below(2);
+                match rng.below(6) {
+                    0 | 1 => edit(&editors[k], &mut rng),
+                    2 | 3 => {
+                        let delta = editors[k].diff(&canonical.state_vector()).unwrap();
+                        canonical.apply_update(&delta).unwrap();
+                    }
+                    4 => edit(&canonical, &mut rng),
+                    _ => {
+                        let delta = canonical.diff(&editors[k].state_vector()).unwrap();
+                        editors[k].apply_update(&delta).unwrap();
+                    }
+                }
+                if rng.below(3) == 0 {
+                    let now = canonical.text();
+                    match canonical.text_changes_since(seen_revision) {
+                        Some(splices) => {
+                            assert_eq!(apply_splices(&seen_text, &splices), now, "seed={seed}");
+                            answered += 1;
+                        }
+                        None => unanswered += 1,
+                    }
+                    seen_revision = canonical.text_revision();
+                    seen_text = now;
+                }
+            }
+            let mut reference = TextCrdt::new(9);
+            reference.apply_delta(&decode_update_ops(&canonical.encode_state()).unwrap());
+            assert_eq!(canonical.text(), reference.text(), "seed={seed}");
+            assert!(answered > 0, "seed={seed}");
+            // Only the first fold into a replica seeded from text (no order
+            // yet) re-projects from the graph.
+            assert!(
+                unanswered <= 1,
+                "seed={seed}: {unanswered} unanswered of {}",
+                answered + unanswered
+            );
+        }
+    }
+
+    /// A batch delivered ahead of the one it builds on waits unplaced; the
+    /// batch that places both journals both as one change.
+    #[test]
+    fn an_out_of_order_batch_journals_when_it_is_placed() {
+        let canonical = ReplicaState::from_text(1, "abc\n");
+        canonical.apply_local_edit(0, 0, "");
+        let editor = ReplicaState::from_encoded(2, &canonical.encode_state()).unwrap();
+        let base = editor.state_vector();
+        editor.apply_local_edit(1, 0, "XY");
+        let first = editor.diff(&base).unwrap();
+        let middle = editor.state_vector();
+        editor.apply_local_edit(3, 1, "é");
+        let second = editor.diff(&middle).unwrap();
+
+        canonical.apply_local_edit(4, 0, "tail\n");
+        let revision = canonical.text_revision();
+        let text = canonical.text();
+        assert_eq!(canonical.text_changes_since(revision), Some(Vec::new()));
+        canonical.apply_update(&second).unwrap();
+        canonical.apply_update(&first).unwrap();
+        let now = canonical.text();
+        assert_eq!(now, "aXYéc\ntail\n");
+        let splices = canonical
+            .text_changes_since(revision)
+            .expect("both batches folded");
+        assert_eq!(apply_splices(&text, &splices), now);
+    }
+
+    /// A batch the order declines re-projects from the graph: the journal
+    /// cannot say what changed, so it restarts there.
+    #[test]
+    fn a_reprojected_batch_restarts_the_journal() {
+        let canonical = ReplicaState::from_text(1, "hello\n");
+        canonical.apply_local_edit(0, 0, "> ");
+        let revision = canonical.text_revision();
+        assert_eq!(canonical.text_changes_since(revision), Some(Vec::new()));
+        let mut bulk = TextCrdt::new(4);
+        bulk.insert_str(0, &"y".repeat(5_000));
+        canonical
+            .apply_update(&encode_update_ops(&bulk.delta_since(&TextVersionVector::new())).unwrap())
+            .unwrap();
+        assert_eq!(canonical.text_changes_since(revision), None);
+        let restarted = canonical.text_revision();
+        let text = canonical.text();
+        canonical.apply_local_edit(0, 1, "Z");
+        let splices = canonical.text_changes_since(restarted).unwrap();
+        assert_eq!(apply_splices(&text, &splices), canonical.text());
     }
 }

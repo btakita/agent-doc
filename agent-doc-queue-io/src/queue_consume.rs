@@ -7493,7 +7493,7 @@ mod core_tests {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let lose = self
                 .superseded
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
                     left.checked_sub(1)
                 })
                 .is_ok();

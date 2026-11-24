@@ -1867,7 +1867,13 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   Client activated the release. A Client log `snapshot schema negotiated version=5 ...
   after_refusal=DELIVERY_FAILED` is then followed, once the Client logged `[frontend-impl]
   activated`, by `snapshot accepted` on that lease. When the
-  backend never received the ask, the lease keeps schema 1 and needs a reconnect. The backend
+  backend never received the ask, the lease keeps schema 1 and needs a reconnect. `agent-doc
+  upgrade` reports that lease from the backend idea.log: a `frontend_schema=1` report on an open
+  lease ends only at a `snapshot accepted` of `schema=2` or later, the lease's `lease retired`, a
+  new `lease opened` for that Client or an `IDE STARTED` banner, because a cold backend logs the
+  schema-1 acceptance right after the report and that acceptance carries no geometry; after
+  `snapshot awaits frontend activation` on the lease the report adds that the Client may still
+  recover on its own (GH #435 review, cycle 2). Any acceptance ends any other report. The backend
   validator accepts schemas 1 through 5.
 
   **Frozen shared RPC contract (GH #435).** The Client frontend is shell code only a Client

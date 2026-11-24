@@ -1157,7 +1157,10 @@ fn jetbrains_remote_dev_client_steps(
 
 /// GH #435: a `[split-surface] frontend/backend plugin mismatch` that a backend
 /// idea.log reports on a lease that is still open and has accepted no snapshot
-/// since, i.e. the JetBrains Client's layout publication is blocked right now.
+/// since that clears it, i.e. the JetBrains Client's layout publication is
+/// blocked right now. A schema-1 report stays until a snapshot of schema 2 or
+/// later is accepted: a backend whose peer has not activated accepts schema 1
+/// without geometry (GH #435 review, cycle 2).
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct OpenLeaseFrontendMismatch {
     client: String,
@@ -1166,6 +1169,11 @@ struct OpenLeaseFrontendMismatch {
     frontend_schema: Option<u32>,
     /// The mismatch facts, without the backend's remedy text.
     detail: String,
+    /// The backend logged `snapshot awaits frontend activation` on this lease
+    /// after the report: its peer activated after the lease's schema-1
+    /// snapshots were accepted, and a Client that got the late schema answer
+    /// recovers on the same lease.
+    awaiting_activation: bool,
 }
 
 /// GH #440 review (cycle 3): the event after `tag` when `tag` opens `line`'s
@@ -1201,7 +1209,10 @@ fn split_surface_field<'a>(line: &'a str, key: &str) -> Option<&'a str> {
 /// GH #435: the newest still-open lease whose frontend the backend reported as
 /// mismatched, from one backend idea.log. A lease retired, superseded, or with
 /// a snapshot accepted after its mismatch is not stuck, and an
-/// `IDE STARTED` banner forgets the previous IDE run.
+/// `IDE STARTED` banner forgets the previous IDE run. An accepted schema-1
+/// snapshot does not clear a `frontend_schema=1` report: a backend whose peer
+/// has not activated logs that acceptance right after the report and the lease
+/// still publishes no geometry (GH #435 review, cycle 2).
 fn open_lease_frontend_mismatch(log: &str) -> Option<OpenLeaseFrontendMismatch> {
     let mut open = BTreeMap::<String, u64>::new();
     let mut stuck = BTreeMap::<String, OpenLeaseFrontendMismatch>::new();
@@ -1231,9 +1242,11 @@ fn open_lease_frontend_mismatch(log: &str) -> Option<OpenLeaseFrontendMismatch> 
             }
         } else if event.starts_with("lease retired ") || event.starts_with("snapshot accepted ") {
             if let Some((client, generation)) = lease()
-                && stuck
-                    .get(&client)
-                    .is_some_and(|it| it.generation == generation)
+                && stuck.get(&client).is_some_and(|it| {
+                    it.generation == generation
+                        && (event.starts_with("lease retired ")
+                            || acceptance_clears_open_lease_mismatch(it, event))
+                })
             {
                 stuck.remove(&client);
             }
@@ -1242,6 +1255,13 @@ fn open_lease_frontend_mismatch(log: &str) -> Option<OpenLeaseFrontendMismatch> 
                 && open.get(&client) == Some(&generation)
             {
                 open.remove(&client);
+            }
+        } else if event.starts_with("snapshot awaits frontend activation ") {
+            if let Some((client, generation)) = lease()
+                && let Some(it) = stuck.get_mut(&client)
+                && it.generation == generation
+            {
+                it.awaiting_activation = true;
             }
         } else if event.starts_with("frontend/backend plugin mismatch ")
             && let Some((client, generation)) = lease()
@@ -1275,12 +1295,28 @@ fn open_lease_frontend_mismatch(log: &str) -> Option<OpenLeaseFrontendMismatch> 
                     generation,
                     frontend_schema,
                     detail,
+                    awaiting_activation: false,
                 },
             );
         }
     }
     let newest = newest?;
     stuck.remove(&newest).or_else(|| stuck.into_values().last())
+}
+
+/// Whether a `snapshot accepted` line on the reported lease ends its mismatch.
+/// A `frontend_schema=1` report ends only at `schema=2` or later: the schema-1
+/// acceptance a not-yet-activated backend logs right after its GH #441 report
+/// carries no geometry. A line without a readable `schema=` (no backend that
+/// logs the report writes one) ends it, as before.
+fn acceptance_clears_open_lease_mismatch(
+    stuck: &OpenLeaseFrontendMismatch,
+    accepted: &str,
+) -> bool {
+    stuck.frontend_schema != Some(1)
+        || split_surface_field(accepted, "schema")
+            .and_then(|it| it.parse::<u32>().ok())
+            .is_none_or(|schema| schema >= 2)
 }
 
 /// GH #435: what `agent-doc upgrade` prints for a blocked Client lease. A
@@ -1291,9 +1327,14 @@ fn open_lease_frontend_mismatch_message(stuck: &OpenLeaseFrontendMismatch, log: 
     let lease = format!("client={} generation={}", stuck.client, stuck.generation);
     match stuck.frontend_schema {
         Some(1) => format!(
-            "JetBrains Client frontend stuck on snapshot schema 1 (GH #435): {} shows `frontend/backend plugin mismatch {}` on the open lease {lease}, and no snapshot was accepted after it. The Client's schema negotiation with this backend went unanswered, so that lease publishes no geometry and no activation receipt, and the backend refuses every snapshot; both peers can still run the same plugin. Repair: quit and restart JetBrains Client (or close and reopen the project in it) so it opens a new lease and negotiates again. The Client idea.log line `snapshot schema negotiated version=1 backend_offered=none` confirms it; plugin 0.2.1052 and later negotiate again by themselves. Only if the Client's `[split-surface] frontend surface publisher started` line is absent or names another plugin, install the same modular ZIP in the Client.",
+            "JetBrains Client frontend stuck on snapshot schema 1 (GH #435): {} shows `frontend/backend plugin mismatch {}` on the open lease {lease}, and no snapshot of schema 2 or later was accepted after it. The Client's schema negotiation with this backend went unanswered, so that lease publishes schema-1 snapshots, which carry no geometry and no activation receipt: a backend whose frontend peer has activated refuses them, and one whose peer has not activated yet (after a backend IDE restart) accepts them without geometry, so the tmux columns never follow the Client either way; both peers can still run the same plugin.{} Repair: quit and restart JetBrains Client (or close and reopen the project in it) so it opens a new lease and negotiates again. The Client idea.log line `snapshot schema negotiated version=1 backend_offered=none` confirms it; plugin 0.2.1052 and later negotiate again by themselves. Only if the Client's `[split-surface] frontend surface publisher started` line is absent or names another plugin, install the same modular ZIP in the Client.",
             log.display(),
             stuck.detail,
+            if stuck.awaiting_activation {
+                " The backend has since logged `snapshot awaits frontend activation` on that lease: its peer activated after the lease's schema-1 snapshots were accepted, and a Client that received the late schema answer asks again and recovers on the same lease within seconds, so run `agent-doc upgrade` again before reconnecting."
+            } else {
+                ""
+            },
         ),
         _ => format!(
             "JetBrains Client frontend runs another Agent Doc build (GH #435): {} shows `frontend/backend plugin mismatch {}` on the open lease {lease}, and no snapshot was accepted after it. Repair: install the same modular ZIP in the Client (run `agent-doc upgrade` on the Client machine, or follow the Client steps), then restart JetBrains Client.",
@@ -8087,6 +8128,112 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             "{log}2026-11-24 08:00:00,001 [   1]   INFO - #c.i.i.StartupUtil - ------------------------------------------------------ IDE STARTED ------------------------------------------------------\n"
         );
         assert_eq!(super::open_lease_frontend_mismatch(&restarted), None);
+
+        // GH #435 review (cycle 2): a backend whose peer has not activated (every
+        // backend IDE restart) logs the GH #441 report inside the publish that
+        // accepts the schema 1, so `snapshot accepted ... schema=1` follows it at
+        // once. That acceptance carries no geometry and leaves the lease stuck.
+        let cold = "\
+2026-11-24 09:00:01,001 [   1]   INFO - #c.g.b.a.s.b.AuthenticatedSurfaceIngressState - [split-surface] lease opened client=c-3 generation=102 layout_authority=remote_measured readiness=connected_blocked frontend_plugin=0.2.1060
+2026-11-24 09:00:01,101 [   1]   INFO - #c.g.b.a.s.b.AuthenticatedSurfaceIngressState - [split-surface] provisional schema-1 snapshot client=c-3 generation=102 frontend_plugin=0.2.1060 (the same plugin asks for the schema again after a refusal; a plugin mismatch is reported only if its next snapshot is still schema 1)
+2026-11-24 09:00:31,001 [   1]   WARN - #c.g.b.a.s.b.ControllerSurfaceIngress - [split-surface] frontend/backend plugin mismatch client=c-3 generation=102 frontend_schema=1 backend_schema=5 (the JetBrains Client frontend published schema 1 without this backend's schema answer: its 5 s schema negotiation went unanswered on this lease, or it predates negotiation; schema 1 carries no geometry and no activation receipt) remedy=reconnect the JetBrains Client so it opens a new lease and asks this backend for its schema again
+2026-11-24 09:00:31,002 [   1]   INFO - #c.g.b.a.s.b.AuthenticatedSurfaceIngressState - [split-surface] snapshot accepted client=c-3 generation=102 sequence=2 schema=1 surfaces=1 measured_windows=0/0 layout_authority=remote_measured readiness=accepted first=true after_refusal=none
+";
+        let stuck = super::open_lease_frontend_mismatch(cold).expect("the cold lease is stuck");
+        assert_eq!(
+            (
+                stuck.client.as_str(),
+                stuck.generation,
+                stuck.frontend_schema
+            ),
+            ("c-3", 102, Some(1))
+        );
+        assert_eq!(stuck.detail, "frontend_schema=1 backend_schema=5");
+        assert!(!stuck.awaiting_activation);
+        let message = super::open_lease_frontend_mismatch_message(&stuck, Path::new("idea.log"));
+        for needle in [
+            "JetBrains Client frontend stuck on snapshot schema 1 (GH #435)",
+            "no snapshot of schema 2 or later was accepted after it",
+            "accepts them without geometry",
+            "quit and restart JetBrains Client",
+        ] {
+            assert!(message.contains(needle), "missing {needle:?}: {message}");
+        }
+        for wrong in ["refuses every snapshot", "awaits frontend activation"] {
+            assert!(!message.contains(wrong), "{wrong:?}: {message}");
+        }
+        // Later schema-1 acceptances on that lease keep it stuck.
+        let still_schema_one = format!(
+            "{cold}2026-11-24 09:01:00,001 [   1]   INFO - #c - [split-surface] snapshot accepted client=c-3 generation=102 sequence=9 schema=1 surfaces=1 measured_windows=0/0 layout_authority=remote_measured readiness=accepted first=false after_refusal=DELIVERY_FAILED:controller delivery failed\n"
+        );
+        assert_eq!(
+            super::open_lease_frontend_mismatch(&still_schema_one).map(|it| it.generation),
+            Some(102)
+        );
+
+        // The recovering cold lease: the backend received the late ask, its peer
+        // activated, it refused the next schema 1 without ending the lease, and
+        // the re-asked schema 5 is accepted on the same lease. While it awaits,
+        // the report says it may still recover; the schema-5 acceptance clears it.
+        let awaiting = format!(
+            "{cold}2026-11-24 09:00:40,001 [   1]   INFO - #c.g.b.a.s.b.AuthenticatedSurfaceIngressState - [split-surface] snapshot awaits frontend activation client=c-3 generation=102 sequence=3 schema=1 accepted_sequence=2 (the backend peer activated after this lease's receipt-less snapshots were accepted; the lease stays open for the Client's activated snapshot)
+2026-11-24 09:00:40,002 [   1]   WARN - #c.g.b.a.s.b.AuthenticatedSurfaceIngressState - [split-surface] snapshot refused client=c-3 generation=102 sequence=3 status=DELIVERY_FAILED readiness=connected_blocked diagnostic=frontend_authority_absent_or_generation_mismatched
+"
+        );
+        let stuck = super::open_lease_frontend_mismatch(&awaiting).expect("not recovered yet");
+        assert!(stuck.awaiting_activation);
+        let message = super::open_lease_frontend_mismatch_message(&stuck, Path::new("idea.log"));
+        assert!(
+            message.contains("`snapshot awaits frontend activation`")
+                && message.contains("run `agent-doc upgrade` again before reconnecting"),
+            "{message}"
+        );
+        let recovering = format!(
+            "{awaiting}2026-11-24 09:00:42,001 [   1]   INFO - #c.g.b.a.s.b.AuthenticatedSurfaceIngressState - [split-surface] snapshot accepted client=c-3 generation=102 sequence=4 schema=5 surfaces=1 measured_windows=2/2 layout_authority=remote_measured readiness=accepted first=false after_refusal=DELIVERY_FAILED:frontend_authority_absent_or_generation_mismatched\n"
+        );
+        assert_eq!(super::open_lease_frontend_mismatch(&recovering), None);
+        // An acceptance on another lease of that Client does not clear it.
+        let other_generation = format!(
+            "{cold}2026-11-24 09:00:42,001 [   1]   INFO - #c - [split-surface] snapshot accepted client=c-3 generation=99 sequence=4 schema=5 surfaces=1\n"
+        );
+        assert!(super::open_lease_frontend_mismatch(&other_generation).is_some());
+        let cold_retired = format!(
+            "{cold}2026-11-24 09:30:00,001 [   1]   INFO - #c - [split-surface] lease retired client=c-3 generation=102 accepted_sequence=2\n"
+        );
+        assert_eq!(super::open_lease_frontend_mismatch(&cold_retired), None);
+        let cold_reopened = format!(
+            "{cold}2026-11-24 09:30:01,001 [   1]   INFO - #c - [split-surface] lease opened client=c-3 generation=103 layout_authority=remote_measured readiness=connected_blocked frontend_plugin=0.2.1060\n"
+        );
+        assert_eq!(super::open_lease_frontend_mismatch(&cold_reopened), None);
+
+        // A 0.2.1046 backend reported on the lease's first snapshot, before
+        // validation: on a cold backend its schema-1 acceptance follows, then
+        // the peer's activation refuses the lease for good. Both are stuck.
+        let legacy_cold = "\
+2026-11-23 19:00:00,001 [   1]   INFO - #c.g.b.a.s.b.AuthenticatedSurfaceIngressState - [split-surface] lease opened client=c-4 generation=50 layout_authority=remote_measured readiness=connected_blocked
+2026-11-23 19:00:00,101 [   1]   WARN - #c.g.b.a.s.b.ControllerSurfaceIngress - [split-surface] frontend/backend plugin mismatch client=c-4 generation=50 frontend_schema=1 backend_schema=5 (the JetBrains Client runs an older Agent Doc frontend) remedy=install the same agent-doc-jetbrains-262-0.2.1046.zip
+2026-11-23 19:00:00,102 [   1]   INFO - #c.g.b.a.s.b.AuthenticatedSurfaceIngressState - [split-surface] snapshot accepted client=c-4 generation=50 sequence=1 schema=1 surfaces=1 measured_windows=0/0 layout_authority=remote_measured readiness=accepted first=true after_refusal=none
+";
+        let stuck = super::open_lease_frontend_mismatch(legacy_cold).expect("legacy cold lease");
+        assert_eq!((stuck.generation, stuck.frontend_schema), (50, Some(1)));
+        let legacy_revoked = format!(
+            "{legacy_cold}2026-11-23 19:00:30,001 [   1]   WARN - #c.g.b.a.s.b.AuthenticatedSurfaceIngressState - [split-surface] snapshot refused client=c-4 generation=50 sequence=2 status=DELIVERY_FAILED readiness=connected_blocked diagnostic=frontend_authority_absent_or_generation_mismatched\n"
+        );
+        assert_eq!(
+            super::open_lease_frontend_mismatch(&legacy_revoked).map(|it| it.generation),
+            Some(50)
+        );
+
+        // Any acceptance still clears a report that is not schema 1.
+        let receipt = "\
+x [split-surface] lease opened client=c-5 generation=60 layout_authority=remote_measured readiness=connected_blocked
+x [split-surface] frontend/backend plugin mismatch client=c-5 generation=60 frontend_receipt=unreadable (the JetBrains Client runs a different Agent Doc frontend) remedy=install
+";
+        assert!(super::open_lease_frontend_mismatch(receipt).is_some());
+        let receipt_accepted = format!(
+            "{receipt}x [split-surface] snapshot accepted client=c-5 generation=60 sequence=1 schema=5 surfaces=1\n"
+        );
+        assert_eq!(super::open_lease_frontend_mismatch(&receipt_accepted), None);
     }
 
     #[test]

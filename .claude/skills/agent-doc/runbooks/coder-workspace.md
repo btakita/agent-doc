@@ -128,7 +128,12 @@ creates one with the receipt's attach command.
   repair needed. `agent-doc upgrade` on the backend reads the backend
   `idea.log` and prints `JetBrains Client frontend stuck on snapshot schema
   1` with the reconnect repair while that lease is still open and no snapshot
-  was accepted after the warning.
+  of schema 2 or later was accepted after the warning. A backend whose peer
+  has not activated logs `snapshot accepted ... schema=1` right after the
+  warning; that acceptance carries no geometry, so the report stays. After
+  `snapshot awaits frontend activation` on that lease it adds that the Client
+  may still recover by itself: run `agent-doc upgrade` again before
+  reconnecting.
 - Client shell refusal (GH #440): a Client on an older shell cannot load the
   backend's frontend release, then publishes schema 1. A reconnect cannot fix
   that. Since 0.2.1055 the backend withholds the release from such a Client

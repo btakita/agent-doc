@@ -949,6 +949,26 @@ pub enum StateFact {
         commit_candidate_content: Option<String>,
         source: String,
     },
+    /// `#visiblecandidateretention`: the commit candidate keyed by
+    /// `commit_candidate_hash`, at or below `model_revision`, can no longer be
+    /// elected by any visible-write lookup.
+    ///
+    /// Minted only by [`VisibleWriteProjection::superseded_commit_candidates`]:
+    /// a strictly newer candidate (`superseded_by_*`) whose exact content a
+    /// `DocumentWriteConverged` settled (`converged_target_hash`). The editor
+    /// has visibly moved past this candidate and the write that moved it
+    /// converged, so the older image no longer proves editor-visible content.
+    /// The fact is hash-only on purpose: it is the small record that outlives
+    /// the retired image once retention drops the image row.
+    VisibleWriteCommitCandidateRetired {
+        document_hash: String,
+        commit_candidate_hash: String,
+        model_revision: u64,
+        superseded_by_commit_candidate_hash: String,
+        superseded_by_model_revision: u64,
+        converged_target_hash: String,
+        source: String,
+    },
     VisibleWriteMaterializedCarryForwardObserved {
         document_hash: String,
         model_revision: u64,
@@ -1162,6 +1182,7 @@ impl StateFact {
             | Self::EditorPatchApplied { document_hash, .. }
             | Self::EditorPatchRejected { document_hash, .. }
             | Self::VisibleWriteCommitCandidateObserved { document_hash, .. }
+            | Self::VisibleWriteCommitCandidateRetired { document_hash, .. }
             | Self::VisibleWriteMaterializedCarryForwardObserved { document_hash, .. }
             | Self::IpcProofInsufficient { document_hash, .. }
             | Self::EditorPatchRetryRequested { document_hash, .. }
@@ -1245,6 +1266,7 @@ impl StateFact {
             | Self::EditorPatchApplied { .. }
             | Self::EditorPatchRejected { .. }
             | Self::VisibleWriteCommitCandidateObserved { .. }
+            | Self::VisibleWriteCommitCandidateRetired { .. }
             | Self::VisibleWriteMaterializedCarryForwardObserved { .. }
             | Self::IpcProofInsufficient { .. }
             | Self::EditorPatchRetryRequested { .. }
@@ -1348,6 +1370,9 @@ impl StateFact {
             Self::EditorPatchRejected { .. } => "editor_patch_rejected",
             Self::VisibleWriteCommitCandidateObserved { .. } => {
                 "visible_write_commit_candidate_observed"
+            }
+            Self::VisibleWriteCommitCandidateRetired { .. } => {
+                "visible_write_commit_candidate_retired"
             }
             Self::VisibleWriteMaterializedCarryForwardObserved { .. } => {
                 "visible_write_materialized_carry_forward_observed"
@@ -1796,6 +1821,24 @@ impl DocumentStateProjection {
     ) -> Option<&VisibleWriteCommitCandidateProjection> {
         self.visible_write
             .applied_candidate_for_patch(&self.transport, patch_id)
+    }
+
+    /// Candidates the document's latest converged write has superseded
+    /// (`#visiblecandidateretention`). A pure function of the projection, so a
+    /// writer can re-derive it after any fact and an already-recorded
+    /// retirement is simply absent from the answer.
+    pub fn superseded_visible_write_candidates(
+        &self,
+        content_hash: impl FnMut(&VisibleWriteCommitCandidateProjection) -> Option<String>,
+    ) -> Vec<VisibleWriteCommitCandidateRetirement> {
+        let Some(converged) = self.document.latest_converged_write.as_ref() else {
+            return Vec::new();
+        };
+        self.visible_write.superseded_commit_candidates(
+            &self.transport,
+            &converged.target_hash,
+            content_hash,
+        )
     }
 
     pub fn materialized_visible_write_carry_forward(
@@ -2841,6 +2884,14 @@ impl DocumentStateProjection {
                     commit_candidate_content.as_deref(),
                     source,
                 );
+            }
+            StateFact::VisibleWriteCommitCandidateRetired {
+                commit_candidate_hash,
+                model_revision,
+                ..
+            } => {
+                self.visible_write
+                    .retire_commit_candidate(commit_candidate_hash, *model_revision);
             }
             StateFact::VisibleWriteMaterializedCarryForwardObserved {
                 model_revision,
@@ -5336,6 +5387,85 @@ impl VisibleWriteProjection {
         );
     }
 
+    /// Apply a `VisibleWriteCommitCandidateRetired` fact
+    /// (`#visiblecandidateretention`).
+    ///
+    /// Removes the candidate only while the retired revision still covers it,
+    /// so a later re-observation of the same content (a fresh editor
+    /// publication at a higher revision) stays electable. `latest_model_revision`
+    /// is deliberately untouched: it is a running max, and retirement never
+    /// covers the newest candidate (see [`Self::superseded_commit_candidates`]),
+    /// so the max survives both this fold and retention's row deletion.
+    pub fn retire_commit_candidate(&mut self, commit_candidate_hash: &str, model_revision: u64) {
+        if self
+            .commit_candidates
+            .get(commit_candidate_hash)
+            .is_some_and(|candidate| candidate.model_revision <= model_revision)
+        {
+            self.commit_candidates.remove(commit_candidate_hash);
+        }
+    }
+
+    /// The candidates a converged write has superseded
+    /// (`#visiblecandidateretention`).
+    ///
+    /// The superseding candidate is the newest applied candidate whose exact
+    /// content `converged_target_hash` names. `content_hash` answers a
+    /// candidate's image hash in the hash `DocumentWriteConverged::target_hash`
+    /// uses, or `None` when the image is absent or not hashed yet (such a
+    /// candidate cannot supersede, but can still be superseded). Every candidate with a
+    /// strictly lower `model_revision` is retired: the editor visibly applied a
+    /// later patch, and that later write converged, so an older image can no
+    /// longer prove what the editor shows. A candidate newer than the
+    /// superseding one (a write still in flight) is never touched, and neither
+    /// is the superseding candidate itself, which remains the editor-visible
+    /// proof of the converged content.
+    ///
+    /// The candidate key is the hash of the *normalized* content while the
+    /// converged target hash is over the raw content, so the match needs a
+    /// hash of each candidate image; the caller owns hashing (and memoizing)
+    /// it. Candidates are asked newest-first and the search stops at the first
+    /// match, so older images are never hashed. After the first retirement a
+    /// document holds only its superseding candidate plus in-flight ones.
+    pub fn superseded_commit_candidates(
+        &self,
+        transport: &TransportProjection,
+        converged_target_hash: &str,
+        mut content_hash: impl FnMut(&VisibleWriteCommitCandidateProjection) -> Option<String>,
+    ) -> Vec<VisibleWriteCommitCandidateRetirement> {
+        if self.commit_candidates.len() < 2 {
+            return Vec::new();
+        }
+        let mut newest_first = self.commit_candidates.values().collect::<Vec<_>>();
+        newest_first.sort_by(|left, right| {
+            right
+                .model_revision
+                .cmp(&left.model_revision)
+                .then_with(|| right.commit_candidate_hash.cmp(&left.commit_candidate_hash))
+        });
+        let Some(superseding) = newest_first.iter().copied().find(|candidate| {
+            transport
+                .patches
+                .get(&candidate.patch_id)
+                .is_some_and(|patch| patch.phase.is_applied())
+                && content_hash(candidate)
+                    .is_some_and(|hash| hash.eq_ignore_ascii_case(converged_target_hash))
+        }) else {
+            return Vec::new();
+        };
+        newest_first
+            .into_iter()
+            .filter(|candidate| candidate.model_revision < superseding.model_revision)
+            .map(|candidate| VisibleWriteCommitCandidateRetirement {
+                commit_candidate_hash: candidate.commit_candidate_hash.clone(),
+                model_revision: candidate.model_revision,
+                superseded_by_commit_candidate_hash: superseding.commit_candidate_hash.clone(),
+                superseded_by_model_revision: superseding.model_revision,
+                converged_target_hash: converged_target_hash.to_string(),
+            })
+            .collect()
+    }
+
     pub fn applied_candidate<'a>(
         &'a self,
         transport: &'a TransportProjection,
@@ -5428,6 +5558,41 @@ pub struct VisibleWriteCommitCandidateProjection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit_candidate_content: Option<String>,
     pub source: String,
+}
+
+/// One candidate [`VisibleWriteProjection::superseded_commit_candidates`]
+/// found superseded, ready to record as a
+/// [`StateFact::VisibleWriteCommitCandidateRetired`] (`#visiblecandidateretention`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VisibleWriteCommitCandidateRetirement {
+    pub commit_candidate_hash: String,
+    pub model_revision: u64,
+    pub superseded_by_commit_candidate_hash: String,
+    pub superseded_by_model_revision: u64,
+    pub converged_target_hash: String,
+}
+
+impl VisibleWriteCommitCandidateRetirement {
+    /// The retirement as a durable event. The id is a pure function of the
+    /// retired `(document, candidate, revision)`, so re-deriving the same
+    /// retirement after a reload deduplicates on the ledger's unique event id.
+    pub fn into_event(self, document_hash: &str, source: &str) -> StateEvent {
+        StateEvent::new(
+            format!(
+                "visible-write-candidate-retired-{document_hash}-{}-{}",
+                self.commit_candidate_hash, self.model_revision
+            ),
+            StateFact::VisibleWriteCommitCandidateRetired {
+                document_hash: document_hash.to_string(),
+                commit_candidate_hash: self.commit_candidate_hash,
+                model_revision: self.model_revision,
+                superseded_by_commit_candidate_hash: self.superseded_by_commit_candidate_hash,
+                superseded_by_model_revision: self.superseded_by_model_revision,
+                converged_target_hash: self.converged_target_hash,
+                source: source.to_string(),
+            },
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -9110,6 +9275,194 @@ mod tests {
             Some("editor-visible candidate")
         );
         assert!(doc.applied_visible_write_candidate("candidate-b").is_none());
+    }
+
+    /// The raw-content hash `DocumentWriteConverged::target_hash` would carry
+    /// in these fixtures; the candidate key stays an unrelated normalized hash.
+    fn retire_fixture_raw_hash(content: &str) -> String {
+        format!("raw:{content}")
+    }
+
+    fn retire_fixture_candidate_hash(
+        candidate: &VisibleWriteCommitCandidateProjection,
+    ) -> Option<String> {
+        candidate
+            .commit_candidate_content
+            .as_deref()
+            .map(retire_fixture_raw_hash)
+    }
+
+    /// Append the controller's three-event candidate receipt (generation,
+    /// patch applied, candidate) for one editor-applied visible write.
+    fn append_retire_fixture_candidate(ledger: &mut EventLedger, revision: u64, content: &str) {
+        ledger.append(state_event(
+            format!("gen-{revision}"),
+            StateFact::OwnerGenerationChanged {
+                document_hash: "doc-r".into(),
+                owner: StateOwner::EditorIpcBridge,
+                generation: revision,
+            },
+        ));
+        ledger.append(state_event(
+            format!("applied-{revision}"),
+            StateFact::EditorPatchApplied {
+                document_hash: "doc-r".into(),
+                patch_id: format!("patch-{revision}"),
+                actor_generation: revision,
+            },
+        ));
+        ledger.append(state_event(
+            format!("candidate-{revision}"),
+            StateFact::VisibleWriteCommitCandidateObserved {
+                document_hash: "doc-r".into(),
+                patch_id: format!("patch-{revision}"),
+                model_revision: revision,
+                editor_visible_hash: format!("norm:{content}"),
+                commit_candidate_hash: format!("norm:{content}"),
+                commit_candidate_content: Some(content.into()),
+                source: "test".into(),
+            },
+        ));
+    }
+
+    fn append_retire_fixture_converged(ledger: &mut EventLedger, content: &str) {
+        ledger.append(state_event(
+            format!("converged-{content}"),
+            StateFact::DocumentWriteConverged {
+                document_hash: "doc-r".into(),
+                intent_id: format!("intent-{content}"),
+                target_hash: retire_fixture_raw_hash(content),
+                source: "test".into(),
+                intent_source: Default::default(),
+            },
+        ));
+    }
+
+    /// `#visiblecandidateretention`: a converged write retires exactly the
+    /// candidates older than the candidate whose content it converged. Every
+    /// other candidate answers every lookup exactly as before; the retired one
+    /// answers none, and the running revision max is unchanged.
+    #[test]
+    fn converged_write_retires_only_candidates_older_than_its_visible_candidate() {
+        let mut ledger = EventLedger::new();
+        append_retire_fixture_candidate(&mut ledger, 10, "first");
+        append_retire_fixture_candidate(&mut ledger, 20, "second");
+        append_retire_fixture_candidate(&mut ledger, 30, "in-flight");
+        append_retire_fixture_converged(&mut ledger, "second");
+        let before = ledger.project_document("doc-r").unwrap();
+
+        let retirements = before.superseded_visible_write_candidates(retire_fixture_candidate_hash);
+        assert_eq!(
+            retirements,
+            vec![VisibleWriteCommitCandidateRetirement {
+                commit_candidate_hash: "norm:first".into(),
+                model_revision: 10,
+                superseded_by_commit_candidate_hash: "norm:second".into(),
+                superseded_by_model_revision: 20,
+                converged_target_hash: "raw:second".into(),
+            }],
+            "only the candidate older than the converged one is superseded; the in-flight newer one is not"
+        );
+        for retirement in retirements {
+            ledger.append(retirement.into_event("doc-r", "test"));
+        }
+        let after = ledger.project_document("doc-r").unwrap();
+
+        assert!(
+            after
+                .applied_visible_write_candidate("norm:first")
+                .is_none()
+        );
+        assert!(
+            after
+                .applied_visible_write_candidate_for_patch("patch-10")
+                .is_none()
+        );
+        for (hash, patch) in [("norm:second", "patch-20"), ("norm:in-flight", "patch-30")] {
+            assert_eq!(
+                after.applied_visible_write_candidate(hash),
+                before.applied_visible_write_candidate(hash),
+            );
+            assert!(after.applied_visible_write_candidate(hash).is_some());
+            assert_eq!(
+                after.applied_visible_write_candidate_for_patch(patch),
+                before.applied_visible_write_candidate_for_patch(patch),
+            );
+        }
+        assert_eq!(after.visible_write.latest_model_revision, Some(30));
+        assert!(
+            after
+                .superseded_visible_write_candidates(retire_fixture_candidate_hash)
+                .is_empty(),
+            "a recorded retirement is not re-derived"
+        );
+    }
+
+    /// Without a converged write naming an applied candidate's content there is
+    /// no superseding candidate, so nothing retires — however many accumulate.
+    #[test]
+    fn retirement_needs_a_converged_write_that_names_an_applied_candidate() {
+        let mut ledger = EventLedger::new();
+        append_retire_fixture_candidate(&mut ledger, 10, "first");
+        assert!(
+            ledger
+                .project_document("doc-r")
+                .unwrap()
+                .superseded_visible_write_candidates(retire_fixture_candidate_hash)
+                .is_empty()
+        );
+        append_retire_fixture_candidate(&mut ledger, 20, "second");
+        append_retire_fixture_converged(&mut ledger, "disk-only target");
+        assert!(
+            ledger
+                .project_document("doc-r")
+                .unwrap()
+                .superseded_visible_write_candidates(retire_fixture_candidate_hash)
+                .is_empty()
+        );
+        // The converged write names the OLDEST candidate: nothing is older.
+        append_retire_fixture_converged(&mut ledger, "first");
+        assert!(
+            ledger
+                .project_document("doc-r")
+                .unwrap()
+                .superseded_visible_write_candidates(retire_fixture_candidate_hash)
+                .is_empty()
+        );
+    }
+
+    /// A retirement covers the retired revision only: the same content
+    /// re-published by the editor later is a fresh, electable candidate.
+    #[test]
+    fn retirement_does_not_cover_a_later_reobservation_of_the_same_content() {
+        let mut ledger = EventLedger::new();
+        append_retire_fixture_candidate(&mut ledger, 10, "first");
+        append_retire_fixture_candidate(&mut ledger, 20, "second");
+        append_retire_fixture_converged(&mut ledger, "second");
+        for retirement in ledger
+            .project_document("doc-r")
+            .unwrap()
+            .superseded_visible_write_candidates(retire_fixture_candidate_hash)
+        {
+            ledger.append(retirement.into_event("doc-r", "test"));
+        }
+        append_retire_fixture_candidate(&mut ledger, 40, "first");
+        let doc = ledger.project_document("doc-r").unwrap();
+        let candidate = doc
+            .applied_visible_write_candidate("norm:first")
+            .expect("re-observed candidate is electable");
+        assert_eq!(candidate.model_revision, 40);
+
+        let mut projection = doc.visible_write.clone();
+        projection.retire_commit_candidate("norm:first", 10);
+        assert_eq!(
+            projection
+                .commit_candidates
+                .get("norm:first")
+                .map(|candidate| candidate.model_revision),
+            Some(40),
+            "a stale retirement must not remove a newer observation"
+        );
     }
 
     /// `#retainedrevert`: a deferred-write successor is admitted only while the

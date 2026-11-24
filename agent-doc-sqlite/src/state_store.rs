@@ -2221,22 +2221,40 @@ fn prune_superseded_realtime_steering_observations(conn: &Connection) -> Result<
 /// the hash and revision once into a materialized set, then apply the same
 /// `>` / `IS` predicate there. The comparison stays SQLite's, so a missing
 /// revision does not lose to a numeric one.
+///
+/// `#visiblecandidateretention`: the same pass also drops every candidate row a
+/// later `visible_write_commit_candidate_retired` fact covers — same document,
+/// same hash, a revision at or below the retired one, appended before the
+/// retirement. That mirrors `VisibleWriteProjection::retire_commit_candidate`
+/// exactly: the fold inserts the row and the retirement removes it, so
+/// dropping it leaves the final map unchanged. The retirement row itself is
+/// kept (it is hash-only, a few hundred bytes), and the newest candidate is
+/// never retired, so `latest_model_revision` keeps its maximum. One
+/// materialized scan serves both rules, so retirement adds no second pass over
+/// the table. Live `haiven-dev` evidence 2026-11-23: one document (`sdk-dev`)
+/// held 282 candidate images / 112MB that the per-hash rule alone could not
+/// drop, because every one had a distinct hash.
 const VISIBLE_CANDIDATE_PRUNE_SQL: &str = r#"
     WITH keyed AS MATERIALIZED (
         SELECT rowid, id, document_hash,
+               fact_type = 'visible_write_commit_candidate_retired' AS retired,
                json_extract(payload_json, '$.fact.commit_candidate_hash') AS hash,
                json_extract(payload_json, '$.fact.model_revision') AS rev
         FROM state_events
-        WHERE fact_type = 'visible_write_commit_candidate_observed'
+        WHERE fact_type IN (
+            'visible_write_commit_candidate_observed',
+            'visible_write_commit_candidate_retired'
+        )
     )
     SELECT e.rowid FROM keyed e
-    WHERE EXISTS (
+    WHERE NOT e.retired
+      AND EXISTS (
         SELECT 1 FROM keyed n
         WHERE n.document_hash = e.document_hash
           AND n.hash IS e.hash
           AND (
-            n.rev > e.rev
-            OR (n.rev IS e.rev AND n.id > e.id)
+            (NOT n.retired AND (n.rev > e.rev OR (n.rev IS e.rev AND n.id > e.id)))
+            OR (n.retired AND n.id > e.id AND n.rev >= e.rev)
           )
     )
     LIMIT 2000
@@ -11013,6 +11031,134 @@ mod tests {
                 "b-c1-r1".to_string(),
             ],
             "one row survives per (document, commit_candidate_hash): highest revision, last on a tie"
+        );
+        Ok(())
+    }
+
+    /// `#visiblecandidateretention`: retention drops exactly the candidate images
+    /// a recorded retirement covers, and the folded visible-write projection is
+    /// byte-identical before and after — so every non-retired candidate
+    /// answers every hash and patch lookup the same, and the running revision
+    /// max survives. A same-content re-observation after the retirement, and
+    /// the in-flight candidate newer than the converged one, are kept.
+    #[test]
+    fn retired_visible_write_commit_candidates_are_pruned_without_changing_the_fold() -> Result<()>
+    {
+        use agent_doc_state_backbone::{EventLedger, StateOwner};
+
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+        let doc = "doc-retire";
+        let raw = |content: &str| format!("raw:{content}");
+        let mut events: Vec<BackboneStateEvent> = Vec::new();
+        let candidate = |events: &mut Vec<BackboneStateEvent>, revision: u64, content: &str| {
+            events.push(BackboneStateEvent::new(
+                format!("gen-{revision}"),
+                StateFact::OwnerGenerationChanged {
+                    document_hash: doc.into(),
+                    owner: StateOwner::EditorIpcBridge,
+                    generation: revision,
+                },
+            ));
+            events.push(BackboneStateEvent::new(
+                format!("applied-{revision}"),
+                StateFact::EditorPatchApplied {
+                    document_hash: doc.into(),
+                    patch_id: format!("patch-{revision}"),
+                    actor_generation: revision,
+                },
+            ));
+            events.push(BackboneStateEvent::new(
+                format!("candidate-{revision}"),
+                StateFact::VisibleWriteCommitCandidateObserved {
+                    document_hash: doc.into(),
+                    patch_id: format!("patch-{revision}"),
+                    model_revision: revision,
+                    editor_visible_hash: format!("norm:{content}"),
+                    commit_candidate_hash: format!("norm:{content}"),
+                    commit_candidate_content: Some(content.repeat(64)),
+                    source: "test".into(),
+                },
+            ));
+        };
+        let fold = |events: &[BackboneStateEvent]| {
+            let mut ledger = EventLedger::new();
+            for event in events {
+                ledger.append(event.clone());
+            }
+            ledger.project_document(doc).expect("document projection")
+        };
+        candidate(&mut events, 10, "first");
+        candidate(&mut events, 20, "second");
+        candidate(&mut events, 30, "in-flight");
+        events.push(BackboneStateEvent::new(
+            "converged-second",
+            StateFact::DocumentWriteConverged {
+                document_hash: doc.into(),
+                intent_id: "intent-second".into(),
+                target_hash: raw(&"second".repeat(64)),
+                source: "test".into(),
+                intent_source: Default::default(),
+            },
+        ));
+        let retirements = fold(&events).superseded_visible_write_candidates(|candidate| {
+            candidate.commit_candidate_content.as_deref().map(raw)
+        });
+        assert_eq!(retirements.len(), 1, "{retirements:?}");
+        for retirement in retirements {
+            events.push(retirement.into_event(doc, "test"));
+        }
+        // The retired content re-published later is a fresh candidate.
+        candidate(&mut events, 40, "first");
+
+        for event in &events {
+            let payload_json = serde_json::to_string(event)?;
+            insert_state_event_in_db(
+                &conn,
+                &StateEventInsert {
+                    event_id: &event.event_id,
+                    document_hash: doc,
+                    domain: "transport",
+                    fact_type: event.fact.label(),
+                    payload_json: &payload_json,
+                },
+            )?;
+        }
+        let replay = |conn: &Connection| -> Result<Vec<BackboneStateEvent>> {
+            load_state_events_from_db(conn, Some(doc))?
+                .into_iter()
+                .map(|status| Ok(serde_json::from_str(&status.payload_json)?))
+                .collect()
+        };
+        let before = fold(&replay(&conn)?);
+
+        prune_superseded_visible_write_commit_candidates(&conn)?;
+
+        let remaining: Vec<String> = conn
+            .prepare(
+                "SELECT event_id FROM state_events \
+                 WHERE fact_type LIKE 'visible_write_commit_candidate_%' ORDER BY id",
+            )?
+            .query_map([], |row| row.get(0))?
+            .collect::<std::result::Result<_, _>>()?;
+        assert_eq!(
+            remaining,
+            vec![
+                "candidate-20".to_string(),
+                "candidate-30".to_string(),
+                format!("visible-write-candidate-retired-{doc}-norm:first-10"),
+                "candidate-40".to_string(),
+            ],
+            "only the retired image row goes; the hash-only retirement row stays"
+        );
+        let after = fold(&replay(&conn)?);
+        assert_eq!(after.visible_write, before.visible_write);
+        assert_eq!(after.visible_write.latest_model_revision, Some(40));
+        assert_eq!(
+            after
+                .applied_visible_write_candidate("norm:first")
+                .map(|candidate| candidate.model_revision),
+            Some(40)
         );
         Ok(())
     }

@@ -55,6 +55,7 @@ Examples:
 - `EditorPatchRejected`
 - `IpcProofInsufficient`
 - `VisibleWriteCommitCandidateObserved`
+- `VisibleWriteCommitCandidateRetired`
 - `DocumentWriteDeferred`
 - `DocumentWriteConverged`
 - `CommitObserved`
@@ -188,6 +189,21 @@ Content-bearing visible-write receipts include the model revision in their
 stable event identity so a fresh editor publication can supersede a legacy
 hash-only fact for the same patch without losing idempotence. A visible-write
 hash is validation metadata, not recoverable content authority.
+Commit candidates are a map keyed by candidate hash, so recency alone never
+retires one (`#visiblecandidateretention`). A candidate is retired by a
+hash-only `VisibleWriteCommitCandidateRetired` fact once a strictly newer
+applied candidate's exact content has converged (`DocumentWriteConverged`
+whose `target_hash` is that candidate image's raw content hash): the editor
+visibly moved past the older image and the write that moved it settled. The
+controller derives these after each converged write or candidate it appends;
+the derivation is a pure function of the projection, so a missed trigger is
+covered by the next. Retirement only ever removes an answer from the hash and
+patch lookups (a stale image can no longer prove editor-visible content),
+never adds one; the superseding and any newer in-flight candidate are never
+retired, so `latest_model_revision` keeps its maximum. Retention drops each
+covered candidate row and keeps the retirement row. On a copy of the live
+`haiven-dev` ledger, one converged write retired 281 of `sdk-dev`'s 282
+candidate images (112.5MB to 0.26MB).
 `DocumentWriteDeferred` is likewise content-bearing: it retains both
 `expected_content` and `target_content`. A successor intent must be based on the
 prior target or component-compose the prior and new targets over the retained

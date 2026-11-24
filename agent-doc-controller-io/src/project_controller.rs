@@ -71,6 +71,34 @@ const DEFAULT_LAYOUT_SCOPE: &str = "default";
 const PROJECT_REACTIVE_ACTIVATION_KEY: &str = "\0agent-doc:project-reactive";
 const REFRESH_REACTIVE_ACTIVATION_KEY: &str = "\0agent-doc:refresh-reactive";
 const CONTROLLER_BOOTSTRAP_SCOPE: &str = "project";
+
+/// Raw-content hashes of visible-write commit candidate images, keyed by
+/// `(document_hash, commit_candidate_hash, model_revision)`
+/// (`#visiblecandidateretention`). A candidate's image is fixed for that key, so
+/// the cache is a pure memo: process-global is safe, and it spares re-hashing
+/// every live image on every converged write while a legacy backlog drains.
+static VISIBLE_WRITE_CANDIDATE_CONTENT_HASHES: std::sync::LazyLock<
+    parking_lot::Mutex<VisibleWriteCandidateContentHashes>,
+> = std::sync::LazyLock::new(Default::default);
+
+type VisibleWriteCandidateContentHashes = std::collections::HashMap<(String, String, u64), String>;
+
+fn document_candidate_revision_is_live(
+    projection: &agent_doc_state_backbone::StateBackboneProjection,
+    document_hash: &str,
+    commit_candidate_hash: &str,
+    model_revision: u64,
+) -> bool {
+    projection
+        .document(document_hash)
+        .and_then(|document| {
+            document
+                .visible_write
+                .commit_candidates
+                .get(commit_candidate_hash)
+        })
+        .is_some_and(|candidate| candidate.model_revision == model_revision)
+}
 const CONNECT_WAIT: Duration = Duration::from_secs(3);
 #[cfg(not(any(test, feature = "test-support")))]
 const LAUNCH_CONNECT_WAIT: Duration = Duration::from_secs(45);
@@ -11542,8 +11570,125 @@ impl ControllerRuntime {
         };
         if inserted {
             self.apply_state_event(event)?;
+            self.retire_superseded_visible_write_candidates(project_root, event);
         }
         Ok(inserted)
+    }
+
+    /// Record a `VisibleWriteCommitCandidateRetired` fact for every candidate
+    /// the document's latest converged write has superseded
+    /// (`#visiblecandidateretention`).
+    ///
+    /// Runs after the two facts that can create a supersession — a converged
+    /// write, or the candidate whose content an earlier converged write already
+    /// named — under the caller's document fence and ingress lock, so the
+    /// retirement lands in the same serialized order as the fact that caused
+    /// it. The derivation is a pure function of the projection, so a converged
+    /// write appended without this controller (or before this build) is
+    /// covered by the next one that passes through here.
+    ///
+    /// Best-effort: the causing fact is already durable, and an unrecorded
+    /// retirement only leaves an older image electable, exactly as before.
+    fn retire_superseded_visible_write_candidates(
+        &self,
+        project_root: &Path,
+        event: &agent_doc_state_backbone::StateEvent,
+    ) {
+        if !matches!(
+            event.fact,
+            agent_doc_state_backbone::StateFact::DocumentWriteConverged { .. }
+                | agent_doc_state_backbone::StateFact::VisibleWriteCommitCandidateObserved { .. }
+        ) {
+            return;
+        }
+        let document_hash = event.fact.document_hash();
+        // With one candidate (the steady state once retirement runs) nothing
+        // can be superseded. Otherwise the derivation hashes images
+        // newest-first and stops at the first the converged write names, so
+        // it is usually one image; each image is hashed at most once per
+        // process. Under the caller's ingress lock the projection is fixed.
+        let (converged_target_hash, retirements) = {
+            let memory = self.memory.lock();
+            let Some((document, converged)) = memory
+                .state_projection
+                .document(document_hash)
+                .filter(|document| document.visible_write.commit_candidates.len() > 1)
+                .and_then(|document| {
+                    Some((document, document.document.latest_converged_write.as_ref()?))
+                })
+            else {
+                return;
+            };
+            let mut hashes = VISIBLE_WRITE_CANDIDATE_CONTENT_HASHES.lock();
+            hashes.retain(|(document, candidate_hash, revision), _| {
+                document != document_hash
+                    || document_candidate_revision_is_live(
+                        &memory.state_projection,
+                        document_hash,
+                        candidate_hash,
+                        *revision,
+                    )
+            });
+            let retirements = document.visible_write.superseded_commit_candidates(
+                &document.transport,
+                &converged.target_hash,
+                |candidate| {
+                    let key = (
+                        document_hash.to_string(),
+                        candidate.commit_candidate_hash.clone(),
+                        candidate.model_revision,
+                    );
+                    if let Some(hash) = hashes.get(&key) {
+                        return Some(hash.clone());
+                    }
+                    let hash = agent_doc_hash::content_hash(
+                        candidate.commit_candidate_content.as_deref()?,
+                    );
+                    hashes.insert(key, hash.clone());
+                    Some(hash)
+                },
+            );
+            (converged.target_hash.clone(), retirements)
+        };
+        let Some(first) = retirements.first() else {
+            return;
+        };
+        let superseded_by = first.superseded_by_commit_candidate_hash.clone();
+        let mut recorded = 0usize;
+        let mut failure = None;
+        for retirement in retirements.iter() {
+            let retired = retirement
+                .clone()
+                .into_event(document_hash, event.fact.label());
+            match append_state_event(project_root, &retired).and_then(|inserted| {
+                inserted
+                    .then(|| self.apply_state_event(&retired))
+                    .transpose()
+            }) {
+                Ok(Some(())) => {
+                    recorded += 1;
+                    VISIBLE_WRITE_CANDIDATE_CONTENT_HASHES.lock().remove(&(
+                        document_hash.to_string(),
+                        retirement.commit_candidate_hash.clone(),
+                        retirement.model_revision,
+                    ));
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    failure = Some(format!("{err:#}"));
+                    break;
+                }
+            }
+        }
+        agent_doc_ops_log_io::log_op(
+            project_root,
+            &format!(
+                "visible_write_candidates_retired document_hash={document_hash} superseded={} recorded={recorded} superseded_by={superseded_by} converged_target_hash={converged_target_hash} trigger={} error={} (#visiblecandidateretention)",
+                retirements.len(),
+                event.fact.label(),
+                failure.as_deref().unwrap_or("none"),
+            ),
+        );
     }
 
     /// Append one durable authority handoff to the main ledger and report
@@ -26116,6 +26261,135 @@ agent:queue\n\
     // `#retainedclearreactive` — the retained-write clear as a subscribed
     // `Effect`, not a `settle_*` call every consumer has to remember.
     // -----------------------------------------------------------------------
+
+    /// `#visiblecandidateretention`: a converged write through the controller
+    /// records a retirement for every candidate older than the one whose exact
+    /// content it converged, the live and durable projections both stop
+    /// electing it, and every other candidate answers as before. Re-deriving
+    /// after a later fact records nothing twice.
+    #[test]
+    fn converged_write_retires_superseded_visible_write_candidates_live_and_durably() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let (_file, document_hash) = retained_test_document(&dir);
+        let runtime = Arc::new(ControllerRuntime::new(test_bootstrap(&dir)).unwrap());
+        let image = |label: &str| format!("# Session\n{label}\n");
+        let append = |event: agent_doc_state_backbone::StateEvent| {
+            runtime
+                .append_apply_state_event_serialized(dir.path(), &event)
+                .unwrap();
+        };
+        let candidate = |revision: u64, label: &str| {
+            append(agent_doc_state_backbone::StateEvent::new(
+                format!("gen-{revision}"),
+                agent_doc_state_backbone::StateFact::OwnerGenerationChanged {
+                    document_hash: document_hash.clone(),
+                    owner: agent_doc_state_backbone::StateOwner::EditorIpcBridge,
+                    generation: revision,
+                },
+            ));
+            append(agent_doc_state_backbone::StateEvent::new(
+                format!("applied-{revision}"),
+                agent_doc_state_backbone::StateFact::EditorPatchApplied {
+                    document_hash: document_hash.clone(),
+                    patch_id: format!("patch-{revision}"),
+                    actor_generation: revision,
+                },
+            ));
+            append(agent_doc_state_backbone::StateEvent::new(
+                format!("candidate-{revision}"),
+                agent_doc_state_backbone::StateFact::VisibleWriteCommitCandidateObserved {
+                    document_hash: document_hash.clone(),
+                    patch_id: format!("patch-{revision}"),
+                    model_revision: revision,
+                    editor_visible_hash: format!("cand-{label}"),
+                    commit_candidate_hash: format!("cand-{label}"),
+                    commit_candidate_content: Some(image(label)),
+                    source: "test".to_string(),
+                },
+            ));
+        };
+        let converged = |label: &str| {
+            append(agent_doc_state_backbone::StateEvent::new(
+                format!("converged-{label}"),
+                agent_doc_state_backbone::StateFact::DocumentWriteConverged {
+                    document_hash: document_hash.clone(),
+                    intent_id: format!("intent-{label}"),
+                    target_hash: agent_doc_hash::content_hash(&image(label)),
+                    source: "test".to_string(),
+                    intent_source: Default::default(),
+                },
+            ));
+        };
+        let retired_rows = || {
+            state_store::load_state_events_by_fact_type_from_db(
+                &open_state_db(dir.path()).unwrap(),
+                "visible_write_commit_candidate_retired",
+            )
+            .unwrap()
+            .len()
+        };
+
+        candidate(10, "first");
+        candidate(20, "second");
+        candidate(30, "in-flight");
+        let before = runtime
+            .document_state_projection(&document_hash)
+            .unwrap()
+            .unwrap();
+        converged("second");
+        assert_eq!(retired_rows(), 1);
+
+        let live = runtime
+            .document_state_projection(&document_hash)
+            .unwrap()
+            .unwrap();
+        let durable = load_state_backbone_projection(dir.path())
+            .unwrap()
+            .document(&document_hash)
+            .cloned()
+            .unwrap();
+        for projection in [&live, &durable] {
+            assert!(
+                projection
+                    .applied_visible_write_candidate("cand-first")
+                    .is_none()
+            );
+            assert!(
+                projection
+                    .applied_visible_write_candidate_for_patch("patch-10")
+                    .is_none()
+            );
+            for hash in ["cand-second", "cand-in-flight"] {
+                assert!(projection.applied_visible_write_candidate(hash).is_some());
+                assert_eq!(
+                    projection.applied_visible_write_candidate(hash),
+                    before.applied_visible_write_candidate(hash),
+                );
+            }
+            assert_eq!(projection.visible_write.latest_model_revision, Some(30));
+        }
+
+        // A later candidate re-runs the derivation; nothing new is superseded.
+        candidate(40, "third");
+        assert_eq!(retired_rows(), 1);
+        // Its convergence supersedes the two candidates below it.
+        converged("third");
+        assert_eq!(retired_rows(), 3);
+        let live = runtime
+            .document_state_projection(&document_hash)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            live.visible_write
+                .commit_candidates
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>(),
+            vec!["cand-third".to_string()]
+        );
+        assert_eq!(live.visible_write.latest_model_revision, Some(40));
+    }
 
     /// The closeout and editor-op reads each need only part of the live
     /// projection. Neither answer should carry the commit-candidate images.

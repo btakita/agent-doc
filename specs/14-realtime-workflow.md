@@ -2346,6 +2346,45 @@ The rules:
   composition and the controller's projection) and `concurrent_row_ops::tests`
   (`agent-doc-document-realtime`).
 
+- **A binary write over the authority carrying a retained write is its
+  successor (`#composefault` root).** On the consume hops of the same haiven-dev
+  window (ops.log 2026-11-24T21:45:24Z-21:45:44Z) the `#composefault` shapes
+  came from two defects; consume read the current authority, not a stale cut:
+  - **The controller's retained projection duplicated the row.** report-complete's
+    target admits the claimed row's `[#q-…]`, which re-keys its cell from
+    `queue:N:txt:<work>` to `queue:N:id:q-…`. Projected over an editor cut where
+    the operator typed elsewhere in the queue, the per-cell merge
+    (`carry_agent_component_ops_onto_response_rebase`) read that as a delete of a
+    row the operator still held plus an insert: `generated_id_promotion_alias`
+    spelled the alias without the `queue:N:` prefix every cell identity carries,
+    so it never matched the base row, and `#keepqueueitems` restored the
+    "omitted" row. The authority held `☑️ … [#q-…]`, its follow-ups, then the
+    stale `🚧` copy (`retained_transition_projection_effect content_hash=6d7e28…`);
+    `queue consume --ack-text` struck that copy and attached the response tree
+    under it, after the follow-ups. The alias now carries the cell prefix, and
+    re-keys a promoted row onto its base row only while the other side still
+    holds that row (an operator delete or rewording keeps the admitted row its
+    own cell). An untouched live row is no longer a progressive revision whose
+    text replaces the admitted row's.
+  - **The retained successor replayed the retained write.** consume derived its
+    write over that authority and wrote it to the CP model (`b861…`), but its
+    retained successor was a 3-way composition of the older target and the
+    newer write over the chain's pre-write base (`composed_hash=27c2…`), which
+    the controller then projected back over the authority (`5406…`). When the
+    cut a successor was derived over already carries the pending retained write
+    (`write_policy::retained_target_carried_by_cut`: the delta verbatim, or the
+    controller's projection of it is a fixed point), the successor replaces the
+    target as is, over the chain's advanced base (ops log
+    `{source}_deferred_write_superseded_by_derived_cut … (#composefault)`).
+    Composition, with the `#dupwrite` and `#composefault` defenses, remains for
+    a successor derived over a cut without the retained write.
+
+  Regressions: `chainedwrite_tests` (`agent-doc-document-realtime-io`:
+  report-complete then consume on one row while the editor never acknowledges
+  and the operator types, correct with `concurrent_row_ops::probe::with_disabled`
+  and rewriting nothing with it on) and `promotion_rekey_tests`
+  (`agent-doc-merge`, the measured documents byte for byte).
+
 The regression
 `typingdupe_composed_retained_write_never_reinserts_a_stale_typing_snapshot`
 (`agent-doc-document-realtime-io`) drives the real retained-intent journal

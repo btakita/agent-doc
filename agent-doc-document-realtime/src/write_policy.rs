@@ -2082,6 +2082,39 @@ pub fn rebase_retained_target_over_editor_cut(
     Ok(rebased)
 }
 
+/// `#composefault` root: whether `cut` already carries the retained write
+/// `merge_base` -> `retained_target`.
+///
+/// It does when the cut holds the target's delta verbatim, or when projecting
+/// the retained write over the cut ([`rebase_retained_target_over_editor_cut`],
+/// the controller's own projection) is a fixed point. That is the
+/// controller's `TargetVisible` reading of a retained intent, so a binary write
+/// derived over such a cut was derived over the retained write's result: it is
+/// that write's successor, and composing the two would replay the retained
+/// write's changes a second time against an older base.
+pub fn retained_target_carried_by_cut(merge_base: &str, retained_target: &str, cut: &str) -> bool {
+    if retained_target == cut {
+        return true;
+    }
+    if retained_target == merge_base {
+        return false;
+    }
+    if agent_doc_merge::captured_splice::current_contains_delta(merge_base, retained_target, cut) {
+        return true;
+    }
+    let Ok(rebased) = rebase_retained_target_over_editor_cut(merge_base, retained_target, cut)
+    else {
+        return false;
+    };
+    let rebased = agent_doc_merge::response_cell::deduplicate_response_cells(&rebased)
+        .ok()
+        .flatten()
+        .unwrap_or(rebased);
+    rebased == cut
+        || agent_doc_merge::captured_splice::without_binary_owned_markers(&rebased)
+            == agent_doc_merge::captured_splice::without_binary_owned_markers(cut)
+}
+
 /// `#retainedprojectionclobber`: a retained rebase that would have deleted
 /// text the operator typed after the retained intent's base.
 #[derive(Debug, Clone, PartialEq, Eq)]

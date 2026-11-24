@@ -7003,103 +7003,138 @@ fn ensure_deferred_document_write_intent_attempt(
                     );
                     return Ok(pending.intent_id);
                 };
-                let retained_target = retire_consumed_completion_feedback_before_composition(
-                    file,
-                    source,
+                // `#composefault` root: the cut this successor was derived over
+                // already carries the retained write (the controller projected
+                // it into the authority while the editor had not acknowledged
+                // it). The successor is then that write's result plus its own
+                // op: it replaces the retained target as is. Composing the two
+                // over the chain's older base would replay the retained
+                // write's changes a second time (`#dupwrite`, `#composefault`).
+                if write_policy::retained_target_carried_by_cut(
                     &merge_base,
                     &pending.target_content,
-                    content,
-                );
-                // `#dupwrite`: the retained target's copies of queue rows the
-                // newer target holds at a later cut (the operator typed on)
-                // are not the chain's op, and neither is a marker the newer
-                // target's change of the row supersedes.
-                let stale_rows = write_policy::neutralize_stale_queue_row_copies(
-                    &merge_base,
-                    &retained_target,
-                    content,
-                );
-                if let Some(stale) = &stale_rows {
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!(
-                            "{source}_deferred_write_stale_queue_rows_reverted file={} prior_intent_id={} reverted={} advanced={} (#dupwrite)",
-                            file.display(),
-                            pending.intent_id,
-                            stale.reverted,
-                            stale.advanced,
-                        ),
-                    );
-                }
-                let (composition_base, retained_target) = stale_rows.map_or_else(
-                    || (merge_base.clone(), retained_target),
-                    |stale| (stale.base, stale.target),
-                );
-                // `#composefault`: the retained target and the newer target
-                // each changed one queue row (report-complete's id admission
-                // and follow-ups, the strike and its response tree): one row,
-                // and each inserted block under its own parent.
-                let concurrent = agent_doc_document_realtime::concurrent_row_ops::reconcile_concurrent_queue_row_ops(
-                    &composition_base,
-                    &retained_target,
-                    content,
-                );
-                if let Some(ops) = &concurrent {
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!(
-                            "{source}_deferred_write_concurrent_queue_row_ops_reconciled file={} prior_intent_id={} folded={} ordered={} (#composefault)",
-                            file.display(),
-                            pending.intent_id,
-                            ops.folded,
-                            ops.ordered,
-                        ),
-                    );
-                }
-                let (composition_base, retained_target) = concurrent.map_or_else(
-                    || (composition_base, retained_target),
-                    |ops| (ops.base, ops.older),
-                );
-                let base_state =
-                    agent_doc_merge::crdt::CrdtDoc::from_text(&composition_base).encode_state();
-                target_content = agent_doc_merge::crdt::merge_by_component_with_operator_rearmed(
-                    Some(&base_state),
-                    &retained_target,
-                    content,
-                    operator_rearm_evidence_for_merge(file, &merge_base, source)?,
-                )
-                .with_context(|| {
-                    format!(
-                        "failed to compose deferred document writes for {}",
-                        file.display()
-                    )
-                })?;
-                target_content =
-                    canonicalize_and_validate_agent_rebase(&target_content, content, file, source)?;
-                // Preserve the original editor cut as the merge base across a
-                // chain of canonical target refinements (commit boundary moves,
-                // marker cleanup, compaction). Re-basing on the prior target would
-                // make a reconnecting pre-force editor look like it deleted the
-                // response introduced by that target. `typingdupe`: only for the
-                // components that chain wrote and the cut already shows; every
-                // other component's base is the cut this successor was derived
-                // over.
-                expected_content = advance_retained_chain_base(
-                    file,
-                    source,
-                    &pending,
-                    merge_base,
                     expected_current,
-                );
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "{source}_deferred_write_composed file={} prior_intent_id={} requested_hash={requested_target_hash} composed_hash={}",
-                        file.display(),
-                        pending.intent_id,
-                        agent_doc_hash::content_hash(&target_content),
-                    ),
-                );
+                ) {
+                    expected_content = advance_retained_chain_base(
+                        file,
+                        source,
+                        &pending,
+                        merge_base,
+                        expected_current,
+                    );
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "{source}_deferred_write_superseded_by_derived_cut file={} prior_intent_id={} prior_target_hash={} requested_hash={requested_target_hash} (#composefault)",
+                            file.display(),
+                            pending.intent_id,
+                            pending.target_hash,
+                        ),
+                    );
+                } else {
+                    let retained_target = retire_consumed_completion_feedback_before_composition(
+                        file,
+                        source,
+                        &merge_base,
+                        &pending.target_content,
+                        content,
+                    );
+                    // `#dupwrite`: the retained target's copies of queue rows the
+                    // newer target holds at a later cut (the operator typed on)
+                    // are not the chain's op, and neither is a marker the newer
+                    // target's change of the row supersedes.
+                    let stale_rows = write_policy::neutralize_stale_queue_row_copies(
+                        &merge_base,
+                        &retained_target,
+                        content,
+                    );
+                    if let Some(stale) = &stale_rows {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "{source}_deferred_write_stale_queue_rows_reverted file={} prior_intent_id={} reverted={} advanced={} (#dupwrite)",
+                                file.display(),
+                                pending.intent_id,
+                                stale.reverted,
+                                stale.advanced,
+                            ),
+                        );
+                    }
+                    let (composition_base, retained_target) = stale_rows.map_or_else(
+                        || (merge_base.clone(), retained_target),
+                        |stale| (stale.base, stale.target),
+                    );
+                    // `#composefault`: the retained target and the newer target
+                    // each changed one queue row (report-complete's id admission
+                    // and follow-ups, the strike and its response tree): one row,
+                    // and each inserted block under its own parent.
+                    let concurrent = agent_doc_document_realtime::concurrent_row_ops::reconcile_concurrent_queue_row_ops(
+                        &composition_base,
+                        &retained_target,
+                        content,
+                    );
+                    if let Some(ops) = &concurrent {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "{source}_deferred_write_concurrent_queue_row_ops_reconciled file={} prior_intent_id={} folded={} ordered={} (#composefault)",
+                                file.display(),
+                                pending.intent_id,
+                                ops.folded,
+                                ops.ordered,
+                            ),
+                        );
+                    }
+                    let (composition_base, retained_target) = concurrent.map_or_else(
+                        || (composition_base, retained_target),
+                        |ops| (ops.base, ops.older),
+                    );
+                    let base_state =
+                        agent_doc_merge::crdt::CrdtDoc::from_text(&composition_base).encode_state();
+                    target_content =
+                        agent_doc_merge::crdt::merge_by_component_with_operator_rearmed(
+                            Some(&base_state),
+                            &retained_target,
+                            content,
+                            operator_rearm_evidence_for_merge(file, &merge_base, source)?,
+                        )
+                        .with_context(|| {
+                            format!(
+                                "failed to compose deferred document writes for {}",
+                                file.display()
+                            )
+                        })?;
+                    target_content = canonicalize_and_validate_agent_rebase(
+                        &target_content,
+                        content,
+                        file,
+                        source,
+                    )?;
+                    // Preserve the original editor cut as the merge base across a
+                    // chain of canonical target refinements (commit boundary moves,
+                    // marker cleanup, compaction). Re-basing on the prior target would
+                    // make a reconnecting pre-force editor look like it deleted the
+                    // response introduced by that target. `typingdupe`: only for the
+                    // components that chain wrote and the cut already shows; every
+                    // other component's base is the cut this successor was derived
+                    // over.
+                    expected_content = advance_retained_chain_base(
+                        file,
+                        source,
+                        &pending,
+                        merge_base,
+                        expected_current,
+                    );
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "{source}_deferred_write_composed file={} prior_intent_id={} requested_hash={requested_target_hash} composed_hash={}",
+                            file.display(),
+                            pending.intent_id,
+                            agent_doc_hash::content_hash(&target_content),
+                        ),
+                    );
+                }
             } else if let Some(retained_base) = pending.expected_content.clone().filter(|base| {
                 agent_doc_hash::content_hash(base).eq_ignore_ascii_case(&pending.expected_hash)
             }) {
@@ -22668,3 +22703,7 @@ scratch
 #[cfg(test)]
 #[path = "composefault_tests.rs"]
 mod composefault_tests;
+
+#[cfg(test)]
+#[path = "chainedwrite_tests.rs"]
+mod chainedwrite_tests;

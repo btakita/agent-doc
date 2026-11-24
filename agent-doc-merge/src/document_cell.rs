@@ -1274,11 +1274,16 @@ fn align_operator_repeats(
     // Match that projection back to its unique base row before repeat
     // disambiguation, so the pre-id and id-bearing cuts stay one cell and the
     // live/operator child position remains authoritative.
+    // `#composefault` root: the alias is a cell identity, so it carries the
+    // `component:occurrence:` prefix every node key identity carries. Without
+    // it no alias ever equals a base identity, and an admitted row re-keyed
+    // from `txt:` to `id:` reads as a delete plus an insert.
     let promotion_aliases = |occ: &ComponentOccurrence| {
         occ.items
             .iter()
             .map(|(key, value)| {
                 crate::crdt::generated_id_promotion_alias(value)
+                    .map(|alias| format!("{}:{}:{alias}", occ.component, occ.occurrence))
                     .unwrap_or_else(|| node_key_identity(key).to_string())
             })
             .collect::<Vec<_>>()
@@ -1286,37 +1291,55 @@ fn align_operator_repeats(
     let base_aliases = promotion_aliases(base);
     let ours_aliases = promotion_aliases(ours);
     let theirs_aliases = promotion_aliases(theirs);
-    let align_to_base =
-        |side: &ComponentOccurrence, side_ids: &mut [String], side_aliases: &[String]| {
-            let mut base_counts = std::collections::HashMap::<&str, usize>::new();
-            let mut side_counts = std::collections::HashMap::<&str, usize>::new();
-            for alias in &base_aliases {
-                *base_counts.entry(alias).or_default() += 1;
+    // `#composefault` root: re-key a promoted row onto its base row only while the
+    // other side still holds that base row, so the two are one cell. When the
+    // other side deleted (or reworded) the base row, the promoted row stays
+    // its own cell: the admitted id is never lost to that delete, and the
+    // steering alignment below decides any rewording.
+    let ours_held = ours_aliases
+        .iter()
+        .cloned()
+        .collect::<std::collections::HashSet<_>>();
+    let theirs_held = theirs_aliases
+        .iter()
+        .cloned()
+        .collect::<std::collections::HashSet<_>>();
+    let align_to_base = |side: &ComponentOccurrence,
+                         side_ids: &mut [String],
+                         side_aliases: &[String],
+                         other_held: &std::collections::HashSet<String>| {
+        let mut base_counts = std::collections::HashMap::<&str, usize>::new();
+        let mut side_counts = std::collections::HashMap::<&str, usize>::new();
+        for alias in &base_aliases {
+            *base_counts.entry(alias).or_default() += 1;
+        }
+        for alias in side_aliases {
+            *side_counts.entry(alias).or_default() += 1;
+        }
+        for (index, alias) in side_aliases.iter().enumerate() {
+            if base_counts.get(alias.as_str()) != Some(&1)
+                || side_counts.get(alias.as_str()) != Some(&1)
+            {
+                continue;
             }
-            for alias in side_aliases {
-                *side_counts.entry(alias).or_default() += 1;
+            if !other_held.contains(alias) {
+                continue;
             }
-            for (index, alias) in side_aliases.iter().enumerate() {
-                if base_counts.get(alias.as_str()) != Some(&1)
-                    || side_counts.get(alias.as_str()) != Some(&1)
-                {
-                    continue;
-                }
-                let base_index = base_aliases
-                    .iter()
-                    .position(|base_alias| base_alias == alias)
-                    .expect("unique base promotion alias exists");
-                let promotion_changed_key = side_ids[index] != base_ids[base_index]
-                    && (crate::crdt::generated_id_promotion_alias(&side.items[index].1).is_some()
-                        || crate::crdt::generated_id_promotion_alias(&base.items[base_index].1)
-                            .is_some());
-                if promotion_changed_key {
-                    side_ids[index] = base_ids[base_index].clone();
-                }
+            let base_index = base_aliases
+                .iter()
+                .position(|base_alias| base_alias == alias)
+                .expect("unique base promotion alias exists");
+            let promotion_changed_key = side_ids[index] != base_ids[base_index]
+                && (crate::crdt::generated_id_promotion_alias(&side.items[index].1).is_some()
+                    || crate::crdt::generated_id_promotion_alias(&base.items[base_index].1)
+                        .is_some());
+            if promotion_changed_key {
+                side_ids[index] = base_ids[base_index].clone();
             }
-        };
-    align_to_base(ours, &mut ours_ids, &ours_aliases);
-    align_to_base(theirs, &mut theirs_ids, &theirs_aliases);
+        }
+    };
+    align_to_base(ours, &mut ours_ids, &ours_aliases, &theirs_held);
+    align_to_base(theirs, &mut theirs_ids, &theirs_aliases, &ours_held);
 
     // A live editor may continue typing after admission has projected a q-id
     // onto the same row. Align only a unique one-to-one progressive revision;
@@ -2117,7 +2140,13 @@ fn compose_aligned(
             (Some(o), Some(t)) => {
                 if o == t {
                     Some(o.clone())
-                } else if ours.component == "queue" && progressive_promotion_keys.contains(id) {
+                } else if ours.component == "queue"
+                    && progressive_promotion_keys.contains(id)
+                    // `#composefault` root: the live row is a progressive revision
+                    // only when the operator revised it. An untouched base row
+                    // carries no operator text to keep over the admission.
+                    && base_map.get(id) != Some(t)
+                {
                     Some(crate::crdt::project_generated_id_onto_live(o, t))
                 } else if ours.component == "queue"
                     && base_map.get(id).is_some_and(|base| {
@@ -3644,6 +3673,10 @@ mod repeat_scope_tests;
 #[cfg(test)]
 #[path = "document_cell_twin_sibling_tests.rs"]
 mod twin_sibling_tests;
+
+#[cfg(test)]
+#[path = "document_cell_promotion_rekey_tests.rs"]
+mod promotion_rekey_tests;
 
 #[cfg(test)]
 mod tests {

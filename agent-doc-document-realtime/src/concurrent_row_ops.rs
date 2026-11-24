@@ -55,6 +55,57 @@ pub fn reconcile_concurrent_queue_row_ops(
     older: &str,
     newer: &str,
 ) -> Option<ConcurrentQueueRowOps> {
+    if probe::disabled() {
+        return None;
+    }
+    let reconciled = reconcile(merge_base, older, newer);
+    probe::record(reconciled.as_ref());
+    reconciled
+}
+
+/// `#composefault` root: a regression probe over [`reconcile_concurrent_queue_row_ops`].
+///
+/// The rule is a defense: binary writes chained over the authoritative
+/// document never compose two ops on one row, so it must have nothing to do.
+/// Tests prove both halves on the calling thread: the outcome is correct with
+/// the defense switched off, and with it on it rewrites nothing.
+#[doc(hidden)]
+pub mod probe {
+    use std::cell::Cell;
+
+    thread_local! {
+        static DISABLED: Cell<bool> = const { Cell::new(false) };
+        static REWRITES: Cell<Option<usize>> = const { Cell::new(None) };
+    }
+
+    pub(super) fn disabled() -> bool {
+        DISABLED.with(Cell::get)
+    }
+
+    pub(super) fn record(reconciled: Option<&super::ConcurrentQueueRowOps>) {
+        if reconciled.is_some_and(|ops| ops.folded + ops.ordered > 0) {
+            REWRITES.with(|slot| slot.set(slot.get().map(|count| count + 1)));
+        }
+    }
+
+    /// Run `f` with the rule switched off on this thread.
+    pub fn with_disabled<T>(f: impl FnOnce() -> T) -> T {
+        let previous = DISABLED.with(|slot| slot.replace(true));
+        let result = f();
+        DISABLED.with(|slot| slot.set(previous));
+        result
+    }
+
+    /// Run `f` and count the calls on this thread that rewrote a row or gap.
+    pub fn count_rewrites<T>(f: impl FnOnce() -> T) -> (T, usize) {
+        let previous = REWRITES.with(|slot| slot.replace(Some(0)));
+        let result = f();
+        let count = REWRITES.with(|slot| slot.replace(previous)).unwrap_or(0);
+        (result, count)
+    }
+}
+
+fn reconcile(merge_base: &str, older: &str, newer: &str) -> Option<ConcurrentQueueRowOps> {
     let base_bodies = top_level_component_bodies(merge_base)?;
     let older_bodies = top_level_component_bodies(older)?;
     let newer_bodies = top_level_component_bodies(newer)?;

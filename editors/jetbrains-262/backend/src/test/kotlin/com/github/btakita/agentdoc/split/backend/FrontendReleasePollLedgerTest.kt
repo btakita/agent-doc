@@ -9,7 +9,7 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
 
 /**
- * GH #440: the shell RPC layer tells the ingress which JetBrains Client refuses this backend's
+ * GH #440: the shell RPC layer tells the ingress which JetBrains Client cannot load this backend's
  * frontend release. A Client before 0.2.1052 fetches the whole package without asking for its
  * identity; every later Client asks for the identity first.
  */

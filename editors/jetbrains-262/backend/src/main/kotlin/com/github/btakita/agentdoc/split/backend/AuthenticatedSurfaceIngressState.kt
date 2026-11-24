@@ -88,8 +88,9 @@ private fun notifyFrontendPluginMismatch(project: Project, mismatch: FrontendPlu
 }
 
 /**
- * GH #435/#440: the notification title. A Client that refuses this backend's release leads with
- * the version comparison; a schema-1 lease on the same shell keeps the unanswered-negotiation one.
+ * GH #435/#440: the notification title. A Client that cannot load this backend's release (another
+ * shell, so the backend withholds it) leads with the version comparison; a schema-1 lease on the
+ * same shell keeps the unanswered-negotiation one.
  */
 internal fun frontendPluginMismatchTitle(mismatch: FrontendPluginMismatch, backendVersion: String?): String {
     val backend = backendVersion?.takeIf { it.isNotBlank() && it != "unknown" }
@@ -99,7 +100,7 @@ internal fun frontendPluginMismatchTitle(mismatch: FrontendPluginMismatch, backe
         val order = refusal.clientVersionOrder(backend)
         return when {
             order == null || order == 0 ->
-                "Agent Doc: $client refuses the backend's ${backend ?: "plugin"}: different Agent Doc shell"
+                "Agent Doc: $client cannot load the backend's ${backend ?: "plugin"}: different Agent Doc shell"
             order < 0 -> "Agent Doc: $client is older than the backend's ${backend ?: "plugin"}: update the Client plugin"
             else -> "Agent Doc: $client is newer than the backend's ${backend ?: "plugin"}: install one version on both"
         }
@@ -326,7 +327,7 @@ internal class AuthenticatedSurfaceIngressState(
             return@withLock rejected(SurfaceIngressStatus.STALE_LEASE, lease, "lease or frontend epoch is stale")
         }
         publications[lease.leaseId]?.takeIf { !it.shellRefusalReported }?.let { publication ->
-            // GH #440: a Client proven to refuse this backend's release shell is reported at once,
+            // GH #440: a Client proven unable to load this backend's release shell is reported at once,
             // and once more if that proof arrives after a first report (its first whole-package
             // poll can land after its first snapshot): the shell refusal replaces the negotiation
             // story. Everything else is reported once per lease, after GH #441's provisional hold.
@@ -664,8 +665,9 @@ internal class AuthenticatedSurfaceIngressState(
  * [unansweredNegotiation] marks a schema-1 snapshot: every frontend since schema negotiation
  * (2026-10-20) publishes schema 1 only when the backend gave no schema answer within its 5 s
  * window, so the remedy is a new lease (a Client reconnect), not a reinstall.
- * [shellRefusal] (GH #440) marks a Client whose Agent Doc shell is not this backend's: it refuses
- * this backend's frontend release on every poll, and only the backend's plugin in the Client helps.
+ * [shellRefusal] (GH #440) marks a Client whose Agent Doc shell is not this backend's: it cannot
+ * load this backend's frontend release (since GH #435 the backend withholds it from such a Client),
+ * and only the backend's plugin in the Client helps.
  */
 internal data class FrontendPluginMismatch(
     val detail: String,
@@ -674,11 +676,12 @@ internal data class FrontendPluginMismatch(
 )
 
 /**
- * GH #440: the proof that the JetBrains Client refuses this backend's frontend release. A Client
- * checks the release's shell digest against its own and refuses a different one (the check
- * stays: a generation built against another shell cannot load). [clientShell] is null when the
- * Client never reported it, which is the case for every Client before 0.2.1052
- * ([legacyReleasePoller]); those poll the whole package, and their shell predates this backend's.
+ * GH #440: the proof that the JetBrains Client cannot load this backend's frontend release. A
+ * generation built against another shell cannot load: a Client refuses one whose shell digest is
+ * not its own, and since GH #435 [FrontendReleaseDeliveryGate] withholds the release from such a
+ * Client, so it never receives it. [clientShell] is null when the Client never reported it, which
+ * is the case for every Client before 0.2.1052 ([legacyReleasePoller]); those poll the whole
+ * package, and their shell predates this backend's.
  */
 internal data class FrontendShellRefusal(
     val clientShell: String?,
@@ -737,9 +740,9 @@ internal fun compareAgentDocVersions(left: String?, right: String?): Int? {
  *
  * GH #440: [clientEvidence] is what the shell's RPC layer learned about the same Client. A Client
  * whose shell is proven different (its schema-5 receipt or its own build report), or that polls
- * the whole release package the way only Clients before 0.2.1052 do, refuses this backend's
- * release on every poll; that leads, because asking for the schema again cannot fix it. Matching
- * shells keep the unanswered-negotiation story.
+ * the whole release package the way only Clients before 0.2.1052 do, cannot load this backend's
+ * release, which the backend withholds from it; that leads, because asking for the schema again
+ * cannot fix it. Matching shells keep the unanswered-negotiation story.
  */
 internal fun frontendPluginMismatch(
     snapshot: FrontendSurfaceSnapshot,
@@ -809,6 +812,10 @@ internal fun frontendShellRefusal(
         )
     }
     if (clientEvidence?.legacyReleasePoller != true) return null
+    // GH #440 review: a Client that names its plugin in its lease (GH #441) is 0.2.1053 or newer,
+    // so its whole-package poll is a fallback (a 0.2.1055+ Client whose release offer went
+    // unanswered), not proof of a shell before 0.2.1052. Its shell is unknown: no refusal.
+    if (leasePluginVersion != null) return null
     return FrontendShellRefusal(
         clientShell = null,
         backendShell = backendShellDigest,
@@ -818,20 +825,27 @@ internal fun frontendShellRefusal(
     )
 }
 
-private fun frontendShellRefusalStory(refusal: FrontendShellRefusal): String {
-    val clientLine = "`[frontend-impl] refused: release shell ${refusal.backendShell} does not match this client " +
-        "shell ${refusal.clientShell ?: "(its own)"}`"
+/**
+ * GH #440 review (cycle 1): what the operator can check. Since GH #435 [FrontendReleaseDeliveryGate]
+ * withholds the release from a Client on another shell, so that Client never receives it and never
+ * logs the `[frontend-impl] refused:` line older backends caused; the backend's own idea.log has
+ * the withholding instead.
+ */
+internal fun frontendShellRefusalStory(refusal: FrontendShellRefusal): String {
     val why = if (refusal.legacyReleasePoller) {
-        "the JetBrains Client fetched this backend's whole frontend release ${refusal.legacyPackagePolls} " +
+        "the JetBrains Client polled this backend's whole frontend release ${refusal.legacyPackagePolls} " +
             "time(s) without asking for its identity, which only Agent Doc Clients before " +
             "${FrontendShellRefusal.IDENTITY_POLL_FIRST_VERSION} do; their shell is older than this backend's, " +
-            "so the Client refuses the release on every poll"
+            "so this backend withholds the release from that Client (backend idea.log: " +
+            "`[frontend-impl] release withheld client=... legacy_poll=true`) and the Client cannot load it"
     } else {
-        "the JetBrains Client runs a different Agent Doc shell than this backend, so it refuses this " +
-            "backend's frontend release on every poll"
+        "the JetBrains Client runs a different Agent Doc shell than this backend, so this backend " +
+            "withholds its frontend release from that Client and the Client cannot load it (a Client " +
+            "from 0.2.1055 on logs `[frontend-impl] client plugin mismatch ... backend_shell=" +
+            "${refusal.backendShell.take(12)} client_shell=${refusal.clientShell?.take(12) ?: "..."}` in its idea.log)"
     }
-    return "$why and logs $clientLine in its idea.log. Asking for the schema again or reconnecting cannot " +
-        "change the Client's shell; only this backend's plugin in the Client can"
+    return "$why. Asking for the schema again or reconnecting cannot change the Client's shell; only this " +
+        "backend's plugin in the Client can"
 }
 
 /**
@@ -883,7 +897,7 @@ internal fun frontendPluginMismatchRemedy(version: String?, ideDataDir: String?,
 }
 
 /**
- * GH #440: the remedy for a Client that refuses this backend's release. It leads with the version
+ * GH #440: the remedy for a Client that cannot load this backend's release. It leads with the version
  * comparison and the exact folder to replace, then the full install ([install]), then how the
  * Client log proves it worked. The text carries no angle brackets (the notification body is HTML).
  */

@@ -119,14 +119,18 @@ creates one with the receipt's attach command.
   which had congested the link. `agent-doc upgrade` on the backend reads the
   backend `idea.log` and prints `JetBrains Client frontend stuck on snapshot
   schema 1` with this repair while that lease is still open.
-- Client shell refusal (GH #440): a Client older than the backend refuses the
-  backend's frontend release on every poll (Client `idea.log`:
-  `[frontend-impl] refused: release shell <backend> does not match this client
-  shell <client>`), then publishes schema 1. A reconnect cannot fix that. The
-  backend says so when it can prove it (the Client fetched the whole release
-  package without asking for its identity, which only Clients before 0.2.1052
-  do, or the Client reported another shell): `frontend/backend plugin mismatch
-  client_shell=... backend_shell=... client_plugin=... backend_plugin=...`,
+- Client shell refusal (GH #440): a Client on an older shell cannot load the
+  backend's frontend release, then publishes schema 1. A reconnect cannot fix
+  that. Since 0.2.1055 the backend withholds the release from such a Client
+  (backend `idea.log`: `[frontend-impl] release withheld client=...
+  reason=... legacy_poll=true` for a Client before 0.2.1052), so the Client
+  never receives it and logs no `[frontend-impl] refused:` line; older
+  backends sent it, and the Client refused it on every poll with that line.
+  The backend says so when it can prove it (the Client polled the whole
+  release package without asking for its identity, which only Clients before
+  0.2.1052 do, or the Client reported another shell): `frontend/backend
+  plugin mismatch client_shell=... backend_shell=... client_plugin=...
+  backend_plugin=...`,
   with no `frontend_schema=` token, and a warning titled `JetBrains Client
   plugin ... is older than the backend's ...`. Repair: replace the Client's
   `plugins/frontend/agent-doc-jetbrains-262` with the backend's ZIP (the

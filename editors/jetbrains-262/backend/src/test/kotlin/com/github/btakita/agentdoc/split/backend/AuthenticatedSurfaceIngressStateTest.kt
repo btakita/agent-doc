@@ -399,7 +399,11 @@ class AuthenticatedSurfaceIngressStateTest {
         }
         assertEquals(1, mismatches.size, mismatches.toString())
         assertTrue(mismatches.single().contains("client_shell=dddddddddddd backend_shell=aaaaaaaaaaaa"), mismatches.toString())
-        assertTrue(mismatches.single().contains("refuses this backend's frontend release"), mismatches.toString())
+        assertTrue(
+            mismatches.single().contains("this backend withholds its frontend release from that Client"),
+            mismatches.toString(),
+        )
+        assertFalse(mismatches.single().contains("refused:"), mismatches.toString())
     }
 
     /**
@@ -572,7 +576,22 @@ class AuthenticatedSurfaceIngressStateTest {
             ),
             refusal.detail,
         )
-        assertTrue(refusal.detail.contains("release shell $BACKEND_SHELL does not match this client shell"), refusal.detail)
+        // GH #440 review (cycle 1): since GH #435 the backend withholds the release from this Client,
+        // so the story names the backend's withholding line; the Client never receives the release
+        // and never logs `[frontend-impl] refused:`.
+        assertEquals(
+            "the JetBrains Client polled this backend's whole frontend release 2 time(s) without asking " +
+                "for its identity, which only Agent Doc Clients before 0.2.1052 do; their shell is older than " +
+                "this backend's, so this backend withholds the release from that Client (backend idea.log: " +
+                "`[frontend-impl] release withheld client=... legacy_poll=true`) and the Client cannot load it. " +
+                "Asking for the schema again or reconnecting cannot change the Client's shell; only this " +
+                "backend's plugin in the Client can",
+            frontendShellRefusalStory(refusal.shellRefusal!!),
+        )
+        assertTrue(refusal.detail.contains("withholds the release from that Client"), refusal.detail)
+        assertTrue(refusal.detail.contains("legacy_poll=true"), refusal.detail)
+        assertFalse(refusal.detail.contains("refused:"), refusal.detail)
+        assertFalse(refusal.detail.contains("fetched"), refusal.detail)
         assertTrue(refusal.detail.contains("cannot change the Client's shell"), refusal.detail)
         // `agent-doc upgrade` reads `frontend_schema=1` as the reconnect case.
         assertFalse(refusal.detail.contains("frontend_schema="), refusal.detail)
@@ -616,7 +635,11 @@ class AuthenticatedSurfaceIngressStateTest {
             mismatch.detail,
         )
         assertTrue(
-            mismatch.detail.contains("release shell $BACKEND_SHELL does not match this client shell $CLIENT_SHELL"),
+            mismatch.detail.contains(
+                "this backend withholds its frontend release from that Client and the Client cannot load it " +
+                    "(a Client from 0.2.1055 on logs `[frontend-impl] client plugin mismatch ... " +
+                    "backend_shell=1265693a728a client_shell=b5741f110bfb` in its idea.log)",
+            ),
             mismatch.detail,
         )
         assertEquals(
@@ -676,6 +699,43 @@ class AuthenticatedSurfaceIngressStateTest {
             "Agent Doc: JetBrains Client plugin 0.2.1053 is older than the backend's 0.2.1054: update the Client plugin",
             frontendPluginMismatchTitle(mismatch, "0.2.1054"),
         )
+    }
+
+    /**
+     * GH #440 review (cycle 1): a Client that names its plugin in its lease (GH #441) is 0.2.1053 or
+     * newer. A 0.2.1055 Client whose release offer went unanswered falls back to the whole-package
+     * poll without asking for the identity; that is not proof of a shell before 0.2.1052, so it is
+     * never labeled `before_0.2.1052` or told to update an older plugin.
+     */
+    @Test
+    fun aLegacyPollFromAClientThatNamesItsLeasePluginIsNotAnOldShell() = runBlocking {
+        val schemaOne = snapshot("frontend-a", 1).forSchema(1)
+        val legacy = FrontendClientShellEvidence(legacyPackagePolls = 1)
+        assertEquals(null, frontendShellRefusal(schemaOne, null, BACKEND_SHELL, legacy, "0.2.1054", "0.2.1055"))
+        val named = frontendPluginMismatch(schemaOne, null, BACKEND_SHELL, legacy, "0.2.1054", "0.2.1055")!!
+        assertEquals(null, named.shellRefusal)
+        assertTrue(named.unansweredNegotiation, named.detail)
+        assertFalse(named.detail.contains("before_0.2.1052"), named.detail)
+        // Without a lease version the same poll still proves an old shell.
+        assertTrue(frontendPluginMismatch(schemaOne, null, BACKEND_SHELL, legacy, "0.2.1054")!!.shellRefusal!!.legacyReleasePoller)
+
+        // Through the lease state machine: the lease names plugin 0.2.1055.
+        val mismatches = mutableListOf<FrontendPluginMismatch>()
+        val state = AuthenticatedSurfaceIngressState(
+            RecordingPublisher(),
+            RecordingForwarder(),
+            backendActivationReceipt = backendActivation.copy(shellDigest = BACKEND_SHELL),
+            clientShellEvidence = FrontendClientShellEvidenceSource { legacy },
+            backendPluginVersion = { "0.2.1054" },
+            scheduleDiagnostic = { _, _ -> },
+            log = { _, _ -> },
+            onFrontendPluginMismatch = { _, _, mismatch -> mismatches += mismatch },
+        )
+        val frontend = frontendLeaseInstanceId("frontend-a", "0.2.1055")
+        val lease = state.open("client-a", frontend)
+        repeat(3) { attempt -> state.publish("client-a", lease, snapshot(frontend, attempt + 1L).forSchema(1)) }
+        assertTrue(mismatches.none { it.shellRefusal != null }, mismatches.toString())
+        assertTrue(mismatches.none { it.detail.contains("before_0.2.1052") }, mismatches.toString())
     }
 
     /**

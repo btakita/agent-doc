@@ -2179,13 +2179,7 @@ pub fn apply_claim_attempts(
         if item.source != SteeringSource::Queue {
             continue;
         }
-        let claim = item
-            .vector
-            .as_deref()
-            .and_then(&claim_of)
-            .or_else(|| claim_of(&item.verbatim))
-            .or_else(|| item.previous.as_deref().and_then(&claim_of));
-        if let Some(claim) = claim {
+        if let Some(claim) = claim_for_item(item, &claim_of) {
             if item.current_item && !claim.owner.starts_with("subagent:") {
                 continue;
             }
@@ -2203,6 +2197,94 @@ pub fn apply_claim_attempts(
             item.worker_id = claim.worker.map(|worker| worker.worker_id);
         }
     }
+}
+
+/// The claim a queue item resolves to: its nest vector, its row, then the
+/// text it was edited from.
+fn claim_for_item(
+    item: &SteeringItem,
+    claim_of: impl Fn(&str) -> Option<agent_doc_queue::queue_claim::QueueClaim>,
+) -> Option<agent_doc_queue::queue_claim::QueueClaim> {
+    item.vector
+        .as_deref()
+        .and_then(&claim_of)
+        .or_else(|| claim_of(&item.verbatim))
+        .or_else(|| item.previous.as_deref().and_then(&claim_of))
+}
+
+/// A queue row's text with every binary decoration removed (progress, pin and
+/// priority markers, the `[#owner#N]` claim prefix, a generated `[#q-…]`), for
+/// telling an operator edit from a lifecycle repaint.
+fn authored_row_key(text: &str) -> String {
+    let norm = normalize_queue_text(text);
+    collapse_ws(agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(&norm).trim())
+}
+
+/// The text this attempt was claimed under, when the operator has edited its
+/// row since (`#claimfollowedit` records the follow in this generation).
+/// `None` when the row is the claimed text up to binary decorations.
+fn claimed_text_before_operator_edit(
+    claim: &agent_doc_queue::queue_claim::QueueClaim,
+) -> Option<String> {
+    let last = claim.followed_from.last()?;
+    // A legacy claim's follows are unattributable: keep them visible.
+    if claim.followed_generation == 0 {
+        return Some(last.clone());
+    }
+    // A re-claim starts a new attempt on the row as it is now; only this
+    // generation's own follows are edits since the claim.
+    if claim.followed_generation != claim.generation {
+        return None;
+    }
+    let current = authored_row_key(&claim.item_text);
+    claim
+        .followed_from
+        .iter()
+        .rev()
+        .find(|previous| authored_row_key(previous) != current)
+        .cloned()
+}
+
+/// `#selfsteer`: retire the claimer's own view of a claimed row.
+///
+/// A claimed row the steering watermark never acknowledged surfaces as an
+/// ADDITION carrying its claim repaint (`🟡`/`🚧 [#owner#N]`), whether the
+/// coordinator added the row itself, a preflight carried it, or a pool refill
+/// offered it. The coordinator ran `queue claim` with that exact text and
+/// handed it to the worker, so the addition is binary bookkeeping, not operator
+/// steering: it is dropped. When the operator edited the row after the claim,
+/// the item becomes the edit it is (`previous` = the claimed text), so it
+/// forwards to the owner. Reported attempts keep their closeout routing.
+/// Returns how many additions were retired.
+pub fn retire_claimed_additions(
+    items: &mut Vec<SteeringItem>,
+    claim_of: impl Fn(&str) -> Option<agent_doc_queue::queue_claim::QueueClaim>,
+) -> usize {
+    let before = items.len();
+    items.retain_mut(|item| {
+        if item.source != SteeringSource::Queue
+            || item.change != SteeringChange::Added
+            || item.dispatch != SteeringDispatch::ForwardToOwner
+            || item.current_item
+        {
+            return true;
+        }
+        let Some(claim) = claim_for_item(item, &claim_of) else {
+            return true;
+        };
+        if claim.state == agent_doc_queue::queue_claim::QueueClaimState::Reported {
+            return true;
+        }
+        match claimed_text_before_operator_edit(&claim) {
+            Some(previous) => {
+                item.change = SteeringChange::Edited;
+                item.previous = Some(normalize_queue_text(&previous));
+                true
+            }
+            None => false,
+        }
+    });
+    before - items.len()
 }
 
 /// The receipt key of one degraded struck-row deletion report

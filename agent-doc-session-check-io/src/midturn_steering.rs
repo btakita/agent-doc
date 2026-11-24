@@ -851,6 +851,18 @@ fn route_claimed_items(
             lineage_identity.and_then(|id| attempts.get(&id).cloned())
         };
         core::apply_claim_attempts(items, claim_for);
+        // `#selfsteer`: a claimed row's addition is the claimer's own
+        // bookkeeping unless the operator edited it since the claim.
+        let retired = core::retire_claimed_additions(items, claim_for);
+        if retired > 0 && !status_only {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "midturn_steering_claimed_additions_retired file={} count={retired} (#selfsteer)",
+                    file.display()
+                ),
+            );
+        }
     }
     let mut cancellations = std::collections::HashMap::new();
     for receipt in &ledger.cancellations {
@@ -6004,9 +6016,12 @@ mod tests {
         assert!(after_claim.items[0].verbatim.ends_with("/117"));
         assert_ne!(after_claim.fingerprint, wake.fingerprint);
 
-        // The agent channel still delivers both, once: the wake ate nothing.
+        // The agent channel still delivers the unclaimed one: the wake ate
+        // nothing. The claimed addition is the claimer's own bookkeeping
+        // (`#selfsteer`): the coordinator claimed it with exactly that text.
         let hook = observe(&file, CONSUMER_HOOK, true).unwrap().expect("hook");
-        assert_eq!(hook.items.len(), 2, "{hook:?}");
+        assert_eq!(hook.items.len(), 1, "{hook:?}");
+        assert!(hook.items[0].verbatim.ends_with("/117"), "{hook:?}");
         assert!(hook.after_close);
         // ...and once surfaced there, nothing is left to wake for.
         assert!(observe_for_wake(&file).unwrap().items.is_empty());
@@ -8690,17 +8705,12 @@ mod tests {
             assert!(wake.items.is_empty(), "{wake:?}");
             assert_eq!(wake.pending, 0, "{wake:?}");
             assert!(wake.recheck_after_ms.is_none(), "{wake:?}");
+            // Once settled, the projected `🚧 [#subagent:one#1] do [#one]`
+            // addition is the claimer's own bookkeeping (`#selfsteer`): the
+            // claim was made with exactly that text, so nothing surfaces.
             let settled = settled.expect("settled peek");
             assert_eq!(settled.pending, 0, "{settled:?}");
-            assert_eq!(settled.items.len(), 1, "{settled:?}");
-            let item = &settled.items[0];
-            assert_eq!(item.source, core::SteeringSource::Queue);
-            assert_eq!(item.change, core::SteeringChange::Added);
-            assert_eq!(item.dispatch, core::SteeringDispatch::ForwardToOwner);
-            assert!(item.verbatim.contains("🚧"), "{item:?}");
-            assert!(item.verbatim.contains("do [#one]"), "{item:?}");
-            assert_eq!(item.owner.as_deref(), Some("subagent:one"));
-            assert_eq!(item.generation, Some(1));
+            assert!(settled.items.is_empty(), "{settled:?}");
             assert!(settled_wake.items.is_empty(), "{settled_wake:?}");
             assert_eq!(settled_wake.pending, 0, "{settled_wake:?}");
         }
@@ -8719,6 +8729,231 @@ mod tests {
         assert!(
             !settled_wake.items[0].verbatim.contains("[#one]"),
             "{settled_wake:?}"
+        );
+    }
+
+    /// Disk-backed claim projection effects for detached-document fixtures.
+    struct SelfSteerDiskEffects;
+
+    impl agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionEffects for SelfSteerDiskEffects {
+        fn current_document_content(
+            &self,
+            file: &std::path::Path,
+            _source: &str,
+        ) -> anyhow::Result<String> {
+            Ok(std::fs::read_to_string(file)?)
+        }
+
+        fn converge_document_or_disk(
+            &self,
+            file: &std::path::Path,
+            target_content: &str,
+            _source_content: &str,
+            _reason: &str,
+        ) -> anyhow::Result<()> {
+            std::fs::write(file, target_content)?;
+            Ok(())
+        }
+    }
+
+    /// The coordinator's own `queue claim` + `queue start` + projection of
+    /// `item`, exactly as the CLI runs them inside one tool call.
+    fn coordinator_claims_and_starts(file: &Path, item: &str, owner: &str) {
+        let effects = SelfSteerDiskEffects;
+        let (_, claim) = agent_doc_queue_io::queue_cmd::claim_with_runtime_projection(
+            &effects, file, item, owner, 3600,
+        )
+        .unwrap();
+        let running = agent_doc_queue_io::queue_claim::start_attempt(
+            file,
+            &claim.item_text,
+            owner,
+            &format!("worker:{owner}"),
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_cmd::project_claim_item_runtime_state_with_effects(
+            &effects,
+            file,
+            &running.item_text,
+            false,
+        )
+        .unwrap();
+    }
+
+    /// `#selfsteer` (agent-doc-bugs.md, 2026-11-24): the coordinator added a
+    /// `[from:coordinator key=…]` row (or preflight carried an operator row
+    /// the hook watermark never acknowledged), then ran `queue claim` and
+    /// `queue start` for it. The next PostToolUse hook minted a steering token
+    /// whose only item was that row's own claim repaint, `dispatch=
+    /// forward_to_owner source=queue change=added owner=subagent:<label>`,
+    /// framed as an operator edit. The claimer handed the worker exactly that
+    /// text, so a claimed addition unchanged since its claim is the binary's
+    /// bookkeeping, in-turn and on the committed-fallback hook watermark alike.
+    /// Real operator edits in the same window still surface: a new row, and an
+    /// edit of the claimed row (forwarded as an edit, with the claimed text as
+    /// `previous`).
+    #[test]
+    fn coordinator_claim_of_an_unacknowledged_row_is_not_operator_steering() {
+        let row = "[from:coordinator key=selfsteer] agent: fix the steering echo #selfsteer";
+        let earlier_row = "- fix the flaky test\n";
+        let doc = |rows: &str| {
+            format!(
+                "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:queue -->\n- current task\n{rows}<!-- /agent:queue -->\n"
+            )
+        };
+        for fallback in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+            let file = dir.path().join("plan.md");
+            let baseline = doc("");
+            std::fs::write(&file, &baseline).unwrap();
+            let cycle =
+                agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
+                    .unwrap();
+            seed_for_cycle(
+                &file,
+                &cycle.cycle_id,
+                &baseline,
+                Some("current task"),
+                Vec::new(),
+            )
+            .unwrap();
+            if fallback {
+                // The live shape: a turn-boundary report left the hook on a
+                // committed-baseline fallback watermark (`#steeringstale`).
+                close_cycle(&file, &baseline);
+                agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
+                    .unwrap();
+                let earlier = doc(earlier_row);
+                std::fs::write(&file, &earlier).unwrap();
+                agent_doc_snapshot_io::checkpoint_document_baseline(
+                    &file,
+                    &earlier,
+                    agent_doc_ops_log_io::log_op,
+                )
+                .unwrap();
+                close_cycle(&file, &earlier);
+                prepare_closeout(&file)
+                    .unwrap()
+                    .expect("closeout report")
+                    .acknowledge(&file)
+                    .unwrap();
+                let root = project_root(&file).unwrap();
+                let conn = agent_doc_sqlite::state_store::open_state_db(&root).unwrap();
+                let hook = load_watermark(&conn, &state_key(CONSUMER_HOOK, &file))
+                    .unwrap()
+                    .unwrap();
+                assert!(
+                    hook.cycle_id.starts_with("committed:"),
+                    "fixture must reproduce the fallback hook watermark: {hook:?}"
+                );
+            }
+
+            // One tool call: the coordinator adds its row and claims + starts
+            // it; no hook ran in between.
+            let prior = if fallback { earlier_row } else { "" };
+            std::fs::write(&file, doc(&format!("{prior}- {row}\n"))).unwrap();
+            coordinator_claims_and_starts(&file, row, "subagent:selfsteer");
+            let projected = std::fs::read_to_string(&file).unwrap();
+            assert!(
+                projected.contains("[#subagent:selfsteer#1]"),
+                "fixture must carry the claim repaint: {projected}"
+            );
+            let output = post_tool_use_document_response(
+                &file,
+                now_ms(),
+                |_, _, _, _| Ok(None),
+                &mut || false,
+            )
+            .unwrap();
+            assert!(
+                output.is_none(),
+                "fallback={fallback}: the coordinator's own claim repaint minted operator steering: {output:?}"
+            );
+
+            // A real operator addition in the same window still surfaces, and
+            // the claimed row stays silent.
+            let with_operator_row = projected.replace(
+                "<!-- /agent:queue -->",
+                "- operator: also check the wake path\n<!-- /agent:queue -->",
+            );
+            std::fs::write(&file, &with_operator_row).unwrap();
+            let report = observe(&file, CONSUMER_HOOK, true)
+                .unwrap()
+                .expect("the operator's addition surfaces");
+            assert_eq!(report.items.len(), 1, "fallback={fallback}: {report:?}");
+            assert!(
+                report.items[0]
+                    .verbatim
+                    .contains("also check the wake path"),
+                "fallback={fallback}: {report:?}"
+            );
+            assert_eq!(report.items[0].change, core::SteeringChange::Added);
+            assert_ne!(
+                report.items[0].dispatch,
+                core::SteeringDispatch::ForwardToOwner
+            );
+        }
+    }
+
+    /// `#selfsteer`: when the operator edits a row the coordinator claimed
+    /// before any hook acknowledged it, the first hook still forwards that
+    /// edit to the owner, as an edit of the claimed text.
+    #[test]
+    fn operator_edit_of_an_unacknowledged_claimed_row_still_forwards_to_owner() {
+        let row = "[from:coordinator key=selfsteer] agent: fix the steering echo #selfsteer";
+        let doc = |rows: &str| {
+            format!(
+                "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:queue -->\n- current task\n{rows}<!-- /agent:queue -->\n"
+            )
+        };
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let baseline = doc("");
+        std::fs::write(&file, &baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
+                .unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            &baseline,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        std::fs::write(&file, doc(&format!("- {row}\n"))).unwrap();
+        coordinator_claims_and_starts(&file, row, "subagent:selfsteer");
+        let projected = std::fs::read_to_string(&file).unwrap();
+        let edited = projected.replace(row, &format!("{row}: also cover the wake path"));
+        assert_ne!(edited, projected, "fixture must edit the claimed row");
+        std::fs::write(&file, &edited).unwrap();
+        let claimed = agent_doc_queue_io::queue_claim::claimed_items_for_content(&file, &edited);
+        assert!(
+            claimed.claims(&format!("{row}: also cover the wake path")),
+            "the claim followed the operator edit"
+        );
+        let report = observe(&file, CONSUMER_HOOK, true)
+            .unwrap()
+            .expect("the operator's edit surfaces");
+        assert_eq!(report.items.len(), 1, "{report:?}");
+        let item = &report.items[0];
+        assert_eq!(item.dispatch, core::SteeringDispatch::ForwardToOwner);
+        assert_eq!(item.owner.as_deref(), Some("subagent:selfsteer"));
+        assert!(
+            item.verbatim.contains("also cover the wake path"),
+            "{item:?}"
+        );
+        assert_eq!(item.change, core::SteeringChange::Edited, "{item:?}");
+        assert!(
+            item.previous
+                .as_deref()
+                .is_some_and(|previous| previous.contains(row)
+                    && !previous.contains("also cover the wake path")),
+            "{item:?}"
         );
     }
 

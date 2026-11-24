@@ -571,21 +571,126 @@ pub fn reconcile_compacted_committed_capture(file: &Path) -> Result<bool> {
     if !retired {
         return Ok(false);
     }
+    log_compacted_capture_reconciled(file, &capture.capture_id, &state.cycle_id);
+    Ok(true)
+}
+
+/// Outcome of [`settle_compacted_capture_and_detect_stuck`].
+#[derive(Debug)]
+pub struct StuckCaptureSweep {
+    /// [`reconcile_compacted_committed_capture`]'s result.
+    pub reconciled: Result<bool>,
+    /// [`stuck_captured_cycle`]'s result, read after that reconcile.
+    pub stuck: Option<StuckCapturedCycleInfo>,
+}
+
+/// [`reconcile_compacted_committed_capture`] (only when `settle`) followed by
+/// [`stuck_captured_cycle`], from ONE read of their shared evidence
+/// (`#q-8383c546c6ca`).
+///
+/// Preflight ran the two back to back, and each loaded the cycle state, the
+/// closeout projection and the committed document, then searched it for the
+/// captured response: two of each per preflight for the same cut. A reconcile
+/// that retires the capture leaves nothing stuck, exactly as the second read
+/// used to observe; otherwise the evidence the reconcile read is the evidence
+/// the detection reads.
+pub fn settle_compacted_capture_and_detect_stuck(file: &Path, settle: bool) -> StuckCaptureSweep {
+    let quiet = |reconciled| StuckCaptureSweep {
+        reconciled,
+        stuck: None,
+    };
+    let state = match agent_doc_cycle_state_io::load_with_closeout_projection(file) {
+        Ok(Some(state)) => state,
+        Ok(None) => return quiet(Ok(false)),
+        Err(err) => return quiet(Err(err)),
+    };
+    if state.phase != agent_doc_turn::CyclePhase::Committed {
+        return quiet(Ok(false));
+    }
+    let Some(capture_id) = state.capture_id.clone() else {
+        return quiet(Ok(false));
+    };
+    let projection = match agent_doc_cycle_state_io::load_closeout_projection(file) {
+        Ok(Some(projection)) => projection,
+        Ok(None) => return quiet(Ok(false)),
+        Err(err) => return quiet(Err(err)),
+    };
+    // Both readers accept only this cycle's own capture with the cycle's
+    // response hash and a non-blank body. The detection also skips a capture a
+    // reconcile already retired.
+    let retired = projection.captured_response_retired_reason.is_some();
+    let Some(capture) = projection.captured_response.filter(|capture| {
+        capture.capture_id == capture_id
+            && capture.cycle_id == state.cycle_id
+            && state
+                .response_sha256
+                .as_deref()
+                .is_none_or(|sha| sha == capture.response_sha256)
+            && !capture.response_body.trim().is_empty()
+    }) else {
+        return quiet(Ok(false));
+    };
+    let head = match agent_doc_git_io::revision::show_head(file) {
+        Ok(Some(head)) => head,
+        Ok(None) => return quiet(Ok(false)),
+        Err(err) => return quiet(Err(err)),
+    };
+    if agent_doc_turn::response_replay::response_materialized_in_content(
+        &capture.response_body,
+        &head,
+    ) {
+        return quiet(Ok(false));
+    }
+    if response_materialized_in_head_compact_archive(file, &capture.response_body, &head) {
+        if !settle {
+            return quiet(Ok(false));
+        }
+        // Archive-backed materialization is the one case the reconcile
+        // settles: retire the capture so the false positive cannot resurface
+        // after the archive is collected.
+        let reconciled = agent_doc_cycle_state_io::retire_projected_captured_response(
+            file,
+            &state.cycle_id,
+            &capture.capture_id,
+            "referenced_compact_archive",
+        )
+        .inspect(|retired| {
+            if *retired {
+                log_compacted_capture_reconciled(file, &capture.capture_id, &state.cycle_id);
+            }
+        });
+        return quiet(reconciled);
+    }
+    if retired {
+        return quiet(Ok(false));
+    }
+    StuckCaptureSweep {
+        reconciled: Ok(false),
+        stuck: Some(StuckCapturedCycleInfo {
+            cycle_id: state.cycle_id,
+            response_body_len: capture.response_body.len(),
+            capture_id: capture.capture_id,
+            capture_state: capture_state_label(capture_state_for_cycle_phase(state.phase))
+                .to_string(),
+        }),
+    }
+}
+
+fn log_compacted_capture_reconciled(file: &Path, capture_id: &str, cycle_id: &str) {
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "reconcile_compacted_committed_capture file={} capture_id={} cycle_id={}",
             file.display(),
-            capture.capture_id,
-            state.cycle_id
+            capture_id,
+            cycle_id
         ),
     );
     eprintln!(
         "[preflight] reconciled compacted committed capture {} for {} (response archived out of HEAD; retired the ledger projection so the stuck-capture false positive cannot resurface)",
-        capture.capture_id,
+        capture_id,
         file.display()
     );
-    Ok(true)
 }
 
 fn response_materialized_in_head_compact_archive(

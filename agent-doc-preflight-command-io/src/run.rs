@@ -1114,24 +1114,28 @@ fn run_with_options_to_writer_in_pass(
     // a one-time terminal `Discarded`, so a later archive GC cannot resurface the
     // false-positive stuck warning. After this, `stuck_captured_cycle` sees a
     // discarded capture and returns None for the same case.
-    if !options.probe {
-        match agent_doc_flow_io::closeout::reconcile_compacted_committed_capture(file) {
-            Ok(true) => {
-                eprintln!(
-                    "[preflight] reconciled compacted committed capture for {}",
-                    file.display()
-                );
-            }
-            Ok(false) => {}
-            Err(err) => {
-                eprintln!(
-                    "[preflight] warning: failed to reconcile compacted committed capture for {}: {err}",
-                    file.display()
-                );
-            }
+    // `#q-8383c546c6ca`: one read of the cycle state, closeout projection and
+    // committed document serves both the settle and the detection.
+    let stuck_sweep = agent_doc_flow_io::closeout::settle_compacted_capture_and_detect_stuck(
+        file,
+        !options.probe,
+    );
+    match stuck_sweep.reconciled {
+        Ok(true) => {
+            eprintln!(
+                "[preflight] reconciled compacted committed capture for {}",
+                file.display()
+            );
+        }
+        Ok(false) => {}
+        Err(err) => {
+            eprintln!(
+                "[preflight] warning: failed to reconcile compacted committed capture or detect a stuck captured cycle for {}: {err}",
+                file.display()
+            );
         }
     }
-    if let Some(info) = agent_doc_flow_io::closeout::stuck_captured_cycle(file) {
+    if let Some(info) = stuck_sweep.stuck {
         warnings.push(PreflightWarning {
             code: "stuck_captured_cycle".to_string(),
             message: format!(

@@ -837,6 +837,32 @@ impl ClaimQueueView {
     /// the queue graph does not parse (the same condition under which
     /// [`crate::queue_continuation::live_queue_head_rows`] is `None`).
     pub fn from_content(content: &str) -> Option<Self> {
+        // A pure function of the text (no installed steer: it reads the raw
+        // block rows). One admission derives it from the same cut once per
+        // claim-ledger read, which re-derived every row's lineage each time
+        // (`#q-8383c546c6ca`).
+        thread_local! {
+            static MEMO: std::cell::RefCell<
+                agent_doc_element::content_memo::ContentMemo<
+                    std::sync::Arc<Option<ClaimQueueView>>,
+                >,
+            > = const {
+                std::cell::RefCell::new(agent_doc_element::content_memo::ContentMemo::new(
+                    4 * 1024,
+                    8,
+                    16 * 1024 * 1024,
+                ))
+            };
+        }
+        let Ok(view) = agent_doc_element::content_memo::memoized(&MEMO, content, |content| {
+            Ok::<_, std::convert::Infallible>(std::sync::Arc::new(Self::from_content_uncached(
+                content,
+            )))
+        });
+        view.as_ref().clone()
+    }
+
+    fn from_content_uncached(content: &str) -> Option<Self> {
         use crate::document_queue::{self, QueueEntry};
         let components = agent_doc_element::element::parse(content).ok()?;
         let graph = crate::queue_graph::QueueGraph::parse(content, &components).ok()?;
@@ -5482,6 +5508,24 @@ mod tests {
             claim_identity_at(&annotated_entries, annotated_live).unwrap(),
             claim_identity(&annotated_struck_lineage)
         );
+    }
+
+    /// `#q-8383c546c6ca`: the memoized view of a document past the memo's size
+    /// floor is the uncached derivation, on the first read and on a repeat.
+    #[test]
+    fn memoized_claim_queue_view_equals_the_uncached_derivation() {
+        let mut body = String::new();
+        for parent in 0..80 {
+            body.push_str(&format!(
+                "- ### https://github.com/example/repo/pull/{parent}\n  - ~~#review~~\n  - 📥 #review ⟦effect:{parent}⟧\n"
+            ));
+        }
+        let content = format!("<!-- agent:queue go -->\n{body}<!-- /agent:queue -->\n");
+        assert!(content.len() > 4 * 1024, "past the memo's size floor");
+        let uncached = ClaimQueueView::from_content_uncached(&content);
+        assert!(uncached.is_some());
+        assert_eq!(ClaimQueueView::from_content(&content), uncached);
+        assert_eq!(ClaimQueueView::from_content(&content), uncached);
     }
 
     /// `#nostuckidentity`: once the live row is claimed, later effect

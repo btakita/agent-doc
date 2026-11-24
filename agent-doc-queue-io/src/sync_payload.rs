@@ -126,13 +126,6 @@ pub fn build_project_queue_sync_payload(
             }
         }
         normalize_claims_for_queue_sync(&mut claims, now_secs);
-        let committed_content = match agent_doc_git_io::revision::show_head(&document) {
-            Ok(content) => content,
-            Err(error) => {
-                payload.scan_errors.push(scan_error(&document, error));
-                None
-            }
-        };
         let lineage = if claims.is_empty() {
             None
         } else {
@@ -152,28 +145,32 @@ pub fn build_project_queue_sync_payload(
             &claims,
         ) {
             Ok(mut document_payload) => {
-                let retained_capture_targets =
-                    agent_doc_cycle_state_io::load_document_projection(&document)
-                        .ok()
-                        .flatten()
-                        .map(|projection| {
-                            if projection.document.pending_write_journal.is_empty() {
-                                projection
-                                    .document
-                                    .pending_write
-                                    .into_iter()
-                                    .map(|intent| intent.target_content)
-                                    .collect::<Vec<_>>()
-                            } else {
-                                projection
-                                    .document
-                                    .pending_write_journal
-                                    .into_iter()
-                                    .map(|intent| intent.target_content)
-                                    .collect::<Vec<_>>()
-                            }
-                        })
-                        .unwrap_or_default();
+                // `#q-8383c546c6ca`: the commit surface (`git show HEAD:`) and
+                // the retained capture targets (a whole per-document state
+                // projection) are evidence only for a reported, lost-reported or
+                // running row that has a claim. The scan visits every session
+                // document of the project, and almost none carry such a row, so
+                // read them only for a document that does.
+                let needs_response_surfaces = !claims.is_empty()
+                    && !(document_payload.reported_checkmark.is_empty()
+                        && document_payload.lost_reported.is_empty()
+                        && document_payload.running.is_empty());
+                let committed_content = if needs_response_surfaces {
+                    match agent_doc_git_io::revision::show_head(&document) {
+                        Ok(content) => content,
+                        Err(error) => {
+                            payload.scan_errors.push(scan_error(&document, error));
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+                let retained_capture_targets = if needs_response_surfaces {
+                    retained_capture_targets(&document)
+                } else {
+                    Vec::new()
+                };
                 apply_response_evidence(
                     &mut document_payload,
                     &content,
@@ -203,6 +200,31 @@ pub fn build_project_queue_sync_payload(
         }
     }
     Ok(payload)
+}
+
+/// Target contents of the document's retained (not yet converged) writes.
+fn retained_capture_targets(document: &Path) -> Vec<String> {
+    agent_doc_cycle_state_io::load_document_projection(document)
+        .ok()
+        .flatten()
+        .map(|projection| {
+            if projection.document.pending_write_journal.is_empty() {
+                projection
+                    .document
+                    .pending_write
+                    .into_iter()
+                    .map(|intent| intent.target_content)
+                    .collect::<Vec<_>>()
+            } else {
+                projection
+                    .document
+                    .pending_write_journal
+                    .into_iter()
+                    .map(|intent| intent.target_content)
+                    .collect::<Vec<_>>()
+            }
+        })
+        .unwrap_or_default()
 }
 
 fn reclassify_ended_owner_claims(

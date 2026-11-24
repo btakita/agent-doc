@@ -1780,7 +1780,8 @@ pub fn state_event_retention_due(last_run_ms: u64, now_ms: u64, interval: Durati
 }
 
 /// Run every `state_events` retention pass, best-effort, at most once per
-/// [`STATE_EVENT_RETENTION_INTERVAL`] per process.
+/// [`STATE_EVENT_RETENTION_INTERVAL`] per database: per process, and across
+/// processes through the durable [`STATE_EVENT_RETENTION_STAMP_KEY`] stamp.
 ///
 /// Retention is maintenance, never a reason to fail state-db open: each pass
 /// logs and continues, and the run stamp only advances on a fully clean pass so
@@ -1804,6 +1805,16 @@ fn run_state_event_retention_if_due(conn: &Connection) {
         stamps.insert(key.clone(), now_ms);
         last_run_ms
     };
+    // `#q-8383c546c6ca`: the interval is per database, not per process. Every
+    // short-lived process (each hook, each preflight) used to run the whole
+    // pass on its first open; on the live 740 MB `haiven-dev` `state.db` that
+    // was 1-3s of correlated scans in front of the first read. A process that
+    // ran a clean pass within the interval leaves a durable stamp in the
+    // database, and this open skips.
+    let wall_now_ms = retention_wall_clock_ms();
+    if retention_stamp_is_fresh(conn, wall_now_ms, STATE_EVENT_RETENTION_INTERVAL) {
+        return;
+    }
     let mut clean = true;
     for (label, outcome) in [
         (
@@ -1887,7 +1898,15 @@ fn run_state_event_retention_if_due(conn: &Connection) {
             eprintln!("[agent-doc] warning: failed to prune {label} events: {err:#}");
         }
     }
-    if !clean {
+    if clean {
+        // Best-effort: a missing stamp only means the next process prunes.
+        let _ = upsert_project_runtime_state_in_db(
+            conn,
+            STATE_EVENT_RETENTION_STAMP_KEY,
+            &wall_now_ms.to_string(),
+            wall_now_ms,
+        );
+    } else {
         let mut guard = STATE_EVENT_RETENTION_LAST_RUN_MS.lock();
         // Restore the previous stamp so a transient failure retries at the next
         // open instead of waiting out the whole interval.
@@ -1898,6 +1917,31 @@ fn run_state_event_retention_if_due(conn: &Connection) {
             stamps.insert(key, last_run_ms);
         }
     }
+}
+
+/// `project_runtime_state` key of the durable cross-process retention stamp:
+/// the wall-clock millis of the last clean pass over this database.
+const STATE_EVENT_RETENTION_STAMP_KEY: &str = "state_event_retention_last_clean_pass_ms";
+
+fn retention_wall_clock_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis().min(u64::MAX as u128) as u64)
+        .unwrap_or_default()
+}
+
+/// Whether the database records a clean pass less than `interval` before
+/// `now_ms`. A missing or unreadable stamp, or one from the future (a clock
+/// step), is stale, so retention runs.
+fn retention_stamp_is_fresh(conn: &Connection, now_ms: u64, interval: Duration) -> bool {
+    load_project_runtime_state_from_db(conn, STATE_EVENT_RETENTION_STAMP_KEY)
+        .ok()
+        .flatten()
+        .and_then(|stamp| stamp.parse::<u64>().ok())
+        .is_some_and(|last_ms| {
+            now_ms >= last_ms
+                && now_ms - last_ms < interval.as_millis().min(u64::MAX as u128) as u64
+        })
 }
 
 /// Drop rows of a **superseding** `state_events` fact beyond the newest
@@ -12404,6 +12448,12 @@ mod tests {
                     [format!("obs-{i}")],
                 )?;
             }
+            // The seed's own open stamped a clean pass; the clones model
+            // databases whose last pass is older than the interval.
+            tx.execute(
+                "DELETE FROM project_runtime_state WHERE state_key = ?1",
+                [STATE_EVENT_RETENTION_STAMP_KEY],
+            )?;
             tx.commit()?;
         }
 
@@ -12672,6 +12722,82 @@ mod tests {
         Ok(())
     }
 
+    /// `#q-8383c546c6ca`: a clean pass in one process stamps the database, so
+    /// the next short-lived process (a hook, a preflight) skips the pass on its
+    /// first open instead of re-running every correlated scan. A missing or
+    /// stale stamp is due, as before.
+    #[test]
+    fn retention_interval_is_shared_across_processes_by_a_durable_stamp() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+        let key = conn.path().unwrap_or_default().to_string();
+        let stamp = || -> Result<Option<String>> {
+            load_project_runtime_state_from_db(&conn, STATE_EVENT_RETENTION_STAMP_KEY)
+        };
+        assert!(
+            stamp()?.is_some(),
+            "the first clean pass stamps the database"
+        );
+        let insert_steering = |label: &str, count: usize| -> Result<()> {
+            for i in 0..count {
+                conn.execute(
+                    "INSERT INTO state_events (event_id, document_hash, domain, fact_type, payload_json, timestamp) \
+                     VALUES (?1, 'docA', 'closeout', 'realtime_steering_observed', ?2, 0)",
+                    rusqlite::params![
+                        format!("steer-{label}-{i}"),
+                        r#"{"fact":{"cycle_id":"cycle-1"}}"#
+                    ],
+                )?;
+            }
+            Ok(())
+        };
+        let steering = || -> Result<i64> {
+            Ok(conn.query_row(
+                "SELECT COUNT(*) FROM state_events WHERE fact_type = 'realtime_steering_observed'",
+                [],
+                |row| row.get(0),
+            )?)
+        };
+        // A new process: no in-memory stamp for this database.
+        let forget_process_stamp = || {
+            if let Some(stamps) = STATE_EVENT_RETENTION_LAST_RUN_MS.lock().as_mut() {
+                stamps.remove(&key);
+            }
+        };
+
+        insert_steering("fresh", 3)?;
+        forget_process_stamp();
+        run_state_event_retention_if_due(&conn);
+        assert_eq!(
+            steering()?,
+            3,
+            "a fresh durable stamp from another process skips the pass"
+        );
+
+        conn.execute(
+            "DELETE FROM project_runtime_state WHERE state_key = ?1",
+            [STATE_EVENT_RETENTION_STAMP_KEY],
+        )?;
+        forget_process_stamp();
+        run_state_event_retention_if_due(&conn);
+        assert_eq!(steering()?, 1, "without a stamp the pass runs");
+        assert!(stamp()?.is_some(), "the clean pass stamps again");
+
+        let stale_ms =
+            retention_wall_clock_ms() - STATE_EVENT_RETENTION_INTERVAL.as_millis() as u64 - 1;
+        upsert_project_runtime_state_in_db(
+            &conn,
+            STATE_EVENT_RETENTION_STAMP_KEY,
+            &stale_ms.to_string(),
+            stale_ms,
+        )?;
+        insert_steering("stale", 2)?;
+        forget_process_stamp();
+        run_state_event_retention_if_due(&conn);
+        assert_eq!(steering()?, 1, "a stamp older than the interval is due");
+        Ok(())
+    }
+
     /// The periodic retention pass (not just the individual prune helpers)
     /// bounds superseded realtime steering snapshots per document-cycle and
     /// undo checkpoint/clear snapshots per document. Live `haiven-dev` on
@@ -12704,6 +12830,10 @@ mod tests {
         if let Some(stamps) = STATE_EVENT_RETENTION_LAST_RUN_MS.lock().as_mut() {
             stamps.remove(&key);
         }
+        conn.execute(
+            "DELETE FROM project_runtime_state WHERE state_key = ?1",
+            [STATE_EVENT_RETENTION_STAMP_KEY],
+        )?;
         run_state_event_retention_if_due(&conn);
 
         let count = |fact_type: &str| -> Result<i64> {

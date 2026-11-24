@@ -7908,7 +7908,11 @@ fn entries_derived(entries: &[QueueEntry]) -> std::rc::Rc<std::cell::RefCell<Ent
         static TABLES: std::cell::RefCell<Vec<(Vec<QueueEntry>, Shared)>> =
             const { std::cell::RefCell::new(Vec::new()) };
     }
-    const KEPT: usize = 4;
+    // One admission interleaves the blocks of every queue of the current
+    // document and of each sibling session document it scans; with four
+    // slots those blocks evicted each other and every lineage read rebuilt
+    // its block's alias table (`#q-8383c546c6ca`).
+    const KEPT: usize = 32;
     TABLES.with(|tables| {
         let mut tables = tables.borrow_mut();
         if let Some(at) = tables

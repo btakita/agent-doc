@@ -7,7 +7,8 @@ pub use agent_doc_flow_io::closeout::{
     CloseoutBinaryFreshnessEvidence, CloseoutCaptureEvidence, CloseoutCycleEvidence,
     CloseoutEditorIpcEvidence, CloseoutQueueOnlyDriftEvidence, CloseoutRecoveryEvidence,
     CloseoutResponseBodyEvidence, RecoveryApplication, closeout_recovery_command_for_file,
-    reconcile_compacted_committed_capture, stuck_captured_cycle,
+    reconcile_compacted_committed_capture, settle_compacted_capture_and_detect_stuck,
+    stuck_captured_cycle,
 };
 
 pub fn complete_required_closeout(file: &Path) -> Result<bool> {
@@ -660,6 +661,20 @@ mod tests {
         assert_eq!(info.capture_id, capture.capture_id);
         assert_eq!(info.response_body_len, response.len());
         assert_eq!(info.capture_state, "committed");
+
+        // `#q-8383c546c6ca`: preflight's single-read sweep settles nothing and
+        // reports the same stuck capture.
+        for settle in [true, false] {
+            let sweep = settle_compacted_capture_and_detect_stuck(&doc, settle);
+            assert!(!sweep.reconciled.unwrap());
+            let swept = sweep
+                .stuck
+                .expect("the sweep detects the same stuck capture");
+            assert_eq!(swept.cycle_id, info.cycle_id);
+            assert_eq!(swept.capture_id, info.capture_id);
+            assert_eq!(swept.response_body_len, info.response_body_len);
+            assert_eq!(swept.capture_state, info.capture_state);
+        }
     }
 
     #[test]
@@ -2579,6 +2594,98 @@ mod tests {
         std::fs::remove_file(&archive_path).unwrap();
         assert!(
             stuck_captured_cycle(&doc).is_none(),
+            "a reconciled (discarded) capture must not flag stuck after the archive is removed"
+        );
+    }
+
+    #[test]
+    fn preflight_stuck_sweep_settles_a_compacted_capture_once_and_survives_archive_gc() {
+        // #stuck-capture-compact-false-positive: reconciliation marks the capture
+        // Discarded once the response is proven in the compact archive, so the
+        // false-positive stuck warning cannot resurface even if the archive is
+        // later garbage-collected.
+        let base = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Older response.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = "### Re: compacted — gpt-5\n\nArchived response body.\n";
+        let (dir, doc) = setup_git_project_with_doc(base);
+        let archive_dir = dir.path().join(".agent-doc/archives");
+        std::fs::create_dir_all(&archive_dir).unwrap();
+        let archive_path = archive_dir.join("doc-20260527-000000.md");
+        std::fs::write(
+            &archive_path,
+            format!(
+                "---\narchived_from: compact\ncomponent: exchange\ndocument: doc.md\n---\n\n{base}\n{response}"
+            ),
+        )
+        .unwrap();
+        let compacted = format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n*Compacted. Content archived to `{}`*\n<!-- /agent:exchange -->\n",
+            archive_path.display()
+        );
+
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        std::fs::write(&doc, &compacted).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &compacted,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        run_git(dir.path(), &["add", "doc.md"]);
+        run_git(dir.path(), &["commit", "-m", "compact", "--no-verify"]);
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(&compacted),
+            Some(&compacted),
+        )
+        .unwrap();
+
+        // `#q-8383c546c6ca`: a probe sweep reports nothing stuck (the archive
+        // materializes the response) and settles nothing.
+        let probe = settle_compacted_capture_and_detect_stuck(&doc, false);
+        assert!(!probe.reconciled.unwrap());
+        assert!(probe.stuck.is_none());
+
+        // The admitting sweep settles it exactly as the reconcile does, so the
+        // probe left it unsettled.
+        let sweep = settle_compacted_capture_and_detect_stuck(&doc, true);
+        assert!(
+            sweep.reconciled.unwrap(),
+            "expected the sweep to settle the compacted committed capture"
+        );
+        assert!(sweep.stuck.is_none());
+        assert!(
+            agent_doc_capture_io::load_active(&doc).unwrap().is_none(),
+            "a reconciled terminal capture must not remain active"
+        );
+
+        // A second pass is a no-op (already discarded).
+        let again = settle_compacted_capture_and_detect_stuck(&doc, true);
+        assert!(
+            !again.reconciled.unwrap(),
+            "the sweep should be idempotent once the capture is discarded"
+        );
+        assert!(again.stuck.is_none());
+
+        // Durability: even after the archive is GC'd, the discarded capture must
+        // not resurface as a stuck-capture false positive.
+        std::fs::remove_file(&archive_path).unwrap();
+        let after_gc = settle_compacted_capture_and_detect_stuck(&doc, true);
+        assert!(!after_gc.reconciled.unwrap());
+        assert!(
+            after_gc.stuck.is_none(),
             "a reconciled (discarded) capture must not flag stuck after the archive is removed"
         );
     }

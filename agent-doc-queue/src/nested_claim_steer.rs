@@ -174,6 +174,14 @@ pub fn expand_entries(
 fn expand_prompt(prompt: &QueuePrompt, snapshots: &[ClaimTimeSnapshot], out: &mut Vec<QueueEntry>) {
     let index = out.len();
     out.push(QueueEntry::Prompt(prompt.clone()));
+    // Only a folded free-text prompt can split. Decide that from the row text
+    // before deriving its identity: the identity reads every earlier row of
+    // the growing `out` prefix, a fresh slice per row, so deriving it for every
+    // row re-derived the prefix's alias table each time (cubic in the queue
+    // length; `#q-8383c546c6ca`).
+    if !has_subprompts(&prompt.text) || is_tracked_do(&prompt.text) {
+        return;
+    }
     // Parents already pushed supply the nest vector (`#nestlistlineage`).
     let identity = crate::queue_claim::claim_identity_at(out, index)
         .unwrap_or_else(|| claim_identity(&prompt.text));
@@ -183,9 +191,6 @@ fn expand_prompt(prompt: &QueuePrompt, snapshots: &[ClaimTimeSnapshot], out: &mu
     else {
         return;
     };
-    if !has_subprompts(&prompt.text) || is_tracked_do(&prompt.text) {
-        return;
-    }
     let split = split_nested_claim_steer_with_limit(
         &prompt.text,
         &snapshot.claim_time_text,

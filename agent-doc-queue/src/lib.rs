@@ -59,6 +59,7 @@ pub mod handback_followups;
 pub mod hourglass_lifetime;
 #[cfg(test)]
 mod incremental_corpus;
+pub mod inline_pipe;
 pub mod linked_todo_queue;
 pub mod loose_ends;
 #[cfg(test)]

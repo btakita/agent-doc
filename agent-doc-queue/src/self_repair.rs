@@ -183,6 +183,10 @@ pub enum SelfRepairKind {
     /// are still open into its `✅` form, or struck a `✅` hand-off row whose
     /// last stage closed ([`crate::hand_off::settle_hand_off_heads`]).
     HandOffStage,
+    /// `#pipeprompt` inline form: rewrote an open inline hand-off row
+    /// (`#rebase |> #address`) into the nested ` |>` form it stands for
+    /// ([`crate::inline_pipe::expand_inline_hand_offs`]).
+    InlineHandOff,
 }
 
 impl SelfRepairKind {
@@ -209,6 +213,7 @@ impl SelfRepairKind {
             Self::StaleTypingCopy => "stale_typing_copy",
             Self::MisplacedFollowupRow => "misplaced_followup_row",
             Self::HandOffStage => "hand_off_stage",
+            Self::InlineHandOff => "inline_hand_off",
         }
     }
 }
@@ -1314,7 +1319,17 @@ pub fn self_repair_document_with_claims(
     let (lifted, lift_repairs) =
         crate::followup_lift::lift_misplaced_followups(&current, is_claimed);
     repairs.extend(lift_repairs);
-    (lifted != document).then_some((lifted, repairs))
+    // `#pipeprompt` inline form: an open `#rebase |> #address` row becomes
+    // the nested ` |>` statement it stands for, before any attempt holds it.
+    let (expanded, expand_repairs) =
+        if lifted.contains(agent_doc_element_queue::pipe::INLINE_HAND_OFF_JOIN) {
+            let presets = crate::goal_preset_terminal::effective_presets_for_content(&lifted);
+            crate::inline_pipe::expand_inline_hand_offs(&lifted, &presets, is_claimed)
+        } else {
+            (lifted, Vec::new())
+        };
+    repairs.extend(expand_repairs);
+    (expanded != document).then_some((expanded, repairs))
 }
 
 /// Whether a hand-back action item asks the operator to clean up one of

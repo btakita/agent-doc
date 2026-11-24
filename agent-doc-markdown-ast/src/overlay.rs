@@ -1560,6 +1560,10 @@ pub enum PipeLintKind {
     /// A ` |>` row sits inside a ` |` statement, ` |+` deep pipe or ` >`
     /// fold: the whole block is one task, so nothing is handed off.
     HandOffInsideBlock,
+    /// A row splits on ` | ` with a preset first but a segment that does not
+    /// start with a preset (`#review | then summarize`): it stays prose, not
+    /// an inline pipe. Nest the rest under the first segment with ` |`.
+    InlinePipeProseSegment,
 }
 
 impl PipeLintKind {
@@ -1574,6 +1578,7 @@ impl PipeLintKind {
             Self::ClaimedRowInStatement => "agent-doc/pipe-toggle-while-claimed",
             Self::HandOffWithoutChildren => "agent-doc/hand-off-without-stages",
             Self::HandOffInsideBlock => "agent-doc/hand-off-inside-block",
+            Self::InlinePipeProseSegment => "agent-doc/inline-pipe-prose-segment",
         }
     }
 }
@@ -1595,7 +1600,8 @@ pub struct PipeLint {
 /// closed to the leaf-only shape on a malformed statement.
 pub fn pipe_statement_lints(content: &str) -> Vec<PipeLint> {
     use agent_doc_element_queue::pipe::{
-        EdgeOp, pipe_marker_in_code_span, reserved_edge_hint, reserved_edge_suffix, row_work_text,
+        EdgeOp, is_inline_hand_off, near_inline_pipe, pipe_marker_in_code_span, reserved_edge_hint,
+        reserved_edge_suffix, row_work_text,
     };
     use agent_doc_element_queue::subprompts::{line_indent_width, list_item_content};
 
@@ -1691,7 +1697,9 @@ pub fn pipe_statement_lints(content: &str) -> Vec<PipeLint> {
                     ),
                 );
             }
-            if op == EdgeOp::HandOff && parent_op.is_some_and(EdgeOp::folds) {
+            if (op == EdgeOp::HandOff || is_inline_hand_off(row))
+                && parent_op.is_some_and(EdgeOp::folds)
+            {
                 push(
                     PipeLintKind::HandOffInsideBlock,
                     format!(
@@ -1717,6 +1725,14 @@ pub fn pipe_statement_lints(content: &str) -> Vec<PipeLint> {
                         ),
                     );
                 }
+            }
+            if let Some(segment) = near_inline_pipe(row) {
+                push(
+                    PipeLintKind::InlinePipeProseSegment,
+                    format!(
+                        "`{path}` is not an inline pipe: `{segment}` does not start with a preset, so the row stays prose. To pipe into it, nest it under the row before it with ` |`"
+                    ),
+                );
             }
             if pipe_marker_in_code_span(row) {
                 push(

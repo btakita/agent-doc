@@ -6431,14 +6431,59 @@ pub fn submitted_prompt_at(entries: &[QueueEntry], index: usize) -> Option<Strin
     if let Some(op) = edge_block_op(&identity) {
         return Some(submitted_edge_block(entries, index, &identity, op));
     }
-    let submitted = match nest_vector_at(entries, index, &identity) {
+    let lineage = nest_vector_at(entries, index, &identity);
+    let pipeline = inline_pipe_submission_note(entries, index, &identity);
+    let submitted = match lineage {
         Some(lineage) => with_prompt_tree(entries, index, &without_binary_markers(&lineage)),
         None => identity,
+    };
+    let submitted = match pipeline {
+        Some(note) => format!("{submitted}\n{note}"),
+        None => submitted,
     };
     Some(match hand_off_submission_note(entries, index) {
         Some(note) => format!("{submitted}\n{note}"),
         None => submitted,
     })
+}
+
+/// Line that follows a submitted inline pipe row (`#pipeprompt` inline form,
+/// `- #review | #address`).
+pub const INLINE_PIPE_PROMPT_HEADER: &str = "Inline pipe (`#pipeprompt`): this row is ONE task whose stages are its segments, split on ` | ` (and ` |> `), run in order; each stage takes the previous stage's result, and each segment's leading `#preset` is a directive of this row. Finish each stage before the next. Its pipeline:";
+
+/// The inline-pipe note for the leaf at `index`: [`INLINE_PIPE_PROMPT_HEADER`]
+/// and the row's pipeline after its ancestor lineage, when its first line is
+/// an inline pipe row
+/// ([`agent_doc_element_queue::pipe::inline_pipe_segments`]); else `None`.
+/// A ` |> ` row reaches a worker only when an attempt held it before it
+/// could be split into stage rows ([`crate::inline_pipe`]), so its stages run
+/// in this one task.
+fn inline_pipe_submission_note(
+    entries: &[QueueEntry],
+    index: usize,
+    identity: &str,
+) -> Option<String> {
+    let first = identity.lines().next()?;
+    let segments = agent_doc_element_queue::pipe::inline_pipe_segments(first)?;
+    let mut pipeline = String::new();
+    for (position, segment) in segments.iter().enumerate() {
+        if position > 0 {
+            pipeline.push_str(match segments[position - 1].next {
+                agent_doc_element_queue::pipe::EdgeOp::HandOff => {
+                    agent_doc_element_queue::pipe::INLINE_HAND_OFF_JOIN
+                }
+                _ => agent_doc_element_queue::pipe::INLINE_PIPE_JOIN,
+            });
+        }
+        pipeline.push_str(&segment.text);
+    }
+    let prefix = nest_ancestor_path(entries, index)
+        .map(|path| format!("{}: ", without_binary_markers(&path)))
+        .unwrap_or_default();
+    Some(format!(
+        "{INLINE_PIPE_PROMPT_HEADER}\n- {prefix}{}",
+        without_binary_markers(&pipeline)
+    ))
 }
 
 /// Line that follows a submitted ` |>` row while its stage 1 runs
@@ -6599,9 +6644,16 @@ pub fn edge_block_op(text: &str) -> Option<agent_doc_element_queue::pipe::EdgeOp
     Some(EdgeOp::of_row(head)).filter(|op| op.folds())
 }
 
-/// Whether `text` (marker-stripped) is a folded ` |` statement.
+/// Whether `text` (marker-stripped) is a ` |` statement: a folded block
+/// whose head ends in ` |` / ` |+`, or an inline pipe row
+/// (`#review | #address`, [`agent_doc_element_queue::pipe::inline_pipe_segments`]),
+/// which is the same statement on one line.
 pub fn is_pipe_statement_text(text: &str) -> bool {
     edge_block_op(text).is_some_and(agent_doc_element_queue::pipe::EdgeOp::pipes)
+        || text
+            .lines()
+            .next()
+            .is_some_and(agent_doc_element_queue::pipe::is_inline_pipe)
 }
 
 /// Whether the entry at `index` is a folded ` |` statement (`#pipeprompt`).

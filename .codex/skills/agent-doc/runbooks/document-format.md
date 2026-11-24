@@ -153,7 +153,8 @@ head:
   struck on their own. Commands pipe too: `- #review |` over `- #address`.
 - The operator is the last authored token, before any `[#q-…]` or other
   binary suffix, and never inside a code span. A ` | ` in the middle of a row
-  is prose. Adding or removing the operator does not change the row's claim
+  is prose, unless every segment starts with a preset (an inline pipe, below).
+  Adding or removing the operator does not change the row's claim
   identity. While the head is claimed an edit cannot remove it, and while a
   row inside is claimed adding it does not fold the block.
 - Stage indicator: the worker reports the stage it starts with
@@ -206,6 +207,42 @@ previous stage's hand-back as its input:
 - The state is all in the document: after a crash nothing reruns, a lost
   stage worker retries only that stage, and self-repair finishes a strike
   an older writer left without its `✅`.
+
+#### Inline pipes: `- #review | #address` (`#pipeprompt`)
+
+A row whose segments are all presets can pipe on one line:
+
+```markdown
+- #review | #address
+- #gh-fix https://github.com/org/repo/issues/7 | #pr
+- #rebase |> #address |> #adversarial-pr
+```
+
+- A row is an inline pipe only when splitting it on ` | ` or ` |> ` (outside
+  code spans) gives two or more segments and every segment starts with a
+  known preset. Arguments may follow the preset: `#gh-fix <url> | #pr`,
+  `#address (see <url>) |> #adversarial-pr`.
+- It is the same statement as the nested form: `- #review | #address` is
+  `- #review |` over `- #address`. With only ` | ` it is one task whose
+  stages are its segments, and its submission ends with `Inline pipe
+  (#pipeprompt) …` and the pipeline.
+- A trailing ` |` (or ` |>`, ` >`) still applies to the row's children:
+  `- #review | #address |` over `- under 200 words` pipes the last segment
+  into them.
+- ` |> ` between segments is a hand-off. Each stage needs its own row, so
+  agent-doc rewrites the row into the nested ` |>` form once, before any
+  worker holds it: `- #rebase |>` over `- #address |>` over
+  `- #adversarial-pr`. The row keeps its `[#q-…]` on stage 1, a ` | ` inside
+  one stage stays inline (`#a | #b |> #c` becomes `#a | #b |>` over `#c`),
+  and the row's children move under the last stage. A row a worker already
+  holds is left as written and runs its stages in order in one task.
+- Each segment's leading preset is a directive (`#directiveposition`), and
+  the stages feed `#presetorder`: `- #address | #adversarial-pr` is
+  `#address then #adversarial-pr`.
+- A ` | ` row with a segment that does not start with a preset stays prose
+  (`pending | completed`). When its first segment is a preset
+  (`#review | then summarize`), the lint says to nest the rest under it with
+  ` |`. Shell pipes inside code spans are never operators.
 
 Built-in element semantics live in the `agent-doc-element-*` crate family and
 are composed by `agent-doc-element-registry`. An unregistered `agent:*`

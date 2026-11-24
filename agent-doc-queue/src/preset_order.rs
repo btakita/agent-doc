@@ -36,13 +36,14 @@ pub fn temporal_preset_order(text: &str, presets: &[(String, String)]) -> Vec<St
 /// Each stage contributes its own `then` chain, or else its first preset in
 /// directive position (`#gh-fix <url>`, `<url>: #address`). A prose stage is
 /// a gap. Fan-out branches all follow their parent's stage, so every branch's
-/// preset is a later preset. A ` >` fold, context children, and a single-row
-/// ` | ` are not stages.
+/// preset is a later preset. An inline pipe row (`#address | #adversarial-pr`,
+/// every segment led by a preset) is the same statement on one line, also
+/// after a lineage prefix (`<url>: #address | #adversarial-pr`). A ` >`
+/// fold, context children, and a prose ` | ` are not stages.
 pub fn pipe_preset_order(text: &str, presets: &[(String, String)]) -> Vec<String> {
-    let text = text.trim();
-    if !crate::document_queue::is_pipe_statement_text(text) {
+    let Some(text) = pipe_statement_scope(text) else {
         return Vec::new();
-    }
+    };
     let mut order: Vec<String> = Vec::new();
     for stage in agent_doc_element_queue::pipe::statement_stage_pipelines(text)
         .iter()
@@ -55,6 +56,26 @@ pub fn pipe_preset_order(text: &str, presets: &[(String, String)]) -> Vec<String
         }
     }
     if order.len() >= 2 { order } else { Vec::new() }
+}
+
+/// The ` |` statement `text` carries: `text` itself, or for a claimed or
+/// submitted leaf whose nest vector leads with its lineage
+/// (`<url>: #address | #adversarial-pr`), the inline pipe row after the last
+/// lineage join. `None` when there is no statement.
+fn pipe_statement_scope(text: &str) -> Option<&str> {
+    let text = text.trim();
+    if crate::document_queue::is_pipe_statement_text(text) {
+        return Some(text);
+    }
+    let first = text.lines().next()?;
+    first
+        .match_indices(": ")
+        .map(|(at, join)| text[at + join.len()..].trim_start())
+        .find(|tail| {
+            tail.lines()
+                .next()
+                .is_some_and(agent_doc_element_queue::pipe::is_inline_pipe)
+        })
 }
 
 fn stage_presets(stage: &str, presets: &[(String, String)]) -> Vec<String> {
@@ -126,8 +147,8 @@ fn then_preset_order(text: &str, presets: &[(String, String)]) -> Vec<String> {
 /// statement with a `#` directive in a stage after its first, so a brief can
 /// tell the next worker that a settled earlier preset does not finish the row.
 pub fn item_orders_a_later_preset(item: &str) -> bool {
-    if crate::document_queue::is_pipe_statement_text(item.trim())
-        && agent_doc_element_queue::pipe::statement_stage_pipelines(item.trim())
+    if let Some(statement) = pipe_statement_scope(item)
+        && agent_doc_element_queue::pipe::statement_stage_pipelines(statement)
             .iter()
             .any(|stages| {
                 stages.iter().skip(1).any(|stage| {
@@ -431,8 +452,45 @@ mod tests {
             ),
             vec!["#gh-issue".to_string(), "#upgrade".to_string()]
         );
+        // `#pipeprompt` inline form: the same statement on one row, also
+        // after a lineage prefix, a hand-off chain the worker runs whole, and
+        // a stage argument.
+        for statement in [
+            "#address | #adversarial-pr",
+            "🚧 [#subagent:pipe#2] #address | #adversarial-pr [#q-0123456789ab]",
+            "https://github.com/sample-org/sample-repo/pull/12: #address | #adversarial-pr",
+            "#address (see https://github.com/sample-org/sample-repo/pull/12#discussion_r1) |> #adversarial-pr",
+            "#address | #adversarial-pr |\n  - under 200 words",
+        ] {
+            assert_eq!(
+                temporal_preset_order(statement, &presets),
+                address_then_review,
+                "{statement}"
+            );
+            assert!(item_orders_a_later_preset(statement), "{statement}");
+        }
+        assert_eq!(
+            temporal_preset_order(
+                "https://github.com/sample-org/sample-repo/pull/933: #rebase |> #address |> #adversarial-pr",
+                &presets
+            ),
+            three
+        );
+        // `#directiveposition` per segment: a middle segment's preset is a
+        // directive even with prose arguments on both sides of it.
+        assert_eq!(
+            temporal_preset_order(
+                "#address (see the thread) | #note the fix please | #adversarial-pr",
+                &presets
+            ),
+            vec![
+                "#address".to_string(),
+                "#note".to_string(),
+                "#adversarial-pr".to_string()
+            ]
+        );
         // Not an order: no pipe (context children), one preset stage, a prose
-        // or quoted mention, a code span, or a single-row inline pipe.
+        // or quoted mention, a code span, or a prose ` | ` segment.
         for text in [
             "#address\n  - #adversarial-pr",
             "#address |\n  - update the title",
@@ -440,7 +498,8 @@ mod tests {
             "#address |\n  - explain why the #adversarial-pr review was stale",
             "#address |\n  - `#adversarial-pr`",
             "#address |\n  - \"#adversarial-pr\"",
-            "#address | #adversarial-pr",
+            "#address | review it with #adversarial-pr",
+            "`#address | #adversarial-pr`",
             "#address >\n  - #adversarial-pr",
         ] {
             assert!(temporal_preset_order(text, &presets).is_empty(), "{text}");

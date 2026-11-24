@@ -48,6 +48,11 @@
 //!   combine (ordered lists chain, unordered lists fan out, ` |+` chains its
 //!   whole subtree).
 //!
+//! * [`inline_pipe_segments`] reads the inline form, a row whose ` | ` /
+//!   ` |> ` segments all start with a preset (`- #review | #address`): the
+//!   same statement as the nested form, so [`statement_stage_pipelines`]
+//!   reads it as its segments and the two forms round-trip.
+//!
 //! Folding (which source lines a block owns) lives with the queue
 //! enumerators: `agent_doc_markdown_ast::overlay::edge_block_end`.
 
@@ -228,6 +233,205 @@ pub fn ends_with_fold(row: &str) -> bool {
     EdgeOp::of_row(row) == EdgeOp::Fold
 }
 
+/// Join between two segments of an inline pipe row (`- #review | #address`).
+pub const INLINE_PIPE_JOIN: &str = " | ";
+
+/// Join between two segments of an inline hand-off row
+/// (`- #rebase |> #address |> #adversarial-pr`).
+pub const INLINE_HAND_OFF_JOIN: &str = " |> ";
+
+/// One segment of an inline pipe row ([`inline_pipe_segments`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineSegment {
+    /// The segment's text: its leading `#preset` and any arguments
+    /// (`#gh-fix <url>`, `#address (see <url>)`), trimmed.
+    pub text: String,
+    /// Byte range of [`Self::text`] in the row's first line.
+    pub range: Range<usize>,
+    /// The operator after the segment: [`EdgeOp::Pipe`] (` | `) or
+    /// [`EdgeOp::HandOff`] (` |> `) to the next segment. The last segment
+    /// carries the row's own row-final operator, which applies to the row's
+    /// children ([`EdgeOp::Context`] when the row has none).
+    pub next: EdgeOp,
+}
+
+/// The segments of an inline pipe row (`#pipeprompt` inline form), or `None`.
+///
+/// `row` is one row's content after its list marker; lifecycle prefixes,
+/// stage glyphs, a generated `[#q-…]` id and the other binary-owned suffixes
+/// are read past. The row is an inline pipe only when splitting its authored
+/// text on ` | ` and ` |> ` outside code spans gives two or more segments
+/// and EVERY segment starts with a `#preset` tag (a `#`, an ASCII letter,
+/// then letters, digits, `-` or `_`, followed by whitespace or the end).
+/// Arguments may follow the tag: `#gh-fix <url> | #pr`.
+///
+/// A ` | ` row with any other segment (`pending | completed`, a link title,
+/// `#review | then summarize`) stays prose. A preset-aware caller also
+/// requires each tag to be a known preset ([`inline_pipe_segments_with`]).
+/// A struck row is never an inline pipe: its first segment starts with `~~`.
+pub fn inline_pipe_segments(row: &str) -> Option<Vec<InlineSegment>> {
+    inline_pipe_segments_with(row, |_| true)
+}
+
+/// [`inline_pipe_segments`] where `is_preset(tag)` must also accept every
+/// segment's leading tag (`#review`, with its `#`).
+pub fn inline_pipe_segments_with(
+    row: &str,
+    is_preset: impl Fn(&str) -> bool,
+) -> Option<Vec<InlineSegment>> {
+    let first = row.lines().next()?;
+    let (lead, body, trailing) = inline_body(first)?;
+    let raw = split_inline_body(body, trailing)?;
+    raw.into_iter()
+        .map(|(start, end, next)| {
+            let raw = &body[start..end];
+            let text = raw.trim();
+            let tag = leading_preset_tag(text)?;
+            if !is_preset(tag) {
+                return None;
+            }
+            let trimmed_start = start + (raw.len() - raw.trim_start().len());
+            Some(InlineSegment {
+                text: text.to_string(),
+                range: lead + trimmed_start..lead + trimmed_start + text.len(),
+                next,
+            })
+        })
+        .collect()
+}
+
+/// `first`'s authored body for the inline reader: its byte offset in
+/// `first`, the body without lifecycle prefix, binary suffixes and the
+/// row-final operator, and that operator.
+fn inline_body(first: &str) -> Option<(usize, &str, EdgeOp)> {
+    let work = crate::strip_attempt_projection_prefix(strip_stage_glyph(first));
+    let lead = offset_in(first, work)?;
+    let authored = authored_prefix(work);
+    Some(match edge_marker(authored) {
+        Some((op, range)) => (lead, &authored[..range.start], op),
+        None => (lead, authored, EdgeOp::Context),
+    })
+}
+
+/// `body` split at every ` | ` / ` |> ` outside code spans, as
+/// `(start, end, operator after)` byte ranges; the last range carries
+/// `trailing`. `None` when there is no join.
+fn split_inline_body(body: &str, trailing: EdgeOp) -> Option<Vec<(usize, usize, EdgeOp)>> {
+    let spans = code_span_ranges(body);
+    let bytes = body.as_bytes();
+    let mut cuts: Vec<(usize, usize, EdgeOp)> = Vec::new();
+    let mut at = 0;
+    while at + 3 <= bytes.len() {
+        let in_code = spans.iter().any(|span| span.contains(&at));
+        if !in_code && bytes[at] == b' ' && bytes[at + 1] == b'|' {
+            if bytes[at + 2] == b' ' {
+                cuts.push((at, at + 3, EdgeOp::Pipe));
+                at += 3;
+                continue;
+            }
+            if bytes[at + 2] == b'>' && bytes.get(at + 3) == Some(&b' ') {
+                cuts.push((at, at + 4, EdgeOp::HandOff));
+                at += 4;
+                continue;
+            }
+        }
+        at += 1;
+    }
+    if cuts.is_empty() {
+        return None;
+    }
+    let mut segments = Vec::with_capacity(cuts.len() + 1);
+    let mut start = 0;
+    for &(cut_start, cut_end, op) in &cuts {
+        segments.push((start, cut_start, op));
+        start = cut_end;
+    }
+    segments.push((start, body.len(), trailing));
+    Some(segments)
+}
+
+/// Whether `row` is an inline pipe row ([`inline_pipe_segments`]).
+pub fn is_inline_pipe(row: &str) -> bool {
+    inline_pipe_segments(row).is_some()
+}
+
+/// Whether `row` is an inline pipe row with a ` |> ` hand-off between two of
+/// its segments (not only as its row-final operator).
+pub fn is_inline_hand_off(row: &str) -> bool {
+    inline_pipe_segments(row).is_some_and(|segments| {
+        segments
+            .iter()
+            .rev()
+            .skip(1)
+            .any(|segment| segment.next == EdgeOp::HandOff)
+    })
+}
+
+/// A row whose segments all start with a `#preset` tag except at least one,
+/// when the row splits on ` | ` / ` |> ` into two or more segments and its
+/// first segment starts with a tag (`#review | then summarize`). It stays
+/// prose; the lint suggests nesting the rest. `None` otherwise.
+pub fn near_inline_pipe(row: &str) -> Option<String> {
+    if is_inline_pipe(row) {
+        return None;
+    }
+    let (_, body, trailing) = inline_body(row.lines().next()?)?;
+    let parts = split_inline_body(body, trailing)?;
+    let part = |(start, end, _): (usize, usize, EdgeOp)| body[start..end].trim();
+    leading_preset_tag(part(parts[0]))?;
+    parts
+        .into_iter()
+        .skip(1)
+        .map(part)
+        .find(|text| leading_preset_tag(text).is_none())
+        .map(str::to_string)
+}
+
+/// The leading `#preset` tag of `text`, when it starts with one followed by
+/// whitespace or the end.
+fn leading_preset_tag(text: &str) -> Option<&str> {
+    let rest = text.strip_prefix('#')?;
+    let mut chars = rest.char_indices();
+    let (_, first) = chars.next()?;
+    if !first.is_ascii_alphabetic() {
+        return None;
+    }
+    let end = chars
+        .find(|(_, ch)| !(ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_')))
+        .map_or(rest.len(), |(at, _)| at);
+    let after = &rest[end..];
+    if !after.is_empty() && !after.starts_with(char::is_whitespace) {
+        return None;
+    }
+    Some(&text[..end + 1])
+}
+
+/// Byte offset of `inner` inside `outer`, when `inner` is a subslice of it.
+fn offset_in(outer: &str, inner: &str) -> Option<usize> {
+    let start = (inner.as_ptr() as usize).checked_sub(outer.as_ptr() as usize)?;
+    (start + inner.len() <= outer.len()).then_some(start)
+}
+
+/// A stage's text read as its inline segments when it is an inline pipe
+/// row, else the text itself (`#pipeprompt` round trip: `- #review |` over
+/// `- #address` and `- #review | #address` give the same stages).
+pub fn inline_stage_texts(text: &str) -> Vec<String> {
+    let first_end = text.find('\n').unwrap_or(text.len());
+    match inline_pipe_segments(&text[..first_end]) {
+        Some(segments) => {
+            let mut out: Vec<String> = segments.into_iter().map(|segment| segment.text).collect();
+            // Continuation lines belong to the last segment.
+            if first_end < text.len()
+                && let Some(last) = out.last_mut()
+            {
+                last.push_str(&text[first_end..]);
+            }
+            out
+        }
+        None => vec![text.to_string()],
+    }
+}
+
 /// `text` without the explicit operator on its first line. Text without one
 /// is returned unchanged. Later lines (a folded block's children) are kept.
 pub fn strip_edge_marker(text: &str) -> String {
@@ -370,7 +574,8 @@ pub fn statement_pipelines(text: &str) -> Vec<String> {
 /// [`statement_pipelines`] before the join: each pipeline as its stages' work
 /// text, in run order. Readers that need a stage boundary (`#presetorder`
 /// reads each stage's preset) use this instead of splitting a rendered
-/// pipeline on ` | `, which a stage's own prose may contain.
+/// pipeline on ` | `, which a stage's own prose may contain. An inline pipe
+/// row ([`inline_pipe_segments`]) contributes one stage per segment.
 pub fn statement_stage_pipelines(text: &str) -> Vec<Vec<String>> {
     let rows = statement_rows(text);
     if rows.is_empty() {
@@ -454,9 +659,15 @@ pub fn statement_stage_pipelines(text: &str) -> Vec<Vec<String>> {
             })
             .collect()
     }
+    // An inline pipe row (`- #review | #address`) is its segments, in order:
+    // the same stages as the nested form, so the two forms round-trip.
     render(&rows, 0, &depth, &children)
         .into_iter()
-        .map(|path| path.into_iter().map(|at| rows[at].text.clone()).collect())
+        .map(|path| {
+            path.into_iter()
+                .flat_map(|at| inline_stage_texts(&rows[at].text))
+                .collect()
+        })
         .collect()
 }
 
@@ -886,6 +1097,162 @@ mod tests {
         );
         assert_eq!(strip_stage_glyph("▶️ draft |"), "draft |");
         assert_eq!(strip_stage_glyph("▶️draft"), "▶️draft");
+    }
+
+    /// `#pipeprompt` inline form: `- #review | #address` is a pipe only when
+    /// every ` | ` / ` |> ` segment starts with a `#preset` tag.
+    #[test]
+    fn an_inline_pipe_row_needs_a_preset_at_the_start_of_every_segment() {
+        let texts = |row: &str| {
+            inline_pipe_segments(row).map(|segments| {
+                segments
+                    .into_iter()
+                    .map(|segment| (segment.text, segment.next))
+                    .collect::<Vec<_>>()
+            })
+        };
+        assert_eq!(
+            texts("#review | #address"),
+            Some(vec![
+                ("#review".to_string(), EdgeOp::Pipe),
+                ("#address".to_string(), EdgeOp::Context),
+            ])
+        );
+        assert_eq!(
+            texts(
+                "🚧 [#subagent:x#1] #gh-fix https://github.com/o/r/issues/7 | #pr [#q-0123456789ab]"
+            ),
+            Some(vec![
+                (
+                    "#gh-fix https://github.com/o/r/issues/7".to_string(),
+                    EdgeOp::Pipe
+                ),
+                ("#pr".to_string(), EdgeOp::Context),
+            ])
+        );
+        // sdk-dev's live rows: a hand-off chain, a parenthetical argument.
+        assert_eq!(
+            texts("#rebase |> #address |> #adversarial-pr"),
+            Some(vec![
+                ("#rebase".to_string(), EdgeOp::HandOff),
+                ("#address".to_string(), EdgeOp::HandOff),
+                ("#adversarial-pr".to_string(), EdgeOp::Context),
+            ])
+        );
+        assert_eq!(
+            texts(
+                "#rebase |> #address (see https://github.com/o/r/pull/936#discussion_r1) |> #adversarial-pr [#q-3d7130df8092]"
+            ),
+            Some(vec![
+                ("#rebase".to_string(), EdgeOp::HandOff),
+                (
+                    "#address (see https://github.com/o/r/pull/936#discussion_r1)".to_string(),
+                    EdgeOp::HandOff
+                ),
+                ("#adversarial-pr".to_string(), EdgeOp::Context),
+            ])
+        );
+        // A trailing operator keeps piping into the row's children.
+        assert_eq!(
+            texts("#review | #address |"),
+            Some(vec![
+                ("#review".to_string(), EdgeOp::Pipe),
+                ("#address".to_string(), EdgeOp::Pipe),
+            ])
+        );
+        assert_eq!(
+            texts("#review | #address |>"),
+            Some(vec![
+                ("#review".to_string(), EdgeOp::Pipe),
+                ("#address".to_string(), EdgeOp::HandOff),
+            ])
+        );
+        assert!(is_inline_hand_off("#address |> #adversarial-pr"));
+        assert!(!is_inline_hand_off("#review | #address |>"));
+        assert!(!is_inline_hand_off("#review |>"));
+        // Prose: a non-preset segment, one segment, code spans, struck rows,
+        // reserved operators, issue numbers and markdown link titles.
+        for row in [
+            "pending | completed",
+            "#review | then summarize",
+            "url: #address | #adversarial-pr",
+            "#review |",
+            "#review",
+            "run `#a | #b`",
+            "`#review | #address`",
+            "~~#review | #address~~",
+            "#review || #address",
+            "#review |+ #address",
+            "fix #389 | #390",
+            "[#a | #b](https://example.com)",
+            "#review|#address",
+            "#review: | #address",
+        ] {
+            assert_eq!(texts(row), None, "{row}");
+        }
+        // The byte ranges point into the row's first line.
+        let row = "📥 #review | #address [#q-0123456789ab]";
+        let segments = inline_pipe_segments(row).unwrap();
+        assert_eq!(&row[segments[0].range.clone()], "#review");
+        assert_eq!(&row[segments[1].range.clone()], "#address");
+        // A preset-aware reader also needs each tag to be a known preset.
+        assert!(inline_pipe_segments_with("#review | #address", |tag| tag == "#review").is_none());
+        assert!(
+            inline_pipe_segments_with("#review | #address", |tag| matches!(
+                tag,
+                "#review" | "#address"
+            ))
+            .is_some()
+        );
+        // A near miss names the segment to nest.
+        assert_eq!(
+            near_inline_pipe("#review | then summarize").as_deref(),
+            Some("then summarize")
+        );
+        assert_eq!(
+            near_inline_pipe("#rebase |> summarize the diff").as_deref(),
+            Some("summarize the diff")
+        );
+        assert_eq!(near_inline_pipe("pending | completed"), None);
+        assert_eq!(near_inline_pipe("#review | #address"), None);
+        assert_eq!(near_inline_pipe("#review"), None);
+    }
+
+    /// The inline and nested forms are the same statement: same stages, same
+    /// rendered pipeline.
+    #[test]
+    fn the_inline_and_nested_forms_round_trip() {
+        for (inline, nested) in [
+            ("#review | #address", "#review |\n  - #address"),
+            (
+                "#rebase | #address | #adversarial-pr",
+                "#rebase |\n  - #address |\n    - #adversarial-pr",
+            ),
+            (
+                "#gh-fix https://github.com/o/r/issues/7 | #pr",
+                "#gh-fix https://github.com/o/r/issues/7 |\n  1. #pr",
+            ),
+        ] {
+            assert_eq!(
+                statement_stage_pipelines(inline),
+                statement_stage_pipelines(nested)
+            );
+            assert_eq!(statement_pipelines(inline), vec![inline.to_string()]);
+            assert_eq!(statement_pipelines(nested), vec![inline.to_string()]);
+        }
+        // A trailing ` |` pipes the last segment into the children.
+        assert_eq!(
+            statement_pipelines("#review | #address |\n  - under 200 words\n  - no ids"),
+            vec![
+                "#review | #address | under 200 words",
+                "#review | #address | no ids",
+            ]
+        );
+        // An inline row inside a nested statement contributes its segments.
+        assert_eq!(
+            statement_stage_pipelines("collect |\n  - #review | #address"),
+            vec![vec!["collect", "#review", "#address"]]
+        );
     }
 
     /// The combination rule, one case per cell.

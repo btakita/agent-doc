@@ -156,8 +156,29 @@ impl<'a> ReconcileInputSources<'a> {
         }
     }
 
+    /// `#pipeprompt` inline form: the document's effective presets
+    /// (frontmatter plus `.agent-doc/project.md`), installed for the chain
+    /// when the revision holds a ` |> ` between two segments, so
+    /// [`agent_doc_queue::inline_pipe::expand_inline_hand_offs`] knows every
+    /// preset a row may lead a segment with. Other revisions read nothing.
+    fn inline_hand_off_presets(
+        &self,
+    ) -> Option<agent_doc_queue::goal_preset_terminal::InheritedPresetsGuard> {
+        self.content
+            .contains(agent_doc_element_queue::pipe::INLINE_HAND_OFF_JOIN)
+            .then(|| {
+                agent_doc_queue::goal_preset_terminal::InheritedPresetsGuard::install(
+                    &agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(
+                        self.content,
+                        self.file,
+                    ),
+                )
+            })
+    }
+
     /// Run `f` with these sources as the chain's [`ReconcileInputs`].
     pub fn with_inputs<T>(&self, f: impl FnOnce(&ReconcileInputs<'_>) -> T) -> T {
+        let _presets = self.inline_hand_off_presets();
         let is_live = |owner: &str, generation: u64| self.is_live(owner, generation);
         let response_proven = |id: &str| self.response_proven(id);
         let struck_provenance = |work: &str| self.struck_provenance(work);
@@ -191,6 +212,7 @@ pub fn carry_self_repair_rewrites(file: &Path, repairs: &[SelfRepair]) {
 /// its id's original is in `agent:exchange` or the response index.
 pub fn self_repair_document_for(file: &Path, content: &str) -> Option<(String, Vec<SelfRepair>)> {
     let sources = ReconcileInputSources::load(file, content);
+    let _presets = sources.inline_hand_off_presets();
     let repaired = self_repair_document_with_claims(
         content,
         &|owner: &str, generation: u64| sources.is_live(owner, generation),
@@ -505,6 +527,52 @@ mod tests {
         assert!(
             self_repair_document_for(&file, &damaged)
                 .is_none_or(|(document, _)| document.contains("⟦effect:1⟧"))
+        );
+    }
+
+    /// `#pipeprompt` inline form: the presets an inline hand-off leads its
+    /// segments with live in `.agent-doc/project.md` (sdk-dev's `#rebase`,
+    /// `#address`, `#adversarial-pr`), so self-repair reads the effective
+    /// map before it rewrites the row into its nested ` |>` form.
+    #[test]
+    fn an_inline_hand_off_expands_with_the_project_presets() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+        git(repo, &["init", "-b", "main"]);
+        fs::create_dir_all(repo.join(".agent-doc")).unwrap();
+        fs::write(
+            repo.join(".agent-doc").join("project.md"),
+            concat!(
+                "---\npresets:\n",
+                "  '#rebase': 'Rebase onto the base branch.'\n",
+                "  '#address': 'Address the review.'\n",
+                "  '#adversarial-pr': 'Post one independent review.'\n",
+                "---\n",
+            ),
+        )
+        .unwrap();
+        let file = repo.join("session.md");
+        let content = doc(concat!(
+            "- ### https://github.com/sample-org/sample-api/pull/933\n",
+            "  - #rebase |> #address |> #adversarial-pr [#q-000000000001]\n",
+        ));
+        fs::write(&file, &content).unwrap();
+        let (repaired, repairs) = self_repair_document_for(&file, &content).expect("expands");
+        assert_eq!(
+            repaired,
+            doc(concat!(
+                "- ### https://github.com/sample-org/sample-api/pull/933\n",
+                "  - #rebase |> [#q-000000000001]\n",
+                "    - #address |>\n",
+                "      - #adversarial-pr\n",
+            )),
+            "{repairs:?}"
+        );
+        // Without the project presets the row is left as written.
+        fs::remove_file(repo.join(".agent-doc").join("project.md")).unwrap();
+        assert!(
+            self_repair_document_for(&file, &content)
+                .is_none_or(|(document, _)| document.contains("#rebase |> #address"))
         );
     }
 }

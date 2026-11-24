@@ -178,7 +178,7 @@ fn subtree_has_open_row(entries: &[&QueueEntry], index: usize, own_indent: usize
 
 /// The list-marker prefix of `line` (indent, `- ` / `N. `, and a top-level
 /// `### ` heading) and the row content after it.
-fn split_row_prefix(line: &str) -> Option<(&str, &str)> {
+pub(crate) fn split_row_prefix(line: &str) -> Option<(&str, &str)> {
     let (indent, ordered, rest) = document_queue::split_list_item(line)?;
     let marker = ordered.map_or(2, |marker| marker.len() + 1);
     let mut at = indent + marker;

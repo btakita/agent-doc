@@ -2480,7 +2480,84 @@ pub(crate) fn mask_directive_scan(text: &str) -> String {
             None => i += 1,
         }
     }
-    mask_prose_directive_tokens(&out.into_iter().collect::<String>())
+    mask_inline_pipe_segments(&out.into_iter().collect::<String>())
+}
+
+/// `#directiveposition` for a `#pipeprompt` inline pipe row: each segment's
+/// leading tag is a directive (`#address (see …) | #note the fix | #pr`), so
+/// each segment is masked on its own ([`mask_prose_directive_tokens`]). The
+/// row splits on ` | ` / ` |> ` in its first line when every segment leads
+/// with a `#tag`; the last segment runs to the end of `text`. Any other text
+/// is masked whole.
+fn mask_inline_pipe_segments(text: &str) -> String {
+    let first_end = text.find('\n').unwrap_or(text.len());
+    let first = &text[..first_end];
+    let mut cuts: Vec<(usize, usize)> = Vec::new();
+    let bytes = first.as_bytes();
+    let mut at = 0;
+    while at + 3 <= bytes.len() {
+        if bytes[at] == b' ' && bytes[at + 1] == b'|' {
+            if bytes[at + 2] == b' ' {
+                cuts.push((at, at + 3));
+                at += 3;
+                continue;
+            }
+            if bytes[at + 2] == b'>' && bytes.get(at + 3) == Some(&b' ') {
+                cuts.push((at, at + 4));
+                at += 4;
+                continue;
+            }
+        }
+        at += 1;
+    }
+    if cuts.is_empty() {
+        return mask_prose_directive_tokens(text);
+    }
+    let mut pieces: Vec<&str> = Vec::with_capacity(cuts.len() + 1);
+    let mut start = 0;
+    for &(cut_start, cut_end) in &cuts {
+        pieces.push(&text[start..cut_start]);
+        start = cut_end;
+    }
+    pieces.push(&text[start..]);
+    if !pieces.iter().all(|piece| segment_leads_with_tag(piece)) {
+        return mask_prose_directive_tokens(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    for (index, piece) in pieces.iter().enumerate() {
+        if index > 0 {
+            let (cut_start, cut_end) = cuts[index - 1];
+            out.push_str(&text[cut_start..cut_end]);
+        }
+        out.push_str(&mask_prose_directive_tokens(piece));
+    }
+    out
+}
+
+/// Whether the leading directive run of `segment` holds a `#tag`.
+fn segment_leads_with_tag(segment: &str) -> bool {
+    let mut depth: usize = 0;
+    for word in segment.split_whitespace() {
+        let chars: Vec<char> = word.chars().collect();
+        let in_bracket = depth > 0 || chars.first() == Some(&'[');
+        for ch in &chars {
+            match ch {
+                '[' => depth += 1,
+                ']' => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+        if in_bracket {
+            continue;
+        }
+        if chars.first() == Some(&'#') && chars.get(1).is_some_and(|ch| ch.is_alphabetic()) {
+            return true;
+        }
+        if !directive_edge_word(&chars) {
+            return false;
+        }
+    }
+    false
 }
 
 /// `#directiveposition`: blank every `#token` outside directive position.

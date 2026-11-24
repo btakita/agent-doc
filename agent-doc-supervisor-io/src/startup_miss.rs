@@ -210,13 +210,9 @@ pub fn record_startup_miss(
         origin,
         cycle_baseline_id: cycle_baseline_id.map(|s| s.to_string()),
     };
-    let ledger = crate::state_events::load_document_ledger_shared(
-        &identity.project_root,
-        &identity.document_hash,
-    )?;
-    let next_epoch = ledger
-        .document_epoch(&identity.document_hash)
-        .saturating_add(1);
+    let next_epoch =
+        crate::state_events::document_epoch(&identity.project_root, &identity.document_hash)?
+            .saturating_add(1);
     let event = StateEvent::new(
         format!(
             "startup-miss-recorded:{}:epoch-{next_epoch}",
@@ -241,9 +237,10 @@ pub fn load_startup_miss(file: &Path) -> Result<Option<StartupMiss>> {
     let Some(identity) = crate::state_events::document_state_identity(file)? else {
         return Ok(None);
     };
-    let ledger = crate::state_events::load_document_ledger_shared(
+    let ledger = crate::state_events::load_document_family_shared(
         &identity.project_root,
         &identity.document_hash,
+        crate::state_events::LedgerFamily::StartupMiss,
     )?;
     let Some(miss) = ledger
         .project_document(&identity.document_hash)
@@ -266,9 +263,10 @@ pub fn clear_startup_miss(file: &Path) -> Result<()> {
     let Some(identity) = crate::state_events::document_state_identity(file)? else {
         return Ok(());
     };
-    let ledger = crate::state_events::load_document_ledger_shared(
+    let ledger = crate::state_events::load_document_family_shared(
         &identity.project_root,
         &identity.document_hash,
+        crate::state_events::LedgerFamily::StartupMiss,
     )?;
     let Some(miss) = ledger
         .project_document(&identity.document_hash)
@@ -276,9 +274,9 @@ pub fn clear_startup_miss(file: &Path) -> Result<()> {
     else {
         return Ok(());
     };
-    let next_epoch = ledger
-        .document_epoch(&identity.document_hash)
-        .saturating_add(1);
+    let next_epoch =
+        crate::state_events::document_epoch(&identity.project_root, &identity.document_hash)?
+            .saturating_add(1);
     let event = StateEvent::new(
         format!(
             "startup-miss-cleared:{}:epoch-{next_epoch}",

@@ -28,11 +28,14 @@ fn request_recycle_observed(file: &str, reason: &str) -> Result<bool> {
     let Some(identity) = crate::state_events::document_state_identity(Path::new(file))? else {
         return Ok(false);
     };
-    let ledger = crate::state_events::load_document_ledger_shared(
+    let ledger = crate::state_events::load_document_family_shared(
         &identity.project_root,
         &identity.document_hash,
+        crate::state_events::LedgerFamily::Recycle,
     )?;
-    let recycle_epoch = next_recycle_epoch(&ledger, &identity.document_hash)?;
+    let document_epoch =
+        crate::state_events::document_epoch(&identity.project_root, &identity.document_hash)?;
+    let recycle_epoch = next_recycle_epoch(&ledger, &identity.document_hash, document_epoch)?;
     let marked_secs = now_secs();
     let event = StateEvent::new(
         format!(
@@ -61,9 +64,13 @@ pub fn request_recycle(file: &str, reason: &str) -> Result<()> {
 
 /// Compatibility ledger high-water, not the number of retained events. History
 /// compaction can shrink `document_epoch`; it cannot unspend a recycle event ID.
+///
+/// `ledger` holds the document's recycle family; `document_epoch` is the indexed
+/// count of all its retained events (`#q-c71d106debc4`).
 fn next_recycle_epoch(
     ledger: &agent_doc_state_backbone::EventLedger,
     document_hash: &str,
+    document_epoch: u64,
 ) -> Result<u64> {
     ledger
         .events()
@@ -77,7 +84,7 @@ fn next_recycle_epoch(
         })
         .max()
         .unwrap_or(0)
-        .max(ledger.document_epoch(document_hash))
+        .max(document_epoch)
         .checked_add(1)
         .context("supervisor recycle generation exhausted")
 }
@@ -100,9 +107,10 @@ pub fn request_recycle_for_doc_observed(file: &Path, reason: &str) -> Result<boo
 /// Read the raw recycle-request for `file` regardless of freshness.
 pub fn read_recycle_request(file: &str) -> Option<RecycleRequest> {
     let identity = crate::state_events::document_state_identity(Path::new(file)).ok()??;
-    let ledger = crate::state_events::load_document_ledger_shared(
+    let ledger = crate::state_events::load_document_family_shared(
         &identity.project_root,
         &identity.document_hash,
+        crate::state_events::LedgerFamily::Recycle,
     )
     .ok()?;
     let recycle = ledger
@@ -129,9 +137,10 @@ pub fn read_outstanding_recycle_request(
     file: &str,
 ) -> Option<agent_doc_supervisor::recycle_request::OutstandingRecycleRequest> {
     let identity = crate::state_events::document_state_identity(Path::new(file)).ok()??;
-    let ledger = crate::state_events::load_document_ledger_shared(
+    let ledger = crate::state_events::load_document_family_shared(
         &identity.project_root,
         &identity.document_hash,
+        crate::state_events::LedgerFamily::Recycle,
     )
     .ok()?;
     let recycle = ledger
@@ -221,9 +230,10 @@ fn clear_recycle_request_inner(file: &str) -> Result<()> {
     let Some(identity) = crate::state_events::document_state_identity(Path::new(file))? else {
         return Ok(());
     };
-    let ledger = crate::state_events::load_document_ledger_shared(
+    let ledger = crate::state_events::load_document_family_shared(
         &identity.project_root,
         &identity.document_hash,
+        crate::state_events::LedgerFamily::Recycle,
     )?;
     let Some(recycle) = ledger
         .project_document(&identity.document_hash)
@@ -307,9 +317,12 @@ mod tests {
             read_recycle_request(file.to_str().unwrap()).unwrap().reason,
             "new_install"
         );
-        let ledger =
-            crate::state_events::load_document_ledger_shared(dir.path(), &identity.document_hash)
-                .unwrap();
+        let ledger = crate::state_events::load_document_family_shared(
+            dir.path(),
+            &identity.document_hash,
+            crate::state_events::LedgerFamily::Recycle,
+        )
+        .unwrap();
         assert_eq!(
             ledger
                 .project_document(&identity.document_hash)

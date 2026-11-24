@@ -5318,6 +5318,27 @@ pub fn load_starting_actor_timeout_events_from_db(
     Ok(events)
 }
 
+/// Count one document's retained `state_events` rows.
+///
+/// (`#q-c71d106debc4`, dogfood key histreplay) `event_id` is `UNIQUE`, so this
+/// equals `EventLedger::document_epoch` over the same rows (the number of
+/// accepted, deduped events targeting the document) without reading or parsing
+/// a single `payload_json`. The count is answered from the
+/// `(document_hash, id)` index; the supervisor startup-miss and recycle writers
+/// used to replay the whole document ledger (live `sdk-dev.md`: 38,776 rows /
+/// 139MB) only to take this number for their next event id.
+pub fn count_state_events_for_document_in_db(
+    conn: &Connection,
+    document_hash: &str,
+) -> Result<u64> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM state_events WHERE document_hash = ?1",
+        params![document_hash],
+        |row| row.get(0),
+    )?;
+    Ok(u64::try_from(count).unwrap_or(0))
+}
+
 /// Load one document's events of the named fact types, in durable append order.
 ///
 /// (`#q-e9483473162d`, dogfood key preflightlag) A reader whose

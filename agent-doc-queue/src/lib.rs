@@ -50,6 +50,7 @@ pub mod child_row_renest;
 mod codespan_tag_tests;
 pub mod finished_duplicate;
 pub mod finished_tree;
+pub mod followup_lift;
 pub mod followup_moved_state;
 pub mod followup_owner;
 pub mod followup_provenance;

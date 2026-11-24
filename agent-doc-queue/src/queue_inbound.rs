@@ -58,7 +58,9 @@ pub struct QueueFollowupPlan {
 
 /// Insert queue-local follow-up heads inside the origin row's own prompt tree,
 /// at that row's nesting depth, after that row's own children. A nested origin
-/// does not hoist its follow-ups to a column-0 sibling. Queue id and origin
+/// does not hoist its follow-ups to a column-0 sibling, except out of a
+/// standalone action row it is nested under (`#parentstrike`,
+/// [`crate::followup_lift::hoisted_followup_slot`]). Queue id and origin
 /// are both mandatory: a mirrored copy in another queue must never redirect
 /// the insertion to the document's selected queue.
 pub fn plan_queue_followups(
@@ -287,6 +289,13 @@ fn origin_subtree_ends(body: &str, matches_row: impl Fn(&str) -> bool) -> Vec<Fo
             Some(len) => format!("{}{}", &line_text[..prefix_len], " ".repeat(len + 1)),
             None => line_text[..prefix_len].to_string(),
         };
+        // `#parentstrike`: an origin nested directly under a standalone
+        // action row (a follow-up or `[operator-verify]` row, never a group
+        // label) gives its follow-ups to that row's level, after its subtree.
+        // Inside it they would turn the action row into a group parent that
+        // no agent path closes.
+        let (subtree_end, prefix) = crate::followup_lift::hoisted_followup_slot(body, index)
+            .unwrap_or((subtree_end, prefix));
         matches.push(FollowupSlot {
             end: subtree_end,
             prefix,
@@ -620,6 +629,51 @@ mod tests {
         assert!(
             !updated.contains("\n- first\n"),
             "follow-up must stay nested:\n{updated}"
+        );
+    }
+
+    /// `#parentstrike` live shape (sdk-dev.md 2026-11-23): the operator
+    /// typed `#justdoit` under a `🙋` operator-verify follow-up row. Its
+    /// follow-ups belong after that row, at its depth. Nested inside it they
+    /// turned the finished sign-in row into a group parent that no agent
+    /// path could close.
+    #[test]
+    fn followups_of_a_reply_under_an_operator_verify_row_land_after_that_row() {
+        let doc = concat!(
+            "<!-- agent:run id=main subagents -->\n",
+            "- ### [#q-aaaa00000001] follow-up: agent: find why it was delivered. [#q-aaaa00000002]\n",
+            "  - **Response [#r-0123456789ab]**\n",
+            "    - **State:** Waiting on operator input.\n",
+            "    - 🙋 [#q-bbbb00000001] follow-up: operator: sign in to the admin console. [operator-verify] [#q-bbbb00000002]\n",
+            "      - ☑️ [#subagent:justdoit#1] #justdoit\n",
+            "- 🙋 [#q-aaaa00000002] follow-up: human (owner): decide visibility. [operator-verify] [#q-dddd00000001]\n",
+            "<!-- /agent:run -->\n",
+        );
+        let updated = plan_queue_followups(
+            doc,
+            "main",
+            "☑️ [#subagent:justdoit#1] #justdoit",
+            &[
+                "[#justdoit] follow-up: human (owner): decide moderation. [operator-verify]"
+                    .to_string(),
+                "[#justdoit] follow-up: agent: open the config PR.".to_string(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            updated,
+            concat!(
+                "<!-- agent:run id=main subagents -->\n",
+                "- ### [#q-aaaa00000001] follow-up: agent: find why it was delivered. [#q-aaaa00000002]\n",
+                "  - **Response [#r-0123456789ab]**\n",
+                "    - **State:** Waiting on operator input.\n",
+                "    - 🙋 [#q-bbbb00000001] follow-up: operator: sign in to the admin console. [operator-verify] [#q-bbbb00000002]\n",
+                "      - ☑️ [#subagent:justdoit#1] #justdoit\n",
+                "    - [#justdoit] follow-up: human (owner): decide moderation. [operator-verify]\n",
+                "    - [#justdoit] follow-up: agent: open the config PR.\n",
+                "- 🙋 [#q-aaaa00000002] follow-up: human (owner): decide visibility. [operator-verify] [#q-dddd00000001]\n",
+                "<!-- /agent:run -->\n",
+            )
         );
     }
 

@@ -175,6 +175,10 @@ pub enum SelfRepairKind {
     /// duplicate, or an older typing snapshot, of a newer row
     /// ([`crate::stale_typing_copies`], `#dupwrite`).
     StaleTypingCopy,
+    /// Lifted a follow-up row that sat directly under a standalone action
+    /// row (another follow-up or an `[operator-verify]` row) up to be that
+    /// row's sibling (`#parentstrike`).
+    MisplacedFollowupRow,
 }
 
 impl SelfRepairKind {
@@ -199,6 +203,7 @@ impl SelfRepairKind {
             Self::HalfClosedStrike => "half_closed_strike",
             Self::NumberedStepResponse => "numbered_step_response",
             Self::StaleTypingCopy => "stale_typing_copy",
+            Self::MisplacedFollowupRow => "misplaced_followup_row",
         }
     }
 }
@@ -1275,6 +1280,27 @@ pub fn self_repair_document_with_provenance(
         }
         None => (rehomed != document).then_some((rehomed, repairs)),
     }
+}
+
+/// [`self_repair_document_with_provenance`], then lift follow-up rows that
+/// sit directly under a standalone action row
+/// ([`crate::followup_lift::lift_misplaced_followups`], `#parentstrike`).
+/// `is_claimed(row)` is the claim ledger's answer for a row's text; a
+/// claimed row keeps its place.
+pub fn self_repair_document_with_claims(
+    document: &str,
+    is_live: &dyn Fn(&str, u64) -> bool,
+    response_proven: &dyn Fn(&str) -> bool,
+    struck_provenance: &dyn Fn(&str) -> bool,
+    is_claimed: &dyn Fn(&str) -> bool,
+) -> Option<(String, Vec<SelfRepair>)> {
+    let (current, mut repairs) =
+        self_repair_document_with_provenance(document, is_live, response_proven, struck_provenance)
+            .unwrap_or_else(|| (document.to_string(), Vec::new()));
+    let (lifted, lift_repairs) =
+        crate::followup_lift::lift_misplaced_followups(&current, is_claimed);
+    repairs.extend(lift_repairs);
+    (lifted != document).then_some((lifted, repairs))
 }
 
 /// Whether a hand-back action item asks the operator to clean up one of

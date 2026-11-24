@@ -8,7 +8,7 @@ use agent_doc_queue::reconcile_incremental::{
     ReconcileCache, ReconcileInputs, ReconcileReport, Reconciled, reconcile_full,
     reconcile_incremental,
 };
-use agent_doc_queue::self_repair::{SelfRepair, self_repair_document_with_provenance};
+use agent_doc_queue::self_repair::{SelfRepair, self_repair_document_with_claims};
 use agent_doc_queue::stale_typing_copies::drop_stale_typing_copies;
 
 /// The external answers the queue reconcile passes read for one document
@@ -191,11 +191,12 @@ pub fn carry_self_repair_rewrites(file: &Path, repairs: &[SelfRepair]) {
 /// its id's original is in `agent:exchange` or the response index.
 pub fn self_repair_document_for(file: &Path, content: &str) -> Option<(String, Vec<SelfRepair>)> {
     let sources = ReconcileInputSources::load(file, content);
-    let repaired = self_repair_document_with_provenance(
+    let repaired = self_repair_document_with_claims(
         content,
         &|owner: &str, generation: u64| sources.is_live(owner, generation),
         &|id: &str| sources.response_proven(id),
         &|work: &str| sources.struck_provenance(work),
+        &|row: &str| sources.is_claimed(row),
     );
     let (document, mut repairs) = match repaired {
         Some((document, repairs)) => (document, repairs),

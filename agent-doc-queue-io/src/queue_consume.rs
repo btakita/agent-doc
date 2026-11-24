@@ -810,6 +810,15 @@ fn addressable_rows(
                     index,
                 ) {
                     Some(origin) => Some(origin),
+                    // `#parentstrike`: a finished parent whose subtree holds
+                    // only closed structure (struck rows, response trees).
+                    None if agent_doc_queue::document_queue::closed_subtree_parent(
+                        entries.as_ref(),
+                        index,
+                    ) =>
+                    {
+                        None
+                    }
                     None => continue,
                 }
             } else {
@@ -1251,7 +1260,11 @@ fn acknowledge_free_text_once(
     apply_guard: &crate::queue_edit_owner::QueueEditGuard,
 ) -> Result<Option<QueueConsumptionOutcome>> {
     apply_guard.ensure_protects(file)?;
-    let content = effects.current_document_content(file, "queue_consume_ack_text")?;
+    // `#parentstrike`: `authority` is the text the write converges against;
+    // `content` is the text the acknowledgement is composed on, which lifts
+    // a finished parent's open rows out before the strike.
+    let authority = effects.current_document_content(file, "queue_consume_ack_text")?;
+    let mut content = authority.clone();
     let (fm, _) = frontmatter::parse(&content)?;
 
     // `#acktextlineage`: exact operator proof may repair completed subagent
@@ -1322,9 +1335,42 @@ fn acknowledge_free_text_once(
         }
     }
 
-    let addressable = acknowledgeable_rows(&content)?;
+    let mut addressable = acknowledgeable_rows(&content)?;
     let attempts = crate::queue_claim::claim_states_for_content(file, &content)
         .context("queue consume --ack-text: failed to inspect queue attempt state")?;
+    // `#parentstrike`: the exact text names a live row that has rows nested
+    // under it. Lift its open follow-up and operator-verify rows to its level
+    // first, so the strike closes only the parent; any other open row keeps
+    // it open, and the refusal names each one.
+    let mut lifted_rows: Vec<String> = Vec::new();
+    if selector.is_none()
+        && !response.is_failure()
+        && exact_acknowledgement_rows(&addressable, expected_head, None, &attempts)?.is_none()
+        && let Some(row_start) = live_parent_row_start(&content, expected_head)?
+    {
+        let plan = {
+            let sources = crate::self_repair::ReconcileInputSources::load(file, &content);
+            agent_doc_queue::followup_lift::plan_parent_close(&content, row_start, &|row: &str| {
+                sources.is_claimed(row)
+            })
+        };
+        if let Some(plan) = plan {
+            if !plan.open_rows.is_empty() {
+                anyhow::bail!(parent_close_refusal(file, &plan));
+            }
+            content = plan.document;
+            lifted_rows = plan.lifted;
+            addressable = acknowledgeable_rows(&content)?;
+            if exact_acknowledgement_rows(&addressable, expected_head, None, &attempts)?.is_none() {
+                anyhow::bail!(
+                    "{}: --ack-text names the parent row {:?}, which is still not closable after \
+                     lifting its open rows; no change was applied (#parentstrike).",
+                    file.display(),
+                    plan.parent,
+                );
+            }
+        }
+    }
     if let Some(rows) =
         exact_acknowledgement_rows(&addressable, expected_head, selector, &attempts)?
     {
@@ -1420,8 +1466,16 @@ fn acknowledge_free_text_once(
             }
         }
         let open_todo_ids = agent_doc_element::todo::open_todo_ids(&content);
+        // `#parentstrike`: on a follow-up or `[operator-verify]` row the `🙋`
+        // glyph is the tag's projection, not a request; only an open Todo
+        // named by one of its ids holds it (as for the same row as a leaf).
+        let hold_text = if agent_doc_queue::followup_lift::is_standalone_action_row(&row.lineage) {
+            agent_doc_element_queue::strip_attempt_projection_prefix(&row.lineage)
+        } else {
+            row.lineage.as_str()
+        };
         if agent_doc_document::queue_projection::operator_action_holds_row(
-            &row.lineage,
+            hold_text,
             &open_todo_ids,
         ) {
             anyhow::bail!(
@@ -1495,7 +1549,7 @@ fn acknowledge_free_text_once(
             apply_guard,
         )?;
         if let Err(err) =
-            effects.converge_document_or_disk(file, &target, &content, "queue_consume_ack_text")
+            effects.converge_document_or_disk(file, &target, &authority, "queue_consume_ack_text")
         {
             let rendered = format!("{err:#}");
             if !agent_doc_turn::write_ownership::is_retained_cli_write_deferred(&rendered)
@@ -1547,6 +1601,17 @@ fn acknowledge_free_text_once(
             QueueConsumptionProofStage::AfterMutation,
             apply_guard,
         )?;
+        for lifted in &lifted_rows {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "queue_consume_parent_close_lifted file={} parent_hash={} row_hash={} (#parentstrike)",
+                    file.display(),
+                    agent_doc_hash::content_hash(row.lineage.trim()),
+                    agent_doc_hash::content_hash(lifted.trim()),
+                ),
+            );
+        }
         retire_exact_text_ack_strike(file, &row.lineage, selector, &target, &content);
         if let Some((item_text, generation)) = settled_absent_attempt.as_ref()
             && let Err(err) = crate::queue_claim::settle_absent_worker_attempt(
@@ -1786,6 +1851,94 @@ fn acknowledge_free_text_once(
 /// next closeout prune (sdk-dev 2026-11-05: struck 03:32Z, closed 17:04Z).
 /// Failures are reported, never fatal: the successor is already accepted and
 /// the next closeout prune still closes a receipt whose row has no live head.
+/// `#parentstrike`: the byte offset of the one live group-parent row whose
+/// lineage or text is `expected_head`, matched as an exact `--ack-text` is
+/// (priority markers ignored; the binary's trailing `[#q-…]` optional).
+/// `None` when no such row exists or several do.
+fn live_parent_row_start(content: &str, expected_head: &str) -> Result<Option<usize>> {
+    let components = element::parse(content)?;
+    let queue_set = agent_doc_queue::queue_set::QueueSet::parse(content, &components)?;
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue")
+        .context("queue consume --ack-text: failed to derive queue nodes")?;
+    let mut used_nodes = vec![false; nodes.len()];
+    let expected = strip_priority_markers(expected_head).trim().to_string();
+    let sans_generated_id = |text: &str| {
+        agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(
+            strip_priority_markers(text).trim(),
+        )
+        .trim()
+        .to_string()
+    };
+    let expected_sans = sans_generated_id(&expected);
+    let mut exact = Vec::new();
+    let mut loose = Vec::new();
+    for block in queue_set.blocks() {
+        let entries =
+            agent_doc_queue::nested_claim_steer::expand_slice_if_installed(&block.entries);
+        for (index, entry) in entries.iter().enumerate() {
+            let QueueEntry::Prompt(prompt) = entry else {
+                continue;
+            };
+            let display = strip_priority_markers(prompt.text.trim())
+                .trim()
+                .to_string();
+            let node_index = nodes.iter().enumerate().find_map(|(node_index, node)| {
+                if used_nodes.get(node_index).copied().unwrap_or(false) || node.item.struck {
+                    return None;
+                }
+                let node_text = strip_priority_markers(node.item.text.trim());
+                (node_text.trim() == display).then_some(node_index)
+            });
+            let Some(node_index) = node_index else {
+                continue;
+            };
+            used_nodes[node_index] = true;
+            if !agent_doc_queue::document_queue::entry_is_group_parent(entries.as_ref(), index) {
+                continue;
+            }
+            let lineage =
+                agent_doc_queue::document_queue::lineage_claim_text(entries.as_ref(), index)
+                    .unwrap_or_else(|| display.clone());
+            let start = nodes[node_index].item.start_byte;
+            if strip_priority_markers(&lineage).trim() == expected || display == expected {
+                exact.push(start);
+            } else if sans_generated_id(&lineage) == expected_sans
+                || sans_generated_id(&display) == expected_sans
+            {
+                loose.push(start);
+            }
+        }
+    }
+    let matches = if exact.is_empty() { loose } else { exact };
+    Ok(match matches.as_slice() {
+        [only] => Some(*only),
+        _ => None,
+    })
+}
+
+/// `#parentstrike`: why a finished parent row stays open, naming every open
+/// row under it and the agent commands that close them. The agent closes
+/// these rows; the message never asks the operator to strike or delete one.
+fn parent_close_refusal(file: &Path, plan: &agent_doc_queue::followup_lift::ParentClose) -> String {
+    let rows = plan
+        .open_rows
+        .iter()
+        .map(|row| format!("\n  - {row}"))
+        .collect::<String>();
+    format!(
+        "{}: refusing to strike {:?}: {} open row(s) are nested under it, and striking it would \
+         close or hide them:{rows}\nNext: finish or close each open row first (let its worker \
+         report, or `agent-doc queue consume {} --ack-text '<its nest vector>' --summary '…'` \
+         once its work is done), then rerun this command. Open follow-up and operator-verify \
+         rows are lifted to the parent's level automatically. No change was applied; closing \
+         these rows is agent work, not an operator edit (#parentstrike).",
+        file.display(),
+        plan.parent,
+        plan.open_rows.len(),
+        file.display(),
+    )
+}
+
 fn retire_exact_text_ack_strike(
     file: &Path,
     struck_head: &str,
@@ -13864,6 +14017,129 @@ queue_active: true
             "{after}"
         );
         assert!(after.contains("- ### keep this later row\n"), "{after}");
+    }
+
+    /// `#parentstrike` live shape (sdk-dev.md 2026-11-24, anonymized): the
+    /// operator-verify sign-in row is done, but follow-up rows of other
+    /// origins are nested under it, so before the fix `--ack-text` found no
+    /// executable leaf and the agent asked the operator to strike the row.
+    const PARENTSTRIKE_SIGN_IN: &str = "🙋 [#q-bbbb00000001] follow-up: operator: sign in to the admin console. [operator-verify] [#q-bbbb00000002]";
+
+    fn parentstrike_doc(root: &Path, extra_child: &str) -> std::path::PathBuf {
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let doc = root.join("sdk-dev.md");
+        let content = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "## Run <!-- agent:run id=\"main\" subagents priority -->\n",
+                "- ### [#q-aaaa00000001] follow-up: agent: find why the chat message was delivered. [#q-aaaa00000002]\n",
+                "  - **Response [#r-0123456789ab]**\n",
+                "    - **Summary:** Not classified yet.\n",
+                "    - **State:** Waiting on operator input.\n",
+                "    - {sign_in}\n",
+                "      - ~~#justdoit~~\n",
+                "        - **Response [#r-1123456789ab]**\n",
+                "          - **Summary:** Ran it with the signed-in session.\n",
+                "          - **State:** Complete.\n",
+                "      - 🙋 [#justdoit] follow-up: human (product owner): decide whether swearing is moderated. [operator-verify] [#q-cccc00000001]\n",
+                "      - 📥 [#justdoit] follow-up: agent: open the config PR once that is decided. [#q-cccc00000002]\n",
+                "{extra}",
+                "      - 🙋 [#q-cccc00000002] follow-up: human (reviewer): approve the config PR. [operator-verify] [#q-cccc00000004]\n",
+                "- keep this later row\n",
+                "<!-- /agent:run -->\n",
+            ),
+            sign_in = PARENTSTRIKE_SIGN_IN,
+            extra = extra_child,
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        doc
+    }
+
+    fn parentstrike_ack(doc: &Path) -> Result<Option<super::QueueConsumptionOutcome>> {
+        let guard = crate::queue_edit_owner::QueueEditGuard::acquire(doc).unwrap();
+        super::acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
+            doc,
+            PARENTSTRIKE_SIGN_IN,
+            None,
+            super::AckTextResponse::Summary("The operator signed in; a worker used the session."),
+            &TEST_EFFECTS,
+            &guard,
+        )
+    }
+
+    /// An agent closes the finished parent row with `--ack-text --summary`.
+    /// Its open follow-up rows are lifted to its level first, so only the
+    /// parent is struck and every open row stays open, in order.
+    #[test]
+    fn parentstrike_ack_text_strikes_only_the_parent_and_lifts_open_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = parentstrike_doc(dir.path(), "");
+
+        let outcome = parentstrike_ack(&doc)
+            .unwrap()
+            .expect("the finished parent row is acknowledged");
+        assert_eq!(outcome.consumed_count, 1);
+
+        let after = std::fs::read_to_string(&doc).unwrap();
+        let open_rows = [
+            "    - 🙋 [#justdoit] follow-up: human (product owner): decide whether swearing is moderated. [operator-verify] [#q-cccc00000001]\n",
+            "    - 📥 [#justdoit] follow-up: agent: open the config PR once that is decided. [#q-cccc00000002]\n",
+            "    - 🙋 [#q-cccc00000002] follow-up: human (reviewer): approve the config PR. [operator-verify] [#q-cccc00000004]\n",
+        ];
+        let mut cursor = after
+            .find("    - ~~[#q-bbbb00000001] follow-up: operator: sign in to the admin console.")
+            .unwrap_or_else(|| panic!("the parent row is struck: {after}"));
+        for row in open_rows {
+            let at = after[cursor..].find(row).unwrap_or_else(|| {
+                panic!("open row {row:?} stays open, after the parent: {after}")
+            });
+            cursor += at;
+        }
+        assert!(after.contains("      - ~~#justdoit~~\n"), "{after}");
+        assert!(
+            after.contains("      - **Response [#r-")
+                && after.contains(
+                    "        - **Summary:** The operator signed in; a worker used the session.\n"
+                ),
+            "the struck parent carries its own response: {after}"
+        );
+        assert!(after.contains("- keep this later row\n"), "{after}");
+    }
+
+    /// Running work under the parent keeps it open. The refusal names every
+    /// open row under it and the agent command; it never asks the operator to
+    /// strike or delete a row, and nothing changes.
+    #[test]
+    fn parentstrike_ack_text_refuses_while_open_rows_stay_under_the_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = parentstrike_doc(
+            dir.path(),
+            "      - 🚧 [#subagent:cfg#1] [#justdoit] follow-up: agent: measure the wait. [#q-cccc00000003]\n",
+        );
+        let before = std::fs::read_to_string(&doc).unwrap();
+
+        let err = parentstrike_ack(&doc).expect_err("running work keeps the parent open");
+        let message = format!("{err:#}");
+        assert!(message.contains("#parentstrike"), "{message}");
+        assert!(
+            message.contains("[#subagent:cfg#1] [#justdoit] follow-up: agent: measure the wait."),
+            "the refusal names the open row: {message}"
+        );
+        assert!(message.contains("agent-doc queue"), "{message}");
+        let lower = message.to_ascii_lowercase();
+        assert!(
+            !lower.contains("operator strike")
+                && !lower.contains("ask the operator to strike")
+                && !lower.contains("please strike"),
+            "{message}"
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), before);
     }
 
     /// `#nestedechostrike` live shape (agent-doc-bugs.md 2026-10-27): a

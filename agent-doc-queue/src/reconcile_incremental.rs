@@ -6,7 +6,8 @@
 //! document. The chain is the queue-sync order:
 //!
 //! 1. [`crate::followup_moved_state::reconcile_moved_followup_states`]
-//! 2. [`crate::self_repair::self_repair_document_with_provenance`]
+//! 2. [`crate::self_repair::self_repair_document_with_claims`] (with the
+//!    `#parentstrike` follow-up lift)
 //! 3. [`crate::response_tree_sync::sync_response_trees_striking`] (detached
 //!    tallies, slimmed hand-backs, Remaining lists, finished-tree strikes,
 //!    tree-scoped guidance, bare struck rows, 🗑️/🔒 tree glyphs)
@@ -339,11 +340,12 @@ pub fn queue_sync_response_chain(
         document: normalized,
         ..QueueSyncResponses::default()
     };
-    if let Some((repaired, repairs)) = crate::self_repair::self_repair_document_with_provenance(
+    if let Some((repaired, repairs)) = crate::self_repair::self_repair_document_with_claims(
         &out.document,
         inputs.is_live,
         inputs.response_proven,
         inputs.struck_provenance,
+        inputs.is_claimed,
     ) {
         out.document = repaired;
         out.repairs = repairs;
@@ -665,11 +667,12 @@ fn run_chain(document: &str, inputs: &ReconcileInputs<'_>) -> Reconciled {
         out.document = moved;
         out.moved_followup_rows = rows;
     }
-    if let Some((repaired, repairs)) = crate::self_repair::self_repair_document_with_provenance(
+    if let Some((repaired, repairs)) = crate::self_repair::self_repair_document_with_claims(
         &out.document,
         inputs.is_live,
         inputs.response_proven,
         inputs.struck_provenance,
+        inputs.is_claimed,
     ) {
         out.document = repaired;
         out.repairs = repairs;

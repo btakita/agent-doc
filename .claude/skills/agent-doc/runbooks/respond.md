@@ -558,7 +558,15 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      --summary '<what was done, and where>'`: the summary becomes the struck
      row's short response tree (Summary, State, Guidance) when no worker
      hand-back supplies one, and a strike that would leave the row bare is
-     refused (`#ackresponse`). Never end the turn, hand the tree back, or write
+     refused (`#ackresponse`). The same command closes a finished row that
+     has rows nested under it, including an `[operator-verify]` row the
+     operator has done: it first lifts the open follow-up and
+     `[operator-verify]` rows under it to the row's own level, then strikes
+     only that row. When other open rows (running work, an operator's
+     sub-prompt) keep it open, the refusal names each one: close those first,
+     and never ask the operator to strike or delete the row
+     (`#parentstrike`). Follow-ups never nest under another follow-up or
+     `[operator-verify]` row; self-repair lifts any that do. Never end the turn, hand the tree back, or write
      "More work remains" over an open agent row; leave one open only with its
      concrete blocker recorded on the row. "More work remains" is only for
      operator-owned or genuinely blocked work. When that

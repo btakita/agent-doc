@@ -6636,9 +6636,27 @@ fn stopped_reason_for_row(document: &str, response_body: &str, row: RowRef<'_>) 
     unique_strings(echoes)
 }
 
+/// Whether the row's own child level holds a `**Response [#r-…]**` or
+/// `**Closed by:**` row. A response deeper in the subtree belongs to a
+/// descendant row (`#parentstrike`: a finished parent whose struck child
+/// carries a response still gets its own).
 fn row_has_response_child(document: &str, item_end: usize, scope_end: usize) -> bool {
     let scope = document.get(item_end..scope_end).unwrap_or("");
-    scope.contains("**Response [#r-") || scope.contains("**Closed by:**")
+    let items = scope
+        .lines()
+        .filter_map(|line| {
+            let content = line.trim_start_matches(' ');
+            let item = content.strip_prefix("- ")?;
+            Some((line.len() - content.len(), item.trim_start()))
+        })
+        .collect::<Vec<_>>();
+    let Some(child_indent) = items.iter().map(|(indent, _)| *indent).min() else {
+        return false;
+    };
+    items.iter().any(|(indent, item)| {
+        *indent == child_indent
+            && (item.starts_with("**Response [#r-") || item.starts_with("**Closed by:**"))
+    })
 }
 
 /// Every `**Response [#r-…]**` child id already rendered in a queue component.

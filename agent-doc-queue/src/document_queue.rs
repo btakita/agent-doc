@@ -5039,6 +5039,54 @@ pub fn reported_response_origin(
     Some(ReportedResponseOrigin { request_ids })
 }
 
+/// `#parentstrike`: a live row that is a group parent only through closed
+/// structure: struck rows, response trees, comments. No live prompt is under
+/// it, so nothing under it is dispatchable work. An explicit agent
+/// acknowledgement may strike it (it never becomes an executable leaf, and
+/// dispatch never selects it). Binary-owned Waiting-on-you items, their
+/// packets and the tree's heading are not such rows.
+pub fn closed_subtree_parent(entries: &[QueueEntry], idx: usize) -> bool {
+    let Some(QueueEntry::Prompt(prompt)) = entries.get(idx) else {
+        return false;
+    };
+    if prompt
+        .text
+        .contains(crate::queue_consume::WAITING_ON_YOU_ITEM_MARKER)
+        || crate::waiting_packet::is_waiting_on_you_root_text(&prompt.text)
+        || crate::waiting_packet::waiting_owner(entries, idx).is_some()
+        || crate::waiting_packet::is_packet_row(entries, idx)
+        || !entry_is_group_parent(entries, idx)
+    {
+        return false;
+    }
+    let own_indent = prompt.indent;
+    for later in entries.iter().skip(idx + 1) {
+        match later {
+            QueueEntry::Prompt(child) => {
+                if child.indent <= own_indent {
+                    break;
+                }
+                return false;
+            }
+            QueueEntry::Completed(child) => {
+                if child.indent <= own_indent {
+                    break;
+                }
+            }
+            QueueEntry::Freeform(raw) => {
+                let Some((indent, _, _)) = raw.lines().next().and_then(split_list_item) else {
+                    continue;
+                };
+                if indent <= own_indent {
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    true
+}
+
 /// A GitHub pull-request URL whose only descendants are list comments
 /// (`#prurlcommentnote`).
 ///

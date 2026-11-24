@@ -872,7 +872,7 @@ pub fn retire_struck(
     Ok(retired)
 }
 
-fn terminal_projection_pending(file: &Path) -> Result<bool> {
+pub(crate) fn terminal_projection_pending(file: &Path) -> Result<bool> {
     Ok(
         agent_doc_cycle_state_io::load_document_projection(file)?.is_some_and(|projection| {
             projection.document.pending_write.is_some()

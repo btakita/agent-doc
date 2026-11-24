@@ -1030,7 +1030,18 @@ special case: closure never consults the anchor. The set is `None` only when
 the queue graph does not parse, and then closure is not judged (expiry
 only); it is no longer `None` merely because no queue is ready (idle,
 blocked, or in flight), so a row that left every queue closes its claim
-then too. Drain and dispatch callers that want only the scheduler-selected
+then too. Closure is proven against the authoritative current text, never a stale cut
+(`#claimpruneauthority`): when `prune_closed_claims` would close a claim, it
+asks for the document's closure authority first. With no editor attached the
+caller's closeout content is the authority. With an editor attached a row has
+closed only when it is also absent from the editor's current, unquarantined
+CRDT text. While a retained projection write is pending (the same gate the
+release-receipt prune uses), or the editor replica is missing, mid-sync, or
+quarantined, or the read fails, closure is deferred to the next prune and
+only expiry applies. Before this, closeout reconciliation judged closure from
+a raw disk read that lagged the editor while status and recap writes were
+retained, and pruned a live worker's claim whose row was still running.
+Drain and dispatch callers that want only the scheduler-selected
 queue keep reading `live_queue_head_texts` / `live_queue_head_rows`. Before
 this, the closure set read only the selected queue, so a claim on a live
 `agent:loop` row was judged closed whenever `agent:run` had work: closeout

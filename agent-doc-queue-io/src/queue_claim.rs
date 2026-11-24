@@ -3983,14 +3983,115 @@ pub fn ledger_claimed_items_for_content(file: &Path, content: &str) -> ClaimedQu
     }
 }
 
+/// Where `prune_closed_claims` may judge that a claimed row closed
+/// (`#claimpruneauthority`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClaimClosureAuthority {
+    /// No editor owns the document: the caller's closeout content is the
+    /// authority (it may be ahead of disk, never behind it).
+    CallerContent,
+    /// An editor owns the document and this is its current, unquarantined
+    /// CRDT text. A row closed only if it is absent here too.
+    Current(String),
+    /// No proof is available now (a retained projection is still pending,
+    /// the editor's replica is missing or mid-sync, a live replica is
+    /// quarantined, or the read failed). Closure waits for the next prune;
+    /// expiry still applies.
+    Deferred(&'static str),
+}
+
+/// Resolve [`ClaimClosureAuthority`] for `file` now.
+pub fn claim_closure_authority(file: &Path) -> ClaimClosureAuthority {
+    match crate::claim_release_receipt::terminal_projection_pending(file) {
+        Ok(false) => {}
+        Ok(true) => return ClaimClosureAuthority::Deferred("retained_projection_pending"),
+        Err(_) => return ClaimClosureAuthority::Deferred("projection_unreadable"),
+    }
+    match agent_doc_controller_io::project_controller::current_text_via_controller_model_read_for_doc(
+        file,
+        "queue_claim_prune",
+    ) {
+        Ok(None) | Ok(Some(agent_doc_crdt_relay_io::CurrentText::Detached)) => {
+            ClaimClosureAuthority::CallerContent
+        }
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
+            text,
+            quarantined_replicas: 0,
+            ..
+        })) => ClaimClosureAuthority::Current(text),
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { .. })) => {
+            ClaimClosureAuthority::Deferred("quarantined_replica")
+        }
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)) => {
+            ClaimClosureAuthority::Deferred("editor_replica_missing")
+        }
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending)) => {
+            ClaimClosureAuthority::Deferred("editor_sync_pending")
+        }
+        Err(_) => ClaimClosureAuthority::Deferred("current_text_unavailable"),
+    }
+}
+
 /// Durably drop expired claims and claims whose item has closed. Called at
 /// closeout reconciliation, where a consumed head ends its claim.
+///
+/// `#claimpruneauthority`: closure is proven against the authoritative
+/// current text, never a stale cut. A caller's content (or the raw disk read
+/// closeout reconciliation does) can lag the editor's CRDT text while
+/// retained status/recap writes await delivery; on 2026-11-24 that pruned a
+/// live worker's claim (`subagent:pflag`, cause=closed) whose row was still
+/// running. The authority is consulted only when some claim would close.
 pub fn prune_closed_claims(file: &Path, content: &str) -> Result<usize> {
+    let ledger = load_ledger(file)?;
+    if ledger.claims.is_empty() {
+        return Ok(0);
+    }
+    let live = live_queue_head_identities(content);
+    let closes_some = live.as_ref().is_some_and(|live| {
+        ledger
+            .claims
+            .iter()
+            .any(|claim| !live.contains(&claim.identity))
+    });
+    let authority = if closes_some {
+        claim_closure_authority(file)
+    } else {
+        ClaimClosureAuthority::CallerContent
+    };
+    prune_closed_claims_under(file, content, &authority)
+}
+
+/// [`prune_closed_claims`] with an already-resolved closure authority.
+pub fn prune_closed_claims_under(
+    file: &Path,
+    content: &str,
+    authority: &ClaimClosureAuthority,
+) -> Result<usize> {
     if load_ledger(file)?.claims.is_empty() {
         return Ok(0);
     }
     let _guard = steer_guard(nested_claim_steer_snapshots(file, content));
     let mut live = live_queue_head_identities(content);
+    match authority {
+        ClaimClosureAuthority::CallerContent => {}
+        ClaimClosureAuthority::Current(text) => match live_queue_head_identities(text) {
+            Some(current) => {
+                if let Some(live) = &mut live {
+                    live.extend(current);
+                }
+            }
+            None => live = None,
+        },
+        ClaimClosureAuthority::Deferred(reason) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "queue_claim_prune_closure_deferred reason={reason} (#claimpruneauthority)"
+                ),
+            );
+            live = None;
+        }
+    }
     let heads = ClaimQueueView::from_content(content);
     let now = now_secs();
     let pruned = mutate_ledger(file, |ledger| {
@@ -5530,6 +5631,66 @@ mod tests {
         assert_eq!(outcome, ClaimOutcome::Created);
         assert_eq!(stored.owner, "subagent:whyrun");
         assert!(claimed_items_for_content(&doc, &idless).claims(free_text));
+    }
+
+    /// `#claimpruneauthority`: the `subagent:pflag` prune. A running worker's
+    /// row was still live in the editor's current CRDT text, but closeout
+    /// judged closure from a stale cut that lacked it (retained status/recap
+    /// writes awaiting delivery, an editor replica re-registering) and pruned
+    /// the claim `cause=closed`. Closure is proven against the authority.
+    #[test]
+    fn claimpruneauthority_a_stale_cut_never_prunes_a_live_workers_claim() {
+        let dir = tempfile::tempdir().unwrap();
+        let row = "[from:chat key=preflightlag] perf: sdk-dev.md preflight admission takes 70-81s";
+        let doc = write_doc(dir.path(), &[row, "another row"]);
+        let current = std::fs::read_to_string(&doc).unwrap();
+        let (_, claim) = super::claim(&doc, row, "subagent:pflag", 600).unwrap();
+        start_attempt(
+            &doc,
+            row,
+            "subagent:pflag",
+            "a3aa3a27018a02bbf",
+            600,
+            claim.generation,
+        )
+        .unwrap();
+        let stale = current.replace(&format!("- {row}\n"), "");
+        assert!(!stale.contains(row));
+
+        // The editor's current text still has the row: nothing closed.
+        assert_eq!(
+            prune_closed_claims_under(
+                &doc,
+                &stale,
+                &ClaimClosureAuthority::Current(current.clone())
+            )
+            .unwrap(),
+            0
+        );
+        // No proof available yet: closure waits.
+        assert_eq!(
+            prune_closed_claims_under(
+                &doc,
+                &stale,
+                &ClaimClosureAuthority::Deferred("retained_projection_pending")
+            )
+            .unwrap(),
+            0
+        );
+        let kept = load_ledger(&doc).unwrap().claims;
+        assert_eq!(kept.len(), 1, "{kept:#?}");
+        assert_eq!(
+            kept[0].state,
+            agent_doc_queue::queue_claim::QueueClaimState::Running
+        );
+
+        // The authority agrees the row is gone: the claim closes.
+        assert_eq!(
+            prune_closed_claims_under(&doc, &stale, &ClaimClosureAuthority::Current(stale.clone()))
+                .unwrap(),
+            1
+        );
+        assert!(load_ledger(&doc).unwrap().claims.is_empty());
     }
 
     #[test]

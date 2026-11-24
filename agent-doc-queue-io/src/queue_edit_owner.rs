@@ -1369,7 +1369,7 @@ mod tests {
                     scope_id: document_hash,
                     holder: token.to_string(),
                     holder_pid: Some(std::process::id()),
-                    heartbeat_secs: now_secs().saturating_sub(3600),
+                    heartbeat_secs: now_secs() - 3600,
                 },
             )
             .unwrap();

@@ -1402,20 +1402,23 @@ fn run_queue_maintenance_worker(
         })();
         // dogfood `maintlockhold`: how long this request held the maintenance claim
         // and how many fence observations actually materialized the document.
-        let fence_counts = effect_fence.authority.counts();
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "queue_maintenance_background_claim_held file={} pid={} generation={} held_ms={} fence_observations={} fence_materializations={} outcome={} (maintlockhold)",
-                file.display(),
-                std::process::id(),
-                request.generation,
-                request_started.elapsed().as_millis(),
-                fence_counts.observations,
-                fence_counts.materializations,
-                if result.is_ok() { "ok" } else { "error" },
-            ),
-        );
+        // Logged only for a request that kept its fence: a superseded worker
+        // must not append anything but its exit diagnostic (`#deadmaintworker`).
+        if result.is_ok() {
+            let fence_counts = effect_fence.authority.counts();
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "queue_maintenance_background_claim_held file={} pid={} generation={} held_ms={} fence_observations={} fence_materializations={} outcome=ok (maintlockhold)",
+                    file.display(),
+                    std::process::id(),
+                    request.generation,
+                    request_started.elapsed().as_millis(),
+                    fence_counts.observations,
+                    fence_counts.materializations,
+                ),
+            );
+        }
         drop(effect_fence);
 
         match result {

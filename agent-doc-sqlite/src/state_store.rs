@@ -1815,6 +1815,30 @@ fn run_state_event_retention_if_due(conn: &Connection) {
     if retention_stamp_is_fresh(conn, wall_now_ms, STATE_EVENT_RETENTION_INTERVAL) {
         return;
     }
+    let clean = run_state_event_retention_passes(conn);
+    if clean {
+        // Best-effort: a missing stamp only means the next process prunes.
+        let _ = upsert_project_runtime_state_in_db(
+            conn,
+            STATE_EVENT_RETENTION_STAMP_KEY,
+            &wall_now_ms.to_string(),
+            wall_now_ms,
+        );
+    } else {
+        let mut guard = STATE_EVENT_RETENTION_LAST_RUN_MS.lock();
+        // Restore the previous stamp so a transient failure retries at the next
+        // open instead of waiting out the whole interval.
+        let stamps = guard.get_or_insert_with(BTreeMap::new);
+        if last_run_ms == u64::MAX {
+            stamps.remove(&key);
+        } else {
+            stamps.insert(key, last_run_ms);
+        }
+    }
+}
+
+/// Every retention pass, best-effort; `true` when all of them succeeded.
+fn run_state_event_retention_passes(conn: &Connection) -> bool {
     let mut clean = true;
     for (label, outcome) in [
         (
@@ -1898,25 +1922,7 @@ fn run_state_event_retention_if_due(conn: &Connection) {
             eprintln!("[agent-doc] warning: failed to prune {label} events: {err:#}");
         }
     }
-    if clean {
-        // Best-effort: a missing stamp only means the next process prunes.
-        let _ = upsert_project_runtime_state_in_db(
-            conn,
-            STATE_EVENT_RETENTION_STAMP_KEY,
-            &wall_now_ms.to_string(),
-            wall_now_ms,
-        );
-    } else {
-        let mut guard = STATE_EVENT_RETENTION_LAST_RUN_MS.lock();
-        // Restore the previous stamp so a transient failure retries at the next
-        // open instead of waiting out the whole interval.
-        let stamps = guard.get_or_insert_with(BTreeMap::new);
-        if last_run_ms == u64::MAX {
-            stamps.remove(&key);
-        } else {
-            stamps.insert(key, last_run_ms);
-        }
-    }
+    clean
 }
 
 /// `project_runtime_state` key of the durable cross-process retention stamp:
@@ -2439,6 +2445,18 @@ pub fn reclaim_state_db_free_space(project_root: &Path) -> Result<u64> {
         return Ok(0);
     }
     let conn = open_state_db(project_root)?;
+    // An explicit cleanup always prunes. The open's own retention is gated by
+    // the cross-process stamp (`#q-8383c546c6ca`), so an open within the
+    // interval skipped it and `gc --database-only` pruned nothing.
+    if run_state_event_retention_passes(&conn) {
+        let now_ms = retention_wall_clock_ms();
+        let _ = upsert_project_runtime_state_in_db(
+            &conn,
+            STATE_EVENT_RETENTION_STAMP_KEY,
+            &now_ms.to_string(),
+            now_ms,
+        );
+    }
 
     let page_count: i64 = conn
         .query_row("PRAGMA page_count", [], |row| row.get(0))

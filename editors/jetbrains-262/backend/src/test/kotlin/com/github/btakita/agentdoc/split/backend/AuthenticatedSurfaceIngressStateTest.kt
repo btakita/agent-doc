@@ -385,7 +385,7 @@ class AuthenticatedSurfaceIngressStateTest {
             backendActivationReceipt = backendActivation.copy(implSha256 = null, epoch = 0),
             scheduleDiagnostic = { _, _ -> },
             log = { _, _ -> },
-            onFrontendPluginMismatch = { client, _, detail -> mismatches += "$client $detail" },
+            onFrontendPluginMismatch = { client, _, mismatch -> mismatches += "$client ${mismatch.detail}" },
         )
         val lease = state.open("client-a", "frontend-a")
         val stale = frontendActivation.copy(shellDigest = "d".repeat(64), implSha256 = null, epoch = 0)
@@ -400,16 +400,63 @@ class AuthenticatedSurfaceIngressStateTest {
         assertTrue(mismatches.single().contains("frontend_shell=dddddddddddd backend_shell=aaaaaaaaaaaa"), mismatches.toString())
     }
 
+    /**
+     * GH #435 (Coder, 2026-11-24): the Client's 0.2.1046 frontend timed out its 5 s schema
+     * negotiation and published schema 1 for the whole lease. Schema 1 carries no activation
+     * receipt, so every snapshot was refused, and the backend called it an "older Agent Doc
+     * frontend" although both peers ran 0.2.1046. Schema 1 from a current frontend is that
+     * fallback, so the backend says so and names the reconnect first.
+     */
+    @Test
+    fun aSchemaOneSnapshotIsReportedAsAnUnansweredNegotiationWithTheReconnectRemedy() = runBlocking {
+        val mismatches = mutableListOf<FrontendPluginMismatch>()
+        val state = AuthenticatedSurfaceIngressState(
+            RecordingPublisher(),
+            RecordingForwarder(),
+            backendActivationReceipt = backendActivation,
+            scheduleDiagnostic = { _, _ -> },
+            log = { _, _ -> },
+            onFrontendPluginMismatch = { _, _, mismatch -> mismatches += mismatch },
+        )
+        val lease = state.open("client-a", "frontend-a")
+        val ack = state.publish(
+            "client-a",
+            lease,
+            snapshot("frontend-a", 1).copy(activationReceipt = frontendActivation.encode()).forSchema(1),
+        )
+
+        assertEquals(SurfaceIngressStatus.DELIVERY_FAILED, ack.status, "schema 1 carries no activation receipt")
+        assertEquals(FRONTEND_AUTHORITY_UNAVAILABLE_READINESS, ack.diagnostic)
+        val mismatch = mismatches.single()
+        assertTrue(mismatch.unansweredNegotiation)
+        assertTrue(mismatch.detail.contains("frontend_schema=1 backend_schema=5"), mismatch.detail)
+        assertTrue(mismatch.detail.contains("negotiation"), mismatch.detail)
+        assertFalse(mismatch.detail.contains("older Agent Doc frontend"), mismatch.detail)
+
+        val remedy = frontendPluginMismatchRemedy(mismatch, "0.2.1052", "IntelliJIdea2026.3")
+        assertTrue(remedy.startsWith("reconnect the JetBrains Client"), remedy)
+        assertTrue(remedy.contains("snapshot schema negotiated version=1 backend_offered=none"), remedy)
+        // Only when the Client log names another plugin is a reinstall the remedy.
+        assertTrue(remedy.contains("names a plugin other than 0.2.1052"), remedy)
+        assertTrue(remedy.contains("agent-doc-jetbrains-262-0.2.1052.zip"), remedy)
+        assertFalse(remedy.contains('<') || remedy.contains('>'), remedy)
+        val olderRemedy = frontendPluginMismatchRemedy(
+            frontendPluginMismatch(snapshot("frontend-a", 1).copy(schemaVersion = 4), null, "a".repeat(64))!!,
+            "0.2.1052",
+            "IntelliJIdea2026.3",
+        )
+        assertTrue(olderRemedy.startsWith("install the same agent-doc-jetbrains-262-0.2.1052.zip"), olderRemedy)
+    }
+
     @Test
     fun frontendPluginMismatchNamesTheStaleSide() {
         val current = snapshot("frontend-a", 1)
         val sameBuild = frontendActivation.copy(shellDigest = "a".repeat(64))
         assertEquals(null, frontendPluginMismatch(current.copy(activationReceipt = sameBuild.encode()), sameBuild, "a".repeat(64)))
-        assertTrue(
-            frontendPluginMismatch(current.copy(schemaVersion = 4), null, "a".repeat(64))!!
-                .contains("frontend_schema=4 backend_schema=5"),
-        )
-        assertTrue(frontendPluginMismatch(current, null, "a".repeat(64))!!.contains("frontend_receipt=unreadable"))
+        val older = frontendPluginMismatch(current.copy(schemaVersion = 4), null, "a".repeat(64))!!
+        assertTrue(older.detail.contains("frontend_schema=4 backend_schema=5"), older.detail)
+        assertFalse(older.unansweredNegotiation, "a frontend that negotiated schema 4 is an older build")
+        assertTrue(frontendPluginMismatch(current, null, "a".repeat(64))!!.detail.contains("frontend_receipt=unreadable"))
         assertEquals(null, frontendPluginMismatch(current, sameBuild, "unknown"), "an unbuilt identity proves nothing")
         val line = frontendPluginMismatchLine(
             "client-a",

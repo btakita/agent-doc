@@ -1798,9 +1798,18 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   one-sided installs with no authenticated frontend lease. Schema negotiation keeps old peers
   working: Fleet RPC decodes with `ignoreUnknownKeys = false` and `encodeDefaults = true`, so
   versioned optional keys are never encoded while null (`@EncodeDefault(NEVER)`), and the frontend asks
-  `SurfaceSnapshotRpcApi.supportedSnapshotSchemaVersion()` once per lease; a backend that predates
-  the call fails it (or does not answer within 5 s) and the frontend publishes schema 1 without
-  geometry. The backend validator accepts schemas 1 through 4. Explicit retirement/release is the
+  `SurfaceSnapshotRpcApi.supportedSnapshotSchemaVersion()` when a lease opens; a backend that
+  predates the call fails it (or does not answer within 5 s) and the frontend publishes schema 1
+  without geometry. That schema is provisional (GH #435): while the backend has not answered,
+  every refused snapshot asks again, and an answer republishes the same capture at the answered
+  schema at once. Before, one unanswered negotiation pinned schema 1 for the lease; schema 1
+  carries no activation receipt, so a backend with an activated generation refused every snapshot
+  (`frontend_authority_absent_or_generation_mismatched`) until the Client reconnected. The backend
+  reports a schema-1 snapshot as `frontend/backend plugin mismatch frontend_schema=1 ...` with the
+  reconnect remedy, not as an older build. The 30 s frontend-release poll asks
+  `frontendImplementationReleaseIdentity()` (digest and epoch) and fetches the package bytes only
+  for a generation the Client has not activated, retrying a refused one after 10 minutes. The
+  backend validator accepts schemas 1 through 5. Explicit retirement/release is the
   only transition that hands authority back to the backend fallback. Evidence: the client logs
   `[split-surface] snapshot schema negotiated version=<n> backend_offered=<n|none>
   geometry=measured|unavailable`; the backend logs `[rd-layout] forwarded measured columns

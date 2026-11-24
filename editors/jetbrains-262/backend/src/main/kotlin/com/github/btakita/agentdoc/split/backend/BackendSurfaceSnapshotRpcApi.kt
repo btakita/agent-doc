@@ -5,12 +5,14 @@ package com.github.btakita.agentdoc.split.backend
 import com.github.btakita.agentdoc.shell.ShellGenerationHost
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
 import com.github.btakita.agentdoc.split.FrontendImplementationRelease
+import com.github.btakita.agentdoc.split.FrontendImplementationReleaseIdentity
 import com.github.btakita.agentdoc.split.FrontendPresentationReceipt
 import com.github.btakita.agentdoc.split.SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.SurfaceIngressAck
 import com.github.btakita.agentdoc.split.SurfaceIngressLease
 import com.github.btakita.agentdoc.split.SurfaceIngressStatus
 import com.github.btakita.agentdoc.split.SurfaceSnapshotRpcApi
+import com.github.btakita.agentdoc.split.identity
 import com.intellij.codeWithMe.ClientId
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.platform.project.ProjectId
@@ -96,4 +98,11 @@ internal class BackendSurfaceSnapshotRpcApi(
     override suspend fun supportedSnapshotSchemaVersion(): Int = SURFACE_SNAPSHOT_SCHEMA_VERSION
 
     override suspend fun frontendImplementationRelease(): FrontendImplementationRelease? = frontendRelease()
+
+    /**
+     * GH #435: the same discovery (and backend peer activation) as [frontendImplementationRelease],
+     * answered without the package bytes, which stay on this host.
+     */
+    override suspend fun frontendImplementationReleaseIdentity(): FrontendImplementationReleaseIdentity? =
+        frontendRelease()?.identity()
 }

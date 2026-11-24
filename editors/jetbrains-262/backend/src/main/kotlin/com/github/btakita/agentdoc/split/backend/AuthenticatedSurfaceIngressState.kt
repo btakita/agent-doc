@@ -10,6 +10,7 @@ import com.github.btakita.agentdoc.split.FrontendSurface
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
 import com.github.btakita.agentdoc.split.FrontendPresentationReceipt
 import com.github.btakita.agentdoc.split.FOCUSED_EDITOR_SURFACE_SNAPSHOT_SCHEMA_VERSION
+import com.github.btakita.agentdoc.split.LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.MAIN_SURFACE_PANE_ID
 import com.github.btakita.agentdoc.split.SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.isSupportedSurfaceSnapshotSchema
@@ -62,13 +63,20 @@ internal class ControllerSurfaceIngressFactory : SurfaceIngressFactory {
 }
 
 /** GH #435: tell the operator, in the Client UI, that the Client's frontend is a different build. */
-private fun notifyFrontendPluginMismatch(project: Project, detail: String) {
+private fun notifyFrontendPluginMismatch(project: Project, mismatch: FrontendPluginMismatch) {
     if (project.isDisposed) return
     val notification = NotificationGroupManager.getInstance()
         .getNotificationGroup("Agent Doc")
         .createNotification(
-            "Agent Doc: the JetBrains Client frontend is not the backend's plugin ${pluginVersion()}",
-            "$detail. Layout sync needs both halves of one ZIP: ${currentFrontendPluginMismatchRemedy()}.",
+            if (mismatch.unansweredNegotiation) {
+                "Agent Doc: the JetBrains Client frontend publishes layout without geometry"
+            } else {
+                "Agent Doc: the JetBrains Client frontend is not the backend's plugin ${pluginVersion()}"
+            },
+            "${mismatch.detail}. " +
+                (if (mismatch.unansweredNegotiation) "Layout sync needs a lease that negotiated schema " +
+                    "$SURFACE_SNAPSHOT_SCHEMA_VERSION: " else "Layout sync needs both halves of one ZIP: ") +
+                "${currentFrontendPluginMismatchRemedy(mismatch)}.",
             NotificationType.WARNING,
         )
     AgentDocNotices.show(project, notification, "ControllerSurfaceIngress.frontendPluginMismatch")
@@ -82,10 +90,15 @@ private class ControllerSurfaceIngress(private val project: Project) : SurfaceIn
         layoutForwarder,
         backendActivationReceipt = ShellGenerationHost.getInstance().receipt(),
         backendActivationReceiptProvider = BackendFrontendReleaseActivation::receipt,
-        onFrontendPluginMismatch = { clientId, generation, detail ->
-            val line = frontendPluginMismatchLine(clientId, generation, detail)
+        onFrontendPluginMismatch = { clientId, generation, mismatch ->
+            val line = frontendPluginMismatchLine(
+                clientId,
+                generation,
+                mismatch.detail,
+                currentFrontendPluginMismatchRemedy(mismatch),
+            )
             Logger.getInstance(ControllerSurfaceIngress::class.java).warn(line)
-            notifyFrontendPluginMismatch(project, detail)
+            notifyFrontendPluginMismatch(project, mismatch)
         },
     )
 
@@ -152,8 +165,16 @@ internal class AuthenticatedSurfaceIngressState(
      * GH #435: called once per lease when the Client's frontend is not the backend's own build
      * ([frontendPluginMismatch]). An upgrade on the Remote Dev backend never reaches the Client.
      */
-    private val onFrontendPluginMismatch: (clientId: String, connectionGeneration: Long, detail: String) -> Unit =
-        { clientId, generation, detail -> logPublication(true, frontendPluginMismatchLine(clientId, generation, detail)) },
+    private val onFrontendPluginMismatch: (
+        clientId: String,
+        connectionGeneration: Long,
+        mismatch: FrontendPluginMismatch,
+    ) -> Unit = { clientId, generation, mismatch ->
+        logPublication(
+            true,
+            frontendPluginMismatchLine(clientId, generation, mismatch.detail, currentFrontendPluginMismatchRemedy(mismatch)),
+        )
+    },
 ) {
     private val generation = AtomicLong(generationSeed)
     private val mutex = Mutex()
@@ -535,27 +556,75 @@ internal class AuthenticatedSurfaceIngressState(
 }
 
 /**
+ * GH #435: why one lease's frontend snapshots cannot carry this backend's layout authority.
+ * [unansweredNegotiation] marks a schema-1 snapshot: every frontend since schema negotiation
+ * (2026-10-20) publishes schema 1 only when the backend gave no schema answer within its 5 s
+ * window, so the remedy is a new lease (a Client reconnect), not a reinstall.
+ */
+internal data class FrontendPluginMismatch(
+    val detail: String,
+    val unansweredNegotiation: Boolean = false,
+)
+
+/**
  * GH #435: why the JetBrains Client's frontend is not this backend's Agent Doc build, or null when
  * it is (or cannot be told apart). Both halves of one modular ZIP share `agent.doc.shared`, so one
- * install reports one shell digest; a frontend that negotiated a lower snapshot schema predates
- * this backend. An upgrade run on a Remote Dev backend never updates the Client, so this is the
- * version check that names the stale side.
+ * install reports one shell digest; a frontend that negotiated a lower snapshot schema (2-4)
+ * predates this backend. Schema 1 is different: it is the frontend's fallback when the
+ * negotiation went unanswered, which on Coder (2026-11-24) was a 0.2.1046 frontend paired with a
+ * 0.2.1046 backend. An upgrade run on a Remote Dev backend never updates the Client, so this is
+ * the version check that names the stale side.
  */
 internal fun frontendPluginMismatch(
     snapshot: FrontendSurfaceSnapshot,
     frontendReceipt: ActivationReceipt?,
     backendShellDigest: String,
-): String? {
+): FrontendPluginMismatch? {
+    if (snapshot.schemaVersion <= LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION) {
+        return FrontendPluginMismatch(
+            "frontend_schema=${snapshot.schemaVersion} backend_schema=$SURFACE_SNAPSHOT_SCHEMA_VERSION " +
+                "(the JetBrains Client frontend published schema ${snapshot.schemaVersion} without this " +
+                "backend's schema answer: its 5 s schema negotiation went unanswered on this lease, or it " +
+                "predates negotiation; schema ${snapshot.schemaVersion} carries no geometry and no activation receipt)",
+            unansweredNegotiation = true,
+        )
+    }
     if (snapshot.schemaVersion < SURFACE_SNAPSHOT_SCHEMA_VERSION) {
-        return "frontend_schema=${snapshot.schemaVersion} backend_schema=$SURFACE_SNAPSHOT_SCHEMA_VERSION " +
-            "(the JetBrains Client runs an older Agent Doc frontend)"
+        return FrontendPluginMismatch(
+            "frontend_schema=${snapshot.schemaVersion} backend_schema=$SURFACE_SNAPSHOT_SCHEMA_VERSION " +
+                "(the JetBrains Client runs an older Agent Doc frontend)",
+        )
     }
     val frontendShell = frontendReceipt?.shellDigest
-        ?: return "frontend_receipt=unreadable (the JetBrains Client runs a different Agent Doc frontend)"
+        ?: return FrontendPluginMismatch(
+            "frontend_receipt=unreadable (the JetBrains Client runs a different Agent Doc frontend)",
+        )
     if (frontendShell == ShellIdentity.UNKNOWN || backendShellDigest == ShellIdentity.UNKNOWN) return null
     if (frontendShell == backendShellDigest) return null
-    return "frontend_shell=${frontendShell.take(12)} backend_shell=${backendShellDigest.take(12)} " +
-        "(the JetBrains Client and the Remote Dev backend run different Agent Doc builds)"
+    return FrontendPluginMismatch(
+        "frontend_shell=${frontendShell.take(12)} backend_shell=${backendShellDigest.take(12)} " +
+            "(the JetBrains Client and the Remote Dev backend run different Agent Doc builds)",
+    )
+}
+
+/**
+ * GH #435: the remedy for [mismatch]. A schema-1 lease is repaired by a new lease, which asks for
+ * the schema again; only a Client log that names another plugin calls for the reinstall.
+ */
+internal fun frontendPluginMismatchRemedy(
+    mismatch: FrontendPluginMismatch,
+    version: String?,
+    ideDataDir: String?,
+): String {
+    val install = frontendPluginMismatchRemedy(version, ideDataDir)
+    if (!mismatch.unansweredNegotiation) return install
+    val known = version?.takeIf { it.isNotBlank() && it != "unknown" }
+    return "reconnect the JetBrains Client so it opens a new lease and asks this backend for its schema " +
+        "again: quit and restart the JetBrains Client, or close and reopen this project in it. Its idea.log " +
+        "line `snapshot schema negotiated version=1 backend_offered=none` confirms the unanswered " +
+        "negotiation; Agent Doc 0.2.1052 and later ask again by themselves after a refusal. Only if the " +
+        "Client idea.log has no `frontend surface publisher started` line, or that line names a plugin " +
+        "other than ${known ?: "this backend's version"}, " + install
 }
 
 /**
@@ -588,6 +657,9 @@ internal fun backendIdeDataDirName(): String? =
 
 internal fun currentFrontendPluginMismatchRemedy(): String =
     frontendPluginMismatchRemedy(runCatching { pluginVersion() }.getOrNull(), backendIdeDataDirName())
+
+internal fun currentFrontendPluginMismatchRemedy(mismatch: FrontendPluginMismatch): String =
+    frontendPluginMismatchRemedy(mismatch, runCatching { pluginVersion() }.getOrNull(), backendIdeDataDirName())
 
 internal fun frontendPluginMismatchLine(
     clientId: String,

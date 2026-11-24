@@ -4,7 +4,9 @@ package com.github.btakita.agentdoc.split.frontend
 
 import com.github.btakita.agentdoc.split.FrontendSurface
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
+import com.github.btakita.agentdoc.shell.receipt.ActivationReceipt
 import com.github.btakita.agentdoc.split.FrontendImplementationRelease
+import com.github.btakita.agentdoc.split.FrontendImplementationReleaseIdentity
 import com.github.btakita.agentdoc.split.FrontendPresentationCapability
 import com.github.btakita.agentdoc.split.FrontendPresentationReceipt
 import com.github.btakita.agentdoc.split.FrontendPresentationReceiptOutcome
@@ -19,6 +21,7 @@ import com.github.btakita.agentdoc.split.SurfaceIngressStatus
 import com.github.btakita.agentdoc.split.SurfaceRole
 import com.github.btakita.agentdoc.split.SurfaceSnapshotRpcApi
 import com.github.btakita.agentdoc.split.forSchema
+import com.github.btakita.agentdoc.split.identity
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
@@ -107,25 +110,38 @@ class FrontendSurfaceSnapshotService(
     }
 
     private suspend fun pollFrontendImplementationReleases() {
+        val poll = FrontendReleasePoll()
         while (true) {
             try {
-                SurfaceSnapshotRpcApi.getInstance().frontendImplementationRelease()?.let { release ->
-                    val active = FrontendReleaseActivation.receipt()
-                    if (active.implSha256 != release.implSha256 || active.epoch != release.epoch) {
-                        when (val outcome = activateFrontendImplementationRelease(release)) {
-                            is FrontendActivationOutcome.Activated -> {
-                                LOG.info(
-                                    "[frontend-impl] activated digest=${outcome.receipt.implSha256} " +
-                                        "epoch=${outcome.receipt.epoch}",
-                                )
-                                requestCapture()
+                // GH #435: ask which generation the backend selected before moving its bytes. The
+                // full release is a multi-megabyte ZIP; fetching it every 30 s congested the
+                // Remote Dev link enough to time out the schema negotiation.
+                val identity = SurfaceSnapshotRpcApi.getInstance().frontendImplementationReleaseIdentity()
+                if (poll.shouldFetch(identity, FrontendReleaseActivation.receipt(), System.currentTimeMillis())) {
+                    SurfaceSnapshotRpcApi.getInstance().frontendImplementationRelease()?.let { release ->
+                        val active = FrontendReleaseActivation.receipt()
+                        if (active.implSha256 != release.implSha256 || active.epoch != release.epoch) {
+                            when (val outcome = activateFrontendImplementationRelease(release)) {
+                                is FrontendActivationOutcome.Activated -> {
+                                    LOG.info(
+                                        "[frontend-impl] activated digest=${outcome.receipt.implSha256} " +
+                                            "epoch=${outcome.receipt.epoch}",
+                                    )
+                                    requestCapture()
+                                }
+                                is FrontendActivationOutcome.Refused -> {
+                                    poll.refused(release.identity(), System.currentTimeMillis())
+                                    LOG.warn("[frontend-impl] refused: ${outcome.reason}")
+                                }
+                                is FrontendActivationOutcome.RestartRequired -> {
+                                    poll.refused(release.identity(), System.currentTimeMillis())
+                                    LOG.warn("[frontend-impl] restart required: ${outcome.reason}")
+                                }
+                                is FrontendActivationOutcome.RolledBack -> {
+                                    poll.refused(release.identity(), System.currentTimeMillis())
+                                    LOG.warn("[frontend-impl] rolled back: ${outcome.reason}")
+                                }
                             }
-                            is FrontendActivationOutcome.Refused ->
-                                LOG.warn("[frontend-impl] refused: ${outcome.reason}")
-                            is FrontendActivationOutcome.RestartRequired ->
-                                LOG.warn("[frontend-impl] restart required: ${outcome.reason}")
-                            is FrontendActivationOutcome.RolledBack ->
-                                LOG.warn("[frontend-impl] rolled back: ${outcome.reason}")
                         }
                     }
                 }
@@ -169,7 +185,11 @@ class FrontendSurfaceSnapshotService(
     }
 
     private suspend fun publishForLease(lease: SurfaceIngressLease) {
-        val schema = negotiateSnapshotSchema()
+        // GH #435: the schema belongs to this lease, but an unanswered negotiation is provisional:
+        // a refusal asks the backend again instead of pinning schema 1 for the lease's lifetime.
+        val negotiation = SnapshotSchemaNegotiation(::askBackendSnapshotSchema)
+        negotiation.negotiate()
+        LOG.info(negotiation.logLine())
         val outcomes = FrontendPublicationLog(lease.connectionGeneration)
         captures.collectLatest {
             // Coalesce the burst of file-editor, AWT hierarchy, and focus events produced by one
@@ -179,10 +199,17 @@ class FrontendSurfaceSnapshotService(
             var refusals = 0
             do {
                 val capture = captureOnEdt()
-                val published = capture.snapshot.forSchema(schema)
+                val published = capture.snapshot.forSchema(negotiation.schema)
                 val ack = SurfaceSnapshotRpcApi.getInstance()
                     .publishSnapshot(lease, published)
                 if (ack.status != SurfaceIngressStatus.ACCEPTED) {
+                    if (negotiation.renegotiateAfterRefusal()) {
+                        // The backend answered this time: republish the same editor state at
+                        // the schema it accepts (with geometry and the activation receipt).
+                        LOG.info(negotiation.logLine() + " after_refusal=${ack.status}")
+                        refusals = 0
+                        continue
+                    }
                     // GH #435: a refusal the backend can outgrow (its controller was busy, the
                     // project was not registered yet, a frame was not realized) is republished on
                     // a bounded backoff. Before, the snapshot waited for the next editor/AWT
@@ -222,27 +249,29 @@ class FrontendSurfaceSnapshotService(
      * accepts them. Fleet RPC decodes with `ignoreUnknownKeys = false`; negotiation prevents older
      * peers from seeing new keys. The authenticated lease already owns structure while this call
      * is pending; native derives the live vector from the same snapshot's measured evidence.
+     * Null when the backend gave no answer within [FRONTEND_SCHEMA_NEGOTIATION_TIMEOUT_MS] or
+     * failed the call (a backend that predates negotiation).
      */
-    private suspend fun negotiateSnapshotSchema(): Int {
-        val offered = try {
-            withTimeoutOrNull(FRONTEND_SCHEMA_NEGOTIATION_TIMEOUT_MS) {
-                SurfaceSnapshotRpcApi.getInstance().supportedSnapshotSchemaVersion()
+    private suspend fun askBackendSnapshotSchema(): Int? = try {
+        withTimeoutOrNull(FRONTEND_SCHEMA_NEGOTIATION_TIMEOUT_MS) {
+            SurfaceSnapshotRpcApi.getInstance().supportedSnapshotSchemaVersion()
+        }.also { offered ->
+            if (offered == null) {
+                LOG.info(
+                    "[split-surface] backend snapshot schema negotiation unanswered after " +
+                        "${FRONTEND_SCHEMA_NEGOTIATION_TIMEOUT_MS}ms; publishing schema " +
+                        "$LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION provisionally and asking again after a refusal",
+                )
             }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (failure: Exception) {
-            LOG.info(
-                "[split-surface] backend snapshot schema negotiation unavailable " +
-                    "(${failure.javaClass.simpleName}); publishing schema $LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION",
-            )
-            null
         }
-        val schema = negotiatedSnapshotSchema(offered)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (failure: Exception) {
         LOG.info(
-            "[split-surface] snapshot schema negotiated version=$schema backend_offered=${offered ?: "none"} " +
-                "geometry=${if (schema >= GEOMETRY_SURFACE_SNAPSHOT_SCHEMA_VERSION) "measured" else "unavailable"}",
+            "[split-surface] backend snapshot schema negotiation unavailable " +
+                "(${failure.javaClass.simpleName}); publishing schema $LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION",
         )
-        return schema
+        null
     }
 
     private suspend fun captureOnEdt(): CapturedFrontendSurfaces {
@@ -476,6 +505,76 @@ internal fun activateFrontendImplementationRelease(
 internal fun negotiatedSnapshotSchema(backendOffered: Int?): Int =
     (backendOffered ?: LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION)
         .coerceIn(LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION, SURFACE_SNAPSHOT_SCHEMA_VERSION)
+
+/**
+ * GH #435: the snapshot schema of one ingress lease. An answer from the backend is final for the
+ * lease. No answer (the 5 s negotiation timed out, or the backend failed the call) is
+ * provisional: the lease publishes schema 1 meanwhile, and every refused publication asks again.
+ *
+ * Before, one unanswered negotiation pinned schema 1 for the whole lease. A schema-1 snapshot
+ * carries no activation receipt, so a backend with an activated implementation generation refused
+ * every snapshot (`frontend_authority_absent_or_generation_mismatched`) until the Client
+ * reconnected, and reported an "older Agent Doc frontend" the Client did not have.
+ */
+internal class SnapshotSchemaNegotiation(private val ask: suspend () -> Int?) {
+    @Volatile
+    var schema: Int = LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION
+        private set
+
+    @Volatile
+    private var backendOffered: Int? = null
+
+    val answered: Boolean get() = backendOffered != null
+
+    /** Ask the backend; returns the schema to publish. */
+    suspend fun negotiate(): Int {
+        ask()?.let { backendOffered = it }
+        schema = negotiatedSnapshotSchema(backendOffered)
+        return schema
+    }
+
+    /** After a refused publication, ask again while unanswered; true when the schema changed. */
+    suspend fun renegotiateAfterRefusal(): Boolean {
+        if (answered) return false
+        val before = schema
+        negotiate()
+        return schema != before
+    }
+
+    fun logLine(): String =
+        "[split-surface] snapshot schema negotiated version=$schema backend_offered=${backendOffered ?: "none"} " +
+            "geometry=${if (schema >= GEOMETRY_SURFACE_SNAPSHOT_SCHEMA_VERSION) "measured" else "unavailable"} " +
+            "provisional=${!answered}"
+}
+
+/** GH #435: how long a generation the Client refused waits before its package is fetched again. */
+internal const val FRONTEND_REFUSED_RELEASE_REFETCH_MS = 10L * 60 * 1000
+
+/**
+ * GH #435: whether the 30 s release poll moves the backend's package bytes. Only a generation
+ * this Client has not activated is fetched, and one it refused (no client trust yet, a shell
+ * mismatch) is fetched again only after [FRONTEND_REFUSED_RELEASE_REFETCH_MS], so a missing
+ * trust file added later still activates without a restart.
+ */
+internal class FrontendReleasePoll {
+    private var refused: FrontendImplementationReleaseIdentity? = null
+    private var refusedAtMs: Long = 0
+
+    fun shouldFetch(
+        identity: FrontendImplementationReleaseIdentity?,
+        active: ActivationReceipt,
+        nowMs: Long,
+    ): Boolean {
+        if (identity == null) return false
+        if (active.implSha256 == identity.implSha256 && active.epoch == identity.epoch) return false
+        return identity != refused || nowMs - refusedAtMs >= FRONTEND_REFUSED_RELEASE_REFETCH_MS
+    }
+
+    fun refused(identity: FrontendImplementationReleaseIdentity, nowMs: Long) {
+        refused = identity
+        refusedAtMs = nowMs
+    }
+}
 
 /**
  * Assigns identity and incarnation from public AWT/WindowManager evidence before RPC.  IDs are

@@ -307,4 +307,24 @@ interface SurfaceSnapshotRpcApi : RemoteApi<Unit> {
 
     /** The current backend-selected package, or null while the backend remains shell-only. */
     suspend fun frontendImplementationRelease(): FrontendImplementationRelease?
+
+    /**
+     * GH #435: which package [frontendImplementationRelease] would return, without its bytes, or
+     * null while the backend remains shell-only. The Client polls this every 30 s and fetches the
+     * multi-megabyte package only when it names a generation the Client has not activated; polling
+     * the full release resent the whole ZIP every 30 s over the Remote Dev link, and the
+     * congestion timed out the Client's 5 s schema negotiation.
+     */
+    suspend fun frontendImplementationReleaseIdentity(): FrontendImplementationReleaseIdentity?
 }
+
+/** GH #435: the identity of one backend-selected frontend generation (no package bytes). */
+@Serializable
+data class FrontendImplementationReleaseIdentity(
+    val implSha256: String,
+    val epoch: Long,
+)
+
+/** GH #435: the identity of [this] release. */
+fun FrontendImplementationRelease.identity(): FrontendImplementationReleaseIdentity =
+    FrontendImplementationReleaseIdentity(implSha256 = implSha256, epoch = epoch)

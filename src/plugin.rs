@@ -1151,8 +1151,169 @@ fn jetbrains_remote_dev_client_steps(
         format!("  3. Open the Client plugins directory. A Client started by Toolbox or Gateway for {backend} loads plugins from Windows %APPDATA%\\JetBrains\\{ide}\\plugins\\frontend, macOS ~/Library/Application Support/JetBrains/{ide}/plugins/frontend, Linux ~/.local/share/JetBrains/{ide}/frontend (no plugins segment on Linux; $XDG_DATA_HOME replaces ~/.local/share when set). A standalone JetBrains Client uses Windows %APPDATA%\\JetBrains\\JetBrainsClient<YYYY.N>\\plugins, macOS ~/Library/Application Support/JetBrains/JetBrainsClient<YYYY.N>/plugins, Linux ~/.local/share/JetBrains/JetBrainsClient<YYYY.N> instead. The Client idea.log line `[split-surface] frontend surface publisher started` names the loaded folder as plugin_path=."),
         format!("  4. Delete the agent-doc-jetbrains, agent-doc-jetbrains-262 and agent-doc-jetbrains-263 folders there, then extract {asset} into that directory (it creates agent-doc-jetbrains-262/)."),
         format!("  5. Download {download}/{JETBRAINS_FRONTEND_RELEASE_PUBLIC_KEY_ASSET} and save it in that directory as {JETBRAINS_FRONTEND_RELEASE_DIR}/{JETBRAINS_FRONTEND_TRUSTED_KEYS_FILE} (no extension). Without it the Client logs `[frontend-impl] refused: ... not configured on the JetBrains Client host` and the backend refuses layout snapshots."),
-        format!("  6. Start the Client and reconnect. Its idea.log must show `[split-surface] frontend surface publisher started ... plugin={package_version}`; a backend idea.log line `[split-surface] frontend/backend plugin mismatch` means the Client still runs another build."),
+        format!("  6. Start the Client and reconnect. Its idea.log must show `[split-surface] frontend surface publisher started ... plugin={package_version}`; a backend idea.log line `[split-surface] frontend/backend plugin mismatch frontend_schema=1` means the Client's schema negotiation went unanswered (restart the Client again to reconnect), and any other `frontend/backend plugin mismatch` means the Client still runs another build."),
     ]
+}
+
+/// GH #435: a `[split-surface] frontend/backend plugin mismatch` that a backend
+/// idea.log reports on a lease that is still open and has accepted no snapshot
+/// since, i.e. the JetBrains Client's layout publication is blocked right now.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OpenLeaseFrontendMismatch {
+    client: String,
+    generation: u64,
+    /// `frontend_schema=<n>` from the line; None for a shell/receipt mismatch.
+    frontend_schema: Option<u32>,
+    /// The mismatch facts, without the backend's remedy text.
+    detail: String,
+}
+
+fn split_surface_field<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    line.split_whitespace()
+        .find_map(|token| token.strip_prefix(key)?.strip_prefix('='))
+}
+
+/// GH #435: the newest still-open lease whose frontend the backend reported as
+/// mismatched, from one backend idea.log. A lease retired, superseded, or with
+/// a snapshot accepted after its mismatch is not stuck, and an
+/// `IDE STARTED` banner forgets the previous IDE run.
+fn open_lease_frontend_mismatch(log: &str) -> Option<OpenLeaseFrontendMismatch> {
+    let mut open = BTreeMap::<String, u64>::new();
+    let mut stuck = BTreeMap::<String, OpenLeaseFrontendMismatch>::new();
+    let mut newest: Option<String> = None;
+    for line in log.lines() {
+        if line.contains(" IDE STARTED ") {
+            open.clear();
+            stuck.clear();
+            newest = None;
+            continue;
+        }
+        let Some((_, event)) = line.split_once("[split-surface] ") else {
+            continue;
+        };
+        let lease = || {
+            Some((
+                split_surface_field(event, "client")?.to_string(),
+                split_surface_field(event, "generation")?
+                    .parse::<u64>()
+                    .ok()?,
+            ))
+        };
+        if event.starts_with("lease opened ") {
+            if let Some((client, generation)) = lease() {
+                stuck.remove(&client);
+                open.insert(client, generation);
+            }
+        } else if event.starts_with("lease retired ") || event.starts_with("snapshot accepted ") {
+            if let Some((client, generation)) = lease()
+                && stuck
+                    .get(&client)
+                    .is_some_and(|it| it.generation == generation)
+            {
+                stuck.remove(&client);
+            }
+            if event.starts_with("lease retired ")
+                && let Some((client, generation)) = lease()
+                && open.get(&client) == Some(&generation)
+            {
+                open.remove(&client);
+            }
+        } else if event.starts_with("frontend/backend plugin mismatch ")
+            && let Some((client, generation)) = lease()
+            && open.get(&client) == Some(&generation)
+        {
+            let facts = event
+                .trim_start_matches("frontend/backend plugin mismatch ")
+                .split(" remedy=")
+                .next()
+                .unwrap_or_default();
+            // Only the `key=value` facts: a 0.2.1046 backend's parenthetical
+            // blamed "an older Agent Doc frontend" for schema 1 as well.
+            let detail = facts
+                .split_whitespace()
+                .filter(|token| token.contains('=') && !token.starts_with('('))
+                .filter(|token| !token.starts_with("client=") && !token.starts_with("generation="))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let frontend_schema =
+                split_surface_field(event, "frontend_schema").and_then(|it| it.parse().ok());
+            newest = Some(client.clone());
+            stuck.insert(
+                client.clone(),
+                OpenLeaseFrontendMismatch {
+                    client,
+                    generation,
+                    frontend_schema,
+                    detail,
+                },
+            );
+        }
+    }
+    let newest = newest?;
+    stuck.remove(&newest).or_else(|| stuck.into_values().last())
+}
+
+/// GH #435: what `agent-doc upgrade` prints for a blocked Client lease. A
+/// schema-1 lease is the Client's unanswered schema negotiation (both peers can
+/// run one build), repaired by a reconnect; any other mismatch is the Client
+/// running another build, repaired by installing the same modular ZIP there.
+fn open_lease_frontend_mismatch_message(stuck: &OpenLeaseFrontendMismatch, log: &Path) -> String {
+    let lease = format!("client={} generation={}", stuck.client, stuck.generation);
+    match stuck.frontend_schema {
+        Some(1) => format!(
+            "JetBrains Client frontend stuck on snapshot schema 1 (GH #435): {} shows `frontend/backend plugin mismatch {}` on the open lease {lease}, and no snapshot was accepted after it. The Client's schema negotiation with this backend went unanswered, so that lease publishes no geometry and no activation receipt, and the backend refuses every snapshot; both peers can still run the same plugin. Repair: quit and restart JetBrains Client (or close and reopen the project in it) so it opens a new lease and negotiates again. The Client idea.log line `snapshot schema negotiated version=1 backend_offered=none` confirms it; plugin 0.2.1052 and later negotiate again by themselves. Only if the Client's `[split-surface] frontend surface publisher started` line is absent or names another plugin, install the same modular ZIP in the Client.",
+            log.display(),
+            stuck.detail,
+        ),
+        _ => format!(
+            "JetBrains Client frontend runs another Agent Doc build (GH #435): {} shows `frontend/backend plugin mismatch {}` on the open lease {lease}, and no snapshot was accepted after it. Repair: install the same modular ZIP in the Client (run `agent-doc upgrade` on the Client machine, or follow the Client steps), then restart JetBrains Client.",
+            log.display(),
+            stuck.detail,
+        ),
+    }
+}
+
+/// GH #435: every `<IDE system dir>/log/idea.log` under the JetBrains system
+/// roots, where a Remote Dev backend writes its `[split-surface]` lines.
+fn jetbrains_backend_idea_logs(system_roots: &[PathBuf]) -> Vec<PathBuf> {
+    let mut logs = system_roots
+        .iter()
+        .filter_map(|root| std::fs::read_dir(root).ok())
+        .flatten()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path().join("log").join("idea.log"))
+        .filter(|log| log.is_file())
+        .collect::<Vec<_>>();
+    logs.sort();
+    logs
+}
+
+/// The newest bytes of a log worth parsing; idea.log rotates near 10 MB.
+const BACKEND_IDEA_LOG_TAIL_BYTES: u64 = 16 * 1024 * 1024;
+
+fn read_log_tail(log: &Path) -> Option<String> {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+    let mut file = std::fs::File::open(log).ok()?;
+    let len = file.metadata().ok()?.len();
+    file.seek(SeekFrom::Start(
+        len.saturating_sub(BACKEND_IDEA_LOG_TAIL_BYTES),
+    ))
+    .ok()?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    Some(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// GH #435: one line per backend idea.log on this machine whose Client lease
+/// is blocked by a frontend mismatch right now.
+fn jetbrains_open_lease_frontend_mismatch_lines(system_roots: &[PathBuf]) -> Vec<String> {
+    jetbrains_backend_idea_logs(system_roots)
+        .into_iter()
+        .filter_map(|log| {
+            let stuck = open_lease_frontend_mismatch(&read_log_tail(&log)?)?;
+            Some(open_lease_frontend_mismatch_message(&stuck, &log))
+        })
+        .collect()
 }
 
 /// GH #108: the headline for a finished release install. A staged package left
@@ -5117,6 +5278,13 @@ pub fn report_reconcile_summary(report: &PluginReconcileReport, release: &str) {
         "{}",
         printed_reconcile_summary(report, release, note_printed)
     );
+    if report.has_modular_jetbrains_target() {
+        for line in jetbrains_open_lease_frontend_mismatch_lines(
+            &agent_doc_fs::jetbrains_install::jetbrains_system_roots(),
+        ) {
+            eprintln!("WARNING: {line}");
+        }
+    }
     if !report.targets.is_empty() {
         log_jetbrains_upgrade_decision(&report.ops_log_line(release));
     }
@@ -7541,6 +7709,99 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
     /// modular plugin and left the operator's JetBrains Client frontend on the
     /// old build. The summary now prints the exact Client steps unless a local
     /// Client/Gateway plugins directory was reconciled by this process.
+    /// GH #435 (Coder, 2026-11-24): both peers ran plugin 0.2.1046, yet the
+    /// backend logged `frontend/backend plugin mismatch frontend_schema=1` and
+    /// refused every snapshot of the Client's lease. `agent-doc upgrade` on the
+    /// backend reads that from the backend idea.log and names the repair: a
+    /// Client reconnect, not another reinstall.
+    #[test]
+    fn upgrade_detects_a_schema_one_lease_stuck_in_the_backend_idea_log() {
+        let log = "\
+2026-11-23 19:24:40,001 [   1]   INFO - #c.g.b.a.s.b.AuthenticatedSurfaceIngressState - [split-surface] lease opened client=c-1 generation=100 layout_authority=remote_measured readiness=connected_blocked
+2026-11-23 19:25:25,001 [   1]   INFO - #c.g.b.a.s.b.AuthenticatedSurfaceIngressState - [split-surface] snapshot accepted client=c-1 generation=100 sequence=1 schema=5 surfaces=1 measured_windows=2/2 layout_authority=remote_measured readiness=accepted first=true after_refusal=none
+2026-11-23 20:30:00,001 [   1]   INFO - #c.g.b.a.s.b.AuthenticatedSurfaceIngressState - [split-surface] lease retired client=c-1 generation=100 accepted_sequence=98
+2026-11-23 20:30:19,001 [   1]   INFO - #c.g.b.a.s.b.AuthenticatedSurfaceIngressState - [split-surface] lease opened client=c-2 generation=101 layout_authority=remote_measured readiness=connected_blocked
+2026-11-23 20:30:50,001 [   1]   WARN - #c.g.b.a.s.b.ControllerSurfaceIngress - [split-surface] frontend/backend plugin mismatch client=c-2 generation=101 frontend_schema=1 backend_schema=5 (the JetBrains Client runs an older Agent Doc frontend) remedy=install the same agent-doc-jetbrains-262-0.2.1046.zip
+2026-11-23 20:30:50,002 [   1]   WARN - #c.g.b.a.s.b.AuthenticatedSurfaceIngressState - [split-surface] snapshot refused client=c-2 generation=101 sequence=1 status=DELIVERY_FAILED readiness=connected_blocked diagnostic=frontend_authority_absent_or_generation_mismatched
+";
+        let stuck = super::open_lease_frontend_mismatch(log).expect("the open lease is stuck");
+        assert_eq!(stuck.client, "c-2");
+        assert_eq!(stuck.generation, 101);
+        assert_eq!(stuck.frontend_schema, Some(1));
+        let message = super::open_lease_frontend_mismatch_message(
+            &stuck,
+            Path::new("/cache/IntelliJIdea2026.3/log/idea.log"),
+        );
+        for needle in [
+            "JetBrains Client frontend stuck on snapshot schema 1 (GH #435)",
+            "/cache/IntelliJIdea2026.3/log/idea.log",
+            "client=c-2 generation=101",
+            "schema negotiation with this backend went unanswered",
+            "quit and restart JetBrains Client",
+            "close and reopen the project",
+            "0.2.1052",
+            "`snapshot schema negotiated version=1 backend_offered=none`",
+        ] {
+            assert!(message.contains(needle), "missing {needle:?}: {message}");
+        }
+        assert!(!message.contains("older Agent Doc frontend"), "{message}");
+
+        // A later acceptance on the same lease (a renegotiating frontend) or a
+        // retired lease is not stuck; an IDE restart forgets the old run.
+        let recovered = format!(
+            "{log}2026-11-23 20:31:01,001 [   1]   INFO - #c - [split-surface] snapshot accepted client=c-2 generation=101 sequence=2 schema=5 surfaces=1\n"
+        );
+        assert_eq!(super::open_lease_frontend_mismatch(&recovered), None);
+        let retired = format!(
+            "{log}2026-11-23 21:00:00,001 [   1]   INFO - #c - [split-surface] lease retired client=c-2 generation=101 accepted_sequence=0\n"
+        );
+        assert_eq!(super::open_lease_frontend_mismatch(&retired), None);
+        let restarted = format!(
+            "{log}2026-11-24 08:00:00,001 [   1]   INFO - #c.i.i.StartupUtil - ------------------------------------------------------ IDE STARTED ------------------------------------------------------\n"
+        );
+        assert_eq!(super::open_lease_frontend_mismatch(&restarted), None);
+    }
+
+    #[test]
+    fn upgrade_names_the_reinstall_for_a_mismatch_from_another_build() {
+        let log = "\
+x [split-surface] lease opened client=c-9 generation=7 layout_authority=remote_measured readiness=connected_blocked
+x [split-surface] frontend/backend plugin mismatch client=c-9 generation=7 frontend_shell=dddddddddddd backend_shell=aaaaaaaaaaaa (the JetBrains Client and the Remote Dev backend run different Agent Doc builds) remedy=install
+";
+        let stuck = super::open_lease_frontend_mismatch(log).expect("another build");
+        assert_eq!(stuck.frontend_schema, None);
+        let message = super::open_lease_frontend_mismatch_message(&stuck, Path::new("idea.log"));
+        assert!(
+            message.contains("JetBrains Client frontend runs another Agent Doc build (GH #435)"),
+            "{message}"
+        );
+        assert!(
+            message.contains("frontend_shell=dddddddddddd backend_shell=aaaaaaaaaaaa"),
+            "{message}"
+        );
+        assert!(
+            message.contains("install the same modular ZIP in the Client"),
+            "{message}"
+        );
+        assert_eq!(
+            super::open_lease_frontend_mismatch("no agent-doc lines\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn backend_idea_logs_are_found_under_each_system_root() {
+        let root = tempfile::tempdir().unwrap();
+        let log_dir = root.path().join("IntelliJIdea2026.3").join("log");
+        std::fs::create_dir_all(&log_dir).unwrap();
+        std::fs::write(log_dir.join("idea.log"), "x").unwrap();
+        std::fs::create_dir_all(root.path().join("Toolbox")).unwrap();
+        assert_eq!(
+            super::jetbrains_backend_idea_logs(&[root.path().to_path_buf()]),
+            vec![log_dir.join("idea.log")]
+        );
+    }
+
     #[test]
     fn reconcile_summary_prints_client_steps_when_no_local_client_was_reconciled() {
         use super::{PluginEditorFamily::JetBrains, PluginTargetOutcome as O};

@@ -80,7 +80,8 @@ creates one with the receipt's attach command.
   route's `frontend_layout=[...]`, a backend `[split-surface] snapshot refused
   ... status=DELIVERY_FAILED ...
   diagnostic=frontend_authority_absent_or_generation_mismatched` line, or a
-  backend `[split-surface] frontend/backend plugin mismatch` line. The route
+  backend `[split-surface] frontend/backend plugin mismatch` line other than
+  `frontend_schema=1` (see the schema-1 lease below). The route
   token records only the status, so `snapshot_refused(DELIVERY_FAILED)` alone
   is not one: it also covers controller delivery timeouts and Client paths
   the backend cannot resolve. `reason=route_column_order_unknown` is
@@ -104,6 +105,20 @@ creates one with the receipt's attach command.
   in the Client. Without the key the Client logs `[frontend-impl] refused` and
   the backend refuses snapshots with
   `frontend_authority_absent_or_generation_mismatched`.
+- Schema-1 lease (GH #435): a backend line `[split-surface] frontend/backend
+  plugin mismatch ... frontend_schema=1 backend_schema=5` does not mean an old
+  plugin. The Client's frontend publishes schema 1 when its 5 s schema
+  negotiation got no answer from the backend (Client `idea.log`: `snapshot
+  schema negotiated version=1 backend_offered=none`). Schema 1 carries no
+  geometry and no activation receipt, so the backend refuses every snapshot
+  with `frontend_authority_absent_or_generation_mismatched`, although both
+  peers can run the same build. Plugin 0.2.1046 kept schema 1 until the lease
+  ended: restart JetBrains Client (or close and reopen the project) to
+  reconnect. 0.2.1052 and later ask again after a refusal, and poll the
+  backend's frontend release by digest instead of moving its ZIP every 30 s,
+  which had congested the link. `agent-doc upgrade` on the backend reads the
+  backend `idea.log` and prints `JetBrains Client frontend stuck on snapshot
+  schema 1` with this repair while that lease is still open.
 - JetBrains Gateway with the frontend installed (GH #435): once the Client's
   frontend opens its lease, the backend logs `reason=frontend_measured_layout_authority`
   and `[layout-detect] unknown windows=0 ... flat_evidence_has_no_column_geometry`
@@ -118,9 +133,10 @@ creates one with the receipt's attach command.
     A refusal with `DELIVERY_FAILED`, `PROJECT_MISMATCH` or `INCOMPLETE`
     republishes on a 1-30 s backoff. A refusal that keeps repeating with
     `INVALID_SCHEMA`, or `DELIVERY_FAILED` with
-    `diagnostic=frontend_authority_absent_or_generation_mismatched`, is a
-    Client build that does not match the backend: install the matching ZIP in
-    the Client.
+    `diagnostic=frontend_authority_absent_or_generation_mismatched` after a
+    `snapshot schema negotiated version=5`, is a Client build that does not
+    match the backend: install the matching ZIP in the Client. After
+    `version=1 backend_offered=none` it is the schema-1 lease above.
   - Backend `idea.log`: `[split-surface] frontend/backend ingress accepted`
     (or `deferred`), `lease opened ... layout_authority=remote_measured`,
     `snapshot refused ... status=<STATUS> diagnostic=<why>`,

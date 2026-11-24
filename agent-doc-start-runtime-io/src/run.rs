@@ -1849,11 +1849,24 @@ pub fn run_with_reap_policy_resume_and_harness(
             } else {
                 "restart_continue_spawn"
             };
-            shared.transition_actor_state(
+            // GH #438 review: this publication waits behind an IPC handler's
+            // deferred one. If that publication retired this generation (a
+            // newer one owns the document), stop here: the spawn below clears
+            // `stop_requested`, and the retired generation would host a live
+            // harness beside the new owner.
+            if !shared.transition_actor_state_owning_generation(
                 agent_doc_controller::actor::ActorState::Busy,
                 "supervisor",
                 restart_reason,
-            );
+            ) {
+                log_event(
+                    &mut session_log,
+                    &format!(
+                        "actor_generation_retired action=skip_relaunch reason={restart_reason}"
+                    ),
+                );
+                break "actor_generation_retired";
+            }
 
             // `#agentreloadrestart` Phase 1b — this iteration is serving a restart.
             // Re-read CURRENT frontmatter and re-resolve the harness launch spec. If
@@ -2826,11 +2839,20 @@ pub fn run_with_reap_policy_resume_and_harness(
                     &mut session_log,
                     &format!("ipc_stop_agent restart_count={}", restart_count),
                 );
-                shared.transition_actor_state(
+                // GH #438 review: the Stop Agent request's deferred publication
+                // lands before this one. A generation it retired must not offer
+                // the operator a relaunch.
+                if !shared.transition_actor_state_owning_generation(
                     agent_doc_controller::actor::ActorState::WaitingInput,
                     "supervisor",
                     "stop_agent_prompt",
-                );
+                ) {
+                    log_event(
+                        &mut session_log,
+                        "actor_generation_retired action=skip_stop_agent_prompt",
+                    );
+                    break "actor_generation_retired";
+                }
                 raw_mode.suspend();
                 eprintln!("\nAgent stopped. Supervisor is still running.");
                 match prompt_for_restart_or_quit(

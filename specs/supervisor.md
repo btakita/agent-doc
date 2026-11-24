@@ -765,7 +765,20 @@ receipt was late, so the command is never replayed on that evidence.
   `reexec deferred: lifecycle_publication_pending` while any publication is
   pending and retries at the next safe boundary.
 - `state` and `pid` queries perform no effect. They do not take `ipc_handoff`
-  and never wait behind an effectful handler.
+  and never wait behind an effectful handler, even while an effect holds it.
+- A deferred publication can be the one that learns this generation is
+  retired (the controller's generation compare-and-swap failed because a newer
+  generation owns the document). By then the command has already killed the
+  child, so the host loop may already be headed for a relaunch. Retirement
+  sets `stop_requested`, but the next spawn clears that flag. So the host loop
+  checks generation ownership after each transition that precedes bringing a
+  child back. That transition waits behind the deferred publication, so it
+  sees any retirement. The two transitions are the relaunch's
+  `restart_fresh_spawn`/`restart_continue_spawn`, which every restart path runs
+  before spawning, and the Stop Agent `stop_agent_prompt`. If the generation is
+  retired, the supervisor exits with reason `actor_generation_retired` instead
+  of spawning a harness beside the new owner or offering the operator a
+  relaunch.
 
 ### External control use cases
 

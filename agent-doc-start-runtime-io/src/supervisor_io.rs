@@ -1351,6 +1351,148 @@ mod tests {
         );
     }
 
+    /// GH #438 review: `state`/`pid` must answer while an effectful handler
+    /// holds `ipc_handoff`. The receipt tests above probe `pid` only after the
+    /// handler released the gate, so they pass with or without the bypass. The
+    /// gate is still held through effects that can be slow (tmux send, a PTY
+    /// write, the restart preflight's queue-edit guard); this test holds it for
+    /// the whole probe.
+    #[test]
+    fn state_and_pid_queries_answer_while_an_effect_holds_ipc_handoff() {
+        let dir = tempfile::tempdir().unwrap();
+        let shared = gh438_shared(dir.path());
+        let mut ipc =
+            start_supervisor_ipc(dir.path(), "gh438-session", shared.clone()).expect("ipc");
+        let sock = agent_doc_supervisor_io::ipc::socket_path(dir.path(), "gh438-session");
+
+        let handoff = shared.ipc_handoff.lock();
+        let budget = Duration::from_secs(2);
+        let pid = agent_doc_supervisor_io::ipc::probe_supervisor_pid(&sock, budget)
+            .map_err(|err| format!("{err:#}"));
+        let state_sock = sock.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(
+                agent_doc_supervisor_io::ipc::send_command(&state_sock, &IpcMethod::State)
+                    .map_err(|err| format!("{err:#}")),
+            );
+        });
+        let state = rx.recv_timeout(budget + Duration::from_millis(500));
+        drop(handoff);
+        ipc.stop();
+
+        let pid = pid.expect("pid query queued behind the held ipc_handoff");
+        assert!(pid.ok, "{pid:?}");
+        let state = state
+            .expect("state query hung behind the held ipc_handoff")
+            .expect("state query queued behind the held ipc_handoff");
+        assert!(state.ok, "{state:?}");
+    }
+
+    /// GH #438 review: the publication moved after the effect, so a Stop Agent
+    /// or Restart kills the child before the controller can answer that a newer
+    /// generation owns the document. The host loop's next lifecycle transition
+    /// (the relaunch's `restart_*_spawn`, or `stop_agent_prompt`) waits behind
+    /// that deferred publication and must then report the retirement: the next
+    /// spawn clears `stop_requested`, so the flag alone would let a retired
+    /// generation host a live harness beside the new owner.
+    #[test]
+    fn host_loop_transition_after_a_deferred_retirement_refuses_the_relaunch() {
+        use agent_doc_controller::actor::ActorState;
+        let dir = tempfile::tempdir().unwrap();
+        let shared = gh438_shared(dir.path());
+        let released = Arc::new((Mutex::new(false), parking_lot::Condvar::new()));
+        let entered = Arc::new(Mutex::new(Vec::<String>::new()));
+        {
+            let (gate, log) = (released.clone(), entered.clone());
+            *shared.lifecycle_publisher_for_test.lock() = Some(Arc::new(
+                move |_state: ActorState, _caller: &str, reason: &str| {
+                    log.lock().push(reason.to_string());
+                    let (lock, turn) = &*gate;
+                    let mut released = lock.lock();
+                    while !*released {
+                        turn.wait(&mut released);
+                    }
+                    anyhow::bail!(
+                        "controller actor generation compare-and-swap failed: expected 7, found 8"
+                    )
+                },
+            ));
+        }
+        let release = || {
+            let (lock, turn) = &*released;
+            *lock.lock() = true;
+            turn.notify_all();
+        };
+        let mut ipc =
+            start_supervisor_ipc(dir.path(), "gh438-session", shared.clone()).expect("ipc");
+        let sock = agent_doc_supervisor_io::ipc::socket_path(dir.path(), "gh438-session");
+
+        let receipt = agent_doc_supervisor_io::ipc::send_command(
+            &sock,
+            &IpcMethod::StopAgent { reason: None },
+        );
+        // The child is gone and the run loop reaches its next transition while
+        // the deferred publication is still waiting on the controller.
+        let host_shared = shared.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let host = std::thread::spawn(move || {
+            let _ = tx.send(host_shared.transition_actor_state_owning_generation(
+                ActorState::Busy,
+                "supervisor",
+                "restart_continue_spawn",
+            ));
+        });
+        let answered_early = rx.recv_timeout(Duration::from_millis(300)).ok();
+        release();
+        let owns_generation = rx.recv_timeout(Duration::from_secs(3));
+        host.join().expect("host-loop transition");
+        ipc.stop();
+
+        let receipt = receipt.expect("stop_agent receipt");
+        assert!(receipt.ok, "{receipt:?}");
+        assert_eq!(
+            answered_early, None,
+            "the host-loop transition must wait behind the deferred publication"
+        );
+        assert_eq!(
+            owns_generation,
+            Ok(false),
+            "a generation retired by the deferred publication must refuse the relaunch"
+        );
+        assert!(shared.stop_requested.load(Ordering::Relaxed));
+        assert_eq!(
+            entered.lock().clone(),
+            vec!["ipc_stop_agent_requested".to_string()],
+            "a retired generation publishes nothing after the retirement"
+        );
+    }
+
+    /// GH #438 review: the host loop must act on that answer at both places a
+    /// child can come back: the relaunch transition (every restart path runs
+    /// it before spawning) and the Stop Agent keepalive prompt.
+    #[test]
+    fn host_loop_checks_generation_ownership_before_relaunching() {
+        let source = include_str!("run.rs");
+        let relaunch = source
+            .split_once("let restart_reason = if first_run {")
+            .and_then(|(_, tail)| tail.split_once("// `#agentreloadrestart` Phase 1b"))
+            .map(|(body, _)| body)
+            .expect("the relaunch transition must remain discoverable");
+        let keepalive = source
+            .split_once("PostChildExitAction::StopAgentKeepalive =>")
+            .and_then(|(_, tail)| tail.split_once("prompt_for_restart_or_quit("))
+            .map(|(body, _)| body)
+            .expect("the Stop Agent keepalive prompt must remain discoverable");
+        for (site, body) in [("relaunch", relaunch), ("stop_agent keepalive", keepalive)] {
+            assert!(
+                body.contains("transition_actor_state_owning_generation(")
+                    && body.contains("break \"actor_generation_retired\";"),
+                "the {site} path must stop when its transition reports a retired generation"
+            );
+        }
+    }
+
     #[test]
     fn zombie_child_is_not_alive() {
         // #zombiechild: `/proc/<pid>` exists for a corpse the supervisor has not

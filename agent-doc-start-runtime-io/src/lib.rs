@@ -3369,6 +3369,27 @@ impl SupervisorShared {
         }
     }
 
+    /// Publish `state` like [`Self::transition_actor_state`], then answer
+    /// whether this process still owns the authoritative actor generation.
+    ///
+    /// The publication waits behind every earlier one, an IPC handler's
+    /// deferred publication included, so a controller retirement learned by any
+    /// of them is visible when this returns. A host-loop path about to launch
+    /// a child (or offer the operator a relaunch) must check this answer: the
+    /// retirement sets `stop_requested`, but the next spawn clears that flag,
+    /// and a retired generation hosting a live harness duplicates the session
+    /// (GH #438 review).
+    #[must_use]
+    fn transition_actor_state_owning_generation(
+        &self,
+        state: agent_doc_controller::actor::ActorState,
+        caller: &str,
+        reason: &str,
+    ) -> bool {
+        self.transition_actor_state(state, caller, reason);
+        self.actor_generation_lease.active()
+    }
+
     /// GH #438: hold this thread's lifecycle publications until the returned
     /// guard drops. An effectful IPC handler writes its receipt first, so a
     /// slow or unreachable project controller (`mark_lifecycle` can spend a 5s

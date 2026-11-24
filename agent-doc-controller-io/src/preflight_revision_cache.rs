@@ -17,15 +17,20 @@
 //!     write journal or compact projection is pending, exactly the states in
 //!     which `enforce_cycle_completion` has nothing to recover;
 //!   - the stuck sweep is quiet when no committed capture awaits HEAD. That
-//!     verdict needs a git read, so it is never computed on the RPC thread. It
-//!     comes from this cache, keyed by the closeout projection's content
-//!     revision and the commit it was checked against.
+//!     verdict needs a `rev-parse` (and a `git show` while a capture awaits
+//!     HEAD). It comes from this cache, keyed by the closeout projection's
+//!     content revision and the commit it was checked against.
 //! - The cache is edit-driven controller work. Each closeout (the controller's
-//!   continuation-reconcile notify) and each cache miss schedules a refresh on
-//!   the controller's per-document worker
-//!   ([`crate::document_maintenance::preflight_revision_cache`]). The refresh
+//!   continuation-reconcile notify) schedules a refresh on the controller's
+//!   per-document worker
+//!   ([`crate::document_maintenance::preflight_revision_cache`]), which
 //!   computes the stuck verdict from the live projection and the current HEAD
-//!   and records it here. Preflight's phases only read the result.
+//!   and records it here.
+//! - A read that finds no verdict for the revision it just read computes it
+//!   from that same closeout clone and records it. The notify fires before the
+//!   closeout's last projection writes, so the refresh can record an
+//!   intermediate revision; a refresh the miss scheduled would be debounced
+//!   past the preflight's own next read (CI 45328547184).
 //! - A revision is the SHA-256 of the closeout projection's JSON, so any
 //!   closeout fact changes it. Nothing else feeds the stuck verdict except the
 //!   commit, which the caller compares itself.
@@ -34,7 +39,8 @@
 //! - A verdict never claims more than the live projection proves: a cycle
 //!   state that cannot be reconstructed is not clean, and a stuck verdict for
 //!   another revision or commit is not returned as current.
-//! - The RPC never runs git, never writes, and never waits for a refresh.
+//! - The RPC never writes state and never waits for a worker; it runs git
+//!   only to compute a verdict missing for the revision it read.
 //! - With no controller, an older one, or any error, preflight runs both
 //!   phases inline exactly as before.
 //!

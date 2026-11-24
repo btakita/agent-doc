@@ -144,6 +144,25 @@ fn head_oid(file: &Path) -> Option<String> {
         .flatten()
 }
 
+/// The stuck-sweep verdict for `closeout` against the current HEAD of the
+/// document's repository. `None` when there is no HEAD to check against.
+pub fn stuck_sweep_verdict(
+    file: &Path,
+    closeout: Option<&agent_doc_state_backbone::CloseoutProjection>,
+) -> Result<Option<StuckSweepVerdict>> {
+    let Some(head) = head_oid(file) else {
+        return Ok(None);
+    };
+    let quiet = match closeout {
+        None => true,
+        Some(closeout) => agent_doc_flow_io::closeout::stuck_sweep_is_quiet(file, closeout, &head)?,
+    };
+    Ok(Some(StuckSweepVerdict {
+        head_oid: head,
+        quiet,
+    }))
+}
+
 /// Controller-side refresh (the per-document worker of
 /// `agent_doc_controller_io::document_maintenance::preflight_revision_cache`):
 /// compute the stuck-sweep verdict for the live closeout projection against
@@ -151,24 +170,16 @@ fn head_oid(file: &Path) -> Option<String> {
 pub fn refresh_preflight_revision_cache(file: &Path) -> Result<()> {
     let started = Instant::now();
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let Some(head) = head_oid(&canonical) else {
-        return Ok(());
-    };
     let closeout = agent_doc_cycle_state_io::load_document_closeout_projection(&canonical)?;
     let revision = closeout_revision(closeout.as_ref());
-    let quiet = match closeout.as_ref() {
-        None => true,
-        Some(closeout) => {
-            agent_doc_flow_io::closeout::stuck_sweep_is_quiet(&canonical, closeout, &head)?
-        }
+    let Some(verdict) = stuck_sweep_verdict(&canonical, closeout.as_ref())? else {
+        return Ok(());
     };
+    let (head, quiet) = (verdict.head_oid.clone(), verdict.quiet);
     record_stuck_verdict(
         &agent_doc_hash::document_id_for_path(&canonical),
         &revision,
-        StuckSweepVerdict {
-            head_oid: head.clone(),
-            quiet,
-        },
+        verdict,
     );
     agent_doc_ops_log_io::log_op(
         &canonical,
@@ -304,6 +315,26 @@ mod tests {
         assert_eq!(
             fetch_verdicts_with(&doc, "repair", |_| Ok(verdicts(Some(false)))),
             Some(verdicts(Some(false)))
+        );
+    }
+
+    #[test]
+    fn a_missing_verdict_is_computed_for_the_given_closeout_at_head() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = doc_in_git_repo(dir.path());
+        let verdict = stuck_sweep_verdict(&doc, None)
+            .unwrap()
+            .expect("a repository with a HEAD");
+        assert!(verdict.quiet, "no closeout projection: nothing awaits HEAD");
+        assert_eq!(Some(verdict.head_oid), head_oid(&doc));
+
+        let outside = tempfile::tempdir().unwrap();
+        let loose = outside.path().join("loose.md");
+        std::fs::write(&loose, "# Loose\n").unwrap();
+        assert_eq!(
+            stuck_sweep_verdict(&loose, None).unwrap(),
+            None,
+            "no HEAD: no verdict, so preflight sweeps inline"
         );
     }
 

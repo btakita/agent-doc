@@ -132,7 +132,21 @@ fn the_next_preflight_reads_the_controllers_repair_and_stuck_verdicts() {
             String::from_utf8_lossy(&output.stderr)
         );
     };
+    let from = ops_log(&root).len();
     preflight("first");
+    // CI 45328547184: no refresh has run for the first preflight's closeout
+    // revision, and the refresh a miss schedules is debounced past the
+    // preflight's own next read. The controller computes the missing verdict
+    // for exactly the revision it read, so even this read is served.
+    let appended = ops_log(&root).get(from..).unwrap_or_default().to_string();
+    let first_stuck = appended
+        .lines()
+        .find(|line| line.contains("preflight_revision_cache_stuck"))
+        .unwrap_or_else(|| panic!("the first stuck phase did not read the verdict:\n{appended}"));
+    assert!(
+        first_stuck.contains("served=true"),
+        "a verdict missing for the current revision is computed, not deferred: {first_stuck}"
+    );
 
     let from = ops_log(&root).len();
     let finalize = agent_doc()

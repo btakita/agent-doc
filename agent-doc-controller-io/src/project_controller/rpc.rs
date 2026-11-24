@@ -28295,9 +28295,18 @@ pub(crate) fn handle_document_state_projection(
 }
 
 /// `#q-1d2a127f32aa`: answer preflight's repair and stuck verdicts from the
-/// live projection (memory only: no git, no write, no wait). A stuck verdict
-/// missing for the current closeout revision schedules the background refresh
-/// that computes it, so the next preflight reads it.
+/// live projection (no write, no wait for a worker). The repair verdict is a
+/// memory read. A stuck verdict cached for the closeout revision just read is
+/// returned as is; otherwise it is computed here, from that same closeout
+/// clone, and recorded under its revision.
+///
+/// The background refresh alone could not serve the next read: the closeout
+/// notify that schedules it fires before the closeout's last projection
+/// writes, so on a slow runner it records an intermediate revision, and a
+/// refresh scheduled by a miss is debounced past the preflight's own next
+/// read (CI 45328547184). Computing the missing verdict for the revision the
+/// caller is about to compare closes that window; the refresh remains the
+/// pre-warm that usually makes this a pure memory read.
 pub(crate) fn handle_preflight_revision_verdicts(
     runtime: &ControllerRuntime,
     request: ControllerRequest,
@@ -28305,11 +28314,56 @@ pub(crate) fn handle_preflight_revision_verdicts(
     let file = request_file(&request)?;
     let canonical = file.canonicalize().unwrap_or(file);
     let document_hash = agent_doc_hash::document_id_for_path(&canonical);
-    let verdicts = runtime.document_preflight_revision_verdicts(&document_hash);
-    if verdicts.stuck.is_none() {
-        schedule_preflight_revision_cache_refresh(&canonical, "verdict_miss");
+    let (mut verdicts, missing_closeout) =
+        runtime.document_preflight_revision_verdicts(&document_hash);
+    if let Some(closeout) = missing_closeout {
+        verdicts.stuck = compute_missing_stuck_verdict(
+            &canonical,
+            &document_hash,
+            &verdicts.closeout_revision,
+            closeout.as_ref(),
+        );
     }
     Ok(verdicts)
+}
+
+/// The stuck verdict for `closeout` (read at `closeout_revision`), computed
+/// through the binary port and recorded for the next read. `None` (and a
+/// background refresh) when the port is absent or the computation fails, so
+/// preflight runs its sweep inline.
+fn compute_missing_stuck_verdict(
+    file: &Path,
+    document_hash: &str,
+    closeout_revision: &str,
+    closeout: Option<&agent_doc_state_backbone::CloseoutProjection>,
+) -> Option<crate::preflight_revision_cache::StuckSweepVerdict> {
+    let effects = runtime_effects()
+        .ok()
+        .filter(|effects| effects.preflight_revision_cache_supported())?;
+    match effects.stuck_sweep_verdict(file, closeout) {
+        Ok(Some(verdict)) => {
+            crate::preflight_revision_cache::record_stuck_verdict(
+                document_hash,
+                closeout_revision,
+                verdict.clone(),
+            );
+            Some(verdict)
+        }
+        Ok(None) => None,
+        Err(error) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "preflight_revision_cache_verdict_failed file={} revision={} error={} (#q-1d2a127f32aa)",
+                    file.display(),
+                    closeout_revision.get(..12).unwrap_or(closeout_revision),
+                    format!("{error:#}").replace('\n', " | "),
+                ),
+            );
+            schedule_preflight_revision_cache_refresh(file, "verdict_miss");
+            None
+        }
+    }
 }
 
 /// Schedule `file`'s preflight revision-cache refresh on the controller's

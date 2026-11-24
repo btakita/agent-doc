@@ -3806,6 +3806,21 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
         )
     }
 
+    /// `#q-1d2a127f32aa`: the stuck-sweep verdict for `closeout` (the exact
+    /// closeout projection the controller just read for `file`, `None` when
+    /// the document has none) against the current commit. Usually one
+    /// `rev-parse`; `git show` only while a committed capture awaits HEAD.
+    fn stuck_sweep_verdict(
+        &self,
+        file: &Path,
+        _closeout: Option<&agent_doc_state_backbone::CloseoutProjection>,
+    ) -> Result<Option<crate::preflight_revision_cache::StuckSweepVerdict>> {
+        anyhow::bail!(
+            "preflight stuck-sweep verdict is not wired in this binary ({})",
+            file.display()
+        )
+    }
+
     /// `#queueschedule`: put a completed `loop` pass's items back into the
     /// document's `agent:queue` through the binary-owned queue write path
     /// (live CRDT replica while an editor holds the document). The writer lives
@@ -12718,21 +12733,29 @@ impl ControllerRuntime {
     }
 
     /// `#q-1d2a127f32aa`: the preflight repair and stuck verdicts for one
-    /// document, from one read of the live projection.
+    /// document, from one read of the live projection. When no stuck verdict
+    /// is cached for that read's closeout revision, the closeout it was read
+    /// from comes back too, so the caller can compute the verdict for exactly
+    /// that revision.
     pub(crate) fn document_preflight_revision_verdicts(
         &self,
         document_hash: &str,
-    ) -> crate::preflight_revision_cache::PreflightRevisionVerdicts {
+    ) -> (
+        crate::preflight_revision_cache::PreflightRevisionVerdicts,
+        Option<Option<agent_doc_state_backbone::CloseoutProjection>>,
+    ) {
         let memory = self.memory.lock();
         let projection = memory.state_projection.document(document_hash);
         let closeout = projection.map(|document| &document.closeout);
         let revision = crate::preflight_revision_cache::closeout_revision(closeout);
         let stuck = crate::preflight_revision_cache::cached_stuck_verdict(document_hash, &revision);
-        crate::preflight_revision_cache::verdicts_from_projection(
+        let missing_closeout = stuck.is_none().then(|| closeout.cloned());
+        let verdicts = crate::preflight_revision_cache::verdicts_from_projection(
             closeout,
             projection.map(|document| &document.document),
             stuck,
-        )
+        );
+        (verdicts, missing_closeout)
     }
 
     /// Read one terminal proof from the current document projection. Queue

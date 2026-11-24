@@ -778,6 +778,15 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         agent_doc_preflight_command_io::revision_cache::refresh_preflight_revision_cache(file)
     }
 
+    fn stuck_sweep_verdict(
+        &self,
+        file: &Path,
+        closeout: Option<&agent_doc_state_backbone::CloseoutProjection>,
+    ) -> anyhow::Result<Option<agent_doc_controller_io::preflight_revision_cache::StuckSweepVerdict>>
+    {
+        agent_doc_preflight_command_io::revision_cache::stuck_sweep_verdict(file, closeout)
+    }
+
     fn restore_queue_loop_items(
         &self,
         file: &Path,

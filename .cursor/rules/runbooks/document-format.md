@@ -114,6 +114,44 @@ children:
 - Bulleted siblings (`- note`) beside numbered rows are not steps, and a
   numbered list at column 0 is not a sequence.
 
+#### Edge operators: ` |` pipe and ` >` fold (`#pipeprompt`, `#foldprompt`)
+
+A run row's last token sets how its children relate to it. With no
+operator, the row is context and each child is its own leaf (paths join with
+`: `). Two operators make the row and its children ONE task with one queue
+head:
+
+```markdown
+- Collect the open agent-doc GitHub issues |
+  - group them by component |
+    - draft a triage summary |
+      - under 200 words
+      - no internal ids
+- Summarize the release thread >
+  - focus on blockers
+  - skip chit-chat
+```
+
+- ` |` pipes: each ` |` row passes its result to the rows nested under it, in
+  reading order (`Collect … | group … | draft … | under 200 words | no
+  internal ids`). The grammar is strict: inside a statement, a row with
+  children must end in ` |` (or ` >`). Otherwise nothing folds, the rows stay
+  separate leaves, and the lint names the row.
+- ` >` folds: the row and its whole nested list are one task; the list is
+  context. Inner rows need no operator.
+- The top row is the only head: it alone gets the `[#q-…]`, claim, strike and
+  response tree. Inner rows get no ids and are never offered, claimed or
+  struck on their own. Commands pipe too: `- #review |` over `- #address`.
+- The operator is the last authored token, before any `[#q-…]` or other
+  binary suffix, and never inside a code span. A ` | ` in the middle of a row
+  is prose. Adding or removing the operator does not change the row's claim
+  identity. While the head is claimed an edit cannot remove it, and while a
+  row inside is claimed adding it does not fold the block.
+- The lint reports a ` |` or ` >` row with no children, a missing inner ` |`,
+  a code span ending in ` |`, and the reserved suffixes ` ||` and ` |+`
+  (deep pipe) and ` |>` (hand-off pipe), which are not implemented yet, plus
+  ` |*` (did you mean ` |+`?).
+
 Built-in element semantics live in the `agent-doc-element-*` crate family and
 are composed by `agent-doc-element-registry`. An unregistered `agent:*`
 component uses the `agent-doc-element-unknown` fallback: preserve

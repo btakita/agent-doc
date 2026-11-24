@@ -368,6 +368,98 @@ pub fn restore_missing_nested_claim_rows_across_queues(
     Ok(changed.then_some(projected))
 }
 
+/// Refuse removing or swapping a block's edge operator while its head holds a
+/// live claim (`#pipeprompt`, `#foldprompt`).
+///
+/// The operator is not part of the row's work identity, so the claim still
+/// finds its row after an edit drops ` |` or ` >`. Without the operator the
+/// row would turn back into a context label and its nested rows into separate
+/// leaves while the claimed task is still running on the whole block. The
+/// claimed head is found by its exact `[#owner#generation]` annotation; its
+/// claim-time operator comes from the claim text. A head without children, a
+/// lost attempt, or a claim taken without an operator is left alone.
+/// `Ok(None)` when nothing changed.
+pub fn restore_claimed_edge_markers(
+    content: &str,
+    claims: &[crate::queue_claim::QueueClaim],
+) -> Result<Option<String>> {
+    use agent_doc_element_queue::pipe::{EdgeOp, with_edge_marker};
+    use agent_doc_element_queue::subprompts::{line_indent_width, list_item_content};
+
+    let live = claims
+        .iter()
+        .filter(|claim| claim.state != crate::queue_claim::QueueClaimState::Lost)
+        .filter_map(|claim| {
+            let claimed = [
+                claim.claim_time_row.as_deref(),
+                Some(claim.item_text.as_str()),
+            ]
+            .into_iter()
+            .flatten()
+            .map(|text| EdgeOp::of_row(text.lines().next().unwrap_or("")))
+            .find(|op| *op != EdgeOp::Context)?;
+            Some((claim.owner.as_str(), claim.generation, claimed))
+        })
+        .collect::<Vec<_>>();
+    if live.is_empty() {
+        return Ok(None);
+    }
+    let Ok(components) = element::parse(content) else {
+        return Ok(None);
+    };
+    let runnable = components
+        .iter()
+        .filter(|component| matches!(component.name.as_str(), "queue" | "run" | "loop"))
+        .map(|component| component.open_end..component.close_start)
+        .collect::<Vec<_>>();
+    let mut out = String::with_capacity(content.len() + 4);
+    let lines = content.split_inclusive('\n').collect::<Vec<_>>();
+    let mut offset = 0usize;
+    let mut changed = false;
+    for (index, raw) in lines.iter().enumerate() {
+        let line_start = offset;
+        offset += raw.len();
+        let line = raw.trim_end_matches(['\n', '\r']);
+        let restored = runnable
+            .iter()
+            .any(|range| range.contains(&line_start))
+            .then(|| list_item_content(line))
+            .flatten()
+            .and_then(|row| {
+                // A top-level row may carry its `### ` navigation heading.
+                let work = row
+                    .strip_prefix("### ")
+                    .or_else(|| row.strip_prefix("## "))
+                    .unwrap_or(row);
+                let owner = agent_doc_document::queue_projection::owner_projection(work)?;
+                let (_, _, claimed) = live.iter().find(|(name, generation, _)| {
+                    *name == owner.owner && *generation == owner.generation
+                })?;
+                let indent = line_indent_width(line);
+                let has_children = lines[index + 1..]
+                    .iter()
+                    .map(|next| next.trim_end_matches(['\n', '\r']))
+                    .find(|next| !next.trim().is_empty())
+                    .is_some_and(|next| {
+                        line_indent_width(next) > indent && list_item_content(next).is_some()
+                    });
+                (has_children && EdgeOp::of_row(row) != *claimed).then(|| {
+                    let marker_len = line.len() - row.len();
+                    format!("{}{}", &line[..marker_len], with_edge_marker(row, *claimed))
+                })
+            });
+        match restored {
+            Some(restored) => {
+                out.push_str(&restored);
+                out.push_str(&raw[line.len()..]);
+                changed = true;
+            }
+            None => out.push_str(raw),
+        }
+    }
+    Ok(changed.then_some(out))
+}
+
 /// Remove empty list placeholders from every queue body.
 ///
 /// A retained rebase can copy an editor gap such as `      - ` back into the

@@ -537,6 +537,12 @@ fn derive_runtime_projection_scoped(
             &repair_claims,
         )?;
     let current = repaired_current.as_deref().unwrap_or(current);
+    // `#pipeprompt`: an edit cannot drop a claimed block's ` |` / ` >`.
+    let restored_edges = agent_doc_queue::queue_mirror_projection::restore_claimed_edge_markers(
+        current,
+        &repair_claims,
+    )?;
+    let current = restored_edges.as_deref().unwrap_or(current);
     if let Ok(ledger) = &mut claim_ledger
         && !ledger.claims.is_empty()
         && let Some(view) = agent_doc_queue::queue_claim::ClaimQueueView::from_content(current)

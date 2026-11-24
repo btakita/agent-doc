@@ -823,11 +823,20 @@ fn parse_spans_uncached(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<u
             // the runnable prompt. Normalize it before any queue identity or
             // claimability decision so normal projection can heal the row.
             let item_content = strip_active_projection_weld(item_content);
-            if let Some(end_i) = agent_doc_markdown_ast::overlay::tracked_do_context_block_end(
-                &lines,
-                i,
-                item_content,
-            ) {
+            // `#pipeprompt` / `#foldprompt`: a row ending in ` |` or ` >` folds
+            // its block into one head, the shape a tracked `do` folds its
+            // prose into.
+            if let Some(end_i) =
+                agent_doc_markdown_ast::overlay::edge_block_end(&lines, i, item_content).or_else(
+                    || {
+                        agent_doc_markdown_ast::overlay::tracked_do_context_block_end(
+                            &lines,
+                            i,
+                            item_content,
+                        )
+                    },
+                )
+            {
                 let completed = parse_completed_inline_with_note(item_content);
                 let (head, note) = completed.map_or((item_content, None), |(head, note)| {
                     (strip_top_level_queue_heading(head), note)
@@ -5807,11 +5816,18 @@ fn nest_vector_claim_at(entries: &[QueueEntry], index: usize, item_text: &str) -
 }
 
 fn nest_vector_at_with_work(entries: &[QueueEntry], index: usize, shown: &str) -> Option<String> {
-    let own_indent = entries.get(index).and_then(entry_indent)?;
-    if own_indent == 0 {
+    if shown.trim().is_empty() {
         return None;
     }
-    if shown.trim().is_empty() {
+    let ancestors = nest_ancestor_path(entries, index)?;
+    Some(prefix_nest_vector(&ancestors, shown))
+}
+
+/// Ancestor labels above the row at `index`, joined with `: ` (the default
+/// context edge). `None` for a top-level row or a row with no labeled parent.
+fn nest_ancestor_path(entries: &[QueueEntry], index: usize) -> Option<String> {
+    let own_indent = entries.get(index).and_then(entry_indent)?;
+    if own_indent == 0 {
         return None;
     }
     let mut depth = own_indent;
@@ -5865,7 +5881,7 @@ fn nest_vector_at_with_work(entries: &[QueueEntry], index: usize, shown: &str) -
         return None;
     }
     labels.reverse();
-    Some(prefix_nest_vector(&labels.join(": "), shown))
+    Some(labels.join(": "))
 }
 
 /// Nest vector of the row whose work text is `prompt_text`.
@@ -5971,6 +5987,10 @@ mod reference_lineage_tests;
 #[cfg(test)]
 #[path = "comment_sibling_tests.rs"]
 mod comment_sibling_tests;
+
+#[cfg(test)]
+#[path = "pipe_prompt_tests.rs"]
+mod pipe_prompt_tests;
 
 #[cfg(test)]
 mod unique_child_vector_regression_tests {
@@ -6307,6 +6327,9 @@ pub fn submitted_prompt_at(entries: &[QueueEntry], index: usize) -> Option<Strin
     if identity.trim().is_empty() {
         return None;
     }
+    if let Some(op) = edge_block_op(&identity) {
+        return Some(submitted_edge_block(entries, index, &identity, op));
+    }
     Some(match nest_vector_at(entries, index, &identity) {
         Some(lineage) => with_prompt_tree(entries, index, &without_binary_markers(&lineage)),
         None => identity,
@@ -6351,6 +6374,78 @@ pub fn submitted_group_prompt_with_context_at(
     let prompt = submitted_group_prompt_at(entries, index)?;
     let packet = prompt_context_packet_at(entries, index)?;
     Some(agent_doc_prompt_context::lineage::attach(&packet, &prompt))
+}
+
+/// Line that follows a submitted ` |` statement (`#pipeprompt`). The
+/// statement's children ARE the prompt, so it never carries the context-only
+/// [`PROMPT_TREE_HEADER`].
+pub const PIPE_PROMPT_HEADER: &str = "Structured prompt (`#pipeprompt`): each row ending in ` |` passes its result to the rows nested under it, in reading order. Evaluate the whole statement above as ONE task, read as this pipeline:";
+
+/// Line that follows a submitted ` >` fold (`#foldprompt`).
+pub const FOLD_PROMPT_HEADER: &str = "Folded prompt (`#foldprompt`, ` >`): the row above and its whole nested list are ONE task; the list is that row's context.";
+
+/// The explicit edge operator of a folded block's head (`#pipeprompt`,
+/// `#foldprompt`): `Some` when the head row ends in ` |` or ` >` and owns a
+/// nested block. `text` is the marker-stripped prompt text.
+pub fn edge_block_op(text: &str) -> Option<agent_doc_element_queue::pipe::EdgeOp> {
+    use agent_doc_element_queue::pipe::EdgeOp;
+    let (head, block) = agent_doc_element_queue::subprompts::split_subprompt_block(text);
+    block?;
+    Some(EdgeOp::of_row(head)).filter(|op| *op != EdgeOp::Context)
+}
+
+/// Whether `text` (marker-stripped) is a folded ` |` statement.
+pub fn is_pipe_statement_text(text: &str) -> bool {
+    edge_block_op(text) == Some(agent_doc_element_queue::pipe::EdgeOp::Pipe)
+}
+
+/// Whether the entry at `index` is a folded ` |` statement (`#pipeprompt`).
+pub fn entry_is_pipe_statement(entries: &[QueueEntry], index: usize) -> bool {
+    entries
+        .get(index)
+        .and_then(prompt_of)
+        .is_some_and(|prompt| is_pipe_statement_text(&strip_in_progress_marker(prompt.text.trim())))
+}
+
+/// Whether the entry at `index` is a folded ` |` or ` >` block: one head
+/// whose nested rows are its prompt, never separate leaves.
+pub fn entry_is_edge_block(entries: &[QueueEntry], index: usize) -> bool {
+    entries
+        .get(index)
+        .and_then(prompt_of)
+        .is_some_and(|prompt| {
+            edge_block_op(&strip_in_progress_marker(prompt.text.trim())).is_some()
+        })
+}
+
+/// Work text submitted for a folded ` |` statement or ` >` fold.
+///
+/// The block is ONE task: its tree is submitted intact after any ancestor
+/// lineage (joined with `: `, the default context edge). A ` |` statement
+/// then gets [`PIPE_PROMPT_HEADER`] and the statement read as one pipeline,
+/// whose rows join with ` | `; how children combine (chain vs fan-out) is
+/// decided only by [`agent_doc_element_queue::pipe::statement_pipeline`]. A
+/// ` >` fold gets [`FOLD_PROMPT_HEADER`].
+fn submitted_edge_block(
+    entries: &[QueueEntry],
+    index: usize,
+    identity: &str,
+    op: agent_doc_element_queue::pipe::EdgeOp,
+) -> String {
+    let statement = without_binary_markers(identity);
+    let ancestors = nest_ancestor_path(entries, index).map(|path| without_binary_markers(&path));
+    let tree = match &ancestors {
+        Some(ancestors) => prefix_nest_vector(ancestors, &statement),
+        None => statement.clone(),
+    };
+    if op == agent_doc_element_queue::pipe::EdgeOp::Fold {
+        return format!("{tree}\n{FOLD_PROMPT_HEADER}");
+    }
+    let pipeline = agent_doc_element_queue::pipe::statement_pipeline(&statement);
+    match &ancestors {
+        Some(ancestors) => format!("{tree}\n{PIPE_PROMPT_HEADER}\n{ancestors}: {pipeline}"),
+        None => format!("{tree}\n{PIPE_PROMPT_HEADER}\n{pipeline}"),
+    }
 }
 
 pub const PROMPT_TREE_HEADER: &str =

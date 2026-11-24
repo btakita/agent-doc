@@ -349,7 +349,52 @@ pub fn validate_integrity_on_content_with_logger(
 ) -> Result<()> {
     validate_structure_on_content(file, content)?;
     emit_stray_close_marker_notices(file, content, ops_logger);
+    emit_edge_operator_notices(file, content, ops_logger);
     Ok(())
+}
+
+/// `#pipeprompt` / `#foldprompt`: one advisory finding per misplaced or
+/// reserved row-final edge operator (` |`, ` >`, ` ||`, ` |+`, …) in a
+/// runnable list component. Like the stray-close-marker notices these never
+/// enter [`classify_and_emit`]: the queue already fails closed to the
+/// leaf-only shape, so no lint mode turns them into a refusal.
+pub fn edge_operator_findings(file: &Path, content: &str) -> Vec<LintFinding> {
+    agent_doc_markdown_ast::overlay::pipe_statement_lints(content)
+        .into_iter()
+        .map(|lint| LintFinding {
+            path: file.to_path_buf(),
+            line: lint.line,
+            col: 1,
+            rule: lint.kind.rule().to_string(),
+            severity: LintSeverity::Warning,
+            message: lint.message,
+            fix_hint: None,
+        })
+        .collect()
+}
+
+/// Print and log the non-blocking edge-operator notices for `content`.
+fn emit_edge_operator_notices(file: &Path, content: &str, ops_logger: OpsLogger) {
+    let findings = edge_operator_findings(file, content);
+    let Some(first) = findings.first() else {
+        return;
+    };
+    eprintln!(
+        "[lint] {} non-blocking queue edge-operator notice(s) for {}:",
+        findings.len(),
+        file.display()
+    );
+    eprint!("{}", format_findings_text(&findings));
+    ops_logger(
+        file,
+        &format!(
+            "lint_edge_operator_notice file={} count={} first_line={} rule={}",
+            file.display(),
+            findings.len(),
+            first.line,
+            first.rule,
+        ),
+    );
 }
 
 /// Rule id of the `#strayclosemarker` notice.
@@ -1691,6 +1736,40 @@ operator-owned scratch state\n\
 
         let sound = doc.replace("t<!-- /agent:run -->", "<!-- /agent:run -->");
         assert!(stray_close_marker_findings(&file, &sound).is_empty());
+    }
+
+    /// `#pipeprompt`: misplaced or reserved queue edge operators are
+    /// advisory notices with line numbers; no lint mode blocks on them.
+    #[test]
+    fn edge_operator_findings_are_advisory_and_line_numbered() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = "# Doc\n\n<!-- agent:run -->\n- lonely |\n- Collect |\n  - group\n    - draft\n- keep ||\n<!-- /agent:run -->\n";
+        let file = write_doc(&dir, "pipe.md", doc);
+        validate_integrity_on_content_with_logger(&file, doc, noop_ops_logger)
+            .expect("edge-operator notices never block");
+        let findings = edge_operator_findings(&file, doc);
+        let rules = findings
+            .iter()
+            .map(|finding| (finding.line, finding.rule.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rules,
+            vec![
+                (4, "agent-doc/pipe-without-children"),
+                (6, "agent-doc/pipe-stage-missing-marker"),
+                (8, "agent-doc/reserved-edge-operator"),
+            ]
+        );
+        assert!(
+            findings[1].message.contains("`Collect | group`"),
+            "{}",
+            findings[1].message
+        );
+        assert!(
+            findings
+                .iter()
+                .all(|finding| finding.severity == LintSeverity::Warning)
+        );
     }
 
     #[test]

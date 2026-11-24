@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, fmt, ops::Range, str::FromStr};
 
 pub mod nested_claim_steer;
+pub mod pipe;
 pub mod queue_identity;
 pub mod subprompts;
 
@@ -1425,8 +1426,13 @@ pub fn strip_generated_queue_prompt_id_annotation(text: &str) -> String {
 /// `text` with leading markers and leading `#tag` / `#tag:` intent tokens
 /// removed (see [`queue_head_identity`]). Never strips the last token, so a
 /// bare `#id` survives.
+///
+/// A trailing edge operator (` |` `#pipeprompt`, ` >` `#foldprompt`) is
+/// stripped the same way: adding or removing it never changes which work the
+/// row names.
 pub fn strip_intent_tags(text: &str) -> String {
-    let mut current = strip_priority_markers(text);
+    let unpiped = pipe::strip_edge_marker(text);
+    let mut current = strip_priority_markers(&unpiped);
     loop {
         let trimmed = current.trim_start();
         let Some(rest) = trimmed.strip_prefix('#') else {

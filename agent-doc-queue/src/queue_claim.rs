@@ -3783,6 +3783,8 @@ pub fn same_claim_row(left: &str, right: &str) -> bool {
 /// [`queue_head_identity`].
 fn nest_vector_claim_identity(text: &str) -> Option<QueueItemIdentity> {
     let head = agent_doc_element_queue::subprompts::head_without_subprompts(text);
+    // `#pipeprompt`: the ` |` operator is not part of the work identity.
+    let head = agent_doc_element_queue::pipe::strip_edge_marker(head);
     let head = agent_doc_element_queue::strip_priority_markers(head.trim());
     let head = head.trim();
     // `do [#id]: note` is an annotated directive, not a nest vector.

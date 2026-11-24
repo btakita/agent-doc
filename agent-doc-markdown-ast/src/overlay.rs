@@ -1443,6 +1443,265 @@ pub fn tracked_do_context_block_end(
     Some(end)
 }
 
+/// End (exclusive line index) of the block an explicit edge operator on the
+/// row at `parent` folds into one head, or `None` when the row has none.
+///
+/// * ` |` (`#pipeprompt`): the row continues into its children. The grammar
+///   is strict: inside the block, every row that has children must itself end
+///   in ` |` (or ` >`, which folds its own list). A malformed block is not
+///   folded, so the rows keep today's leaf-only shape and the lint names the
+///   row.
+/// * ` >` (`#foldprompt`): the row and its whole child list are one task.
+///
+/// The block is every following line deeper than `parent` (blank lines between
+/// children included). It ends at a line at or above the parent's depth, at a
+/// generated response row (the head's own response tree sits after its
+/// block), or at the end of input. Folding is also refused while any row in
+/// the block carries its own attempt projection: adding an operator above a
+/// claimed row never takes that claim's row away from it.
+pub fn edge_block_end(lines: &[&str], parent: usize, item_content: &str) -> Option<usize> {
+    use agent_doc_element_queue::pipe::{EdgeOp, unpiped_parent_rows};
+    use agent_doc_element_queue::subprompts::{line_indent_width, list_item_content};
+
+    let op = EdgeOp::of_row(item_content);
+    if op == EdgeOp::Context || item_content.contains("<!-- agent-doc:") {
+        return None;
+    }
+    let work = agent_doc_element_queue::strip_attempt_projection_prefix(item_content).trim();
+    let lower = work.to_ascii_lowercase();
+    if lower.starts_with("re [#")
+        || lower.starts_with("re #")
+        || is_ignored_list_comment(work)
+        || is_generated_response_structure_row(work)
+        || canonical_response_row(work).is_some()
+    {
+        return None;
+    }
+    let parent_indent = line_indent_width(lines.get(parent)?);
+    let mut end = parent + 1;
+    let mut cursor = parent + 1;
+    while let Some(line) = lines.get(cursor) {
+        if line.trim().is_empty() {
+            cursor += 1;
+            continue;
+        }
+        let indent = line_indent_width(line);
+        if indent <= parent_indent {
+            break;
+        }
+        if let Some(content) = list_item_content(line) {
+            if inert_list_child_end(lines, cursor, indent).is_some()
+                || is_generated_response_structure_row(content)
+                || content.contains("<!-- agent-doc:")
+            {
+                break;
+            }
+            let child_work = content.trim();
+            if agent_doc_element_queue::strip_attempt_projection_prefix(child_work) != child_work {
+                return None;
+            }
+        }
+        cursor += 1;
+        end = cursor;
+    }
+    let block = &lines[parent + 1..end];
+    if !block
+        .iter()
+        .any(|line| list_item_content(line).is_some_and(|content| !content.trim().is_empty()))
+    {
+        return None;
+    }
+    if op == EdgeOp::Fold {
+        return Some(end);
+    }
+    let mut statement = item_content.to_string();
+    for line in block {
+        statement.push('\n');
+        statement.push_str(line);
+    }
+    unpiped_parent_rows(&statement).is_empty().then_some(end)
+}
+
+/// Kind of a `#pipeprompt` lint finding ([`pipe_statement_lints`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PipeLintKind {
+    /// A row ends in ` |` but has no children to pipe into.
+    PipeWithoutChildren,
+    /// A row ends in ` >` but has no children to fold.
+    FoldWithoutChildren,
+    /// Inside a statement, a row has children but does not end in ` |`. The
+    /// strict grammar leaves the statement unfolded.
+    UnpipedStageParent,
+    /// A code span ends in ` |`; it is literal code, not the operator.
+    PipeInCodeSpan,
+    /// A row ends in a suffix reserved for a future edge operator.
+    ReservedEdgeOperator,
+    /// A row inside a ` |` statement or ` >` fold holds its own claim, so the
+    /// block does not fold until that claim settles.
+    ClaimedRowInStatement,
+}
+
+impl PipeLintKind {
+    /// Stable rule id for the lint surface.
+    pub fn rule(self) -> &'static str {
+        match self {
+            Self::PipeWithoutChildren => "agent-doc/pipe-without-children",
+            Self::FoldWithoutChildren => "agent-doc/fold-without-children",
+            Self::UnpipedStageParent => "agent-doc/pipe-stage-missing-marker",
+            Self::PipeInCodeSpan => "agent-doc/pipe-in-code-span",
+            Self::ReservedEdgeOperator => "agent-doc/reserved-edge-operator",
+            Self::ClaimedRowInStatement => "agent-doc/pipe-toggle-while-claimed",
+        }
+    }
+}
+
+/// One `#pipeprompt` lint finding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PipeLint {
+    /// 1-based document line of the row.
+    pub line: usize,
+    pub kind: PipeLintKind,
+    /// The row's path from its top-level ancestor, each edge joined by its
+    /// own operator (`: ` by default, ` | ` below a ` |` row).
+    pub path: String,
+    pub message: String,
+}
+
+/// `#pipeprompt` / `#foldprompt` lint findings for every runnable list
+/// component in `content`. Advisory only: the queue enumerators already fail
+/// closed to the leaf-only shape on a malformed statement.
+pub fn pipe_statement_lints(content: &str) -> Vec<PipeLint> {
+    use agent_doc_element_queue::pipe::{
+        EdgeOp, pipe_marker_in_code_span, reserved_edge_hint, reserved_edge_suffix, row_work_text,
+    };
+    use agent_doc_element_queue::subprompts::{line_indent_width, list_item_content};
+
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return Vec::new();
+    };
+    let mut findings = Vec::new();
+    for component in components
+        .iter()
+        .filter(|component| is_runnable_component(&component.name))
+    {
+        let body = &content[component.open_end..component.close_start];
+        let first_line = content[..component.open_end].matches('\n').count() + 1;
+        let lines: Vec<&str> = body.lines().collect();
+        // Rows that take part in the tree: list rows outside fences that are
+        // not comments or generated response metadata.
+        let mut rows: Vec<(usize, usize, &str)> = Vec::new();
+        let mut fence: Option<(char, usize)> = None;
+        for (index, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            if let Some((ch, run)) = fence {
+                if trimmed.chars().take_while(|c| *c == ch).count() >= run
+                    && trimmed.chars().all(|c| c == ch)
+                {
+                    fence = None;
+                }
+                continue;
+            }
+            if let Some(open) = queue_code_fence_run(trimmed) {
+                fence = Some(open);
+                continue;
+            }
+            let Some(content) = list_item_content(line) else {
+                continue;
+            };
+            let indent = line_indent_width(line);
+            if content.trim().is_empty()
+                || is_ignored_list_comment(content)
+                || is_generated_response_structure_row(content)
+                || inert_list_child_end(&lines, index, indent).is_some()
+            {
+                continue;
+            }
+            rows.push((index, indent, content));
+        }
+        // (indent, path, operator on the edges below this row)
+        let mut stack: Vec<(usize, String, EdgeOp)> = Vec::new();
+        for (position, &(index, indent, row)) in rows.iter().enumerate() {
+            while stack.last().is_some_and(|(at, _, _)| *at >= indent) {
+                stack.pop();
+            }
+            let text = row_work_text(row);
+            let parent_op = stack.last().map(|(_, _, op)| *op);
+            let path = match stack.last() {
+                Some((_, parent, op)) => format!("{parent}{}{text}", op.join()),
+                None => text.clone(),
+            };
+            let has_children = rows
+                .get(position + 1)
+                .is_some_and(|&(_, next, _)| next > indent);
+            let line = first_line + index;
+            let mut push = |kind: PipeLintKind, message: String| {
+                findings.push(PipeLint {
+                    line,
+                    kind,
+                    path: path.clone(),
+                    message,
+                });
+            };
+            let op = EdgeOp::of_row(row);
+            if op == EdgeOp::Pipe && !has_children {
+                push(
+                    PipeLintKind::PipeWithoutChildren,
+                    format!(
+                        "`{path}` ends in ` |` but has no children to pipe into; nest the next stage under it or remove ` |`"
+                    ),
+                );
+            }
+            if op == EdgeOp::Fold && !has_children {
+                push(
+                    PipeLintKind::FoldWithoutChildren,
+                    format!(
+                        "`{path}` ends in ` >` but has no children to fold; nest its context under it or remove ` >`"
+                    ),
+                );
+            }
+            if matches!(parent_op, Some(EdgeOp::Pipe | EdgeOp::Fold)) {
+                if parent_op == Some(EdgeOp::Pipe) && has_children && op == EdgeOp::Context {
+                    push(
+                        PipeLintKind::UnpipedStageParent,
+                        format!(
+                            "`{path}` is inside a ` |` statement and has children, so it must end in ` |`; until it does, the statement runs as separate leaves"
+                        ),
+                    );
+                }
+                let work = row.trim();
+                if agent_doc_element_queue::strip_attempt_projection_prefix(work) != work {
+                    push(
+                        PipeLintKind::ClaimedRowInStatement,
+                        format!(
+                            "`{path}` holds its own claim, so the operator above it does not take effect until that claim settles"
+                        ),
+                    );
+                }
+            }
+            if pipe_marker_in_code_span(row) {
+                push(
+                    PipeLintKind::PipeInCodeSpan,
+                    format!(
+                        "`{path}` ends in a code span that ends in ` |`; that is literal code, not the pipe operator. Put ` |` after the code span to pipe"
+                    ),
+                );
+            }
+            if let Some(suffix) = reserved_edge_suffix(row) {
+                push(
+                    PipeLintKind::ReservedEdgeOperator,
+                    format!(
+                        "`{path}` ends in `{}`, which is {}; it is neither prose nor an operator yet",
+                        suffix.trim_start(),
+                        reserved_edge_hint(suffix)
+                    ),
+                );
+            }
+            stack.push((indent, path, op));
+        }
+    }
+    findings
+}
+
 /// Byte-free shape of one bullet-less multi-line queue head: a prose title run
 /// followed by one or more balanced Markdown code fences
 /// (`#multilinequeuehead`).
@@ -2283,8 +2542,8 @@ pub fn components(source: &str) -> Vec<Component> {
             // `line_start`.
             let raw_start = line_start + (content.len() - item_content.len());
             if is_runnable_component(&comp.name)
-                && let Some(end_index) =
-                    tracked_do_context_block_end(&content_lines, index, item_content)
+                && let Some(end_index) = edge_block_end(&content_lines, index, item_content)
+                    .or_else(|| tracked_do_context_block_end(&content_lines, index, item_content))
             {
                 let end = line_offsets.get(end_index).copied().unwrap_or(source.len());
                 comp.items

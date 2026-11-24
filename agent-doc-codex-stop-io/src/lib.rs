@@ -4115,6 +4115,23 @@ fn committed_prompt_diff_stop_response_with(
         );
         return Ok(Some(StopResponse::AllowExit));
     }
+    // `#selfsteer`: steering retires a claimed row's unchanged addition as the
+    // claimer's own bookkeeping, so a prompt forwarded to a live claim owner no
+    // longer appears in `pending` at all. The interruption still names it as
+    // its prompt target; it remains the owner's work, not fresh coordinator
+    // work. A reported attempt is coordinator closeout and still re-enters.
+    if pending.is_empty()
+        && let Some(owner) = prompt_target_from_interruption_reason(reason)
+            .and_then(|target| live_unreported_claim_owner(file, &current, &target))
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "codex_stop_committed_prompt_diff_forwarded_to_claim_owners items=0 retired_claimed_addition=1 owner={owner} action=continue (#claimedstopforward #selfsteer)",
+            ),
+        );
+        return Ok(Some(StopResponse::AllowExit));
+    }
     // `#queuetypingsteer`: a `content_edit` is the operator's own edit inside an
     // existing queue item or prompt; name that edit, not some other prompt the
     // exchange happens to hold.
@@ -4177,6 +4194,20 @@ fn committed_prompt_diff_stop_response_with(
             prompt = first_nonempty_prompt_line(&prompt),
         ),
     }))
+}
+
+/// The owner of a live, unreported claim attempt on the queue row `target`.
+#[cfg(test)]
+fn live_unreported_claim_owner(file: &Path, content: &str, target: &str) -> Option<String> {
+    let identity = agent_doc_queue::queue_claim::claim_identity(target);
+    agent_doc_queue_io::queue_claim::active_claims_for_content(file, content)
+        .ok()?
+        .into_iter()
+        .find(|claim| {
+            claim.state != agent_doc_queue::queue_claim::QueueClaimState::Reported
+                && agent_doc_queue::queue_claim::claim_identity(&claim.item_text) == identity
+        })
+        .map(|claim| claim.owner)
 }
 
 fn committed_prompt_diff_background_handoff_response(
@@ -16085,14 +16116,11 @@ Waiting on the reported row.\n\
         )
         .unwrap();
 
+        // `#selfsteer`: the row is exactly the text it was claimed with, so
+        // steering retires its addition as the claimer's own bookkeeping.
         let pending =
             agent_doc_session_check_io::midturn_steering::pending_steering_items(&doc, &current);
-        assert_eq!(pending.len(), 1, "{pending:?}");
-        assert_eq!(pending[0].dispatch.as_str(), "forward_to_owner");
-        assert_eq!(
-            pending[0].owner.as_deref(),
-            Some("subagent:subagent_prompt_permissions")
-        );
+        assert!(pending.is_empty(), "{pending:?}");
 
         let reason = format!(
             "[session-check] INTERRUPTED: cycle `cycle-1` is `committed` (commit_success), but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started; prompt_target: {prompt}"
@@ -16270,11 +16298,13 @@ Waiting on the reported row.\n\
         agent_doc_queue_io::queue_claim::claim(&doc, claimed, "subagent:permissions", 3600)
             .unwrap();
 
+        // `#selfsteer`: the claimed row's unchanged addition is the claimer's
+        // own bookkeeping; only the unclaimed prompt remains pending.
         let pending =
             agent_doc_session_check_io::midturn_steering::pending_steering_items(&doc, &current);
-        assert_eq!(pending.len(), 2, "{pending:?}");
-        assert_eq!(pending[0].dispatch.as_str(), "forward_to_owner");
-        assert_ne!(pending[1].dispatch.as_str(), "forward_to_owner");
+        assert_eq!(pending.len(), 1, "{pending:?}");
+        assert_eq!(pending[0].verbatim, unclaimed, "{pending:?}");
+        assert_ne!(pending[0].dispatch.as_str(), "forward_to_owner");
 
         let reason = format!(
             "[session-check] INTERRUPTED: cycle `cycle-1` is `committed` (commit_success), but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started; prompt_target: {claimed}"

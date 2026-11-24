@@ -210,6 +210,27 @@ pub fn worker_absent_and_settleable(claim: &QueueClaim) -> bool {
         || (claim.state == QueueClaimState::Lost && continue_already_failed(claim))
 }
 
+/// `#finishedackclose`: the attempt's worker ended and recorded its final
+/// hand-back, and no report-complete took it yet ([`report_owed`]). The
+/// worker will not run again, so the coordinator's exact `--ack-text`
+/// acknowledgement may settle the row it holds (after the usual integration
+/// proof), just as `queue report-complete` may. An interim hand-back (the
+/// worker said it waits on its own background work) is not finished, and a
+/// quota block keeps its partial work; neither is settled this way.
+pub fn worker_finished_and_settleable(claim: &QueueClaim) -> bool {
+    if claim.state == QueueClaimState::QuotaBlocked
+        || claim.quota_block.is_some()
+        || claim.lost_from == Some(QueueClaimState::QuotaBlocked)
+        || !matches!(
+            claim.state,
+            QueueClaimState::Running | QueueClaimState::Lost
+        )
+    {
+        return false;
+    }
+    report_owed(claim) && claim.interim_end_hand_back().is_none()
+}
+
 /// Continue, or retry when a previous continue failed. `None` for every other
 /// claim. Callers project TTL expiry first. A stopped harness freeze remains
 /// `Running` only as transient ledger evidence before this pass; a worker that

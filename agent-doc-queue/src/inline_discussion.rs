@@ -362,12 +362,17 @@ mod tests {
             "https://github.com/haiven-dev/haiven-api/pulls/869: #adversarial-pr",
             &presets,
         ));
-        let quoted = "The proposal quotes `#adversarial-pr` and also mentions `#adversarial-pr without a closer.";
+        let quoted =
+            "The proposal quotes `#adversarial-pr` and ends without a closer: `#adversarial-pr";
         assert!(
             item_mentions_inline_discussion_goal(quoted),
             "an unbalanced backtick does not hide the goal token"
         );
         assert!(!head_requires_inline_discussions(quoted, &presets));
+        // `#directiveposition`: the same token inside descriptive prose is not
+        // a directive, with or without a stray backtick.
+        let prose = "The proposal quotes `#adversarial-pr` and also mentions `#adversarial-pr without a closer.";
+        assert!(!item_mentions_inline_discussion_goal(prose));
         let balanced = "The proposal only quotes `#adversarial-pr`.";
         assert!(!item_mentions_inline_discussion_goal(balanced));
         assert!(!head_requires_inline_discussions(balanced, &presets));

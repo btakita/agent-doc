@@ -2333,6 +2333,9 @@ pub fn close_attempt_for_prompt_blocker(
 /// once the coordinator settled the row it held. Nothing is left live for the
 /// attempt, so the struck row reads no stale claim. The predicate is checked
 /// again under the ledger lock: a worker that came back meanwhile is kept.
+/// `#finishedackclose`: a worker that ended with its final hand-back
+/// ([`agent_doc_queue::lost_running_recovery::worker_finished_and_settleable`])
+/// is settled the same way once the coordinator acknowledged its row.
 pub fn settle_absent_worker_attempt(
     file: &Path,
     item: &str,
@@ -2349,7 +2352,9 @@ pub fn settle_absent_worker_attempt(
         };
         let mut claim = ledger.claims[index].clone();
         claim.project_expiry(now);
-        if !agent_doc_queue::lost_running_recovery::worker_absent_and_settleable(&claim) {
+        if !agent_doc_queue::lost_running_recovery::worker_absent_and_settleable(&claim)
+            && !agent_doc_queue::lost_running_recovery::worker_finished_and_settleable(&claim)
+        {
             return Ok(None);
         }
         Ok(Some(ledger.claims.remove(index)))

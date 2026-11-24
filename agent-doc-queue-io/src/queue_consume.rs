@@ -837,6 +837,7 @@ fn exact_acknowledgement_rows<'a>(
     rows: &'a [AddressableExecutableRow],
     expected_head: &str,
     selector: Option<&AckTextSelector>,
+    attempts: &[agent_doc_queue::queue_claim::QueueClaim],
 ) -> Result<Option<Vec<&'a AddressableExecutableRow>>> {
     let expected_normalized = strip_priority_markers(expected_head);
     let expected = expected_normalized.trim();
@@ -845,7 +846,8 @@ fn exact_acknowledgement_rows<'a>(
         .filter(|row| strip_priority_markers(&row.lineage).trim() == expected)
         .collect();
     if !lineage_matches.is_empty() {
-        return select_exact_acknowledgement_rows(&lineage_matches, expected, selector).map(Some);
+        return select_exact_acknowledgement_rows(&lineage_matches, expected, selector, attempts)
+            .map(Some);
     }
 
     let mut display_matches: Vec<&AddressableExecutableRow> = rows
@@ -876,7 +878,9 @@ fn exact_acknowledgement_rows<'a>(
         return Ok(None);
     }
     match display_matches.as_slice() {
-        [only] => select_exact_acknowledgement_rows(&[*only], expected, selector).map(Some),
+        [only] => {
+            select_exact_acknowledgement_rows(&[*only], expected, selector, attempts).map(Some)
+        }
         many @ [_, _, ..] => {
             let lineages = many
                 .iter()
@@ -895,6 +899,7 @@ fn select_exact_acknowledgement_rows<'a>(
     matches: &[&'a AddressableExecutableRow],
     expected: &str,
     selector: Option<&AckTextSelector>,
+    attempts: &[agent_doc_queue::queue_claim::QueueClaim],
 ) -> Result<Vec<&'a AddressableExecutableRow>> {
     match selector {
         None => match matches {
@@ -917,14 +922,65 @@ fn select_exact_acknowledgement_rows<'a>(
                 )
             }),
         Some(AckTextSelector::Owner(expected_owner)) => {
-            let owner_matches = matches
+            // `#ackownerlineage`: the owner fence names a durable attempt. A
+            // row whose visible owner annotation was cleared (a requeued
+            // attempt reads `📥` again) still belongs to the attempt the claim
+            // ledger records for its exact identity.
+            let durable_attempts = |row: &AddressableExecutableRow| {
+                let identity = agent_doc_queue::queue_claim::claim_identity(&row.lineage);
+                attempts
+                    .iter()
+                    .filter(move |attempt| attempt.identity == identity)
+            };
+            let mut owner_matches = matches
                 .iter()
                 .filter(|row| row.owner.as_ref() == Some(expected_owner))
                 .copied()
                 .collect::<Vec<_>>();
             if owner_matches.is_empty() {
+                // Only an unannotated row can stand for the durable attempt; a
+                // row annotated for another attempt is that attempt's.
+                owner_matches = matches
+                    .iter()
+                    .filter(|row| {
+                        row.owner.is_none()
+                            && durable_attempts(row).any(|attempt| {
+                                attempt.owner == expected_owner.owner
+                                    && attempt.generation == expected_owner.generation
+                            })
+                    })
+                    .copied()
+                    .collect();
+                if owner_matches.len() > 1 {
+                    anyhow::bail!(
+                        "--ack-owner names a durable attempt whose {} exact --ack-text rows carry no owner annotation; no change was applied. expected={expected:?}. Next: rerun the same command with --ack-occurrence <N> instead of --ack-owner",
+                        owner_matches.len()
+                    );
+                }
+            }
+            if owner_matches.is_empty() {
+                let known = matches
+                    .iter()
+                    .flat_map(|row| {
+                        row.owner
+                            .iter()
+                            .map(|owner| format!("{}#{}", owner.owner, owner.generation))
+                            .chain(durable_attempts(row).map(|attempt| {
+                                format!("{}#{}", attempt.owner, attempt.generation)
+                            }))
+                    })
+                    .collect::<std::collections::BTreeSet<_>>();
+                let next = if known.is_empty() {
+                    "no attempt holds this row: rerun the same command without --ack-owner"
+                        .to_string()
+                } else {
+                    format!(
+                        "rerun the same command with --ack-owner {}",
+                        known.into_iter().collect::<Vec<_>>().join(" or --ack-owner ")
+                    )
+                };
                 anyhow::bail!(
-                    "--ack-owner did not match an exact --ack-text lineage; no change was applied. expected={expected:?} owner={:?} generation={}",
+                    "--ack-owner did not match an exact --ack-text lineage; no change was applied. expected={expected:?} owner={:?} generation={}. Next: {next}",
                     expected_owner.owner,
                     expected_owner.generation
                 );
@@ -936,6 +992,56 @@ fn select_exact_acknowledgement_rows<'a>(
             // to every other attempt remain outside this selection.
             Ok(owner_matches)
         }
+    }
+}
+
+/// The agent command that unblocks an `--ack-text` refused by a live claim
+/// (`#ackrefusalcommand`). Every state names a command an agent can run; none
+/// asks the operator to edit or delete the row.
+fn live_claim_ack_next_command(
+    file: &Path,
+    lineage: &str,
+    attempt: &agent_doc_queue::queue_claim::QueueClaim,
+) -> String {
+    use agent_doc_queue::queue_claim::QueueClaimState;
+    let doc = crate::queue_claim::shell_single_quote(&file.display().to_string());
+    let item = crate::queue_claim::shell_single_quote(
+        &agent_doc_queue::queue_claim::claim_item_handle(lineage),
+    );
+    let generation = attempt.generation;
+    let owner = format!("{}#{}", attempt.owner, generation);
+    let report = format!(
+        "`agent-doc queue report-complete {doc} --item {item} --generation {generation} --response '<the worker hand-back>'`"
+    );
+    let freeze = format!(
+        "`agent-doc queue freeze {doc} --item {item} --generation {generation} --reason '<what the harness reported>'`"
+    );
+    let fail = format!(
+        "`agent-doc queue fail {doc} --item {item} --reason '<why>' --attempted '<what was tried>'`"
+    );
+    if attempt.state == QueueClaimState::QuotaBlocked
+        || attempt.quota_block.is_some()
+        || attempt.lost_from == Some(QueueClaimState::QuotaBlocked)
+    {
+        return format!(
+            "the worker stopped on a usage limit and keeps its partial work. Continue it after the limit resets, then run {report}; or end the row with {fail}."
+        );
+    }
+    match attempt.state {
+        QueueClaimState::Reported => format!(
+            "the worker reported. Rerun the same command with `--ack-owner {}` to settle exactly that attempt.",
+            crate::queue_claim::shell_single_quote(&owner)
+        ),
+        QueueClaimState::Claimed => format!(
+            "no worker was bound to this claim. Release it with `agent-doc queue release {doc} --item {item} --generation {generation} --requeue`, then rerun the same command."
+        ),
+        _ if attempt.interim_end_hand_back().is_some() => format!(
+            "the worker's last message defers its result. Continue that same worker until it hands back, then run {report}."
+        ),
+        QueueClaimState::Running | QueueClaimState::Lost => format!(
+            "the worker may still be running. When it hands back, run {report}. If the harness says it stopped, run {freeze}, then rerun the same command."
+        ),
+        _ => format!("run {report}, or end the row with {fail}."),
     }
 }
 
@@ -1077,6 +1183,73 @@ pub fn acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
     effects: &dyn QueueConsumeWriteEffects,
     apply_guard: &crate::queue_edit_owner::QueueEditGuard,
 ) -> Result<Option<QueueConsumptionOutcome>> {
+    // `#ackonecall`: one coordinator closeout settles the attempt and strikes
+    // the row. When the strike write was retained and then superseded before
+    // it landed (an editor replica re-registered over it; live 2026-11-24 on
+    // agent-doc-bugs.md), the row is still live in the authority, so the
+    // acknowledgement is recomposed from the current text in this same call
+    // instead of leaving the row for a second identical command.
+    let mut attempt = 1;
+    loop {
+        match acknowledge_free_text_once(
+            file,
+            expected_head,
+            selector,
+            response,
+            effects,
+            apply_guard,
+        ) {
+            Err(err)
+                if attempt < ACK_TEXT_RECOMPOSE_LIMIT
+                    && err.downcast_ref::<AckStrikeNotLanded>().is_some() =>
+            {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_consume_ack_text_strike_superseded file={} attempt={attempt} next=recompose_from_current_authority (#ackonecall)",
+                        file.display(),
+                    ),
+                );
+                attempt += 1;
+            }
+            Err(err) => {
+                return Err(match err.downcast::<AckStrikeNotLanded>() {
+                    Ok(not_landed) => not_landed.deferral,
+                    Err(err) => err,
+                });
+            }
+            Ok(outcome) => return Ok(outcome),
+        }
+    }
+}
+
+/// How many times one `--ack-text` recomposes a strike whose retained write
+/// was superseded before it landed (`#ackonecall`).
+const ACK_TEXT_RECOMPOSE_LIMIT: usize = 3;
+
+/// A retained `--ack-text` strike write whose row is still live in the current
+/// authority text: it was superseded, not merely slow (`#ackonecall`).
+#[derive(Debug)]
+struct AckStrikeNotLanded {
+    deferral: anyhow::Error,
+}
+
+impl std::fmt::Display for AckStrikeNotLanded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#}", self.deferral)
+    }
+}
+
+impl std::error::Error for AckStrikeNotLanded {}
+
+fn acknowledge_free_text_once(
+    file: &Path,
+    expected_head: &str,
+    selector: Option<&AckTextSelector>,
+    response: AckTextResponse<'_>,
+    effects: &dyn QueueConsumeWriteEffects,
+    apply_guard: &crate::queue_edit_owner::QueueEditGuard,
+) -> Result<Option<QueueConsumptionOutcome>> {
     apply_guard.ensure_protects(file)?;
     let content = effects.current_document_content(file, "queue_consume_ack_text")?;
     let (fm, _) = frontmatter::parse(&content)?;
@@ -1150,7 +1323,11 @@ pub fn acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
     }
 
     let addressable = acknowledgeable_rows(&content)?;
-    if let Some(rows) = exact_acknowledgement_rows(&addressable, expected_head, selector)? {
+    let attempts = crate::queue_claim::claim_states_for_content(file, &content)
+        .context("queue consume --ack-text: failed to inspect queue attempt state")?;
+    if let Some(rows) =
+        exact_acknowledgement_rows(&addressable, expected_head, selector, &attempts)?
+    {
         let row = rows[0];
         if !queue_prompt_text_is_free_text(&content, &row.lineage) {
             anyhow::bail!(
@@ -1167,8 +1344,6 @@ pub fn acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
         // a stale visible owner annotation is not authority to close an
         // abandoned attempt.
         let row_identity = agent_doc_queue::queue_claim::claim_identity(&row.lineage);
-        let attempts = crate::queue_claim::claim_states_for_content(file, &content)
-            .context("queue consume --ack-text: failed to inspect queue attempt state")?;
         // `#attemptlineage`: an attempt whose worker is proven gone and owes no
         // hand-back (a `#promptpressure` requeue, a stopped harness freeze, a
         // lost attempt whose continue failed) protects no running work. The
@@ -1189,7 +1364,13 @@ pub fn acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
             );
             let absent_worker =
                 agent_doc_queue::lost_running_recovery::worker_absent_and_settleable(attempt);
-            if absent_worker {
+            // `#finishedackclose`: a worker that ended with its final
+            // hand-back will not run again. The coordinator's exact
+            // acknowledgement settles it, after the same integration proof a
+            // reported attempt needs.
+            let finished_worker =
+                agent_doc_queue::lost_running_recovery::worker_finished_and_settleable(attempt);
+            if absent_worker || finished_worker {
                 settled_absent_attempt = Some((attempt.item_text.clone(), attempt.generation));
             }
             // `#queuefail`: a failure closes a row no worker is still working
@@ -1218,15 +1399,17 @@ pub fn acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
                         attempt.generation,
                     );
                 }
-            } else if !absent_worker && !reported_owner_matches {
+            } else if !absent_worker && !finished_worker && !reported_owner_matches {
                 anyhow::bail!(
                     "{}: --ack-text refuses queue work with a live claim. Complete or recover the \
-                     worker attempt before acknowledging {:?}. state={:?} owner={:?} generation={}",
+                     worker attempt before acknowledging {:?}. state={:?} owner={:?} generation={}. \
+                     Next: {}",
                     file.display(),
                     row.lineage,
                     attempt.state,
                     attempt.owner,
                     attempt.generation,
+                    live_claim_ack_next_command(file, &row.lineage, attempt),
                 );
             }
             // A settled absent attempt never reported, so it owes no
@@ -1311,9 +1494,52 @@ pub fn acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
             QueueConsumptionProofStage::BeforeMutation,
             apply_guard,
         )?;
-        effects
-            .converge_document_or_disk(file, &target, &content, "queue_consume_ack_text")
-            .context("queue consume --ack-text: failed to converge document")?;
+        if let Err(err) =
+            effects.converge_document_or_disk(file, &target, &content, "queue_consume_ack_text")
+        {
+            let rendered = format!("{err:#}");
+            if !agent_doc_turn::write_ownership::is_retained_cli_write_deferred(&rendered)
+                && !agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(
+                    &rendered,
+                )
+            {
+                return Err(err.context("queue consume --ack-text: failed to converge document"));
+            }
+            // `#ackonecall`: a retained write is durable unless something
+            // superseded it. The current authority decides: the struck rows
+            // gone means the strike landed, so settle and retire in this call.
+            let live_before = addressable
+                .iter()
+                .filter(|candidate| candidate.lineage == row.lineage)
+                .count();
+            let live_now = effects
+                .current_document_content(file, "queue_consume_ack_text_landed")
+                .ok()
+                .and_then(|current| acknowledgeable_rows(&current).ok())
+                .map(|current| {
+                    current
+                        .iter()
+                        .filter(|candidate| candidate.lineage == row.lineage)
+                        .count()
+                });
+            match live_now {
+                Some(live_now) if live_now + consumed_count <= live_before => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "queue_consume_ack_text_retained_landed file={} consumed_count={consumed_count} (#ackonecall)",
+                            file.display(),
+                        ),
+                    );
+                }
+                _ => {
+                    return Err(anyhow::Error::new(AckStrikeNotLanded {
+                        deferral: err
+                            .context("queue consume --ack-text: failed to converge document"),
+                    }));
+                }
+            }
+        }
         save_snapshot_recovery_only(file, &target, "queue consume --ack-text writeback");
         record_queue_consumption_proofs_under_apply_guard(
             file,
@@ -7085,6 +7311,373 @@ mod core_tests {
         assert!(failed.contains("- keep this queued\n"), "{failed}");
     }
 
+    const DIRECTIVEPOS_STOPLOOPCAP_ROW: &str = "[from:dogfood key=stoploopcap] fix: the Claude Stop #transientcloseout gate refused 9 consecutive recursive Stops (stop_hook_active=true, debts=1, unchanged) on sdk-dev.md until Claude Code's block cap overrode it ('A hook blocked the turn from ending 9 consecutive times'), 2026-11-24 00:04–00:05Z. The debt was '2. 📥 #address' (a numbered step whose claims, s389address gens 1–3, never projected onto the row), so state=inbox_or_running never releases. #stophookactiveguard promises the harness cap is never the only guard. A 📥/🚧 row the agent provably cannot move in this turn (claimed this turn but still unprojected, or no claim/close path resolves it) must be released on an unchanged recursive Stop with a systemMessage naming it, and every state needs a bounded refusal count per unchanged debt set. #spec-test-build-install-commit-push";
+
+    const DIRECTIVEPOS_NOOPADDRESS_ROW: &str = "[from:chat key=noopaddress] fix: agent-doc must never require the operator to delete or edit a row to satisfy its own hook. Operator: 'The operator should not have to delete a row to resolve agent-doc's hook. Why does agent-doc now require the user to delete a row? Is there another solution that agent-doc can do to resolve these issue?' On sdk-dev.md the agent told the operator '2. 📥 #address under #389 … needs you to delete it' because a no-op #address (PR #389 had nothing to address) could not be closed by any agent path: #addressproof (goal_loop_handoff address_effect_unproven / address_effect.rs) requeues an address hand-back with no observed head change and no review reply, and a no-op hand-back has neither. Make 'nothing to address' a provable agent outcome (observe no unresolved review threads, no requested changes, no failing required checks on the current head and record it as the address effect, or settle via the declared NO-WRITTEN-FIX final state with that evidence), and audit every Stop/closeout refusal and every agent-facing hint so each names an agent-executable command, never 'delete the row' or any operator document edit. #spec-test-build-install-commit-push";
+
+    /// A started attempt of `row` (owner `owner`, generation 1) in a
+    /// `subagents` queue whose project defines `#address`.
+    fn directivepos_started_row(row: &str, owner: &str) -> (TempDir, PathBuf) {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        fs::write(
+            tmp.path().join(".agent-doc/project.md"),
+            concat!(
+                "---\npresets:\n",
+                "  '#address': 'Address every actionable review item on the exact current head.'\n",
+                "  '#spec-test-build-install-commit-push': '#dogfood-install: approve all commit + integration + push'\n",
+                "---\n",
+            ),
+        )
+        .unwrap();
+        let doc = tmp.path().join("agent-doc-bugs.md");
+        let content = format!(
+            "---\nagent_doc_session: sample-bugs\nagent_doc_format: template\n---\n\n\
+             <!-- agent:exchange patch=append -->\n\
+             <!-- /agent:exchange -->\n\n\
+             <!-- agent:queue subagents -->\n\
+             - 📥 {row}\n\
+             - keep this queued\n\
+             <!-- /agent:queue -->\n"
+        );
+        fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        crate::queue_claim::claim(&doc, row, owner, 600).unwrap();
+        crate::queue_claim::start_attempt(&doc, row, owner, &format!("worker:{owner}"), 600, 1)
+            .unwrap();
+        (tmp, doc)
+    }
+
+    fn directivepos_ack(
+        doc: &Path,
+        row: &str,
+        selector: Option<&super::AckTextSelector>,
+    ) -> Result<Option<super::QueueConsumptionOutcome>> {
+        let guard = crate::queue_edit_owner::QueueEditGuard::acquire(doc).unwrap();
+        super::acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
+            doc,
+            row,
+            selector,
+            super::AckTextResponse::Summary("Fixed on main; see the exchange entry."),
+            &TEST_EFFECTS,
+            &guard,
+        )
+    }
+
+    fn directivepos_owner(owner: &str) -> super::AckTextSelector {
+        super::AckTextSelector::Owner(agent_doc_document::queue_projection::QueueOwnerProjection {
+            owner: owner.to_string(),
+            generation: 1,
+        })
+    }
+
+    /// `#directiveposition` + `#ackownerlineage`, replaying both live
+    /// agent-loop `agent-doc-bugs.md` rows (2026-11-24, build 0.35.589):
+    /// `stoploopcap` and `noopaddress`. Their prose names `#address` and
+    /// `#addressproof` outside a directive position, so `queue report-complete`
+    /// requeued every hand-back (`#reviewfixonhead`) and left the attempt
+    /// `Running` with an abandon freeze and a failed continue, its row a bare
+    /// `📥`. Now (1) the hand-back is not an address hand-back, and (2) the
+    /// coordinator's `--ack-text --summary` closes the row, with or without
+    /// `--ack-owner` naming the row's durable attempt, which no longer needs a
+    /// visible owner annotation. A wrong owner names the right one.
+    #[test]
+    fn directivepos_live_rows_close_through_ack_text() {
+        for (row, owner, hand_back) in [
+            (
+                DIRECTIVEPOS_STOPLOOPCAP_ROW,
+                "subagent:stoploop",
+                "**Summary** The Stop hook can no longer refuse the same queue rows until Claude Code's 9-block cap ends the turn.",
+            ),
+            (
+                DIRECTIVEPOS_NOOPADDRESS_ROW,
+                "subagent:noopaddr",
+                "NO-WRITTEN-FIX head=40a91157e6de0a5ccaa25109c77b3ae4266af9bf\n**Summary** A no-op address settles.",
+            ),
+        ] {
+            for selector in [None, Some(directivepos_owner(owner))] {
+                let (_tmp, doc) = directivepos_started_row(row, owner);
+                let content = fs::read_to_string(&doc).unwrap();
+                assert!(
+                    crate::goal_loop_handoff::requeue_nonterminal_hand_back(
+                        &doc,
+                        &content,
+                        row,
+                        Some(1),
+                        hand_back,
+                    )
+                    .unwrap()
+                    .is_none(),
+                    "a prose #address is not an address hand-back: {row}"
+                );
+                // The live ledger the old binary left: requeued (abandon
+                // freeze carrying the end hand-back), continue failed.
+                crate::queue_claim::abandon_attempt(&doc, row, Some(1))
+                    .unwrap()
+                    .expect("the old binary requeued the attempt");
+                let mut ledger = crate::queue_claim::load_ledger(&doc).unwrap();
+                let claim = &mut ledger.claims[0];
+                claim.frozen = Some(agent_doc_queue::queue_claim::QueueWorkerFreeze {
+                    frozen_at_secs: claim.claimed_at_secs + 60,
+                    reason: agent_doc_queue::queue_claim::subagent_end_freeze_reason(Some(
+                        hand_back,
+                    )),
+                    abandoned: true,
+                });
+                claim.lost_continue = Some(agent_doc_queue::queue_claim::LostContinueRecord {
+                    attempted_at_secs: claim.claimed_at_secs + 70,
+                    failed: true,
+                    reason: "lost running claim was abandoned for requeue".to_string(),
+                    during_turn: true,
+                });
+                crate::queue_claim::store_ledger_for_test(&doc, &ledger).unwrap();
+
+                let wrong = directivepos_owner("subagent:x");
+                let error = directivepos_ack(&doc, row, Some(&wrong)).unwrap_err();
+                assert!(
+                    error.to_string().contains(&format!(
+                        "Next: rerun the same command with --ack-owner {owner}#1"
+                    )),
+                    "{error}"
+                );
+                assert_eq!(fs::read_to_string(&doc).unwrap(), content);
+
+                directivepos_ack(&doc, row, selector.as_ref())
+                    .unwrap_or_else(|err| panic!("{owner} {selector:?}: {err:#}"))
+                    .expect("the exact row is acknowledged");
+                let closed = fs::read_to_string(&doc).unwrap();
+                assert!(closed.contains("~~"), "the row is struck: {closed}");
+                assert!(closed.contains("- keep this queued\n"), "{closed}");
+                assert!(
+                    crate::queue_claim::load_ledger(&doc)
+                        .unwrap()
+                        .claims
+                        .is_empty(),
+                    "the settled attempt leaves no claim behind"
+                );
+            }
+        }
+    }
+
+    /// Retained `--ack-text` writes for `#ackonecall`: the first `superseded`
+    /// writes are retained and then lost (an editor replica re-registered
+    /// over them, so the authority never carries the strike); a `landed`
+    /// write is applied but its delivery projection still reports pending.
+    struct RetainedAckEffects {
+        superseded: AtomicUsize,
+        landed: bool,
+        calls: AtomicUsize,
+    }
+
+    impl QueueConsumeWriteEffects for RetainedAckEffects {
+        fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            Ok(std::fs::read_to_string(file)?)
+        }
+
+        fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+            agent_doc_fs::write_atomic(file, content.as_bytes())
+        }
+
+        fn converge_document_or_disk(
+            &self,
+            file: &Path,
+            target_content: &str,
+            _source_content: &str,
+            reason: &str,
+        ) -> Result<()> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let lose = self
+                .superseded
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                    left.checked_sub(1)
+                })
+                .is_ok();
+            if !lose {
+                agent_doc_fs::write_atomic(file, target_content.as_bytes())?;
+                if !self.landed {
+                    return Ok(());
+                }
+            }
+            anyhow::bail!(
+                "[{}] the {reason} write was accepted by the editor authority and is durable, but its delivery projection had not converged [{}]",
+                agent_doc_turn::write_ownership::RETAINED_CLI_WRITE_DEFERRED_TOKEN,
+                agent_doc_turn::write_ownership::RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN,
+            )
+        }
+    }
+
+    /// `#ackonecall`, replaying the 2026-11-24 closeout of both live rows: the
+    /// first `--ack-text --summary` exited `deferred (exit 75)` after its
+    /// retained strike was superseded, the rows read `📥` again, and only a
+    /// second identical command struck them. One call now settles the dead
+    /// attempt and strikes the row, whether the retained write landed or was
+    /// superseded and had to be recomposed.
+    #[test]
+    fn one_ack_text_call_settles_and_strikes_through_a_retained_write() {
+        let row = DIRECTIVEPOS_NOOPADDRESS_ROW;
+        for (superseded, landed) in [(0, true), (1, false), (1, true), (2, false)] {
+            let (_tmp, doc) = directivepos_started_row(row, "subagent:noopaddr");
+            crate::queue_claim::abandon_attempt(&doc, row, Some(1))
+                .unwrap()
+                .expect("the old binary requeued the attempt");
+            let effects = RetainedAckEffects {
+                superseded: AtomicUsize::new(superseded),
+                landed,
+                calls: AtomicUsize::new(0),
+            };
+            let guard = crate::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+            super::acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
+                &doc,
+                row,
+                None,
+                super::AckTextResponse::Summary("Fixed on main; see the exchange entry."),
+                &effects,
+                &guard,
+            )
+            .unwrap_or_else(|err| panic!("superseded={superseded} landed={landed}: {err:#}"))
+            .expect("the exact row is acknowledged");
+            drop(guard);
+            assert_eq!(effects.calls.load(Ordering::SeqCst), superseded + 1);
+            let closed = fs::read_to_string(&doc).unwrap();
+            assert!(closed.contains("~~[from:chat key=noopaddress]"), "{closed}");
+            assert!(
+                crate::queue_claim::load_ledger(&doc)
+                    .unwrap()
+                    .claims
+                    .is_empty(),
+                "superseded={superseded} landed={landed}: the attempt is settled in the same call"
+            );
+        }
+
+        // A write that never lands stays a deferral after the bounded
+        // recompositions; the row is not reported closed.
+        let (_tmp, doc) = directivepos_started_row(row, "subagent:noopaddr");
+        crate::queue_claim::abandon_attempt(&doc, row, Some(1)).unwrap();
+        let effects = RetainedAckEffects {
+            superseded: AtomicUsize::new(usize::MAX),
+            landed: false,
+            calls: AtomicUsize::new(0),
+        };
+        let guard = crate::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        let error = super::acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
+            &doc,
+            row,
+            None,
+            super::AckTextResponse::Summary("Fixed on main."),
+            &effects,
+            &guard,
+        )
+        .unwrap_err();
+        assert!(
+            agent_doc_turn::write_ownership::is_retained_cli_write_deferred(&format!("{error:#}")),
+            "{error:#}"
+        );
+        assert_eq!(
+            effects.calls.load(Ordering::SeqCst),
+            super::ACK_TEXT_RECOMPOSE_LIMIT
+        );
+    }
+
+    /// `#finishedackclose`: a worker that ended with its final hand-back,
+    /// recorded by `queue freeze` / the harness end hook before any
+    /// report-complete, owes no more work. The coordinator's exact
+    /// `--ack-text --summary` closes its row once the attempt's integration
+    /// proof is recorded; before that, the refusal names the
+    /// `queue lineage-record` command.
+    #[test]
+    fn a_finished_frozen_attempt_closes_through_ack_text() {
+        let row = DIRECTIVEPOS_STOPLOOPCAP_ROW;
+        let (_tmp, doc) = directivepos_started_row(row, "subagent:stoploop");
+        let content = fs::read_to_string(&doc).unwrap();
+        let frozen = crate::queue_claim::freeze_attempt(
+            &doc,
+            row,
+            Some(1),
+            &agent_doc_queue::queue_claim::subagent_end_freeze_reason(Some(
+                "**Summary** Bounded the Stop refusal loop. **What changed** main 74e173cc66.",
+            )),
+        )
+        .unwrap();
+        assert!(agent_doc_queue::lost_running_recovery::report_owed(&frozen));
+        assert!(agent_doc_queue::lost_running_recovery::worker_finished_and_settleable(&frozen));
+
+        let error = directivepos_ack(&doc, row, None).unwrap_err();
+        assert!(
+            !error.to_string().contains("live claim"),
+            "a finished attempt is not a live claim: {error}"
+        );
+        assert!(
+            error.to_string().contains("agent-doc queue lineage-record"),
+            "{error}"
+        );
+        assert_eq!(fs::read_to_string(&doc).unwrap(), content);
+
+        crate::queue_lineage::record_prose_only(&doc, &frozen, "prose hand-back").unwrap();
+        directivepos_ack(&doc, row, None)
+            .unwrap_or_else(|err| panic!("{err:#}"))
+            .expect("the finished row is acknowledged");
+        let closed = fs::read_to_string(&doc).unwrap();
+        assert!(closed.contains("~~"), "the row is struck: {closed}");
+        assert!(
+            crate::queue_claim::load_ledger(&doc)
+                .unwrap()
+                .claims
+                .is_empty(),
+            "the settled attempt leaves no claim behind"
+        );
+    }
+
+    /// `#ackrefusalcommand`: every `--ack-text` live-claim refusal names the
+    /// agent command that unblocks it, and that command works: a running
+    /// worker is frozen (the harness said it stopped), an unbound claim is
+    /// released for requeue, then the same `--ack-text` closes the row.
+    #[test]
+    fn every_live_claim_refusal_names_a_working_agent_command() {
+        let row = DIRECTIVEPOS_NOOPADDRESS_ROW;
+
+        let (_tmp, doc) = directivepos_started_row(row, "subagent:noopaddr");
+        let error = directivepos_ack(&doc, row, None).unwrap_err().to_string();
+        assert!(
+            error.contains("refuses queue work with a live claim"),
+            "{error}"
+        );
+        assert!(error.contains("agent-doc queue freeze "), "{error}");
+        assert!(
+            error.contains("agent-doc queue report-complete "),
+            "{error}"
+        );
+        crate::queue_claim::freeze_attempt(&doc, row, Some(1), "ended without a result").unwrap();
+        directivepos_ack(&doc, row, None)
+            .unwrap_or_else(|err| panic!("{err:#}"))
+            .expect("the stopped worker's row is acknowledged");
+
+        let (_tmp, doc) = directivepos_started_row(row, "subagent:noopaddr");
+        let mut ledger = crate::queue_claim::load_ledger(&doc).unwrap();
+        ledger.claims[0].state = agent_doc_queue::queue_claim::QueueClaimState::Claimed;
+        ledger.claims[0].worker = None;
+        crate::queue_claim::store_ledger_for_test(&doc, &ledger).unwrap();
+        let error = directivepos_ack(&doc, row, None).unwrap_err().to_string();
+        assert!(
+            error.contains("agent-doc queue release ") && error.contains("--requeue"),
+            "{error}"
+        );
+        crate::claim_release_receipt::release_attempt(
+            &doc,
+            row,
+            crate::claim_release_receipt::ReleaseKind::Requeue,
+            Some(1),
+        )
+        .unwrap();
+        directivepos_ack(&doc, row, None)
+            .unwrap_or_else(|err| panic!("{err:#}"))
+            .expect("the released row is acknowledged");
+    }
+
     /// Without `--summary`, a strike whose row gets a response tree from
     /// elsewhere is not refused, and an automatic (`AsAttached`) strike
     /// keeps its old shape.
@@ -8141,7 +8734,7 @@ mod core_tests {
         let selector = super::AckTextSelector::Occurrence(1);
 
         let error =
-            super::exact_acknowledgement_rows(&rows, "#address", Some(&selector)).unwrap_err();
+            super::exact_acknowledgement_rows(&rows, "#address", Some(&selector), &[]).unwrap_err();
 
         assert!(
             error.to_string().contains("short leaf is ambiguous"),

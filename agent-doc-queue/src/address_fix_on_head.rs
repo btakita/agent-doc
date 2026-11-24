@@ -227,6 +227,57 @@ mod tests {
         }
     }
 
+    /// `#directiveposition`: the live agent-loop `agent-doc-bugs.md` rows
+    /// (2026-11-24) `noopaddress` and `directivepos` name `#address` and
+    /// `#addressproof` in descriptive prose, outside any quote. Only a bare
+    /// directive row or the row's leading / trailing tags are directives, so
+    /// neither row is an address run and its hand-back takes the ordinary
+    /// report path instead of a `#reviewfixonhead` requeue.
+    #[test]
+    fn a_prose_address_token_is_not_an_address_run() {
+        let presets = presets();
+        for row in [
+            NOOPADDRESS_ROW.to_string(),
+            format!("📥 {NOOPADDRESS_ROW}"),
+            format!("🚧 [#subagent:noopaddr#1] {NOOPADDRESS_ROW}"),
+            DIRECTIVEPOS_ROW.to_string(),
+            STOPLOOPCAP_ROW.to_string(),
+            format!("📥 {STOPLOOPCAP_ROW}"),
+            "fix: a no-op #address could not close, see PR 12".to_string(),
+        ] {
+            assert!(!head_is_address_run(&row, &presets), "{row}");
+            assert!(!item_mentions_address_preset(&row), "{row}");
+            assert!(
+                !crate::inline_discussion::item_mentions_inline_discussion_goal(&row),
+                "{row}"
+            );
+            assert!(
+                crate::preset_order::temporal_preset_order(&row, &presets).is_empty(),
+                "{row}"
+            );
+        }
+        // Directive position still counts: a bare row, leading tags, and the
+        // trailing tags, with metadata, connectors, and punctuation between.
+        for real in [
+            "#address",
+            "#address [#q-1]",
+            "📥 [#subagent:fix#2] #address [#q-1]",
+            "#address https://github.com/sample-org/sample-repo/pull/12",
+            "https://github.com/sample-org/sample-repo/pull/12: #address",
+            "https://github.com/sample-org/sample-repo/pull/12: #address.",
+            "https://github.com/sample-org/sample-repo/pull/12: #address then #adversarial-pr",
+            "https://github.com/sample-org/sample-repo/pull/12: #address [operator-verify] [#q-1]",
+            "[from:chat key=x] https://github.com/sample-org/sample-repo/pull/12 — #address",
+        ] {
+            assert!(head_is_address_run(real, &presets), "{real}");
+            assert!(item_mentions_address_preset(real), "{real}");
+        }
+    }
+
+    const NOOPADDRESS_ROW: &str = "[from:chat key=noopaddress] fix: agent-doc must never require the operator to delete or edit a row to satisfy its own hook. Operator: 'The operator should not have to delete a row to resolve agent-doc's hook. Why does agent-doc now require the user to delete a row? Is there another solution that agent-doc can do to resolve these issue?' On sdk-dev.md the agent told the operator '2. 📥 #address under #389 … needs you to delete it' because a no-op #address (PR #389 had nothing to address) could not be closed by any agent path: #addressproof (goal_loop_handoff address_effect_unproven / address_effect.rs) requeues an address hand-back with no observed head change and no review reply, and a no-op hand-back has neither. Make 'nothing to address' a provable agent outcome (observe no unresolved review threads, no requested changes, no failing required checks on the current head and record it as the address effect, or settle via the declared NO-WRITTEN-FIX final state with that evidence), and audit every Stop/closeout refusal and every agent-facing hint so each names an agent-executable command, never 'delete the row' or any operator document edit. #spec-test-build-install-commit-push";
+
+    const DIRECTIVEPOS_ROW: &str = "[from:dogfood key=directivepos] fix: two finished agent-doc-bugs.md rows (the stoploopcap and noopaddress rows) still have no agent close path on build 0.35.589+b07b1936f8ce734f: (1) queue report-complete keeps treating them as #address hand-backs and requeues them (#reviewfixonhead) because their prose mentions #address/#addressproof outside quotes — 40a91157e6 only skips quoted spans; a preset/directive must count only in directive position (a bare directive row like '#address', or the trailing preset tags), never inside descriptive prose; (2) after `queue freeze` of the finished attempt, `queue consume --ack-text … --summary` still refuses with 'refuses queue work with a live claim', and --ack-owner 'subagent:x#1' reports 'did not match an exact --ack-text lineage'. A frozen/finished attempt must not block the coordinator's ack-text closeout. Replay both live rows as failing tests, fix, and make sure every refusal names a working agent command. #spec-test-build-install-commit-push";
+
     const STOPLOOPCAP_ROW: &str = "[from:dogfood key=stoploopcap] fix: the Claude Stop #transientcloseout gate refused 9 consecutive recursive Stops (stop_hook_active=true, debts=1, unchanged) on sdk-dev.md until Claude Code's block cap overrode it ('A hook blocked the turn from ending 9 consecutive times'), 2026-11-24 00:04–00:05Z. The debt was '2. 📥 #address' (a numbered step whose claims, s389address gens 1–3, never projected onto the row), so state=inbox_or_running never releases. #stophookactiveguard promises the harness cap is never the only guard. A 📥/🚧 row the agent provably cannot move in this turn (claimed this turn but still unprojected, or no claim/close path resolves it) must be released on an unchanged recursive Stop with a systemMessage naming it, and every state needs a bounded refusal count per unchanged debt set. #spec-test-build-install-commit-push";
 
     #[test]

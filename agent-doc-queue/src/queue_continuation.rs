@@ -2443,7 +2443,8 @@ fn multiline_head_has_prose_lead(text: &str) -> bool {
 /// `#reviewfixonhead`. Quoted spans are masked on one line only: `"…"`,
 /// `“…”`, `‘…’`, and `'…'` whose opening quote follows a non-word character
 /// and whose closing quote precedes one, so an apostrophe (`doesn't`) never
-/// opens a span.
+/// opens a span. Last, every `#token` outside directive position is blanked
+/// ([`mask_prose_directive_tokens`], `#directiveposition`).
 pub(crate) fn mask_directive_scan(text: &str) -> String {
     let code_masked = mask_inline_code(text);
     let chars: Vec<char> = code_masked.chars().collect();
@@ -2479,7 +2480,116 @@ pub(crate) fn mask_directive_scan(text: &str) -> String {
             None => i += 1,
         }
     }
+    mask_prose_directive_tokens(&out.into_iter().collect::<String>())
+}
+
+/// `#directiveposition`: blank every `#token` outside directive position.
+///
+/// A row carries a directive or preset in directive position only: the
+/// leading run of the row (a bare `#address`, `#gh-fix <url>`, `#address
+/// [#q-1]`) or its trailing run (`<url>: #address then #adversarial-pr`,
+/// `fix: … #spec-test-build-install-commit-push`). A run is made of `#tag`
+/// words, bracketed metadata (`[from:chat key=x]`, `[#q-…]`,
+/// `[operator-verify]`), the connectors `then` / `and`, and words with no
+/// letters or digits (`:`, `—`, `📥`). The first other word ends it. A `#token`
+/// inside descriptive prose describes another row or a mechanism, never this
+/// row's directive: the live `agent-doc-bugs.md` row `noopaddress` (2026-11-24)
+/// says "a no-op #address (PR #389 had nothing to address) …
+/// #addressproof …" and was read as an address run, so every hand-back was
+/// requeued with `#reviewfixonhead`.
+fn mask_prose_directive_tokens(text: &str) -> String {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Kind {
+        Edge,
+        Prose,
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut words: Vec<(usize, usize, Kind)> = Vec::new();
+    let mut depth: usize = 0;
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i].is_whitespace() {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < chars.len() && !chars[i].is_whitespace() {
+            i += 1;
+        }
+        let word = &chars[start..i];
+        let in_bracket = depth > 0 || word.first() == Some(&'[');
+        for ch in word {
+            match ch {
+                '[' => depth += 1,
+                ']' => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+        let kind = if in_bracket || directive_edge_word(word) {
+            Kind::Edge
+        } else {
+            Kind::Prose
+        };
+        words.push((start, i, kind));
+    }
+    let lead = words
+        .iter()
+        .take_while(|(_, _, kind)| *kind == Kind::Edge)
+        .count();
+    let trail = words
+        .iter()
+        .rev()
+        .take_while(|(_, _, kind)| *kind == Kind::Edge)
+        .count();
+    let mut out = chars.clone();
+    let prose_end = words.len().saturating_sub(trail);
+    for &(start, end, _) in words.iter().take(prose_end).skip(lead) {
+        let mut j = start;
+        while j < end {
+            let starts_tag = chars[j] == '#'
+                && (j == start || !is_directive_name_char(chars[j - 1]))
+                && chars.get(j + 1).is_some_and(|ch| ch.is_alphanumeric());
+            if !starts_tag {
+                j += 1;
+                continue;
+            }
+            let mut k = j + 1;
+            while k < end && is_directive_name_char(chars[k]) {
+                k += 1;
+            }
+            for slot in &mut out[j..k] {
+                *slot = ' ';
+            }
+            j = k;
+        }
+    }
     out.into_iter().collect()
+}
+
+fn is_directive_name_char(ch: char) -> bool {
+    ch.is_alphanumeric() || matches!(ch, '-' | '_')
+}
+
+/// A word that may sit in a row's leading or trailing directive run.
+fn directive_edge_word(word: &[char]) -> bool {
+    let segments: Vec<String> = word
+        .split(|ch| !(is_directive_name_char(*ch) || *ch == '#'))
+        .filter(|segment| segment.iter().any(|ch| ch.is_alphanumeric()))
+        .map(|segment| segment.iter().collect())
+        .collect();
+    if segments.is_empty() {
+        return true;
+    }
+    if let [only] = segments.as_slice()
+        && (only.eq_ignore_ascii_case("then") || only.eq_ignore_ascii_case("and"))
+    {
+        return true;
+    }
+    segments.iter().all(|segment| {
+        segment
+            .strip_prefix('#')
+            .is_some_and(|name| !name.is_empty() && name.chars().all(is_directive_name_char))
+    })
 }
 
 /// Replace inline-code span contents with spaces so a QUOTED id or preset

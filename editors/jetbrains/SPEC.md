@@ -925,13 +925,22 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   converges; any other readable mismatch publishes the buffer; only an
   unreadable buffer may accept controller text. The Kotlin adapter repeats this
   guard over native and frozen-floor answers so an older native library cannot
-  apply controller text over a differing buffer.
+  apply controller text over a differing buffer. `#acceptedwriterollforward`
+  is the one exception the guard permits: when the controller's op record
+  (`binaryAttributedAncestorHashes`, proven against `canonicalContentHash`)
+  names the buffer as a generation only agent-doc's own writes carried to the
+  canonical, the evidence reports `buffer_is_binary_attributed_ancestor` and
+  native answers `apply_canonical` (the accepted writes roll forward onto the
+  stale buffer, rechecked at the publication edge against that exact buffer and
+  canonical); when it names the settled shadow and the clean merge from it
+  exists, `shadow_is_binary_attributed_ancestor` plus `clean_merge_available`
+  answer `merge_forward`. The frozen floor predates the rule and still adopts.
   The publication edge rechecks the exact buffer cut, replacement endpoint,
   and generation before publishing one full-buffer CRDT delta. Retained resume
   state is released only after that commit point. Settled shadows, acknowledged
-  replica bases, containment, clean-merge candidates, disk equality, binary
-  attribution, restart history, and retained-controller state remain useful
-  diagnostics and recovery lineage, but none chooses registration direction.
+  replica bases, containment, disk equality, restart history, and
+  retained-controller state remain useful diagnostics and recovery lineage, but
+  none chooses registration direction; only the op-record attribution above does.
   Controller-authored responses, status corrections, queue markers, and other
   retained effects are durable owed intents; after the buffer becomes current
   authority, they replay through the ordinary editor-owned delivery path.

@@ -1,6 +1,6 @@
 {
   "derivation": "registration_projection",
-  "about": "GH #326 phase 5 parity cases. The IDE buffer is authoritative whenever it is readable. The Rust derivation and frozen Kotlin floor both defer a pending local delivery, converge exact equality, and otherwise publish the IDE buffer into the controller projection. Controller containment, attribution, shadow, disk, merge, restart, and retained-state facts are diagnostics only.",
+  "about": "GH #326 phase 5 parity cases. The IDE buffer is authoritative whenever it is readable. The Rust derivation and frozen Kotlin floor both defer a pending local delivery, converge exact equality, and otherwise publish the IDE buffer into the controller projection. Controller containment, shadow, disk, restart, and retained-state facts are diagnostics only. The one exception is the controller's op record of its own binary-authored writes (#acceptedwriterollforward): when it names the buffer, or the settled shadow with a clean merge from it, as a generation those writes alone carried to canonical, the accepted writes roll forward onto the buffer; the frozen floor predates that rule and still adopts.",
   "cases": [
     {
       "name": "a fresh-controller reseed publishes a proven live buffer instead of the temporary empty canonical",
@@ -1096,6 +1096,105 @@
         "canonical_empty": false,
         "buffer_empty": false,
         "attach_held_for_operator": true
+      },
+      "expected": {
+        "action": "adopt_operator_buffer",
+        "hold_reason": null
+      },
+      "frozen_expected": {
+        "action": "adopt_operator_buffer",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "#acceptedwriterollforward: a stale buffer the op record names as the strike's pre-image rolls the accepted strike forward",
+      "texts": {
+        "published_shadow": "# bugs\n\n<!-- agent:queue -->\n- ### 📥 do [#docscleanup]\n<!-- /agent:queue -->\n\n## Exchange\n\noperator prompt\n",
+        "buffer": "# bugs\n\n<!-- agent:queue -->\n- ### 📥 do [#docscleanup]\n<!-- /agent:queue -->\n\n## Exchange\n\noperator prompt\n",
+        "canonical": "# bugs\n\n<!-- agent:queue -->\n- ~~### 📥 do [#docscleanup]~~\n<!-- /agent:queue -->\n\n## Exchange\n\noperator prompt\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": false,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": true,
+        "has_published_shadow": true,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": true,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": null,
+        "canonical_empty": false,
+        "buffer_empty": false,
+        "buffer_is_binary_attributed_ancestor": true
+      },
+      "expected": {
+        "action": "apply_canonical",
+        "hold_reason": null
+      },
+      "frozen_expected": {
+        "action": "adopt_operator_buffer",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "#acceptedwriterollforward: operator typing past an attributed shadow merges forward with the accepted write",
+      "texts": {
+        "published_shadow": "# bugs\n\n<!-- agent:queue -->\n- ### 📥 do [#docscleanup]\n<!-- /agent:queue -->\n\n## Exchange\n\noperator prompt\n",
+        "buffer": "# bugs\n\n<!-- agent:queue -->\n- ### 📥 do [#docscleanup]\n<!-- /agent:queue -->\n\n## Exchange\n\noperator prompt\nmore operator text\n",
+        "canonical": "# bugs\n\n<!-- agent:queue -->\n- ~~### 📥 do [#docscleanup]~~\n<!-- /agent:queue -->\n\n## Exchange\n\noperator prompt\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": false,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": true,
+        "has_published_shadow": true,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": true,
+        "canonical_empty": false,
+        "buffer_empty": false,
+        "shadow_is_binary_attributed_ancestor": true
+      },
+      "expected": {
+        "action": "merge_forward",
+        "hold_reason": null
+      },
+      "frozen_expected": {
+        "action": "adopt_operator_buffer",
+        "hold_reason": null
+      }
+    },
+    {
+      "name": "#acceptedwriterollforward: an operator rewrite of the struck row has no clean merge and keeps the IDE buffer",
+      "texts": {
+        "published_shadow": "# bugs\n\n<!-- agent:queue -->\n- ### 📥 do [#docscleanup]\n<!-- /agent:queue -->\n\n## Exchange\n\noperator prompt\n",
+        "buffer": "# bugs\n\n<!-- agent:queue -->\n- ### 📥 do [#docscleanup] and the operator's extra scope\n<!-- /agent:queue -->\n\n## Exchange\n\noperator prompt\n",
+        "canonical": "# bugs\n\n<!-- agent:queue -->\n- ~~### 📥 do [#docscleanup]~~\n<!-- /agent:queue -->\n\n## Exchange\n\noperator prompt\n"
+      },
+      "input": {
+        "defer_canonical_projection_for_pending_local": false,
+        "canonical_projection_retained": false,
+        "retained_replica_reseed_pending": false,
+        "canonical_covers_retained_frontier": true,
+        "has_published_shadow": true,
+        "has_buffer": true,
+        "has_canonical": true,
+        "buffer_equals_canonical": false,
+        "buffer_equals_shadow": false,
+        "canonical_equals_shadow": false,
+        "canonical_contains_operator_edits": null,
+        "clean_merge_available": false,
+        "canonical_empty": false,
+        "buffer_empty": false,
+        "shadow_is_binary_attributed_ancestor": true
       },
       "expected": {
         "action": "adopt_operator_buffer",

@@ -2526,12 +2526,45 @@ the controller copy is a projection. Exact equality converges, and pending
 captured local delivery defers. Every other mismatch publishes the exact IDE
 buffer into the replacement endpoint after rechecking both the buffer cut and
 endpoint generation at the publication edge. Settled shadows, containment,
-binary attribution, disk equality, clean-merge candidates, restart history, and
-retained-controller state may explain a mismatch but never authorize projecting
-controller text over the IDE buffer. This includes a controller projection that
-provably contains all earlier operator edits: it can still be older than what
-the operator sees now. An unreadable buffer is the only registration state in
-which the controller projection may seed the editor.
+disk equality, restart history, and retained-controller state may explain a
+mismatch but never authorize projecting controller text over the IDE buffer.
+This includes a controller projection that provably contains all earlier
+operator edits: it can still be older than what the operator sees now. An
+unreadable buffer is the only text-reading state in which the controller
+projection may seed the editor.
+
+**Accepted writes roll forward (`#acceptedwriterollforward`).** The one proof
+that is not a reading of the text is the controller's op record of its own
+binary-authored writes (`#attachauthorattribution`): the content-addressed
+chain of canonical generations that only agent-doc's writes connect, proven
+against the canonical hash the registration answered. A replica that
+re-registers with its own buffer must never let that buffer win over a write
+the binary already accepted:
+
+- When the record names the buffer as an ancestor of the canonical, the buffer
+  holds no text the canonical lacks; it is a stale copy. Registration projects
+  the canonical onto it (`apply_canonical`), fenced at the publication edge on
+  that exact buffer and canonical, so the accepted writes roll forward.
+- When the record names the settled shadow instead and the operator typed past
+  it, the clean line-anchored merge from that shadow keeps the operator's edits
+  and the accepted writes (`merge_forward`). A merge that refuses (both sides
+  changed the same line) publishes the IDE buffer as before.
+- Any canonical change that did not come through a recorded binary write (an
+  editor relay update, a document-op delta, a disk rebuild) ends the run, so an
+  unrecorded difference is never attributed. An empty canonical is never
+  projected (`#emptycanonicaldeadlock`).
+
+The live case (agent-doc-bugs.md, ops.log 2026-11-24 ~02:17Z): an `--ack-text`
+strike reached the shared document state, then the JetBrains replica
+re-registered with a buffer that lacked it. The registration published that
+buffer, its alignment splice deleted the strike, and the same path kept
+reverting `status set` writes to older payloads. The retained effects were
+supposed to replay later through editor-owned delivery, but the republished
+buffer had already removed them from the canonical. The relay SimWorld
+(`editor_attach_simworld`: `a_reregistering_stale_buffer_rolls_an_accepted_ack_strike_forward`,
+`a_reregistering_stale_buffer_keeps_every_accepted_status_write`,
+`operator_typing_beside_an_accepted_write_merges_instead_of_deleting_it`, and
+the conflict control) pins the behavior.
 
 There is one queue-semantic answer to the generic deleted-anchor refusal
 (`#struckqueuepruneattach`). When the live buffer differs from the settled

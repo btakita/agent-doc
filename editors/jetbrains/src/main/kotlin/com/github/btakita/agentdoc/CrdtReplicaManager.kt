@@ -4175,6 +4175,32 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             (settledShadows[filePath] ?: nativeReloadSettledShadows[filePath])?.toString() ?: restorePersistedSettledShadow(filePath)
         val bufferTextAtRegistration = editorBufferText(filePath) ?: initialText
         val canonicalTextAtRegistration = forwarder.replicaText()
+        // `#acceptedwriterollforward`: the controller's op record of its own binary-authored
+        // writes (`#attachauthorattribution`), checked by content hash. It is the one proof that
+        // a differing buffer is a stale copy of writes the binary already accepted (an
+        // `--ack-text` strike, a `status set` payload), so those writes roll forward onto the
+        // buffer instead of a republished buffer deleting them (agent-doc-bugs.md, ops.log
+        // 2026-11-24 02:17Z). The clean merge is computed only when the shadow is attributed.
+        val rollForward =
+            acceptedWriteRollForwardFactsUtil(
+                publishedShadow = publishedShadowAtRegistration,
+                bufferText = bufferTextAtRegistration,
+                canonicalText = canonicalTextAtRegistration,
+                canonicalContentHash = forwarder.canonicalContentHash,
+                binaryAttributedAncestorHashes = forwarder.binaryAttributedAncestorHashes,
+                contentHash = ::contentHash,
+                merge = { base, buffer, canonical -> cleanRegistrationMerge(base, buffer, canonical) },
+            )
+        if (rollForward.bufferAttributed || rollForward.shadowAttributed) {
+            log.info(
+                "[crdt-replica] registration attributed the canonical difference of ${File(filePath).name} " +
+                    "to writes agent-doc already accepted; buffer_attributed=${rollForward.bufferAttributed} " +
+                    "shadow_attributed=${rollForward.shadowAttributed} clean_merge=${rollForward.cleanMergeAvailable} " +
+                    "buffer_hash=${bufferTextAtRegistration?.let(::contentHash) ?: "unavailable"} " +
+                    "canonical_hash=${forwarder.canonicalContentHash ?: "unknown"} " +
+                    "attributed_ancestors=${forwarder.binaryAttributedAncestorHashes.size} (#acceptedwriterollforward)",
+            )
+        }
         // GH #326 phase 5: the facts are captured here, in the same order as before; which
         // direction they imply is the native `registration_projection` derivation
         // ([RegistrationProjection], frozen floor when no native generation answers). Executing
@@ -4189,13 +4215,16 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     publishedShadow = publishedShadowAtRegistration,
                     bufferText = bufferTextAtRegistration,
                     canonicalText = canonicalTextAtRegistration,
-                    // `#idebufferauthority`: containment, attribution, merge,
-                    // and disk proofs are diagnostics, not authority. Do not
-                    // pay their whole-document cost on registration.
-                    cleanMergeAvailable = null,
+                    // `#idebufferauthority`: containment and disk proofs are
+                    // diagnostics, not authority. Do not pay their
+                    // whole-document cost on registration. The op-record
+                    // attribution (`#acceptedwriterollforward`) is the exception.
+                    cleanMergeAvailable = rollForward.cleanMergeAvailable,
                     canonicalContainsOperatorEdits = null,
                     diskText = null,
                     attachHeldForOperator = retainedProjectionHoldPaths.contains(filePath),
+                    bufferIsBinaryAttributedAncestor = rollForward.bufferAttributed.takeIf { it },
+                    shadowIsBinaryAttributedAncestor = rollForward.shadowAttributed.takeIf { it },
                 ),
             )
         val retainedProjectionAction = registrationProjection.action
@@ -4490,7 +4519,20 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             }
 
             RetainedRegistrationProjectionAction.ApplyCanonical -> {
-                if (mergeBase != publishedShadow && editorBufferText(filePath) != bufferText) {
+                if (
+                    bufferText != null &&
+                    bufferText != canonicalText &&
+                    (editorBufferText(filePath) != bufferText || forwarder.replicaText() != canonicalText)
+                ) {
+                    // `#acceptedwriterollforward`: the op record proved exactly `bufferText` is a
+                    // stale copy of accepted writes. A keystroke since then is not in that proof,
+                    // and a canonical that moved is not the one it was proven against.
+                    log.warn(
+                        "[crdt-replica] accepted-write roll-forward raced for ${File(filePath).name}; " +
+                            "leaving the operator buffer untouched and retrying registration",
+                    )
+                    false
+                } else if (mergeBase != publishedShadow && editorBufferText(filePath) != bufferText) {
                     // `#ackedreplicabase`: adoption was proven lossless for exactly
                     // `bufferText`; a keystroke since then is not in that proof.
                     log.warn(
@@ -4602,8 +4644,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
     /**
      * Apply a controller projection only when the IDE buffer was unreadable or
-     * byte-identical at the registration decision. Any readable mismatch must
-     * have selected AdoptOperatorBuffer and cannot reach this function.
+     * byte-identical at the registration decision, or when the controller's op
+     * record proved the buffer a stale copy of writes the binary already accepted
+     * (`#acceptedwriterollforward`; the publication edge rechecked that exact
+     * buffer). Any other readable mismatch selected AdoptOperatorBuffer.
      */
     private fun retainCanonicalProjectionAfterRegistration(
         filePath: String,
@@ -6693,9 +6737,12 @@ internal fun closingDocumentHoldRequiresPublicationUtil(
  *
  * `#idebufferauthority`: [bufferText] is what the operator can currently see and
  * is authoritative whenever it can be read. The controller copy is a projection,
- * not a competing whole-document authority. Shadows, containment, attribution,
- * disk equality, and restart history may diagnose the mismatch; none licenses
- * replacing a differing readable IDE buffer.
+ * not a competing whole-document authority. Shadows, containment, disk
+ * equality, and restart history may diagnose the mismatch; none licenses
+ * replacing a differing readable IDE buffer. The controller's op record of its
+ * own binary-authored writes is the exception (`#acceptedwriterollforward`):
+ * when it names the buffer (or its shadow) as a stale copy of writes the binary
+ * already accepted, those writes roll forward onto the buffer.
  */
 internal enum class RetainedRegistrationProjectionAction {
     ApplyCanonical,
@@ -6703,8 +6750,10 @@ internal enum class RetainedRegistrationProjectionAction {
     HoldOperatorBuffer,
     DeferCanonicalProjection,
     /**
-     * Legacy wire action retained for older native/plugin parity. The execution
-     * adapter maps it to [AdoptOperatorBuffer] whenever a readable buffer differs.
+     * `#acceptedwriterollforward`: the operator typed past a settled shadow the
+     * controller's op record attributes, and the clean merge from that shadow
+     * keeps both the operator's edits and the binary's accepted writes. Without
+     * that proof the execution adapter maps it to [AdoptOperatorBuffer].
      */
     MergeForward,
     /**
@@ -6937,6 +6986,46 @@ internal fun bufferIsBinaryAttributedAncestorUtil(
     if (bufferText == canonicalText || binaryAttributedAncestorHashes.isEmpty()) return false
     if (contentHash(canonicalText) != canonicalContentHash) return false
     return contentHash(bufferText) in binaryAttributedAncestorHashes
+}
+
+/** `#acceptedwriterollforward`: the op-record facts one registration reports. */
+internal data class AcceptedWriteRollForwardFacts(
+    val bufferAttributed: Boolean,
+    val shadowAttributed: Boolean,
+    /** The clean merge from the attributed shadow; null unless [shadowAttributed]. */
+    val cleanMergeAvailable: Boolean?,
+)
+
+/**
+ * `#acceptedwriterollforward`: whether the controller's op record names the buffer, or else the
+ * settled shadow, as a generation from which only agent-doc's own binary-authored writes lead to
+ * the canonical ([bufferIsBinaryAttributedAncestorUtil]). The clean merge from the shadow is
+ * asked of [merge] only when the shadow is attributed and the buffer moved past it.
+ */
+internal fun acceptedWriteRollForwardFactsUtil(
+    publishedShadow: String?,
+    bufferText: String?,
+    canonicalText: String?,
+    canonicalContentHash: String?,
+    binaryAttributedAncestorHashes: List<String>,
+    contentHash: (String) -> String,
+    merge: (base: String, buffer: String, canonical: String) -> String?,
+): AcceptedWriteRollForwardFacts {
+    val none = AcceptedWriteRollForwardFacts(bufferAttributed = false, shadowAttributed = false, cleanMergeAvailable = null)
+    if (bufferText == null || canonicalText == null || bufferText == canonicalText) return none
+    if (binaryAttributedAncestorHashes.isEmpty()) return none
+    if (bufferIsBinaryAttributedAncestorUtil(bufferText, canonicalText, canonicalContentHash, binaryAttributedAncestorHashes, contentHash)) {
+        return AcceptedWriteRollForwardFacts(bufferAttributed = true, shadowAttributed = false, cleanMergeAvailable = null)
+    }
+    if (
+        publishedShadow == null ||
+        publishedShadow == bufferText ||
+        !bufferIsBinaryAttributedAncestorUtil(publishedShadow, canonicalText, canonicalContentHash, binaryAttributedAncestorHashes, contentHash)
+    ) {
+        return none
+    }
+    val merged = registrationMergeFromBaseUtil(publishedShadow, bufferText, canonicalText, merge)
+    return AcceptedWriteRollForwardFacts(bufferAttributed = false, shadowAttributed = true, cleanMergeAvailable = merged != null)
 }
 
 /** The causal facts registration reports, and the ancestor they were proven from. */

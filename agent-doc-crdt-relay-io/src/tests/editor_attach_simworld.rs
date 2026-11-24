@@ -296,10 +296,22 @@ impl SimPluginEditor {
             .ok()
             .map(|disk| disk == self.buffer);
         evidence.attach_held_for_operator = self.attach_held.then_some(true);
-        if self.attribution
-            && buffer_is_binary_attributed_ancestor(&registration, &self.buffer, &canonical)
-        {
-            evidence.canonical_contains_operator_edits = Some(true);
+        // `#acceptedwriterollforward`: the op-record facts the plugin reports
+        // (`bufferIsBinaryAttributedAncestorUtil` over the buffer, then over
+        // the settled shadow with the clean merge from that shadow).
+        let mut merge_base = merge_base;
+        if self.attribution {
+            if buffer_is_binary_attributed_ancestor(&registration, &self.buffer, &canonical) {
+                evidence.buffer_is_binary_attributed_ancestor = Some(true);
+            } else if let Some(shadow) = shadow.as_deref().filter(|shadow| {
+                *shadow != self.buffer
+                    && buffer_is_binary_attributed_ancestor(&registration, shadow, &canonical)
+            }) {
+                evidence.shadow_is_binary_attributed_ancestor = Some(true);
+                let clean = merge_from_base(shadow, &self.buffer, &canonical).is_some();
+                evidence.clean_merge_available = Some(clean);
+                merge_base = Some(shadow.to_string());
+            }
         }
         let decision = derive_registration_projection(&evidence);
         self.last = Some(AttemptFacts {
@@ -453,6 +465,8 @@ fn registration_evidence(
         buffer_empty: Some(buffer.is_empty()),
         buffer_equals_disk: None,
         attach_held_for_operator: None,
+        buffer_is_binary_attributed_ancestor: None,
+        shadow_is_binary_attributed_ancestor: None,
     };
     (evidence, merge_base)
 }
@@ -563,23 +577,31 @@ fn library_reload_then_refused_swap_reregisters_with_the_retained_frontier() {
     );
     assert_ne!(facts.canonical, facts.buffer);
     assert_eq!(
+        facts.evidence.buffer_is_binary_attributed_ancestor,
+        Some(true),
+        "{facts:#?}"
+    );
+    assert_eq!(
         recovery,
-        Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
+        Attempt::Committed(RegistrationProjectionAction::ApplyCanonical),
         "{facts:#?}"
     );
 
-    // The readable IDE buffer is published; the retained claim remains a
-    // separate durable intent for ordinary replay.
-    assert_eq!(editor.buffer, operator_text);
-    assert_eq!(hub_text(&doc), operator_text);
+    // `#acceptedwriterollforward`: the buffer is the claim projection's
+    // recorded pre-image, so the accepted claim rolls forward onto it instead
+    // of the republished buffer deleting it.
+    assert_ne!(editor.buffer, operator_text);
+    assert_eq!(editor.buffer, hub_text(&doc));
+    assert!(
+        editor
+            .buffer
+            .contains(&format!("🟡 [#subagent:attachhold#1] {CLAIMED_ITEM}"))
+    );
     assert_eq!(
         editor.settled_shadow.as_deref(),
         Some(editor.buffer.as_str())
     );
     assert!(editor.reload_resume_state.is_none(), "released on commit");
-    // The superseded controller projection remains a separate durable intent;
-    // registration authority does not mark it visibly delivered.
-    with_hub(&doc, |hub| assert!(!hub.delivery_converged())).unwrap();
 }
 
 /// The control for the test above: the plugin's pre-f155fe0076 release order
@@ -1146,13 +1168,15 @@ fn a_restored_settled_shadow_adopts_a_canonical_that_advanced_while_the_ide_was_
         Some(settled.as_str()),
         "{facts:#?}"
     );
+    // `#acceptedwriterollforward`: the buffer is the response's recorded
+    // pre-image, so the response rolls forward instead of being deleted.
     assert_eq!(
         attempt,
-        Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
+        Attempt::Committed(RegistrationProjectionAction::ApplyCanonical),
         "{facts:#?}"
     );
-    assert_eq!(editor.buffer, settled);
-    assert_eq!(hub_text(&doc), settled);
+    assert_eq!(editor.buffer, advanced);
+    assert_eq!(hub_text(&doc), advanced);
 }
 
 /// `#restartadoptscanonical`: with the settled shadow restored and a hub that
@@ -1201,11 +1225,17 @@ fn a_lost_frontier_adopts_a_controller_claim_projection_it_can_attribute() {
     assert_eq!(facts.canonical_covers_retained_frontier, None);
     assert_eq!(
         attempt,
-        Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
+        Attempt::Committed(RegistrationProjectionAction::ApplyCanonical),
         "{facts:#?}"
     );
     assert_eq!(editor.buffer, hub_text(&doc));
-    assert!(editor.buffer.contains(&format!("📥 {CLAIMED_ITEM}")));
+    assert!(
+        editor
+            .buffer
+            .contains(&format!("[#subagent:attachhold#1] {CLAIMED_ITEM}")),
+        "the attributed claim projection rolls forward onto the buffer:\n{}",
+        editor.buffer
+    );
 }
 
 /// `#attachauthorattribution`: the restarted-IDE document shape. A run queue row
@@ -1276,17 +1306,19 @@ fn a_restart_whose_canonical_differs_only_by_binary_authored_projections_adopts_
             continue;
         }
         assert_eq!(
-            facts.evidence.canonical_contains_operator_edits,
+            facts.evidence.buffer_is_binary_attributed_ancestor,
             Some(true),
             "{facts:#?}"
         );
+        // `#acceptedwriterollforward`: the markers agent-doc wrote roll
+        // forward onto the saved buffer.
         assert_eq!(
             attempt,
-            Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
+            Attempt::Committed(RegistrationProjectionAction::ApplyCanonical),
             "{facts:#?}"
         );
-        assert_eq!(editor.buffer, saved);
-        assert_eq!(hub_text(&doc), saved);
+        assert_eq!(editor.buffer, canonical);
+        assert_eq!(hub_text(&doc), canonical);
     }
 }
 
@@ -1403,16 +1435,19 @@ fn restart_across_controller_replacement(
 /// and the replacement attaches without an operator step.
 #[test]
 fn a_replacement_controller_attributes_its_predecessors_binary_writes() {
-    let (_dir, doc, mut editor, _saved) =
+    let (_dir, doc, mut editor, saved) =
         restart_across_controller_replacement("attach-author-replacement.md");
+    let canonical = hub_text(&doc);
     let attempt = editor.reregister(false);
     let facts = editor.last().clone();
     assert_eq!(
         attempt,
-        Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
+        Attempt::Committed(RegistrationProjectionAction::ApplyCanonical),
         "{facts:#?}"
     );
-    assert_eq!(editor.buffer, hub_text(&doc));
+    assert_ne!(editor.buffer, saved);
+    assert_eq!(editor.buffer, canonical);
+    assert_eq!(hub_text(&doc), canonical);
 }
 
 /// `#attachauthorattribution`: the control. A replacement controller with no
@@ -1468,6 +1503,178 @@ fn a_durable_record_proves_nothing_about_a_canonical_past_its_tip() {
     );
     assert_eq!(editor.buffer, saved);
     assert_eq!(hub_text(&doc), saved);
+}
+
+/// `#acceptedwriterollforward`: a binary-authored write the editor never
+/// projected (its replica and buffer stay at `before`).
+fn accept_binary_write(doc: &std::path::Path, before: &str, after: &str, source: &str) {
+    assert_eq!(hub_text(doc), before);
+    apply_cp_write_for_file(doc, before, after, source)
+        .unwrap()
+        .expect("the binary write uses the live relay");
+    assert_eq!(hub_text(doc), after);
+}
+
+const ROLL_FORWARD_DOC: &str = "# bugs\n\n<!-- agent:status -->\nstatus: payload-1\n<!-- /agent:status -->\n\n<!-- agent:queue -->\n- ### 📥 do [#implementfeature]\n- ### 📥 do [#docscleanup]\n<!-- /agent:queue -->\n\n## Exchange\n\noperator prompt\n";
+
+/// `#acceptedwriterollforward` (agent-doc-bugs.md, ops.log 2026-11-24 ~02:17Z):
+/// `queue consume --ack-text` struck a head into the shared document state,
+/// then the JetBrains replica re-registered with a buffer that lacked the
+/// strike. Registration published that buffer (`#idebufferauthority`) and its
+/// alignment splice deleted the strike. The controller's op record names the
+/// buffer as the strike's pre-image, so the strike must roll forward onto it.
+#[test]
+fn a_reregistering_stale_buffer_rolls_an_accepted_ack_strike_forward() {
+    let (_dir, doc) = temp_doc("accepted-ack-strike.md");
+    std::fs::write(&doc, ROLL_FORWARD_DOC).unwrap();
+    let mut editor = SimPluginEditor::open(&doc, ResumeRelease::OnCommit);
+    let stale = editor.buffer.clone();
+    let struck = stale.replacen(
+        "- ### 📥 do [#docscleanup]",
+        "- ~~### 📥 do [#docscleanup]~~",
+        1,
+    );
+    accept_binary_write(&doc, &stale, &struck, "queue_consume_ack_text");
+
+    let attempt = editor.reregister(false);
+    let facts = editor.last().clone();
+    assert_eq!(facts.buffer, stale, "{facts:#?}");
+    assert_eq!(facts.canonical, struck, "{facts:#?}");
+    assert_eq!(
+        facts.evidence.buffer_is_binary_attributed_ancestor,
+        Some(true),
+        "{facts:#?}"
+    );
+    assert_eq!(
+        attempt,
+        Attempt::Committed(RegistrationProjectionAction::ApplyCanonical),
+        "{facts:#?}"
+    );
+    assert_eq!(
+        hub_text(&doc),
+        struck,
+        "the accepted strike survives the re-registration"
+    );
+    assert_eq!(
+        editor.buffer, struck,
+        "the strike rolls forward onto the buffer"
+    );
+}
+
+/// `#acceptedwriterollforward`: the same session's `status set` writes kept
+/// reverting to older payloads. Every binary write since the buffer's
+/// generation survives, not only the newest.
+#[test]
+fn a_reregistering_stale_buffer_keeps_every_accepted_status_write() {
+    let (_dir, doc) = temp_doc("accepted-status-writes.md");
+    std::fs::write(&doc, ROLL_FORWARD_DOC).unwrap();
+    let mut editor = SimPluginEditor::open(&doc, ResumeRelease::OnCommit);
+    let stale = editor.buffer.clone();
+    let second = stale.replacen("status: payload-1", "status: payload-2", 1);
+    accept_binary_write(&doc, &stale, &second, "status_set");
+    let third = second.replacen("status: payload-2", "status: payload-3", 1);
+    accept_binary_write(&doc, &second, &third, "status_set");
+    let struck = third.replacen(
+        "- ### 📥 do [#implementfeature]",
+        "- ~~### 📥 do [#implementfeature]~~",
+        1,
+    );
+    accept_binary_write(&doc, &third, &struck, "queue_consume_ack_text");
+
+    let attempt = editor.reregister(false);
+    let facts = editor.last().clone();
+    assert_eq!(
+        attempt,
+        Attempt::Committed(RegistrationProjectionAction::ApplyCanonical),
+        "{facts:#?}"
+    );
+    assert_eq!(hub_text(&doc), struck);
+    assert_eq!(editor.buffer, struck);
+    assert!(editor.buffer.contains("status: payload-3"));
+    assert!(!editor.buffer.contains("status: payload-1"));
+}
+
+/// `#acceptedwriterollforward`: the operator typed after the settled shadow
+/// (not yet drained into the replica), and the binary accepted a strike since
+/// that shadow. The clean merge from the attributed shadow keeps both; the
+/// stale part of the buffer never deletes the strike.
+#[test]
+fn operator_typing_beside_an_accepted_write_merges_instead_of_deleting_it() {
+    let (_dir, doc) = temp_doc("accepted-write-merge.md");
+    std::fs::write(&doc, ROLL_FORWARD_DOC).unwrap();
+    let mut editor = SimPluginEditor::open(&doc, ResumeRelease::OnCommit);
+    let shadow = editor.buffer.clone();
+    let struck = shadow.replacen(
+        "- ### 📥 do [#docscleanup]",
+        "- ~~### 📥 do [#docscleanup]~~",
+        1,
+    );
+    accept_binary_write(&doc, &shadow, &struck, "queue_consume_ack_text");
+    let typed = shadow.replacen(
+        "operator prompt\n",
+        "operator prompt\nmore operator text\n",
+        1,
+    );
+    editor.type_unapplied(&typed);
+
+    let attempt = editor.reregister(false);
+    let facts = editor.last().clone();
+    assert_eq!(
+        facts.evidence.shadow_is_binary_attributed_ancestor,
+        Some(true),
+        "{facts:#?}"
+    );
+    assert_eq!(
+        attempt,
+        Attempt::Committed(RegistrationProjectionAction::MergeForward),
+        "{facts:#?}"
+    );
+    let expected = struck.replacen(
+        "operator prompt\n",
+        "operator prompt\nmore operator text\n",
+        1,
+    );
+    assert_eq!(hub_text(&doc), expected);
+    assert_eq!(editor.buffer, expected);
+}
+
+/// `#acceptedwriterollforward`, the control: the operator rewrote the very
+/// row the binary struck. No clean merge exists, so the readable IDE buffer
+/// stays authoritative (`#idebufferauthority`); only an op-record proof rolls
+/// a write forward.
+#[test]
+fn an_operator_rewrite_of_the_struck_row_still_publishes_the_ide_buffer() {
+    let (_dir, doc) = temp_doc("accepted-write-conflict.md");
+    std::fs::write(&doc, ROLL_FORWARD_DOC).unwrap();
+    let mut editor = SimPluginEditor::open(&doc, ResumeRelease::OnCommit);
+    let shadow = editor.buffer.clone();
+    let struck = shadow.replacen(
+        "- ### 📥 do [#docscleanup]",
+        "- ~~### 📥 do [#docscleanup]~~",
+        1,
+    );
+    accept_binary_write(&doc, &shadow, &struck, "queue_consume_ack_text");
+    let rewritten = shadow.replacen(
+        "- ### 📥 do [#docscleanup]",
+        "- ### 📥 do [#docscleanup] and the operator's extra scope",
+        1,
+    );
+    editor.type_unapplied(&rewritten);
+
+    let attempt = editor.reregister(false);
+    let facts = editor.last().clone();
+    assert_eq!(
+        facts.evidence.clean_merge_available,
+        Some(false),
+        "{facts:#?}"
+    );
+    assert_eq!(
+        attempt,
+        Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
+        "{facts:#?}"
+    );
+    assert_eq!(hub_text(&doc), rewritten);
+    assert_eq!(editor.buffer, rewritten);
 }
 
 const INSTALL_DOC: &str = "# sdk-dev\n\n<!-- agent:queue -->\n- do [#adversarial-pr]\n- do [#docscleanup]\n<!-- /agent:queue -->\n\n## Exchange\n\noperator prompt\n";
@@ -1575,13 +1782,22 @@ fn an_install_reload_reattaches_an_unedited_buffer_without_an_operator_step() {
             Some(true),
             "install {install}: the retained frontier is in the reseeded history: {facts:#?}"
         );
+        // `#acceptedwriterollforward`: every canonical difference is a write
+        // agent-doc recorded (the response, the markers, the follow-up row),
+        // so they roll forward onto the unedited buffer.
         assert_eq!(
             attempt,
-            Attempt::Committed(RegistrationProjectionAction::AdoptOperatorBuffer),
+            Attempt::Committed(RegistrationProjectionAction::ApplyCanonical),
             "install {install}: {facts:#?}"
         );
-        assert_eq!(editor.buffer, hub_text(&doc), "install {install}");
-        assert_eq!(editor.buffer, operator_text);
+        let canonical = hub_text(&doc);
+        assert_eq!(editor.buffer, canonical, "install {install}");
+        assert_ne!(editor.buffer, operator_text);
+        assert!(canonical.contains("### Re: answer"), "install {install}");
+        assert!(
+            canonical.contains("- do [#followuprow]"),
+            "install {install}"
+        );
         assert!(
             editor.buffer.contains("operator prompt"),
             "every operator line survives: {operator_text}"

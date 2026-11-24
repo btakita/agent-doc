@@ -51,6 +51,14 @@ internal object RegistrationProjection {
          * evidence and none has arrived since.
          */
         val attachHeldForOperator: Boolean = false,
+        /**
+         * `#acceptedwriterollforward`: the controller's op record names [bufferText] as a canonical
+         * generation from which only agent-doc's own binary-authored writes lead to [canonicalText]
+         * ([bufferIsBinaryAttributedAncestorUtil]; null: not computed).
+         */
+        val bufferIsBinaryAttributedAncestor: Boolean? = null,
+        /** `#acceptedwriterollforward`: the same op-record proof for [publishedShadow]. */
+        val shadowIsBinaryAttributedAncestor: Boolean? = null,
     )
 
     /**
@@ -75,6 +83,8 @@ internal object RegistrationProjection {
         @SerializedName("buffer_empty") val bufferEmpty: Boolean? = null,
         @SerializedName("buffer_equals_disk") val bufferEqualsDisk: Boolean? = null,
         @SerializedName("attach_held_for_operator") val attachHeldForOperator: Boolean? = null,
+        @SerializedName("buffer_is_binary_attributed_ancestor") val bufferIsBinaryAttributedAncestor: Boolean? = null,
+        @SerializedName("shadow_is_binary_attributed_ancestor") val shadowIsBinaryAttributedAncestor: Boolean? = null,
     )
 
     /** The answer. [holdReason] is non-null exactly when [action] is a hold. */
@@ -106,6 +116,8 @@ internal object RegistrationProjection {
             bufferEqualsDisk = observation.diskText?.let { disk -> buffer?.let { it == disk } },
             // Reported only when true: an absent fact is the historical behaviour.
             attachHeldForOperator = observation.attachHeldForOperator.takeIf { it },
+            bufferIsBinaryAttributedAncestor = observation.bufferIsBinaryAttributedAncestor,
+            shadowIsBinaryAttributedAncestor = observation.shadowIsBinaryAttributedAncestor,
         )
     }
 
@@ -133,6 +145,11 @@ internal object RegistrationProjection {
      * `#idebufferauthority`: enforce the invariant at the execution adapter too,
      * so an older hot-loaded native library cannot project controller text over
      * a differing readable IDE buffer. Pending local delivery remains deferred.
+     *
+     * `#acceptedwriterollforward`: the controller's op record is the one proof that may
+     * project canonical (or merge forward) over a differing buffer, because it says the buffer
+     * (or its shadow) is a stale copy of writes the binary already accepted. Without that
+     * proof every other answer still becomes an adoption of the IDE buffer.
      */
     internal fun guardIdeBufferAuthority(decision: Decision, observation: Observation): Decision {
         val buffer = observation.bufferText
@@ -143,6 +160,9 @@ internal object RegistrationProjection {
         ) {
             return decision
         }
+        if (acceptedWriteRollForwardProven(decision.action, observation)) {
+            return decision
+        }
         if (decision.action != RetainedRegistrationProjectionAction.AdoptOperatorBuffer) {
             LOG.warn(
                 "[crdt-replica] registration answered ${decision.action} over a differing readable IDE buffer; " +
@@ -150,6 +170,29 @@ internal object RegistrationProjection {
             )
         }
         return Decision(RetainedRegistrationProjectionAction.AdoptOperatorBuffer, null)
+    }
+
+    /**
+     * `#acceptedwriterollforward`: whether [action] rolls writes the binary already accepted
+     * forward onto the buffer under the op-record proof the observation carries. An empty
+     * canonical is never projected (`#emptycanonicaldeadlock`).
+     */
+    internal fun acceptedWriteRollForwardProven(
+        action: RetainedRegistrationProjectionAction,
+        observation: Observation,
+    ): Boolean {
+        val canonical = observation.canonicalText ?: return false
+        if (canonical.isEmpty()) return false
+        return when (action) {
+            RetainedRegistrationProjectionAction.ApplyCanonical ->
+                observation.bufferIsBinaryAttributedAncestor == true
+            RetainedRegistrationProjectionAction.MergeForward ->
+                observation.shadowIsBinaryAttributedAncestor == true &&
+                    observation.cleanMergeAvailable == true &&
+                    observation.publishedShadow != null &&
+                    observation.publishedShadow != observation.bufferText
+            else -> false
+        }
     }
 
     /** Parse the native output; `null` takes the frozen floor. */

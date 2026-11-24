@@ -549,10 +549,17 @@ new operator intent; an unanswered quoted tail remains actionable.
   On editor registration and re-registration, an open readable IDE buffer is
   the whole-document authority and the controller holds only a projection. If
   their bytes differ, the replacement endpoint must publish the exact observed
-  IDE buffer after generation-fenced rechecks; containment, binary attribution,
-  settled shadows, disk equality, restart history, and retained-controller state
-  are diagnostics only and never authorize projecting controller text over the
-  IDE buffer. Exact equality converges without a write, an unreadable buffer may
+  IDE buffer after generation-fenced rechecks; containment, settled shadows,
+  disk equality, restart history, and retained-controller state are diagnostics
+  only and never authorize projecting controller text over the IDE buffer. The
+  one exception is the controller's op record of its own binary-authored writes
+  (`#acceptedwriterollforward`): when it names the buffer, by content hash, as
+  a canonical generation from which only those writes lead to the canonical,
+  the buffer is a stale copy of writes the binary already accepted, so the
+  canonical rolls forward onto it instead of the republished buffer deleting
+  them; when it names the settled shadow and the buffer moved past it, a clean
+  merge from that shadow keeps both, and without a clean merge the buffer
+  publishes as before. Exact equality converges without a write, an unreadable buffer may
   accept the controller projection, and a captured local delta may defer the
   registration effect until its existing delivery edge settles
   (`#idebufferauthority`). Publishing that buffer re-authors only the lines that

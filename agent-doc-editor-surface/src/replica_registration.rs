@@ -8,7 +8,12 @@
 //! endpoint bootstrapped from. The live IDE buffer is the document authority;
 //! the controller copy is only a projection. Registration therefore converges
 //! an equal cut, defers while a captured local delta owns delivery, or publishes
-//! the exact readable IDE buffer into the replacement endpoint.
+//! the exact readable IDE buffer into the replacement endpoint. The exception
+//! is a write the binary already accepted (`#acceptedwriterollforward`): when
+//! the controller's own op record proves the buffer (or its settled shadow) is
+//! a generation that only binary-authored writes carried to the canonical, the
+//! buffer is the base and those writes roll forward onto it instead of being
+//! deleted by a republished stale buffer.
 //!
 //! That choice was the most frequently changed pure decision in
 //! `CrdtReplicaManager` (`retainedRegistrationProjectionActionForAttachUtil` and
@@ -127,6 +132,21 @@ pub struct RegistrationProjectionEvidence {
     /// fallback over the buffer that hold protected.
     #[serde(default)]
     pub attach_held_for_operator: Option<bool>,
+    /// `#acceptedwriterollforward`: the controller's op record of its own
+    /// binary-authored writes (`#attachauthorattribution`) names the live
+    /// buffer, by content hash, as a canonical generation from which only those
+    /// writes lead to this canonical (`None`: not reported). The buffer then
+    /// holds no text the canonical lacks: it is a stale copy of writes the
+    /// binary already accepted (an `--ack-text` strike, a `status set`
+    /// payload), and projecting the canonical onto it rolls them forward.
+    #[serde(default)]
+    pub buffer_is_binary_attributed_ancestor: Option<bool>,
+    /// `#acceptedwriterollforward`: the same op-record proof for the settled
+    /// shadow. With a clean merge from that shadow (`clean_merge_available`),
+    /// the operator's edits since the shadow and the binary's accepted writes
+    /// since it both survive (`None`: not reported).
+    #[serde(default)]
+    pub shadow_is_binary_attributed_ancestor: Option<bool>,
 }
 
 /// The direction a registration projects. Wire tokens are snake_case.
@@ -183,8 +203,29 @@ fn registration_action(e: &RegistrationProjectionEvidence) -> RegistrationProjec
         // `#idebufferauthority`: a readable IDE buffer is the source of truth.
         // A controller copy may contain every historical operator edit and
         // still not equal what the operator sees now. No containment, shadow,
-        // disk, or attribution proof licenses replacing it.
-        AdoptOperatorBuffer
+        // or disk reading licenses replacing it.
+        //
+        // `#acceptedwriterollforward`: the one exception is the controller's
+        // op record, which is not a reading of the text. When it names the
+        // buffer (or the buffer's settled shadow) as a generation that only
+        // binary-authored writes carried to this canonical, publishing the
+        // buffer would delete writes the binary already accepted (the
+        // 2026-11-24 02:17Z ack-text strike and the reverted `status set`
+        // payloads on agent-doc-bugs.md). The buffer stays the base and those
+        // writes roll forward onto it; an empty canonical is never projected.
+        let rollable = e.canonical_empty != Some(true);
+        if rollable && e.buffer_is_binary_attributed_ancestor == Some(true) {
+            ApplyCanonical
+        } else if rollable
+            && e.shadow_is_binary_attributed_ancestor == Some(true)
+            && e.has_published_shadow
+            && !e.buffer_equals_shadow
+            && e.clean_merge_available == Some(true)
+        {
+            MergeForward
+        } else {
+            AdoptOperatorBuffer
+        }
     } else {
         ApplyCanonical
     }
@@ -473,6 +514,102 @@ mod tests {
             assert_eq!(held.action, AdoptOperatorBuffer, "{unattributed:?}");
             assert_eq!(held.hold_reason, None);
         }
+    }
+
+    /// `#acceptedwriterollforward` (agent-doc-bugs.md, 2026-11-24 02:17Z): an
+    /// `--ack-text` strike reached canonical, then the editor re-registered
+    /// with a buffer that lacked it. The op record names that buffer as the
+    /// strike's pre-image, so the strike rolls forward onto the buffer instead
+    /// of the buffer's republication deleting it.
+    #[test]
+    fn a_stale_buffer_the_op_record_attributes_rolls_accepted_writes_forward() {
+        let stale = "- ### 📥 do [#docscleanup]\n";
+        let struck = "- ~~### 📥 do [#docscleanup]~~\n";
+        for retained in [false, true] {
+            for shadow in [None, Some(stale)] {
+                let evidence = RegistrationProjectionEvidence {
+                    canonical_projection_retained: retained,
+                    buffer_is_binary_attributed_ancestor: Some(true),
+                    ..facts(shadow, Some(stale), Some(struck))
+                };
+                let answer = derive_registration_projection(&evidence);
+                assert_eq!(answer.action, ApplyCanonical, "{evidence:?}");
+                assert_eq!(answer.hold_reason, None);
+            }
+        }
+        // Without the op record the readable buffer still wins.
+        for unproven in [None, Some(false)] {
+            let evidence = RegistrationProjectionEvidence {
+                buffer_is_binary_attributed_ancestor: unproven,
+                ..facts(Some(stale), Some(stale), Some(struck))
+            };
+            assert_eq!(
+                derive_registration_projection(&evidence).action,
+                AdoptOperatorBuffer
+            );
+        }
+        // A pending local delivery still defers, and an empty canonical is
+        // never projected, whatever the record says.
+        let pending = RegistrationProjectionEvidence {
+            defer_canonical_projection_for_pending_local: true,
+            buffer_is_binary_attributed_ancestor: Some(true),
+            ..facts(None, Some(stale), Some(struck))
+        };
+        assert_eq!(
+            derive_registration_projection(&pending).action,
+            DeferCanonicalProjection
+        );
+        let empty = RegistrationProjectionEvidence {
+            buffer_is_binary_attributed_ancestor: Some(true),
+            ..facts(None, Some(stale), Some(""))
+        };
+        assert_eq!(
+            derive_registration_projection(&empty).action,
+            AdoptOperatorBuffer
+        );
+    }
+
+    /// `#acceptedwriterollforward`: the operator typed after the settled
+    /// shadow, and the binary's accepted writes since that shadow are on
+    /// record. A clean merge from the shadow keeps both; anything less keeps
+    /// the IDE buffer.
+    #[test]
+    fn an_attributed_shadow_merges_operator_edits_with_accepted_writes() {
+        let shadow = "a\nb\n";
+        let buffer = "a\nb\ntyped\n";
+        let canonical = "a (closed)\nb\n";
+        let evidence =
+            |attributed: Option<bool>, merge: Option<bool>| RegistrationProjectionEvidence {
+                shadow_is_binary_attributed_ancestor: attributed,
+                clean_merge_available: merge,
+                ..facts(Some(shadow), Some(buffer), Some(canonical))
+            };
+        assert_eq!(
+            derive_registration_projection(&evidence(Some(true), Some(true))).action,
+            MergeForward
+        );
+        for (attributed, merge) in [
+            (Some(true), Some(false)),
+            (Some(true), None),
+            (None, Some(true)),
+            (Some(false), Some(true)),
+        ] {
+            assert_eq!(
+                derive_registration_projection(&evidence(attributed, merge)).action,
+                AdoptOperatorBuffer,
+                "{attributed:?} {merge:?}"
+            );
+        }
+        // Text containment is still not the op record.
+        let contained = RegistrationProjectionEvidence {
+            canonical_contains_operator_edits: Some(true),
+            clean_merge_available: Some(true),
+            ..facts(Some(shadow), Some(buffer), Some(canonical))
+        };
+        assert_eq!(
+            derive_registration_projection(&contained).action,
+            AdoptOperatorBuffer
+        );
     }
 
     #[test]

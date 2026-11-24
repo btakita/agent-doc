@@ -45,6 +45,8 @@ class RegistrationProjectionTest {
         cleanMergeAvailable = flags.get("clean_merge_available").flagOrNull(),
         diskText = disk,
         attachHeldForOperator = flags.get("attach_held_for_operator").flagOrNull() == true,
+        bufferIsBinaryAttributedAncestor = flags.get("buffer_is_binary_attributed_ancestor").flagOrNull(),
+        shadowIsBinaryAttributedAncestor = flags.get("shadow_is_binary_attributed_ancestor").flagOrNull(),
     )
 
     /** The answer in the fixture's wire shape. */

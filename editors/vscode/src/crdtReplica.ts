@@ -184,6 +184,23 @@ function sha256(value: string): string {
     return createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
+/**
+ * `#acceptedwriterollforward`: the controller's op record (`#attachauthorattribution`) names
+ * `bufferText` as a canonical generation from which only agent-doc's own binary-authored writes
+ * lead to `canonicalText`, proven against the record's canonical hash. Never a reading of the text.
+ */
+export function acceptedWriteRollForwardUtil(
+    bufferText: string | null,
+    canonicalText: string | null,
+    record: { readonly canonicalContentHash: string | null; readonly binaryAttributedAncestorHashes: readonly string[] },
+): boolean {
+    if (bufferText == null || canonicalText == null || bufferText === canonicalText) return false;
+    if (canonicalText.length === 0 || record.canonicalContentHash == null) return false;
+    if (record.binaryAttributedAncestorHashes.length === 0) return false;
+    if (sha256(canonicalText) !== record.canonicalContentHash) return false;
+    return record.binaryAttributedAncestorHashes.includes(sha256(bufferText));
+}
+
 function stringList(value: unknown): string[] {
     if (!Array.isArray(value)) return [];
     return value.filter((entry): entry is string => typeof entry === 'string');
@@ -746,12 +763,15 @@ export class CrdtReplicaForwarder {
         return this.divergent;
     }
 
-    /** Diagnostic controller-projection hash; never editor-buffer authority. */
+    /** The controller-projection hash the op record was proven against (`#acceptedwriterollforward`). */
     get canonicalContentHash(): string | null {
         return this.attributedCanonicalHash;
     }
 
-    /** Diagnostic ancestry; never editor-buffer authority. */
+    /**
+     * Binary-authored ancestry: authority only through [acceptedWriteRollForwardUtil]
+     * (`#acceptedwriterollforward`), never a text reading.
+     */
     get binaryAttributedAncestorHashes(): readonly string[] {
         return this.attributedAncestorHashes;
     }
@@ -1899,8 +1919,15 @@ export class CrdtReplicaManager {
      * `#idebufferauthority`: registration bootstraps the CRDT node from the
      * controller projection, but a readable live IDE buffer remains the
      * whole-document authority. Publish that exact buffer as one local replace;
-     * never project retained controller text over it based on attribution,
-     * containment, disk equality, or restart history.
+     * never project retained controller text over it based on containment,
+     * disk equality, or restart history.
+     *
+     * `#acceptedwriterollforward`: the controller's op record of its own
+     * binary-authored writes is the exception. When it names the buffer as a
+     * generation from which only those writes lead to the canonical, the
+     * buffer is a stale copy of writes the binary already accepted (an
+     * `--ack-text` strike, a `status set` payload); publishing it would delete
+     * them, so the canonical rolls forward onto the buffer instead.
      */
     private async publishAuthoritativeBufferAtRegistration(
         filePath: string,
@@ -1913,6 +1940,21 @@ export class CrdtReplicaManager {
         if (bufferText == null || canonicalText == null) return;
         if (bufferText === canonicalText) {
             this.shadows.set(filePath, bufferText);
+            return;
+        }
+        if (acceptedWriteRollForwardUtil(bufferText, canonicalText, forwarder)) {
+            this.logger.debug(
+                `[crdt-replica] registration attributed the canonical difference of ${filePath} to writes ` +
+                `agent-doc already accepted; rolling them forward onto the IDE buffer. ` +
+                `buffer_hash=${sha256(bufferText)} canonical_hash=${sha256(canonicalText)} ` +
+                '(#acceptedwriterollforward)',
+            );
+            if (!(await this.applyCanonicalProjection(filePath, canonicalText, bufferText))) return;
+            if (!(await forwarder.projectVisibleState(canonicalText))) {
+                this.scheduleReplicaRetry(filePath, 'accepted-write-roll-forward-projection-retry');
+                return;
+            }
+            this.options.observeProjection?.(filePath);
             return;
         }
         this.logger.debug(

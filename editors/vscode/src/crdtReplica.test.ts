@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { createHash } from 'crypto';
 import {
+    acceptedWriteRollForwardUtil,
 CrdtReplicaForwarder,
 CrdtReplicaManager,
 ControllerSocketReplicaTransport,
@@ -1059,7 +1060,7 @@ describe('#idebufferauthority registration publication', () => {
         '- https://example.test/pull/14\n  - marker #adversarial-pr\n- ### [#subagent:impl#3] do [#implement]\n';
     const hash = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
 
-    function registrationTransport() {
+    function registrationTransport(ancestors: readonly string[] = [hash(saved)]) {
         const transport = new FakeTransport();
         transport.register = async () => {
             transport.registerCount += 1;
@@ -1067,17 +1068,17 @@ describe('#idebufferauthority registration publication', () => {
                 clientId: 40 + transport.registerCount,
                 bootstrap: Buffer.from([9]),
                 canonicalContentHash: hash(canonical),
-                binaryAttributedAncestorHashes: [hash(saved)],
+                binaryAttributedAncestorHashes: ancestors,
             };
         };
         return transport;
     }
 
-    it('publishes the readable IDE buffer even when controller attribution names it as an ancestor', async () => {
+    it('rolls writes the controller op record attributes forward onto a stale IDE buffer (#acceptedwriterollforward)', async () => {
         const transport = registrationTransport();
         const filePath = '/work/plan.md';
-        const editorText = saved;
-        let applied = 0;
+        let editorText = saved;
+        const applied: Array<{ text: string; expected: string }> = [];
         let observed = 0;
         const manager = new CrdtReplicaManager({
             projectRoot: '/work',
@@ -1086,24 +1087,41 @@ describe('#idebufferauthority registration publication', () => {
             nodeFactory: () => new FakeNode(canonical),
             listDocuments: () => [],
             currentText: () => editorText,
-            applyText: async () => {
-                applied += 1;
+            applyText: async (_path, text, expected) => {
+                if (editorText !== expected) return false;
+                applied.push({ text, expected });
+                editorText = text;
                 return true;
             },
             observeProjection: () => { observed += 1; },
         });
 
         assert.equal(await manager.attachDocument(filePath, saved), true);
-        assert.equal(applied, 0);
-        assert.equal(editorText, saved);
-        assert.equal(transport.broadcasts.length, 1);
+        assert.deepEqual(applied, [{ text: canonical, expected: saved }]);
+        assert.equal(editorText, canonical, 'the accepted writes reach the buffer');
+        assert.equal(transport.broadcasts.length, 0, 'the stale buffer is never republished');
         assert.equal(observed, 1);
-        assert.deepEqual(transport.projected, [{ contentHash: hash(saved), diskPersisted: false }]);
+        assert.deepEqual(transport.projected, [{ contentHash: hash(canonical), diskPersisted: false }]);
         manager.dispose();
     });
 
+    it('the roll-forward proof is the op record, never the text', () => {
+        const record = { canonicalContentHash: hash(canonical), binaryAttributedAncestorHashes: [hash(saved)] };
+        assert.equal(acceptedWriteRollForwardUtil(saved, canonical, record), true);
+        assert.equal(acceptedWriteRollForwardUtil(saved + '- typed\n', canonical, record), false);
+        assert.equal(acceptedWriteRollForwardUtil(saved, canonical, { ...record, binaryAttributedAncestorHashes: [] }), false);
+        assert.equal(acceptedWriteRollForwardUtil(saved, canonical, { ...record, canonicalContentHash: hash('newer') }), false);
+        assert.equal(acceptedWriteRollForwardUtil(saved, canonical, { ...record, canonicalContentHash: null }), false);
+        assert.equal(acceptedWriteRollForwardUtil(canonical, canonical, record), false);
+        assert.equal(acceptedWriteRollForwardUtil(null, canonical, record), false);
+        assert.equal(
+            acceptedWriteRollForwardUtil(saved, '', { canonicalContentHash: hash(''), binaryAttributedAncestorHashes: [hash(saved)] }),
+            false,
+        );
+    });
+
     it('publishes the still-open IDE buffer on forced re-registration', async () => {
-        const transport = registrationTransport();
+        const transport = registrationTransport([]);
         const filePath = '/work/plan.md';
         let editorText = canonical;
         const nodes = [new FakeNode(canonical), new FakeNode(canonical)];
@@ -1153,7 +1171,7 @@ describe('#idebufferauthority registration publication', () => {
     });
 
     it('does not acknowledge a registration publication when the IDE buffer races it', async () => {
-        const transport = registrationTransport();
+        const transport = registrationTransport([]);
         const filePath = '/work/plan.md';
         let editorText = saved;
         let releaseBroadcast!: () => void;

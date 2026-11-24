@@ -25,6 +25,7 @@ class VisibleRollForwardTest {
         visible: String? = "d5e3a7b1",
         structureExact: Boolean = true,
         remoteApplyInFlight: Boolean = false,
+        visibleIsAcceptedAncestor: Boolean = false,
     ) = visibleRollForwardDecisionUtil(
         expectedCanonicalHash = expected,
         canonicalHash = canonical,
@@ -32,12 +33,57 @@ class VisibleRollForwardTest {
         visibleHash = visible,
         visibleStructureExact = structureExact,
         remoteApplyInFlight = remoteApplyInFlight,
+        visibleIsAcceptedAncestor = visibleIsAcceptedAncestor,
     )
 
     @Test
     fun `the measured stuck state rolls the visible buffer forward`() {
         // Replica rebuilt onto canonical 72a301c0, buffer holds operator text.
         assertEquals(VisibleRollForwardDecision.RollForward, decide())
+    }
+
+    /**
+     * `#acceptedwriterollforward`: the controller's op record names the visible buffer as a
+     * generation from which only agent-doc's accepted writes (an `--ack-text` strike, a
+     * `status set` payload) lead to the fenced canonical. Publishing that cut would delete them.
+     */
+    @Test
+    fun `a visible buffer the op record names as a stale copy of accepted writes is never published`() {
+        assertEquals(VisibleRollForwardDecision.VisibleLacksAcceptedWrites, decide(visibleIsAcceptedAncestor = true))
+        // Even a buffer the template guard rejects: the canonical holds everything it does.
+        assertEquals(
+            VisibleRollForwardDecision.VisibleLacksAcceptedWrites,
+            decide(structureExact = false, visibleIsAcceptedAncestor = true),
+        )
+        // The earlier fences still decide first.
+        assertEquals(
+            VisibleRollForwardDecision.CanonicalMoved,
+            decide(canonical = "609d1d50", replica = "609d1d50", visibleIsAcceptedAncestor = true),
+        )
+        assertEquals(
+            VisibleRollForwardDecision.RemoteApplyInFlight,
+            decide(remoteApplyInFlight = true, visibleIsAcceptedAncestor = true),
+        )
+        assertEquals(VisibleRollForwardDecision.ReplicaBehind, decide(replica = "21456910", visibleIsAcceptedAncestor = true))
+    }
+
+    @Test
+    fun `a stale visible copy rolls the accepted writes onto the buffer through the fenced apply`() {
+        val body = source("CrdtReplicaManager.kt")
+            .substringAfter("private fun rollVisibleBufferForward(")
+            .substringBefore("private fun scheduleUnforwardedOperatorTextRecovery(")
+        assertTrue(
+            "the proof is the op record against the fenced canonical, never a reading of the text",
+            body.contains("bufferIsBinaryAttributedAncestorUtil(") &&
+                body.contains("forwarder.canonicalContentHash") &&
+                body.contains("forwarder.binaryAttributedAncestorHashes"),
+        )
+        val branch = body
+            .substringAfter("VisibleRollForwardDecision.VisibleLacksAcceptedWrites ->")
+            .substringBefore("VisibleRollForwardDecision.AlreadyConverged ->")
+        assertTrue(branch.contains("retainCanonicalProjectionAfterRegistration(filePath, forwarder)"))
+        assertTrue(branch.contains("VisibleRollForwardResult.Deferred"))
+        assertFalse(branch.contains("ensureEditorText"))
     }
 
     @Test
@@ -101,13 +147,13 @@ class VisibleRollForwardTest {
     fun `roll forward happens only under every safety fact, across all combinations`() {
         val hashes = listOf(null, expected, "d5e3a7b1", "21456910")
         for (canonical in hashes) for (replica in hashes) for (visible in hashes) {
-            for (exact in listOf(true, false)) for (inFlight in listOf(true, false)) {
-                val decision = decide(canonical, replica, visible, exact, inFlight)
+            for (exact in listOf(true, false)) for (inFlight in listOf(true, false)) for (stale in listOf(true, false)) {
+                val decision = decide(canonical, replica, visible, exact, inFlight, stale)
                 val safe =
                     canonical == expected && replica == canonical && visible != null &&
-                        visible != canonical && exact && !inFlight
+                        visible != canonical && exact && !inFlight && !stale
                 assertEquals(
-                    "canonical=$canonical replica=$replica visible=$visible exact=$exact inFlight=$inFlight",
+                    "canonical=$canonical replica=$replica visible=$visible exact=$exact inFlight=$inFlight stale=$stale",
                     safe,
                     decision == VisibleRollForwardDecision.RollForward,
                 )
@@ -166,6 +212,8 @@ class VisibleRollForwardTest {
 
     @Test
     fun `the roll-forward publishes the buffer and never writes controller text into it`() {
+        // `#acceptedwriterollforward` is the one exception, and it goes through the
+        // generation-fenced remote apply ([a stale visible copy rolls the accepted writes...]).
         val body = source("CrdtReplicaManager.kt")
             .substringAfter("private fun rollVisibleBufferForward(")
             .substringBefore("private fun scheduleUnforwardedOperatorTextRecovery(")

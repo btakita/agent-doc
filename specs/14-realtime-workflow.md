@@ -1929,7 +1929,12 @@ roll-forward without the recycle:
   controller text the buffer merely lacked, and it drains that delta into the
   now-unblocked buffer instead: projecting a cut canonical does not hold would
   only mark the member for a whole-buffer rebootstrap. Nothing writes
-  controller text into the buffer except that ordinary remote apply.
+  controller text into the buffer except that ordinary remote apply, and the
+  one op-record case: when the controller's record names the visible cut as a
+  stale copy of writes the binary already accepted, the editor answers
+  `visible_lacks_accepted_writes` and projects the fenced canonical through the
+  same generation-fenced remote apply instead of publishing the cut
+  (`#acceptedwriterollforward`, below).
 - The operator's visible text is the base and the retained write rolls forward
   onto it. The relay accepts the publication from the in-lineage member (it is
   not an unproven-lineage fence), and its component isolation keeps a region
@@ -2565,6 +2570,49 @@ buffer had already removed them from the canonical. The relay SimWorld
 `a_reregistering_stale_buffer_keeps_every_accepted_status_write`,
 `operator_typing_beside_an_accepted_write_merges_instead_of_deleting_it`, and
 the conflict control) pins the behavior.
+
+The same rule binds every other plugin path that publishes a whole editor cut
+after a registration answered (the audit of each `ensureEditorText(editorText)`
+caller and its VS Code counterpart):
+
+- **JetBrains template-guard recovery** re-registers a replacement from the
+  unchanged exact editor baseline. That registration may itself roll accepted
+  writes forward (`apply_canonical` / `merge_forward`) and queue their fenced
+  projection; the recovery used to publish the baseline over it anyway. The
+  registration now records what it rolled forward
+  (`acceptedWriteRollForwardTarget`), and the recovery keeps it while the
+  replica still holds exactly that text and the template guard accepts it
+  (`templateGuardRecoveryBaselineUtil`). A malformed or empty target, or a
+  replica that moved past it, publishes the baseline as before: refusing a
+  malformed canonical is the guard's job, and an accepted write the guard
+  rejects does not get past it.
+- **JetBrains visible roll-forward** (`#jetbrainsreplicaloops`) publishes the
+  visible cut onto the fenced canonical. When the op record, proven against
+  that exact canonical, names the visible buffer as an ancestor, the cut holds
+  nothing canonical lacks: the editor answers `visible_lacks_accepted_writes`,
+  projects the canonical through the generation-fenced remote apply, and
+  returns `Deferred` so the controller's next request finds the buffer
+  converged. This is the one case in which the visible roll-forward writes
+  controller text into the buffer.
+- **JetBrains closing-document cut** skips publishing a closing buffer the op
+  record names as a stale copy (a registration's roll-forward projection had
+  not landed when the tab closed) and deregisters with canonical intact
+  (`closingCutPublishesBufferUtil`).
+- **VS Code** has no visible roll-forward handler and its close path does not
+  publish; its template-guard recovery retries through the registration
+  publication, which applies the rule above. That publication now also
+  requires the attributed canonical to pass the template guard, so a malformed
+  canonical never reaches the buffer by the roll-forward path when the
+  remote-apply path refuses it.
+- **Unchanged:** the registration-edge publishes (`adopt_operator_buffer`,
+  `publish_operator_buffer`, `merge_forward`) are the decisions this rule
+  already governs, and the captured-local-delta paths forward one keystroke
+  delta fenced on its exact base, never a whole stale cut.
+
+The op record arrives only with a registration ack, so these proofs hold only
+while the canonical is still the one that registration answered. A write
+accepted after it moves the canonical hash, the proof fails, and the earlier
+behavior applies until the next registration.
 
 There is one queue-semantic answer to the generic deleted-anchor refusal
 (`#struckqueuepruneattach`). When the live buffer differs from the settled

@@ -1942,7 +1942,13 @@ export class CrdtReplicaManager {
             this.shadows.set(filePath, bufferText);
             return;
         }
-        if (acceptedWriteRollForwardUtil(bufferText, canonicalText, forwarder)) {
+        // The template-guard recovery retries through here, and the remote-apply path refuses a
+        // canonical the template guard rejects. An attributed canonical gets no door around that
+        // guard: a malformed one publishes the IDE buffer as before (`#acceptedwriterollforward`).
+        if (
+            acceptedWriteRollForwardUtil(bufferText, canonicalText, forwarder)
+            && this.templateStructureState(canonicalText) === 'exact'
+        ) {
             this.logger.debug(
                 `[crdt-replica] registration attributed the canonical difference of ${filePath} to writes ` +
                 `agent-doc already accepted; rolling them forward onto the IDE buffer. ` +

@@ -477,6 +477,12 @@ internal enum class VisibleRollForwardDecision(val token: String) {
     VisibleUnavailable("visible_unavailable"),
     /** The operator's buffer fails the template-structure guard; it stays held. */
     VisibleStructureInvalid("visible_structure_invalid"),
+    /**
+     * `#acceptedwriterollforward`: the controller's op record names the visible buffer as a
+     * stale copy of writes the binary already accepted. Publishing it would delete them, so the
+     * fenced canonical is projected onto the buffer instead.
+     */
+    VisibleLacksAcceptedWrites("visible_lacks_accepted_writes"),
 }
 
 /**
@@ -511,6 +517,7 @@ internal fun visibleRollForwardDecisionUtil(
     visibleHash: String?,
     visibleStructureExact: Boolean,
     remoteApplyInFlight: Boolean,
+    visibleIsAcceptedAncestor: Boolean = false,
 ): VisibleRollForwardDecision = when {
     visibleHash == null -> VisibleRollForwardDecision.VisibleUnavailable
     canonicalHash == visibleHash && replicaHash == visibleHash -> VisibleRollForwardDecision.AlreadyConverged
@@ -520,6 +527,7 @@ internal fun visibleRollForwardDecisionUtil(
     remoteApplyInFlight -> VisibleRollForwardDecision.RemoteApplyInFlight
     replicaHash == visibleHash -> VisibleRollForwardDecision.RepublishPending
     replicaHash != canonicalHash -> VisibleRollForwardDecision.ReplicaBehind
+    visibleIsAcceptedAncestor -> VisibleRollForwardDecision.VisibleLacksAcceptedWrites
     !visibleStructureExact -> VisibleRollForwardDecision.VisibleStructureInvalid
     else -> VisibleRollForwardDecision.RollForward
 }
@@ -2158,7 +2166,28 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     return@submit true
                 }
                 val forwarder = attachedForwarder ?: forwarderFor(filePath, closingText) ?: return@submit false
-                forwarder.ensureEditorText(closingText)
+                if (
+                    closingCutPublishesBufferUtil(
+                        closingText = closingText,
+                        replicaText = forwarder.replicaText(),
+                        canonicalContentHash = forwarder.canonicalContentHash,
+                        binaryAttributedAncestorHashes = forwarder.binaryAttributedAncestorHashes,
+                        contentHash = ::contentHash,
+                    )
+                ) {
+                    forwarder.ensureEditorText(closingText)
+                } else {
+                    // `#acceptedwriterollforward`: the op record names the closing buffer as a
+                    // stale copy of writes the binary already accepted (a registration's
+                    // roll-forward projection had not landed when the tab closed). It holds
+                    // nothing canonical lacks; publishing it would delete those writes.
+                    log.info(
+                        "[crdt-replica] closing cut of ${File(filePath).name} is a stale copy of accepted writes; " +
+                            "keeping canonical instead of publishing it; " +
+                            "buffer_hash=${contentHash(closingText)} " +
+                            "canonical_hash=${forwarder.canonicalContentHash ?: "unknown"} (#acceptedwriterollforward)",
+                    )
+                }
                 shadows[filePath] = ReplicaShadow(closingText)
                 clearLocalPending(filePath)
                 if (forwarders.remove(filePath, forwarder)) {
@@ -3196,6 +3225,38 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             if (replacement == null || replacement === staleForwarder) {
                 scheduleTemplateGuardRecoveryRetry(filePath, "template-guard-reregister")
                 return RemoteTextApplyDisposition.RetryFailClosed
+            }
+            // `#acceptedwriterollforward`: the replacement's registration may already have rolled
+            // writes the binary accepted forward onto this exact buffer under the op record, and
+            // queued that fenced projection. Republishing the editor baseline here would delete
+            // them from canonical again; keep the roll-forward unless the template guard rejects it.
+            val replacementText = replacement.replicaText()
+            val baseline =
+                templateGuardRecoveryBaselineUtil(
+                    editorText = editorText,
+                    replicaText = replacementText,
+                    acceptedWriteRollForwardTarget = replacement.acceptedWriteRollForwardTarget,
+                    replicaStructureExact =
+                        replacementText?.let {
+                            templateStructureState(
+                                filePath,
+                                it,
+                                TemplateValidationPlane.Lane.RemoteCandidate,
+                                "template-guard-recovery-roll-forward",
+                            ) == TemplateStructureProjectionState.Exact
+                        } ?: false,
+                )
+            if (baseline == TemplateGuardRecoveryBaseline.KeepAcceptedWriteRollForward) {
+                clearTemplateGuardRecoveryBackoff(filePath)
+                log.warn(
+                    "[crdt-replica] rejected malformed remote projection for ${File(filePath).name}; " +
+                        "the re-registered replica rolled accepted writes forward onto the editor baseline, " +
+                        "keeping them instead of republishing the baseline; " +
+                        "editor_hash=${contentHash(editorText)} canonical_hash=${replacementText?.let(::contentHash)} " +
+                        "rejected_hash=${contentHash(remoteText)} (#acceptedwriterollforward)",
+                )
+                requestRemoteDrain(filePath, "template-guard-accepted-write-roll-forward")
+                return RemoteTextApplyDisposition.Recovered
             }
             replacement.ensureEditorText(editorText)
             if (replacement.replicaText() != editorText || editorBufferText(filePath) != editorText) {
@@ -4541,6 +4602,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     )
                     false
                 } else {
+                    if (bufferText != null && bufferText != canonicalText) {
+                        // `#acceptedwriterollforward`: only the op-record proof licenses this
+                        // projection over a readable differing buffer; record it for the callers
+                        // that run after registration (template-guard recovery).
+                        forwarder.acceptedWriteRollForwardTarget = canonicalText
+                    }
                     retainCanonicalProjectionAfterRegistration(filePath, forwarder)
                     true
                 }
@@ -4618,6 +4685,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     )
                     false
                 } else {
+                    // `#acceptedwriterollforward`: see the ApplyCanonical branch.
+                    forwarder.acceptedWriteRollForwardTarget = merged
                     fenceEveryCapturedEdit(filePath, "registration-merge-forward")
                     retainedCanonicalProjectionPaths.remove(filePath)
                     // The replica now holds the merge and has published it; project
@@ -5191,7 +5260,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
      * request without the recycle: the operator's visible text is the base and
      * becomes canonical as one bounded splice from the fenced canonical; the
      * controller's retained transition re-applies the pending write on top of
-     * it. Nothing here writes controller text into the buffer.
+     * it. Nothing here writes controller text into the buffer, except when the
+     * controller's op record names the visible cut as a stale copy of writes the
+     * binary already accepted (`#acceptedwriterollforward`): the fenced canonical
+     * is then projected through the generation-fenced remote apply.
      */
     private fun rollVisibleBufferForward(
         filePath: String,
@@ -5226,10 +5298,33 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 visibleHash = visible?.let(::contentHash),
                 visibleStructureExact = visibleExact,
                 remoteApplyInFlight = isApplyingRemote(filePath) || remoteEditorApplyPaths.contains(filePath),
+                // `#acceptedwriterollforward`: the op record (proven against this exact canonical)
+                // names the visible buffer as a stale copy of writes the binary already accepted.
+                visibleIsAcceptedAncestor =
+                    bufferIsBinaryAttributedAncestorUtil(
+                        visible,
+                        canonical,
+                        forwarder.canonicalContentHash,
+                        forwarder.binaryAttributedAncestorHashes,
+                        ::contentHash,
+                    ),
             )
         when (decision) {
             VisibleRollForwardDecision.RollForward,
             VisibleRollForwardDecision.RepublishPending -> Unit
+            VisibleRollForwardDecision.VisibleLacksAcceptedWrites -> {
+                // The buffer holds nothing canonical lacks. Roll the accepted writes onto it
+                // through the generation-fenced remote apply (it refuses if the operator types
+                // first); the controller's next request then finds the buffer converged.
+                log.warn(
+                    "[crdt-replica] visible roll-forward declined for $name; decision=${decision.token} " +
+                        "expected_canonical_hash=$expectedCanonicalHash " +
+                        "buffer_hash=${visible?.let(::contentHash) ?: "unavailable"} reason=$reason " +
+                        "recovery=project_accepted_writes (#acceptedwriterollforward)",
+                )
+                retainCanonicalProjectionAfterRegistration(filePath, forwarder)
+                return VisibleRollForwardResult.Deferred
+            }
             VisibleRollForwardDecision.AlreadyConverged -> {
                 log.info(
                     "[crdt-replica] visible roll-forward not needed for $name; decision=${decision.token} " +
@@ -7027,6 +7122,62 @@ internal fun acceptedWriteRollForwardFactsUtil(
     val merged = registrationMergeFromBaseUtil(publishedShadow, bufferText, canonicalText, merge)
     return AcceptedWriteRollForwardFacts(bufferAttributed = false, shadowAttributed = true, cleanMergeAvailable = merged != null)
 }
+
+/** `#acceptedwriterollforward`: what template-guard recovery does after its replacement registers. */
+internal enum class TemplateGuardRecoveryBaseline {
+    /** Publish the unchanged exact editor baseline as canonical (the historical recovery). */
+    PublishEditorBaseline,
+    /** The registration rolled accepted writes forward onto that baseline; keep them. */
+    KeepAcceptedWriteRollForward,
+}
+
+/**
+ * `#acceptedwriterollforward`: template-guard recovery re-registers a replacement replica from the
+ * unchanged exact editor baseline. That registration may answer `apply_canonical` /
+ * `merge_forward` under the controller's op record and queue the fenced projection of writes the
+ * binary already accepted; [acceptedWriteRollForwardTarget] is what it rolled forward. Republishing
+ * the baseline would delete those writes, so they are kept while the replica still holds exactly
+ * that target and the template guard accepts it. A malformed or empty target, a replica that moved
+ * past it, or no recorded roll-forward publishes the baseline as before.
+ */
+internal fun templateGuardRecoveryBaselineUtil(
+    editorText: String,
+    replicaText: String?,
+    acceptedWriteRollForwardTarget: String?,
+    replicaStructureExact: Boolean,
+): TemplateGuardRecoveryBaseline =
+    if (
+        replicaText != null &&
+        replicaText.isNotEmpty() &&
+        replicaText != editorText &&
+        replicaText == acceptedWriteRollForwardTarget &&
+        replicaStructureExact
+    ) {
+        TemplateGuardRecoveryBaseline.KeepAcceptedWriteRollForward
+    } else {
+        TemplateGuardRecoveryBaseline.PublishEditorBaseline
+    }
+
+/**
+ * `#acceptedwriterollforward`: whether closing a tab publishes its buffer as the final cut. Not
+ * when the controller's op record (proven against the replica's canonical) names the closing
+ * buffer as a stale copy of writes the binary already accepted: it holds nothing canonical lacks,
+ * and the alignment splice would delete those writes. Every unproven buffer is published as before.
+ */
+internal fun closingCutPublishesBufferUtil(
+    closingText: String,
+    replicaText: String?,
+    canonicalContentHash: String?,
+    binaryAttributedAncestorHashes: List<String>,
+    contentHash: (String) -> String,
+): Boolean =
+    !bufferIsBinaryAttributedAncestorUtil(
+        closingText,
+        replicaText,
+        canonicalContentHash,
+        binaryAttributedAncestorHashes,
+        contentHash,
+    )
 
 /** The causal facts registration reports, and the ancestor they were proven from. */
 internal data class RegistrationCausalProof(

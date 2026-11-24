@@ -1105,6 +1105,35 @@ describe('#idebufferauthority registration publication', () => {
         manager.dispose();
     });
 
+    it('never rolls an attributed canonical past the template-structure guard (#acceptedwriterollforward)', async () => {
+        // The template-guard recovery retries through this registration publication. An
+        // attributed canonical the guard rejects must not reach the buffer by the roll-forward
+        // door the remote-apply path keeps shut; the IDE buffer is published as before.
+        const transport = registrationTransport();
+        const filePath = '/work/plan.md';
+        const editorText = saved;
+        let applied = 0;
+        const manager = new CrdtReplicaManager({
+            projectRoot: '/work',
+            identity: 'vscode-test',
+            transport,
+            nodeFactory: () => new FakeNode(canonical),
+            listDocuments: () => [],
+            currentText: () => editorText,
+            normalizeTemplateStructure: (text) => (text === canonical ? null : text),
+            applyText: async () => {
+                applied += 1;
+                return true;
+            },
+        });
+
+        assert.equal(await manager.attachDocument(filePath, saved), true);
+        assert.equal(applied, 0, 'a malformed canonical is never projected into the buffer');
+        assert.equal(transport.broadcasts.length, 1);
+        assert.deepEqual(transport.projected, [{ contentHash: hash(saved), diskPersisted: false }]);
+        manager.dispose();
+    });
+
     it('the roll-forward proof is the op record, never the text', () => {
         const record = { canonicalContentHash: hash(canonical), binaryAttributedAncestorHashes: [hash(saved)] };
         assert.equal(acceptedWriteRollForwardUtil(saved, canonical, record), true);

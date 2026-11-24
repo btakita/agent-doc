@@ -179,6 +179,15 @@ class CrdtReplicaForwarder(
         private set
 
     /**
+     * `#acceptedwriterollforward`: the text this replica's registration rolled forward onto a
+     * stale buffer under the op record (the canonical for `apply_canonical`, the clean merge for
+     * `merge_forward`), or null when the registration adopted or converged. A caller that runs
+     * after registration (template-guard recovery) reads it instead of republishing the buffer.
+     */
+    @Volatile
+    internal var acceptedWriteRollForwardTarget: String? = null
+
+    /**
      * Register this editor as a replica with the CP-owned document model and open the
      * local FFI replica bootstrapped from the canonical state the CP
      * returns. Returns true when the document is editor-attached and the replica

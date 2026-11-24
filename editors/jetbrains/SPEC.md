@@ -935,6 +935,14 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   canonical); when it names the settled shadow and the clean merge from it
   exists, `shadow_is_binary_attributed_ancestor` plus `clean_merge_available`
   answer `merge_forward`. The frozen floor predates the rule and still adopts.
+  The registration records the text it rolled forward on the replica
+  (`acceptedWriteRollForwardTarget`). Template-guard recovery keeps that roll-
+  forward instead of republishing the editor baseline over it while the replica
+  holds exactly that text and the template guard accepts it; the visible
+  roll-forward answers `visible_lacks_accepted_writes` and projects the fenced
+  canonical when the op record names the visible cut as an ancestor; the
+  closing-document cut skips publishing such a stale copy (specs/14
+  `#acceptedwriterollforward`).
   The publication edge rechecks the exact buffer cut, replacement endpoint,
   and generation before publishing one full-buffer CRDT delta. Retained resume
   state is released only after that commit point. Settled shadows, acknowledged

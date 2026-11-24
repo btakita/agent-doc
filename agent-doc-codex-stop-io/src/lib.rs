@@ -2096,13 +2096,35 @@ fn claude_stop_answer_with_drain_readiness(
     transient_turn_end_continuation(input, &file, &drain_readiness)
 }
 
+/// `#stoploopcap`: how every released row is closed. The agent resolves it
+/// with an agent-doc command, never by asking the operator to edit the row.
+const RELEASED_ROW_AGENT_CLOSE: &str = "An agent closes each row with an agent-doc command, never an operator edit: run the command its line names, `agent-doc queue report-complete` for a worker's finished generation, or `agent-doc queue consume <FILE> --ack-text '<row>' --summary '<outcome>'` once its work is done or cannot be done.";
+
 /// Operator-visible notice for `state=unchanged_debts` (`#stophookactiveguard`).
 fn unchanged_debts_system_message(
     file: &Path,
     debts: &[agent_doc_queue::transient_closeout::TransientCloseoutDebt],
 ) -> String {
     let mut message = format!(
-        "agent-doc ended this turn with {} queue row(s) in {} still owing a transition (#stophookactiveguard): the Stop hook refused them once this turn and the agent stopped again without moving them. The rows stay live:",
+        "agent-doc ended this turn with {} queue row(s) in {} still owing a transition (#stophookactiveguard): the Stop hook refused them once this turn and the agent stopped again without moving them. The rows stay live. {RELEASED_ROW_AGENT_CLOSE}",
+        debts.len(),
+        file.display()
+    );
+    for debt in debts {
+        message.push('\n');
+        message.push_str(&debt.render());
+    }
+    message
+}
+
+/// Operator-visible notice for `state=refusal_bound` (`#stoploopcap`).
+fn refusal_bound_system_message(
+    file: &Path,
+    refusals: u32,
+    debts: &[agent_doc_queue::transient_closeout::TransientCloseoutDebt],
+) -> String {
+    let mut message = format!(
+        "agent-doc ended this turn after the Stop hook refused the same {} queue row(s) in {} {refusals} times in a row (#stoploopcap): the agent kept stopping without moving them, so the hook stops refusing rather than leave Claude Code's consecutive-block cap as the only guard. The rows stay live, still owe these transitions, and the next turn refuses them again. {RELEASED_ROW_AGENT_CLOSE}",
         debts.len(),
         file.display()
     );
@@ -2134,9 +2156,14 @@ fn unchanged_debts_system_message(
 /// the agent was told once and nothing it did moved them. A changed debt set
 /// refuses again, a first Stop (`stop_hook_active = false`) always refuses,
 /// and the record is cleared on each turn's first Stop before any gate runs,
-/// so every distinct debt set is reported at least once per turn. Claude
-/// Code's consecutive-block cap is never the only guard for debts this release
-/// still covers.
+/// so every distinct debt set is reported at least once per turn.
+/// `#stopunprojectedclaim`: a `📥` row a live claim already holds (its claim
+/// marker never projected) is released the same way as a dispatch-held row.
+/// `#stoploopcap`: every held state is bounded too. Once the record shows
+/// [`agent_doc_queue_io::transient_closeout_refusal::UNCHANGED_REFUSAL_BOUND`]
+/// consecutive refusals of the same debt set this turn, the next recursive
+/// Stop over it allows with `state=refusal_bound` and a `systemMessage`, so
+/// Claude Code's consecutive-block cap is never the only guard.
 fn transient_turn_end_continuation(
     input: &ClaudeStopInput,
     file: &Path,
@@ -2237,12 +2264,18 @@ fn transient_turn_end_continuation(
                 | agent_doc_document::queue_projection::QueueLifecycleMarker::LostRunning
         )
     });
-    let repeats = input.stop_hook_active
-        && agent_doc_queue_io::transient_closeout_refusal::repeats_previous_refusal(
+    // `#stoploopcap`: how many times in a row this turn already refused this
+    // exact debt set for this session.
+    let prior_refusals = if input.stop_hook_active {
+        agent_doc_queue_io::transient_closeout_refusal::previous_refusal_count(
             file,
             &input.session_id,
             &fingerprint,
-        )?;
+        )?
+    } else {
+        0
+    };
+    let repeats = prior_refusals > 0;
     if input.stop_hook_active
         && hand_off_pending_queue_at_stop(file, &content, &assessment, drain_readiness)?
     {
@@ -2268,6 +2301,31 @@ fn transient_turn_end_continuation(
         } else {
             "reported_open"
         };
+        // `#stoploopcap`: every held state is bounded per unchanged debt set,
+        // so Claude Code's consecutive-block cap is never the only guard.
+        if prior_refusals >= agent_doc_queue_io::transient_closeout_refusal::UNCHANGED_REFUSAL_BOUND
+        {
+            let rows = assessment
+                .debts
+                .iter()
+                .map(|debt| debt.row.as_str())
+                .collect::<Vec<_>>();
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "claude_stop_transient_closeout_refusal_bound debts={} refusals={prior_refusals} fingerprint={} rows={rows:?} action=allow_final_answer state=refusal_bound held_state={state} (#stoploopcap)",
+                    assessment.debts.len(),
+                    fingerprint,
+                ),
+            );
+            return Ok(ClaudeStopAnswer::Allow {
+                system_message: Some(refusal_bound_system_message(
+                    file,
+                    prior_refusals,
+                    &assessment.debts,
+                )),
+            });
+        }
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -16640,6 +16698,213 @@ Waiting on the reported row.\n\
         assert!(notice.contains("agent-doc queue claim"), "{notice}");
         let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(log.contains("state=unchanged_debts"), "{log}");
+    }
+
+    /// `#stopunprojectedclaim` (haiven-dev `tasks/sdk/sdk-dev.md`,
+    /// 2026-11-24 00:04Z): `2. 📥 #address` carried a live worker claim whose
+    /// marker never projected onto the row. The Stop hook refused nine
+    /// recursive Stops with `state=inbox_or_running` until Claude Code's
+    /// consecutive-block cap ended the turn. The first Stop names the row and
+    /// why it cannot move; a recursive Stop over that unchanged set ends the
+    /// turn with a `systemMessage` naming it, and the row stays live.
+    #[test]
+    fn claude_stop_names_and_releases_a_pending_row_a_live_claim_holds_unprojected() {
+        const ITEM: &str = "do [#unprojectedaddress]";
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        fs::write(
+            &doc,
+            format!(
+                "---\nsession: sid\nagent_doc_format: template\n---\n\n## Queue\n\n\
+<!-- agent:queue -->\n\
+- 📥 {ITEM}\n\
+<!-- /agent:queue -->\n"
+            ),
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        complete_run(&doc);
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&doc, ITEM, "subagent:s389address", 7200)
+                .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            ITEM,
+            "subagent:s389address",
+            "worker:s389address",
+            7200,
+            claim.generation,
+        )
+        .unwrap();
+        assert!(
+            fs::read_to_string(&doc)
+                .unwrap()
+                .contains("- 📥 do [#unprojectedaddress]"),
+            "the claim did not project onto the row"
+        );
+        invalidate_stop_document_cache();
+        let answer = |stop_hook_active: bool| {
+            claude_stop_answer_with_drain_readiness(
+                &ClaudeStopInput {
+                    session_id: "codex-session".to_string(),
+                    cwd: dir.path().display().to_string(),
+                    stop_hook_active,
+                    transcript_path: None,
+                    reason: None,
+                    subagent_type: None,
+                },
+                |_: &Path| agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor,
+            )
+            .unwrap()
+        };
+        let first = answer(false)
+            .into_continuation()
+            .expect("the first stop names the unprojected row");
+        assert!(
+            first.reason.contains("📥 do [#unprojectedaddress]"),
+            "{}",
+            first.reason
+        );
+        assert!(
+            first.reason.contains("#stopunprojectedclaim"),
+            "{}",
+            first.reason
+        );
+        let released = answer(true);
+        let ClaudeStopAnswer::Allow {
+            system_message: Some(notice),
+        } = &released
+        else {
+            panic!(
+                "an unchanged refusal over only an unprojected claimed row ends the turn: {released:?}"
+            );
+        };
+        assert!(notice.contains("📥 do [#unprojectedaddress]"), "{notice}");
+        assert!(notice.contains("#stopunprojectedclaim"), "{notice}");
+        assert!(
+            notice.contains("agent-doc queue report-complete"),
+            "{notice}"
+        );
+        assert!(notice.contains("never an operator edit"), "{notice}");
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("state=unchanged_debts"), "{log}");
+        assert!(!log.contains("state=inbox_or_running"), "{log}");
+        assert!(
+            fs::read_to_string(&doc)
+                .unwrap()
+                .contains("- 📥 do [#unprojectedaddress]"),
+            "the row stays live"
+        );
+    }
+
+    /// `#stoploopcap` (haiven-dev `tasks/sdk/sdk-dev.md`, 2026-11-24): every
+    /// held state has a bounded refusal count per unchanged debt set, so
+    /// Claude Code's consecutive-block cap ("A hook blocked the turn from
+    /// ending 9 consecutive times") is never reached. A drainable `📥`
+    /// (`state=inbox_or_running`) and a `☑️` hold (`state=reported_open`)
+    /// each refuse the first Stop and the next recursive Stops up to the
+    /// bound, then the turn ends with a loud `systemMessage` and an ops-log
+    /// line; the rows stay live. A changed debt set restarts the count.
+    #[test]
+    fn claude_stop_bounds_consecutive_refusals_of_an_unchanged_held_debt_set() {
+        let bound = agent_doc_queue_io::transient_closeout_refusal::UNCHANGED_REFUSAL_BOUND;
+        assert!(
+            (2..9).contains(&bound),
+            "the bound must end the turn well before Claude Code's 9-block cap"
+        );
+        for (rows, state) in [
+            ("- 📥 still pending\n", "inbox_or_running"),
+            ("- ☑️ still reported\n", "reported_open"),
+        ] {
+            let dir = setup_project();
+            let doc = dir.path().join("task.md");
+            let content = format!(
+                "---\nsession: sid\nagent_doc_format: template\n---\n\n## Queue\n\n\
+<!-- agent:queue -->\n\
+{rows}\
+<!-- /agent:queue -->\n"
+            );
+            fs::write(&doc, &content).unwrap();
+            init_git_repo(dir.path(), &doc);
+            track_doc(&dir, &doc, "");
+            complete_run(&doc);
+            invalidate_stop_document_cache();
+            let answer = |stop_hook_active: bool| {
+                invalidate_stop_document_cache();
+                claude_stop_answer_with_drain_readiness(
+                    &ClaudeStopInput {
+                        session_id: "codex-session".to_string(),
+                        cwd: dir.path().display().to_string(),
+                        stop_hook_active,
+                        transcript_path: None,
+                        reason: None,
+                        subagent_type: None,
+                    },
+                    |_: &Path| {
+                        agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor
+                    },
+                )
+                .unwrap()
+            };
+            let ops = || {
+                fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default()
+            };
+            assert!(
+                answer(false).into_continuation().is_some(),
+                "{state}: the first stop refuses"
+            );
+            for recursive in 1..bound {
+                assert!(
+                    answer(true).into_continuation().is_some(),
+                    "{state}: recursive stop {recursive} of {bound} still refuses: {}",
+                    ops()
+                );
+            }
+            assert_eq!(
+                agent_doc_queue_io::transient_closeout_refusal::load(&doc)
+                    .unwrap()
+                    .unwrap()
+                    .refusals,
+                bound
+            );
+            let released = answer(true);
+            let ClaudeStopAnswer::Allow {
+                system_message: Some(notice),
+            } = &released
+            else {
+                panic!("{state}: refusal {bound} of an unchanged set is the last: {released:?}");
+            };
+            assert!(notice.contains("#stoploopcap"), "{notice}");
+            assert!(notice.contains(&format!("{bound} times")), "{notice}");
+            assert!(
+                notice.contains(rows.trim().trim_start_matches("- ")),
+                "{notice}"
+            );
+            assert!(notice.contains("The rows stay live"), "{notice}");
+            assert!(notice.contains("never an operator edit"), "{notice}");
+            assert!(notice.contains("agent-doc queue consume"), "{notice}");
+            let log = ops();
+            assert!(
+                log.contains(&format!(
+                    "claude_stop_transient_closeout_refusal_bound debts=1 refusals={bound}"
+                )),
+                "{log}"
+            );
+            assert!(
+                log.contains(&format!(
+                    "action=allow_final_answer state=refusal_bound held_state={state}"
+                )),
+                "{log}"
+            );
+            assert!(
+                fs::read_to_string(&doc).unwrap().contains(rows),
+                "the rows stay live"
+            );
+
+            // The next turn's first Stop refuses the same set again.
+            assert!(answer(false).into_continuation().is_some());
+        }
     }
 }
 

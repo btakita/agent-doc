@@ -812,7 +812,12 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   The binary finishes a mechanical `☑️` first (the worker response is written
   and the row is struck); a `☑️` that is still visible keeps the turn open
   (`state=reported_open`). `📥`, `🚧`, and `⚠️🚧` keep the turn open
-  (`state=inbox_or_running`). Any other unchanged set logs
+  (`state=inbox_or_running`), except a `📥` that a live claim already holds
+  but whose claim marker never projected: it is named and released like a
+  dispatch-held row (`#stopunprojectedclaim`). Neither hold is unbounded:
+  after 3 consecutive refusals of the same set, the next recursive Stop ends
+  the turn with `state=refusal_bound` and a `systemMessage` naming the rows,
+  which stay live (`#stoploopcap`). Any other unchanged set logs
   `state=unchanged_debts` and names the rows left live to the operator in a
   `systemMessage` (`#stophookactiveguard`). A closed cycle that captured no
   response still consults this gate before it allows, and does not order

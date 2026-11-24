@@ -140,6 +140,11 @@ pub struct TransientCloseoutDebt {
     /// several sibling rows, such as each pull request's `#adversarial-pr`)
     /// and the claim that dispatches it.
     pub pending_dispatch: Option<PendingDispatch>,
+    /// `#stopunprojectedclaim`: a heartbeat-fresh claim already holds this
+    /// `📥` row, but its claim marker never projected onto the row. A claim
+    /// or dispatch is refused while that claim is live, so nothing in this
+    /// turn moves the row; it does not hold the turn through a recursive Stop.
+    pub unprojected_claim: Option<FreshClaim>,
 }
 
 /// The continue a worker that ended on an interim note is owed
@@ -242,8 +247,12 @@ impl TransientCloseoutDebt {
     /// debt set (`#transientcloseout`). A dispatch-held `📥` row does not:
     /// nothing in this turn re-offers it until its blocker is fixed, and the
     /// refusal already named the fix (`#dispatchheldstop`).
+    /// A `📥` row a live claim already holds does not either: its claim
+    /// marker never projected, and the agent cannot claim it again
+    /// (`#stopunprojectedclaim`).
     pub fn holds_turn_through_recursive_stop(&self) -> bool {
         self.dispatch_held.is_none()
+            && self.unprojected_claim.is_none()
             && (self.recoverable_attempt || marker_holds_turn_through_recursive_stop(self.marker))
     }
 }
@@ -680,6 +689,10 @@ const OWED_REPORTED_RESPONSE_ORIGIN: &str = "the operator answered this reported
 /// `#adversarial-pr` that matched five rows.
 pub const OWED_PENDING_SUBAGENT_DISPATCH: &str = "dispatch this row to its own background worker in this turn: claim it, spawn one worker with its `agent-doc queue brief` preamble, then bind that worker with `agent-doc queue start`. One worker binds to one row, so a worker already running a sibling row (such as the same pull request's `#rebase`) does not cover this one, and the row stays pending until its own worker starts; a head that is still pending means the turn is not over.";
 
+/// `#stopunprojectedclaim`: what a `📥` row owes while a live claim holds it
+/// but its claim marker never projected onto the row.
+pub const OWED_UNPROJECTED_CLAIM: &str = "a live worker claim already holds this row, but its claim marker never projected onto it (#stopunprojectedclaim), so claiming or dispatching it again is refused and nothing in this turn moves it. Let that worker finish and report its generation (`agent-doc queue report-complete`), or, only if the worker is gone, release it with `agent-doc queue release --requeue`; once its work is done or cannot be done, close the row with `agent-doc queue consume <FILE> --ack-text '<row>' --summary '<outcome>'`. The row stays live until an agent command closes it; never ask the operator to edit it";
+
 pub const OWED_DISPATCH_HELD: &str = "subagent dispatch holds this row: its last claim admission was refused, so the pool will not offer it again. Fix the blocker";
 
 /// `#finishactionable`: what a pending agent-owned `follow up on an action
@@ -806,6 +819,7 @@ pub fn assess_transient_closeout(
                 continue_worker: None,
                 recoverable_attempt: false,
                 pending_dispatch: None,
+                unprojected_claim: None,
             };
             let identity = crate::queue_claim::claim_identity_at(&entries, index)
                 .unwrap_or_else(|| crate::queue_claim::claim_identity(&prompt.text));
@@ -1042,6 +1056,14 @@ pub fn assess_transient_closeout(
                             "subagent:<label>".to_string(),
                         ]),
                     });
+                    assessment.debts.push(held);
+                }
+                // `#stopunprojectedclaim`: a live claim already holds this
+                // row, so a claim or dispatch is refused; only the claim's
+                // projection is missing. Name it instead of offering a claim.
+                QueueLifecycleMarker::Pending if evidence.fresh_claims.contains_key(&identity) => {
+                    let mut held = debt(OWED_UNPROJECTED_CLAIM);
+                    held.unprojected_claim = Some(evidence.fresh_claims[&identity]);
                     assessment.debts.push(held);
                 }
                 // `#finishactionable`: an agent-owned action item a worker
@@ -2271,7 +2293,9 @@ mod tests {
         assert!(
             failure.contains("integrate the report or otherwise leave the reported-but-open state")
         );
-        assert!(failure.contains("leave pending before the turn ends"));
+        // `#stopunprojectedclaim`: the claimed `📥` still refuses the first
+        // Stop, naming the claim that never projected onto it.
+        assert!(failure.contains(OWED_UNPROJECTED_CLAIM), "{failure}");
         assert!(!failure.contains("liveworker"), "{failure}");
         assert!(!failure.contains("set the flag"), "{failure}");
     }
@@ -3246,6 +3270,56 @@ EXCHANGE<!-- /agent:exchange -->
         // With no hold recorded, the same row owes the ordinary pending text.
         let plain = assess_transient_closeout(content, &CloseoutEvidence::default()).unwrap();
         assert!(plain.debts.iter().all(|debt| debt.dispatch_held.is_none()));
+        assert!(plain.debts[0].holds_turn_through_recursive_stop());
+    }
+
+    /// `#stopunprojectedclaim` (haiven-dev `tasks/sdk/sdk-dev.md`,
+    /// 2026-11-24): the numbered step `2. 📥 #address` carried a live worker
+    /// claim (`subagent:s389address`, generations 1-3) whose marker never
+    /// projected onto the row, so the Stop hook refused nine recursive Stops
+    /// with `state=inbox_or_running` until Claude Code's block cap ended the
+    /// turn. A `📥` row a heartbeat-fresh claim already holds is not
+    /// claimable or dispatchable in this turn: it owes the projection, names
+    /// why, and does not hold a recursive Stop. A drainable `📥` beside it
+    /// still does.
+    #[test]
+    fn a_pending_row_a_live_claim_holds_is_named_and_does_not_hold_a_recursive_stop() {
+        let content = "<!-- agent:queue -->\n- 📥 do [#unprojected]\n- 📥 do [#drainablehead]\n<!-- /agent:queue -->\n";
+        let unprojected = identity_of(content, "unprojected");
+        for phase in [FreshClaim::Running, FreshClaim::Dispatching] {
+            let evidence = CloseoutEvidence {
+                document: Some("/tmp/sdk-dev.md".to_string()),
+                fresh_claims: [(unprojected.clone(), phase)].into(),
+                // A subagent-routed row would otherwise be offered a claim
+                // that the live claim refuses.
+                subagent_dispatch: [(unprojected.clone(), "do [#unprojected]".to_string())].into(),
+                ..CloseoutEvidence::default()
+            };
+            let assessment = assess_transient_closeout(content, &evidence).unwrap();
+            assert_eq!(assessment.debts.len(), 2, "{assessment:#?}");
+            let held = &assessment.debts[0];
+            assert_eq!(held.row, "📥 do [#unprojected]");
+            assert_eq!(held.unprojected_claim, Some(phase), "{held:#?}");
+            assert!(held.pending_dispatch.is_none(), "{held:#?}");
+            let rendered = held.render();
+            assert!(rendered.contains(OWED_UNPROJECTED_CLAIM), "{rendered}");
+            assert!(rendered.contains("#stopunprojectedclaim"), "{rendered}");
+            assert!(!rendered.contains("agent-doc queue claim"), "{rendered}");
+            assert!(!held.holds_turn_through_recursive_stop(), "{held:#?}");
+
+            let drainable = &assessment.debts[1];
+            assert!(drainable.unprojected_claim.is_none(), "{drainable:#?}");
+            assert!(drainable.holds_turn_through_recursive_stop());
+        }
+
+        // Without a live claim the same row is an ordinary drainable head.
+        let plain = assess_transient_closeout(content, &CloseoutEvidence::default()).unwrap();
+        assert!(
+            plain
+                .debts
+                .iter()
+                .all(|debt| debt.unprojected_claim.is_none())
+        );
         assert!(plain.debts[0].holds_turn_through_recursive_stop());
     }
 }

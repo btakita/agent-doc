@@ -17,6 +17,11 @@
 //! every turn's first Stop, so a refusal from an earlier turn never satisfies
 //! a later one. Each hook call is a new process, so the record lives in
 //! `state.db`, not in memory.
+//!
+//! `#stoploopcap`: some debt sets keep refusing an unchanged recursive Stop
+//! (`📥`, `🚧`, `⚠️🚧`, `☑️`). The record counts consecutive refusals of one
+//! debt set for one session, and the gate ends the turn once that count
+//! reaches [`UNCHANGED_REFUSAL_BOUND`], well before Claude Code's own cap.
 
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -25,6 +30,16 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 const STATE_KIND: &str = "transient_closeout_refusal";
+
+/// `#stoploopcap`: how many consecutive refusals of one unchanged debt set,
+/// for one session in one turn, the Stop hook issues before it ends the turn
+/// anyway. Claude Code overrides a hook after 9 consecutive blocks; the
+/// harness cap must never be the only guard.
+pub const UNCHANGED_REFUSAL_BOUND: u32 = 3;
+
+fn one_refusal() -> u32 {
+    1
+}
 
 /// The last transient-closeout refusal issued for a document.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -36,6 +51,11 @@ pub struct TransientCloseoutRefusal {
     /// Number of refused debt rows, for diagnostics.
     pub debts: usize,
     pub refused_at_secs: u64,
+    /// `#stoploopcap`: consecutive refusals of this exact debt set to this
+    /// session since the record was last cleared or changed. A record written
+    /// before this field existed counts as one refusal.
+    #[serde(default = "one_refusal")]
+    pub refusals: u32,
 }
 
 /// Order-independent digest of the refused `(row text, owed transition)` debts.
@@ -85,9 +105,22 @@ pub fn repeats_previous_refusal(
     session_id: &str,
     debts_fingerprint: &str,
 ) -> Result<bool> {
-    Ok(load(file)?.is_some_and(|refusal| {
-        refusal.session_id == session_id && refusal.debts_fingerprint == debts_fingerprint
-    }))
+    Ok(previous_refusal_count(file, session_id, debts_fingerprint)? > 0)
+}
+
+/// `#stoploopcap`: how many consecutive refusals this document's record holds
+/// for `session_id` over exactly this debt set; `0` when the previous refusal
+/// went to another session or another debt set, or none is recorded.
+pub fn previous_refusal_count(
+    file: &Path,
+    session_id: &str,
+    debts_fingerprint: &str,
+) -> Result<u32> {
+    Ok(load(file)?
+        .filter(|refusal| {
+            refusal.session_id == session_id && refusal.debts_fingerprint == debts_fingerprint
+        })
+        .map_or(0, |refusal| refusal.refusals.max(1)))
 }
 
 /// Forget this document's recorded refusal. `Ok(true)` when one was present.
@@ -112,10 +145,14 @@ pub fn clear(file: &Path) -> Result<bool> {
 }
 
 /// Record a refusal of `debts` rows with `debts_fingerprint` to `session_id`.
+///
+/// `#stoploopcap`: a refusal of the same debt set to the same session as the
+/// recorded one increments its consecutive count; any other starts at one.
 pub fn record(file: &Path, session_id: &str, debts_fingerprint: &str, debts: usize) -> Result<()> {
     let Some((root, document_hash, canonical_path)) = state_identity(file)? else {
         return Ok(());
     };
+    let refusals = previous_refusal_count(file, session_id, debts_fingerprint)?.saturating_add(1);
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -125,6 +162,7 @@ pub fn record(file: &Path, session_id: &str, debts_fingerprint: &str, debts: usi
         debts_fingerprint: debts_fingerprint.to_string(),
         debts,
         refused_at_secs: now,
+        refusals,
     };
     let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
     agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
@@ -191,5 +229,39 @@ mod tests {
             repeats_previous_refusal(&other, "s1", "f1").unwrap(),
             "clearing one document leaves another document's record"
         );
+    }
+
+    /// `#stoploopcap`: the record counts consecutive refusals of one debt set
+    /// for one session, so the gate can bound them; any change restarts it.
+    #[test]
+    fn consecutive_refusals_of_one_debt_set_are_counted_and_a_change_restarts_the_count() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, "x\n").unwrap();
+        assert_eq!(previous_refusal_count(&doc, "s1", "f1").unwrap(), 0);
+        record(&doc, "s1", "f1", 1).unwrap();
+        assert_eq!(previous_refusal_count(&doc, "s1", "f1").unwrap(), 1);
+        record(&doc, "s1", "f1", 1).unwrap();
+        record(&doc, "s1", "f1", 1).unwrap();
+        assert_eq!(previous_refusal_count(&doc, "s1", "f1").unwrap(), 3);
+        assert_eq!(load(&doc).unwrap().unwrap().refusals, 3);
+        // A changed debt set starts over, and the old set no longer repeats.
+        record(&doc, "s1", "f2", 2).unwrap();
+        assert_eq!(previous_refusal_count(&doc, "s1", "f2").unwrap(), 1);
+        assert_eq!(previous_refusal_count(&doc, "s1", "f1").unwrap(), 0);
+        // So does another session over the same set.
+        record(&doc, "s2", "f2", 2).unwrap();
+        assert_eq!(previous_refusal_count(&doc, "s2", "f2").unwrap(), 1);
+        assert_eq!(previous_refusal_count(&doc, "s1", "f2").unwrap(), 0);
+        // A turn's first Stop clears the count.
+        assert!(clear(&doc).unwrap());
+        assert_eq!(previous_refusal_count(&doc, "s2", "f2").unwrap(), 0);
+        // A record written before the count existed reads as one refusal.
+        let legacy: TransientCloseoutRefusal = serde_json::from_str(
+            r#"{"session_id":"s1","debts_fingerprint":"f1","debts":1,"refused_at_secs":0}"#,
+        )
+        .unwrap();
+        assert_eq!(legacy.refusals, 1);
     }
 }

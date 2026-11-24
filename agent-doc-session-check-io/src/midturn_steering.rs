@@ -9128,6 +9128,112 @@ mod tests {
         assert!(item.verbatim.contains("also post on GH #435"), "{item:?}");
     }
 
+    /// `#selfsteer3` (agent-doc-bugs.md, 2026-11-24 ~16:40Z, the adv441 row,
+    /// build 0.35.590+f7720f3eadf2330b): a claimed NESTED leaf's binary
+    /// repaint still minted `dispatch=forward_to_owner change=edited`, with
+    /// `previous: https://github.com/btakita/agent-doc/issues/441:
+    /// #adversarial-pr` (the claim key's parent-to-leaf nest vector) and
+    /// `verbatim: 🚧 [#subagent:adv441#1] #adversarial-pr [#q-55efbe13f8ad]`
+    /// (the visible leaf row). `#selfsteer2` compared raw `previous` against
+    /// the leaf row, so the same row in nest-vector vs leaf form always read as
+    /// an operator edit. A claimed row compares by claim identity (the nest
+    /// vector) modulo binary decorations; a real operator edit of the leaf
+    /// still forwards to its owner.
+    #[test]
+    fn heartbeat_refresh_repaint_of_a_claimed_nested_leaf_is_not_operator_steering() {
+        let parent = "https://github.com/btakita/agent-doc/issues/441";
+        let leaf = "#adversarial-pr";
+        let vector = format!("{parent}: {leaf}");
+        let qid = " [#q-55efbe13f8ad]";
+        let owner = "subagent:adv441";
+        let doc = |leaf_row: &str| {
+            format!(
+                "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:queue -->\n- current task\n- ### {parent}\n  - %% Provisional schema 1 shows the reinstall warning %%\n  - {leaf_row}\n<!-- /agent:queue -->\n"
+            )
+        };
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let baseline = doc(leaf);
+        std::fs::write(&file, &baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
+                .unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            &baseline,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        coordinator_claims_and_starts(&file, &vector, owner);
+        let hook = |label: &str| {
+            let output = post_tool_use_document_response(
+                &file,
+                now_ms(),
+                |_, _, _, _| Ok(None),
+                &mut || false,
+            )
+            .unwrap();
+            assert!(
+                output.is_none(),
+                "{label}: the binary's own repaint of a claimed nested leaf minted operator steering: {output:?}"
+            );
+        };
+        hook("claim + start");
+
+        // Preflight admits the leaf's generated prompt id; the coordinator's
+        // heartbeat then refreshes + re-projects the claim by its nest vector.
+        let projected = std::fs::read_to_string(&file).unwrap();
+        let leaf_line = format!("{leaf}\n<!-- /agent:queue -->");
+        let admitted =
+            projected.replace(&leaf_line, &format!("{leaf}{qid}\n<!-- /agent:queue -->"));
+        assert_ne!(admitted, projected, "fixture must admit the prompt id");
+        std::fs::write(&file, &admitted).unwrap();
+        let refreshed = agent_doc_queue_io::queue_claim::refresh_attempt(
+            &file,
+            &format!("{vector}{qid}"),
+            owner,
+            3600,
+            Some(1),
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_cmd::project_claim_item_runtime_state_with_effects(
+            &SelfSteerDiskEffects,
+            &file,
+            &refreshed.item_text,
+            false,
+        )
+        .unwrap();
+        let repainted = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            repainted.contains(&format!("🚧 [#{owner}#1] {leaf}{qid}")),
+            "fixture must carry the refresh repaint: {repainted}"
+        );
+        hook("in-turn heartbeat refresh");
+
+        // A real operator edit of the claimed leaf still forwards to its owner.
+        let edited = repainted.replace(
+            &format!("{leaf}{qid}"),
+            &format!("{leaf} also cover the Windows thin client{qid}"),
+        );
+        assert_ne!(edited, repainted, "fixture must edit the claimed leaf");
+        std::fs::write(&file, &edited).unwrap();
+        let report = observe(&file, CONSUMER_HOOK, true)
+            .unwrap()
+            .expect("the operator's edit surfaces");
+        assert_eq!(report.items.len(), 1, "{report:?}");
+        let item = &report.items[0];
+        assert_eq!(item.dispatch, core::SteeringDispatch::ForwardToOwner);
+        assert_eq!(item.owner.as_deref(), Some(owner));
+        assert_eq!(item.change, core::SteeringChange::Edited, "{item:?}");
+        assert!(
+            item.verbatim.contains("also cover the Windows thin client"),
+            "{item:?}"
+        );
+    }
+
     /// `#steerworks` items 1 + 3 (agent-doc-bugs.md, 2026-10-04): the operator
     /// annotates a CLAIMED `#gh-fix` head while the coordinator is idle. The
     /// claim follows the edit, the idle wake fires for it, the woken cycle's

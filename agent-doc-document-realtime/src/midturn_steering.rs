@@ -2272,9 +2272,11 @@ pub struct RetiredClaimedBookkeeping {
 /// follows). Such an edit is dropped when it changes nothing authored: either
 /// `previous` and `verbatim` are the same row up to binary decorations, or
 /// the attempt has no operator edit since its claim and `verbatim` is the
-/// claimed text (the claimer handed the worker exactly that). Any other edit
-/// of the row is the operator's and still forwards to the owner. Reported
-/// attempts keep their closeout routing.
+/// claimed text (the claimer handed the worker exactly that). Both compare the
+/// row's claim identity, its nest vector for a nested leaf, never the visible
+/// leaf row against a nest vector (`#selfsteer3`). Any other edit of the row
+/// is the operator's and still forwards to the owner. Reported attempts keep
+/// their closeout routing.
 pub fn retire_claimed_bookkeeping(
     items: &mut Vec<SteeringItem>,
     claim_of: impl Fn(&str) -> Option<agent_doc_queue::queue_claim::QueueClaim>,
@@ -2296,7 +2298,11 @@ pub fn retire_claimed_bookkeeping(
         }
         let edited_since_claim = claimed_text_before_operator_edit(&claim);
         if item.change == SteeringChange::Edited {
-            let current = authored_row_key(&item.verbatim);
+            // `#selfsteer3`: compare in claim-identity form. A nested leaf's
+            // `previous` is its old nest vector (`parent: leaf`) and its claim
+            // text is a nest vector, while `verbatim` is only the visible leaf
+            // row, so the raw row would read every repaint as an edit.
+            let current = authored_row_key(item.claim_text());
             let repaint = item
                 .previous
                 .as_deref()
@@ -6569,6 +6575,63 @@ mod tests {
             0
         );
         assert_eq!(reverted.len(), 1);
+    }
+
+    /// `#selfsteer3` (the adv441 row): a claimed NESTED leaf's edit carries its
+    /// old nest vector as `previous` and only the visible leaf row as
+    /// `verbatim`. A repaint is the same claim identity modulo decorations and
+    /// is retired; an operator edit of the leaf still forwards.
+    #[test]
+    fn retire_claimed_bookkeeping_compares_a_nested_leaf_by_its_nest_vector() {
+        let owner = "subagent:adv441";
+        let vector = "https://github.com/btakita/agent-doc/issues/441: #adversarial-pr";
+        let qid = " [#q-55efbe13f8ad]";
+        let mut ledger = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+        ledger.claim(&format!("{vector}{qid}"), owner, 100, 3600);
+        let claim = ledger.claims[0].clone();
+        let item = |previous: &str, verbatim: &str, vector: &str| SteeringItem {
+            source: SteeringSource::Queue,
+            change: SteeringChange::Edited,
+            dispatch: SteeringDispatch::ForwardToOwner,
+            current_item: false,
+            verbatim: verbatim.to_string(),
+            previous: Some(previous.to_string()),
+            presets: Vec::new(),
+            possibly_partial: false,
+            owner: Some(owner.to_string()),
+            generation: Some(1),
+            worker_id: None,
+            explicit: false,
+            vector: Some(vector.to_string()),
+            prompt_tree: None,
+            queue_mode: None,
+        };
+        let repaint = item(
+            vector,
+            &format!("🚧 [#{owner}#1] #adversarial-pr{qid}"),
+            &format!("{vector}{qid}"),
+        );
+        let operator = item(
+            vector,
+            &format!("🚧 [#{owner}#1] #adversarial-pr also cover Windows{qid}"),
+            &format!("{vector} also cover Windows{qid}"),
+        );
+        let mut items = vec![repaint, operator.clone()];
+        let retired = retire_claimed_bookkeeping(&mut items, |_| Some(claim.clone()));
+        assert_eq!(retired.repaints, 1, "{items:?}");
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert_eq!(items[0].verbatim, operator.verbatim);
+        // A re-parented leaf is a different claim identity: it forwards.
+        let mut moved = vec![item(
+            vector,
+            &format!("🚧 [#{owner}#1] #adversarial-pr{qid}"),
+            &format!("https://github.com/btakita/agent-doc/issues/440: #adversarial-pr{qid}"),
+        )];
+        assert_eq!(
+            retire_claimed_bookkeeping(&mut moved, |_| Some(claim.clone())).repaints,
+            0
+        );
+        assert_eq!(moved.len(), 1);
     }
 
     /// `#barereplymarker`: generated packet rows carry only a bare trailing

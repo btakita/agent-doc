@@ -4401,6 +4401,61 @@ mod tests {
         doc
     }
 
+    /// `#pipeprompt` stage heartbeat: a ` |` statement head is claimed by
+    /// its row text, `--stage` records on the exact attempt, a stale
+    /// generation is refused, and projection paints from the ledger.
+    #[test]
+    fn a_statement_stage_heartbeat_records_on_the_exact_attempt() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = write_doc(
+            dir.path(),
+            &["Collect the issues |\n  - group them |\n    - draft"],
+        );
+        let (_, claim) = claim(&file, "Collect the issues |", "subagent:pipe", 7200).unwrap();
+        start_attempt(
+            &file,
+            "Collect the issues |",
+            "subagent:pipe",
+            "worker:pipe",
+            7200,
+            claim.generation,
+        )
+        .unwrap();
+        let refreshed = refresh_attempt(
+            &file,
+            "Collect the issues",
+            "subagent:pipe",
+            7200,
+            Some(claim.generation),
+        )
+        .unwrap();
+        assert_eq!(refreshed.stage, None);
+        let staged = record_stage(&file, &refreshed, 3).unwrap();
+        assert_eq!(staged.stage, Some(3));
+        let ledger = load_ledger(&file).unwrap();
+        assert_eq!(ledger.claims[0].stage, Some(3));
+        assert!(record_stage(&file, &refreshed, 0).is_err());
+        let mut stale = refreshed.clone();
+        stale.generation += 1;
+        assert!(record_stage(&file, &stale, 2).is_err());
+
+        let painted_head = format!(
+            "- 🚧 [#subagent:pipe#{}] Collect the issues |\n  - group them |\n    - draft\n",
+            claim.generation
+        );
+        let content = format!("<!-- agent:queue go -->\n{painted_head}<!-- /agent:queue -->\n");
+        let projected = agent_doc_queue::queue_mirror_projection::project_statement_stages(
+            &content,
+            &ledger.claims,
+        )
+        .unwrap()
+        .expect("stage 3 paints");
+        assert!(
+            projected.contains("  - ✅ group them |\n    - ▶️ draft\n"),
+            "{projected}"
+        );
+    }
+
     fn subagents_doc(root: &Path, prompts: &[&str]) -> PathBuf {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         let doc = root.join("task.md");

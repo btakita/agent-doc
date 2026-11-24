@@ -506,7 +506,7 @@ pub fn project_statement_stages(
         let head = in_queue
             .then(|| list_item_content(body(index)))
             .flatten()
-            .filter(|row| EdgeOp::of_row(row) == EdgeOp::Pipe);
+            .filter(|row| EdgeOp::of_row(row).pipes());
         let Some(head) = head else {
             out.push_str(lines[index]);
             index += 1;

@@ -9,6 +9,8 @@
 //!   child is its own leaf. Today's behaviour.
 //! * **` |` pipe** (joined ` | `): the row's result flows into its children,
 //!   like a YAML block scalar and a shell pipe at once, in reading order.
+//! * **` |+` deep pipe** (joined ` | `): every descendant edge pipes too; the
+//!   whole subtree flattens in document order into one pipeline.
 //! * **` >` fold**: the row and its whole child list are ONE task; the list
 //!   is the row's context.
 //!
@@ -36,9 +38,10 @@
 //! * [`strip_edge_marker`] removes it from a head's first line, so adding or
 //!   removing an operator never changes a row's work identity;
 //! * [`statement_rows`] reads a folded block back as rows, and
-//!   [`statement_pipeline`] renders a pipe statement as one pipeline joined
+//!   [`statement_pipelines`] renders a pipe statement as its pipelines joined
 //!   with [`PIPE_PATH_JOIN`]. That function alone decides how children
-//!   combine.
+//!   combine (ordered lists chain, unordered lists fan out, ` |+` chains its
+//!   whole subtree).
 //!
 //! Folding (which source lines a block owns) lives with the queue
 //! enumerators: `agent_doc_markdown_ast::overlay::edge_block_end`.
@@ -52,6 +55,9 @@ pub const PIPE_MARKER: &str = " |";
 
 /// The authored fold operator: a space and `>`, as the row's last token.
 pub const FOLD_MARKER: &str = " >";
+
+/// The authored deep-pipe operator: every descendant edge pipes too.
+pub const DEEP_PIPE_MARKER: &str = " |+";
 
 /// Join between a statement row and its child in a rendered path. Above the
 /// statement, the ordinary nest-vector join `: ` still applies.
@@ -70,6 +76,9 @@ pub enum EdgeOp {
     /// Explicit ` |`: the parent's result flows into its children. Paths join
     /// with ` | `.
     Pipe,
+    /// Explicit ` |+`: a deep pipe. Every descendant edge pipes too, so the
+    /// whole subtree flattens into one pipeline; descendants need no ` |`.
+    DeepPipe,
     /// Explicit ` >`: the row and its whole child list are one task. Children
     /// are not addressable, so the join only labels lint paths.
     Fold,
@@ -77,7 +86,7 @@ pub enum EdgeOp {
 
 impl EdgeOp {
     /// Every explicit operator, in parse order.
-    pub const EXPLICIT: [EdgeOp; 2] = [EdgeOp::Pipe, EdgeOp::Fold];
+    pub const EXPLICIT: [EdgeOp; 3] = [EdgeOp::Pipe, EdgeOp::DeepPipe, EdgeOp::Fold];
 
     /// The operator a row's suffix gives the edges to its children.
     pub fn of_row(row: &str) -> Self {
@@ -89,6 +98,7 @@ impl EdgeOp {
         match self {
             Self::Context => None,
             Self::Pipe => Some(PIPE_MARKER),
+            Self::DeepPipe => Some(DEEP_PIPE_MARKER),
             Self::Fold => Some(FOLD_MARKER),
         }
     }
@@ -97,24 +107,33 @@ impl EdgeOp {
     pub fn join(self) -> &'static str {
         match self {
             Self::Context => ": ",
-            Self::Pipe => PIPE_PATH_JOIN,
+            Self::Pipe | Self::DeepPipe => PIPE_PATH_JOIN,
             Self::Fold => " > ",
         }
+    }
+
+    /// Whether the operator pipes (` |` or ` |+`).
+    pub fn pipes(self) -> bool {
+        matches!(self, Self::Pipe | Self::DeepPipe)
+    }
+
+    /// Whether every descendant of the row belongs to its block without its
+    /// own operator (` |+`, ` >`).
+    pub fn covers_subtree(self) -> bool {
+        matches!(self, Self::DeepPipe | Self::Fold)
     }
 }
 
 /// Row-final suffixes reserved for future edge operators: ` ||` (probably a
-/// shell-style fallback), ` |+` (the deep pipe, whose descendants pipe without
-/// each needing ` |`), ` |>` (the hand-off pipe, whose next stage runs as a
-/// fresh worker), and the near-miss ` |*`. None is implemented yet. They are
-/// neither prose nor an operator; the lint reports them as reserved
+/// shell-style fallback) and ` |>` (the hand-off pipe, whose next stage runs
+/// as a fresh worker), plus the near-miss ` |*`. None is implemented yet.
+/// They are neither prose nor an operator; the lint reports them as reserved
 /// ([`reserved_edge_hint`]).
-pub const RESERVED_EDGE_SUFFIXES: [&str; 4] = [" ||", " |+", " |*", " |>"];
+pub const RESERVED_EDGE_SUFFIXES: [&str; 3] = [" ||", " |*", " |>"];
 
 /// What the lint says about a reserved suffix ([`RESERVED_EDGE_SUFFIXES`]).
 pub fn reserved_edge_hint(suffix: &str) -> &'static str {
     match suffix {
-        " |+" => "reserved for the deep pipe, which is not implemented yet",
         " |*" => "reserved; did you mean ` |+` (deep pipe)?",
         " |>" => {
             "reserved for the hand-off pipe, which is not implemented yet; use ` |` to pipe within one task"
@@ -248,26 +267,29 @@ pub struct StatementRow {
     pub op: EdgeOp,
     /// Whether a deeper row follows before the list returns to this depth.
     pub has_children: bool,
+    /// Whether the row's own list marker is ordered (`1.`, `N)`).
+    pub ordered: bool,
 }
 
 /// The rows of a folded block: its head line, then every list row of its
 /// block, in reading order. Continuation lines join their row.
 pub fn statement_rows(text: &str) -> Vec<StatementRow> {
-    let mut rows: Vec<(usize, String)> = Vec::new();
+    let mut rows: Vec<(usize, String, bool)> = Vec::new();
     for (index, line) in text.lines().enumerate() {
         if index == 0 {
-            rows.push((0, line.to_string()));
+            rows.push((0, line.to_string(), false));
             continue;
         }
         match list_item_content(line) {
             // A `%% … %%` list comment is an annotation, not a stage.
             Some(content) if is_list_comment(content) => {}
             Some(content) if line_indent_width(line) > 0 => {
-                rows.push((line_indent_width(line), content.to_string()));
+                let ordered = crate::ordered_list_marker_len(line.trim_start()).is_some();
+                rows.push((line_indent_width(line), content.to_string(), ordered));
             }
             _ if line.trim().is_empty() => {}
             _ => {
-                if let Some((_, last)) = rows.last_mut() {
+                if let Some((_, last, _)) = rows.last_mut() {
                     last.push('\n');
                     last.push_str(line.trim());
                 }
@@ -277,42 +299,126 @@ pub fn statement_rows(text: &str) -> Vec<StatementRow> {
     let count = rows.len();
     (0..count)
         .map(|index| {
-            let (indent, raw) = &rows[index];
+            let (indent, raw, ordered) = &rows[index];
             let has_children = index == 0 && count > 1
                 || rows
                     .get(index + 1)
-                    .is_some_and(|(next, _)| index > 0 && next > indent);
+                    .is_some_and(|(next, _, _)| index > 0 && next > indent);
             StatementRow {
                 indent: *indent,
                 text: row_work_text(raw),
                 op: EdgeOp::of_row(raw),
                 has_children,
+                ordered: *ordered,
             }
         })
         .collect()
 }
 
-/// A pipe statement as one pipeline: every row in document order joined with
-/// [`PIPE_PATH_JOIN`], like a vertical `a | b | c`.
+/// A pipe statement as its pipelines, each joined with [`PIPE_PATH_JOIN`].
 ///
-/// This is the one place that decides how a ` |` row's children combine
-/// (`#pipeprompt` v1 execution rule): they CHAIN in document order, so
-/// `draft a triage summary |` over `under 200 words` and `no internal ids`
-/// reads `… draft a triage summary | under 200 words | no internal ids`, and
-/// the whole statement is ONE task. A fan-out rule (one path per leaf) would
-/// change only this function and the submission that renders it.
-pub fn statement_pipeline(text: &str) -> String {
-    statement_rows(text)
-        .into_iter()
-        .map(|row| row.text)
-        .filter(|text| !text.is_empty())
-        .collect::<Vec<_>>()
-        .join(PIPE_PATH_JOIN)
+/// This is the one place that decides how a row's children combine
+/// (`#pipeprompt` combination rule, operator decision 2026-11-24):
+///
+/// * under ` |`, an **ordered** child list (`1.`, `N)`) CHAINS in numbered
+///   order, each step taking the previous step's result
+///   (`draft | 1st | 2nd`), while an **unordered** list (`- `) FANS OUT:
+///   each child takes the parent's result independently, one pipeline per
+///   branch (`draft | under 200 words`, `draft | no internal ids`);
+/// * ` |+` overrides the list type: its whole subtree flattens in document
+///   order into one chain;
+/// * a ` >` row inside a statement is one stage whose list is its context;
+/// * a row without an operator ends its branch.
+///
+/// Every pipeline still runs inside the ONE task; fan-out is framed as
+/// "apply each of these to the parent's result". The phase-2 ` |>` rule
+/// (sequential hand-offs for ordered children, parallel workers for
+/// unordered ones) will live here too.
+pub fn statement_pipelines(text: &str) -> Vec<String> {
+    let rows = statement_rows(text);
+    if rows.is_empty() {
+        return Vec::new();
+    }
+    // Children of each row: the next rows one level deeper.
+    let depth = |index: usize| if index == 0 { 0 } else { rows[index].indent };
+    let children = |index: usize| -> Vec<usize> {
+        let own = depth(index);
+        let mut out = Vec::new();
+        let mut child_depth = None;
+        for later in index + 1..rows.len() {
+            let at = depth(later);
+            if at <= own {
+                break;
+            }
+            match child_depth {
+                None => {
+                    child_depth = Some(at);
+                    out.push(later);
+                }
+                Some(expected) if at <= expected => {
+                    out.push(later);
+                    child_depth = Some(at);
+                }
+                _ => {}
+            }
+        }
+        out
+    };
+    fn subtree(rows: &[StatementRow], index: usize, depth: &dyn Fn(usize) -> usize) -> Vec<usize> {
+        let own = depth(index);
+        let mut out = vec![index];
+        out.extend((index + 1..rows.len()).take_while(|&later| depth(later) > own));
+        out
+    }
+    fn render(
+        rows: &[StatementRow],
+        index: usize,
+        depth: &dyn Fn(usize) -> usize,
+        children: &dyn Fn(usize) -> Vec<usize>,
+    ) -> Vec<String> {
+        let row = &rows[index];
+        let kids = children(index);
+        if kids.is_empty() || !row.op.pipes() {
+            return vec![row.text.clone()];
+        }
+        if row.op == EdgeOp::DeepPipe {
+            return vec![
+                subtree(rows, index, depth)
+                    .into_iter()
+                    .map(|at| rows[at].text.as_str())
+                    .filter(|text| !text.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(PIPE_PATH_JOIN),
+            ];
+        }
+        if kids.iter().all(|&kid| rows[kid].ordered) {
+            // Chain: each step takes the previous step's result.
+            let mut paths = vec![row.text.clone()];
+            for kid in kids {
+                let steps = render(rows, kid, depth, children);
+                paths = paths
+                    .iter()
+                    .flat_map(|path| {
+                        steps
+                            .iter()
+                            .map(move |step| format!("{path}{PIPE_PATH_JOIN}{step}"))
+                    })
+                    .collect();
+            }
+            return paths;
+        }
+        // Fan out: each child takes the parent's result independently.
+        kids.into_iter()
+            .flat_map(|kid| render(rows, kid, depth, children))
+            .map(|branch| format!("{}{PIPE_PATH_JOIN}{branch}", row.text))
+            .collect()
+    }
+    render(&rows, 0, &depth, &children)
 }
 
 /// Rows of a pipe statement that have children but no operator. A statement
 /// with such a row is malformed under the strict grammar. Rows inside a
-/// ` >` fold are that fold's context and need no operator.
+/// ` >` fold or below a ` |+` deep pipe need no operator of their own.
 pub fn unpiped_parent_rows(text: &str) -> Vec<StatementRow> {
     let mut out = Vec::new();
     let mut fold_depth: Option<usize> = None;
@@ -323,7 +429,7 @@ pub fn unpiped_parent_rows(text: &str) -> Vec<StatementRow> {
         }
         fold_depth = None;
         match row.op {
-            EdgeOp::Fold => fold_depth = Some(depth),
+            EdgeOp::Fold | EdgeOp::DeepPipe => fold_depth = Some(depth),
             EdgeOp::Context if row.has_children => out.push(row),
             _ => {}
         }
@@ -519,7 +625,6 @@ mod tests {
             "a | b in the middle",
             "Collect|",
             "Collect ||",
-            "Collect |+",
             "Collect |*",
             "Collect |>",
             "|",
@@ -577,7 +682,13 @@ mod tests {
         assert_eq!(EdgeOp::Pipe.join(), " | ");
         assert_eq!(EdgeOp::Context.join(), ": ");
         assert_eq!(reserved_edge_suffix("Collect ||"), Some(" ||"));
-        assert_eq!(reserved_edge_suffix("Collect |+"), Some(" |+"));
+        assert_eq!(reserved_edge_suffix("Collect |+"), None);
+        assert_eq!(EdgeOp::of_row("Collect |+"), EdgeOp::DeepPipe);
+        assert_eq!(
+            EdgeOp::of_row("Collect |+ [#q-0123456789ab]"),
+            EdgeOp::DeepPipe
+        );
+        assert_eq!(EdgeOp::DeepPipe.join(), " | ");
         assert_eq!(
             reserved_edge_suffix("Collect |* [#q-0123456789ab]"),
             Some(" |*")
@@ -605,8 +716,11 @@ mod tests {
     fn statement_chains_its_rows_in_document_order() {
         let text = "Collect the open issues | [#q-0123456789ab]\n  - group them by component |\n    - draft a triage summary |\n      - under 200 words\n      - no internal ids";
         assert_eq!(
-            statement_pipeline(text),
-            "Collect the open issues | group them by component | draft a triage summary | under 200 words | no internal ids",
+            statement_pipelines(text),
+            vec![
+                "Collect the open issues | group them by component | draft a triage summary | under 200 words",
+                "Collect the open issues | group them by component | draft a triage summary | no internal ids",
+            ],
         );
         assert!(unpiped_parent_rows(text).is_empty());
         let rows = statement_rows(text);
@@ -624,6 +738,13 @@ mod tests {
         // A ` >` stage folds its own list; rows under it need no operator.
         let folded = "Collect |\n  - summarize >\n    - context\n      - more context";
         assert!(unpiped_parent_rows(folded).is_empty());
+        // A ` |+` deep pipe declares its whole subtree piped.
+        let deep = "Collect |+\n  - group\n    - draft\n      - under 200 words";
+        assert!(unpiped_parent_rows(deep).is_empty());
+        assert_eq!(
+            statement_pipelines(deep),
+            vec!["Collect | group | draft | under 200 words"]
+        );
     }
 
     #[test]
@@ -639,10 +760,45 @@ mod tests {
         assert_eq!(strip_stage_glyphs(&painted), text);
         assert_eq!(project_stage_glyphs(text, Some(1)), text);
         assert_eq!(
-            statement_pipeline(&painted),
-            "Collect | group | draft | under 200 words"
+            statement_pipelines(&painted),
+            vec!["Collect | group | draft | under 200 words"]
         );
         assert_eq!(strip_stage_glyph("▶️ draft |"), "draft |");
         assert_eq!(strip_stage_glyph("▶️draft"), "▶️draft");
+    }
+
+    /// The combination rule, one case per cell.
+    #[test]
+    fn ordered_children_chain_unordered_children_fan_out() {
+        // ` |` + ordered list: one chain in numbered order.
+        assert_eq!(
+            statement_pipelines("draft |\n  1. outline\n  2. write\n  3. trim"),
+            vec!["draft | outline | write | trim"]
+        );
+        // ` |` + unordered list: each child takes the parent's result.
+        assert_eq!(
+            statement_pipelines("draft |\n  - under 200 words\n  - no internal ids"),
+            vec!["draft | under 200 words", "draft | no internal ids"]
+        );
+        // ` |+` + unordered list: the whole subtree chains anyway.
+        assert_eq!(
+            statement_pipelines("draft |+\n  - outline\n    - sections\n  - trim"),
+            vec!["draft | outline | sections | trim"]
+        );
+        // A chained step that itself fans out multiplies the branches.
+        assert_eq!(
+            statement_pipelines(
+                "collect |\n  1. group |\n    - by component\n    - by age\n  2. summarize"
+            ),
+            vec![
+                "collect | group | by component | summarize",
+                "collect | group | by age | summarize",
+            ]
+        );
+        // A ` >` stage keeps its list as its own context.
+        assert_eq!(
+            statement_pipelines("collect |\n  - summarize >\n    - focus on CI"),
+            vec!["collect | summarize"]
+        );
     }
 }

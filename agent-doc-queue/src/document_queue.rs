@@ -6379,7 +6379,12 @@ pub fn submitted_group_prompt_with_context_at(
 /// Line that follows a submitted ` |` statement (`#pipeprompt`). The
 /// statement's children ARE the prompt, so it never carries the context-only
 /// [`PROMPT_TREE_HEADER`].
-pub const PIPE_PROMPT_HEADER: &str = "Structured prompt (`#pipeprompt`): each row ending in ` |` passes its result to the rows nested under it, in reading order. Evaluate the whole statement above as ONE task. Stage 1 is its top row and each later row is the next stage; as you start stage N, report it with `agent-doc queue claim <FILE> --item <ITEM> --owner <OWNER> --refresh --generation <GENERATION> --stage N` so the row shows ▶️. Read the statement as this pipeline:";
+pub const PIPE_PROMPT_HEADER: &str = "Structured prompt (`#pipeprompt`): a row ending in ` |` passes its result to the rows nested under it. Numbered children chain in order, each step taking the previous step's result; bulleted children each take the parent's result independently (apply each of these to the parent's result); a row ending in ` |+` chains its whole subtree. Evaluate the whole statement above as ONE task. Stage 1 is its top row and each later row is the next stage; as you start stage N, report it with `agent-doc queue claim <FILE> --item <ITEM> --owner <OWNER> --refresh --generation <GENERATION> --stage N` so the row shows ▶️. Its pipelines:";
+
+/// Line added to a submitted block that holds numbered rows: inside one
+/// task, numbering is procedure order, never separate `#orderedsteps` steps.
+pub const ORDERED_PROCEDURE_NOTE: &str =
+    "Numbered rows in it are steps to do in order, within this one task (a procedure).";
 
 /// Line that follows a submitted ` >` fold (`#foldprompt`).
 pub const FOLD_PROMPT_HEADER: &str = "Folded prompt (`#foldprompt`, ` >`): the row above and its whole nested list are ONE task; the list is that row's context.";
@@ -6396,7 +6401,7 @@ pub fn edge_block_op(text: &str) -> Option<agent_doc_element_queue::pipe::EdgeOp
 
 /// Whether `text` (marker-stripped) is a folded ` |` statement.
 pub fn is_pipe_statement_text(text: &str) -> bool {
-    edge_block_op(text) == Some(agent_doc_element_queue::pipe::EdgeOp::Pipe)
+    edge_block_op(text).is_some_and(agent_doc_element_queue::pipe::EdgeOp::pipes)
 }
 
 /// Whether the entry at `index` is a folded ` |` statement (`#pipeprompt`).
@@ -6424,7 +6429,7 @@ pub fn entry_is_edge_block(entries: &[QueueEntry], index: usize) -> bool {
 /// lineage (joined with `: `, the default context edge). A ` |` statement
 /// then gets [`PIPE_PROMPT_HEADER`] and the statement read as one pipeline,
 /// whose rows join with ` | `; how children combine (chain vs fan-out) is
-/// decided only by [`agent_doc_element_queue::pipe::statement_pipeline`]. A
+/// decided only by [`agent_doc_element_queue::pipe::statement_pipelines`]. A
 /// ` >` fold gets [`FOLD_PROMPT_HEADER`].
 fn submitted_edge_block(
     entries: &[QueueEntry],
@@ -6439,14 +6444,30 @@ fn submitted_edge_block(
         Some(ancestors) => prefix_nest_vector(ancestors, &statement),
         None => statement.clone(),
     };
+    // `#orderedsteps` never applies inside one task: numbered rows keep their
+    // numbers verbatim. Under ` >` they read as a procedure; under a pipe the
+    // pipelines below restate their chain order.
     if op == agent_doc_element_queue::pipe::EdgeOp::Fold {
-        return format!("{tree}\n{FOLD_PROMPT_HEADER}");
+        let ordered = statement.lines().skip(1).any(|line| {
+            agent_doc_element_queue::ordered_list_marker_len(line.trim_start()).is_some()
+        });
+        let procedure = if ordered {
+            format!("\n{ORDERED_PROCEDURE_NOTE}")
+        } else {
+            String::new()
+        };
+        return format!("{tree}\n{FOLD_PROMPT_HEADER}{procedure}");
     }
-    let pipeline = agent_doc_element_queue::pipe::statement_pipeline(&statement);
-    match &ancestors {
-        Some(ancestors) => format!("{tree}\n{PIPE_PROMPT_HEADER}\n{ancestors}: {pipeline}"),
-        None => format!("{tree}\n{PIPE_PROMPT_HEADER}\n{pipeline}"),
-    }
+    let prefix = ancestors
+        .as_ref()
+        .map(|ancestors| format!("{ancestors}: "))
+        .unwrap_or_default();
+    let pipelines = agent_doc_element_queue::pipe::statement_pipelines(&statement)
+        .into_iter()
+        .map(|pipeline| format!("- {prefix}{pipeline}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("{tree}\n{PIPE_PROMPT_HEADER}\n{pipelines}")
 }
 
 pub const PROMPT_TREE_HEADER: &str =

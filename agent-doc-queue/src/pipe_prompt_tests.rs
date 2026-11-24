@@ -252,7 +252,7 @@ fn commands_pipe_too() {
         submitted.starts_with("#review |\n  - #address\n"),
         "{submitted}"
     );
-    assert!(submitted.ends_with("\n#review | #address"), "{submitted}");
+    assert!(submitted.ends_with("\n- #review | #address"), "{submitted}");
 }
 
 #[test]
@@ -267,7 +267,10 @@ fn submission_is_one_task_with_its_tree_intact() {
                 .strip_prefix("- ")
                 .and_then(|body| body.strip_suffix("\n- next item\n"))
                 .unwrap(),
-            "Collect the open agent-doc GitHub issues | group them by component | draft a triage summary | under 200 words | no internal ids",
+            concat!(
+                "- Collect the open agent-doc GitHub issues | group them by component | draft a triage summary | under 200 words\n",
+                "- Collect the open agent-doc GitHub issues | group them by component | draft a triage summary | no internal ids",
+            ),
         )
     );
     assert!(!submitted.contains(PROMPT_TREE_HEADER));
@@ -286,7 +289,7 @@ fn inner_paths_join_with_pipe_and_outer_paths_with_colon() {
         "{submitted}"
     );
     assert!(
-        submitted.ends_with("\nrelease epic: Collect the issues | group them | draft"),
+        submitted.ends_with("\n- release epic: Collect the issues | group them | draft"),
         "{submitted}"
     );
 }
@@ -400,8 +403,13 @@ fn fold_and_reserved_operator_lints() {
             PipeLintKind::FoldWithoutChildren,
             PipeLintKind::ReservedEdgeOperator,
             PipeLintKind::ReservedEdgeOperator,
-            PipeLintKind::ReservedEdgeOperator,
+            PipeLintKind::PipeWithoutChildren,
         ]
+    );
+    assert!(
+        findings[3].message.contains("ends in `|+`"),
+        "{}",
+        findings[3].message
     );
     assert!(
         findings[1]
@@ -552,4 +560,178 @@ fn stage_glyphs_follow_the_reported_stage_and_leave_with_the_claim() {
         closed.contains("  - ~~group them |~~\n    - ~~draft~~\n"),
         "{closed}"
     );
+}
+
+const DEEP: &str = "\
+- collect the open issues |+
+  - group them by component
+    - draft a triage summary
+      - under 200 words
+- next item
+";
+
+#[test]
+fn a_deep_pipe_flattens_its_whole_subtree_into_one_task() {
+    let entries = parsed(DEEP);
+    assert_eq!(entries.len(), 2, "{entries:?}");
+    assert_eq!(executable_prompt_indexes(&entries), vec![0, 1]);
+    assert!(entry_is_pipe_statement(&entries, 0));
+    let submitted = submitted_prompt_at(&entries, 0).unwrap();
+    assert!(
+        submitted.ends_with(
+            "\n- collect the open issues | group them by component | draft a triage summary | under 200 words"
+        ),
+        "{submitted}"
+    );
+    assert!(submitted.contains(PIPE_PROMPT_HEADER), "{submitted}");
+    // Descendants need no ` |`: the deep pipe declares them piped.
+    assert!(agent_doc_markdown_ast::overlay::pipe_statement_lints(&queue_doc(DEEP)).is_empty());
+    // One q-id, identity stable on toggle, byte-for-byte render.
+    let projected = crate::prompt_identity::project(&queue_doc(DEEP), "doc");
+    assert_eq!(
+        projected
+            .content
+            .lines()
+            .filter(|line| line.contains("[#q-"))
+            .count(),
+        2,
+        "{}",
+        projected.content
+    );
+    assert!(
+        projected
+            .content
+            .contains("- collect the open issues |+ [#q-"),
+        "{}",
+        projected.content
+    );
+    assert_eq!(
+        crate::queue_claim::claim_identity_at(
+            &parsed("- collect |+ [#q-0123456789ab]\n  - x\n"),
+            0
+        ),
+        crate::queue_claim::claim_identity_at(&parsed("- collect [#q-0123456789ab]\n  - x\n"), 0),
+    );
+    let canonical = render(&entries);
+    assert_eq!(canonical.replace("- ### ", "- "), DEEP);
+    // A claimed head is restored to its claim-time ` |+`.
+    let claim = edge_claim("collect |+\n  - x", "running");
+    assert_eq!(
+        crate::queue_mirror_projection::restore_claimed_edge_markers(
+            &queue_doc("- 🚧 [#subagent:pipe#3] collect\n  - x\n"),
+            std::slice::from_ref(&claim),
+        )
+        .unwrap(),
+        Some(queue_doc("- 🚧 [#subagent:pipe#3] collect |+\n  - x\n"))
+    );
+}
+
+#[test]
+fn numbered_children_without_an_operator_stay_ordered_steps() {
+    let entries = parsed("- release\n  1. build\n  2. publish\n");
+    assert_eq!(entries.len(), 3);
+    let waits = ordered_step_waits(&entries);
+    assert!(waits[1].is_none());
+    assert_eq!(
+        waits[2].as_ref().map(|wait| wait.step_number.as_str()),
+        Some("1")
+    );
+}
+
+/// The combination rule cells inside one task: ` >` + ordered list is a
+/// procedure, ` |` + ordered list chains, ` |+` chains whatever the list type.
+/// None of them is `#orderedsteps`; the numbering is kept verbatim.
+#[test]
+fn a_fold_wins_over_ordered_steps_and_keeps_the_numbering() {
+    for (body, header, tail) in [
+        (
+            "- release >\n  1. build\n  2. publish\n",
+            FOLD_PROMPT_HEADER,
+            ORDERED_PROCEDURE_NOTE,
+        ),
+        (
+            "- release |\n  1. build\n  2. publish\n",
+            PIPE_PROMPT_HEADER,
+            "- release | build | publish",
+        ),
+        (
+            "- release |+\n  1. build\n    - with tests\n  2. publish\n",
+            PIPE_PROMPT_HEADER,
+            "- release | build | with tests | publish",
+        ),
+    ] {
+        let entries = parsed(body);
+        assert_eq!(entries.len(), 1, "{body}: {entries:?}");
+        assert_eq!(executable_prompt_indexes(&entries), vec![0], "{body}");
+        assert!(
+            ordered_step_waits(&entries).iter().all(Option::is_none),
+            "{body}"
+        );
+        let submitted = submitted_prompt_at(&entries, 0).unwrap();
+        assert!(submitted.contains("\n  1. build\n"), "{submitted}");
+        assert!(submitted.contains("\n  2. publish"), "{submitted}");
+        assert!(submitted.contains(header), "{submitted}");
+        assert!(submitted.ends_with(tail), "{submitted}");
+        assert_eq!(render(&entries).replace("- ### ", "- "), body);
+        // Lifecycle projection never paints a step hold inside the block.
+        assert!(!render(&entries).contains("⛔"), "{body}");
+    }
+    // ` >` + unordered list: plain context, no procedure note.
+    let submitted = submitted_prompt_at(&parsed(FOLD), 0).unwrap();
+    assert!(!submitted.contains(ORDERED_PROCEDURE_NOTE), "{submitted}");
+    // ` |` + unordered list fans out: each child takes the parent's result.
+    let submitted = submitted_prompt_at(
+        &parsed("- draft |\n  - under 200 words\n  - no internal ids\n"),
+        0,
+    )
+    .unwrap();
+    assert!(
+        submitted.ends_with("\n- draft | under 200 words\n- draft | no internal ids"),
+        "{submitted}"
+    );
+}
+
+/// ` |>` (phase 2) is reserved: until its hand-off ships, its children keep
+/// today's shape, which is already the staged order the hand-off will use.
+#[test]
+fn a_hand_off_pipe_keeps_its_children_in_staged_order() {
+    // Ordered children: sequential, one step at a time in number order.
+    let entries = parsed("- release |>\n  1. build\n  2. publish\n");
+    assert_eq!(entries.len(), 3);
+    let waits = ordered_step_waits(&entries);
+    assert!(waits[1].is_none());
+    assert_eq!(
+        waits[2].as_ref().map(|wait| wait.step_number.as_str()),
+        Some("1")
+    );
+    // Unordered children: parallel leaves.
+    let entries = parsed("- release |>\n  - build\n  - publish\n");
+    assert_eq!(entries.len(), 3);
+    assert_eq!(executable_prompt_indexes(&entries), vec![1, 2]);
+    assert!(ordered_step_waits(&entries).iter().all(Option::is_none));
+}
+
+#[test]
+fn dropping_an_inner_pipe_under_a_claimed_head_keeps_the_statement() {
+    // Unclaimed, the malformed statement keeps the leaf-only shape.
+    let unclaimed = parsed("- Collect |\n  - group\n    - draft\n");
+    assert_eq!(unclaimed.len(), 3);
+    // Claimed, the edit cannot unfold it under the running attempt.
+    for head in [
+        "🚧 [#subagent:pipe#3] Collect |",
+        "### 🟡 [#subagent:pipe#3] Collect |",
+    ] {
+        let body = format!("- {head}\n  - group\n    - draft\n");
+        let entries = parsed(&body);
+        assert_eq!(entries.len(), 1, "{body}: {entries:?}");
+        let nodes =
+            agent_doc_markdown_ast::mutations::item_nodes(&queue_doc(&body), "queue").unwrap();
+        assert_eq!(nodes.len(), 1, "{body}");
+        let findings = agent_doc_markdown_ast::overlay::pipe_statement_lints(&queue_doc(&body));
+        assert!(
+            findings.iter().any(|finding| finding.kind
+                == agent_doc_markdown_ast::overlay::PipeLintKind::UnpipedStageParent),
+            "{findings:?}"
+        );
+    }
 }

@@ -1451,6 +1451,8 @@ pub fn tracked_do_context_block_end(
 ///   in ` |` (or ` >`, which folds its own list). A malformed block is not
 ///   folded, so the rows keep today's leaf-only shape and the lint names the
 ///   row.
+/// * ` |+` (deep pipe): every descendant edge pipes too; the whole subtree is
+///   one flattened pipeline and descendants need no operator.
 /// * ` >` (`#foldprompt`): the row and its whole child list are one task.
 ///
 /// The block is every following line deeper than `parent` (blank lines between
@@ -1513,7 +1515,17 @@ pub fn edge_block_end(lines: &[&str], parent: usize, item_content: &str) -> Opti
     {
         return None;
     }
-    if op == EdgeOp::Fold {
+    if op.covers_subtree() {
+        return Some(end);
+    }
+    // While the head holds an attempt, an edit that drops an inner ` |` does
+    // not unfold the statement under its running claim: membership is fixed
+    // until the claim settles, and the lint names the row meanwhile.
+    let head_work = item_content
+        .trim_start()
+        .trim_start_matches('#')
+        .trim_start();
+    if agent_doc_element_queue::strip_attempt_projection_prefix(head_work) != head_work {
         return Some(end);
     }
     let mut statement = item_content.to_string();
@@ -1645,11 +1657,12 @@ pub fn pipe_statement_lints(content: &str) -> Vec<PipeLint> {
                 });
             };
             let op = EdgeOp::of_row(row);
-            if op == EdgeOp::Pipe && !has_children {
+            if op.pipes() && !has_children {
                 push(
                     PipeLintKind::PipeWithoutChildren,
                     format!(
-                        "`{path}` ends in ` |` but has no children to pipe into; nest the next stage under it or remove ` |`"
+                        "`{path}` ends in `{}` but has no children to pipe into; nest the next stage under it or remove the operator",
+                        op.marker().unwrap_or(" |").trim_start()
                     ),
                 );
             }
@@ -1661,7 +1674,7 @@ pub fn pipe_statement_lints(content: &str) -> Vec<PipeLint> {
                     ),
                 );
             }
-            if matches!(parent_op, Some(EdgeOp::Pipe | EdgeOp::Fold)) {
+            if parent_op.is_some_and(|op| op != EdgeOp::Context) {
                 if parent_op == Some(EdgeOp::Pipe) && has_children && op == EdgeOp::Context {
                     push(
                         PipeLintKind::UnpipedStageParent,
@@ -1698,7 +1711,13 @@ pub fn pipe_statement_lints(content: &str) -> Vec<PipeLint> {
                     ),
                 );
             }
-            stack.push((indent, path, op));
+            // A ` |+` / ` >` block covers its whole subtree: a descendant
+            // without its own operator inherits the block's.
+            let inherited = match (op, parent_op) {
+                (EdgeOp::Context, Some(parent)) if parent.covers_subtree() => parent,
+                _ => op,
+            };
+            stack.push((indent, path, inherited));
         }
     }
     findings

@@ -132,13 +132,22 @@ head:
   - skip chit-chat
 ```
 
-- ` |` pipes: each ` |` row passes its result to the rows nested under it, in
-  reading order (`Collect … | group … | draft … | under 200 words | no
-  internal ids`). The grammar is strict: inside a statement, a row with
-  children must end in ` |` (or ` >`). Otherwise nothing folds, the rows stay
-  separate leaves, and the lint names the row.
+- ` |` pipes: each ` |` row passes its result to the rows nested under it.
+  Numbered children (`1.`) chain in order, each taking the previous step's
+  result; bulleted children (`- `) fan out, each taking the parent's result
+  (above: `… draft … | under 200 words` and `… draft … | no internal ids`).
+  The grammar is strict: inside a statement, a row with children must end in
+  ` |` (or ` |+` / ` >`). Otherwise nothing folds, the rows stay separate
+  leaves, and the lint names the row.
+- ` |+` deep-pipes: every descendant pipes too, so the whole subtree
+  flattens in document order into one chain (`collect | group | draft |
+  under 200 words`), whatever the list type. Inner rows need no ` |`.
 - ` >` folds: the row and its whole nested list are one task; the list is
   context. Inner rows need no operator.
+- Inside a ` |`, ` |+` or ` >` block, numbered rows (`1.`, `2.`) stay in the
+  one task: they keep their numbers and never become separate
+  `#orderedsteps` steps or get a `⛔` hold. Under ` >` they are a procedure
+  to do in order; under a pipe they are the chain order.
 - The top row is the only head: it alone gets the `[#q-…]`, claim, strike and
   response tree. Inner rows get no ids and are never offered, claimed or
   struck on their own. Commands pipe too: `- #review |` over `- #address`.
@@ -152,10 +161,10 @@ head:
   --generation <N> --stage <n>` (stage 1 is the top row). That row shows
   `▶️` and earlier rows `✅`; the head keeps its own lifecycle glyph. The
   glyphs are binary bookkeeping and leave when the claim does.
-- The lint reports a ` |` or ` >` row with no children, a missing inner ` |`,
-  a code span ending in ` |`, and the reserved suffixes ` ||` and ` |+`
-  (deep pipe) and ` |>` (hand-off pipe), which are not implemented yet, plus
-  ` |*` (did you mean ` |+`?).
+- The lint reports a ` |`, ` |+` or ` >` row with no children, a missing
+  inner ` |`, a code span ending in ` |`, and the reserved suffixes ` ||`
+  and ` |>` (hand-off pipe, not implemented yet), plus ` |*` (did you mean
+  ` |+`?).
 
 Built-in element semantics live in the `agent-doc-element-*` crate family and
 are composed by `agent-doc-element-registry`. An unregistered `agent:*`

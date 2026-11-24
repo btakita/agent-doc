@@ -5820,6 +5820,43 @@ pub fn enqueue_queue_continuation_reconcile(
     )
 }
 
+/// Bound on the preflight-verdict read. The handler only reads memory, so a
+/// controller that cannot answer in this window is busy enough that the
+/// inline phases are no slower.
+const PREFLIGHT_REVISION_VERDICTS_TIMEOUT: Duration = Duration::from_millis(1_500);
+
+/// `#q-1d2a127f32aa`: read `file`'s preflight repair and stuck verdicts from
+/// the running project controller. Never launches a controller; with none
+/// running, an older one, or a timeout this errors and preflight runs its
+/// phases inline.
+pub fn request_preflight_revision_verdicts(
+    file: &Path,
+) -> Result<crate::preflight_revision_cache::PreflightRevisionVerdicts> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    request_existing_controller_with_timeout(
+        &project_root,
+        ControllerRequest {
+            command: crate::preflight_revision_cache::PREFLIGHT_REVISION_VERDICTS_COMMAND
+                .to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("preflight".to_string()),
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+            sequence: None,
+        },
+        PREFLIGHT_REVISION_VERDICTS_TIMEOUT,
+    )
+}
+
 /// Bound on the lifecycle-projection notify. The handler only reserves the
 /// document and schedules its run.
 const QUEUE_LIFECYCLE_PROJECTION_ENQUEUE_TIMEOUT: Duration = Duration::from_secs(1);
@@ -25594,6 +25631,12 @@ pub(crate) fn handle_request_locked(
                 request,
             ))
         }
+        crate::preflight_revision_cache::PREFLIGHT_REVISION_VERDICTS_COMMAND => {
+            controller_envelope(handle_preflight_revision_verdicts(
+                runtime.as_ref(),
+                request,
+            ))
+        }
         "document_terminal_closeout_proof" => {
             controller_envelope(request_file(&request).map(|file| {
                 runtime
@@ -26679,7 +26722,7 @@ fn hydrate_reliable_sync_liveness(
     let snapshot = agent_doc_sqlite::reliable_sync_inbox::load(
         &agent_doc_sqlite::state_store::state_db_path(project_root),
     )?;
-    let batches = snapshot
+    let mut batches = snapshot
         .liveness
         .iter()
         .map(|record| {
@@ -26694,6 +26737,21 @@ fn hydrate_reliable_sync_liveness(
             })
         })
         .collect::<Result<Vec<_>>>()?;
+    // `#q-1d2a127f32aa`: never adopt another root's editors. A `state.db`
+    // copied out of a live project (a private benchmark or repro copy) still
+    // journals the live editor's registrations, whose paths name the live
+    // project. Folding them made this controller push replica rebuilds to
+    // those paths, which resolve to the live editor's IPC socket.
+    let foreign = drop_foreign_editor_registrations(project_root, &mut batches);
+    if foreign > 0 {
+        agent_doc_ops_log_io::log_op(
+            project_root,
+            &format!(
+                "reliable_sync_foreign_registrations_dropped project_root={} count={foreign} (#q-1d2a127f32aa)",
+                project_root.display(),
+            ),
+        );
+    }
     // `#exitwatcherrootscope`: the deaths this root records are those of pids
     // its own journal opened. The plane is process-global, so after the fold it
     // can also hold open pids another root's controller hydrated or received,
@@ -26731,6 +26789,50 @@ fn hydrate_reliable_sync_liveness(
     };
     restored_reliable_sync_projects().lock().insert(project_key);
     Ok(Some(dead_open_pids))
+}
+
+/// Whether an editor registration's document `path` lies inside
+/// `project_root` (lexically or after resolving symlinks). A relative path
+/// cannot be judged and is kept.
+pub(crate) fn registration_path_inside_root(project_root: &Path, path: &str) -> bool {
+    let path = Path::new(path);
+    if !path.is_absolute() {
+        return true;
+    }
+    let roots = [
+        project_root.to_path_buf(),
+        project_root
+            .canonicalize()
+            .unwrap_or_else(|_| project_root.to_path_buf()),
+    ];
+    let paths = [
+        path.to_path_buf(),
+        path.canonicalize().unwrap_or_else(|_| path.to_path_buf()),
+    ];
+    paths
+        .iter()
+        .any(|path| roots.iter().any(|root| path.starts_with(root)))
+}
+
+/// Remove `Register` ops whose document lies outside `project_root` from
+/// journaled liveness batches; returns how many were dropped.
+pub(crate) fn drop_foreign_editor_registrations(
+    project_root: &Path,
+    batches: &mut [Vec<agent_doc_reliable_sync_io::liveness::LivenessOp>],
+) -> usize {
+    let mut dropped = 0;
+    for batch in batches.iter_mut() {
+        batch.retain(|op| match op {
+            agent_doc_reliable_sync_io::liveness::LivenessOp::Register(registration)
+                if !registration_path_inside_root(project_root, &registration.path) =>
+            {
+                dropped += 1;
+                false
+            }
+            _ => true,
+        });
+    }
+    dropped
 }
 
 /// Journal appends between background compactions of the reliable-sync
@@ -27081,6 +27183,12 @@ fn publish_editor_replica_rebuild_targets(project_root: &Path, driver: &str) {
     let mut by_path = BTreeMap::<String, EditorReplicaRebuildTarget>::new();
     for registration in registrations {
         if controller_serves_replica(&registration.path) {
+            continue;
+        }
+        // `#q-1d2a127f32aa`: the plane is process-global; only this root's
+        // documents are this controller's to rebuild. A foreign path would
+        // signal another project's editor.
+        if !registration_path_inside_root(project_root, &registration.path) {
             continue;
         }
         let strategy = editor_replica_repair_strategy(&registration);
@@ -28184,6 +28292,45 @@ pub(crate) fn handle_document_state_projection(
     let file = request_file(&request)?;
     let document_hash = agent_doc_hash::document_id_for_path(&file);
     runtime.document_state_projection(&document_hash)
+}
+
+/// `#q-1d2a127f32aa`: answer preflight's repair and stuck verdicts from the
+/// live projection (memory only: no git, no write, no wait). A stuck verdict
+/// missing for the current closeout revision schedules the background refresh
+/// that computes it, so the next preflight reads it.
+pub(crate) fn handle_preflight_revision_verdicts(
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<crate::preflight_revision_cache::PreflightRevisionVerdicts> {
+    let file = request_file(&request)?;
+    let canonical = file.canonicalize().unwrap_or(file);
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let verdicts = runtime.document_preflight_revision_verdicts(&document_hash);
+    if verdicts.stuck.is_none() {
+        schedule_preflight_revision_cache_refresh(&canonical, "verdict_miss");
+    }
+    Ok(verdicts)
+}
+
+/// Schedule `file`'s preflight revision-cache refresh on the controller's
+/// per-document worker. Best-effort: a binary without the port, or a failed
+/// enqueue, leaves preflight on its inline phases.
+pub(crate) fn schedule_preflight_revision_cache_refresh(file: &Path, trigger: &str) {
+    let supported =
+        runtime_effects().is_ok_and(|effects| effects.preflight_revision_cache_supported());
+    if !supported {
+        return;
+    }
+    if let Err(error) = crate::document_maintenance::preflight_revision_cache().enqueue(file) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "preflight_revision_cache_enqueue_failed file={} trigger={trigger} error={} (#q-1d2a127f32aa)",
+                file.display(),
+                format!("{error:#}").replace('\n', " | "),
+            ),
+        );
+    }
 }
 
 pub(crate) fn handle_document_closeout_projection(
@@ -45735,6 +45882,9 @@ fn handle_queue_continuation_reconcile_enqueue(
         "continuation reconcile is not wired in this controller binary"
     );
     let outcome = crate::document_maintenance::continuation_reconcile().enqueue(&file)?;
+    // `#q-1d2a127f32aa`: a closeout changes the closeout projection the next
+    // preflight's repair and stuck phases read; refresh their cache now.
+    schedule_preflight_revision_cache_refresh(&file, "closeout");
     Ok(DocumentMaintenanceEnqueueReceipt {
         controller_pid: std::process::id(),
         controller_generation: bootstrap.controller_generation,
@@ -56426,6 +56576,66 @@ mod tests {
     /// derivation returns nothing exactly when the editor most needs an answer. With
     /// no hub for the path, the controller cannot serve it and the registration is
     /// reported.
+    fn liveness_registration(path: &str) -> agent_doc_reliable_sync_io::liveness::LivenessOp {
+        agent_doc_reliable_sync_io::liveness::LivenessOp::Register(
+            agent_doc_reliable_sync_io::liveness::EditorRegistration {
+                document_hash: agent_doc_hash::path_string_hash(path),
+                pid: 4_242,
+                path: path.to_string(),
+                editor_id: "jetbrains-4242".to_string(),
+                editor_kind: "jetbrains".to_string(),
+                editor_version: "0".to_string(),
+                capabilities: Vec::new(),
+                timestamp_ms: 1,
+                activation_receipt: None,
+            },
+        )
+    }
+
+    /// `#q-1d2a127f32aa`: a copy of a live project's `state.db` journals the
+    /// live editor's registrations. The copy's controller drops them at
+    /// hydration, so it never pushes a rebuild to the live editor.
+    #[test]
+    fn foreign_editor_registrations_are_dropped_at_hydration() {
+        let copy = tempfile::tempdir().unwrap();
+        let own = copy.path().join("tasks/own.md");
+        let live = "/home/someone/live-project/tasks/sdk.md";
+        let mut batches = vec![
+            vec![
+                liveness_registration(live),
+                agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                    document_hash: "live".to_string(),
+                    pid: 4_242,
+                    tag: "t".to_string(),
+                },
+            ],
+            vec![liveness_registration(&own.display().to_string())],
+        ];
+
+        let dropped = drop_foreign_editor_registrations(copy.path(), &mut batches);
+
+        assert_eq!(dropped, 1);
+        assert_eq!(
+            batches[0].len(),
+            1,
+            "only the foreign registration is dropped"
+        );
+        assert!(matches!(
+            batches[0][0],
+            agent_doc_reliable_sync_io::liveness::LivenessOp::Open { .. }
+        ));
+        assert_eq!(batches[1].len(), 1, "this root's own registration is kept");
+        assert!(registration_path_inside_root(
+            copy.path(),
+            &own.display().to_string()
+        ));
+        assert!(!registration_path_inside_root(copy.path(), live));
+        assert!(registration_path_inside_root(
+            copy.path(),
+            "relative/doc.md"
+        ));
+    }
+
     #[test]
     fn controller_serves_replica_is_false_without_a_process_local_hub() {
         assert!(

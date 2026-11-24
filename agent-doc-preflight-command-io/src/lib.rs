@@ -1538,6 +1538,7 @@ pub(crate) fn acquire_preflight_apply_guard(
 }
 
 pub mod progress;
+pub mod revision_cache;
 mod run;
 pub use run::*;
 

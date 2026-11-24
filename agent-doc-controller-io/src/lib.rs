@@ -7,6 +7,7 @@ pub mod editor_route_errors;
 pub mod heap_hygiene;
 pub mod inherited_fds;
 pub mod live_turn_follow_up;
+pub mod preflight_revision_cache;
 pub mod process;
 pub mod process_exit_watcher;
 pub mod project_controller;

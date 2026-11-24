@@ -536,6 +536,53 @@ pub fn lifecycle_projection() -> &'static Arc<DocumentMaintenanceScheduler> {
     })
 }
 
+/// `#q-1d2a127f32aa` (preflightlag goal 3): refresh the document's
+/// per-revision preflight cache ([`crate::preflight_revision_cache`]) after a
+/// closeout or a cache miss. There is no pending fact to consume: the trigger
+/// is the edit itself, and a refresh is idempotent, so `reserve` always hands
+/// out a run and a burst of triggers folds into one.
+struct PreflightRevisionCacheRunner;
+
+impl DocumentMaintenanceRunner for PreflightRevisionCacheRunner {
+    fn reserve(&self, _file: &Path) -> Result<Option<String>> {
+        Ok(Some("refresh".to_string()))
+    }
+
+    fn run(&self, file: &Path, _token: &str) -> Result<()> {
+        crate::project_controller::runtime_effects()?.refresh_preflight_revision_cache(file)
+    }
+
+    fn release(&self, _file: &Path, _token: &str) {}
+
+    fn label(&self) -> &'static str {
+        "preflight_revision_cache"
+    }
+}
+
+/// A refresh follows a closeout whose own facts are still landing, so it waits
+/// for a short quiet period; the next preflight is seconds away at the soonest.
+const PREFLIGHT_REVISION_CACHE_TIMING: DocumentMaintenanceTiming = DocumentMaintenanceTiming {
+    debounce: Duration::from_millis(250),
+    max_delay: Duration::from_secs(2),
+    idle_exit: Duration::from_secs(600),
+    retry_base: Duration::from_millis(500),
+    max_retries: 2,
+};
+
+static PREFLIGHT_REVISION_CACHE_SCHEDULER: OnceLock<Arc<DocumentMaintenanceScheduler>> =
+    OnceLock::new();
+
+/// This controller process's preflight revision-cache scheduler
+/// (`#q-1d2a127f32aa`).
+pub fn preflight_revision_cache() -> &'static Arc<DocumentMaintenanceScheduler> {
+    PREFLIGHT_REVISION_CACHE_SCHEDULER.get_or_init(|| {
+        DocumentMaintenanceScheduler::new(
+            Arc::new(PreflightRevisionCacheRunner),
+            PREFLIGHT_REVISION_CACHE_TIMING,
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

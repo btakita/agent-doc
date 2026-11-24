@@ -675,6 +675,18 @@ mod tests {
             assert_eq!(swept.response_body_len, info.response_body_len);
             assert_eq!(swept.capture_state, info.capture_state);
         }
+
+        // `#q-1d2a127f32aa`: the controller's per-revision verdict agrees: the
+        // committed capture is missing from HEAD, so the sweep is not quiet.
+        let closeout = agent_doc_cycle_state_io::load_document_closeout_projection(&doc)
+            .unwrap()
+            .expect("closeout projection");
+        let head = agent_doc_git_io::revision::rev_parse(doc.parent().unwrap(), "HEAD")
+            .unwrap()
+            .expect("head");
+        assert!(
+            !agent_doc_flow_io::closeout::stuck_sweep_is_quiet(&doc, &closeout, &head).unwrap()
+        );
     }
 
     #[test]
@@ -2652,6 +2664,18 @@ mod tests {
         )
         .unwrap();
 
+        // `#q-1d2a127f32aa`: a capture archived out of HEAD is due a settle,
+        // so the controller never records it as quiet.
+        let closeout = agent_doc_cycle_state_io::load_document_closeout_projection(&doc)
+            .unwrap()
+            .expect("closeout projection");
+        let head = agent_doc_git_io::revision::rev_parse(dir.path(), "HEAD")
+            .unwrap()
+            .expect("head");
+        assert!(
+            !agent_doc_flow_io::closeout::stuck_sweep_is_quiet(&doc, &closeout, &head).unwrap()
+        );
+
         // `#q-8383c546c6ca`: a probe sweep reports nothing stuck (the archive
         // materializes the response) and settles nothing.
         let probe = settle_compacted_capture_and_detect_stuck(&doc, false);
@@ -2688,5 +2712,36 @@ mod tests {
             after_gc.stuck.is_none(),
             "a reconciled (discarded) capture must not flag stuck after the archive is removed"
         );
+    }
+
+    #[test]
+    fn stuck_sweep_is_quiet_once_head_carries_the_committed_response() {
+        let base = "---\nsession: test\n---\n\n## User\n\nHello\n";
+        let response = "### Re: hello — gpt-5\n\nCommitted response.\n";
+        let (dir, doc) = setup_git_project_with_doc(base);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        let answered = format!("{base}\n{response}");
+        std::fs::write(&doc, &answered).unwrap();
+        run_git(dir.path(), &["add", "doc.md"]);
+        run_git(dir.path(), &["commit", "-m", "answer", "--no-verify"]);
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(&answered),
+            Some(&answered),
+        )
+        .unwrap();
+        let sweep = settle_compacted_capture_and_detect_stuck(&doc, false);
+        assert!(sweep.stuck.is_none() && !sweep.reconciled.unwrap());
+
+        let closeout = agent_doc_cycle_state_io::load_document_closeout_projection(&doc)
+            .unwrap()
+            .expect("closeout projection");
+        let head = agent_doc_git_io::revision::rev_parse(dir.path(), "HEAD")
+            .unwrap()
+            .expect("head");
+        assert!(agent_doc_flow_io::closeout::stuck_sweep_is_quiet(&doc, &closeout, &head).unwrap());
     }
 }

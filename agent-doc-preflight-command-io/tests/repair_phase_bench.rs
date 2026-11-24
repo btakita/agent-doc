@@ -49,5 +49,24 @@ fn bench_repair_phase_reads() {
         time("stuck: active capture", || {
             agent_doc_capture_io::load_active(&file).unwrap()
         });
+        // `#q-1d2a127f32aa`: the controller-cache path each phase takes instead
+        // (needs a controller serving the copy; otherwise the fetch misses).
+        let served = time("cached: repair verdict + gate", || {
+            let verdicts =
+                agent_doc_preflight_command_io::revision_cache::fetch_verdicts(&file, "bench");
+            agent_doc_preflight_command_io::revision_cache::repair_served_by_cache(
+                &file,
+                verdicts.as_ref(),
+            )
+        });
+        let stuck = time("cached: stuck verdict + gate", || {
+            let verdicts =
+                agent_doc_preflight_command_io::revision_cache::fetch_verdicts(&file, "bench");
+            agent_doc_preflight_command_io::revision_cache::stuck_served_by_cache(
+                &file,
+                verdicts.as_ref(),
+            )
+        });
+        eprintln!("{:>40}: repair={served} stuck={stuck}", "cached: served");
     }
 }

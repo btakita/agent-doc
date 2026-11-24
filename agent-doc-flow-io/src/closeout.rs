@@ -615,19 +615,8 @@ pub fn settle_compacted_capture_and_detect_stuck(file: &Path, settle: bool) -> S
         Ok(None) => return quiet(Ok(false)),
         Err(err) => return quiet(Err(err)),
     };
-    // Both readers accept only this cycle's own capture with the cycle's
-    // response hash and a non-blank body. The detection also skips a capture a
-    // reconcile already retired.
-    let retired = projection.captured_response_retired_reason.is_some();
-    let Some(capture) = projection.captured_response.filter(|capture| {
-        capture.capture_id == capture_id
-            && capture.cycle_id == state.cycle_id
-            && state
-                .response_sha256
-                .as_deref()
-                .is_none_or(|sha| sha == capture.response_sha256)
-            && !capture.response_body.trim().is_empty()
-    }) else {
+    let Some((capture, retired)) = committed_capture_awaiting_head(&state, &capture_id, projection)
+    else {
         return quiet(Ok(false));
     };
     let head = match agent_doc_git_io::revision::show_head(file) {
@@ -674,6 +663,69 @@ pub fn settle_compacted_capture_and_detect_stuck(file: &Path, settle: bool) -> S
                 .to_string(),
         }),
     }
+}
+
+/// The committed cycle's own capture that HEAD must carry, and whether a
+/// reconcile already retired it. Both sweep readers accept only this cycle's
+/// capture with the cycle's response hash and a non-blank body.
+fn committed_capture_awaiting_head(
+    state: &agent_doc_cycle_state_io::CycleState,
+    capture_id: &str,
+    projection: agent_doc_cycle_state_io::ProjectedCloseoutState,
+) -> Option<(agent_doc_cycle_state_io::ProjectedCapturedResponse, bool)> {
+    let retired = projection.captured_response_retired_reason.is_some();
+    projection
+        .captured_response
+        .filter(|capture| {
+            capture.capture_id == capture_id
+                && capture.cycle_id == state.cycle_id
+                && state
+                    .response_sha256
+                    .as_deref()
+                    .is_none_or(|sha| sha == capture.response_sha256)
+                && !capture.response_body.trim().is_empty()
+        })
+        .map(|capture| (capture, retired))
+}
+
+/// `#q-1d2a127f32aa`: whether [`settle_compacted_capture_and_detect_stuck`]
+/// has nothing to do for the closeout projection `closeout` against the
+/// committed revision `rev`: no committed capture awaits the commit, or the
+/// commit already carries its response. A capture missing from `rev` (stuck,
+/// or archived by `compact` and due a settle) is not quiet, so preflight still
+/// runs the sweep for it. The project controller computes this per closeout
+/// revision and commit in the background; preflight's stuck-cycle phase only
+/// reads it.
+pub fn stuck_sweep_is_quiet(
+    file: &Path,
+    closeout: &agent_doc_state_backbone::CloseoutProjection,
+    rev: &str,
+) -> Result<bool> {
+    let Some(state) = agent_doc_cycle_state_io::reconstruct_cycle_state_from_closeout(closeout)?
+    else {
+        return Ok(true);
+    };
+    if state.phase != agent_doc_turn::CyclePhase::Committed {
+        return Ok(true);
+    }
+    let Some(capture_id) = state.capture_id.clone() else {
+        return Ok(true);
+    };
+    let projection = agent_doc_cycle_state_io::ProjectedCloseoutState::from(closeout.clone());
+    let Some((capture, _retired)) =
+        committed_capture_awaiting_head(&state, &capture_id, projection)
+    else {
+        return Ok(true);
+    };
+    let Some(committed) = agent_doc_git_io::revision::show_rev(file, rev)? else {
+        return Ok(true);
+    };
+    Ok(
+        agent_doc_turn::response_replay::response_materialized_in_content(
+            &capture.response_body,
+            &committed,
+        ),
+    )
 }
 
 fn log_compacted_capture_reconciled(file: &Path, capture_id: &str, cycle_id: &str) {

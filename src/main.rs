@@ -768,6 +768,16 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         .map(|_| ())
     }
 
+    fn preflight_revision_cache_supported(&self) -> bool {
+        true
+    }
+
+    fn refresh_preflight_revision_cache(&self, file: &Path) -> anyhow::Result<()> {
+        // `#q-1d2a127f32aa`: edit-driven, per-revision stuck verdict that
+        // preflight's stuck-cycle phase reads instead of sweeping.
+        agent_doc_preflight_command_io::revision_cache::refresh_preflight_revision_cache(file)
+    }
+
     fn restore_queue_loop_items(
         &self,
         file: &Path,

@@ -954,7 +954,15 @@ fn run_with_options_to_writer_in_pass(
         .context("preflight repair effect gate")?;
     // Interrupted-cycle guard (#cyc1). Use exact persisted cycle state instead
     // of inferring solely from `ops.log`.
-    let (recovered_prior, committed_prior) = if options.probe {
+    // `#q-1d2a127f32aa`: the controller's per-revision verdict answers the
+    // common case (the prior cycle closed cleanly) with one memory read
+    // instead of the recovery's projection reads.
+    let repair_served_by_cache = !options.probe
+        && crate::revision_cache::repair_served_by_cache(
+            file,
+            crate::revision_cache::fetch_verdicts(file, "repair").as_ref(),
+        );
+    let (recovered_prior, committed_prior) = if options.probe || repair_served_by_cache {
         (false, false)
     } else {
         enforce_cycle_completion(file, preserve_fresh_owned_pane_reentry)?
@@ -1116,10 +1124,19 @@ fn run_with_options_to_writer_in_pass(
     // discarded capture and returns None for the same case.
     // `#q-8383c546c6ca`: one read of the cycle state, closeout projection and
     // committed document serves both the settle and the detection.
-    let stuck_sweep = agent_doc_flow_io::closeout::settle_compacted_capture_and_detect_stuck(
+    // `#q-1d2a127f32aa`: a quiet verdict the controller recorded for the
+    // current closeout revision and HEAD means the sweep has nothing to do.
+    let stuck_sweep = if crate::revision_cache::stuck_served_by_cache(
         file,
-        !options.probe,
-    );
+        crate::revision_cache::fetch_verdicts(file, "stuck_cycle_detection").as_ref(),
+    ) {
+        agent_doc_flow_io::closeout::StuckCaptureSweep {
+            reconciled: Ok(false),
+            stuck: None,
+        }
+    } else {
+        agent_doc_flow_io::closeout::settle_compacted_capture_and_detect_stuck(file, !options.probe)
+    };
     match stuck_sweep.reconciled {
         Ok(true) => {
             eprintln!(

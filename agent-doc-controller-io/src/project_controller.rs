@@ -3787,6 +3787,25 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
         )
     }
 
+    /// `#q-1d2a127f32aa`: whether this binary wires
+    /// [`Self::refresh_preflight_revision_cache`]. A controller that answers
+    /// `false` still serves `preflight_revision_verdicts`, without a stuck
+    /// verdict.
+    fn preflight_revision_cache_supported(&self) -> bool {
+        false
+    }
+
+    /// Compute `file`'s stuck-sweep verdict from the live projection and the
+    /// current commit and record it in [`crate::preflight_revision_cache`].
+    /// The sweep lives in `agent-doc-flow-io`, which depends on this crate,
+    /// hence the port.
+    fn refresh_preflight_revision_cache(&self, file: &Path) -> Result<()> {
+        anyhow::bail!(
+            "preflight revision cache is not wired in this binary ({})",
+            file.display()
+        )
+    }
+
     /// `#queueschedule`: put a completed `loop` pass's items back into the
     /// document's `agent:queue` through the binary-owned queue write path
     /// (live CRDT replica while an editor holds the document). The writer lives
@@ -12696,6 +12715,24 @@ impl ControllerRuntime {
             .state_projection
             .document(document_hash)
             .map(|document| document.closeout.clone()))
+    }
+
+    /// `#q-1d2a127f32aa`: the preflight repair and stuck verdicts for one
+    /// document, from one read of the live projection.
+    pub(crate) fn document_preflight_revision_verdicts(
+        &self,
+        document_hash: &str,
+    ) -> crate::preflight_revision_cache::PreflightRevisionVerdicts {
+        let memory = self.memory.lock();
+        let projection = memory.state_projection.document(document_hash);
+        let closeout = projection.map(|document| &document.closeout);
+        let revision = crate::preflight_revision_cache::closeout_revision(closeout);
+        let stuck = crate::preflight_revision_cache::cached_stuck_verdict(document_hash, &revision);
+        crate::preflight_revision_cache::verdicts_from_projection(
+            closeout,
+            projection.map(|document| &document.document),
+            stuck,
+        )
     }
 
     /// Read one terminal proof from the current document projection. Queue
